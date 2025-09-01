@@ -1,0 +1,914 @@
+"""
+Base configuration class for all modeling tools.
+
+Provides common interface and functionality for tool configuration,
+validation, and integration with the pipeline system.
+"""
+
+import pandas as pd
+import os
+import json
+from abc import ABC, abstractmethod
+from typing import Dict, List, Any, Optional, Union
+
+
+class BaseConfig(ABC):
+    """
+    Abstract base class for all tool configurations.
+    
+    Provides common functionality for parameter validation,
+    environment management, and integration with Pipeline.
+    """
+    
+    # Tool-specific defaults (override in subclasses)
+    TOOL_NAME = "base"
+    DEFAULT_ENV = "ProteinEnv"
+    COMPATIBLE_ENVS = ["ProteinEnv"]
+    DEFAULT_RESOURCES = {"gpu": "V100", "memory": "15GB", "time": "24:00:00"}
+    
+    def __init__(self, **kwargs):
+        """Initialize base configuration with common parameters."""
+        # Core identification
+        self.tool_name = self.TOOL_NAME
+        self.job_name = kwargs.get('name', '')
+        
+        # Environment and resources
+        self.environment = kwargs.get('env', self.DEFAULT_ENV)
+        self.resources = {**self.DEFAULT_RESOURCES, **kwargs.get('resources', {})}
+        
+        # Pipeline integration
+        self.dependencies = kwargs.get('dependencies', [])
+        self.pipeline_ref = None  # Set by Pipeline when added
+        self.execution_order = 0   # Set by Pipeline
+        
+        # I/O tracking
+        self.input_sources = {}    # What this tool takes as input
+        self.output_files = {}     # What this tool produces
+        self.output_folder = ""    # Set when added to pipeline
+        
+        # Execution state
+        self.configured = False
+        self.executed = False
+        
+        # Store all parameters for validation and serialization
+        self.params = kwargs
+        
+        # Validate configuration
+        self.validate_environment()
+        self.validate_params()
+    
+    def validate_environment(self):
+        """Validate that specified environment is compatible with tool."""
+        if self.environment not in self.COMPATIBLE_ENVS:
+            compatible_str = ", ".join(self.COMPATIBLE_ENVS)
+            raise ValueError(
+                f"{self.TOOL_NAME} is not compatible with environment '{self.environment}'. "
+                f"Compatible environments: {compatible_str}"
+            )
+    
+    @abstractmethod
+    def validate_params(self):
+        """Validate tool-specific parameters. Override in subclasses."""
+        pass
+    
+    @abstractmethod
+    def configure_inputs(self, pipeline_folders: Dict[str, str]):
+        """
+        Configure input sources from pipeline context and dependencies.
+        
+        Args:
+            pipeline_folders: Dictionary of pipeline folder paths
+        """
+        pass
+    
+    @abstractmethod
+    def generate_script(self, script_path: str) -> str:
+        """
+        Generate bash script for tool execution.
+        
+        Args:
+            script_path: Path where script should be written
+            
+        Returns:
+            Script content as string
+        """
+        pass
+    
+    @abstractmethod
+    def get_output_files(self) -> Dict[str, List[str]]:
+        """
+        Get expected output files after execution.
+        
+        Returns:
+            Dictionary mapping output type to file paths
+        """
+        pass
+    
+    def get_expected_output_paths(self) -> Dict[str, List[str]]:
+        """
+        Get expected output file paths without validating existence.
+        
+        Default implementation just calls get_output_files().
+        Override if file existence validation is problematic.
+        
+        Returns:
+            Dictionary mapping output type to expected file paths
+        """
+        return self.get_output_files()
+    
+    def set_pipeline_context(self, pipeline_ref, execution_order: int, output_folder: str):
+        """Set context when added to pipeline."""
+        self.pipeline_ref = pipeline_ref
+        self.execution_order = execution_order
+        self.output_folder = output_folder
+        self.configured = True
+    
+    def resolve_dependency_outputs(self, dependency):
+        """
+        Resolve outputs from a dependency tool.
+        
+        Args:
+            dependency: Another BaseConfig instance or output specification
+            
+        Returns:
+            Dictionary of available outputs from dependency
+        """
+        if hasattr(dependency, 'get_output_files'):
+            return dependency.get_output_files()
+        elif isinstance(dependency, dict):
+            return dependency
+        else:
+            raise ValueError(f"Cannot resolve outputs from dependency: {dependency}")
+    
+    def get_resource_requirements(self) -> Dict[str, str]:
+        """Get SLURM resource requirements for this tool."""
+        return self.resources.copy()
+    
+    def get_config_display(self) -> List[str]:
+        """
+        Get configuration display lines for pipeline config output.
+        Override in subclasses to show tool-specific parameters.
+        
+        Returns:
+            List of configuration strings for display
+        """
+        config_lines = []
+        
+        # Add common parameters
+        if hasattr(self, 'job_name') and self.job_name:
+            config_lines.append(f"Job: {self.job_name}")
+        
+        # Subclasses should override to add tool-specific parameters
+        return config_lines
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize configuration to dictionary."""
+        return {
+            'tool_name': self.tool_name,
+            'environment': self.environment,
+            'resources': self.resources,
+            'parameters': self.params,
+            'dependencies': len(self.dependencies),
+            'execution_order': self.execution_order
+        }
+    
+    def save_config(self, config_file: str):
+        """Save configuration to JSON file."""
+        with open(config_file, 'w') as f:
+            json.dump(self.to_dict(), f, indent=2)
+    
+    def generate_completion_check_header(self) -> str:
+        """
+        Generate bash script header that checks for completion status.
+        
+        Returns:
+            Bash script content for checking completion
+        """
+        # Get step number from output folder (e.g., "1_RFdiffusion")
+        folder_name = os.path.basename(self.output_folder)
+        if '_' in folder_name and folder_name.split('_')[0].isdigit():
+            step_number = folder_name.split('_')[0]
+            completed_file = f"{step_number}_{self.TOOL_NAME}_COMPLETED"
+        else:
+            completed_file = f"{self.TOOL_NAME}_COMPLETED"
+        
+        parent_dir = os.path.dirname(self.output_folder)
+        
+        return f"""# Check if already completed
+if [ -f "{parent_dir}/{completed_file}" ]; then
+    echo "{self.TOOL_NAME} already completed, skipping..."
+    exit 0
+fi
+
+"""
+    
+    def generate_completion_check_footer(self) -> str:
+        """
+        Generate bash script footer that checks outputs and creates status files.
+        
+        Returns:
+            Bash script content for final completion check
+        """
+        # Get expected outputs as JSON string
+        expected_outputs = self.get_expected_output_paths()
+        expected_outputs_json = json.dumps(expected_outputs).replace('"', '\\"')
+        
+        pipe_check_completion = os.path.join(
+            self.folders.get("HelpScripts", "HelpScripts"), 
+            "pipe_check_completion.py"
+        )
+        
+        return f"""
+# Check completion and create status files
+echo "Checking outputs and creating completion status..."
+python {pipe_check_completion} "{self.output_folder}" "{self.TOOL_NAME}" "{expected_outputs_json}"
+
+if [ $? -eq 0 ]; then
+    echo "{self.TOOL_NAME} completed successfully"
+else
+    echo "{self.TOOL_NAME} failed - some outputs missing"
+    exit 1
+fi
+"""
+    
+    def __str__(self) -> str:
+        """String representation of configuration."""
+        return f"{self.TOOL_NAME}(env={self.environment}, order={self.execution_order})"
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    def resolve_datasheet_reference(self, reference: str) -> str:
+        """
+        Resolve datasheet column references like 'input.datasheets.structures.fixed' to actual values.
+        
+        This provides a general way to reference any column from any input datasheet across all tools.
+        
+        Args:
+            reference: Reference string (e.g., "input.datasheets.structures.fixed")
+            
+        Returns:
+            Resolved value from datasheet or original reference if not a datasheet reference
+        """
+        if not reference or not reference.startswith("input.datasheets."):
+            return reference
+        
+        # Parse reference: input.datasheets.structures.fixed -> datasheet_name=structures, column=fixed
+        parts = reference.split(".")
+        if len(parts) < 4:
+            raise ValueError(f"Invalid datasheet reference format: {reference}. Expected: input.datasheets.datasheet_name.column_name")
+        
+        datasheet_name = parts[2]  # e.g., "structures"
+        column_name = parts[3]     # e.g., "fixed"
+        
+        # Get the datasheet path
+        datasheet_path = self._find_datasheet_path(datasheet_name)
+        
+        if not datasheet_path:
+            raise ValueError(f"Datasheet '{datasheet_name}' not found in input datasheets")
+        
+        # For script generation, return a placeholder that indicates this is a datasheet reference
+        # The actual resolution will happen in the script generation where we have access to pandas
+        return f"DATASHEET_REFERENCE:{datasheet_path}:{column_name}"
+    
+    def _find_datasheet_path(self, datasheet_name: str) -> Optional[str]:
+        """
+        Find the path to a named datasheet from various input sources.
+        
+        Args:
+            datasheet_name: Name of the datasheet to find
+            
+        Returns:
+            Path to the datasheet file, or None if not found
+        """
+        # Check StandardizedOutput format
+        if hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets'):
+            if hasattr(self.standardized_input.datasheets, '_datasheets') and datasheet_name in self.standardized_input.datasheets._datasheets:
+                return self.standardized_input.datasheets._datasheets[datasheet_name].path
+        
+        # Check dictionary format
+        if hasattr(self, 'input_datasheets') and isinstance(self.input_datasheets, dict) and datasheet_name in self.input_datasheets:
+            return self.input_datasheets[datasheet_name]["path"]
+        
+        # Check DatasheetContainer format  
+        if hasattr(self, 'input_datasheets') and hasattr(self.input_datasheets, '_datasheets') and datasheet_name in self.input_datasheets._datasheets:
+            return self.input_datasheets._datasheets[datasheet_name].path
+        
+        return None
+    
+    def validate_datasheet_reference(self, reference: str):
+        """Validate datasheet reference format."""
+        # Skip validation for regular values (don't contain dots or only have numeric ranges)
+        if not reference or "datasheets" not in reference:
+            return
+            
+        parts = reference.split(".")
+        if len(parts) < 4:
+            raise ValueError(f"Invalid datasheet reference format: {reference}. Expected format: input.datasheets.datasheet_name.column_name")
+        
+        if parts[0] != "input" or parts[1] != "datasheets":
+            raise ValueError(f"Invalid datasheet reference format: {reference}. Must start with 'input.datasheets.' not '{parts[0]}.{parts[1]}.'")
+            
+        # Additional validation could check if the referenced datasheet/column exists,
+        # but we'll do that at runtime when the datasheet is available
+
+
+class DatasheetInfo:
+    """Information about a datasheet including name, path, and expected columns."""
+    
+    def __init__(self, name: str, path: str, columns: List[str] = None, 
+                 description: str = "", count: int = 0):
+        self.name = name
+        self.path = path
+        self.columns = columns or []
+        self.description = description
+        self.count = count
+    
+    def __str__(self) -> str:
+        if self.columns:
+            # Show more information: path, count, and columns
+            path_display = self.path.replace('/shares/locbp.chem.uzh/', '.../')
+            col_display = ', '.join(self.columns[:3])
+            if len(self.columns) > 3:
+                col_display += f', +{len(self.columns)-3} more'
+            count_display = f" ({self.count} entries)" if self.count > 0 else ""
+            return f"{path_display}{count_display}: {col_display}"
+        return self.name
+    
+    def __repr__(self) -> str:
+        return f"DatasheetInfo(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert DatasheetInfo to dictionary for JSON serialization."""
+        return {
+            "name": self.name,
+            "path": self.path,
+            "columns": self.columns,
+            "description": self.description,
+            "count": self.count
+        }
+
+
+class DatasheetContainer:
+    """Container for named datasheets with dot-notation access."""
+    
+    def __init__(self, datasheets: Dict[str, DatasheetInfo]):
+        self._datasheets = datasheets
+        
+        # Set attributes for dot notation access
+        for name, info in datasheets.items():
+            setattr(self, name, info.path)
+    
+    def __getitem__(self, key: str) -> str:
+        """Get datasheet path by name with legacy 'main' support."""
+        if key in self._datasheets:
+            return self._datasheets[key].path
+        
+        # Legacy support: if asking for "main" and it doesn't exist,
+        # try to find the most appropriate datasheet
+        if key == "main":
+            # Try common datasheet types in order of preference
+            for fallback_key in ['sequences', 'structures', 'compounds']:
+                if fallback_key in self._datasheets:
+                    return self._datasheets[fallback_key].path
+        
+        return ""
+    
+    def __getattr__(self, name: str) -> str:
+        """Get datasheet path by name via dot notation."""
+        if name in self._datasheets:
+            return self._datasheets[name].path
+        raise AttributeError(f"No datasheet named '{name}'")
+    
+    def keys(self):
+        """Get all datasheet names."""
+        return self._datasheets.keys()
+    
+    def items(self):
+        """Get all name, path pairs."""
+        return [(name, info.path) for name, info in self._datasheets.items()]
+    
+    def info(self, name: str) -> DatasheetInfo:
+        """Get full DatasheetInfo object."""
+        return self._datasheets.get(name)
+    
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' operator: 'main' in datasheets"""
+        if key in self._datasheets:
+            return True
+        
+        # Legacy support for "main" - consider it present if any datasheet exists
+        if key == "main":
+            return bool(self._datasheets)
+        
+        return False
+    
+    def get(self, key: str, default: str = "") -> str:
+        """Get datasheet path with default (like dict.get())."""
+        return self.__getitem__(key) or default
+    
+    def __str__(self) -> str:
+        if not self._datasheets:
+            return "{}"
+        
+        lines = []
+        for name, info in self._datasheets.items():
+            # Format: "  structures: .../path.csv (2 entries): id, pdb_file, confidence"
+            lines.append(f"  {name}: {str(info)}")
+        
+        return "{\n" + "\n".join(lines) + "\n}"
+    
+    def __repr__(self) -> str:
+        return f"DatasheetContainer({list(self._datasheets.keys())})"
+
+
+class StandardizedOutput:
+    """
+    Provides dot-notation access to standardized output keys.
+    
+    Allows usage like: rfd.output.structures, rfd.output.datasheets
+    Enhanced with better visualization and named datasheets support.
+    """
+    
+    def __init__(self, output_files: Dict[str, Any]):
+        """Initialize with output files dictionary."""
+        self._data = output_files.copy()
+        
+        # Handle datasheets - convert to DatasheetInfo objects if needed
+        datasheets_raw = output_files.get('datasheets', [])
+        self.datasheets = self._process_datasheets(datasheets_raw)
+        
+        # Set standard attributes for dot notation access
+        self.structures = output_files.get('structures', [])
+        self.compounds = output_files.get('compounds', [])
+        self.sequences = output_files.get('sequences', [])
+        self.output_folder = output_files.get('output_folder', '')
+        
+        # Add ID arrays - extract from existing data or provided directly
+        self.structure_ids = output_files.get('structure_ids', self._extract_structure_ids())
+        self.compound_ids = output_files.get('compound_ids', self._extract_compound_ids())  
+        self.sequence_ids = output_files.get('sequence_ids', self._extract_sequence_ids())
+        
+        # Handle filtering metadata
+        self.filter_metadata = output_files.get('filter_metadata', {})
+        self.is_filtered = self.filter_metadata.get('is_filtered', False)
+        
+        # Update _data to include ID arrays and filter info
+        self._data['structure_ids'] = self.structure_ids
+        self._data['compound_ids'] = self.compound_ids
+        self._data['sequence_ids'] = self.sequence_ids
+        self._data['filter_metadata'] = self.filter_metadata
+        
+        # Also store as attributes for compatibility
+        for key, value in output_files.items():
+            if key != 'datasheets' and not hasattr(self, key):  # Don't override standard attributes
+                setattr(self, key, value)
+    
+    def _process_datasheets(self, datasheets_raw: Any) -> 'DatasheetContainer':
+        """Process datasheets into DatasheetContainer with named access."""
+        if isinstance(datasheets_raw, dict):
+            # Already in named format
+            datasheet_infos = {}
+            for name, info in datasheets_raw.items():
+                if isinstance(info, dict):
+                    datasheet_infos[name] = DatasheetInfo(
+                        name=name,
+                        path=info.get('path', ''),
+                        columns=info.get('columns', []),
+                        description=info.get('description', ''),
+                        count=info.get('count', 0)
+                    )
+                else:
+                    # Legacy format - just a path
+                    datasheet_infos[name] = DatasheetInfo(name=name, path=str(info))
+            return DatasheetContainer(datasheet_infos)
+        elif isinstance(datasheets_raw, list):
+            # Legacy format - convert first item to "main"
+            datasheet_infos = {}
+            for i, path in enumerate(datasheets_raw):
+                name = "main" if i == 0 else f"sheet_{i}"
+                if isinstance(path, str):
+                    datasheet_infos[name] = DatasheetInfo(name=name, path=path)
+                else:
+                    # Assume it's already a DatasheetInfo or dict
+                    datasheet_infos[name] = path
+            return DatasheetContainer(datasheet_infos)
+        else:
+            return DatasheetContainer({})
+    
+    def _extract_structure_ids(self) -> List[str]:
+        """Extract structure IDs from structure file paths."""
+        ids = []
+        for struct_path in self.structures:
+            if isinstance(struct_path, str):
+                # Extract ID from filename (remove extension)
+                filename = os.path.basename(struct_path)
+                if filename.endswith('.pdb'):
+                    ids.append(filename[:-4])
+                elif filename.endswith('.cif'):
+                    ids.append(filename[:-4])
+                else:
+                    ids.append(filename)
+        return ids
+    
+    def _extract_compound_ids(self) -> List[str]:
+        """Extract compound IDs from compound file paths."""
+        ids = []
+        for comp_path in self.compounds:
+            if isinstance(comp_path, str):
+                # Extract ID from filename (remove extension)
+                filename = os.path.basename(comp_path)
+                if filename.endswith('.sdf'):
+                    ids.append(filename[:-4])
+                elif filename.endswith('.mol'):
+                    ids.append(filename[:-4])
+                else:
+                    ids.append(filename)
+        return ids
+    
+    def _extract_sequence_ids(self) -> List[str]:
+        """Extract sequence IDs from sequence files or datasheets."""
+        ids = []
+        
+        # Try to get IDs from datasheets first
+        if hasattr(self.datasheets, '_datasheets'):
+            for name, info in self.datasheets._datasheets.items():
+                if name in ['sequences', 'main'] and info.path:
+                    if os.path.exists(info.path):
+                        df = pd.read_csv(info.path)
+                        if 'id' in df.columns:
+                            ids.extend(df['id'].tolist())
+        
+        # If no IDs found from datasheets, extract from sequence file paths
+        if not ids:
+            for seq_path in self.sequences:
+                if isinstance(seq_path, str):
+                    filename = os.path.basename(seq_path)
+                    if filename.endswith('.fasta'):
+                        ids.append(filename[:-6])
+                    elif filename.endswith('.fa'):
+                        ids.append(filename[:-3])
+                    elif filename.endswith('.csv'):
+                        ids.append(filename[:-4])
+                    else:
+                        ids.append(filename)
+        
+        return ids
+    
+    def __getitem__(self, key: str):
+        """Dictionary-style access: output['structures']"""
+        return self._data.get(key, [])
+    
+    def __iter__(self):
+        """Allow iteration over keys."""
+        return iter(self._data)
+    
+    def keys(self):
+        """Get all available keys."""
+        return self._data.keys()
+    
+    def items(self):
+        """Get all key-value pairs."""
+        return self._data.items()
+    
+    def get(self, key: str, default=None):
+        """Get value with default."""
+        return self._data.get(key, default)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert back to dictionary."""
+        return self._data.copy()
+    
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' operator: 'structures' in output"""
+        return key in self._data
+    
+    def get_legacy_datasheet(self, name: str = "main") -> str:
+        """
+        Get datasheet path using legacy naming conventions.
+        
+        Provides backward compatibility for code that expects:
+        - output.datasheets["main"]
+        - output.get_legacy_datasheet("main")
+        
+        Args:
+            name: Legacy datasheet name (default "main")
+            
+        Returns:
+            Path to datasheet file, or empty string if not found
+        """
+        # Check if legacy "main" alias exists in _data
+        if name == "main" and "main" in self._data:
+            return self._data["main"]
+        
+        # Check in datasheets container
+        if hasattr(self.datasheets, name):
+            datasheet_info = getattr(self.datasheets, name)
+            return datasheet_info.path if hasattr(datasheet_info, 'path') else str(datasheet_info)
+        
+        # For "main", try common datasheet types in order of preference
+        if name == "main":
+            for fallback_name in ['sequences', 'structures', 'compounds']:
+                if hasattr(self.datasheets, fallback_name):
+                    datasheet_info = getattr(self.datasheets, fallback_name)
+                    return datasheet_info.path if hasattr(datasheet_info, 'path') else str(datasheet_info)
+        
+        return ""
+    
+    def _format_list_preview(self, items: List[str], max_items: int = 2) -> str:
+        """Format a list showing first few items with ellipsis if needed."""
+        if not items:
+            return "[]"
+        
+        if len(items) <= max_items:
+            return str(items)
+        
+        preview_items = items[:max_items]
+        return f"[{', '.join(repr(item) for item in preview_items)}, ...]"
+    
+    def pretty(self) -> str:
+        """Pretty formatted representation of the output."""
+        lines = []
+        
+        # Helper function to make paths relative to output_folder
+        def make_relative_path(file_path: str) -> str:
+            if self.output_folder and file_path.startswith(self.output_folder):
+                relative_path = os.path.relpath(file_path, self.output_folder)
+                return f"<output_folder>/{relative_path}"
+            return file_path
+        
+        # Main content keys with their corresponding ID keys
+        content_keys = [
+            ('structures', 'structure_ids'),
+            ('compounds', 'compound_ids'), 
+            ('sequences', 'sequence_ids')
+        ]
+        
+        for content_key, id_key in content_keys:
+            if content_key in self._data and self._data[content_key]:
+                content_files = getattr(self, content_key)
+                id_list = getattr(self, id_key)
+                
+                # Show the file paths with bullet points
+                lines.append(f"{content_key}:")
+                for file_path in content_files:
+                    relative_path = make_relative_path(file_path)
+                    lines.append(f"    – '{relative_path}'")
+                
+                # Show the IDs if available
+                if id_list:
+                    lines.append(f"{id_key}:")
+                    for id_value in id_list:
+                        lines.append(f"    – {id_value}")
+        
+        # Special handling for datasheets
+        if 'datasheets' in self._data and hasattr(self.datasheets, '_datasheets'):
+            lines.append("datasheets:")
+            for name, info in self.datasheets._datasheets.items():
+                # Format columns display
+                col_display = ', '.join(info.columns[:3]) if info.columns else ''
+                if len(info.columns) > 3:
+                    col_display += f', +{len(info.columns)-3} more'
+                
+                # Show datasheet info
+                lines.append(f"    ${name} ({col_display}):")
+                relative_path = make_relative_path(info.path)
+                lines.append(f"        – '{relative_path}'")
+        
+        # Output folder
+        if 'output_folder' in self._data:
+            lines.append("output_folder:")
+            lines.append(f"    – '{self.output_folder}'")
+        
+        # Filter information
+        if self.is_filtered:
+            lines.append("# Filter Information:")
+            filter_info = self.get_filter_info()
+            
+            original_count = self.get_original_items_count()
+            kept_count = self.get_kept_items_count()
+            pass_rate = self.get_filter_pass_rate()
+            
+            if original_count is not None:
+                lines.append(f"original_items: {original_count}")
+            lines.append(f"kept_items: {kept_count}")
+            
+            if pass_rate is not None:
+                lines.append(f"pass_rate: {pass_rate:.1%}")
+            
+            if 'filter_type' in filter_info:
+                lines.append(f"filter_type: {repr(filter_info['filter_type'])}")
+        
+        # Additional keys section (aliases and other attributes)
+        processed_keys = {'structures', 'structure_ids', 'compounds', 'compound_ids', 
+                         'sequences', 'sequence_ids', 'datasheets', 'output_folder', 'filter_metadata'}
+        other_keys = [k for k in self._data.keys() if k not in processed_keys]
+        
+        aliases = []
+        additional_items = []
+        
+        # Standard keys to check for aliases
+        standard_keys = ['structures', 'compounds', 'sequences', 'structure_ids', 'compound_ids', 'sequence_ids']
+        
+        for key in sorted(other_keys):
+            value = self._data[key]
+            found_alias = False
+            
+            # Check if this key's value matches any standard key's value (true alias)
+            for standard_key in standard_keys:
+                if standard_key in self._data:
+                    standard_value = self._data[standard_key]
+                    # Compare values (handle both lists and single values)
+                    if value == standard_value:
+                        aliases.append(f"{standard_key}={key}")
+                        found_alias = True
+                        break
+            
+            # If not an alias, format it consistently with bullet points and relative paths
+            if not found_alias:
+                if isinstance(value, list):
+                    additional_items.append(f"{key}:")
+                    for item in value:
+                        if isinstance(item, str):
+                            relative_path = make_relative_path(item)
+                            additional_items.append(f"    – '{relative_path}'")
+                        else:
+                            additional_items.append(f"    – {item}")
+                else:
+                    # Single value - format with relative path if it's a path
+                    if isinstance(value, str):
+                        relative_path = make_relative_path(value)
+                        additional_items.append(f"{key}:")
+                        additional_items.append(f"    – '{relative_path}'")
+                    else:
+                        additional_items.append(f"{key}: {repr(value)}")
+        
+        # Show additional items and true aliases
+        if additional_items or aliases:
+            # First show additional items (non-aliases)
+            for item in additional_items:
+                lines.append(item)
+            
+            # Then show true aliases with header
+            if aliases:
+                lines.append("#Aliases")
+                for alias in aliases:
+                    lines.append(alias)
+        
+        return "\n".join(lines)
+    
+    def __str__(self) -> str:
+        """String representation with improved formatting."""
+        return self.pretty()
+    
+    def __repr__(self) -> str:
+        """Detailed representation."""
+        return f"StandardizedOutput({dict(self._data)})"
+    
+    def get_filter_info(self) -> Dict[str, Any]:
+        """
+        Get filtering information if this is filtered output.
+        
+        Returns:
+            Dictionary with filter information or empty dict if not filtered
+        """
+        return self.filter_metadata.copy() if self.filter_metadata else {}
+    
+    def get_kept_items_count(self) -> int:
+        """
+        Get count of items that passed filtering.
+        
+        Returns:
+            Number of kept items (structures + sequences + compounds)
+        """
+        return len(self.structures) + len(self.sequences) + len(self.compounds)
+    
+    def get_original_items_count(self) -> Optional[int]:
+        """
+        Get count of original items before filtering (if available).
+        
+        Returns:
+            Original item count or None if not available
+        """
+        if self.is_filtered and 'input_count' in self.filter_metadata:
+            return self.filter_metadata['input_count']
+        return None
+    
+    def get_filter_pass_rate(self) -> Optional[float]:
+        """
+        Calculate filter pass rate if filtering information is available.
+        
+        Returns:
+            Pass rate (0.0 to 1.0) or None if not applicable
+        """
+        original_count = self.get_original_items_count()
+        if original_count is not None and original_count > 0:
+            kept_count = self.get_kept_items_count()
+            return kept_count / original_count
+        return None
+
+
+class ToolOutput:
+    """
+    Container for tool output information.
+    
+    Returned by pipeline.add() to provide rich metadata about tool outputs
+    and enable flexible chaining between tools.
+    """
+    
+    def __init__(self, config: BaseConfig):
+        """Initialize with reference to tool configuration."""
+        self.config = config
+        self.tool_type = config.TOOL_NAME
+        self.environment = config.environment
+        self.output_folder = config.output_folder
+        self.execution_order = config.execution_order
+        
+        # Will be populated after tool configuration
+        self._output_files = {}
+        self._metadata = {}
+    
+    def update_outputs(self, output_files: Dict[str, List[str]], metadata: Dict[str, Any] = None):
+        """Update output files and metadata after tool configuration."""
+        self._output_files = output_files
+        self._metadata = metadata or {}
+    
+    def get_output_files(self, output_type: str = None) -> Union[Dict[str, List[str]], List[str]]:
+        """
+        Get output files, optionally filtered by type.
+        
+        Args:
+            output_type: Specific output type to retrieve (e.g., 'pdbs', 'sequences')
+            
+        Returns:
+            All outputs if output_type is None, otherwise specific output list
+        """
+        # If no cached outputs, delegate to config
+        if not self._output_files and hasattr(self.config, 'get_output_files'):
+            try:
+                config_outputs = self.config.get_output_files()
+                if output_type is None:
+                    return config_outputs
+                return config_outputs.get(output_type, [])
+            except:
+                # Fallback if config method fails
+                pass
+        
+        # Use cached outputs
+        if output_type is None:
+            return self._output_files
+        return self._output_files.get(output_type, [])
+    
+    @property
+    def output_pdbs(self) -> List[str]:
+        """Convenience property for PDB outputs."""
+        return self.get_output_files('pdbs')
+    
+    @property
+    def output_sequences(self) -> List[str]:
+        """Convenience property for sequence outputs."""
+        return self.get_output_files('sequences')
+    
+    @property
+    def output_structures(self) -> List[str]:
+        """Convenience property for structure outputs (PDbs)."""
+        return self.output_pdbs
+    
+    @property
+    def output_datasheets(self) -> List[str]:
+        """Convenience property for datasheet outputs (JSON, CSV, etc.)."""
+        return self.get_output_files('datasheets')
+    
+    @property
+    def job_name(self) -> str:
+        """Get job name from configuration."""
+        return self.config.job_name
+    
+    @property
+    def dependencies(self) -> List:
+        """Get dependencies from configuration.""" 
+        return self.config.dependencies
+    
+    @property
+    def output(self) -> StandardizedOutput:
+        """
+        Get standardized output with dot notation access.
+        
+        Allows usage like:
+        - rfd.output.structures
+        - rfd.output.datasheets
+        - rfd.output['structures'] (dict-style)
+        """
+        # Get current output files from the config
+        if hasattr(self.config, 'get_output_files'):
+            output_files = self.config.get_output_files()
+        else:
+            output_files = self._output_files
+        
+        return StandardizedOutput(output_files)
+    
+    def __str__(self) -> str:
+        return f"ToolOutput({self.tool_type}, {len(self._output_files)} output types)"
+    
+    def __repr__(self) -> str:
+        return self.__str__()
