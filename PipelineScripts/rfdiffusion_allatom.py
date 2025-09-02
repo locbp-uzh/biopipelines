@@ -10,16 +10,16 @@ import shutil
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .rfdiffusion import RFdiffusion
+    from .base_config import BaseConfig
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from rfdiffusion import RFdiffusion
+    from base_config import BaseConfig
 
 
-class RFdiffusionAllAtom(RFdiffusion):
+class RFdiffusionAllAtom(BaseConfig):
     """
     RFdiffusion-AllAtom variant for ligand-aware protein design.
     
@@ -31,19 +31,31 @@ class RFdiffusionAllAtom(RFdiffusion):
     DEFAULT_ENV = "ProteinEnv"
     COMPATIBLE_ENVS = ["ProteinEnv"]
     
-    def __init__(self, ligand: str, ppi_design: bool = False,
-                 ppi_hotspot_residues: List[str] = None, ppi_binder_length: int = None,
-                 autogenerate_contigs: bool = False, model_only_neighbors: bool = False,
-                 num_recycles: int = 1, scaffold_guided: bool = False,
-                 align_motif: bool = True, deterministic: bool = False,
-                 inpaint_str: str = None, inpaint_seq: str = None, 
-                 inpaint_length: int = None, guiding_potentials: str = None,
-                 **kwargs):
+    def __init__(self, ligand: str, pdb: str = "", contigs: str = "", inpaint: str = "",
+                 num_designs: int = 1, active_site: bool = False, 
+                 steps: int = 200, partial_steps: int = 0, 
+                 reproducible: bool = False, reproducibility_number: int = 0,
+                 ppi_design: bool = False, ppi_hotspot_residues: List[str] = None, 
+                 ppi_binder_length: int = None, autogenerate_contigs: bool = False, 
+                 model_only_neighbors: bool = False, num_recycles: int = 1, 
+                 scaffold_guided: bool = False, align_motif: bool = True, 
+                 deterministic: bool = False, inpaint_str: str = None, 
+                 inpaint_seq: str = None, inpaint_length: int = None, 
+                 guiding_potentials: str = None, **kwargs):
         """
         Initialize RFdiffusion-AllAtom configuration.
         
         Args:
             ligand: Ligand identifier (e.g., 'ZIT', 'RFP')
+            pdb: Input PDB file (optional template)
+            contigs: Contig specification (e.g., "A1-100,10-20")
+            inpaint: Inpainting specification (same format as contigs)
+            num_designs: Number of designs to generate
+            active_site: Use active site model for small motifs
+            steps: Diffusion steps (default 200 for AllAtom)
+            partial_steps: Partial diffusion steps
+            reproducible: Use deterministic sampling
+            reproducibility_number: Seed for reproducible runs
             ppi_design: Enable protein-protein interaction design
             ppi_hotspot_residues: List of hotspot residues for PPI (e.g., ["A116","A150"])
             ppi_binder_length: Length of PPI binder
@@ -57,9 +69,19 @@ class RFdiffusionAllAtom(RFdiffusion):
             inpaint_seq: Sequence pattern for inpainting (e.g., "ACDEFG")
             inpaint_length: Target length for each inpainted region
             guiding_potentials: JSON or filepath specifying custom external potentials
-            **kwargs: RFdiffusion base parameters
+            **kwargs: Additional parameters
         """
-        # Store RFdiffusion-AllAtom specific parameters
+        # In common with RFdiffusion
+        self.pdb = pdb
+        self.contigs = contigs
+        self.inpaint = inpaint
+        self.num_designs = num_designs
+        self.active_site = active_site
+        self.steps = steps
+        self.partial_steps = partial_steps
+        self.reproducible = reproducible
+        self.reproducibility_number = reproducibility_number
+        # Specific to RFdiffusion-AllAtom
         self.ligand = ligand
         self.ppi_design = ppi_design
         self.ppi_hotspot_residues = ppi_hotspot_residues or []
@@ -75,19 +97,56 @@ class RFdiffusionAllAtom(RFdiffusion):
         self.inpaint_length = inpaint_length
         self.guiding_potentials = guiding_potentials
         
-        if 'contigs' in kwargs:
-            if '/' in kwargs['contigs']:
-                print("Warning: Character '/' found in contigs. RFdiffusionAllAtom uses ','.")
-
-        # Override default steps for AllAtom (notebook uses denoising_steps=20 for debug, 100-200 normally)
-        if 'steps' not in kwargs:
-            kwargs['steps'] = 200
+        if contigs and '/' in contigs:
+            print("Warning: Character '/' found in contigs. RFdiffusionAllAtom uses ','.")
         
+        # Initialize base class
         super().__init__(**kwargs)
+        
+        # Initialize file paths (will be set in configure_inputs)
+        self._initialize_file_paths()
+    
+    def _initialize_file_paths(self):
+        """Initialize common file paths used throughout the class."""
+        self.input_pdb_file = None
+        self.main_datasheet = None
+        self.rfd_log_file = None
+        self.pipeline_name = None
+        
+        # Helper script paths
+        self.inference_py_file = None
+        self.datasheet_py_file = None
+    
+    def _extract_pipeline_name(self) -> str:
+        """Extract pipeline name from output folder structure."""
+        folder_parts = self.output_folder.split(os.sep)
+        for i, part in enumerate(folder_parts):
+            if part.startswith("1_RFdiffusion"):
+                if i > 0:
+                    return folder_parts[i-1]
+                break
+        raise ValueError(f"Could not extract job name from output folder: {self.output_folder}")
     
     def validate_params(self):
         """Validate RFdiffusion-AllAtom parameters."""
-        super().validate_params()
+        # Base RFdiffusion validation
+        if not self.contigs:
+            raise ValueError("contigs parameter is required for RFdiffusion-AllAtom")
+        
+        if self.num_designs <= 0:
+            raise ValueError("num_designs must be positive")
+        
+        if self.steps <= 0:
+            raise ValueError("steps must be positive")
+        
+        if self.partial_steps < 0:
+            raise ValueError("partial_steps cannot be negative")
+        
+        if self.pdb and not (self.pdb.endswith('.pdb') or os.path.exists(self.pdb)):
+            # Check if it exists in PDBs folder
+            pdb_path = os.path.join(os.getcwd(), "PDBs", self.pdb + ".pdb" if not self.pdb.endswith('.pdb') else self.pdb)
+            if not os.path.exists(pdb_path):
+                raise ValueError(f"PDB file not found: {self.pdb}")
         
         # Additional validation for PPI design
         if self.ppi_design and not self.ppi_hotspot_residues:
@@ -99,9 +158,42 @@ class RFdiffusionAllAtom(RFdiffusion):
         if self.num_recycles < 1:
             raise ValueError("num_recycles must be at least 1")
     
+    def configure_inputs(self, pipeline_folders: Dict[str, str]):
+        """Configure input files and dependencies."""
+        self.folders = pipeline_folders
+        self._setup_file_paths()  # Set up all file paths now that we have folders
+        
+        # Handle PDB input if provided
+        if self.pdb:
+            pdb_temp = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
+            pdb_source = os.path.join(pipeline_folders["PDBs"], pdb_temp)
+            
+            if os.path.exists(pdb_source):
+                # Will be copied in script generation
+                self.input_sources["pdb"] = pdb_source
+            else:
+                raise ValueError(f"PDB file not found: {pdb_source}")
+    
     def get_config_display(self) -> List[str]:
         """Get RFdiffusion-AllAtom configuration display lines."""
         config_lines = super().get_config_display()
+        
+        # Add RFdiffusion base parameters
+        config_lines.extend([
+            f"CONTIGS: {self.contigs}",
+            f"NUM DESIGNS: {self.num_designs}",
+            f"ACTIVE SITE: {self.active_site}",
+            f"STEPS: {self.steps}"
+        ])
+        
+        if self.pdb:
+            config_lines.append(f"PDB: {self.pdb}")
+        if self.inpaint:
+            config_lines.append(f"INPAINT: {self.inpaint}")
+        if self.partial_steps > 0:
+            config_lines.append(f"PARTIAL STEPS: {self.partial_steps}")
+        if self.reproducible:
+            config_lines.append(f"REPRODUCIBLE: {self.reproducible} (seed: {self.reproducibility_number})")
         
         # Add AllAtom-specific parameters
         if self.ligand:
@@ -122,6 +214,31 @@ class RFdiffusionAllAtom(RFdiffusion):
             config_lines.append(f"DETERMINISTIC: {self.deterministic}")
         
         return config_lines
+
+    def generate_script(self, script_path: str) -> str:
+        """
+        Generate RFdiffusion-AllAtom execution script.
+        
+        Args:
+            script_path: Path where script should be written
+            
+        Returns:
+            Script content as string
+        """
+        runtime_folder = os.path.dirname(script_path)
+        rfd_job_folder = self.output_folder
+        os.makedirs(rfd_job_folder, exist_ok=True)
+        
+        # Generate script content following modular pattern
+        script_content = "#!/bin/bash\n"
+        script_content += "# RFdiffusion-AllAtom execution script\n"
+        script_content += "# Generated by ProteinNotebooks pipeline system\n\n"
+        script_content += self.generate_completion_check_header()
+        script_content += self.generate_script_run_rfdiffusion()
+        script_content += self.generate_script_create_datasheet()
+        script_content += self.generate_completion_check_footer()
+        
+        return script_content
     
     def _setup_file_paths(self):
         """Set up all file paths after output_folder is known."""
@@ -129,7 +246,7 @@ class RFdiffusionAllAtom(RFdiffusion):
         self.pipeline_name = self._extract_pipeline_name()
         
         # Core output files
-        self.main_datasheet = os.path.join(self.output_folder, "rfdiffusion_results.csv")
+        self.main_datasheet = os.path.join(self.output_folder, "rfdiffusionAA_results.csv")
         
         # Log file is created by pipeline in the main pipeline folder with pattern _{index}_{toolname}.log
         # Extract index from folder name (e.g., "1_RFdiffusionAllAtom" -> "1")
@@ -251,11 +368,78 @@ python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{desig
 
 """
     
+    def get_output_files(self) -> Dict[str, List[str]]:
+        """
+        Get expected output files after RFdiffusion-AllAtom execution.
+        
+        Uses pure path construction - no filesystem access.
+        Returns expected paths based on naming patterns.
+        
+        Returns:
+            Dictionary mapping output types to file paths with standard keys:
+            - structures: PDB files
+            - compounds: Empty (no compounds from RFdiffusion-AllAtom)
+            - sequences: Empty (no sequences from RFdiffusion-AllAtom)  
+            - datasheets: Main datasheet CSV
+            - output_folder: Tool's output directory
+        """
+        # Ensure file paths are set up
+        if not hasattr(self, 'pipeline_name') or self.pipeline_name is None:
+            # Fallback if configure_inputs hasn't been called yet
+            self._setup_file_paths()
+        
+        pipeline_name = self.pipeline_name
+        main_datasheet = self.main_datasheet
+        
+        # Generate expected PDB file paths based on clean naming pattern
+        design_pdbs = []
+        structure_ids = []
+        for i in range(self.num_designs):
+            design_id = f"{pipeline_name}_{i}"
+            design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
+            design_pdbs.append(design_path)
+            structure_ids.append(design_id)
+        
+        # Organize datasheets by content type
+        datasheets = {
+            "structures": {
+                "path": main_datasheet,
+                "columns": ["id", "source_id", "pdb", "fixed", "designed", "contigs", "time", "status"],
+                "description": "RFdiffusion-AllAtom structure generation results with fixed/designed regions",
+                "count": self.num_designs
+            }
+        }
+        
+        return {
+            "structures": design_pdbs,
+            "structure_ids": structure_ids,
+            "compounds": [],
+            "compound_ids": [],
+            "sequences": [],
+            "sequence_ids": [],
+            "datasheets": datasheets,
+            "output_folder": self.output_folder,
+            # Keep legacy aliases for compatibility
+            "pdbs": design_pdbs,
+            "main": main_datasheet  # Legacy alias for backward compatibility
+        }
+    
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize configuration including RFdiffusion-AllAtom-specific parameters."""
+        """Serialize configuration with all RFdiffusion-AllAtom parameters."""
         base_dict = super().to_dict()
         base_dict.update({
-            "rfd_aa_params": {
+            "tool_params": {
+                # Core diffusion parameters
+                "pdb": self.pdb,
+                "contigs": self.contigs,
+                "inpaint": self.inpaint,
+                "num_designs": self.num_designs,
+                "active_site": self.active_site,
+                "steps": self.steps,
+                "partial_steps": self.partial_steps,
+                "reproducible": self.reproducible,
+                "reproducibility_number": self.reproducibility_number,
+                # AllAtom-specific parameters
                 "ligand": self.ligand,
                 "ppi_design": self.ppi_design,
                 "ppi_hotspot_residues": self.ppi_hotspot_residues,

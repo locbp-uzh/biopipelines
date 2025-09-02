@@ -1,9 +1,9 @@
 """
-Confidence criterion for filtering structures based on confidence scores.
+Confidence analysis for extracting confidence scores from protein structures.
 
-Filters protein structures based on predicted confidence scores like pLDDT,
+Analyzes protein structures to extract predicted confidence scores like pLDDT,
 commonly used for assessing structural quality and confidence in protein predictions.
-Uses 'pLDDT' as the variable name in expressions.
+Outputs CSV with confidence metrics for all structures.
 """
 
 import os
@@ -12,26 +12,26 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 try:
-    from .structure_criterion import StructureCriterion
+    from .structure_analysis import StructureAnalysis
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from structure_criterion import StructureCriterion
+    from structure_analysis import StructureAnalysis
 
 
-class Confidence(StructureCriterion):
+class Confidence(StructureAnalysis):
     """
-    Filter structures based on confidence scores (pLDDT).
+    Analyze structures to extract confidence scores (pLDDT).
     
-    Uses 'pLDDT' as the variable name in expressions.
+    Generates CSV with confidence metrics for all input structures.
     
     pLDDT (predicted Local Distance Difference Test) is a confidence measure
     for protein structure predictions, commonly used in AlphaFold and similar methods.
     Scores range from 0-100, where higher values indicate higher confidence.
     
-    Common thresholds:
+    Common interpretation:
     - Very high confidence: >90
     - High confidence: 70-90  
     - Low confidence: 50-70
@@ -39,17 +39,15 @@ class Confidence(StructureCriterion):
     """
     
     def __init__(self,
-                 expression: str,
                  selection: Optional[Union[str, List[int], List[str]]] = None,
                  score_metric: str = "mean",
                  score_source: str = "bfactor",
+                 metric_name: str = None,
                  **kwargs):
         """
-        Initialize confidence criterion.
+        Initialize confidence analysis.
         
         Args:
-            expression: pLDDT constraint expression using 'pLDDT' variable
-                       (e.g., 'pLDDT>90', 'pLDDT>=70 and pLDDT<=90')
             selection: Region selection for scoring:
                 - None: Use all residues
                 - str: Datasheet reference like "input.datasheets.sequences.designed_residues"
@@ -57,27 +55,24 @@ class Confidence(StructureCriterion):
                 - List[str]: Residue identifiers like ["A45", "A46", "B12"]
             score_metric: How to aggregate pLDDT scores ("mean", "min", "max", "median")
             score_source: Source of scores in PDB ("bfactor", "occupancy")
+            metric_name: Custom name for the pLDDT column (default: "pLDDT")
             **kwargs: Additional parameters
             
         Examples:
-            # High confidence structures (mean pLDDT > 90)
-            Confidence(
-                expression='pLDDT>90',
-                score_metric='mean'
-            )
+            # Analyze all residues with mean pLDDT
+            Confidence(score_metric='mean')
             
-            # Filter based on designed regions only
+            # Analyze designed regions only
             Confidence(
-                expression='pLDDT>=70',
                 selection='input.datasheets.sequences.designed_residues',
-                score_metric='min'  # Ensure all designed residues are confident
+                score_metric='min'
             )
             
-            # Specific residue range
+            # Analyze specific residue range with custom metric name
             Confidence(
-                expression='pLDDT>80',
                 selection=[45, 46, 47, 48, 49, 50],
-                score_metric='mean'
+                score_metric='mean',
+                metric_name='binding_site_confidence'
             )
         """
         self.selection = selection
@@ -91,21 +86,21 @@ class Confidence(StructureCriterion):
         if score_source not in ["bfactor", "occupancy"]:
             raise ValueError(f"Invalid score_source: {score_source}")
         
-        # Initialize parent with expression and store parameters
+        # Initialize parent with parameters
         super().__init__(
-            expression=expression,
+            metric_name=metric_name,
             selection=selection,
             score_metric=score_metric,
             score_source=score_source,
             **kwargs
         )
     
-    def get_variable_name(self) -> str:
-        """Get the variable name used in expressions."""
+    def get_metric_name(self) -> str:
+        """Get the default metric name."""
         return "pLDDT"
     
-    def get_criterion_type(self) -> str:
-        """Get the criterion type identifier."""
+    def get_analysis_type(self) -> str:
+        """Get the analysis type identifier."""
         return "confidence"
     
     def get_runtime_script_path(self) -> str:
@@ -136,4 +131,5 @@ class Confidence(StructureCriterion):
     def __str__(self) -> str:
         """String representation."""
         selection_str = str(self.selection) if self.selection else "all"
-        return f"Confidence({selection_str}: {self.expression})"
+        metric = self.get_effective_metric_name()
+        return f"Confidence({selection_str}: {metric}, {self.score_metric})"

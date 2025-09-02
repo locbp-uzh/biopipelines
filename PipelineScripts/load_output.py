@@ -22,13 +22,18 @@ except ImportError:
 
 class LoadOutput(BaseConfig):
     """
-    Load results from a previously executed pipeline tool.
+    Load results from a previously executed pipeline tool, with optional filtering.
     
     This tool allows reusing outputs from previous pipeline runs without
     re-execution, enabling incremental pipeline development and result reuse.
     
-    The LoadOutput tool validates file existence, loads output metadata,
-    and provides the loaded results through the standard pipeline interface.
+    The LoadOutput tool:
+    - Validates file existence and loads output metadata at pipeline runtime
+    - Optionally applies filters to loaded data (expression string or Filter tool output)  
+    - Provides filtered results through the standard pipeline interface
+    - Enables subsequent tools to work with the filtered subset
+    
+    This is the ONLY tool that checks file existence at pipeline runtime (not SLURM runtime).
     """
     
     # Tool identification
@@ -37,23 +42,30 @@ class LoadOutput(BaseConfig):
     COMPATIBLE_ENVS = ["ProteinEnv", "Boltz2Env", "ligandmpnn_env"]
     DEFAULT_RESOURCES = {"memory": "1GB", "time": "0:10:00"}  # Minimal resources needed
     
-    def __init__(self, result_file: str, validate_files: bool = True, **kwargs):
+    def __init__(self, output_json: str, filter = None, validate_files: bool = True, **kwargs):
         """
         Initialize LoadOutput tool.
         
         Args:
-            result_file: Path to saved tool result JSON file
+            output_json: Path to saved tool result JSON file
+            filter: Optional filter result (ToolOutput from Filter tool) to only load specific IDs
             validate_files: Whether to validate that all referenced files exist
             **kwargs: Additional parameters for BaseConfig
         """
-        self.result_file = result_file
+        self.result_file = output_json
+        self.filter_input = filter
         self.validate_files = validate_files
         self.loaded_result = None
         self.missing_files = []
         self.original_tool_name = None
+        self.filtered_ids = None
         
         # Load and validate the result file
         self._load_and_validate_result()
+        
+        # Process filter if provided
+        if self.filter_input:
+            self._process_filter()
         
         # Set up job name based on loaded result
         if not kwargs.get('job_name'):
@@ -87,6 +99,10 @@ class LoadOutput(BaseConfig):
         
         # Initialize base class
         super().__init__(**kwargs)
+        
+        # Set up dependency on filter input if provided
+        if self.filter_input and hasattr(self.filter_input, 'config'):
+            self.dependencies.append(self.filter_input.config)
         
         # Initialize folders to prevent AttributeError during script generation
         self.folders = {"HelpScripts": "HelpScripts"}  # Will be updated in configure_inputs
@@ -154,6 +170,174 @@ class LoadOutput(BaseConfig):
             if len(self.missing_files) > 5:
                 print(f"  ... and {len(self.missing_files) - 5} more")
     
+    def _process_filter(self):
+        """Process filter input to determine which IDs to keep."""
+        import pandas as pd
+        
+        # Find the main datasheet to filter
+        output_structure = self.loaded_result['output_structure']
+        main_datasheet_path = None
+        
+        if 'datasheets' in output_structure:
+            datasheets = output_structure['datasheets']
+            if isinstance(datasheets, dict):
+                # Look for main datasheet (priority order)
+                priority_names = ['structures', 'analysis', 'combined', 'results']
+                for name in priority_names:
+                    if name in datasheets:
+                        ds_info = datasheets[name]
+                        if isinstance(ds_info, dict) and 'path' in ds_info:
+                            main_datasheet_path = ds_info['path']
+                            break
+                        elif isinstance(ds_info, str):
+                            main_datasheet_path = ds_info
+                            break
+                
+                # If no priority match, take first available
+                if not main_datasheet_path:
+                    first_ds = next(iter(datasheets.values()))
+                    if isinstance(first_ds, dict) and 'path' in first_ds:
+                        main_datasheet_path = first_ds['path']
+                    elif isinstance(first_ds, str):
+                        main_datasheet_path = first_ds
+        
+        if not main_datasheet_path or not os.path.exists(main_datasheet_path):
+            raise ValueError(f"Cannot find main datasheet to filter in loaded output: {main_datasheet_path}")
+        
+        print(f"LoadOutput: Applying filter to datasheet: {main_datasheet_path}")
+        
+        # Load the datasheet
+        try:
+            df = pd.read_csv(main_datasheet_path)
+            print(f"  - Loaded {len(df)} rows")
+        except Exception as e:
+            raise ValueError(f"Error loading datasheet for filtering: {e}")
+        
+        # Apply filter
+        if isinstance(self.filter_input, str):
+            # Simple expression filter
+            try:
+                filtered_df = df.query(self.filter_input)
+                print(f"  - Applied expression: {self.filter_input}")
+            except Exception as e:
+                raise ValueError(f"Error applying filter expression '{self.filter_input}': {e}")
+        
+        elif hasattr(self.filter_input, 'datasheets'):
+            # Precomputed filter result - load the filtered IDs
+            filter_datasheets = self.filter_input.datasheets
+            if isinstance(filter_datasheets, dict):
+                # Find filtered results
+                if 'filtered' in filter_datasheets:
+                    filter_ds_info = filter_datasheets['filtered']
+                else:
+                    filter_ds_info = next(iter(filter_datasheets.values()))
+                
+                if isinstance(filter_ds_info, dict) and 'path' in filter_ds_info:
+                    filter_csv_path = filter_ds_info['path']
+                elif isinstance(filter_ds_info, str):
+                    filter_csv_path = filter_ds_info
+                else:
+                    raise ValueError("Cannot determine filter CSV path")
+                
+                if not os.path.exists(filter_csv_path):
+                    raise ValueError(f"Filter CSV file not found: {filter_csv_path}")
+                
+                try:
+                    filter_df = pd.read_csv(filter_csv_path)
+                    # Use the 'id' column from filtered results to filter the original data
+                    if 'id' in filter_df.columns and 'id' in df.columns:
+                        filtered_df = df[df['id'].isin(filter_df['id'])]
+                        print(f"  - Filtered using precomputed results: {len(filter_df)} IDs")
+                    else:
+                        raise ValueError("Cannot match filtered IDs - missing 'id' columns")
+                except Exception as e:
+                    raise ValueError(f"Error loading filter results from {filter_csv_path}: {e}")
+            else:
+                raise ValueError("Invalid filter input format")
+        else:
+            raise ValueError(f"Invalid filter input type: {type(self.filter_input)}")
+        
+        print(f"  - Result: {len(filtered_df)}/{len(df)} items kept")
+        
+        # Store filtered IDs
+        if 'id' in filtered_df.columns:
+            self.filtered_ids = set(filtered_df['id'].tolist())
+        else:
+            # Fall back to row indices
+            self.filtered_ids = set(filtered_df.index.tolist())
+        
+        print(f"  - Filtered IDs: {sorted(list(self.filtered_ids)) if len(self.filtered_ids) <= 10 else f'{len(self.filtered_ids)} items'}")
+    
+    def _apply_filter_to_output_structure(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply filtering to the output structure based on filtered IDs."""
+        
+        print(f"LoadOutput: Filtering output structure to {len(self.filtered_ids)} items")
+        
+        filtered_structure = output_structure.copy()
+        
+        # Filter structures and structure_ids
+        if 'structures' in output_structure and 'structure_ids' in output_structure:
+            original_structures = output_structure['structures']
+            original_structure_ids = output_structure['structure_ids']
+            
+            if len(original_structures) == len(original_structure_ids):
+                filtered_structures = []
+                filtered_structure_ids = []
+                
+                for structure_path, structure_id in zip(original_structures, original_structure_ids):
+                    if structure_id in self.filtered_ids:
+                        filtered_structures.append(structure_path)
+                        filtered_structure_ids.append(structure_id)
+                
+                filtered_structure['structures'] = filtered_structures
+                filtered_structure['structure_ids'] = filtered_structure_ids
+                print(f"  - Filtered structures: {len(filtered_structures)}/{len(original_structures)}")
+        
+        # Filter compounds and compound_ids  
+        if 'compounds' in output_structure and 'compound_ids' in output_structure:
+            original_compounds = output_structure['compounds']
+            original_compound_ids = output_structure['compound_ids']
+            
+            if len(original_compounds) == len(original_compound_ids):
+                filtered_compounds = []
+                filtered_compound_ids = []
+                
+                for compound_path, compound_id in zip(original_compounds, original_compound_ids):
+                    if compound_id in self.filtered_ids:
+                        filtered_compounds.append(compound_path)
+                        filtered_compound_ids.append(compound_id)
+                
+                filtered_structure['compounds'] = filtered_compounds
+                filtered_structure['compound_ids'] = filtered_compound_ids
+        
+        # Filter sequences and sequence_ids
+        if 'sequences' in output_structure and 'sequence_ids' in output_structure:
+            original_sequences = output_structure['sequences']
+            original_sequence_ids = output_structure['sequence_ids']
+            
+            if len(original_sequences) == len(original_sequence_ids):
+                filtered_sequences = []
+                filtered_sequence_ids = []
+                
+                for sequence_path, sequence_id in zip(original_sequences, original_sequence_ids):
+                    if sequence_id in self.filtered_ids:
+                        filtered_sequences.append(sequence_path)
+                        filtered_sequence_ids.append(sequence_id)
+                
+                filtered_structure['sequences'] = filtered_sequences
+                filtered_structure['sequence_ids'] = filtered_sequence_ids
+        
+        # Update datasheets count information
+        if 'datasheets' in filtered_structure:
+            for ds_name, ds_info in filtered_structure['datasheets'].items():
+                if isinstance(ds_info, dict) and 'count' in ds_info:
+                    # Update count to reflect filtering
+                    if isinstance(ds_info['count'], int):
+                        # Rough estimate - could be more precise if we tracked per-datasheet filtering
+                        filtered_structure['datasheets'][ds_name]['count'] = len(self.filtered_ids)
+        
+        return filtered_structure
+    
     def validate_params(self):
         """Validate LoadOutput parameters."""
         if not self.loaded_result:
@@ -172,16 +356,20 @@ class LoadOutput(BaseConfig):
     
     def get_output_files(self) -> Dict[str, Any]:
         """
-        Return the loaded output structure.
+        Return the loaded output structure, optionally filtered.
         
         Returns:
-            The complete output structure from the saved result
+            The output structure from the saved result, filtered if filter was applied
         """
         if not self.loaded_result:
             raise RuntimeError("No result loaded")
         
-        # Return the saved output structure
+        # Get the original output structure
         output_structure = self.loaded_result['output_structure'].copy()
+        
+        # Apply filtering if filter was provided
+        if self.filtered_ids is not None:
+            output_structure = self._apply_filter_to_output_structure(output_structure)
         
         # Ensure we have all expected keys for compatibility
         default_structure = {

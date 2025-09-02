@@ -328,9 +328,9 @@ class DatasheetInfo:
         if self.columns:
             # Show more information: path, count, and columns
             path_display = self.path.replace('/shares/locbp.chem.uzh/', '.../')
-            col_display = ', '.join(self.columns[:3])
-            if len(self.columns) > 3:
-                col_display += f', +{len(self.columns)-3} more'
+            col_display = ', '.join(self.columns[:6])
+            if len(self.columns) > 6:
+                col_display += f', +{len(self.columns)-6} more'
             count_display = f" ({self.count} entries)" if self.count > 0 else ""
             return f"{path_display}{count_display}: {col_display}"
         return self.name

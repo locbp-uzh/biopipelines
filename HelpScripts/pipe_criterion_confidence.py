@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Runtime helper script for Confidence criterion evaluation.
+Runtime helper script for Confidence analysis.
 
-This script analyzes protein structures at runtime to extract confidence scores
-(pLDDT) from PDB files, following the pipeline pattern.
+This script analyzes protein structures to extract confidence scores (pLDDT)
+and outputs results as CSV for downstream filtering and analysis.
 """
 
 import os
@@ -13,6 +13,7 @@ import json
 import re
 import numpy as np
 import pandas as pd
+import glob
 from typing import Dict, List, Any, Optional, Union
 
 # Try to import structural biology libraries
@@ -32,26 +33,18 @@ except ImportError:
 def parse_position_string(position_str: str) -> List[int]:
     """
     Parse position string like "45-50,52,55-57" into list of residue numbers.
-    
-    Args:
-        position_str: Position specification string
-        
-    Returns:
-        List of residue numbers
     """
     positions = []
     
     for part in str(position_str).split(','):
         part = part.strip()
         if '-' in part and not part.startswith('-'):
-            # Range specification
             try:
                 start, end = map(int, part.split('-'))
                 positions.extend(range(start, end + 1))
             except ValueError:
                 continue
         else:
-            # Single position
             try:
                 positions.append(int(part))
             except ValueError:
@@ -63,16 +56,8 @@ def parse_position_string(position_str: str) -> List[int]:
 def resolve_datasheet_selection(selection_ref: str, context: Dict[str, Any]) -> Optional[List[int]]:
     """
     Resolve datasheet-based selection to list of residue numbers.
-    
-    Args:
-        selection_ref: Reference like "input.datasheets.sequences.designed_residues"
-        context: Context containing datasheets
-        
-    Returns:
-        List of residue numbers or None if resolution fails
     """
     try:
-        # Parse the reference
         if not selection_ref.startswith("input.datasheets."):
             return None
         
@@ -80,16 +65,14 @@ def resolve_datasheet_selection(selection_ref: str, context: Dict[str, Any]) -> 
         if len(parts) < 4:
             return None
         
-        datasheet_name = parts[2]  # e.g., "sequences"
-        column_name = parts[3]     # e.g., "designed_residues"
+        datasheet_name = parts[2]
+        column_name = parts[3]
         
-        # Look for datasheet in context
         datasheets = context.get('datasheets', {})
         
         if isinstance(datasheets, dict) and datasheet_name in datasheets:
             datasheet_info = datasheets[datasheet_name]
             
-            # Get path from datasheet info
             if isinstance(datasheet_info, dict) and 'path' in datasheet_info:
                 datasheet_path = datasheet_info['path']
             else:
@@ -99,7 +82,6 @@ def resolve_datasheet_selection(selection_ref: str, context: Dict[str, Any]) -> 
                 df = pd.read_csv(datasheet_path)
                 
                 if column_name in df.columns:
-                    # Parse position specifications
                     positions = []
                     for value in df[column_name].dropna():
                         if isinstance(value, str):
@@ -114,407 +96,283 @@ def resolve_datasheet_selection(selection_ref: str, context: Dict[str, Any]) -> 
     return None
 
 
-def resolve_selection(selection: Union[str, List, None], context: Dict[str, Any]) -> Optional[List[int]]:
+def calculate_confidence_score(structure_file: str, config: Dict[str, Any], context: Dict[str, Any]) -> Optional[float]:
     """
-    Resolve selection parameter to list of residue numbers.
+    Calculate confidence score from structure file.
+    """
+    selection = config.get('selection')
+    score_metric = config.get('score_metric', 'mean')
+    score_source = config.get('score_source', 'bfactor')
     
-    Args:
-        selection: Selection parameter
-        context: Context information
-        
-    Returns:
-        List of residue numbers to analyze, or None for all residues
-    """
-    if selection is None:
+    try:
+        if BIOPYTHON_AVAILABLE:
+            return calculate_confidence_biopython(structure_file, selection, score_metric, score_source, context)
+        elif MDANALYSIS_AVAILABLE:
+            return calculate_confidence_mdanalysis(structure_file, selection, score_metric, score_source, context)
+        else:
+            print("Warning: Neither BioPython nor MDAnalysis available - using fallback parsing")
+            return calculate_confidence_fallback(structure_file, score_source)
+    
+    except Exception as e:
+        print(f"Error calculating confidence for {structure_file}: {e}")
         return None
+
+
+def calculate_confidence_biopython(structure_file: str, selection: Optional[Union[str, List]], 
+                                  score_metric: str, score_source: str, context: Dict[str, Any]) -> Optional[float]:
+    """Calculate confidence using BioPython."""
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("structure", structure_file)
     
-    if isinstance(selection, list):
+    confidence_scores = []
+    target_residues = None
+    
+    # Resolve selection
+    if isinstance(selection, str) and selection.startswith("input.datasheets."):
+        target_residues = resolve_datasheet_selection(selection, context)
+    elif isinstance(selection, list):
         if all(isinstance(x, int) for x in selection):
-            # List of residue numbers
-            return selection
+            target_residues = selection
         elif all(isinstance(x, str) for x in selection):
-            # List of residue identifiers - extract numbers
-            residue_numbers = []
+            # Parse residue identifiers like "A45", "B123"
+            target_residues = []
             for res_id in selection:
-                # Handle formats like "A45", "B12", or just "45"
-                match = re.search(r'(\d+)', res_id)
-                if match:
-                    residue_numbers.append(int(match.group(1)))
-            return residue_numbers if residue_numbers else None
+                if len(res_id) > 1 and res_id[1:].isdigit():
+                    target_residues.append(int(res_id[1:]))
     
-    elif isinstance(selection, str):
-        # Handle datasheet references
-        if selection.startswith("input.datasheets."):
-            return resolve_datasheet_selection(selection, context)
-        else:
-            # Try to parse as residue range or selection
-            return parse_selection_string(selection)
-    
-    return None
-
-
-def parse_selection_string(selection_str: str) -> Optional[List[int]]:
-    """
-    Parse selection string into residue numbers.
-    
-    Args:
-        selection_str: Selection string
-        
-    Returns:
-        List of residue numbers or None
-    """
-    # Handle common formats
-    if re.match(r'^\d+-\d+$', selection_str):
-        # Range format like "45-50"
-        start, end = map(int, selection_str.split('-'))
-        return list(range(start, end + 1))
-    elif re.match(r'^[\d,\-\s]+$', selection_str):
-        # Comma-separated format like "45,46,47" or "45-50,52,55-57"
-        return parse_position_string(selection_str)
-    
-    return None
-
-
-def extract_scores_mdanalysis(structure_file: str, target_residues: Optional[List[int]] = None,
-                             score_source: str = "bfactor") -> List[float]:
-    """Extract confidence scores using MDAnalysis."""
-    if not MDANALYSIS_AVAILABLE:
-        return []
-    
-    try:
-        u = mda.Universe(structure_file)
-        
-        if target_residues is not None:
-            # Select specific residues
-            resid_selection = " or ".join([f"resid {res}" for res in target_residues])
-            selection = u.select_atoms(f"protein and ({resid_selection})")
-        else:
-            # Select all protein atoms
-            selection = u.select_atoms("protein")
-        
-        if len(selection) == 0:
-            return []
-        
-        # Group by residue and take mean score per residue
-        unique_residues = np.unique(selection.resids)
-        residue_scores = []
-        
-        for resid in unique_residues:
-            residue_atoms = selection.select_atoms(f"resid {resid}")
-            if score_source == "bfactor":
-                residue_score = np.mean(residue_atoms.tempfactors)
-            elif score_source == "occupancy":
-                residue_score = np.mean(residue_atoms.occupancies)
-            else:
-                residue_score = np.mean(residue_atoms.tempfactors)
-            
-            residue_scores.append(residue_score)
-        
-        return residue_scores
-        
-    except Exception as e:
-        print(f"    Error extracting scores with MDAnalysis: {e}")
-        return []
-
-
-def extract_scores_biopython(structure_file: str, target_residues: Optional[List[int]] = None,
-                           score_source: str = "bfactor") -> List[float]:
-    """Extract confidence scores using BioPython."""
-    if not BIOPYTHON_AVAILABLE:
-        return []
-    
-    try:
-        parser = PDBParser(QUIET=True)
-        structure = parser.get_structure("structure", structure_file)
-        
-        scores = []
-        
-        for model in structure:
-            for chain in model:
-                for residue in chain:
-                    # Get residue number
-                    res_num = residue.id[1]
+    # Extract confidence scores
+    for model in structure:
+        for chain in model:
+            for residue in chain:
+                res_num = residue.id[1]
+                
+                # Check if this residue should be included
+                if target_residues is not None and res_num not in target_residues:
+                    continue
+                
+                # Get confidence score from atoms
+                residue_scores = []
+                for atom in residue:
+                    if score_source == 'bfactor':
+                        score = atom.bfactor
+                    elif score_source == 'occupancy':
+                        score = atom.occupancy
+                    else:
+                        score = atom.bfactor
                     
-                    # Skip if not in target residues
-                    if target_residues is not None and res_num not in target_residues:
-                        continue
-                    
-                    # Extract scores from atoms (usually all atoms have same score)
-                    residue_scores = []
-                    for atom in residue:
-                        if score_source == "bfactor":
-                            score = atom.bfactor
-                        elif score_source == "occupancy":
-                            score = atom.occupancy
-                        else:
-                            score = atom.bfactor  # Default to bfactor
-                        
+                    if score > 0:  # Valid confidence score
                         residue_scores.append(score)
+                
+                if residue_scores:
+                    if score_metric == 'mean':
+                        residue_score = np.mean(residue_scores)
+                    elif score_metric == 'min':
+                        residue_score = np.min(residue_scores)
+                    elif score_metric == 'max':
+                        residue_score = np.max(residue_scores)
+                    elif score_metric == 'median':
+                        residue_score = np.median(residue_scores)
+                    else:
+                        residue_score = np.mean(residue_scores)
                     
-                    # Use mean score for residue (they should all be the same for pLDDT)
-                    if residue_scores:
-                        scores.append(np.mean(residue_scores))
-        
-        return scores
-        
-    except Exception as e:
-        print(f"    Error extracting scores with BioPython: {e}")
-        return []
-
-
-def extract_confidence_scores(structure_file: str, target_residues: Optional[List[int]] = None,
-                            score_source: str = "bfactor") -> List[float]:
-    """
-    Extract confidence scores from structure file.
+                    confidence_scores.append(residue_score)
     
-    Args:
-        structure_file: Path to structure file
-        target_residues: Specific residues to analyze, or None for all
-        score_source: Source of scores in PDB ("bfactor", "occupancy")
-        
-    Returns:
-        List of confidence scores
-    """
-    # Try MDAnalysis first, then BioPython
-    if MDANALYSIS_AVAILABLE:
-        scores = extract_scores_mdanalysis(structure_file, target_residues, score_source)
-        if scores:
-            return scores
-    
-    if BIOPYTHON_AVAILABLE:
-        scores = extract_scores_biopython(structure_file, target_residues, score_source)
-        if scores:
-            return scores
-    
-    return []
-
-
-def calculate_aggregate_score(scores: List[float], score_metric: str = "mean") -> Optional[float]:
-    """
-    Calculate aggregate confidence score based on metric.
-    
-    Args:
-        scores: List of individual residue confidence scores
-        score_metric: Aggregation method
-        
-    Returns:
-        Aggregate score or None if no scores
-    """
-    if not scores:
+    if not confidence_scores:
         return None
     
-    if score_metric == "mean":
-        return float(np.mean(scores))
-    elif score_metric == "min":
-        return float(np.min(scores))
-    elif score_metric == "max":
-        return float(np.max(scores))
-    elif score_metric == "median":
-        return float(np.median(scores))
+    # Calculate final score
+    if score_metric == 'mean':
+        return np.mean(confidence_scores)
+    elif score_metric == 'min':
+        return np.min(confidence_scores)
+    elif score_metric == 'max':
+        return np.max(confidence_scores)
+    elif score_metric == 'median':
+        return np.median(confidence_scores)
     else:
-        return float(np.mean(scores))  # Default
+        return np.mean(confidence_scores)
 
 
-def calculate_confidence_score(structure_file: str, config: Dict[str, Any], 
-                             context: Dict[str, Any] = None) -> Optional[float]:
-    """
-    Calculate confidence score for a structure.
+def calculate_confidence_mdanalysis(structure_file: str, selection: Optional[Union[str, List]], 
+                                   score_metric: str, score_source: str, context: Dict[str, Any]) -> Optional[float]:
+    """Calculate confidence using MDAnalysis."""
+    u = mda.Universe(structure_file)
     
-    Args:
-        structure_file: Path to structure file
-        config: Configuration with parameters
-        context: Additional context (datasheets, etc.)
-        
-    Returns:
-        Confidence score or None if calculation fails
-    """
-    try:
-        selection = config["parameters"].get("selection")
-        score_metric = config["parameters"].get("score_metric", "mean")
-        score_source = config["parameters"].get("score_source", "bfactor")
-        
-        # Resolve selection for this structure
-        target_residues = resolve_selection(selection, context or {})
-        
+    # Build selection string
+    if selection is None:
+        selection_str = "all"
+    elif isinstance(selection, str) and selection.startswith("input.datasheets."):
+        target_residues = resolve_datasheet_selection(selection, context)
         if target_residues:
-            print(f"    Analyzing {len(target_residues)} selected residues")
+            res_str = " ".join(str(r) for r in target_residues)
+            selection_str = f"resid {res_str}"
         else:
-            print(f"    Analyzing all residues")
-        
-        # Extract confidence scores
-        residue_scores = extract_confidence_scores(structure_file, target_residues, score_source)
-        
-        if not residue_scores:
-            print(f"    Could not extract confidence scores")
-            return None
-        
-        # Calculate aggregate score
-        aggregate_score = calculate_aggregate_score(residue_scores, score_metric)
-        
-        if aggregate_score is None:
-            print(f"    Could not calculate aggregate score")
-            return None
-        
-        return aggregate_score
-        
-    except Exception as e:
-        print(f"    Error calculating confidence score: {e}")
+            selection_str = "all"
+    elif isinstance(selection, list):
+        if all(isinstance(x, int) for x in selection):
+            res_str = " ".join(str(r) for r in selection)
+            selection_str = f"resid {res_str}"
+        else:
+            selection_str = "all"
+    else:
+        selection_str = "all"
+    
+    atoms = u.select_atoms(selection_str)
+    
+    if len(atoms) == 0:
         return None
+    
+    # Extract confidence scores
+    if score_source == 'bfactor':
+        scores = atoms.tempfactors
+    elif score_source == 'occupancy':
+        scores = atoms.occupancies
+    else:
+        scores = atoms.tempfactors
+    
+    # Filter valid scores
+    valid_scores = scores[scores > 0]
+    
+    if len(valid_scores) == 0:
+        return None
+    
+    # Calculate final score
+    if score_metric == 'mean':
+        return np.mean(valid_scores)
+    elif score_metric == 'min':
+        return np.min(valid_scores)
+    elif score_metric == 'max':
+        return np.max(valid_scores)
+    elif score_metric == 'median':
+        return np.median(valid_scores)
+    else:
+        return np.mean(valid_scores)
 
 
-def evaluate_expression(score: float, expression: str, variable_name: str) -> bool:
-    """
-    Evaluate the filtering expression with the calculated score.
-    
-    Args:
-        score: Calculated score for the item
-        expression: Boolean expression to evaluate
-        variable_name: Variable name to replace in expression
-        
-    Returns:
-        True if the item passes the criterion
-    """
-    # Replace variable name with actual score
-    expr = expression.lower().replace(variable_name.lower(), str(score))
-    
-    # Replace logical operators for Python evaluation
-    expr = expr.replace(' and ', ' & ').replace(' or ', ' | ')
-    
+def calculate_confidence_fallback(structure_file: str, score_source: str) -> Optional[float]:
+    """Fallback confidence calculation using simple text parsing."""
     try:
-        # Use eval safely with restricted globals
-        safe_globals = {
-            "__builtins__": {},
-            "__name__": "__main__",
-            "__doc__": None,
-        }
-        return bool(eval(expr, safe_globals))
+        confidence_scores = []
+        
+        with open(structure_file, 'r') as f:
+            for line in f:
+                if line.startswith('ATOM') or line.startswith('HETATM'):
+                    try:
+                        if score_source == 'bfactor':
+                            score = float(line[60:66].strip())
+                        elif score_source == 'occupancy':
+                            score = float(line[54:60].strip())
+                        else:
+                            score = float(line[60:66].strip())
+                        
+                        if score > 0:
+                            confidence_scores.append(score)
+                    except (ValueError, IndexError):
+                        continue
+        
+        if confidence_scores:
+            return np.mean(confidence_scores)
+        else:
+            return None
+    
     except Exception as e:
-        raise ValueError(f"Error evaluating expression '{expression}' with {variable_name}={score}: {e}")
+        print(f"Error in fallback parsing: {e}")
+        return None
 
 
 def main():
-    """Main execution function."""
-    parser = argparse.ArgumentParser(
-        description="Evaluate Confidence criterion on protein structures"
-    )
-    
-    parser.add_argument(
-        "--structures_dir",
-        required=True,
-        help="Directory containing structure files to analyze"
-    )
-    
-    parser.add_argument(
-        "--output",
-        required=True,
-        help="Output JSON file with results"
-    )
-    
-    parser.add_argument(
-        "--config",
-        required=True,
-        help="JSON config file with criterion parameters"
-    )
+    parser = argparse.ArgumentParser(description='Generate confidence analysis CSV')
+    parser.add_argument('--input_dir', required=True, help='Directory containing structure files')
+    parser.add_argument('--output_csv', required=True, help='Output CSV file for analysis results')
+    parser.add_argument('--config', required=True, help='JSON config file with analysis parameters')
     
     args = parser.parse_args()
     
+    # Load configuration
+    if not os.path.exists(args.config):
+        print(f"Error: Config file not found: {args.config}")
+        sys.exit(1)
+    
     try:
-        # Check library availability
-        if not (BIOPYTHON_AVAILABLE or MDANALYSIS_AVAILABLE):
-            print("Error: Neither BioPython nor MDAnalysis is available")
-            print("Install with: pip install biopython MDAnalysis")
-            sys.exit(1)
-        
-        print(f"Structure analysis libraries available:")
-        print(f"  BioPython: {BIOPYTHON_AVAILABLE}")
-        print(f"  MDAnalysis: {MDANALYSIS_AVAILABLE}")
-        
-        # Load configuration
         with open(args.config, 'r') as f:
             config = json.load(f)
-        
-        print(f"Evaluating Confidence criterion:")
-        print(f"  Selection: {config['parameters'].get('selection', 'all_residues')}")
-        print(f"  Expression: {config['expression']}")
-        print(f"  Score metric: {config['parameters'].get('score_metric', 'mean')}")
-        print(f"  Score source: {config['parameters'].get('score_source', 'bfactor')}")
-        
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        sys.exit(1)
+    
+    metric_name = config.get('metric_name', 'pLDDT')
+    print(f"Generating confidence analysis")
+    print(f"Metric name: {metric_name}")
+    print(f"Selection: {config.get('selection', 'all residues')}")
+    print(f"Score metric: {config.get('score_metric', 'mean')}")
+    
+    try:
         # Find structure files
         structure_files = []
         for ext in ['.pdb', '.cif', '.mmcif']:
-            pattern_files = [f for f in os.listdir(args.structures_dir) if f.lower().endswith(ext)]
-            structure_files.extend([os.path.join(args.structures_dir, f) for f in pattern_files])
+            pattern = os.path.join(args.input_dir, f"*{ext}")
+            structure_files.extend(glob.glob(pattern))
+        
+        if not structure_files:
+            print(f"No structure files found in {args.input_dir}")
+            sys.exit(1)
         
         print(f"Found {len(structure_files)} structure files")
         
-        # Process each structure
-        results = {
-            "criterion_type": config["criterion_type"],
-            "criterion_class": config["criterion_class"],
-            "expression": config["expression"],
-            "variable_name": config["variable_name"],
-            "parameters": config["parameters"],
-            "kept_items": [],
-            "filtered_items": [],
-            "item_scores": {},
-            "total_input": 0,
-            "kept_count": 0,
-            "filtered_count": 0,
-            "pass_rate": 0.0
-        }
+        # Initialize results list for CSV
+        csv_results = []
         
         # Context for datasheet resolution (if needed)
-        context = {}  # Could be extended with actual datasheet context
+        context = {"datasheets": {}}  # TODO: Get actual context from pipeline
         
+        # Process each structure file
         for structure_file in structure_files:
-            if not os.path.exists(structure_file):
-                continue
-                
-            print(f"Processing: {os.path.basename(structure_file)}")
+            structure_name = os.path.basename(structure_file)
+            structure_id = os.path.splitext(structure_name)[0]
+            print(f"Processing: {structure_name}")
             
             # Calculate confidence score
             score = calculate_confidence_score(structure_file, config, context)
             
             if score is None:
-                # Could not calculate score - filter out
-                results["filtered_items"].append(structure_file)
-                results["item_scores"][structure_file] = 0.0
-                print(f"  Could not calculate score")
-                continue
+                print(f"  Could not calculate score - using 0.0")
+                score = 0.0
+            else:
+                print(f"  {metric_name}={score:.2f}")
             
-            results["item_scores"][structure_file] = score
+            # Create CSV row
+            csv_row = {
+                'id': structure_id,
+                'source_structure': structure_name,
+                metric_name: score,
+                'selection': config.get('selection', 'all_residues'),
+                'score_metric': config.get('score_metric', 'mean'),
+                'score_source': config.get('score_source', 'bfactor')
+            }
             
-            # Evaluate expression
-            try:
-                passes = evaluate_expression(score, config["expression"], config["variable_name"])
-                
-                if passes:
-                    results["kept_items"].append(structure_file)
-                    print(f"  {config['variable_name']}={score:.2f} ✓")
-                else:
-                    results["filtered_items"].append(structure_file)
-                    print(f"  {config['variable_name']}={score:.2f} ✗")
-                    
-            except Exception as e:
-                # Expression evaluation failed - filter out
-                results["filtered_items"].append(structure_file)
-                print(f"  Expression error: {e}")
+            csv_results.append(csv_row)
         
-        # Calculate summary statistics
-        results["total_input"] = len(results["kept_items"]) + len(results["filtered_items"])
-        results["kept_count"] = len(results["kept_items"])
-        results["filtered_count"] = len(results["filtered_items"])
-        results["pass_rate"] = results["kept_count"] / results["total_input"] if results["total_input"] > 0 else 0.0
+        # Create output directory if needed
+        os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
         
-        # Save results
-        with open(args.output, 'w') as f:
-            json.dump(results, f, indent=2)
+        # Save results as CSV
+        df = pd.DataFrame(csv_results)
+        df.to_csv(args.output_csv, index=False)
         
-        print(f"Results saved to {args.output}")
-        print(f"Summary: {results['kept_count']}/{results['total_input']} structures kept ({results['pass_rate']:.1%})")
+        print(f"\nAnalysis CSV saved: {args.output_csv}")
+        print(f"Analyzed {len(csv_results)} structures")
+        print(f"Columns: {list(df.columns)}")
+        
+        # Show summary statistics
+        if metric_name in df.columns:
+            score_stats = df[metric_name].describe()
+            print(f"\n{metric_name} statistics:")
+            print(f"  Mean: {score_stats['mean']:.2f}")
+            print(f"  Min: {score_stats['min']:.2f}")
+            print(f"  Max: {score_stats['max']:.2f}")
         
     except Exception as e:
-        print(f"Error during criterion evaluation: {e}")
+        print(f"Error during analysis: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

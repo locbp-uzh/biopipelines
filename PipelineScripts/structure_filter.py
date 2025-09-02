@@ -10,8 +10,8 @@ from typing import Dict, List, Any, Optional, Union
 
 try:
     from .filter import Filter
-    from .filter_criterion import FilterCriterion
-    from .structure_criterion import StructureCriterion
+    from .analysis import Analysis
+    from .structure_analysis import StructureAnalysis
     from .base_config import ToolOutput, StandardizedOutput
 except ImportError:
     # Fallback for direct execution
@@ -19,8 +19,8 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(__file__))
     from filter import Filter
-    from filter_criterion import FilterCriterion
-    from structure_criterion import StructureCriterion
+    from analysis import Analysis
+    from structure_analysis import StructureAnalysis
     from base_config import ToolOutput, StandardizedOutput
 
 
@@ -37,7 +37,7 @@ class StructureFilter(Filter):
     TOOL_NAME = "StructureFilter"
     
     def __init__(self,
-                 criteria: List[FilterCriterion],
+                 criteria: List[Analysis],
                  input: Union[ToolOutput, StandardizedOutput, Dict[str, Any]],
                  combination: str = "AND",
                  score_weights: Optional[Dict[str, float]] = None,
@@ -47,7 +47,7 @@ class StructureFilter(Filter):
         Initialize structure filter tool.
         
         Args:
-            criteria: List of FilterCriterion objects (preferably StructureCriterion)
+            criteria: List of Analysis objects (preferably StructureAnalysis)
             input: Input from previous pipeline tool containing structures
             combination: How to combine criteria ("AND", "OR", "WEIGHTED")
             score_weights: Weights for WEIGHTED combination
@@ -68,7 +68,7 @@ class StructureFilter(Filter):
             **kwargs
         )
     
-    def _validate_structure_criteria(self, criteria: List[FilterCriterion]):
+    def _validate_structure_criteria(self, criteria: List[Analysis]):
         """
         Validate that criteria are compatible with structure filtering.
         
@@ -76,12 +76,12 @@ class StructureFilter(Filter):
             criteria: List of criteria to validate
         """
         if not criteria:
-            raise ValueError("At least one FilterCriterion must be provided")
+            raise ValueError("At least one Analysis must be provided")
         
-        # Check that criteria are preferably StructureCriterion
+        # Check that criteria are preferably StructureAnalysis
         non_structure_criteria = []
         for criterion in criteria:
-            if not isinstance(criterion, StructureCriterion):
+            if not isinstance(criterion, StructureAnalysis):
                 non_structure_criteria.append(criterion.__class__.__name__)
         
         if non_structure_criteria:
@@ -197,7 +197,7 @@ class StructureFilter(Filter):
         
         # Count structure-specific criteria
         structure_criteria_count = sum(1 for criterion in self.criteria 
-                                     if isinstance(criterion, StructureCriterion))
+                                     if isinstance(criterion, StructureAnalysis))
         if structure_criteria_count > 0:
             config_lines.append(f"Structure criteria: {structure_criteria_count}")
         

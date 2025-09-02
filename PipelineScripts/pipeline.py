@@ -321,7 +321,7 @@ class Pipeline:
         
         return "\n".join(script_lines)
     
-    def slurm(self, email: str = None, gpu: str = None, memory: str = None, 
+    def slurm(self, email: str = "", gpu: str = None, memory: str = None, 
               time: str = None, **slurm_options):
         """
         Generate SLURM job submission script.
@@ -339,7 +339,7 @@ class Pipeline:
         if not self.scripts_generated:
             raise ValueError("Must call save() before generating SLURM script")
         
-        email_line = "" if email is None else f"""
+        email_line = "" if email == "" else f"""
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user={email}"""
         

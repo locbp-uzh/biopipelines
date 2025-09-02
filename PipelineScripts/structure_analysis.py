@@ -1,8 +1,8 @@
 """
-StructureCriterion base class for structure-based filtering criteria.
+StructureAnalysis base class for structure-based analysis tools.
 
 Provides common functionality for analyzing protein structures, including
-library imports, file parsing, and standardized interfaces for structure-based filtering.
+library imports, file parsing, and standardized interfaces for structure analysis.
 """
 
 import os
@@ -11,18 +11,18 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 from abc import ABC, abstractmethod
 
 try:
-    from .filter_criterion import FilterCriterion
+    from .analysis import Analysis
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from filter_criterion import FilterCriterion
+    from analysis import Analysis
 
 
-class StructureCriterion(FilterCriterion):
+class StructureAnalysis(Analysis):
     """
-    Abstract base class for structure-based filtering criteria.
+    Abstract base class for structure-based analysis tools.
     
     Provides common functionality for analyzing protein structures including:
     - Structure file parsing and validation
@@ -31,28 +31,28 @@ class StructureCriterion(FilterCriterion):
     - Library availability checking
     """
     
-    def __init__(self, expression: str, **kwargs):
+    def __init__(self, metric_name: str = None, **kwargs):
         """
-        Initialize structure criterion.
+        Initialize structure analysis.
         
         Args:
-            expression: Boolean expression for filtering
-            **kwargs: Structure-specific parameters
+            metric_name: Optional custom name for the metric column
+            **kwargs: Structure-specific analysis parameters
         """
-        super().__init__(expression, **kwargs)
+        super().__init__(metric_name, **kwargs)
         
         # Note: Library availability is checked at runtime by helper scripts
         # During pipeline compilation, we just store parameters
     
     def get_runtime_script_path(self) -> str:
         """
-        Get path to the runtime helper script for structure criteria.
+        Get path to the runtime helper script for structure analysis.
         
         Returns:
             Path relative to HelpScripts folder
         """
-        criterion_name = self.get_criterion_type()
-        return f"pipe_criterion_{criterion_name}.py"
+        analysis_name = self.get_analysis_type()
+        return f"pipe_criterion_{analysis_name}.py"
     
     def parse_selection_string(self, selection: str) -> Dict[str, Any]:
         """

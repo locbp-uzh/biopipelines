@@ -37,8 +37,8 @@ class LigandMPNN(BaseConfig):
                  datasheets: Optional[List[str]] = None,
                  name: str = "",
                  num_sequences: int = 1,
-                 fixed_positions: str = "",
-                 designed_positions: str = "",
+                 fixed: str = "",
+                 redesigned: str = "",
                  design_within: float = 5.0,
                  model: str = "v_32_010",
                  batch_size: int = 1,
@@ -53,8 +53,8 @@ class LigandMPNN(BaseConfig):
             datasheets: Input datasheet files for metadata (from previous tool)
             name: Job name for output files
             num_sequences: Number of sequences to generate (batch_size * num_batches)
-            fixed_positions: Fixed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., "input.datasheets.structures.fixed")
-            designed_positions: Designed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., "input.datasheets.structures.designed")  
+            fixed: Fixed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., "input.datasheets.structures.fixed")
+            redesigned: Designed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., "input.datasheets.structures.designed")  
             design_within: Distance in Å from ligand to redesign (fallback if positions not specified)
             model: LigandMPNN model version to use
             batch_size: Batch size for processing
@@ -97,8 +97,8 @@ class LigandMPNN(BaseConfig):
         self.ligand = ligand
         self.name = name or kwargs.get('job_name', '')
         self.num_sequences = num_sequences
-        self.fixed_positions = fixed_positions
-        self.designed_positions = designed_positions
+        self.fixed_positions = fixed
+        self.designed_positions = redesigned
         self.design_within = design_within
         self.model = model
         self.batch_size = batch_size
