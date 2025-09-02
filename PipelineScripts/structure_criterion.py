@@ -19,22 +19,6 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from filter_criterion import FilterCriterion
 
-# Try to import structural biology libraries
-try:
-    from Bio.PDB import PDBParser
-    from Bio.PDB.Polypeptide import is_aa
-    BIOPYTHON_AVAILABLE = True
-except ImportError:
-    BIOPYTHON_AVAILABLE = False
-    print("Warning: BioPython not available for structure analysis")
-
-try:
-    import MDAnalysis as mda
-    MDANALYSIS_AVAILABLE = True
-except ImportError:
-    MDANALYSIS_AVAILABLE = False
-    print("Warning: MDAnalysis not available for structure analysis")
-
 
 class StructureCriterion(FilterCriterion):
     """

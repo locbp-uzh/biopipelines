@@ -225,7 +225,7 @@ class LigandMPNN(BaseConfig):
         elif isinstance(self.input_structures, str):
             # String input - single PDB file
             if self.input_structures.endswith('.pdb'):
-                pdb_source = os.path.join(pipeline_folders.get("PDBs", os.getcwd()), self.input_structures)
+                pdb_source = os.path.join(pipeline_folders["PDBs"], self.input_structures)
                 if os.path.exists(pdb_source):
                     self.input_sources["structures"] = [pdb_source]
                 else:
@@ -281,10 +281,11 @@ class LigandMPNN(BaseConfig):
     
     def generate_script_setup_positions(self) -> str:
         """Generate the position setup and script modification part."""
-        # Determine input directory for parsing PDBs
+        # Get specific structure files instead of directory
         if "structures" in self.input_sources:
-            first_source = self.input_sources["structures"][0]
-            input_directory = os.path.dirname(first_source)
+            structure_files = self.input_sources["structures"]
+            # Convert to comma-separated string for passing to script
+            structure_files_str = ",".join(structure_files)
         else:
             raise ValueError("No structure sources found")
         
@@ -349,10 +350,11 @@ cd {self.lmpnn_folder}
     
     def generate_script_run_ligandmpnn(self) -> str:
         """Generate the LigandMPNN execution part of the script."""
-        # Determine input directory for parsing PDBs
+        # Get specific structure files instead of directory
         if "structures" in self.input_sources:
-            first_source = self.input_sources["structures"][0]
-            input_directory = os.path.dirname(first_source)
+            structure_files = self.input_sources["structures"]
+            # Convert to comma-separated string for passing to script
+            structure_files_str = ",".join(structure_files)
         else:
             raise ValueError("No structure sources found")
             
@@ -435,7 +437,7 @@ chmod +x {commands_file}
 
 # Use existing HelpScript to create position replacement script
 echo "Creating position replacement script..."
-python {self.runtime_positions_py} {input_directory} {input_source} {input_datasheet} {resolved_fixed} {resolved_designed} {self.ligand} "{self.design_within}" {replacement_script}
+python {self.runtime_positions_py} "{structure_files_str}" {input_source} {input_datasheet} {resolved_fixed} {resolved_designed} {self.ligand} "{self.design_within}" {replacement_script}
 
 # Run the replacement script on the commands file (not this script)
 echo "Running position replacement script on commands file: {commands_file}"

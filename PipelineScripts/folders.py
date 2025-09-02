@@ -30,7 +30,7 @@ class FolderManager:
 
         """Setup base folder structure following notebook conventions."""
         # Get user info from current directory structure
-        notebooks_folder = os.getcwd() if not debug else "ProteinNotebooks"
+        notebooks_folder = os.getcwd() if not debug else "biopipelines"
         user_name = os.path.basename(os.path.dirname(notebooks_folder)) if not debug else "USER"
         self.user_name = user_name
         
@@ -55,11 +55,11 @@ class FolderManager:
             "OmegaFold": os.path.join(self._folders["data"], "OmegaFold"),
             "Boltz": os.path.join(self._folders["data"], "boltz"),
             "BoltzCache": os.path.join(self._folders["models"], "Boltz"),
-            "ProteinOutput": os.path.join(self._folders["user"], "ProteinOutput")})
+            "BioPipelines": os.path.join(self._folders["user"], "BioPipelines")})
         self._folders.update({
-            "pipeline": os.path.join(self._folders["ProteinOutput"],pipeline_name) if not debug else "Debug"})
+            "pipeline": os.path.join(self._folders["BioPipelines"],pipeline_name) if not debug else "Debug"})
 
-        for folder_key in ["user", "ProteinOutput"]:
+        for folder_key in ["user", "BioPipelines", "PDBs"]:
             if not debug: os.makedirs(self._folders[folder_key], exist_ok=True) #create directories
         os.makedirs(self._folders["pipeline"], exist_ok=True)
 

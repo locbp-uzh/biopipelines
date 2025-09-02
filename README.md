@@ -54,25 +54,7 @@ pipeline.save()
 pipeline.slurm()
 ```
 
-## Installation
 
-### Environment Setup
-
-The package requires multiple conda environments for different tools:
-
-```bash
-# Create primary environment
-conda env create -f InstallationFiles/ProteinEnv.yml
-conda activate ProteinEnv
-
-# Install package
-pip install -e .
-```
-
-### Additional Environments
-
-- **Boltz2Env**: Python 3.11 for Boltz2 predictions
-- **ligandmpnn_env**: Python 3.11 for LigandMPNN (incompatible with Boltz2Env)
 
 ## Documentation
 

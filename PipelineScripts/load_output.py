@@ -57,7 +57,32 @@ class LoadOutput(BaseConfig):
         
         # Set up job name based on loaded result
         if not kwargs.get('job_name'):
-            original_job_name = self.loaded_result.get('job_name', 'unknown')
+            # Debug: Print available keys to understand the structure
+            if self.loaded_result:
+                print(f"Debug: Available keys in loaded result: {list(self.loaded_result.keys())}")
+                if 'job_name' in self.loaded_result:
+                    print(f"Debug: job_name found: {self.loaded_result['job_name']}")
+                else:
+                    print("Debug: job_name not found at top level")
+                    # Check if job_name is nested under configuration
+                    if 'configuration' in self.loaded_result and 'pipeline_context' in self.loaded_result['configuration']:
+                        pipeline_context = self.loaded_result['configuration']['pipeline_context']
+                        if 'pipeline_job_name' in pipeline_context:
+                            print(f"Debug: Found pipeline_job_name: {pipeline_context['pipeline_job_name']}")
+            
+            # Try multiple locations for the job name
+            original_job_name = self.loaded_result.get('job_name')
+            
+            if not original_job_name or original_job_name == 'unknown':
+                # Try pipeline_job_name from pipeline context
+                if ('configuration' in self.loaded_result and 
+                    'pipeline_context' in self.loaded_result['configuration']):
+                    pipeline_context = self.loaded_result['configuration']['pipeline_context']
+                    original_job_name = pipeline_context.get('pipeline_job_name', 'unknown')
+            
+            if not original_job_name:
+                original_job_name = 'unknown'
+                
             kwargs['job_name'] = f"load_{original_job_name}"
         
         # Initialize base class
@@ -188,7 +213,18 @@ class LoadOutput(BaseConfig):
             Script content as string
         """
         original_tool = self.loaded_result.get('tool_name', 'Unknown')
-        original_job = self.loaded_result.get('job_name', 'unknown')
+        # Try multiple locations for the job name
+        original_job = self.loaded_result.get('job_name')
+        
+        if not original_job or original_job == 'unknown':
+            # Try pipeline_job_name from pipeline context
+            if ('configuration' in self.loaded_result and 
+                'pipeline_context' in self.loaded_result['configuration']):
+                pipeline_context = self.loaded_result['configuration']['pipeline_context']
+                original_job = pipeline_context.get('pipeline_job_name', 'unknown')
+        
+        if not original_job:
+            original_job = 'unknown'
         
         script_content = f"""#!/bin/bash
 # LoadOutput script - loading results from {original_tool}
@@ -241,7 +277,18 @@ echo "Files loaded from {original_tool} are ready for use"
         
         if self.loaded_result:
             original_tool = self.loaded_result.get('tool_name', 'Unknown')
-            original_job = self.loaded_result.get('job_name', 'unknown')
+            # Try multiple locations for the job name
+        original_job = self.loaded_result.get('job_name')
+        
+        if not original_job or original_job == 'unknown':
+            # Try pipeline_job_name from pipeline context
+            if ('configuration' in self.loaded_result and 
+                'pipeline_context' in self.loaded_result['configuration']):
+                pipeline_context = self.loaded_result['configuration']['pipeline_context']
+                original_job = pipeline_context.get('pipeline_job_name', 'unknown')
+        
+        if not original_job:
+            original_job = 'unknown'
             execution_order = self.loaded_result.get('execution_order', 'unknown')
             
             config_lines.extend([

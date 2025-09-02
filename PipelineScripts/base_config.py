@@ -680,24 +680,6 @@ class StandardizedOutput:
             lines.append("output_folder:")
             lines.append(f"    – '{self.output_folder}'")
         
-        # Filter information
-        if self.is_filtered:
-            lines.append("# Filter Information:")
-            filter_info = self.get_filter_info()
-            
-            original_count = self.get_original_items_count()
-            kept_count = self.get_kept_items_count()
-            pass_rate = self.get_filter_pass_rate()
-            
-            if original_count is not None:
-                lines.append(f"original_items: {original_count}")
-            lines.append(f"kept_items: {kept_count}")
-            
-            if pass_rate is not None:
-                lines.append(f"pass_rate: {pass_rate:.1%}")
-            
-            if 'filter_type' in filter_info:
-                lines.append(f"filter_type: {repr(filter_info['filter_type'])}")
         
         # Additional keys section (aliases and other attributes)
         processed_keys = {'structures', 'structure_ids', 'compounds', 'compound_ids', 

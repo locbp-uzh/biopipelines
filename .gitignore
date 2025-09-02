@@ -94,6 +94,16 @@ Results/
 *Output/
 *.log
 
+# Input data files (user-specific, not part of codebase)
+PDBs/
+*.pdb
+*.cif
+*.ent
+*.mmcif
+
+# Jupyter notebooks (user-specific, not part of codebase)
+*.ipynb
+
 # Temporary files
 temp/
 tmp/

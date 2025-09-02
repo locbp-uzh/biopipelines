@@ -30,7 +30,7 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, pipeline_name: str, job_name: str, job_description: str, debug: bool=False):
+    def __init__(self, pipeline_name: str, job_name: str, job_description: str="Description missing", debug: bool=False):
         if ' ' in job_name: job_name=job_name.replace(' ','_') #It will create issues at runtime otherwise
         
         self.pipeline_name = pipeline_name
@@ -153,6 +153,11 @@ class Pipeline:
         """
         if not self.tools:
             raise ValueError("Cannot save empty pipeline")
+        
+        # Print tool outputs with execution order
+        for i, tool_output in enumerate(self.tool_outputs, 1):
+            print("="*30+f"{i}.{tool_output.config.TOOL_NAME}"+"="*30)
+            print(tool_output.output)
         
         print("="*30+"Pipeline"+"="*30)
         self.validate_pipeline()
@@ -399,7 +404,8 @@ module load mamba
         print("="*30+"Slurm Script"+"="*30)
         # Print line by line to ensure proper formatting
         for line in slurm_content.split('\n'):
-            print(line)
+            if line != "": 
+                print(line)
     
     def resources(self, gpu: str = None, memory: str = None, time: str = None):
         if gpu: self.global_resources["gpu"] = gpu #T4, V100, A100, gpu, high-memory
