@@ -14,15 +14,6 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 
-# Import MDAnalysis for structure analysis
-try:
-    import MDAnalysis as mda
-    from MDAnalysis.lib.distances import distance_array
-    HAS_MDA = True
-except ImportError:
-    HAS_MDA = False
-
-
 def parse_selection(selection: str, structure_path: str) -> str:
     """
     Parse and convert selection string to MDAnalysis format.
@@ -84,8 +75,7 @@ def calculate_distance(structure_path: str, atom_selection: str, residue_selecti
         Calculated distance or None if failed
     """
     if not HAS_MDA:
-        print("Warning: MDAnalysis not available, using placeholder distance")
-        return 5.0  # Placeholder value
+        raise ImportError("MDAnalysis is required for distance calculations. Please install it with: pip install MDAnalysis")
     
     try:
         # Load structure

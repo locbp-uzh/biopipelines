@@ -36,32 +36,6 @@ def validate_smiles(smiles: str) -> bool:
         bracket_count = smiles.count('[') - smiles.count(']')
         return paren_count == 0 and bracket_count == 0
 
-def filter_by_property(value: float, filter_rule: str) -> bool:
-    """
-    Apply property filter rule.
-    
-    Args:
-        value: Property value to test
-        filter_rule: Filter rule (e.g., ">=200", "<=500", "==1")
-        
-    Returns:
-        True if value passes filter, False otherwise
-    """
-    try:
-        if filter_rule.startswith(">="):
-            return value >= float(filter_rule[2:])
-        elif filter_rule.startswith("<="):
-            return value <= float(filter_rule[2:])
-        elif filter_rule.startswith("=="):
-            return value == float(filter_rule[2:])
-        elif filter_rule.startswith(">"):
-            return value > float(filter_rule[1:])
-        elif filter_rule.startswith("<"):
-            return value < float(filter_rule[1:])
-        else:
-            return True
-    except:
-        return True
 
 def process_library(input_files: List[str], 
                    output_file: str,
@@ -70,7 +44,7 @@ def process_library(input_files: List[str],
                    max_compounds: Optional[int] = None,
                    validate_smiles_flag: bool = True,
                    remove_duplicates: bool = True,
-                   filter_rules: Dict[str, str] = None) -> None:
+                   ) -> None:
     """
     Process compound library files.
     
@@ -82,9 +56,7 @@ def process_library(input_files: List[str],
         max_compounds: Maximum number of compounds
         validate_smiles_flag: Whether to validate SMILES
         remove_duplicates: Whether to remove duplicates
-        filter_rules: Property filter rules
     """
-    filter_rules = filter_rules or {}
     
     # Read input files
     all_compounds = []
@@ -149,15 +121,6 @@ def process_library(input_files: List[str],
         if removed_count > 0:
             print(f"Removed {removed_count} duplicate compounds")
     
-    # Apply property filters
-    for prop, rule in filter_rules.items():
-        if prop in combined_df.columns:
-            print(f"Applying filter: {prop} {rule}")
-            initial_count = len(combined_df)
-            mask = combined_df[prop].apply(lambda x: filter_by_property(x, rule))
-            combined_df = combined_df[mask]
-            removed_count = initial_count - len(combined_df)
-            print(f"Removed {removed_count} compounds that didn't meet {prop} criteria")
     
     # Apply compound limit
     if max_compounds and len(combined_df) > max_compounds:
@@ -196,19 +159,8 @@ def main():
     parser.add_argument("--max-compounds", type=int, help="Maximum number of compounds")
     parser.add_argument("--no-validate", action="store_true", help="Skip SMILES validation")
     parser.add_argument("--keep-duplicates", action="store_true", help="Keep duplicate compounds")
-    parser.add_argument("--filter", action="append", help="Property filter (e.g., MW>=200)")
     
     args = parser.parse_args()
-    
-    # Parse filters
-    filter_rules = {}
-    if args.filter:
-        for filter_str in args.filter:
-            for op in [">=", "<=", "==", ">", "<"]:
-                if op in filter_str:
-                    prop, value = filter_str.split(op)
-                    filter_rules[prop] = op + value
-                    break
     
     process_library(
         input_files=args.input_files,
@@ -217,8 +169,7 @@ def main():
         primary_key=args.primary_key,
         max_compounds=args.max_compounds,
         validate_smiles_flag=not args.no_validate,
-        remove_duplicates=not args.keep_duplicates,
-        filter_rules=filter_rules
+        remove_duplicates=not args.keep_duplicates
     )
 
 if __name__ == "__main__":

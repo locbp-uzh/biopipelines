@@ -36,7 +36,7 @@ class AlphaFold(BaseConfig):
     def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
                  sequences: Union[str, List[str], ToolOutput] = "",
                  datasheets: Optional[List[str]] = None,
-                 name: str = "", rank: bool = True, only_first: bool = True,
+                 name: str = "",
                  num_relax: int = 0, num_recycle: int = 3, rand_seed: int = 0,
                  **kwargs):
         """
@@ -90,8 +90,6 @@ class AlphaFold(BaseConfig):
         
         # Store AlphaFold-specific parameters
         self.name = name or kwargs.get('job_name', '')
-        self.rank = rank
-        self.only_first = only_first
         self.num_relax = num_relax
         self.num_recycle = num_recycle
         self.rand_seed = rand_seed
@@ -229,8 +227,6 @@ class AlphaFold(BaseConfig):
             config_lines.append(f"INPUT: {self.input_sequences}")
         
         config_lines.extend([
-            f"RANK: {self.rank}",
-            f"ONLY FIRST: {self.only_first}",
             f"NUM RELAX: {self.num_relax}",
             f"NUM RECYCLE: {self.num_recycle}"
         ])
@@ -481,8 +477,6 @@ cd - > /dev/null
         base_dict.update({
             "af_params": {
                 "name": self.name,
-                "rank": self.rank,
-                "only_first": self.only_first,
                 "num_relax": self.num_relax,
                 "num_recycle": self.num_recycle,
                 "rand_seed": self.rand_seed,

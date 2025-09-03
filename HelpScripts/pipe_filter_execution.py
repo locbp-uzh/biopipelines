@@ -337,7 +337,7 @@ def main():
     parser.add_argument(
         "--filter-class",
         default="Filter",
-        help="Filter class to use (Filter, StructureFilter, etc.)"
+        help="Filter class to use (Filter)"
     )
     
     args = parser.parse_args()

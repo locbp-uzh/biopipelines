@@ -12,16 +12,18 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 try:
-    from .structure_analysis import StructureAnalysis
+    from .analysis import Analysis
+    from .base_config import BaseConfig
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from structure_analysis import StructureAnalysis
+    from analysis import Analysis
+    from base_config import BaseConfig
 
 
-class Confidence(StructureAnalysis):
+class Confidence(Analysis):
     """
     Analyze structures to extract confidence scores (pLDDT).
     
