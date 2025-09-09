@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
 class Boltz2(BaseConfig):
@@ -52,6 +52,7 @@ class Boltz2(BaseConfig):
                  affinity: bool = True,
                  output_format: str = "pdb",
                  msa_server: str = "public",
+                 global_msas_cache: bool = False,
                  **kwargs):
         """
         Initialize Boltz2 configuration.
@@ -71,6 +72,7 @@ class Boltz2(BaseConfig):
             affinity: Whether to calculate binding affinity
             output_format: Output format ("pdb" or "mmcif")
             msa_server: MSA generation ("public" or "local")
+            global_msas_cache: Enable global MSA caching to reuse MSAs across jobs
             **kwargs: Additional parameters
         """
         # Initialize default values
@@ -167,6 +169,7 @@ class Boltz2(BaseConfig):
         self.affinity = affinity  # Renamed from calculate_affinity
         self.output_format = output_format
         self.msa_server = msa_server
+        self.global_msas_cache = global_msas_cache
         
         # Track input source type and files (tool-agnostic)
         self.input_yaml_entities = None
@@ -198,7 +201,6 @@ class Boltz2(BaseConfig):
         
         # Output files
         self.library_scores_csv = None
-        self.pymol_pse_file = None
         self.config_txt_file = None
         self.results_zip = None
         
@@ -236,7 +238,6 @@ class Boltz2(BaseConfig):
         
         # Output files
         self.library_scores_csv = os.path.join(self.library_folder, "library_scores.csv")
-        self.pymol_pse_file = os.path.join(self.library_folder, f"{self.job_name}.pse")
         self.config_txt_file = os.path.join(self.output_folder, f"{self.job_name}_config.txt")
         self.results_zip = os.path.join(self.output_folder, f"{self.job_name}.zip")
         
@@ -247,6 +248,7 @@ class Boltz2(BaseConfig):
             self.boltz_csv_to_configs_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_csv_to_configs.py")
             self.boltz_fasta_to_configs_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_fasta_to_configs.py")
             self.boltz_direct_sequence_config_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_direct_sequence_config.py")
+            self.boltz_protein_ligand_configs_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_protein_ligand_configs.py")
             self.boltz_results_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_results.py")
             self.mmseqs2_client_sh = os.path.join(self.folders.get("MMseqs2", "MMseqs2"), "mmseqs2_client.sh")
             self.fa_to_csv_py = os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py")
@@ -257,6 +259,7 @@ class Boltz2(BaseConfig):
             self.boltz_csv_to_configs_py = None
             self.boltz_fasta_to_configs_py = None
             self.boltz_direct_sequence_config_py = None
+            self.boltz_protein_ligand_configs_py = None
             self.boltz_results_py = None
             self.mmseqs2_client_sh = None
             self.fa_to_csv_py = None
@@ -431,6 +434,212 @@ class Boltz2(BaseConfig):
                     self.ligand_library = project_path
                 else:
                     raise ValueError(f"Ligand library file not found: {self.ligand_library}")
+        
+        # Handle MSA inputs - build YAML config with MSA paths
+        if self.msas:
+            self._integrate_msa_inputs()
+        
+        # Handle global MSA cache lookup
+        if self.global_msas_cache:
+            self._integrate_global_msa_cache()
+    
+    def _integrate_msa_inputs(self):
+        """Build YAML config that includes MSA paths from previous tool."""
+        if not self.msas:
+            return
+            
+        # Get MSA datasheet from previous tool
+        msa_paths = {}
+        if hasattr(self.msas, 'datasheets'):
+            if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
+                # MSAs should be provided in the datasheets.msas
+                # Handle both DatasheetContainer (returns path string) and dict format
+                msa_datasheet = self.msas.datasheets['msas']
+                if isinstance(msa_datasheet, str):
+                    # DatasheetContainer returns path directly
+                    msa_datasheet_path = msa_datasheet
+                elif isinstance(msa_datasheet, dict) and 'path' in msa_datasheet:
+                    # Raw dict format
+                    msa_datasheet_path = msa_datasheet['path']
+                else:
+                    raise ValueError(f"Invalid MSA datasheet format: {type(msa_datasheet)}")
+                
+                # This will be a CSV with columns: id, sequence_id, msa_file
+                # We need to read this at runtime, not pipeline time
+                # For now, just signal that MSAs will be integrated at runtime
+                pass
+            else:
+                raise ValueError("MSA ToolOutput doesn't have datasheets.msas")
+        elif isinstance(self.msas, str):
+            # Direct path to MSA folder
+            pass
+        
+        # Override config generation to include MSA paths in YAML
+        # This ensures MSAs are specified in config rather than calculated
+        self._build_yaml_config_with_msas()
+    
+    def _build_yaml_config_with_msas(self):
+        """Build YAML configuration that specifies MSA paths instead of calculating them."""
+        
+        # For now, we'll modify the script generation to handle MSAs properly
+        # The key insight is that we need to modify the YAML config at runtime
+        # to include msa: path/to/file.csv entries for each protein
+        
+        # Set a flag that we need MSA integration
+        self._needs_msa_integration = True
+        
+        # Clear any existing input yaml entities since we need to rebuild with MSAs
+        if hasattr(self, 'input_yaml_entities'):
+            self._original_yaml_entities = self.input_yaml_entities
+            self.input_yaml_entities = None
+    
+    def _get_protein_sequence(self) -> str:
+        """Get protein sequence for MSA config building."""
+        if hasattr(self, 'input_direct_sequence') and self.input_direct_sequence:
+            return self.input_direct_sequence
+        elif hasattr(self, '_original_yaml_entities') and self._original_yaml_entities:
+            # Extract sequence from original YAML - this is a simplified approach
+            # In practice, we'd need a more robust YAML parser
+            lines = self._original_yaml_entities.split('\n')
+            for line in lines:
+                if 'sequence:' in line:
+                    return line.split('sequence:')[1].strip()
+        return ""
+    
+    def _get_ligand_smiles(self) -> str:
+        """Get ligand SMILES for MSA config building."""
+        # Return the stored ligands value if it's a SMILES string
+        if self.ligands and isinstance(self.ligands, str) and not self.ligands.endswith('.csv'):
+            return self.ligands
+        
+        # If ligands is from YAML entities, parse it
+        if hasattr(self, '_original_yaml_entities') and self._original_yaml_entities:
+            lines = self._original_yaml_entities.split('\n')
+            for line in lines:
+                if 'smiles:' in line:
+                    return line.split('smiles:')[1].strip()
+        return ""
+    
+    def _generate_global_msa_cache_section(self, boltz_cache_folder: str) -> str:
+        """
+        Generate script section for global MSA cache lookup.
+        
+        Args:
+            boltz_cache_folder: Path to Boltz cache folder
+            
+        Returns:
+            Bash script content for global MSA cache handling
+        """
+        if not hasattr(self, '_cache_protein_sequence') or not self._cache_protein_sequence:
+            return ""
+        
+        # Script to check global cache and potentially use cached MSA
+        effective_job_name = self.get_effective_job_name()
+        msa_filename = effective_job_name if effective_job_name is not None else "msa"
+        
+        return f'''
+echo "Checking global MSA cache for protein sequence"
+GLOBAL_MSA_CACHE_SCRIPT="{os.path.join(self.folders['HelpScripts'], 'pipe_manage_global_msa_cache.py')}"
+CACHED_MSA_PATH="{os.path.join(self.msa_cache_folder, f'{msa_filename}.csv')}"
+
+# Try to find MSA in global cache
+python "$GLOBAL_MSA_CACHE_SCRIPT" lookup \\
+    --cache-folder "{boltz_cache_folder}" \\
+    --sequence "{self._cache_protein_sequence}" \\
+    --output "$CACHED_MSA_PATH"
+
+if [ $? -eq 0 ]; then
+    echo "Found MSA in global cache, will use cached version"
+    GLOBAL_MSA_FOUND=true
+else
+    echo "MSA not found in global cache, will calculate new MSA"
+    GLOBAL_MSA_FOUND=false
+fi
+
+'''
+    
+    def _generate_global_msa_cache_storage_section(self, boltz_cache_folder: str) -> str:
+        """
+        Generate script section for storing newly calculated MSAs to global cache.
+        
+        This version extracts sequences from MSA files and caches them if not already present.
+        
+        Args:
+            boltz_cache_folder: Path to Boltz cache folder
+            
+        Returns:
+            Bash script content for MSA storage
+        """
+        # Script to extract sequences from MSA files and update global cache
+        return f'''
+# Update global MSA cache from organized MSAs folder
+if [ "$GLOBAL_MSA_FOUND" = false ]; then
+    echo "Extracting sequences from MSA files and updating global cache"
+    
+    MSA_FOLDER="{os.path.join(self.output_folder, 'MSAs')}"
+    
+    if [ -d "$MSA_FOLDER" ]; then
+        python "{os.path.join(self.folders['HelpScripts'], 'pipe_update_global_msa_cache_from_folder.py')}" \\
+            "$MSA_FOLDER" \\
+            "{boltz_cache_folder}"
+        
+        if [ $? -eq 0 ]; then
+            echo "Successfully updated global MSA cache from MSA folder"
+        else
+            echo "Warning: Failed to update global MSA cache"
+        fi
+    else
+        echo "Warning: MSAs folder not found at $MSA_FOLDER"
+    fi
+else
+    echo "Used cached MSA, skipping global cache update"
+fi
+
+'''
+    
+    def _integrate_global_msa_cache(self):
+        """Set up global MSA cache integration."""
+        # Mark that we need global MSA cache integration
+        self._needs_global_msa_cache = True
+        
+        # Extract protein sequence for cache lookup
+        self._cache_protein_sequence = self._extract_protein_sequence()
+        
+        if not self._cache_protein_sequence:
+            print("Warning: Could not extract protein sequence for global MSA cache")
+            self._needs_global_msa_cache = False
+    
+    def _extract_protein_sequence(self) -> str:
+        """Extract protein sequence for global MSA cache lookup."""
+        # Try different sources for protein sequence
+        
+        # First check self.proteins (most common case for direct sequence input)
+        if self.proteins and isinstance(self.proteins, str):
+            return self.proteins.strip()
+        
+        # Then check other sources
+        if hasattr(self, 'input_direct_sequence') and self.input_direct_sequence:
+            return self.input_direct_sequence.strip()
+        
+        elif hasattr(self, 'input_yaml_entities') and self.input_yaml_entities:
+            # Extract from YAML entities
+            lines = self.input_yaml_entities.split('\n')
+            for line in lines:
+                if 'sequence:' in line:
+                    seq = line.split('sequence:')[1].strip()
+                    if seq and not seq.startswith('id:'):
+                        return seq
+        
+        elif hasattr(self, '_original_yaml_entities') and self._original_yaml_entities:
+            # Extract from original YAML entities  
+            lines = self._original_yaml_entities.split('\n')
+            for line in lines:
+                if 'sequence:' in line:
+                    seq = line.split('sequence:')[1].strip()
+                    if seq and not seq.startswith('id:'):
+                        return seq
+        
+        return ""
     
     def generate_script(self, script_path: str) -> str:
         """
@@ -461,12 +670,30 @@ mkdir -p {self.msa_cache_folder}
 
 """
         
+        # Global MSA cache lookup section
+        if hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
+            script_content += self._generate_global_msa_cache_section(boltz_cache_folder)
+        
         # Handle MSA recycling if provided
         if self.msas:
             script_content += self._generate_msa_recycling_section()
         
+        # Check if we need multiple config files execution (define early for use in conditions)
+        has_multiple_ligands = False
+        if self.ligands:
+            if hasattr(self.ligands, 'compound_ids') and self.ligands.compound_ids:
+                has_multiple_ligands = len(self.ligands.compound_ids) > 1
+            elif hasattr(self.ligands, 'compounds') and self.ligands.compounds:
+                has_multiple_ligands = len(self.ligands.compounds) > 1
+        
         # Generate input configuration based on input type
-        config_file_path = os.path.join(self.output_folder, "input_config.yaml")
+        effective_job_name = self.get_effective_job_name()
+        if effective_job_name is None:
+            config_name = "prediction"
+            #print("Tip: Pass pipeline=pipeline to Boltz2() to use meaningful pipeline job name.")
+        else:
+            config_name = effective_job_name
+        config_file_path = os.path.join(self.output_folder, f"{config_name}.yaml")
         
         if self.config:
             # Direct YAML configuration (Example 1)
@@ -486,16 +713,147 @@ cat > {config_file_path} << 'EOF'
 EOF
 
 """
+        elif hasattr(self, 'input_direct_sequence') and self.input_direct_sequence and (has_multiple_ligands or hasattr(self, '_needs_global_msa_cache') or hasattr(self, '_needs_msa_integration')):
+            # Direct protein sequence with multiple ligands OR MSA integration - use unified approach
+            # Handle ligand parameter extraction
+            ligand_param = "None"
+            if self.ligands:
+                if isinstance(self.ligands, StandardizedOutput):
+                    # Extract compounds CSV path from StandardizedOutput
+                    if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
+                        ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, str):
+                    # Direct file path or datasheet reference
+                    ligand_param = self.resolve_datasheet_reference(self.ligands)
+            affinity_flag = "--affinity" if self.affinity else ""
+            config_files_dir = os.path.join(self.output_folder, "config_files")
+            proteins_csv = os.path.join(self.output_folder, "proteins.csv")
+            
+            # Handle ligand parameter - create CSV if it's a direct string
+            if ligand_param != "None":
+                if ligand_param.endswith('.csv'):
+                    # It's already a CSV file path
+                    final_ligand_param = ligand_param
+                else:
+                    # It's a direct ligand string - create CSV
+                    ligands_csv = os.path.join(self.output_folder, "ligands.csv")
+                    final_ligand_param = ligands_csv
+            else:
+                final_ligand_param = "None"
+            
+            script_content += f"""
+echo "Creating configurations for all protein-ligand combinations"
+mkdir -p {config_files_dir}
+
+# Create protein CSV from direct sequence
+cat > {proteins_csv} << 'EOF'
+id,sequence
+protein,{self.input_direct_sequence}
+EOF
+"""
+            
+            # Add ligand CSV creation if needed
+            if ligand_param != "None" and not ligand_param.endswith('.csv'):
+                script_content += f"""
+# Create ligand CSV from direct ligand string
+cat > {os.path.join(self.output_folder, "ligands.csv")} << 'EOF'
+id,format,smiles,ccd
+ligand,smiles,{ligand_param},
+EOF
+"""
+            
+            # Prepare MSA parameter if available
+            msa_param = ""
+            if hasattr(self, '_needs_msa_integration') and self._needs_msa_integration:
+                if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
+                    msa_ds = self.msas.datasheets['msas']
+                    if isinstance(msa_ds, str):
+                        msa_datasheet = msa_ds
+                    elif isinstance(msa_ds, dict) and 'path' in msa_ds:
+                        msa_datasheet = msa_ds['path']
+                    else:
+                        msa_datasheet = str(msa_ds)
+                    msa_param = f'--msa-datasheet "{msa_datasheet}"'
+            elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
+                msa_param = f'--global-msa-cache --msa-folder "{self.msa_cache_folder}"'
+            
+            # Add job name parameter
+            job_name_param = f'--job-name "{config_name}"' if config_name != "prediction" else ""
+            
+            script_content += f"""
+# Generate config files for all protein-ligand combinations
+python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_param}" {config_files_dir} {affinity_flag} {msa_param} {job_name_param}
+
+"""
+        elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
+            # Generate YAML config with global MSA cache integration (legacy single case)
+            script_content += f"""
+echo "Creating configuration with global MSA cache integration"
+python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_global_cache.py')} \\
+    --protein-sequence "{self._cache_protein_sequence}" \\
+    --ligand-smiles "{self._get_ligand_smiles()}" \\
+    --cached-msa-path "$CACHED_MSA_PATH" \\
+    --output "{config_file_path}" \\
+    --affinity "{self.affinity if self.affinity else 'false'}"
+
+"""
+        elif hasattr(self, '_needs_msa_integration') and self._needs_msa_integration and not self.queries_csv_file:
+            # Generate YAML config with MSAs at runtime (single protein case)
+            msa_datasheet = ""
+            if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
+                # Handle both DatasheetContainer and dict formats
+                msa_ds = self.msas.datasheets['msas']
+                if isinstance(msa_ds, str):
+                    msa_datasheet = msa_ds
+                elif isinstance(msa_ds, dict) and 'path' in msa_ds:
+                    msa_datasheet = msa_ds['path']
+                else:
+                    msa_datasheet = str(msa_ds)  # Fallback
+            
+            script_content += f"""
+echo "Creating configuration with MSA integration"
+python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_msas.py')} \\
+    --protein-sequence "{self._get_protein_sequence()}" \\
+    --ligand-smiles "{self._get_ligand_smiles()}" \\
+    --msa-datasheet "{msa_datasheet}" \\
+    --output "{config_file_path}" \\
+    --affinity "{self.affinity if self.affinity else 'false'}"
+
+"""
         elif self.queries_csv_file:
             # Convert CSV to separate YAML configs for each sequence
             config_files_dir = os.path.join(self.output_folder, "config_files")
-            ligand_param = self.resolve_datasheet_reference(self.ligands) if self.ligands else "None"
+            # Handle ligand parameter extraction
+            ligand_param = "None"
+            if self.ligands:
+                if isinstance(self.ligands, StandardizedOutput):
+                    # Extract compounds CSV path from StandardizedOutput
+                    if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
+                        ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, str):
+                    # Direct file path or datasheet reference
+                    ligand_param = self.resolve_datasheet_reference(self.ligands)
             affinity_flag = "--affinity" if self.affinity else ""
+            
+            # Add MSA parameter if MSAs are provided  
+            msa_datasheet_flag = ""
+            if self.msas:
+                if hasattr(self.msas, 'datasheets'):
+                    # ToolOutput or StandardizedOutput case - access MSA datasheet
+                    if hasattr(self.msas.datasheets, '_datasheets') and 'msas' in self.msas.datasheets._datasheets:
+                        msa_datasheet_path = self.msas.datasheets._datasheets['msas'].path
+                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
+                    elif hasattr(self.msas.datasheets, 'msas'):
+                        msa_datasheet_path = self.msas.datasheets.msas  # Direct path access
+                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
+                elif isinstance(self.msas, str) and self.msas.endswith('.csv'):
+                    # Direct CSV path
+                    msa_datasheet_flag = f'--msa-datasheet "{self.msas}"'
             
             script_content += f"""
 echo "Converting CSV to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_csv_to_configs_py} {self.queries_csv_file} {config_files_dir} "{ligand_param}" {affinity_flag}
+python {self.boltz_csv_to_configs_py} {self.queries_csv_file} {config_files_dir} "{ligand_param}" {affinity_flag} {msa_datasheet_flag}
 
 """
         
@@ -503,33 +861,127 @@ python {self.boltz_csv_to_configs_py} {self.queries_csv_file} {config_files_dir}
             # Convert FASTA files to separate YAML configs
             config_files_dir = os.path.join(self.output_folder, "config_files")
             fasta_files_str = ",".join(self.input_fasta_files)
-            ligand_param = self.resolve_datasheet_reference(self.ligands) if self.ligands else "None"
+            # Handle ligand parameter extraction
+            ligand_param = "None"
+            if self.ligands:
+                if isinstance(self.ligands, StandardizedOutput):
+                    # Extract compounds CSV path from StandardizedOutput
+                    if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
+                        ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, str):
+                    # Direct file path or datasheet reference
+                    ligand_param = self.resolve_datasheet_reference(self.ligands)
             affinity_flag = "--affinity" if self.affinity else ""
+            
+            # Add MSA parameter if MSAs are provided  
+            msa_datasheet_flag = ""
+            if self.msas:
+                if hasattr(self.msas, 'datasheets'):
+                    # ToolOutput or StandardizedOutput case - access MSA datasheet
+                    if hasattr(self.msas.datasheets, '_datasheets') and 'msas' in self.msas.datasheets._datasheets:
+                        msa_datasheet_path = self.msas.datasheets._datasheets['msas'].path
+                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
+                    elif hasattr(self.msas.datasheets, 'msas'):
+                        msa_datasheet_path = self.msas.datasheets.msas  # Direct path access
+                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
+                elif isinstance(self.msas, str) and self.msas.endswith('.csv'):
+                    # Direct CSV path
+                    msa_datasheet_flag = f'--msa-datasheet "{self.msas}"'
             
             script_content += f"""
 echo "Converting FASTA files to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_fasta_to_configs_py} "{fasta_files_str}" {config_files_dir} "{ligand_param}" {affinity_flag}
+python {self.boltz_fasta_to_configs_py} "{fasta_files_str}" {config_files_dir} "{ligand_param}" {affinity_flag} {msa_datasheet_flag}
 
 """
             base_config_file = self.queries_csv
         
         elif hasattr(self, 'input_direct_sequence') and self.input_direct_sequence:
-            # Direct protein sequence - uses proper chain ID 'A'
-            config_file_path = os.path.join(self.output_folder, "input_config.yaml")
-            ligand_param = self.resolve_datasheet_reference(self.ligands) if self.ligands else "None"
+            # Direct protein sequence - check if we need multiple configs for multiple ligands
+            # Handle ligand parameter extraction
+            ligand_param = "None"
+            if self.ligands:
+                if isinstance(self.ligands, StandardizedOutput):
+                    # Extract compounds CSV path from StandardizedOutput
+                    if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
+                        ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, str):
+                    # Direct file path or datasheet reference
+                    ligand_param = self.resolve_datasheet_reference(self.ligands)
             affinity_flag = "--affinity" if self.affinity else ""
             
+            # Check if we have multiple ligands
+            has_multiple_ligands = False
+            if self.ligands and hasattr(self.ligands, 'compound_ids') and self.ligands.compound_ids:
+                has_multiple_ligands = len(self.ligands.compound_ids) > 1
+            
+            # Always generate separate config files for each protein-ligand combination
+            config_files_dir = os.path.join(self.output_folder, "config_files")
+            
+            # Create protein CSV from the direct sequence  
+            proteins_csv = os.path.join(self.output_folder, "proteins.csv")
+            
+            # Handle ligand parameter - create CSV if it's a direct string
+            if ligand_param != "None":
+                if ligand_param.endswith('.csv'):
+                    # It's already a CSV file path
+                    final_ligand_param = ligand_param
+                else:
+                    # It's a direct ligand string - create CSV
+                    ligands_csv = os.path.join(self.output_folder, "ligands.csv")
+                    final_ligand_param = ligands_csv
+            else:
+                final_ligand_param = "None"
+            
             script_content += f"""
-echo "Creating configuration from direct sequence"
-python {self.boltz_direct_sequence_config_py} "{self.input_direct_sequence}" {config_file_path} "{ligand_param}" {affinity_flag}
+echo "Creating configurations for all protein-ligand combinations"
+mkdir -p {config_files_dir}
+
+# Create protein CSV from direct sequence
+cat > {proteins_csv} << 'EOF'
+id,sequence
+protein,{self.input_direct_sequence}
+EOF
+"""
+            
+            # Add ligand CSV creation if needed
+            if ligand_param != "None" and not ligand_param.endswith('.csv'):
+                script_content += f"""
+# Create ligand CSV from direct ligand string
+cat > {os.path.join(self.output_folder, "ligands.csv")} << 'EOF'
+id,format,smiles,ccd
+ligand,smiles,{ligand_param},
+EOF
+"""
+            
+            # Prepare MSA parameter if available
+            msa_param = ""
+            if hasattr(self, '_needs_msa_integration') and self._needs_msa_integration:
+                if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
+                    msa_ds = self.msas.datasheets['msas']
+                    if isinstance(msa_ds, str):
+                        msa_datasheet = msa_ds
+                    elif isinstance(msa_ds, dict) and 'path' in msa_ds:
+                        msa_datasheet = msa_ds['path']
+                    else:
+                        msa_datasheet = str(msa_ds)
+                    msa_param = f'--msa-datasheet "{msa_datasheet}"'
+            elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
+                msa_param = f'--global-msa-cache --msa-folder "{self.msa_cache_folder}"'
+            
+            # Add job name parameter
+            job_name_param = f'--job-name "{config_name}"' if config_name != "prediction" else ""
+            
+            script_content += f"""
+# Generate config files for all protein-ligand combinations
+python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_param}" {config_files_dir} {affinity_flag} {msa_param} {job_name_param}
 
 """
         
         # Run Boltz2 prediction
         boltz_options = f"--cache {boltz_cache_folder} --out_dir {self.output_folder}{msa_option} --output_format {self.output_format}"
         
-        if self.queries_csv_file or self.input_fasta_files:
+        if self.queries_csv_file or self.input_fasta_files or (hasattr(self, 'input_direct_sequence') and self.input_direct_sequence and (has_multiple_ligands or hasattr(self, '_needs_global_msa_cache') or hasattr(self, '_needs_msa_integration'))):
             # Multiple config files - run prediction for each one
             config_files_dir = os.path.join(self.output_folder, "config_files")
             script_content += f"""
@@ -544,7 +996,6 @@ done
 """
         else:
             # Single config file
-            config_file_path = os.path.join(self.output_folder, "input_config.yaml")
             script_content += f"""
 echo "Running Boltz2 prediction"
 boltz predict {config_file_path} {boltz_options}
@@ -553,6 +1004,10 @@ boltz predict {config_file_path} {boltz_options}
         
         # Post-process results using dedicated script
         script_content += self._generate_postprocess_with_script()
+        
+        # Add newly calculated MSAs to global cache after post-processing
+        if hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
+            script_content += self._generate_global_msa_cache_storage_section(boltz_cache_folder)
         
         script_content += self.generate_completion_check_footer()
         
@@ -613,41 +1068,45 @@ boltz predict {config_file_path} {boltz_options}
         
         # Confidence scores datasheet (converted from JSON to CSV for compatibility)
         confidence_csv = os.path.join(self.output_folder, "confidence_scores.csv")
-        datasheets["confidence"] = {
-            "path": confidence_csv,
-            "columns": ["id", "input_file", "confidence_score", "ptm", "iptm", "complex_plddt", "complex_iplddt"],
-            "description": "Boltz2 confidence scores for structure predictions",
-            "count": len(input_file_names)
-        }
+        datasheets["confidence"] = DatasheetInfo(
+            name="confidence",
+            path=confidence_csv,
+            columns=["id", "input_file", "confidence_score", "ptm", "iptm", "complex_plddt", "complex_iplddt"],
+            description="Boltz2 confidence scores for structure predictions",
+            count=len(input_file_names)
+        )
         
         # Affinity scores datasheet (if affinity calculation enabled)
         if self.affinity:
             affinity_csv = os.path.join(self.output_folder, "affinity_scores.csv")
-            datasheets["affinity"] = {
-                "path": affinity_csv,
-                "columns": ["id", "input_file", "affinity_pred_value", "affinity_probability_binary"],
-                "description": "Boltz2 binding affinity predictions",
-                "count": len(input_file_names)
-            }
+            datasheets["affinity"] = DatasheetInfo(
+                name="affinity",
+                path=affinity_csv,
+                columns=["id", "input_file", "affinity_pred_value", "affinity_probability_binary"],
+                description="Boltz2 binding affinity predictions",
+                count=len(input_file_names)
+            )
         
         # MSAs datasheet (for recycling between apo/holo predictions)
         if msa_files:
             msa_csv = os.path.join(self.output_folder, "msas.csv")
-            datasheets["msas"] = {
-                "path": msa_csv,
-                "columns": ["id", "sequence_id", "msa_file"],
-                "description": "MSA files for sequence recycling between predictions",
-                "count": len(msa_files)
-            }
+            datasheets["msas"] = DatasheetInfo(
+                name="msas",
+                path=msa_csv,
+                columns=["id", "sequence_id", "sequence", "msa_file"],
+                description="MSA files for sequence recycling between predictions",
+                count=len(msa_files)
+            )
         
         # Input sequences datasheet (for downstream tools)
         sequences_csv = os.path.join(self.output_folder, "sequences.csv")
-        datasheets["sequences"] = {
-            "path": sequences_csv,
-            "columns": ["id", "sequence"],
-            "description": "Input protein sequences used for prediction",
-            "count": len(sequence_ids)
-        }
+        datasheets["sequences"] = DatasheetInfo(
+            name="sequences",
+            path=sequences_csv,
+            columns=["id", "sequence"],
+            description="Input protein sequences used for prediction",
+            count=len(sequence_ids)
+        )
         
         # Compounds handling
         compounds = []
@@ -669,12 +1128,13 @@ boltz predict {config_file_path} {boltz_options}
                 compound_ids = ["library_compounds"]
             
             # Add compounds datasheet pointing to the ligand library
-            datasheets["compounds"] = {
-                "path": self.ligand_library,
-                "columns": ["id", "smiles", "format", "ccd"],
-                "description": "Compound library used for ligand binding predictions",
-                "count": len(compound_ids) if isinstance(compound_ids, list) else 0
-            }
+            datasheets["compounds"] = DatasheetInfo(
+                name="compounds",
+                path=self.ligand_library,
+                columns=["id", "format", "smiles", "ccd"],
+                description="Compound library used for ligand binding predictions",
+                count=len(compound_ids) if isinstance(compound_ids, list) else 0
+            )
         
         return {
             "structures": structures,
@@ -683,6 +1143,7 @@ boltz predict {config_file_path} {boltz_options}
             "compound_ids": compound_ids,
             "sequences": [sequences_csv],  # Main sequence file
             "sequence_ids": sequence_ids,
+            "msas": msa_files,  # Individual MSA files for recycling
             "datasheets": datasheets,
             "output_folder": self.output_folder,
             # Keep some legacy aliases for compatibility
@@ -752,24 +1213,62 @@ boltz predict {config_file_path} {boltz_options}
         else:
             num_proteins = len(input_names) if input_names else 1
         
-        # Count compounds
-        num_compounds = 1  # Default to 1 if no compounds
-        if hasattr(self, 'ligand_library') and self.ligand_library:
-            # Get compound count from explicit ligands parameter
-            if isinstance(getattr(self, 'ligands', None), StandardizedOutput):
-                num_compounds = len(self.ligands.compound_ids) if self.ligands.compound_ids else 1
-            # Get compound count from legacy input parameter  
-            elif hasattr(self, 'standardized_input') and self.standardized_input:
-                num_compounds = len(getattr(self.standardized_input, 'compound_ids', [1]))
+        # Count compounds - get from actual ligands input
+        num_compounds = 1  # Default
+        if hasattr(self, 'ligands') and self.ligands:
+            if hasattr(self.ligands, 'compound_ids') and self.ligands.compound_ids:
+                num_compounds = len(self.ligands.compound_ids)
+            elif isinstance(self.ligands, str):
+                # Direct SMILES string - single compound
+                num_compounds = 1
             else:
-                # Try to estimate from compound library file (fallback)
+                # Default to 1 for other cases (direct string, etc.)
                 num_compounds = 1
         
-        # Generate sequence IDs: proteins × compounds
-        total_structures = num_proteins * num_compounds
-        base_name = input_names[0] if input_names else "structure"
+        # Get actual ligand IDs if available
+        ligand_ids = []
+        if hasattr(self, 'ligands') and hasattr(self.ligands, 'compound_ids') and self.ligands.compound_ids:
+            ligand_ids = self.ligands.compound_ids
+        elif hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'compound_ids'):
+            ligand_ids = self.standardized_input.compound_ids
+        elif isinstance(self.ligands, str):
+            # Direct SMILES string - use "ligand" as ID
+            ligand_ids = ["ligand"]
         
-        return [f"{base_name}_{i:03d}" for i in range(1, total_structures + 1)]
+        # Get actual protein IDs if available  
+        protein_ids = []
+        if hasattr(self, 'proteins') and hasattr(self.proteins, 'sequence_ids') and self.proteins.sequence_ids:
+            protein_ids = self.proteins.sequence_ids
+        
+        # Generate IDs based on protein/ligand combinations
+        if num_proteins == 1 and num_compounds > 1:
+            # One protein, multiple ligands: use ligand IDs
+            if ligand_ids:
+                return ligand_ids[:num_compounds]
+            else:
+                return [f"ligand_{i:03d}" for i in range(1, num_compounds + 1)]
+        elif num_proteins > 1 and num_compounds == 1:
+            # Multiple proteins, one ligand: use protein IDs
+            if protein_ids:
+                return protein_ids[:num_proteins]
+            else:
+                return [f"protein_{i:03d}" for i in range(1, num_proteins + 1)]
+        elif num_proteins > 1 and num_compounds > 1:
+            # Multiple proteins, multiple ligands: use PROTEIN_LIGAND format
+            sequence_ids = []
+            for protein_idx in range(num_proteins):
+                protein_id = protein_ids[protein_idx] if protein_ids and protein_idx < len(protein_ids) else f"protein_{protein_idx+1:03d}"
+                for ligand_idx in range(num_compounds):
+                    ligand_id = ligand_ids[ligand_idx] if ligand_ids and ligand_idx < len(ligand_ids) else f"ligand_{ligand_idx+1:03d}"
+                    sequence_ids.append(f"{protein_id}_{ligand_id}")
+            return sequence_ids
+        else:
+            # Single protein, single ligand: use effective job name or fallback
+            if hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
+                effective_job_name = self.get_effective_job_name()
+                return [effective_job_name if effective_job_name is not None else "prediction"]
+            base_name = input_names[0] if input_names else "structure"
+            return [base_name]
     
     def _generate_msa_recycling_section(self) -> str:
         """
@@ -778,20 +1277,58 @@ boltz predict {config_file_path} {boltz_options}
         Returns:
             Bash script content for MSA handling
         """
-        if isinstance(self.msas, ToolOutput):
-            # MSAs from previous Boltz2 prediction
-            return f"""
+        if hasattr(self.msas, 'datasheets'):
+            # MSAs from previous Boltz2 prediction - use the MSA files directly
+            if hasattr(self.msas, 'msas') and self.msas.msas:
+                # Use the MSA files array from previous tool
+                return f"""
+echo "Recycling MSAs from previous prediction"
+echo "Copying MSA files to cache folder"
+mkdir -p {self.msa_cache_folder}
+# Copy MSA files from previous Boltz2 output
+cp {' '.join(self.msas.msas)} {self.msa_cache_folder}/
+
+"""
+            else:
+                # Fallback: MSAs will be automatically found in shared cache folder
+                return f"""
 echo "Recycling MSAs from previous prediction"
 # MSAs will be automatically found in shared cache folder
 # Boltz2 will reuse existing MSAs if available
 
 """
         elif isinstance(self.msas, str):
-            # Direct path to MSA folder or file
-            msa_extension = ".a3m" if self.msa_server == "local" else ".csv"
-            return f"""
-echo "Using MSAs from: {self.msas}"
-cp -r {self.msas}/*{msa_extension} {self.msa_cache_folder}/
+            # Handle different string path types
+            if self.msas.endswith('.csv'):
+                # MSA datasheet CSV - read it and copy individual MSA files
+                return f"""
+echo "Using MSAs from datasheet: {self.msas}"
+mkdir -p {self.msa_cache_folder}
+# Read MSA datasheet and copy individual MSA files
+python -c "
+import pandas as pd
+import shutil
+import os
+
+df = pd.read_csv('{self.msas}')
+for _, row in df.iterrows():
+    msa_file = row['msa_file']
+    if os.path.exists(msa_file):
+        dest_file = os.path.join('{self.msa_cache_folder}', os.path.basename(msa_file))
+        shutil.copy2(msa_file, dest_file)
+        print(f'Copied MSA: {{os.path.basename(msa_file)}}')
+    else:
+        print(f'Warning: MSA file not found: {{msa_file}}')
+"
+
+"""
+            else:
+                # Direct path to MSA folder
+                msa_extension = ".a3m" if self.msa_server == "local" else ".csv"
+                return f"""
+echo "Using MSAs from directory: {self.msas}"
+mkdir -p {self.msa_cache_folder}
+cp {self.msas}/*{msa_extension} {self.msa_cache_folder}/
 
 """
         else:
@@ -895,11 +1432,61 @@ python {self.output_folder}/postprocess.py
         # Path to the post-processing script
         postprocess_script_path = os.path.join(self.folders["HelpScripts"], "pipe_boltz_postprocessing.py")
         
-        # Use the original queries CSV file directly (it has the sequence IDs)
-        sequence_ids_file = getattr(self, "queries_csv_file", "")
-        
-        return f"""
+        # Create a sequences file for post-processing if we have direct sequence input
+        if hasattr(self, '_cache_protein_sequence') and self._cache_protein_sequence:
+            sequences_file = os.path.join(self.output_folder, "input_sequences.csv")
+            effective_job_name = self.get_effective_job_name()
+            if effective_job_name is None:
+                sequence_id = "prediction"
+            else:
+                sequence_id = effective_job_name
+                
+            return f"""
 echo "Post-processing Boltz2 results with sequence ID mapping"
+
+# Create sequences file for post-processing
+cat > {sequences_file} << 'EOF'
+id,sequence
+{sequence_id},{self._cache_protein_sequence}
+EOF
+
+# Run the post-processing script
+python {postprocess_script_path} {self.output_folder} {self.output_folder} {sequences_file}
+
+echo "Post-processing completed - structures renamed with sequence IDs"
+
+"""
+        else:
+            # Use the original queries CSV file if available - prioritize input tool's sequences file
+            sequence_ids_file = getattr(self, "queries_csv_file", None)
+            if sequence_ids_file is None:
+                # Fallback to Boltz2's own queries_csv if no input tool file
+                sequence_ids_file = getattr(self, "queries_csv", None)
+            if sequence_ids_file is None:
+                # Try to extract sequence if available
+                protein_sequence = self._extract_protein_sequence()
+                sequences_file = os.path.join(self.output_folder, "input_sequences.csv")
+                effective_job_name = self.get_effective_job_name()
+                if effective_job_name is None:
+                    sequence_id = "prediction"
+                else:
+                    sequence_id = effective_job_name
+                
+                return f"""
+echo "Post-processing Boltz2 results with generated sequence ID"
+
+# Create sequences file for post-processing
+cat > {sequences_file} << 'EOF'
+id,sequence
+{sequence_id},{protein_sequence or ""}
+EOF
+
+# Run the post-processing script with generated CSV file
+python {postprocess_script_path} {self.output_folder} {self.output_folder} {sequences_file}
+"""
+            else:
+                return f"""
+echo "Post-processing Boltz2 results with original sequence ID mapping"
 
 # Run the post-processing script with original CSV file
 python {postprocess_script_path} {self.output_folder} {self.output_folder} {sequence_ids_file}

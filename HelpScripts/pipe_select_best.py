@@ -144,6 +144,95 @@ def find_matching_structure(row: pd.Series, structures_dir: Optional[str]) -> Op
     return None
 
 
+def extract_pool_data_for_id(selected_id: str, pool_folder: str, output_folder: str) -> Dict[str, str]:
+    """
+    Extract all data types (structures, compounds, sequences) from pool output for selected ID.
+    
+    Args:
+        selected_id: The ID of the selected item
+        pool_folder: The pool output folder containing all data types
+        output_folder: Where to copy the selected data
+        
+    Returns:
+        Dictionary mapping data type to extracted file path
+    """
+    extracted_files = {}
+    
+    # Create output directory
+    os.makedirs(output_folder, exist_ok=True)
+    
+    # 1. Extract structures (PDB/CIF files)
+    structure_patterns = [
+        os.path.join(pool_folder, f"{selected_id}.pdb"),
+        os.path.join(pool_folder, f"*{selected_id}*.pdb"),
+        os.path.join(pool_folder, f"{selected_id}.cif"),
+        os.path.join(pool_folder, f"*{selected_id}*.cif"),
+        os.path.join(pool_folder, "**", f"{selected_id}.pdb"),
+        os.path.join(pool_folder, "**", f"*{selected_id}*.pdb"),
+    ]
+    
+    for pattern in structure_patterns:
+        matches = glob.glob(pattern, recursive=True)
+        if matches:
+            source = matches[0]  # Take first match
+            dest = os.path.join(output_folder, "best.pdb")
+            try:
+                shutil.copy2(source, dest)
+                extracted_files['structure'] = dest
+                print(f"Extracted structure: {source} -> {dest}")
+                break
+            except Exception as e:
+                print(f"Warning: Could not copy structure {source}: {e}")
+    
+    # 2. Extract compounds (SDF files)
+    compound_patterns = [
+        os.path.join(pool_folder, f"{selected_id}.sdf"),
+        os.path.join(pool_folder, f"*{selected_id}*.sdf"),
+        os.path.join(pool_folder, "**", f"{selected_id}.sdf"),
+        os.path.join(pool_folder, "**", f"*{selected_id}*.sdf"),
+    ]
+    
+    for pattern in compound_patterns:
+        matches = glob.glob(pattern, recursive=True)
+        if matches:
+            source = matches[0]
+            dest = os.path.join(output_folder, "best_compound.sdf")
+            try:
+                shutil.copy2(source, dest)
+                extracted_files['compound'] = dest
+                print(f"Extracted compound: {source} -> {dest}")
+                break
+            except Exception as e:
+                print(f"Warning: Could not copy compound {source}: {e}")
+    
+    # 3. Extract sequences from datasheets
+    sequence_datasheets = [
+        os.path.join(pool_folder, "*sequences*.csv"),
+        os.path.join(pool_folder, "*sequence*.csv"),
+        os.path.join(pool_folder, "**", "*sequences*.csv"),
+    ]
+    
+    for pattern in sequence_datasheets:
+        matches = glob.glob(pattern, recursive=True)
+        if matches:
+            source_csv = matches[0]
+            try:
+                df = pd.read_csv(source_csv)
+                if 'id' in df.columns:
+                    # Find rows matching the selected ID
+                    matching_rows = df[df['id'] == selected_id]
+                    if not matching_rows.empty:
+                        dest = os.path.join(output_folder, "best_sequences.csv")
+                        matching_rows.to_csv(dest, index=False)
+                        extracted_files['sequences'] = dest
+                        print(f"Extracted sequences: {len(matching_rows)} rows -> {dest}")
+                        break
+            except Exception as e:
+                print(f"Warning: Could not process sequence datasheet {source_csv}: {e}")
+    
+    return extracted_files
+
+
 def select_best_item(config_data: Dict[str, Any]) -> None:
     """
     Select the best item from analysis results.
@@ -166,6 +255,11 @@ def select_best_item(config_data: Dict[str, Any]) -> None:
     composite_function = config_data.get('composite_function', 'weighted_sum')
     output_csv = config_data['output_csv']
     output_structure = config_data['output_structure']
+    
+    # New pool mode parameters
+    use_pool_mode = config_data.get('use_pool_mode', False)
+    data_name = config_data.get('data_name')
+    pool_output_folder = config_data.get('pool_output_folder')
     
     print(f"Selecting best item using metric: {selection_metric}")
     print(f"Selection mode: {selection_mode}")
@@ -275,29 +369,58 @@ def select_best_item(config_data: Dict[str, Any]) -> None:
     for col, val in selected_row.items():
         print(f"  {col}: {val}")
     
-    # Try to copy the corresponding structure file
-    structure_copied = False
-    if structures_dir and output_structure:
-        matching_structure = find_matching_structure(selected_row, structures_dir)
+    # Handle data extraction based on mode
+    extracted_files = {}
+    
+    if use_pool_mode and pool_output_folder:
+        # Pool mode: extract all data types for selected ID
+        selected_id = selected_row.get('id', 'unknown')
+        print(f"\\nPool mode: Extracting all data for ID '{selected_id}'")
         
-        if matching_structure:
+        output_dir = os.path.dirname(output_csv)
+        extracted_files = extract_pool_data_for_id(selected_id, pool_output_folder, output_dir)
+        
+        # Rename structure file to match expected output name
+        if 'structure' in extracted_files and output_structure:
             try:
-                shutil.copy2(matching_structure, output_structure)
-                structure_copied = True
-                print(f"\\nCopied structure: {matching_structure} -> {output_structure}")
+                if os.path.exists(extracted_files['structure']) and extracted_files['structure'] != output_structure:
+                    shutil.move(extracted_files['structure'], output_structure)
+                    extracted_files['structure'] = output_structure
+                    print(f"Renamed structure to: {output_structure}")
             except Exception as e:
-                print(f"Warning: Could not copy structure file: {e}")
-        else:
-            print(f"Warning: Could not find matching structure file for selected item")
+                print(f"Warning: Could not rename structure file: {e}")
+    
+    else:
+        # Legacy mode: try to copy structure file only
+        structure_copied = False
+        if structures_dir and output_structure:
+            matching_structure = find_matching_structure(selected_row, structures_dir)
+            
+            if matching_structure:
+                try:
+                    shutil.copy2(matching_structure, output_structure)
+                    structure_copied = True
+                    extracted_files['structure'] = output_structure
+                    print(f"\\nCopied structure: {matching_structure} -> {output_structure}")
+                except Exception as e:
+                    print(f"Warning: Could not copy structure file: {e}")
+            else:
+                print(f"Warning: Could not find matching structure file for selected item")
     
     # Summary
     print(f"\\nSelection completed successfully!")
     print(f"Selected metric value: {selected_row.get(effective_metric, 'N/A')}")
     print(f"Output datasheet: {output_csv}")
-    if structure_copied:
-        print(f"Output structure: {output_structure}")
+    
+    if use_pool_mode:
+        print(f"Pool mode - Extracted data types: {list(extracted_files.keys())}")
+        for data_type, file_path in extracted_files.items():
+            print(f"  {data_type}: {file_path}")
     else:
-        print("No structure file available")
+        if 'structure' in extracted_files:
+            print(f"Output structure: {extracted_files['structure']}")
+        else:
+            print("No structure file available")
 
 
 def main():

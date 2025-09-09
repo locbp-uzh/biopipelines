@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
 class LigandMPNN(BaseConfig):
@@ -222,6 +222,19 @@ class LigandMPNN(BaseConfig):
             else:
                 raise ValueError("Empty structure list provided")
                 
+        elif isinstance(self.input_structures, StandardizedOutput):
+            # StandardizedOutput object (from tool.output)
+            if self.input_structures.structures:
+                self.input_sources["structures"] = self.input_structures.structures
+                # Also store structure IDs for proper tracking
+                if self.input_structures.structure_ids:
+                    self.input_sources["structure_ids"] = self.input_structures.structure_ids
+                # Store datasheets for position references
+                self.input_datasheets = self.input_structures.datasheets
+                self.standardized_input = self.input_structures
+            else:
+                raise ValueError("No structures found in StandardizedOutput")
+                
         elif isinstance(self.input_structures, str):
             # String input - single PDB file
             if self.input_structures.endswith('.pdb'):
@@ -289,9 +302,13 @@ class LigandMPNN(BaseConfig):
         else:
             raise ValueError("No structure sources found")
         
-        # Determine fixed positions approach - similar to ProteinMPNN
-        if (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
-           (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets')):
+        # Determine fixed positions approach - prioritize explicit positions over datasheets
+        if self.fixed_positions or self.designed_positions:
+            # Use directly specified positions (highest priority)
+            input_source = "selection"  
+            input_datasheet = "-"
+        elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
+             (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets')):
             # Use datasheet from previous tool (e.g., RFdiffusion)
             input_source = "datasheet"
             if hasattr(self.standardized_input, 'datasheets') and self.standardized_input.datasheets:
@@ -318,10 +335,6 @@ class LigandMPNN(BaseConfig):
                     input_datasheet = self.input_datasheets._datasheets[first_name].path
             else:
                 input_datasheet = "-"
-        elif self.fixed_positions or self.designed_positions:
-            # Use directly specified positions
-            input_source = "selection"  
-            input_datasheet = "-"
         else:
             # Use ligand-based design with design_within cutoff
             input_source = "ligand"
@@ -358,9 +371,13 @@ cd {self.lmpnn_folder}
         else:
             raise ValueError("No structure sources found")
             
-        # Determine fixed positions approach - same logic as setup section
-        if (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
-           (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets')):
+        # Determine fixed positions approach - prioritize explicit positions over datasheets
+        if self.fixed_positions or self.designed_positions:
+            # Use directly specified positions (highest priority)
+            input_source = "selection"  
+            input_datasheet = "-"
+        elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
+             (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets')):
             # Use datasheet from previous tool (e.g., RFdiffusion)
             input_source = "datasheet"
             if hasattr(self.standardized_input, 'datasheets') and self.standardized_input.datasheets:
@@ -387,10 +404,6 @@ cd {self.lmpnn_folder}
                     input_datasheet = self.input_datasheets._datasheets[first_name].path
             else:
                 input_datasheet = "-"
-        elif self.fixed_positions or self.designed_positions:
-            # Use directly specified positions
-            input_source = "selection"  
-            input_datasheet = "-"
         else:
             # Use ligand-based design with design_within cutoff
             input_source = "ligand"
@@ -565,12 +578,13 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         
         # Organize datasheets by content type with detailed metadata
         datasheets = {
-            "sequences": {
-                "path": queries_csv,
-                "columns": ["id", "source_id", "sequence", "ligand_binding_score"],
-                "description": "LigandMPNN ligand-aware sequence generation results with binding scores",
-                "count": len(sequence_ids)
-            }
+            "sequences": DatasheetInfo(
+                name="sequences",
+                path=queries_csv,
+                columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec"],
+                description="LigandMPNN ligand-aware sequence generation results with binding scores",
+                count=len(sequence_ids)
+            )
         }
         
         return {

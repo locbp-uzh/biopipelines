@@ -3,7 +3,7 @@
 Runtime helper script for ResidueAtomDistance analysis.
 
 This script analyzes protein structures to calculate distances between specific atoms and residues,
-outputting CSV with distance metrics for all structures.
+outputting CSV with distance metrics for all structures. Parses PDB files directly as text.
 """
 
 import os
@@ -13,112 +13,56 @@ import json
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
+from pdb_parser import parse_pdb_file, parse_selection, calculate_distances, debug_ligand_atoms
 
-def parse_selection(selection: str, structure_path: str) -> str:
-    """
-    Parse and convert selection string to MDAnalysis format.
-    
-    Args:
-        selection: Selection string (e.g., 'LIG.Cl', 'protein.D in TRGDTGH')
-        structure_path: Path to structure file for context
-        
-    Returns:
-        MDAnalysis selection string
-    """
-    # Convert common selection formats to MDAnalysis
-    # This is a simplified parser - could be expanded for more complex selections
-    
-    if 'LIG.' in selection:
-        # Ligand atom selection: 'LIG.Cl' -> 'resname LIG and name Cl'
-        parts = selection.replace('LIG.', '').strip()
-        return f"resname LIG and name {parts}"
-    
-    elif 'protein.' in selection:
-        # Protein selection: 'protein.D in TRGDTGH' -> specific residue and atom
-        parts = selection.replace('protein.', '').strip()
-        if ' in ' in parts:
-            # Residue in sequence: 'D in TRGDTGH' -> 'protein and resname ASP'
-            residue, sequence = parts.split(' in ')
-            # Map single letter to three letter code
-            residue_map = {'D': 'ASP', 'E': 'GLU', 'K': 'LYS', 'R': 'ARG', 'H': 'HIS'}
-            three_letter = residue_map.get(residue, residue)
-            return f"protein and resname {three_letter}"
-        else:
-            # Simple protein atom: 'CA' -> 'protein and name CA'
-            return f"protein and name {parts}"
-    
-    elif 'resname' in selection:
-        # Direct resname selection: 'resname ZN' -> 'resname ZN'
-        return selection
-    
-    elif 'resid' in selection:
-        # Residue ID selection: 'resid 145-150' -> 'resid 145:150'
-        return selection.replace('-', ':')
-    
-    else:
-        # Assume it's already in MDAnalysis format
-        return selection
 
 
 def calculate_distance(structure_path: str, atom_selection: str, residue_selection: str, 
                       distance_metric: str) -> Optional[float]:
     """
-    Calculate distance between atom and residue selections.
+    Calculate distance between atom and residue selections by parsing PDB file.
     
     Args:
         structure_path: Path to structure file
         atom_selection: Atom selection string
-        residue_selection: Residue selection string
-        distance_metric: Type of distance calculation
+        residue_selection: Residue selection string  
+        distance_metric: Type of distance calculation (min, max, mean)
         
     Returns:
         Calculated distance or None if failed
     """
-    if not HAS_MDA:
-        raise ImportError("MDAnalysis is required for distance calculations. Please install it with: pip install MDAnalysis")
-    
     try:
-        # Load structure
-        u = mda.Universe(structure_path)
+        # Parse PDB file
+        atoms = parse_pdb_file(structure_path)
+        
+        if not atoms:
+            print(f"  - Warning: No atoms found in {structure_path}")
+            return None
+        
+        print(f"  - Total atoms in structure: {len(atoms)}")
         
         # Parse selections
-        atom_sel_str = parse_selection(atom_selection, structure_path)
-        residue_sel_str = parse_selection(residue_selection, structure_path)
+        selected_atoms = parse_selection(atom_selection, atoms)
+        selected_residues = parse_selection(residue_selection, atoms)
         
-        print(f"  - Atom selection: {atom_sel_str}")
-        print(f"  - Residue selection: {residue_sel_str}")
+        print(f"  - Atom selection '{atom_selection}': {len(selected_atoms)} atoms")
+        print(f"  - Residue selection '{residue_selection}': {len(selected_residues)} atoms")
         
-        # Select atoms
-        atom_group = u.select_atoms(atom_sel_str)
-        residue_group = u.select_atoms(residue_sel_str)
-        
-        if len(atom_group) == 0:
-            print(f"  - Warning: No atoms found for selection '{atom_sel_str}'")
+        if not selected_atoms:
+            print(f"  - Warning: No atoms found for selection '{atom_selection}'")
             return None
         
-        if len(residue_group) == 0:
-            print(f"  - Warning: No atoms found for selection '{residue_sel_str}'")
+        if not selected_residues:
+            print(f"  - Warning: No atoms found for selection '{residue_selection}'")
             return None
         
-        print(f"  - Found {len(atom_group)} atoms, {len(residue_group)} residue atoms")
+        # Calculate distances using pdb_parser
+        distance = calculate_distances(selected_atoms, selected_residues, distance_metric)
         
-        # Calculate distance matrix
-        distances = distance_array(atom_group.positions, residue_group.positions)
+        if distance is not None:
+            print(f"  - Distance ({distance_metric}): {distance:.3f} Å")
         
-        # Apply distance metric
-        if distance_metric == "min":
-            result = np.min(distances)
-        elif distance_metric == "max":
-            result = np.max(distances)
-        elif distance_metric == "mean":
-            result = np.mean(distances)
-        elif distance_metric == "closest":
-            result = np.min(distances)  # Same as min
-        else:
-            result = np.min(distances)  # Default to min
-        
-        print(f"  - Distance ({distance_metric}): {result:.3f} Å")
-        return float(result)
+        return distance
         
     except Exception as e:
         print(f"  - Error calculating distance: {e}")
@@ -127,7 +71,7 @@ def calculate_distance(structure_path: str, atom_selection: str, residue_selecti
 
 def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
     """
-    Analyze distances between atoms and residues in structures.
+    Analyze distances between atoms and residues in structures by parsing PDB files.
     
     Args:
         config_data: Configuration dictionary with analysis parameters
@@ -175,11 +119,42 @@ def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
     if results:
         df = pd.DataFrame(results)
         
-        # Create output directory
-        os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+        # Create output directory with debug logging
+        output_dir = os.path.dirname(output_csv)
+        print(f"Debug: Creating output directory: {output_dir}")
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            print(f"Debug: Output directory created/verified: {output_dir}")
+            print(f"Debug: Directory exists: {os.path.exists(output_dir)}")
+            print(f"Debug: Directory is writable: {os.access(output_dir, os.W_OK)}")
+        except Exception as e:
+            print(f"Debug: Error creating output directory: {e}")
+            raise
         
-        # Save results
-        df.to_csv(output_csv, index=False)
+        # Save results with debug logging
+        print(f"Debug: About to write CSV to: {output_csv}")
+        try:
+            df.to_csv(output_csv, index=False)
+            print(f"Debug: CSV write call completed")
+            
+            # Verify file exists immediately after write
+            if os.path.exists(output_csv):
+                file_size = os.path.getsize(output_csv)
+                print(f"Debug: File verified exists, size: {file_size} bytes")
+                print(f"Debug: File is readable: {os.access(output_csv, os.R_OK)}")
+            else:
+                print(f"Debug: ERROR - File does not exist immediately after write!")
+                # List directory contents to see what's there
+                try:
+                    dir_contents = os.listdir(output_dir)
+                    print(f"Debug: Directory contents: {dir_contents}")
+                except Exception as e:
+                    print(f"Debug: Error listing directory: {e}")
+        except Exception as e:
+            print(f"Debug: Error writing CSV file: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
         print(f"\nDistance analysis completed successfully!")
         print(f"Analyzed {len(results)} structures")
@@ -195,6 +170,13 @@ def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
             print(f"  Max: {max(distances):.3f} Å")
             print(f"  Mean: {np.mean(distances):.3f} Å")
             print(f"  Std: {np.std(distances):.3f} Å")
+        else:
+            print(f"\nError: No valid distance measurements found!")
+            print(f"All {len(results)} structures returned None for distance calculations.")
+            print(f"Check that:")
+            print(f"  - Atom selection '{atom_selection}' matches atoms in structures")
+            print(f"  - Residue selection '{residue_selection}' matches residues in structures")
+            raise ValueError("No valid distance measurements - all results were None")
     else:
         raise ValueError("No valid results generated - check structure files and selections")
 

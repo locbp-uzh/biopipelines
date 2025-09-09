@@ -39,7 +39,6 @@ class CompoundLibrary(BaseConfig):
                  library: Union[str, Dict[str, Union[str, List[str]]]],
                  primary_key: Optional[str] = None,
                  covalent: bool = False,
-                 include_properties: bool = True,
                  validate_smiles: bool = True,
                  conformer_method: str = "UFF",
                  **kwargs):
@@ -50,7 +49,6 @@ class CompoundLibrary(BaseConfig):
             library: Dictionary with expansion keys or path to existing CSV library
             primary_key: Root key for expansion when library is a dictionary  
             covalent: Generate CCD/PKL files for covalent ligand binding (calls runtime script)
-            include_properties: Calculate molecular properties for compounds
             validate_smiles: Validate SMILES strings during expansion
             conformer_method: Method for conformer generation ("UFF", "OpenFF", "DFT")
             **kwargs: Additional parameters
@@ -59,7 +57,6 @@ class CompoundLibrary(BaseConfig):
         self.library = library
         self.primary_key = primary_key
         self.covalent = covalent
-        self.include_properties = include_properties
         self.validate_smiles = validate_smiles
         self.conformer_method = conformer_method
         
@@ -100,10 +97,10 @@ class CompoundLibrary(BaseConfig):
     def _setup_file_paths(self):
         """Set up all file paths after output_folder is known."""
         # Core output files
-        self.compounds_csv = os.path.join(self.output_folder, f"{self.job_name}_compounds.csv")
-        self.compound_properties_csv = os.path.join(self.output_folder, f"{self.job_name}_compound_properties.csv")
-        self.summary_file = os.path.join(self.output_folder, f"{self.job_name}_summary.txt")
-        self.library_dict_json = os.path.join(self.output_folder, f"{self.job_name}_library_dict.json")
+        self.compounds_csv = os.path.join(self.output_folder, "compounds.csv")
+        self.compound_properties_csv = os.path.join(self.output_folder, "compound_properties.csv")
+        self.summary_file = os.path.join(self.output_folder, "summary.txt")
+        self.library_dict_json = os.path.join(self.output_folder, "library_dict.json")
         
         # Covalent ligand files
         if self.covalent:
@@ -125,9 +122,7 @@ class CompoundLibrary(BaseConfig):
         # Validate library format
         if isinstance(self.library, dict):
             # Dictionary-based library
-            if not self.primary_key:
-                raise ValueError("primary_key is required when library is a dictionary")
-            if self.primary_key not in self.library:
+            if self.primary_key and self.primary_key not in self.library:
                 raise ValueError(f"primary_key '{self.primary_key}' not found in library dictionary")
         elif isinstance(self.library, str):
             # CSV file path
@@ -177,63 +172,72 @@ class CompoundLibrary(BaseConfig):
         primary_lib_key = self.primary_key
         
         # Find the primary key in the base configuration
-        if primary_lib_key not in library:
+        if primary_lib_key and primary_lib_key not in library:
             raise ValueError(f"Primary key '{primary_lib_key}' not found in library")
         
         # Expand each base compound from the primary key
-        final_compounds = []
-        for base in library[primary_lib_key]:
-            final_compounds.append({'smiles': base, 'branching': {}})
-        
-        no_new_branching = False
-        while not no_new_branching:
-            no_new_branching = True
-            updated_compounds = []
+        if primary_lib_key:
+            final_compounds = []
+            for base in library[primary_lib_key]:
+                final_compounds.append({'smiles': base, 'branching': {}})
             
-            # Process every compound in current list
-            for compound in final_compounds:
-                key_found = False
-                # Check for every library key in the current compound's SMILES
-                for key in library_keys:
-                    # Use <key> format instead of *key*
-                    key_pattern = f"<{key}>"
-                    if key_pattern in compound['smiles']:
-                        key_found = True
-                        no_new_branching = False
-                        # For every possible substitution for the key, create a new compound
-                        for option in library[key]:
-                            new_smiles = compound['smiles'].replace(key_pattern, option, 1)
-                            new_branching = compound['branching'].copy()
-                            new_branching[key] = option
-                            updated_compounds.append({'smiles': new_smiles, 'branching': new_branching})
-                        # Process one key per compound per iteration
-                        break
+            no_new_branching = False
+            while not no_new_branching:
+                no_new_branching = True
+                updated_compounds = []
                 
-                if not key_found:
-                    updated_compounds.append(compound)
+                # Process every compound in current list
+                for compound in final_compounds:
+                    key_found = False
+                    # Check for every library key in the current compound's SMILES
+                    for key in library_keys:
+                        # Use <key> format instead of *key*
+                        key_pattern = f"<{key}>"
+                        if key_pattern in compound['smiles']:
+                            key_found = True
+                            no_new_branching = False
+                            # For every possible substitution for the key, create a new compound
+                            for option in library[key]:
+                                new_smiles = compound['smiles'].replace(key_pattern, option, 1)
+                                new_branching = compound['branching'].copy()
+                                new_branching[key] = option
+                                updated_compounds.append({'smiles': new_smiles, 'branching': new_branching})
+                            # Process one key per compound per iteration
+                            break
+                    
+                    if not key_found:
+                        updated_compounds.append(compound)
+                
+                final_compounds = updated_compounds
             
-            final_compounds = updated_compounds
+            # Generate compound IDs based on the pattern from boltz_compound_library.py
+            num_compounds = len(final_compounds)
+            characters = 4
+            if num_compounds > 9: characters = 3
+            if num_compounds > 99: characters = 2
+            if num_compounds > 999: characters = 1
+            if num_compounds > 99999: characters = 0
+            
+            compound_ids = []
+            for u_l_n in range(num_compounds):
+                u_l_n_str = str(u_l_n)
+                n0 = 5 - characters - len(u_l_n_str)
+                zeros_str = '0' * n0
+                compound_name = primary_lib_key if num_compounds == 1 else primary_lib_key[:characters] + zeros_str + u_l_n_str
+                compound_ids.append(compound_name)
         
-        # Store expanded compounds
-        self.expanded_compounds = final_compounds
-        
-        # Generate compound IDs based on the pattern from boltz_compound_library.py
-        num_compounds = len(final_compounds)
-        characters = 4
-        if num_compounds > 9: characters = 3
-        if num_compounds > 99: characters = 2
-        if num_compounds > 999: characters = 1
-        if num_compounds > 99999: characters = 0
-        
-        compound_ids = []
-        for u_l_n in range(num_compounds):
-            u_l_n_str = str(u_l_n)
-            n0 = 5 - characters - len(u_l_n_str)
-            zeros_str = '0' * n0
-            compound_name = primary_lib_key if num_compounds == 1 else primary_lib_key[:characters] + zeros_str + u_l_n_str
-            compound_ids.append(compound_name)
-        
-        self.compound_ids = compound_ids
+            # Store expanded compounds
+            self.expanded_compounds = final_compounds
+            self.compound_ids = compound_ids
+        else:
+            # There is no expansion, every key corresponds to an item
+            compound_ids = []
+            final_compounds = []
+            for name, smiles in library.items():
+                compound_ids.append(name)
+                final_compounds.append({'smiles':smiles,'branching':{}})
+            self.expanded_compounds = final_compounds
+            self.compound_ids = compound_ids
     
     def generate_script(self, script_path: str) -> str:
         """
@@ -275,14 +279,21 @@ cat > "{self.library_dict_json}" << 'EOF'
 {json.dumps(self.library_dict, indent=2)}
 EOF
 
+# Write compound data to temporary JSON file
+cat > "/tmp/compounds_data.json" << 'EOF'
+{json.dumps({'expanded_compounds': self.expanded_compounds, 'compound_ids': self.compound_ids}, indent=2)}
+EOF
+
 # Generate CSV with expanded compounds
 python3 -c "
 import csv
 import json
 
-# Load expanded compounds
-expanded_compounds = {json.dumps(self.expanded_compounds)}
-compound_ids = {json.dumps(self.compound_ids)}
+# Load compound data from JSON file
+with open('/tmp/compounds_data.json', 'r') as f:
+    data = json.load(f)
+expanded_compounds = data['expanded_compounds']
+compound_ids = data['compound_ids']
 
 # Write CSV file with standardized format
 with open('{self.compounds_csv}', 'w', newline='') as csvfile:
@@ -320,12 +331,6 @@ print(f'Generated compound library: {{len(expanded_compounds)}} compounds')
 "
 """
         
-        # Calculate properties if requested
-        if self.include_properties:
-            script_content += f"""
-echo "Calculating molecular properties"
-python3 "{self.smiles_properties_py}" "{self.compounds_csv}" "{self.compound_properties_csv}"
-"""
         
         # Generate covalent ligand files if requested
         if self.covalent:
@@ -363,17 +368,14 @@ compound_count = len(df)
 with open('{self.summary_file}', 'w') as f:
     f.write('Compound Library Summary\\n')
     f.write('========================\\n')
-    f.write(f'Library type: {'Dictionary' if self.library_dict else 'CSV file'}\\n')
-    if self.primary_key:
-        f.write(f'Primary key: {self.primary_key}\\n')
+    f.write(f'Library type: {"Dictionary" if self.library_dict else "CSV file"}\\n')
+    if {f'"{self.primary_key}"' if self.primary_key else 'None'}:
+        f.write(f'Primary key: {self.primary_key if self.primary_key else "None"}\\n')
     f.write(f'Total compounds: {{compound_count}}\\n')
-    f.write(f'Covalent ligands: {self.covalent}\\n')
-    f.write(f'Properties calculated: {self.include_properties}\\n')
+    f.write(f'Covalent ligands: {str(self.covalent)}\\n')
     f.write(f'Conformer method: {self.conformer_method}\\n')
     f.write(f'Output file: {os.path.basename(self.compounds_csv)}\\n')
-    if {self.include_properties}:
-        f.write(f'Properties file: {os.path.basename(self.compound_properties_csv)}\\n')
-    if {self.covalent}:
+    if {"true" if self.covalent else "false"} == "true":
         f.write(f'Covalent library folder: covalent_library/\\n')
 
 print(f'Library processed: {{compound_count}} compounds')
@@ -399,9 +401,14 @@ print(f'Output: {self.compounds_csv}')
         # Build standardized output dictionary
         compounds_list = [self.compounds_csv] if self.compounds_csv else []
         
-        # Generate compound IDs if not already done
+        # Generate predicted compound IDs if not already done
         if not self.compound_ids and self.library_dict:
-            self._expand_library()
+            if self.covalent:
+                # For covalent: use library keys as-is (they're already expanded)
+                self.compound_ids = list(self.library_dict.keys())
+            else:
+                # For simple library: use library keys as-is
+                self.compound_ids = list(self.library_dict.keys())
         
         # Build datasheets with rich metadata
         datasheets = {}
@@ -429,14 +436,6 @@ print(f'Output: {self.compounds_csv}')
             "output_folder": self.output_folder
         }
         
-        if self.include_properties and self.compound_properties_csv:
-            outputs["properties"] = [self.compound_properties_csv]
-            datasheets["properties"] = DatasheetInfo(
-                name="properties",
-                path=self.compound_properties_csv,
-                columns=["id", "MW", "LogP", "HBD", "HBA", "TPSA", "Rotatable_Bonds", "Rings"],
-                description="Calculated molecular properties for compounds"
-            )
         
         if self.covalent and self.covalent_compounds_csv:
             outputs["covalent_compounds"] = [self.covalent_compounds_csv]
@@ -488,7 +487,6 @@ print(f'Output: {self.compounds_csv}')
         
         config_lines.extend([
             f"Covalent ligands: {self.covalent}",
-            f"Include properties: {self.include_properties}",
             f"Validate SMILES: {self.validate_smiles}"
         ])
         
@@ -505,7 +503,6 @@ print(f'Output: {self.compounds_csv}')
                 "library": self.library if isinstance(self.library, str) else "<dictionary>",
                 "primary_key": self.primary_key,
                 "covalent": self.covalent,
-                "include_properties": self.include_properties,
                 "validate_smiles": self.validate_smiles,
                 "conformer_method": self.conformer_method,
                 "num_compounds": len(self.expanded_compounds) if self.expanded_compounds else 0

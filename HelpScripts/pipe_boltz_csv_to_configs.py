@@ -5,13 +5,14 @@ Script to convert CSV sequences to individual Boltz2 YAML configuration files.
 Each sequence gets its own config file with proper chain IDs.
 
 Usage:
-    python pipe_boltz_csv_to_configs.py INPUT_CSV CONFIG_DIR LIGAND_SMILES [AFFINITY]
+    python pipe_boltz_csv_to_configs.py INPUT_CSV CONFIG_DIR LIGAND_SMILES [AFFINITY] [MSA_DATASHEET]
 
 Args:
     INPUT_CSV: Path to CSV file with sequences (must have 'id' and 'sequence' columns)
     CONFIG_DIR: Directory where individual YAML config files will be created
     LIGAND_SMILES: SMILES string for ligand (optional, use "None" for protein-only)
     AFFINITY: Enable affinity calculation (optional, default: True)
+    MSA_DATASHEET: Path to MSA datasheet CSV (optional, use "None" for no MSAs)
 """
 
 import argparse
@@ -25,6 +26,7 @@ def main():
     parser.add_argument('config_dir', help='Output directory for config files')
     parser.add_argument('ligand_smiles', help='Ligand SMILES string or "None"')
     parser.add_argument('--affinity', action='store_true', default=True, help='Enable affinity calculation')
+    parser.add_argument('--msa-datasheet', default=None, help='Path to MSA datasheet CSV file')
     
     args = parser.parse_args()
     
@@ -40,6 +42,22 @@ def main():
         print(f"Error reading CSV file: {e}")
         return 1
     
+    # Load MSA datasheet if provided
+    msa_map = {}
+    if args.msa_datasheet and args.msa_datasheet.upper() != "NONE" and os.path.exists(args.msa_datasheet):
+        try:
+            msa_df = pd.read_csv(args.msa_datasheet)
+            if 'id' in msa_df.columns and 'msa_file' in msa_df.columns:
+                # Create mapping from sequence ID to MSA file
+                msa_map = dict(zip(msa_df['id'], msa_df['msa_file']))
+                print(f"Loaded {len(msa_map)} MSA mappings")
+            else:
+                print("Warning: MSA datasheet missing 'id' or 'msa_file' columns")
+        except Exception as e:
+            print(f"Warning: Error reading MSA datasheet: {e}")
+    elif args.msa_datasheet and args.msa_datasheet.upper() != "NONE":
+        print(f"Warning: MSA datasheet file not found: {args.msa_datasheet}")
+    
     # Process each sequence
     configs_created = 0
     for _, row in df.iterrows():
@@ -54,6 +72,16 @@ def main():
                     'sequence': row['sequence']
                 }
             }
+            
+            # Add MSA file if available for this sequence
+            if row['id'] in msa_map:
+                msa_file = msa_map[row['id']]
+                if os.path.exists(msa_file):
+                    protein_entry['protein']['msa'] = msa_file
+                    print(f"Added MSA for {row['id']}: {msa_file}")
+                else:
+                    print(f"Warning: MSA file not found for {row['id']}: {msa_file}")
+            
             yaml_data['sequences'].append(protein_entry)
             
             # Add ligand if specified (with chain ID B)

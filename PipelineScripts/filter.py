@@ -10,13 +10,13 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
 class FilterResult:
@@ -83,8 +83,9 @@ class Filter(BaseConfig):
     DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
     
     def __init__(self,
-                 input: Union[ToolOutput, StandardizedOutput],
-                 expression: str,
+                 data: Union[ToolOutput, StandardizedOutput] = None,
+                 pool: Union[ToolOutput, StandardizedOutput] = None,
+                 expression: str = None,
                  max_items: Optional[int] = None,
                  sort_by: Optional[str] = None,
                  sort_ascending: bool = True,
@@ -93,36 +94,46 @@ class Filter(BaseConfig):
         Initialize Filter tool.
         
         Args:
-            input: Input from previous tool (typically CombineDatasheets)
-            expression: Pandas query-style expression (e.g., "pLDDT>80 and distance < 5.0")
+            data: Datasheet input to filter (required)
+            pool: Structure pool for copying filtered structures (optional)
+            expression: Pandas query-style expression (e.g., "pLDDT>80 and distance < 5.0") (required)
             max_items: Maximum number of items to keep after filtering
             sort_by: Column name to sort by before applying max_items limit
             sort_ascending: Sort order (True for ascending, False for descending)
             **kwargs: Additional parameters
             
         Examples:
-            # Simple filtering
+            # Data mode - filter datasheet only
             filtered = pipeline.add(Filter(
-                input=combined_analysis,
+                data=combined_analysis.output,
                 expression="pLDDT > 80"
             ))
             
-            # Complex filtering with multiple conditions
+            # Pool mode - filter datasheet and copy structures
             filtered = pipeline.add(Filter(
-                input=combined_analysis,
-                expression="pLDDT > 80 and distance < 5.0 and confidence > 0.9"
-            ))
-            
-            # Filtering with item limit and sorting
-            filtered = pipeline.add(Filter(
-                input=combined_analysis,
-                expression="pLDDT > 70",
-                max_items=10,
-                sort_by="pLDDT",
-                sort_ascending=False  # Best pLDDT first
+                pool=boltz_results.output,
+                data=combined_analysis.output,
+                expression="pLDDT > 80 and distance < 5.0"
             ))
         """
-        self.filter_input = input
+        # Validate required parameters
+        if data is None:
+            raise ValueError("'data' parameter is required")
+        if expression is None:
+            raise ValueError("'expression' parameter is required")
+        
+        # Determine mode and set up inputs
+        if pool is not None:
+            # Pool mode: filter data and copy structures from pool
+            self.use_pool_mode = True
+            self.pool_output = pool
+            self.data_input = data
+        else:
+            # Data mode: filter data only
+            self.use_pool_mode = False
+            self.pool_output = None
+            self.data_input = data
+        
         self.expression = expression
         self.max_items = max_items
         self.sort_by = sort_by
@@ -134,9 +145,13 @@ class Filter(BaseConfig):
         # Initialize base class
         super().__init__(**kwargs)
         
-        # Set up dependency
-        if hasattr(input, 'config'):
-            self.dependencies.append(input.config)
+        # Set up dependencies
+        dependencies = []
+        if hasattr(data, 'config'):
+            dependencies.append(data.config)
+        if pool and hasattr(pool, 'config'):
+            dependencies.append(pool.config)
+        self.dependencies.extend(dependencies)
     
     def _validate_expression(self):
         """Validate that the expression is safe for pandas query."""
@@ -159,55 +174,74 @@ class Filter(BaseConfig):
     
     def validate_params(self):
         """Validate Filter parameters."""
-        if not isinstance(self.filter_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("Input must be a ToolOutput or StandardizedOutput object")
+        if not isinstance(self.data_input, (ToolOutput, StandardizedOutput)):
+            raise ValueError("data must be a ToolOutput or StandardizedOutput object")
+        
+        if self.pool_output and not isinstance(self.pool_output, (ToolOutput, StandardizedOutput)):
+            raise ValueError("pool must be a ToolOutput or StandardizedOutput object")
         
         if self.max_items is not None and self.max_items <= 0:
             raise ValueError("max_items must be positive")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input datasheet from previous tool."""
+        """Configure input datasheet and pool from previous tools."""
         self.folders = pipeline_folders
         
-        # Get the input CSV file from the previous tool
+        # Configure data input (required)
         self.input_csv_path = None
         
-        if hasattr(self.filter_input, 'datasheets'):
-            datasheets = self.filter_input.datasheets
-            if isinstance(datasheets, dict):
-                # Find the main datasheet (look for 'combined' or first available)
-                if 'combined' in datasheets:
-                    ds_info = datasheets['combined']
-                else:
-                    ds_info = next(iter(datasheets.values()))
+        if hasattr(self.data_input, 'datasheets'):
+            datasheets = self.data_input.datasheets
+            
+            # Handle DatasheetContainer objects
+            if hasattr(datasheets, '_datasheets'):
+                # Get the first available DatasheetInfo object
+                ds_info = next(iter(datasheets._datasheets.values()))
+                self.input_csv_path = ds_info.path
+            elif isinstance(datasheets, dict):
+                # Handle raw dict (legacy format)
+                ds_info = next(iter(datasheets.values()))
                 
                 if isinstance(ds_info, dict) and 'path' in ds_info:
                     self.input_csv_path = ds_info['path']
+                elif hasattr(ds_info, 'path'):
+                    # Handle DatasheetInfo objects
+                    self.input_csv_path = ds_info.path
                 else:
                     self.input_csv_path = str(ds_info)
         
-        # Fallback: predict path based on output folder
-        if not self.input_csv_path and hasattr(self.filter_input, 'output_folder'):
-            output_folder = self.filter_input.output_folder
-            # Predict common CSV names that tools would generate (don't check existence)
-            common_names = [
-                'combined_analysis.csv',    # MergeDatasheets output
-                'analysis_results.csv',     # General analysis output
-                'filtered_results.csv',     # Previous filter output
-                'results.csv'               # Generic results
-            ]
-            
-            # Use first predicted path (don't check existence)
-            self.input_csv_path = os.path.join(output_folder, common_names[0])
-        
         if not self.input_csv_path:
-            raise ValueError(f"Could not predict input CSV path from previous tool: {self.filter_input}")
+            raise ValueError(f"Could not predict input CSV path from data tool: {self.data_input}. "
+                           f"The data tool must provide proper datasheet path predictions.")
+        
+        # Configure pool input (optional)
+        if self.use_pool_mode:
+            self.pool_folder = None
+            if hasattr(self.pool_output, 'output_folder'):
+                self.pool_folder = self.pool_output.output_folder
+            
+            if not self.pool_folder:
+                raise ValueError(f"Could not predict pool folder from pool tool: {self.pool_output}. "
+                               f"The pool tool must provide output_folder.")
+    
+    def _get_input_columns(self) -> List[str]:
+        """Get column names from the input datasheet."""
+        # Try to get columns from data tool's datasheet info
+        if hasattr(self.data_input, 'datasheets') and hasattr(self.data_input.datasheets, '_datasheets'):
+            # Look through the datasheets to find one with column info
+            for name, info in self.data_input.datasheets._datasheets.items():
+                if hasattr(info, 'columns') and info.columns:
+                    return info.columns
+        
+        # No fallbacks - columns will be determined at runtime
+        return []
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
         
         config_lines.extend([
+            f"MODE: {'Pool + Data' if self.use_pool_mode else 'Data only'}",
             f"EXPRESSION: {self.expression}",
             f"MAX ITEMS: {self.max_items if self.max_items else 'unlimited'}",
         ])
@@ -236,14 +270,16 @@ class Filter(BaseConfig):
         filtered_csv = os.path.join(output_folder, "filtered_results.csv")
         
         # Create config file for the filter
-        config_file = os.path.join(runtime_folder, "filter_config.json")
+        config_file = os.path.join(output_folder, "filter_config.json")
         config_data = {
             "input_csv": self.input_csv_path,
             "expression": self.expression,
             "max_items": self.max_items,
             "sort_by": self.sort_by,
             "sort_ascending": self.sort_ascending,
-            "output_csv": filtered_csv
+            "output_csv": filtered_csv,
+            "use_pool_mode": self.use_pool_mode,
+            "pool_output_folder": self.pool_folder if self.use_pool_mode else None
         }
         
         import json
@@ -267,7 +303,6 @@ python "{os.path.join(self.folders['HelpScripts'], 'pipe_filter.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
-    echo "Filtering completed successfully"
     echo "Results written to: {filtered_csv}"
 else
     echo "Error: Filtering failed"
@@ -288,25 +323,91 @@ fi
         """
         filtered_csv = os.path.join(self.output_folder, "filtered_results.csv")
         
+        # Get actual column names from input
+        input_columns = self._get_input_columns()
+        
+        missing_ids_csv = os.path.join(self.output_folder, "missing_ids.csv")
+        
         datasheets = {
-            "filtered": {
-                "path": filtered_csv,
-                "columns": "preserved_from_input",
-                "description": f"Filtered results using expression: {self.expression}",
-                "count": "variable"
-            }
+            "filtered": DatasheetInfo(
+                name="filtered",
+                path=filtered_csv,
+                columns=input_columns,
+                description=f"Filtered results using expression: {self.expression}",
+                count="variable"
+            ),
+            "missing_ids": DatasheetInfo(
+                name="missing_ids",
+                path=missing_ids_csv,
+                columns=["id", "structure", "msa"],
+                description="IDs that were filtered out and their expected file paths",
+                count="variable"
+            )
         }
         
-        return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
-            "datasheets": datasheets,
-            "output_folder": self.output_folder
-        }
+        if self.use_pool_mode:
+            # Pool mode: predict copying ALL pool files (runtime will filter)
+            # Copy the entire pool output structure and add filtered datasheet
+            pool_output_dict = self.pool_output._data.copy() if hasattr(self.pool_output, '_data') else {}
+            
+            # Update paths to point to our output folder
+            updated_structures = []
+            updated_compounds = []
+            updated_sequences = []
+            
+            # Copy structure file paths with original names
+            if hasattr(self.pool_output, 'structures') and self.pool_output.structures:
+                for struct_path in self.pool_output.structures:
+                    filename = os.path.basename(struct_path)
+                    updated_structures.append(os.path.join(self.output_folder, filename))
+            
+            # Copy compound file paths with original names  
+            if hasattr(self.pool_output, 'compounds') and self.pool_output.compounds:
+                for comp_path in self.pool_output.compounds:
+                    filename = os.path.basename(comp_path)
+                    updated_compounds.append(os.path.join(self.output_folder, filename))
+            
+            # Copy sequence file paths with original names
+            if hasattr(self.pool_output, 'sequences') and self.pool_output.sequences:
+                for seq_path in self.pool_output.sequences:
+                    filename = os.path.basename(seq_path)
+                    updated_sequences.append(os.path.join(self.output_folder, filename))
+            
+            # Combine pool datasheets with filtered datasheet
+            combined_datasheets = datasheets.copy()
+            if hasattr(self.pool_output, 'datasheets') and hasattr(self.pool_output.datasheets, '_datasheets'):
+                for name, info in self.pool_output.datasheets._datasheets.items():
+                    filename = os.path.basename(info.path)
+                    combined_datasheets[name] = DatasheetInfo(
+                        name=name,
+                        path=os.path.join(self.output_folder, filename),
+                        columns=info.columns,
+                        description=info.description,
+                        count=info.count
+                    )
+            
+            return {
+                "structures": updated_structures,
+                "structure_ids": self.pool_output.structure_ids if hasattr(self.pool_output, 'structure_ids') else [],
+                "compounds": updated_compounds,
+                "compound_ids": self.pool_output.compound_ids if hasattr(self.pool_output, 'compound_ids') else [],
+                "sequences": updated_sequences,
+                "sequence_ids": self.pool_output.sequence_ids if hasattr(self.pool_output, 'sequence_ids') else [],
+                "datasheets": combined_datasheets,
+                "output_folder": self.output_folder
+            }
+        else:
+            # Data mode: only filtered CSV
+            return {
+                "structures": [],
+                "structure_ids": [],
+                "compounds": [],
+                "compound_ids": [],
+                "sequences": [],
+                "sequence_ids": [],
+                "datasheets": datasheets,
+                "output_folder": self.output_folder
+            }
     
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""

@@ -159,29 +159,15 @@ def get_output_files(self) -> Dict[str, List[str]]:
 
 ## Key Design Patterns
 
-### 1. No File Copying Pattern
+### 1. Clean Output Organization
 
-**Bad (Old Approach):**
-```python
-# DON'T DO THIS
-shutil.copy(source_file, tool_folder)  # Wastes space, creates confusion
-```
-
-**Good (New Approach):**
-```python
-# DO THIS
-tool_command --input "{source_file}" --output "{self.output_folder}"
-```
-
-### 2. Clean Output Organization
-
-Each tool outputs **only** to its own numbered folder:
+Each tool outputs **only** to its own numbered folder, example:
 - `1_RFdiffusion/` - only RFdiffusion outputs
 - `2_ProteinMPNN/` - only ProteinMPNN outputs  
 - `3_AlphaFold/` - only AlphaFold outputs
 - `RunTime/` - only execution scripts
 
-### 3. Flexible Input Handling
+### 2. Flexible Input Handling
 
 Tools accept multiple input types transparently:
 ```python
@@ -202,11 +188,6 @@ All tools can provide standard output types:
 - `sequences`: csv file containing columns 'id', 'sequence'
 - `datasheets`: CSV/JSON analysis files, in form of dictionary. the one called 'main' contains a mapping of ids to output
 - `output_folder`: Tool's output directory
-
-Plus tool-specific types:
-- `pymol_session`: PyMOL visualization files
-- `alignments`: MSA files
-- `energies`: Energy calculation files
 
 ## Script Generation Flow
 
@@ -248,46 +229,6 @@ echo ToolB
 echo Job done
 ```
 
-## Integration Points
-
-### With Existing Notebooks
-
-The pipeline system is designed to replicate notebook functionality:
-- Same tool parameters and options
-- Same folder structures for compatibility
-- Same helper script usage
-- Same output formats
-
-### With SLURM System
-
-```python
-pipeline.resources(gpu="A100", memory="32GB", time="48:00:00")
-slurm_script = pipeline.slurm()  # Auto-generates SLURM submission
-```
-
-### With Analysis Scripts
-
-All tools output to consistent locations that existing analysis scripts expect:
-- Results in numbered tool folders
-- Standard file naming conventions
-- CSV summary files for downstream analysis
-
-## Error Handling & Debugging
-
-### Validation Layers
-
-1. **Parameter Validation**: `validate_params()` catches configuration errors
-2. **Input Validation**: `configure_inputs()` catches missing files/dependencies  
-3. **Script Generation**: Bash scripts include error checking (`set -e`)
-4. **Execution Logging**: All output captured to log files
-
-### Debug Information
-
-- Configuration display shows all parameters
-- Folder paths clearly documented
-- Dependency chain visible in pipeline summary
-- Individual tool scripts available for isolated testing
-
 ## Performance Considerations
 
 ### Resource Management
@@ -314,5 +255,3 @@ for protein in protein_list:
 - Intermediate files in tool-specific folders
 - Automatic cleanup opportunities
 - Compressed result archives
-
-This architecture provides a robust, scalable foundation for complex protein modeling workflows while maintaining the simplicity and flexibility that made the original notebooks successful.

@@ -11,7 +11,121 @@ import sys
 import argparse
 import json
 import pandas as pd
+import shutil
+import glob
 from typing import Dict, List, Any, Optional
+
+
+def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str, output_folder: str) -> Dict[str, List[str]]:
+    """
+    Extract structures, compounds, and sequences from pool for filtered IDs.
+    
+    Args:
+        filtered_ids: List of IDs that passed the filter
+        pool_folder: Pool output folder containing all data types
+        output_folder: Where to copy the filtered data
+        
+    Returns:
+        Dictionary mapping data type to list of extracted file paths
+    """
+    extracted_files = {"structures": [], "compounds": [], "sequences": []}
+    
+    # Create output subdirectories
+    structures_dir = os.path.join(output_folder, "structures")
+    compounds_dir = os.path.join(output_folder, "compounds")
+    sequences_dir = os.path.join(output_folder, "sequences")
+    
+    for dir_path in [structures_dir, compounds_dir, sequences_dir]:
+        os.makedirs(dir_path, exist_ok=True)
+    
+    print(f"\nPool mode: Extracting data for {len(filtered_ids)} filtered IDs")
+    
+    for i, selected_id in enumerate(filtered_ids):
+        # Extract structures (PDB/CIF files)
+        structure_patterns = [
+            os.path.join(pool_folder, f"{selected_id}.pdb"),
+            os.path.join(pool_folder, f"*{selected_id}*.pdb"),
+            os.path.join(pool_folder, f"{selected_id}.cif"),
+            os.path.join(pool_folder, f"*{selected_id}*.cif"),
+            os.path.join(pool_folder, "**", f"{selected_id}.pdb"),
+            os.path.join(pool_folder, "**", f"*{selected_id}*.pdb"),
+        ]
+        
+        for pattern in structure_patterns:
+            matches = glob.glob(pattern, recursive=True)
+            if matches:
+                source = matches[0]
+                dest = os.path.join(structures_dir, f"filtered_{i}.pdb")
+                try:
+                    shutil.copy2(source, dest)
+                    extracted_files["structures"].append(dest)
+                    print(f"Extracted structure: {source} -> {dest}")
+                    break
+                except Exception as e:
+                    print(f"Warning: Could not copy structure {source}: {e}")
+        
+        # Extract compounds (SDF files)
+        compound_patterns = [
+            os.path.join(pool_folder, f"{selected_id}.sdf"),
+            os.path.join(pool_folder, f"*{selected_id}*.sdf"),
+            os.path.join(pool_folder, "**", f"{selected_id}.sdf"),
+            os.path.join(pool_folder, "**", f"*{selected_id}*.sdf"),
+        ]
+        
+        for pattern in compound_patterns:
+            matches = glob.glob(pattern, recursive=True)
+            if matches:
+                source = matches[0]
+                dest = os.path.join(compounds_dir, f"filtered_{i}.sdf")
+                try:
+                    shutil.copy2(source, dest)
+                    extracted_files["compounds"].append(dest)
+                    print(f"Extracted compound: {source} -> {dest}")
+                    break
+                except Exception as e:
+                    print(f"Warning: Could not copy compound {source}: {e}")
+    
+    # Extract all datasheets from pool folder (not just sequences)
+    datasheet_patterns = [
+        os.path.join(pool_folder, "*.csv"),
+        os.path.join(pool_folder, "**", "*.csv")
+    ]
+    
+    processed_files = set()  # Track processed files to avoid duplicates
+    
+    for pattern in datasheet_patterns:
+        matches = glob.glob(pattern, recursive=True)
+        for source_csv in matches:
+            if source_csv in processed_files:
+                continue
+            processed_files.add(source_csv)
+            
+            try:
+                df = pd.read_csv(source_csv)
+                filename = os.path.basename(source_csv)
+                
+                # Only process files that have an 'id' column (actual datasheets)
+                # Skip individual MSA files and other non-datasheet CSVs
+                if 'id' not in df.columns:
+                    continue
+                
+                if filtered_ids:
+                    # Filter rows matching the filtered IDs
+                    matching_rows = df[df['id'].isin(filtered_ids)]
+                    dest = os.path.join(output_folder, filename)
+                    matching_rows.to_csv(dest, index=False)
+                    print(f"Filtered datasheet: {filename} ({len(matching_rows)} rows)")
+                else:
+                    # Create empty datasheet with same columns
+                    empty_df = pd.DataFrame(columns=df.columns)
+                    dest = os.path.join(output_folder, filename)
+                    empty_df.to_csv(dest, index=False)
+                    print(f"Created empty datasheet: {filename} with {len(df.columns)} columns")
+                    
+            except Exception as e:
+                print(f"Warning: Could not process datasheet {source_csv}: {e}")
+    
+    return extracted_files
 
 
 def apply_filter(config_data: Dict[str, Any]) -> None:
@@ -28,8 +142,14 @@ def apply_filter(config_data: Dict[str, Any]) -> None:
     sort_ascending = config_data.get('sort_ascending', True)
     output_csv = config_data['output_csv']
     
+    # Pool mode parameters
+    use_pool_mode = config_data.get('use_pool_mode', False)
+    pool_output_folder = config_data.get('pool_output_folder')
+    
     print(f"Applying filter: {expression}")
     print(f"Input: {input_csv}")
+    if use_pool_mode:
+        print(f"Pool mode: {pool_output_folder}")
     
     # Check input file exists
     if not os.path.exists(input_csv):
@@ -69,6 +189,13 @@ def apply_filter(config_data: Dict[str, Any]) -> None:
     if filtered_df.empty:
         print("Warning: No rows passed the filter")
         filtered_df.to_csv(output_csv, index=False)
+        if use_pool_mode and pool_output_folder:
+            print("No structures to copy (empty filter result)")
+            # Still create empty datasheet files with correct headers
+            output_dir = os.path.dirname(output_csv)
+            extract_pool_data_for_filtered_ids([], pool_output_folder, output_dir)
+            # Create missing_ids.csv for empty filter result
+            create_missing_ids_csv(df, filtered_df, pool_output_folder, output_dir)
         return
     
     # Apply sorting if specified
@@ -111,6 +238,76 @@ def apply_filter(config_data: Dict[str, Any]) -> None:
         
         if len(filtered_df) > 3:
             print(f"... and {len(filtered_df) - 3} more rows")
+    
+    # Handle pool mode: copy structures, compounds, sequences for filtered IDs
+    if use_pool_mode and pool_output_folder and not filtered_df.empty:
+        # Get filtered IDs for structure copying
+        filtered_ids = []
+        if 'id' in filtered_df.columns:
+            filtered_ids = filtered_df['id'].astype(str).tolist()
+        else:
+            # Try other ID columns
+            id_columns = [col for col in filtered_df.columns if 'id' in col.lower()]
+            if id_columns:
+                filtered_ids = filtered_df[id_columns[0]].astype(str).tolist()
+        
+        if filtered_ids:
+            output_dir = os.path.dirname(output_csv)
+            extracted_files = extract_pool_data_for_filtered_ids(filtered_ids, pool_output_folder, output_dir)
+            
+            print(f"\\nPool mode summary:")
+            print(f"Filtered IDs: {len(filtered_ids)}")
+            for data_type, files in extracted_files.items():
+                print(f"Extracted {data_type}: {len(files)} files")
+        else:
+            print("Warning: Could not find ID column for pool mode structure copying")
+    
+    # Always create missing_ids.csv for pool mode (shows which IDs were filtered out)
+    if use_pool_mode and pool_output_folder:
+        output_dir = os.path.dirname(output_csv)
+        create_missing_ids_csv(df, filtered_df, pool_output_folder, output_dir)
+
+
+def create_missing_ids_csv(original_df: pd.DataFrame, filtered_df: pd.DataFrame, 
+                          pool_output_folder: str, output_folder: str) -> None:
+    """
+    Create missing_ids.csv with IDs that were filtered out and their expected file paths.
+    
+    Args:
+        original_df: Original dataframe before filtering
+        filtered_df: Dataframe after filtering
+        pool_output_folder: Pool output folder containing original files
+        output_folder: Filter output folder
+    """
+    if 'id' not in original_df.columns:
+        print("Warning: No 'id' column found, cannot create missing_ids.csv")
+        return
+    
+    # Get IDs that were filtered out
+    all_ids = set(original_df['id'].astype(str))
+    passed_ids = set(filtered_df['id'].astype(str)) if not filtered_df.empty else set()
+    missing_ids = list(all_ids - passed_ids)
+    
+    if not missing_ids:
+        # Create empty file with headers
+        missing_df = pd.DataFrame(columns=['id', 'structure', 'msa'])
+    else:
+        # Create rows for missing IDs with their expected file paths
+        missing_data = []
+        for missing_id in missing_ids:
+            structure_path = os.path.join(output_folder, f"{missing_id}.pdb")
+            msa_path = os.path.join(output_folder, f"{missing_id}.csv")
+            missing_data.append({
+                'id': missing_id,
+                'structure': structure_path,
+                'msa': msa_path
+            })
+        missing_df = pd.DataFrame(missing_data)
+    
+    # Save missing_ids.csv
+    missing_ids_csv = os.path.join(output_folder, "missing_ids.csv")
+    missing_df.to_csv(missing_ids_csv, index=False)
+    print(f"Created missing_ids.csv with {len(missing_ids)} filtered out IDs")
 
 
 def validate_expression_syntax(expression: str, columns: List[str]) -> None:
@@ -168,7 +365,7 @@ def main():
     
     try:
         apply_filter(config_data)
-        print("\\nFiltering completed successfully!")
+        print("\nFiltering completed successfully!")
         
     except Exception as e:
         print(f"Error applying filter: {e}")

@@ -400,7 +400,7 @@ module load mamba
         self.slurm_script = slurm_path
         
         print("="*30+"Job"+"="*30)
-        print(f"{self.pipeline_name}: {self.job_name}")
+        print(f"{self.pipeline_name}: {self.job_name} ({self.folder_manager.job_id})")
         print("="*30+"Slurm Script"+"="*30)
         # Print line by line to ensure proper formatting
         for line in slurm_content.split('\n'):
@@ -452,7 +452,7 @@ module load mamba
         from datetime import datetime
         
         # Create tool_outputs directory
-        tool_outputs_dir = os.path.join(self.folders["output"], "tool_outputs")
+        tool_outputs_dir = os.path.join(self.folders["output"], "ToolOutputs")
         os.makedirs(tool_outputs_dir, exist_ok=True)
         
         exported_count = 0
@@ -506,12 +506,12 @@ module load mamba
                 }
                 
                 # Generate filename
-                output_filename = f"{self.job_name}_{i}_{tool.TOOL_NAME}_output.json"
+                output_filename = f"{i}_{tool.TOOL_NAME}_output.json" #{self.job_name}_
                 output_path = os.path.join(tool_outputs_dir, output_filename)
                 
-                # Save to JSON file
+                # Save to JSON file with custom serialization
                 with open(output_path, 'w') as f:
-                    json.dump(tool_metadata, f, indent=2)
+                    json.dump(tool_metadata, f, indent=2, default=self._json_serializer)
                 
                 exported_count += 1
                 
@@ -523,3 +523,12 @@ module load mamba
             print(f"Exported {exported_count} tool output metadata files to: {tool_outputs_dir}")
         else:
             print("Warning: No tool output metadata could be exported")
+    
+    def _json_serializer(self, obj):
+        """Custom JSON serializer for ToolOutput and other non-serializable objects."""
+        if hasattr(obj, 'to_dict'):
+            return obj.to_dict()
+        elif hasattr(obj, '__dict__'):
+            return obj.__dict__
+        else:
+            return str(obj)

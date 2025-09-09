@@ -25,6 +25,36 @@ def check_file_exists(file_path: str) -> bool:
     """
     return os.path.exists(file_path) and (os.path.isfile(file_path) or os.path.isdir(file_path))
 
+def load_expected_missing_files(output_folder: str) -> List[str]:
+    """
+    Load expected missing files from missing_ids.csv if it exists.
+    
+    Args:
+        output_folder: Tool output folder
+        
+    Returns:
+        List of file paths that are expected to be missing
+    """
+    missing_ids_csv = os.path.join(output_folder, "missing_ids.csv")
+    expected_missing = []
+    
+    if os.path.exists(missing_ids_csv):
+        try:
+            import pandas as pd
+            df = pd.read_csv(missing_ids_csv)
+            
+            # Extract all file paths from non-id columns
+            for col in df.columns:
+                if col != 'id':
+                    file_paths = df[col].dropna().tolist()
+                    expected_missing.extend(file_paths)
+                    
+            print(f"Found {len(expected_missing)} files expected to be missing from missing_ids.csv")
+        except Exception as e:
+            print(f"Warning: Could not read missing_ids.csv: {e}")
+    
+    return expected_missing
+
 def check_files_exist(file_list: List[str]) -> tuple[bool, List[str]]:
     """
     Check if all files in a list exist.
@@ -52,40 +82,15 @@ def is_filter_output(expected_outputs: Dict[str, Any]) -> bool:
     Returns:
         True if this is filter output
     """
-    # Check for filter metadata
-    if 'filter_metadata' in expected_outputs:
-        return expected_outputs['filter_metadata'].get('is_filtered', False)
-    
-    # Check if datasheets contain filter manifests
+    # Check if datasheets contain missing_ids (indicates this is a filter tool)
     if 'datasheets' in expected_outputs and isinstance(expected_outputs['datasheets'], dict):
         for name, info in expected_outputs['datasheets'].items():
-            if name in ['manifest', 'filter_manifest'] or 'manifest' in name.lower():
+            if name == 'missing_ids':
                 return True
     
     return False
 
 
-def check_filter_manifest(output_folder: str, job_name: str) -> Optional[Dict[str, Any]]:
-    """
-    Check for and read filter manifest file.
-    
-    Args:
-        output_folder: Tool's output folder
-        job_name: Job name for file naming
-        
-    Returns:
-        Filter manifest data or None if not found
-    """
-    manifest_file = os.path.join(output_folder, f"{job_name}_filter_manifest.json")
-    
-    if os.path.exists(manifest_file):
-        try:
-            with open(manifest_file, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"Warning: Could not read filter manifest {manifest_file}: {e}")
-    
-    return None
 
 
 def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any], 
@@ -117,13 +122,6 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
     if is_filter:
         print("Filter-aware validation: This appears to be filter output")
         
-        # Read filter manifest if available
-        manifest_data = check_filter_manifest(output_folder, job_name)
-        if manifest_data:
-            filter_info['manifest'] = manifest_data
-            print(f"Filter manifest found: {manifest_data.get('kept_count', 'unknown')} items kept, "
-                  f"{manifest_data.get('filtered_count', 'unknown')} items filtered")
-        
         # For filters, categorize checks differently
         critical_files = []
         content_files = []
@@ -154,10 +152,21 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
         
         # Check content files (can be partially missing)
         if content_files:
+            # Load expected missing files from missing_ids.csv
+            expected_missing = load_expected_missing_files(output_folder)
+            
             exists, missing = check_files_exist(content_files)
             if not exists:
-                warnings_by_category['content'] = missing
-                print(f"Warning: Some content files missing (this may be expected for filters): {len(missing)} files")
+                # Filter out expected missing files
+                unexpected_missing = [f for f in missing if f not in expected_missing]
+                expected_missing_found = [f for f in missing if f in expected_missing]
+                
+                if unexpected_missing:
+                    warnings_by_category['content'] = unexpected_missing
+                    print(f"Warning: {len(unexpected_missing)} content files unexpectedly missing")
+                
+                if expected_missing_found:
+                    print(f"Info: {len(expected_missing_found)} content files missing as expected (filtered out)")
         
         # Success if all critical files exist
         success = 'critical' not in missing_by_category

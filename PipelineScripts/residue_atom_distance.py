@@ -12,13 +12,13 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 import os
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
 class ResidueAtomDistance(BaseConfig):
@@ -54,27 +54,40 @@ class ResidueAtomDistance(BaseConfig):
         
         Args:
             input: Input structures from previous tool (ToolOutput or StandardizedOutput)
-            atom: Atom selection string (e.g., 'LIG.Cl', 'protein.CA', 'resname ZN')  
-            residue: Residue selection string (e.g., 'protein.D in TRGDTGH', 'resid 145-150')
+            atom: Atom selection string (e.g., 'LIG.Cl', 'HAL.Cl', 'name CA')  
+            residue: Residue selection string (e.g., 'D in IGDWG', '145', '145-150')
             method: How to calculate distance ("min", "max", "mean", "closest")
             metric_name: Custom name for the distance column (default: "distance")
             **kwargs: Additional parameters
+            
+        Selection Syntax:
+            Atom selections:
+            - 'LIG.Cl' → ligand chlorine atoms
+            - 'HAL.Br' → halogen bromine atoms  
+            - 'name CA' → all alpha carbon atoms
+            
+            Residue selections:
+            - 'D in IGDWG' → aspartic acid in sequence context
+            - '145' → residue number 145
+            - '145-150' → residue range 145 to 150
+            - '145+147+150' → specific residues 145, 147, and 150
             
         Examples:
             # Analyze ligand chlorine distance to specific aspartic acids
             distance_analysis = pipeline.add(ResidueAtomDistance(
                 input=boltz_results.output,
                 atom='LIG.Cl',
-                residue='protein.D in TRGDTGH',
+                residue='D in IGDWG',
                 metric_name='chlorine_distance'
             ))
             
-            # Analyze protein CA atoms distance to ligand
+            # Analyze specific residue distance to ligand  
             ca_analysis = pipeline.add(ResidueAtomDistance(
                 input=structure_tool.output,
-                atom='protein.CA',
-                residue='ligand.all',
-                distance_metric='mean'
+                atom='LIG.Br',
+                residue='145-150',
+                method='mean',
+                metric_name='binding_site_distance'
             ))
         """
         self.distance_input = input
@@ -99,6 +112,10 @@ class ResidueAtomDistance(BaseConfig):
         if self.custom_metric_name:
             return self.custom_metric_name
         return "distance"
+    
+    def get_analysis_csv_path(self) -> str:
+        """Get the path for the analysis CSV file - defined once, used everywhere."""
+        return os.path.join(self.output_folder, "analysis.csv")
     
     def validate_params(self):
         """Validate ResidueAtomDistance parameters."""
@@ -163,11 +180,11 @@ class ResidueAtomDistance(BaseConfig):
         output_folder = self.output_folder
         os.makedirs(output_folder, exist_ok=True)
         
-        # Output CSV path
-        analysis_csv = os.path.join(output_folder, "distance_analysis.csv")
+        # Output CSV path - defined once in get_analysis_csv_path()
+        analysis_csv = self.get_analysis_csv_path()
         
         # Create config file for distance calculation
-        config_file = os.path.join(runtime_folder, "distance_config.json")
+        config_file = os.path.join(output_folder, "distance_config.json")
         config_data = {
             "input_structures": self.input_structures,
             "atom_selection": self.atom_selection,
@@ -218,15 +235,16 @@ fi
         Returns:
             Dictionary with output file paths
         """
-        analysis_csv = os.path.join(self.output_folder, "distance_analysis.csv")
+        analysis_csv = self.get_analysis_csv_path()
         
         datasheets = {
-            "analysis": {
-                "path": analysis_csv,
-                "columns": ["id", "source_structure", self.get_metric_name()],
-                "description": f"Distance analysis: {self.atom_selection} to {self.residue_selection}",
-                "count": len(self.input_structures) if hasattr(self, 'input_structures') else "variable"
-            }
+            "analysis": DatasheetInfo(
+                name="analysis", 
+                path=analysis_csv,
+                columns=["id", "source_structure", self.get_metric_name()],
+                description=f"Distance analysis: {self.atom_selection} to {self.residue_selection}",
+                count=len(self.input_structures) if hasattr(self, 'input_structures') else 0
+            )
         }
         
         return {

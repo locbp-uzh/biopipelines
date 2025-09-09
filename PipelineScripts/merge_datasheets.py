@@ -10,13 +10,13 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
 class MergeDatasheets(BaseConfig):
@@ -187,7 +187,7 @@ class MergeDatasheets(BaseConfig):
         merged_csv = os.path.join(output_folder, "merged.csv")
         
         # Create config file for the combination
-        config_file = os.path.join(runtime_folder, "merge_config.json")
+        config_file = os.path.join(output_folder, "merge_config.json")
         config_data = {
             "input_csvs": self.input_csv_paths,
             "merge_key": self.merge_key,
@@ -214,8 +214,7 @@ echo "Output: {merged_csv}"
 
 # Run Python combination script
 python "{os.path.join(self.folders['HelpScripts'], 'pipe_merge_datasheets.py')}" \\
-  --config "{config_file}" \\
-  --output "{merged_csv}"
+  --config "{config_file}"
 
 if [ $? -eq 0 ]; then
     echo "Successfully merged {len(self.input_csv_paths)} datasheets"
@@ -237,7 +236,7 @@ fi
         Returns:
             Dictionary with output file paths
         """
-        merged_csv = os.path.join(self.output_folder, "merged_analysis.csv")
+        merged_csv = os.path.join(self.output_folder, "merged.csv")
         
         # Determine expected columns by combining input datasheets info
         expected_columns = [self.merge_key, "source_structure"]  # Common columns
@@ -264,12 +263,13 @@ fi
             expected_columns.extend(self.calculate.keys())
         
         datasheets = {
-            "merged": {
-                "path": merged_csv,
-                "columns": expected_columns,
-                "description": "merged analysis results from multiple tools",
-                "count": "variable"  # Depends on input data
-            }
+            "merged": DatasheetInfo(
+                name="merged",
+                path=merged_csv,
+                columns=expected_columns,
+                description="merged analysis results from multiple tools",
+                count="variable"  # Depends on input data
+            )
         }
         
         return {

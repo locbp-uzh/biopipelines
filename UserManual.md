@@ -1,19 +1,60 @@
 # BioPipelines User Manual
 
 ## Table of Contents
-1. [Architecture Overview](#architecture-overview)
-2. [Core Concepts](#core-concepts)
-3. [Tool Abstract](#tool-abstract)
-4. [Structure Generation Tools](#structure-generation-tools)
-5. [Sequence Design Tools](#sequence-design-tools)
-6. [Fusion Tools](#fusion-tools)
-7. [Compound Generation Tools](#compound-generation-tools)
-8. [Analysis Tools](#analysis-tools)
-9. [Filtering Tools](#filtering-tools)
-10. [Optimization Tools](#optimization-tools)
-11. [Utility Tools](#utility-tools)
-12. [Pipeline Examples](#pipeline-examples)
-13. [Troubleshooting](#troubleshooting)
+1. [Getting Started](#getting-started)
+2. [Architecture Overview](#architecture-overview)
+3. [Core Concepts](#core-concepts)
+4. [Tool Abstract](#tool-abstract)
+5. [Structure Generation Tools](#structure-generation-tools)
+6. [Sequence Design Tools](#sequence-design-tools)
+7. [Fusion Tools](#fusion-tools)
+8. [Compound Generation Tools](#compound-generation-tools)
+9. [Analysis Tools](#analysis-tools)
+10. [Filtering Tools](#filtering-tools)
+11. [Optimization Tools](#optimization-tools)
+12. [Utility Tools](#utility-tools)
+13. [Pipeline Examples](#pipeline-examples)
+14. [Troubleshooting](#troubleshooting)
+
+---
+
+## Getting Started
+
+### Recommended Setup
+
+**⚠️ Important**: It is highly recommended to create and run your Jupyter notebooks directly in the BioPipelines folder for optimal functionality.
+
+#### Setup Steps:
+1. **Navigate to the BioPipelines directory**:
+   ```bash
+   cd /path/to/biopipelines
+   ```
+
+2. **Create a new Jupyter notebook in this directory**:
+   ```bash
+   jupyter notebook my_pipeline.ipynb
+   ```
+   
+3. **Import the pipeline system**:
+   ```python
+   from PipelineScripts.pipeline import Pipeline
+   from PipelineScripts.boltz2 import Boltz2
+   from PipelineScripts.compound_library import CompoundLibrary
+   # ... other tool imports
+   ```
+
+#### Why run from the BioPipelines folder?
+- **Correct relative paths**: Tool configurations and helper scripts use relative paths that assume execution from the BioPipelines root
+- **Automatic environment detection**: The system can properly detect and configure conda environments
+- **Folder structure access**: Tools can access the `PipelineScripts/` and `HelpScripts/` directories correctly
+- **Resource configuration**: GPU and compute resource detection works optimally from the project root
+
+#### Alternative Setup:
+If you must run from a different location, ensure the BioPipelines path is in your Python path:
+```python
+import sys
+sys.path.append('/path/to/biopipelines')
+```
 
 ---
 

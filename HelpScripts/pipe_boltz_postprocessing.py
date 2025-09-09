@@ -246,6 +246,18 @@ else:
 # 4. Create MSAs CSV if MSA files exist
 msa_csv = os.path.join(OUTPUT_FOLDER, "msas.csv")
 msa_files_in_dir = []
+
+# Load sequences data to get actual protein sequences
+sequences_data = {}
+if os.path.exists(sequences_csv):
+    try:
+        seq_df = pd.read_csv(sequences_csv)
+        if 'sequence' in seq_df.columns:
+            sequences_data = dict(zip(seq_df['id'], seq_df['sequence']))
+        print(f"Loaded {len(sequences_data)} sequences for MSA datasheet")
+    except Exception as e:
+        print(f"Warning: Could not load sequences from {sequences_csv}: {e}")
+
 print(f"Checking for MSA files in: {msas_folder}")
 if os.path.exists(msas_folder):
     msa_files = os.listdir(msas_folder)
@@ -253,11 +265,14 @@ if os.path.exists(msas_folder):
     for msa_file in msa_files:
         if msa_file.endswith('.csv') or msa_file.endswith('.a3m'):
             seq_id = os.path.splitext(msa_file)[0]  # This is already the sequence_id since we renamed files
-            msa_files_in_dir.append({
-                'id': f"msa_{seq_id}",
+            
+            msa_entry = {
+                'id': seq_id,  # Remove msa_ prefix - use same ID as other datasheets
                 'sequence_id': seq_id,
+                'sequence': sequences_data.get(seq_id, ''),  # Add actual protein sequence
                 'msa_file': os.path.join(msas_folder, msa_file)
-            })
+            }
+            msa_files_in_dir.append(msa_entry)
             print(f"Added MSA file to list: {msa_file} (sequence_id: {seq_id})")
 else:
     print(f"MSA folder does not exist: {msas_folder}")
@@ -268,102 +283,11 @@ if msa_files_in_dir:
     msa_df.to_csv(msa_csv, index=False)
     print(f"Created MSAs CSV: {msa_csv}")
 else:
-    print("No MSA files found, creating empty MSAs CSV")
+    print("[Warning] No MSA files found, creating empty MSAs CSV")
     # Create empty MSAs CSV so completion check doesn't fail
-    msa_df = pd.DataFrame(columns=['id', 'sequence_id', 'msa_file'])
+    msa_df = pd.DataFrame(columns=['id', 'sequence_id', 'sequence', 'msa_file'])
     msa_df.to_csv(msa_csv, index=False)
     print(f"Created empty MSAs CSV: {msa_csv}")
-
-# 5. Create PyMOL session with all structures
-pymol_pse_file = os.path.join(OUTPUT_FOLDER, "boltz2_results.pse")
-if len(structural_files) > 0:
-    try:
-        import pymol
-        from pymol import cmd
-        
-        # Initialize PyMOL in headless mode
-        pymol.pymol_argv = ['pymol', '-c']
-        pymol.finish_launching()
-        
-        # PyMOL settings for good visualization
-        cmd.do("show cartoon")
-        cmd.set("seq_view", 1)
-        cmd.set("cartoon_gap_cutoff", 0)
-        cmd.set("sphere_scale", 0.2)
-        cmd.set("ray_trace_mode", 1)
-        cmd.set("ray_shadows", 0)
-        cmd.set("spec_reflect", 0)
-        cmd.set("ray_trace_frames", 1)
-        cmd.set("ray_trace_color", "gray20")
-        
-        # Define pLDDT colors
-        blue_rgb = [0,76,202]
-        blue = [c/255.0 for c in blue_rgb]
-        lightblue_rgb = [73, 196, 238]
-        lightblue = [c/255.0 for c in lightblue_rgb]
-        yellow_rgb = [255, 213, 57]
-        yellow = [c/255.0 for c in yellow_rgb]
-        orange_rgb = [255, 113, 67]
-        orange = [c/255.0 for c in orange_rgb]
-        
-        cmd.set_color('blue_plddt', blue)
-        cmd.set_color('lightblue_plddt', lightblue)
-        cmd.set_color('yellow_plddt', yellow)
-        cmd.set_color('orange_plddt', orange)
-
-        def plddt(selection="all"):    
-            blue_sel_str = selection + " & ! b < 0.9 & ! b > 1.0"
-            cmd.color('blue_plddt', blue_sel_str)
-            lightblue_sel_str = selection + " & ! b < 0.7 & ! b > 0.9"
-            cmd.color('lightblue_plddt', lightblue_sel_str)
-            yellow_sel_str = selection + " & ! b < 0.5 & ! b > 0.7"
-            cmd.color('yellow_plddt', yellow_sel_str)
-            orange_sel_str = selection + " & ! b < 0.0 & ! b > 0.5"
-            cmd.color('orange_plddt', orange_sel_str)
-        
-        cmd.extend('plddt', plddt)
-
-        # Load all structures
-        first_structure = None
-        for seq_id, struct_file in structural_files.items():
-            if os.path.exists(struct_file):
-                cmd.load(struct_file, seq_id)
-                if first_structure is None:
-                    first_structure = seq_id
-                else:
-                    # Align to first structure
-                    cmd.align(seq_id, first_structure)
-                print(f"Loaded {seq_id} into PyMOL session")
-        
-        # Apply pLDDT coloring
-        cmd.do("plddt")
-        
-        # Highlight ligands and binding sites
-        for seq_id in structural_files.keys():
-            # Show ligand as sticks
-            cmd.do(f"show sticks, {seq_id} and resn {seq_id} and not name N+CA+C+O")
-            cmd.do(f"color wheat, {seq_id} and resn {seq_id}")
-            
-            # Highlight binding site contacts (default behavior)
-            sele_name = f"{seq_id}_contacts"
-            cmd.do(f"select {sele_name}, {seq_id} within 4.0 of ({seq_id} and resn {seq_id})")
-            cmd.do(f"show sticks, {sele_name} and not name N+CA+C+O")
-            cmd.do(f"delete {sele_name}")
-        
-        # Color atoms by element
-        cmd.do("color atomic, (not elem C)")
-        
-        # Save PyMOL session
-        cmd.save(pymol_pse_file)
-        print(f"Created PyMOL session: {pymol_pse_file}")
-        
-        # Clean up PyMOL
-        pymol.cmd.quit()
-        
-    except ImportError:
-        print("PyMOL not available - skipping session creation")
-    except Exception as e:
-        print(f"Error creating PyMOL session: {e}")
 
 # Create scores explanation file
 scores_explanation="""

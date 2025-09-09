@@ -12,8 +12,8 @@ from PipelineScripts.merge_datasheets import MergeDatasheets
 from PipelineScripts.select_best import SelectBest
 
 pipeline = Pipeline(
-    pipeline_name="LigandMPNN-Boltz-Cycle", #Will create a folder in /shares/USER/...
-    job_name="HT7_Cy7_ChlorineFilter", #Unique job folder in /shares/USER/.../job_name_NNN
+    pipeline_name="LigandMPNN-Boltz-Cycle", #Will create a folder in /shares/USER/<pipeline_name>
+    job_name="HT7_Cy7_ChlorineFilter", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
     job_description="Test on filter based on distance between chlorine and aspartate")
 
 pipeline.resources(

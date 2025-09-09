@@ -32,6 +32,9 @@ class BaseConfig(ABC):
         self.tool_name = self.TOOL_NAME
         self.job_name = kwargs.get('name', '')
         
+        # Pipeline reference for getting job name
+        self.pipeline = kwargs.get('pipeline', None)
+        
         # Environment and resources
         self.environment = kwargs.get('env', self.DEFAULT_ENV)
         self.resources = {**self.DEFAULT_RESOURCES, **kwargs.get('resources', {})}
@@ -70,6 +73,17 @@ class BaseConfig(ABC):
     def validate_params(self):
         """Validate tool-specific parameters. Override in subclasses."""
         pass
+    
+    def get_effective_job_name(self) -> str:
+        """
+        Get the effective job name, preferring pipeline job name over tool name.
+        
+        Returns:
+            Job name from pipeline if available, otherwise tool job name, or None if neither available
+        """
+        if self.pipeline and hasattr(self.pipeline, 'job_name') and self.pipeline.job_name:
+            return self.pipeline.job_name
+        return self.job_name if self.job_name else None
     
     @abstractmethod
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
@@ -165,9 +179,9 @@ class BaseConfig(ABC):
         """Serialize configuration to dictionary."""
         return {
             'tool_name': self.tool_name,
+            'job_name': self.job_name,
             'environment': self.environment,
             'resources': self.resources,
-            'parameters': self.params,
             'dependencies': len(self.dependencies),
             'execution_order': self.execution_order
         }
@@ -211,7 +225,23 @@ fi
         """
         # Get expected outputs as JSON string
         expected_outputs = self.get_expected_output_paths()
-        expected_outputs_json = json.dumps(expected_outputs).replace('"', '\\"')
+        
+        # Convert DatasheetInfo objects to dictionaries for JSON serialization
+        json_safe_outputs = {}
+        for key, value in expected_outputs.items():
+            if key == 'datasheets' and isinstance(value, dict):
+                # Convert DatasheetInfo objects to dictionaries
+                json_safe_datasheets = {}
+                for ds_name, ds_info in value.items():
+                    if isinstance(ds_info, DatasheetInfo):
+                        json_safe_datasheets[ds_name] = ds_info.to_dict()
+                    else:
+                        json_safe_datasheets[ds_name] = ds_info
+                json_safe_outputs[key] = json_safe_datasheets
+            else:
+                json_safe_outputs[key] = value
+        
+        expected_outputs_json = json.dumps(json_safe_outputs).replace('"', '\\"')
         
         pipe_check_completion = os.path.join(
             self.folders.get("HelpScripts", "HelpScripts"), 
@@ -326,14 +356,10 @@ class DatasheetInfo:
     
     def __str__(self) -> str:
         if self.columns:
-            # Show more information: path, count, and columns
-            path_display = self.path.replace('/shares/locbp.chem.uzh/', '.../')
-            col_display = ', '.join(self.columns[:6])
-            if len(self.columns) > 6:
-                col_display += f', +{len(self.columns)-6} more'
-            count_display = f" ({self.count} entries)" if self.count > 0 else ""
-            return f"{path_display}{count_display}: {col_display}"
-        return self.name
+            # Show all columns 
+            col_display = ', '.join(self.columns)
+            return f"${self.name} ({col_display})"
+        return f"${self.name}"
     
     def __repr__(self) -> str:
         return f"DatasheetInfo(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
@@ -413,10 +439,14 @@ class DatasheetContainer:
         
         lines = []
         for name, info in self._datasheets.items():
-            # Format: "  structures: .../path.csv (2 entries): id, pdb_file, confidence"
-            lines.append(f"  {name}: {str(info)}")
+            # Format: datasheet name with columns, then indented file path
+            # Extract just the filename from the full path
+            filename = info.path.split('/')[-1]
+            path_display = f"<output_folder>/{filename}"
+            lines.append(f"    {str(info)}:")
+            lines.append(f"        – '{path_display}'")
         
-        return "{\n" + "\n".join(lines) + "\n}"
+        return "\n".join(lines)
     
     def __repr__(self) -> str:
         return f"DatasheetContainer({list(self._datasheets.keys())})"
@@ -471,16 +501,26 @@ class StandardizedOutput:
             datasheet_infos = {}
             for name, info in datasheets_raw.items():
                 if isinstance(info, dict):
+                    # Handle columns - ensure it's always a list
+                    columns = info.get('columns', [])
+                    if isinstance(columns, str):
+                        # No placeholders - if it's a string, it should be an actual column name
+                        columns = [columns]  # Single string becomes list
+                    
                     datasheet_infos[name] = DatasheetInfo(
                         name=name,
                         path=info.get('path', ''),
-                        columns=info.get('columns', []),
+                        columns=columns,
                         description=info.get('description', ''),
                         count=info.get('count', 0)
                     )
                 else:
-                    # Legacy format - just a path
-                    datasheet_infos[name] = DatasheetInfo(name=name, path=str(info))
+                    # Could be a DatasheetInfo object or just a path
+                    if isinstance(info, DatasheetInfo):
+                        datasheet_infos[name] = info
+                    else:
+                        # Legacy format - just a path
+                        datasheet_infos[name] = DatasheetInfo(name=name, path=str(info))
             return DatasheetContainer(datasheet_infos)
         elif isinstance(datasheets_raw, list):
             # Legacy format - convert first item to "main"
@@ -666,9 +706,9 @@ class StandardizedOutput:
             lines.append("datasheets:")
             for name, info in self.datasheets._datasheets.items():
                 # Format columns display
-                col_display = ', '.join(info.columns[:3]) if info.columns else ''
-                if len(info.columns) > 3:
-                    col_display += f', +{len(info.columns)-3} more'
+                col_display = ', '.join(info.columns[:]) if info.columns else '' #:3
+                #if len(info.columns) > 3:
+                #    col_display += f', +{len(info.columns)-3} more'
                 
                 # Show datasheet info
                 lines.append(f"    ${name} ({col_display}):")

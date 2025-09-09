@@ -65,6 +65,13 @@ class FolderManager:
 
         self._folders["output"] = FolderManager.unique_name(self._folders["pipeline"],job_folder,full_path=True)
         os.makedirs(self._folders["output"], exist_ok=True)
+        
+        # Extract job ID from the output folder name
+        output_basename = os.path.basename(self._folders["output"])
+        if "_" in output_basename:
+            self.job_id = output_basename.split("_")[-1]
+        else:
+            raise ValueError(f"Could not extract job ID from output folder name: {output_basename}")
         self._folders["runtime"] = os.path.join(self._folders["output"], "RunTime")    
         os.makedirs(self._folders["runtime"], exist_ok=True)
         

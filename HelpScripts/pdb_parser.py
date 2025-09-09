@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+"""
+PDB file parser for BioPipelines helper scripts.
+
+Lightweight PDB parsing functionality without external dependencies.
+Provides atom selection and distance calculation utilities.
+"""
+
+import math
+from typing import List, Dict, Any, Optional, Tuple, NamedTuple
+
+class Atom(NamedTuple):
+    """Represents an atom from PDB file."""
+    x: float
+    y: float
+    z: float
+    atom_name: str
+    res_name: str
+    res_num: int
+    chain: str
+    element: str = ""
+
+def parse_pdb_file(pdb_path: str) -> List[Atom]:
+    """
+    Parse PDB file and extract atom information.
+    
+    Args:
+        pdb_path: Path to PDB file
+        
+    Returns:
+        List of Atom objects
+    """
+    atoms = []
+    
+    with open(pdb_path, 'r') as f:
+        for line in f:
+            # Only parse ATOM and HETATM records
+            if line.startswith(('ATOM', 'HETATM')):
+                try:
+                    # Parse PDB format according to specification
+                    atom_name = line[12:16].strip()
+                    res_name = line[17:20].strip()
+                    chain = line[21:22].strip()
+                    res_num = int(line[22:26].strip())
+                    x = float(line[30:38].strip())
+                    y = float(line[38:46].strip())
+                    z = float(line[46:54].strip())
+                    element = line[76:78].strip() if len(line) > 76 else atom_name[0]
+                    
+                    atom = Atom(
+                        x=x, y=y, z=z,
+                        atom_name=atom_name,
+                        res_name=res_name,
+                        res_num=res_num,
+                        chain=chain,
+                        element=element
+                    )
+                    atoms.append(atom)
+                    
+                except (ValueError, IndexError) as e:
+                    # Skip malformed lines
+                    continue
+                    
+    return atoms
+
+def get_protein_sequence(atoms: List[Atom]) -> Dict[str, str]:
+    """
+    Extract protein sequence from atoms.
+    
+    Args:
+        atoms: List of Atom objects
+        
+    Returns:
+        Dictionary mapping chain -> sequence
+    """
+    # Standard amino acid mapping
+    aa_map = {
+        'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
+        'GLN': 'Q', 'GLU': 'E', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
+        'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
+        'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
+    }
+    
+    sequences = {}
+    
+    # Group by chain and get unique residues
+    chain_residues = {}
+    for atom in atoms:
+        if atom.res_name in aa_map:  # Only standard amino acids
+            if atom.chain not in chain_residues:
+                chain_residues[atom.chain] = {}
+            chain_residues[atom.chain][atom.res_num] = atom.res_name
+    
+    # Convert to sequences
+    for chain, residues in chain_residues.items():
+        sorted_residues = sorted(residues.items())
+        sequence = ''.join([aa_map[res_name] for _, res_name in sorted_residues])
+        sequences[chain] = sequence
+    
+    return sequences
+
+def select_atoms_by_ligand(atoms: List[Atom], ligand_name: str, atom_name: str = None) -> List[Atom]:
+    """
+    Select atoms from a specific ligand.
+    
+    Args:
+        atoms: List of all atoms
+        ligand_name: Ligand residue name (e.g., 'LIG', 'HAL')
+        atom_name: Specific atom name (e.g., 'Cl', 'Br'), None for all atoms
+        
+    Returns:
+        List of selected atoms
+    """
+    selected = []
+    for atom in atoms:
+        if atom.res_name == ligand_name:
+            if atom_name is None:
+                selected.append(atom)
+            else:
+                # Check for exact match or element-based match (e.g., 'Cl' matches 'CL59')
+                atom_clean = atom.atom_name.strip()
+                if (atom_clean == atom_name or 
+                    atom_clean.startswith(atom_name.upper()) or
+                    atom.element.strip().upper() == atom_name.upper()):
+                    selected.append(atom)
+    return selected
+
+def debug_ligand_atoms(atoms: List[Atom]) -> None:
+    """Debug function to show all ligand residues and atoms."""
+    # Find all non-standard residues (likely ligands)
+    standard_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+    
+    ligand_residues = {}
+    for atom in atoms:
+        if atom.res_name not in standard_residues:
+            if atom.res_name not in ligand_residues:
+                ligand_residues[atom.res_name] = set()
+            ligand_residues[atom.res_name].add(atom.atom_name.strip())
+    
+    if ligand_residues:
+        print("  - Found ligand residues:")
+        for res_name, atom_names in ligand_residues.items():
+            print(f"    {res_name}: {sorted(atom_names)}")
+    else:
+        print("  - No ligand residues found")
+
+def select_atoms_by_residue_number(atoms: List[Atom], residue_numbers: List[int]) -> List[Atom]:
+    """
+    Select atoms from specific residue numbers.
+    
+    Args:
+        atoms: List of all atoms
+        residue_numbers: List of residue numbers to select
+        
+    Returns:
+        List of selected atoms
+    """
+    selected = []
+    for atom in atoms:
+        if atom.res_num in residue_numbers:
+            selected.append(atom)
+    return selected
+
+def select_atoms_by_sequence_context(atoms: List[Atom], target_residue: str, sequence_context: str) -> List[Atom]:
+    """
+    Select atoms by finding residue in sequence context.
+    
+    Args:
+        atoms: List of all atoms
+        target_residue: Single letter amino acid code (e.g., 'D')
+        sequence_context: Sequence context (e.g., 'IGDWG')
+        
+    Returns:
+        List of selected atoms
+    """
+    # Map single letter to three letter code
+    residue_map = {
+        'A': 'ALA', 'R': 'ARG', 'N': 'ASN', 'D': 'ASP', 'C': 'CYS',
+        'Q': 'GLN', 'E': 'GLU', 'G': 'GLY', 'H': 'HIS', 'I': 'ILE',
+        'L': 'LEU', 'K': 'LYS', 'M': 'MET', 'F': 'PHE', 'P': 'PRO',
+        'S': 'SER', 'T': 'THR', 'W': 'TRP', 'Y': 'TYR', 'V': 'VAL'
+    }
+    
+    target_three_letter = residue_map.get(target_residue, target_residue)
+    
+    # Get sequences and find matching positions
+    sequences = get_protein_sequence(atoms)
+    target_positions = []
+    
+    print(f"  - Looking for '{target_residue}' in context '{sequence_context}'")
+    
+    for chain, sequence in sequences.items():
+        print(f"  - Chain {chain}: {len(sequence)} residues")
+        print(f"    Sequence preview: {sequence[:50]}{'...' if len(sequence) > 50 else ''}")
+        
+        # Find all occurrences of sequence context
+        start = 0
+        while True:
+            pos = sequence.find(sequence_context, start)
+            if pos == -1:
+                break
+            
+            print(f"    Found context '{sequence_context}' at position {pos}")
+            
+            # Find position of target residue within context
+            target_pos_in_context = sequence_context.find(target_residue)
+            if target_pos_in_context != -1:
+                # Get ordered residue numbers for this chain
+                chain_residues = [(a.res_num, a.res_name) for a in atoms 
+                                if a.chain == chain and a.res_name in residue_map.values()]
+                # Remove duplicates and sort by residue number
+                unique_residues = list(set(chain_residues))
+                unique_residues.sort(key=lambda x: x[0])
+                
+                if pos + target_pos_in_context < len(unique_residues):
+                    target_res_num = unique_residues[pos + target_pos_in_context][0]
+                    target_positions.append(target_res_num)
+                    print(f"    Target '{target_residue}' at sequence pos {pos + target_pos_in_context} = residue {target_res_num}")
+            
+            start = pos + 1
+    
+    print(f"  - Found target positions: {target_positions}")
+    
+    # If no sequence context match, raise error - no fallbacks
+    if not target_positions:
+        raise ValueError(f"Sequence context '{sequence_context}' not found in protein sequence. "
+                        f"Target residue '{target_residue}' could not be located in the specified context.")
+    
+    return select_atoms_by_residue_number(atoms, target_positions)
+
+def parse_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
+    """
+    Parse selection string and return matching atoms.
+    
+    Args:
+        selection: Selection string (e.g., 'LIG.Cl', 'D in IGDWG', '145')
+        atoms: List of all atoms
+        
+    Returns:
+        List of selected atoms
+    """
+    if '.' in selection:
+        # Ligand atom selection: 'LIG.Cl'
+        parts = selection.split('.', 1)
+        ligand_name = parts[0]
+        atom_name = parts[1] if len(parts) > 1 else None
+        return select_atoms_by_ligand(atoms, ligand_name, atom_name)
+    
+    elif ' in ' in selection:
+        # Residue in sequence context: 'D in IGDWG'
+        parts = selection.split(' in ')
+        target_residue = parts[0].strip()
+        sequence_context = parts[1].strip()
+        return select_atoms_by_sequence_context(atoms, target_residue, sequence_context)
+    
+    elif selection.isdigit():
+        # Simple residue number: '145'
+        res_num = int(selection)
+        return select_atoms_by_residue_number(atoms, [res_num])
+    
+    elif '-' in selection and all(part.isdigit() for part in selection.split('-')):
+        # Residue range: '145-150'
+        start, end = map(int, selection.split('-'))
+        res_nums = list(range(start, end + 1))
+        return select_atoms_by_residue_number(atoms, res_nums)
+    
+    elif '+' in selection:
+        # Multiple residues: '145+147+150'
+        res_nums = [int(x) for x in selection.split('+') if x.isdigit()]
+        return select_atoms_by_residue_number(atoms, res_nums)
+    
+    else:
+        # Try as atom name
+        selected = []
+        for atom in atoms:
+            if atom.atom_name == selection:
+                selected.append(atom)
+        return selected
+
+def calculate_distance(atom1: Atom, atom2: Atom) -> float:
+    """
+    Calculate Euclidean distance between two atoms.
+    
+    Args:
+        atom1: First atom
+        atom2: Second atom
+        
+    Returns:
+        Distance in Angstroms
+    """
+    dx = atom1.x - atom2.x
+    dy = atom1.y - atom2.y
+    dz = atom1.z - atom2.z
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+
+def calculate_distances(atoms1: List[Atom], atoms2: List[Atom], metric: str = "min") -> Optional[float]:
+    """
+    Calculate distance metric between two sets of atoms.
+    
+    Args:
+        atoms1: First set of atoms
+        atoms2: Second set of atoms  
+        metric: Distance metric ("min", "max", "mean", "closest")
+        
+    Returns:
+        Calculated distance or None if no atoms
+    """
+    if not atoms1 or not atoms2:
+        return None
+    
+    distances = []
+    for a1 in atoms1:
+        for a2 in atoms2:
+            dist = calculate_distance(a1, a2)
+            distances.append(dist)
+    
+    if not distances:
+        return None
+    
+    if metric == "min" or metric == "closest":
+        return min(distances)
+    elif metric == "max":
+        return max(distances)
+    elif metric == "mean":
+        return sum(distances) / len(distances)
+    else:
+        return min(distances)  # Default to min

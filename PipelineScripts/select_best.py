@@ -33,8 +33,10 @@ class SelectBest(BaseConfig):
     DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
     
     def __init__(self,
-                 input: Union[ToolOutput, StandardizedOutput],
-                 metric: str,
+                 input: Union[ToolOutput, StandardizedOutput] = None,
+                 pool: Union[ToolOutput, StandardizedOutput] = None,
+                 data: Union[str, ToolOutput, StandardizedOutput] = None,
+                 metric: str = None,
                  mode: str = "max",
                  weights: Optional[Dict[str, float]] = None,
                  tie_breaker: str = "first",
@@ -45,7 +47,9 @@ class SelectBest(BaseConfig):
         Initialize SelectBest tool.
         
         Args:
-            input: Input from previous tool (analysis results or filtered data)
+            input: [LEGACY] Input from previous tool (analysis results or filtered data)
+            pool: Full tool output to select from (new approach)
+            data: Which datasheet to evaluate for selection (string name) or tool output to evaluate (new approach)
             metric: Primary metric to optimize for selection
             mode: "max" or "min" the metric
             weights: Dict of {metric_name: weight} for multi-metric selection
@@ -55,7 +59,15 @@ class SelectBest(BaseConfig):
             **kwargs: Additional parameters
             
         Examples:
-            # Simple: best binding affinity
+            # New approach: pool + data selection
+            best = pipeline.add(SelectBest(
+                pool=boltz.output,           # Full tool output
+                data="compounds",            # Evaluate compounds datasheet
+                metric="binding_affinity",
+                mode="max"
+            ))
+            
+            # Legacy approach: keyword input
             best = pipeline.add(SelectBest(
                 input=analysis_results,
                 metric="binding_affinity",
@@ -64,21 +76,48 @@ class SelectBest(BaseConfig):
             
             # Multi-objective with weights
             best = pipeline.add(SelectBest(
-                input=combined_results,
+                pool=combined_results,
+                data="structures", 
                 metric="composite_score",
                 weights={"binding_affinity": 0.6, "pLDDT": 0.4},
                 mode="max"
             ))
-            
-            # Custom tie breaking
-            best = pipeline.add(SelectBest(
-                input=filtered_data,
-                metric="energy",
-                mode="min",
-                tie_breaker="pLDDT"  # Use pLDDT to break ties
-            ))
         """
-        self.selection_input = input
+        # Determine which approach is being used
+        if pool is not None and data is not None:
+            # New pool + data approach
+            self.use_pool_mode = True
+            self.pool_output = pool
+            
+            # Handle data parameter - can be string (datasheet name) or tool output
+            if isinstance(data, str):
+                self.data_name = data
+                self.data_output = None
+            else:
+                # data is a tool output - use it for evaluation
+                self.data_name = None
+                self.data_output = data
+            
+            self.selection_input = None
+            
+            # Set up dependencies
+            dependencies = [pool]
+            if self.data_output and hasattr(data, 'config'):
+                dependencies.append(data.config)
+            dependency_source = pool
+        elif input is not None:
+            # Legacy input approach (including positional)
+            self.use_pool_mode = False
+            self.pool_output = None
+            self.data_name = None
+            self.selection_input = input
+            dependency_source = input
+        else:
+            raise ValueError("Must specify either 'input' (legacy) or both 'pool' and 'data' (new approach)")
+        
+        if metric is None:
+            raise ValueError("metric parameter is required")
+            
         self.metric = metric
         self.mode = mode
         self.weights = weights or {}
@@ -92,9 +131,17 @@ class SelectBest(BaseConfig):
         # Initialize base class
         super().__init__(**kwargs)
         
-        # Set up dependency
-        if hasattr(input, 'config'):
-            self.dependencies.append(input.config)
+        # Set up dependencies
+        if self.use_pool_mode:
+            # Pool mode: add both pool and data dependencies
+            if hasattr(self.pool_output, 'config'):
+                self.dependencies.append(self.pool_output.config)
+            if self.data_output and hasattr(self.data_output, 'config'):
+                self.dependencies.append(self.data_output.config)
+        else:
+            # Legacy mode
+            if hasattr(dependency_source, 'config'):
+                self.dependencies.append(dependency_source.config)
     
     def _validate_selection_params(self):
         """Validate selection parameters."""
@@ -112,13 +159,133 @@ class SelectBest(BaseConfig):
     
     def validate_params(self):
         """Validate SelectBest parameters."""
-        if not isinstance(self.selection_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("Input must be a ToolOutput or StandardizedOutput object")
+        if self.use_pool_mode:
+            # New pool + data mode
+            if not isinstance(self.pool_output, (ToolOutput, StandardizedOutput)):
+                raise ValueError("pool must be a ToolOutput or StandardizedOutput object")
+            
+            # Validate data parameter
+            if self.data_name:
+                # String datasheet name
+                if not isinstance(self.data_name, str) or not self.data_name:
+                    raise ValueError("data must be a non-empty string specifying the datasheet name")
+            elif self.data_output:
+                # Tool output for evaluation
+                if not isinstance(self.data_output, (ToolOutput, StandardizedOutput)):
+                    raise ValueError("data must be a ToolOutput or StandardizedOutput object")
+            else:
+                raise ValueError("data parameter is required in pool mode")
+        else:
+            # Legacy input mode
+            if not isinstance(self.selection_input, (ToolOutput, StandardizedOutput)):
+                raise ValueError("input must be a ToolOutput or StandardizedOutput object")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input datasheet from previous tool."""
         self.folders = pipeline_folders
         
+        if self.use_pool_mode:
+            # New pool + data mode: extract specific datasheet for evaluation
+            self._configure_pool_mode()
+        else:
+            # Legacy mode: use existing logic
+            self._configure_legacy_mode()
+    
+    def _configure_pool_mode(self):
+        """Configure inputs for pool + data selection mode."""
+        # Get the specified datasheet for evaluation
+        self.input_csv_path = None
+        
+        # Check if data parameter is a tool output (cross-tool evaluation)
+        if self.data_output:
+            # Data comes from a separate tool output
+            if hasattr(self.data_output, 'datasheets'):
+                datasheets = self.data_output.datasheets
+                
+                # For tool outputs, use the main/combined datasheet
+                if hasattr(datasheets, 'combined'):
+                    ds_info = datasheets.combined
+                elif hasattr(datasheets, 'filtered'):
+                    ds_info = datasheets.filtered
+                elif hasattr(datasheets, '_datasheets'):
+                    # Get first available datasheet
+                    ds_info = next(iter(datasheets._datasheets.values()))
+                elif isinstance(datasheets, dict):
+                    ds_info = next(iter(datasheets.values()))
+                else:
+                    ds_info = datasheets
+                
+                # Extract path from datasheet info
+                if hasattr(ds_info, 'path'):
+                    self.input_csv_path = ds_info.path
+                elif isinstance(ds_info, dict) and 'path' in ds_info:
+                    self.input_csv_path = ds_info['path']
+                elif isinstance(ds_info, str):
+                    self.input_csv_path = ds_info
+                else:
+                    self.input_csv_path = str(ds_info)
+            
+            if not self.input_csv_path:
+                raise ValueError(f"Could not predict input CSV path from data_output: {self.data_output}. "
+                               f"The input tool must provide proper datasheet path predictions.")
+                
+        else:
+            # Data comes from a named datasheet within the pool output
+            if hasattr(self.pool_output, 'datasheets'):
+                datasheets = self.pool_output.datasheets
+                
+                # Look for the specified datasheet name
+                if hasattr(datasheets, self.data_name):
+                    ds_info = getattr(datasheets, self.data_name)
+                    if hasattr(ds_info, 'path'):
+                        self.input_csv_path = ds_info.path
+                    elif isinstance(ds_info, str):
+                        self.input_csv_path = ds_info
+                    else:
+                        self.input_csv_path = str(ds_info)
+                elif isinstance(datasheets, dict) and self.data_name in datasheets:
+                    ds_info = datasheets[self.data_name]
+                    if isinstance(ds_info, dict) and 'path' in ds_info:
+                        self.input_csv_path = ds_info['path']
+                    else:
+                        self.input_csv_path = str(ds_info)
+            
+            # Fallback: predict path based on pool output folder and data name
+            if not self.input_csv_path and hasattr(self.pool_output, 'output_folder'):
+                output_folder = self.pool_output.output_folder
+                predicted_name = f"{self.data_name}_results.csv"
+                self.input_csv_path = os.path.join(output_folder, predicted_name)
+        
+        # Validation
+        if not self.input_csv_path:
+            if self.data_output:
+                raise ValueError(f"Could not predict input CSV path from data tool output: {self.data_output}")
+            else:
+                available_datasheets = []
+                if hasattr(self.pool_output, 'datasheets'):
+                    if hasattr(self.pool_output.datasheets, '_datasheets'):
+                        available_datasheets = list(self.pool_output.datasheets._datasheets.keys())
+                    elif isinstance(self.pool_output.datasheets, dict):
+                        available_datasheets = list(self.pool_output.datasheets.keys())
+                
+                raise ValueError(f"Could not find datasheet '{self.data_name}' in pool output. "
+                               f"Available datasheets: {available_datasheets}")
+        
+        # Store the full pool output for later data extraction
+        self.pool_source = self.pool_output
+        
+        # Predict source data directories from pool output
+        self.source_structures_dir = None
+        if hasattr(self.pool_output, 'output_folder'):
+            potential_dirs = [
+                self.pool_output.output_folder,
+                os.path.join(self.pool_output.output_folder, 'structures'),
+                os.path.join(self.pool_output.output_folder, 'pdbs')
+            ]
+            self.source_structures_dir = potential_dirs[0]
+    
+    def _configure_legacy_mode(self):
+        """Configure inputs for legacy input mode."""
         # Get the input CSV file from the previous tool
         self.input_csv_path = None
         
@@ -141,22 +308,12 @@ class SelectBest(BaseConfig):
                 else:
                     self.input_csv_path = str(ds_info)
         
-        # Fallback: predict path based on output folder
-        if not self.input_csv_path and hasattr(self.selection_input, 'output_folder'):
-            output_folder = self.selection_input.output_folder
-            # Predict common CSV names that tools would generate (don't check existence)
-            common_names = [
-                'filtered_results.csv',     # Filter output
-                'combined_analysis.csv',    # MergeDatasheets output  
-                'analysis_results.csv',     # Analysis output
-                'results.csv'               # Generic results
-            ]
-            
-            # Use first predicted path (don't check existence)
-            self.input_csv_path = os.path.join(output_folder, common_names[0])
-        
         if not self.input_csv_path:
-            raise ValueError(f"Could not predict input CSV path from previous tool: {self.selection_input}")
+            raise ValueError(f"Could not predict input CSV path from previous tool: {self.selection_input}. "
+                           f"The input tool must provide proper datasheet path predictions.")
+        
+        # Store for legacy compatibility
+        self.pool_source = self.selection_input
         
         # Also predict source structures directory
         self.source_structures_dir = None
@@ -171,9 +328,53 @@ class SelectBest(BaseConfig):
             # Use first predicted directory (don't verify contents)
             self.source_structures_dir = potential_dirs[0]
     
+    def _get_input_columns(self) -> List[str]:
+        """Get column names from the input datasheet."""
+        if self.use_pool_mode:
+            # Pool mode: get columns from data source
+            if self.data_output:
+                # Data comes from a separate tool output
+                if hasattr(self.data_output, 'datasheets') and hasattr(self.data_output.datasheets, '_datasheets'):
+                    # Look through datasheets to find one with column info
+                    for name, info in self.data_output.datasheets._datasheets.items():
+                        if hasattr(info, 'columns') and info.columns:
+                            return info.columns
+            else:
+                # Data comes from a named datasheet within the pool output
+                if hasattr(self.pool_output, 'datasheets') and hasattr(self.pool_output.datasheets, '_datasheets'):
+                    if self.data_name in self.pool_output.datasheets._datasheets:
+                        info = self.pool_output.datasheets._datasheets[self.data_name]
+                        if hasattr(info, 'columns') and info.columns:
+                            return info.columns
+        else:
+            # Legacy mode: get columns from selection input
+            if hasattr(self.selection_input, 'datasheets') and hasattr(self.selection_input.datasheets, '_datasheets'):
+                # Look through the datasheets to find one with column info
+                for name, info in self.selection_input.datasheets._datasheets.items():
+                    if hasattr(info, 'columns') and info.columns:
+                        return info.columns
+        
+        # Return empty list if columns cannot be determined
+        return []
+    
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
+        
+        if self.use_pool_mode:
+            if self.data_output:
+                config_lines.extend([
+                    f"MODE: Cross-tool Pool + Data Selection",
+                    f"POOL SOURCE: Tool Output",
+                    f"DATA SOURCE: Tool Output",
+                ])
+            else:
+                config_lines.extend([
+                    f"MODE: Pool + Data Selection",
+                    f"DATA SOURCE: {self.data_name}",
+                ])
+        else:
+            config_lines.append("MODE: Legacy Input Selection")
         
         config_lines.extend([
             f"SELECTION METRIC: {self.metric}",
@@ -209,7 +410,7 @@ class SelectBest(BaseConfig):
         selected_structure = os.path.join(output_folder, f"{self.output_name}.pdb")
         
         # Create config file for selection
-        config_file = os.path.join(runtime_folder, "select_best_config.json")
+        config_file = os.path.join(output_folder, "select_best_config.json")
         config_data = {
             "input_csv": self.input_csv_path,
             "source_structures_dir": self.source_structures_dir,
@@ -219,7 +420,11 @@ class SelectBest(BaseConfig):
             "tie_breaker": self.tie_breaker,
             "composite_function": self.composite_function,
             "output_csv": selected_csv,
-            "output_structure": selected_structure
+            "output_structure": selected_structure,
+            # New pool mode configuration
+            "use_pool_mode": self.use_pool_mode,
+            "data_name": self.data_name if self.use_pool_mode else None,
+            "pool_output_folder": getattr(self.pool_source, 'output_folder', None) if hasattr(self, 'pool_source') else None
         }
         
         import json
@@ -261,18 +466,62 @@ fi
         Get expected output files after selection.
         
         Returns:
-            Dictionary with output file paths (single structure + datasheet)
+            Dictionary with output file paths for selected item
         """
+        if self.use_pool_mode:
+            return self._get_pool_mode_outputs()
+        else:
+            return self._get_legacy_mode_outputs()
+    
+    def _get_pool_mode_outputs(self) -> Dict[str, List[str]]:
+        """Get outputs for pool mode - includes all data types for selected ID."""
+        selected_csv = os.path.join(self.output_folder, "selected_best.csv")
+        selected_structure = os.path.join(self.output_folder, f"{self.output_name}.pdb")
+        selected_compound = os.path.join(self.output_folder, f"{self.output_name}_compound.sdf")
+        selected_sequence = os.path.join(self.output_folder, f"{self.output_name}_sequences.csv")
+        
+        # Use output name as the selected ID
+        selected_id = self.output_name
+        
+        # Get actual column names from evaluation datasheet
+        input_columns = self._get_input_columns()
+        
+        # Define datasheets that will be created
+        datasheets = {
+            "selected": {
+                "path": selected_csv,
+                "columns": input_columns,  # Use actual columns
+                "description": f"Best item selected from {self.data_name} using {self.metric}",
+                "count": 1
+            }
+        }
+        
+        return {
+            "structures": [selected_structure],
+            "structure_ids": [selected_id],
+            "compounds": [selected_compound], 
+            "compound_ids": [selected_id],
+            "sequences": [selected_sequence],
+            "sequence_ids": [selected_id],
+            "datasheets": datasheets,
+            "output_folder": self.output_folder
+        }
+    
+    def _get_legacy_mode_outputs(self) -> Dict[str, List[str]]:
+        """Get outputs for legacy mode - single structure + datasheet only."""
         selected_structure = os.path.join(self.output_folder, f"{self.output_name}.pdb")
         selected_csv = os.path.join(self.output_folder, "selected_best.csv")
         
         # Structure ID should match the structure name without extension
         structure_id = self.output_name
         
+        # Get actual column names from input
+        input_columns = self._get_input_columns()
+        
         datasheets = {
             "selected": {
                 "path": selected_csv,
-                "columns": "preserved_from_input",
+                "columns": input_columns,  # Use actual columns
                 "description": f"Single best item selected using {self.metric}",
                 "count": 1
             }
@@ -294,6 +543,8 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
+                "use_pool_mode": self.use_pool_mode,
+                "data_name": self.data_name if self.use_pool_mode else None,
                 "metric": self.metric,
                 "mode": self.mode,
                 "weights": self.weights,
