@@ -80,10 +80,10 @@ folder_to_sequence_map = {}  # Map folder names to sequence IDs
 # Look for boltz_results_* folders in the prediction folder
 boltz_results_folders = [f for f in os.listdir(PREDICTION_FOLDER) if f.startswith('boltz_results_')]
 
-for i, boltz_folder in enumerate(sorted(boltz_results_folders)):
+for boltz_folder in sorted(boltz_results_folders):
     boltz_folder_path = os.path.join(PREDICTION_FOLDER, boltz_folder)
     if os.path.isdir(boltz_folder_path):
-        # Extract the config ID from folder name (e.g., boltz_results_BoltzTest_005_0_1)
+        # Extract the config ID from folder name (e.g., boltz_results_(S)Cy7-CH2F-RCG+)
         config_id = boltz_folder.replace('boltz_results_', '')
         
         # Find the corresponding predictions subfolder
@@ -91,11 +91,14 @@ for i, boltz_folder in enumerate(sorted(boltz_results_folders)):
         if not os.path.exists(predictions_path):
             print(f"Warning: Predictions path not found: {predictions_path}")
             continue
-        # Determine the proper sequence ID for this folder
-        if i < len(sequence_ids):
-            sequence_id = sequence_ids[i]
-        else:
-            sequence_id = config_id  # Fallback to config ID
+        
+        # Use config_id directly as sequence_id (extracted from folder name)
+        sequence_id = config_id
+        
+        # Validate against expected sequence_ids if available
+        if sequence_ids and config_id not in sequence_ids:
+            print(f"Warning: {config_id} not found in expected sequence IDs: {sequence_ids}")
+            print(f"This might indicate folder naming issues or prediction logic mismatch")
         
         folder_to_sequence_map[config_id] = sequence_id
         
