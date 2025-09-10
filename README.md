@@ -38,7 +38,7 @@ lmpnn = pipeline.add(
     LigandMPNN(
         structures="protein.pdb",
         num_sequences=10,
-        design="145-180"
+        redesigned="145-180"
     )
 )
 
