@@ -10,13 +10,13 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
 class SelectBest(BaseConfig):
@@ -34,7 +34,7 @@ class SelectBest(BaseConfig):
     
     def __init__(self,
                  pool: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]],
-                 datasheets: Union[List[Union[ToolOutput, StandardizedOutput]], List[str]],
+                 datasheets: Union[List[Union[ToolOutput, StandardizedOutput, DatasheetInfo]], List[str]],
                  metric: str,
                  mode: str = "max",
                  weights: Optional[Dict[str, float]] = None,
@@ -152,8 +152,8 @@ class SelectBest(BaseConfig):
             raise ValueError(f"Number of datasheets ({len(self.datasheets)}) must match number of pools ({len(self.pool_outputs)})")
         
         for datasheet in self.datasheets:
-            if not isinstance(datasheet, (ToolOutput, StandardizedOutput)):
-                raise ValueError("each datasheet must be a ToolOutput or StandardizedOutput object")
+            if not isinstance(datasheet, (ToolOutput, StandardizedOutput, DatasheetInfo)):
+                raise ValueError("each datasheet must be a ToolOutput, StandardizedOutput, or DatasheetInfo object")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input datasheet from previous tool."""
