@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Important code guideline
 
-**Never** implement fallback methods. If the intended function is not working, the code has to crash.
+**Never** implement fallback methods or values. If the intended function is not working, the code has to crash. If the intended value is not found, the code has to crash. Do not guess variables values or file paths, rather specify them only once and pass them appropriately.
 
 ## Project Overview
 
@@ -22,7 +22,14 @@ Each tool can depend on a specific conda environment. It is up to the user to sp
 
 ## Architecture & Workflow Structure
 
-### Key Components
+### Key Workflow
+
+At "pipeline runtime" a Tool generates bash scripts and predict the filesystem structure of the output these bash scripts will produce based on its input. Tools are written agnostic of other tools, as they predict based on tool specific input parameters and output of other tools, which is given in a standard tool-aspecific format. At "slurm runtime" (on cluster supercomputer) those bash scripts are executed. The coordination of tools and managing of folders is done via a Pipeline class. Any python code that is executed at slurm time is present as a script in HelpScripts with name pipe_<purpose>.py. 
+
+Pipeline | Slurm | Filesystem
+Tool1 -> <tool1>.sh -> <job folder>/<Execution order>_<Tool name>/<output files>
+Tool2 -> <tool2>.sh -> <job folder>/<Execution order>_<Tool name>/<output files>
+...
 
 #### Core Directories
 

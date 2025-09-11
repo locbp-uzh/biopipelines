@@ -53,6 +53,9 @@ class Boltz2(BaseConfig):
                  output_format: str = "pdb",
                  msa_server: str = "public",
                  global_msas_cache: bool = False,
+                 # Advanced prediction parameters
+                 recycling_steps: Optional[int] = None,
+                 diffusion_samples: Optional[int] = None,
                  **kwargs):
         """
         Initialize Boltz2 configuration.
@@ -73,6 +76,8 @@ class Boltz2(BaseConfig):
             output_format: Output format ("pdb" or "mmcif")
             msa_server: MSA generation ("public" or "local")
             global_msas_cache: Enable global MSA caching to reuse MSAs across jobs
+            recycling_steps: Number of recycling steps (default: Boltz2 default 3)
+            diffusion_samples: Number of diffusion samples (default: Boltz2 default 1)
             **kwargs: Additional parameters
         """
         # Initialize default values
@@ -170,6 +175,8 @@ class Boltz2(BaseConfig):
         self.output_format = output_format
         self.msa_server = msa_server
         self.global_msas_cache = global_msas_cache
+        self.recycling_steps = recycling_steps
+        self.diffusion_samples = diffusion_samples
         
         # Track input source type and files (tool-agnostic)
         self.input_yaml_entities = None
@@ -314,6 +321,13 @@ class Boltz2(BaseConfig):
         
         if self.msa_server not in ["public", "local"]:
             raise ValueError("msa_server must be 'public' or 'local'")
+        
+        # Validate recycling_steps and diffusion_samples
+        if self.recycling_steps is not None and (not isinstance(self.recycling_steps, int) or self.recycling_steps < 1):
+            raise ValueError("recycling_steps must be a positive integer")
+        
+        if self.diffusion_samples is not None and (not isinstance(self.diffusion_samples, int) or self.diffusion_samples < 1):
+            raise ValueError("diffusion_samples must be a positive integer")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sequences from various sources (tool-agnostic)."""
@@ -981,6 +995,13 @@ python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_para
         # Run Boltz2 prediction
         boltz_options = f"--cache {boltz_cache_folder} --out_dir {self.output_folder}{msa_option} --output_format {self.output_format}"
         
+        # Add recycling_steps and diffusion_samples if specified
+        if self.recycling_steps is not None:
+            boltz_options += f" --recycling_steps {self.recycling_steps}"
+        
+        if self.diffusion_samples is not None:
+            boltz_options += f" --diffusion_samples {self.diffusion_samples}"
+        
         if self.queries_csv_file or self.input_fasta_files or (hasattr(self, 'input_direct_sequence') and self.input_direct_sequence and (has_multiple_ligands or hasattr(self, '_needs_global_msa_cache') or hasattr(self, '_needs_msa_integration'))):
             # Multiple config files - run prediction for each one
             config_files_dir = os.path.join(self.output_folder, "config_files")
@@ -1515,6 +1536,13 @@ echo "Post-processing completed - structures renamed with sequence IDs"
             f"Affinity calculation: {self.affinity}"
         ])
         
+        # Add advanced parameters if specified
+        if self.recycling_steps is not None:
+            config_lines.append(f"Recycling steps: {self.recycling_steps}")
+        
+        if self.diffusion_samples is not None:
+            config_lines.append(f"Diffusion samples: {self.diffusion_samples}")
+        
         return config_lines
     
     def to_dict(self) -> Dict[str, Any]:
@@ -1532,7 +1560,9 @@ echo "Post-processing completed - structures renamed with sequence IDs"
                 "library_type": self.library_type,
                 "affinity": self.affinity,
                 "output_format": self.output_format,
-                "msa_server": self.msa_server
+                "msa_server": self.msa_server,
+                "recycling_steps": self.recycling_steps,
+                "diffusion_samples": self.diffusion_samples
             }
         })
         return base_dict

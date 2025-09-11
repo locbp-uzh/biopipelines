@@ -326,7 +326,7 @@ fi
         # Get actual column names from input
         input_columns = self._get_input_columns()
         
-        missing_ids_csv = os.path.join(self.output_folder, "missing_ids.csv")
+        missing_csv = os.path.join(self.output_folder, "missing.csv")
         
         datasheets = {
             "filtered": DatasheetInfo(
@@ -336,9 +336,9 @@ fi
                 description=f"Filtered results using expression: {self.expression}",
                 count="variable"
             ),
-            "missing_ids": DatasheetInfo(
-                name="missing_ids",
-                path=missing_ids_csv,
+            "missing": DatasheetInfo(
+                name="missing",
+                path=missing_csv,
                 columns=["id", "structure", "msa"],
                 description="IDs that were filtered out and their expected file paths",
                 count="variable"

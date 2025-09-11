@@ -69,18 +69,7 @@ class LoadOutput(BaseConfig):
         
         # Set up job name based on loaded result
         if not kwargs.get('job_name'):
-            # Debug: Print available keys to understand the structure
-            if self.loaded_result:
-                print(f"Debug: Available keys in loaded result: {list(self.loaded_result.keys())}")
-                if 'job_name' in self.loaded_result:
-                    print(f"Debug: job_name found: {self.loaded_result['job_name']}")
-                else:
-                    print("Debug: job_name not found at top level")
-                    # Check if job_name is nested under configuration
-                    if 'configuration' in self.loaded_result and 'pipeline_context' in self.loaded_result['configuration']:
-                        pipeline_context = self.loaded_result['configuration']['pipeline_context']
-                        if 'pipeline_job_name' in pipeline_context:
-                            print(f"Debug: Found pipeline_job_name: {pipeline_context['pipeline_job_name']}")
+            # Extract job name from loaded result if available (will be processed below)
             
             # Try multiple locations for the job name
             original_job_name = self.loaded_result.get('job_name')

@@ -30,13 +30,8 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
     """
     extracted_files = {"structures": [], "compounds": [], "sequences": []}
     
-    # Create output subdirectories
-    structures_dir = os.path.join(output_folder, "structures")
-    compounds_dir = os.path.join(output_folder, "compounds")
-    sequences_dir = os.path.join(output_folder, "sequences")
-    
-    for dir_path in [structures_dir, compounds_dir, sequences_dir]:
-        os.makedirs(dir_path, exist_ok=True)
+    # Filter puts structures/compounds directly in output folder (not subdirectories)
+    os.makedirs(output_folder, exist_ok=True)
     
     print(f"\nPool mode: Extracting data for {len(filtered_ids)} filtered IDs")
     
@@ -55,7 +50,7 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
             matches = glob.glob(pattern, recursive=True)
             if matches:
                 source = matches[0]
-                dest = os.path.join(structures_dir, f"filtered_{i}.pdb")
+                dest = os.path.join(output_folder, f"{selected_id}.pdb")
                 try:
                     shutil.copy2(source, dest)
                     extracted_files["structures"].append(dest)
@@ -76,7 +71,7 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
             matches = glob.glob(pattern, recursive=True)
             if matches:
                 source = matches[0]
-                dest = os.path.join(compounds_dir, f"filtered_{i}.sdf")
+                dest = os.path.join(output_folder, f"{selected_id}.sdf")
                 try:
                     shutil.copy2(source, dest)
                     extracted_files["compounds"].append(dest)
@@ -304,10 +299,10 @@ def create_missing_ids_csv(original_df: pd.DataFrame, filtered_df: pd.DataFrame,
             })
         missing_df = pd.DataFrame(missing_data)
     
-    # Save missing_ids.csv
-    missing_ids_csv = os.path.join(output_folder, "missing_ids.csv")
-    missing_df.to_csv(missing_ids_csv, index=False)
-    print(f"Created missing_ids.csv with {len(missing_ids)} filtered out IDs")
+    # Save missing.csv (consistent naming with other tools)
+    missing_csv = os.path.join(output_folder, "missing.csv")
+    missing_df.to_csv(missing_csv, index=False)
+    print(f"Created missing.csv with {len(missing_ids)} filtered out IDs")
 
 
 def validate_expression_syntax(expression: str, columns: List[str]) -> None:
