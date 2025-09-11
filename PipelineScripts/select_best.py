@@ -211,21 +211,34 @@ class SelectBest(BaseConfig):
     def validate_params(self):
         """Validate SelectBest parameters."""
         if self.use_pool_mode:
-            # New pool + data mode
-            if not isinstance(self.pool_output, (ToolOutput, StandardizedOutput)):
-                raise ValueError("pool must be a ToolOutput or StandardizedOutput object")
+            # Validate pool outputs
+            if not self.pool_outputs:
+                raise ValueError("pool_outputs must be provided")
             
-            # Validate data parameter
-            if self.data_name:
-                # String datasheet name
-                if not isinstance(self.data_name, str) or not self.data_name:
-                    raise ValueError("data must be a non-empty string specifying the datasheet name")
-            elif self.data_output:
-                # Tool output for evaluation
-                if not isinstance(self.data_output, (ToolOutput, StandardizedOutput)):
-                    raise ValueError("data must be a ToolOutput or StandardizedOutput object")
+            for pool_output in self.pool_outputs:
+                if not isinstance(pool_output, (ToolOutput, StandardizedOutput)):
+                    raise ValueError("each pool must be a ToolOutput or StandardizedOutput object")
+            
+            if self.use_multi_cycle_mode:
+                # Multi-cycle mode: validate datasheets
+                if not self.datasheets:
+                    raise ValueError("datasheets parameter is required in multi-cycle mode")
+                
+                for datasheet in self.datasheets:
+                    if not isinstance(datasheet, (ToolOutput, StandardizedOutput)):
+                        raise ValueError("each datasheet must be a ToolOutput or StandardizedOutput object")
             else:
-                raise ValueError("data parameter is required in pool mode")
+                # Single-cycle mode: validate data parameter
+                if self.data_name:
+                    # String datasheet name
+                    if not isinstance(self.data_name, str) or not self.data_name:
+                        raise ValueError("data must be a non-empty string specifying the datasheet name")
+                elif self.data_output:
+                    # Tool output for evaluation
+                    if not isinstance(self.data_output, (ToolOutput, StandardizedOutput)):
+                        raise ValueError("data must be a ToolOutput or StandardizedOutput object")
+                else:
+                    raise ValueError("data parameter is required in single-cycle pool mode")
         else:
             # Legacy input mode
             if not isinstance(self.selection_input, (ToolOutput, StandardizedOutput)):
@@ -282,8 +295,8 @@ class SelectBest(BaseConfig):
                 
         else:
             # Data comes from a named datasheet within the pool output
-            if hasattr(self.pool_output, 'datasheets'):
-                datasheets = self.pool_output.datasheets
+            if hasattr(self.pool_outputs[0], 'datasheets'):
+                datasheets = self.pool_outputs[0].datasheets
                 
                 # Look for the specified datasheet name
                 if hasattr(datasheets, self.data_name):
@@ -302,8 +315,8 @@ class SelectBest(BaseConfig):
                         self.input_csv_path = str(ds_info)
             
             # Fallback: predict path based on pool output folder and data name
-            if not self.input_csv_path and hasattr(self.pool_output, 'output_folder'):
-                output_folder = self.pool_output.output_folder
+            if not self.input_csv_path and hasattr(self.pool_outputs[0], 'output_folder'):
+                output_folder = self.pool_outputs[0].output_folder
                 predicted_name = f"{self.data_name}_results.csv"
                 self.input_csv_path = os.path.join(output_folder, predicted_name)
         
@@ -313,25 +326,25 @@ class SelectBest(BaseConfig):
                 raise ValueError(f"Could not predict input CSV path from data tool output: {self.data_output}")
             else:
                 available_datasheets = []
-                if hasattr(self.pool_output, 'datasheets'):
-                    if hasattr(self.pool_output.datasheets, '_datasheets'):
-                        available_datasheets = list(self.pool_output.datasheets._datasheets.keys())
-                    elif isinstance(self.pool_output.datasheets, dict):
-                        available_datasheets = list(self.pool_output.datasheets.keys())
+                if hasattr(self.pool_outputs[0], 'datasheets'):
+                    if hasattr(self.pool_outputs[0].datasheets, '_datasheets'):
+                        available_datasheets = list(self.pool_outputs[0].datasheets._datasheets.keys())
+                    elif isinstance(self.pool_outputs[0].datasheets, dict):
+                        available_datasheets = list(self.pool_outputs[0].datasheets.keys())
                 
                 raise ValueError(f"Could not find datasheet '{self.data_name}' in pool output. "
                                f"Available datasheets: {available_datasheets}")
         
         # Store the full pool output for later data extraction
-        self.pool_source = self.pool_output
+        self.pool_source = self.pool_outputs[0]
         
         # Predict source data directories from pool output
         self.source_structures_dir = None
-        if hasattr(self.pool_output, 'output_folder'):
+        if hasattr(self.pool_outputs[0], 'output_folder'):
             potential_dirs = [
-                self.pool_output.output_folder,
-                os.path.join(self.pool_output.output_folder, 'structures'),
-                os.path.join(self.pool_output.output_folder, 'pdbs')
+                self.pool_outputs[0].output_folder,
+                os.path.join(self.pool_outputs[0].output_folder, 'structures'),
+                os.path.join(self.pool_outputs[0].output_folder, 'pdbs')
             ]
             self.source_structures_dir = potential_dirs[0]
     
@@ -392,9 +405,9 @@ class SelectBest(BaseConfig):
                             return info.columns
             else:
                 # Data comes from a named datasheet within the pool output
-                if hasattr(self.pool_output, 'datasheets') and hasattr(self.pool_output.datasheets, '_datasheets'):
-                    if self.data_name in self.pool_output.datasheets._datasheets:
-                        info = self.pool_output.datasheets._datasheets[self.data_name]
+                if hasattr(self.pool_outputs[0], 'datasheets') and hasattr(self.pool_outputs[0].datasheets, '_datasheets'):
+                    if self.data_name in self.pool_outputs[0].datasheets._datasheets:
+                        info = self.pool_outputs[0].datasheets._datasheets[self.data_name]
                         if hasattr(info, 'columns') and info.columns:
                             return info.columns
         else:

@@ -55,6 +55,7 @@ original_analysis = pipeline.add(MergeDatasheets(
 NUM_CYCLES = 3
 all_sequences_seen = None  # Track all sequences across cycles
 previous_analysis = original_analysis  # Start with original baseline for comparison
+previous_boltz_holo_open = best_open  # Start with original best structure
 
 for CYCLE in range(NUM_CYCLES):
     """
@@ -125,29 +126,19 @@ for CYCLE in range(NUM_CYCLES):
                                     expression="open_chlorine_distance < 5.0"))
     
     """
-    Select best for next cycle using multi-cycle approach
+    Select best across previous and current cycles
     """
-    if CYCLE > 0:
-        # Multi-cycle: search across current and previous pools/datasheets
-        best_open = pipeline.add(SelectBest(
-            pool=[best_open.output, boltz_holo_open.output],  # Previous best + current structures
-            datasheets=[previous_analysis.output.datasheets.merged, current_analysis.output.datasheets.merged],
-            metric='affinity_delta',
-            mode='max',
-            name=f'{CYCLE+1}_best'
-        ))
-    else:
-        # First cycle: only current structures and analysis
-        best_open = pipeline.add(SelectBest(
-            pool=[best_open.output, boltz_holo_open.output],  # Original + current structures  
-            datasheets=[original_analysis.output.datasheets.merged, current_analysis.output.datasheets.merged],
-            metric='affinity_delta',
-            mode='max',
-            name=f'{CYCLE+1}_best'
-        ))
+    best_open = pipeline.add(SelectBest(
+        pool=[previous_boltz_holo_open.output, boltz_holo_open.output],  # Previous + current structures
+        datasheets=[previous_analysis.output.datasheets.merged, current_analysis.output.datasheets.merged],
+        metric='affinity_delta',
+        mode='min',
+        name=f'{CYCLE+1}_best'
+    ))
     
-    # Store analysis for next cycle comparison
+    # Store analysis and structures for next cycle comparison
     previous_analysis = current_analysis
+    previous_boltz_holo_open = boltz_holo_open
 
 #Prints
 pipeline.save()
