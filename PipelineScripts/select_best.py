@@ -88,18 +88,21 @@ class SelectBest(BaseConfig):
         """
         # Determine which approach is being used
         if pool is not None and datasheets is not None:
-            # Array approach: compare across multiple pools
-            self.use_array_mode = True
+            # Array approach: always work with arrays (1 or more elements)
             self.use_pool_mode = True
             
-            # Handle pool - can be single or list
+            # Handle pool - can be single or list, always convert to list
             if isinstance(pool, list):
                 self.pool_outputs = pool
             else:
                 self.pool_outputs = [pool]
             
-            # Handle datasheets - list of datasheets/tool outputs
-            self.datasheets = datasheets
+            # Handle datasheets - always expect list, convert if single
+            if isinstance(datasheets, list):
+                self.datasheets = datasheets
+            else:
+                self.datasheets = [datasheets]
+            
             self.data_name = None
             self.data_output = None
             self.selection_input = None
@@ -115,8 +118,7 @@ class SelectBest(BaseConfig):
             dependency_source = self.pool_outputs[0]
             
         elif pool is not None and data is not None:
-            # Single pool + data approach
-            self.use_array_mode = False
+            # Legacy pool + data approach
             self.use_pool_mode = True
             self.pool_outputs = [pool] if not isinstance(pool, list) else pool
             self.datasheets = None
@@ -143,7 +145,6 @@ class SelectBest(BaseConfig):
             
         elif input is not None:
             # Legacy input approach (including positional)
-            self.use_array_mode = False
             self.use_pool_mode = False
             self.pool_outputs = None
             self.datasheets = None
@@ -153,7 +154,7 @@ class SelectBest(BaseConfig):
             dependencies = []
             dependency_source = input
         else:
-            raise ValueError("Must specify either 'input' (legacy), 'pool'+'data' (single cycle), or 'pool'+'datasheets' (multi-cycle)")
+            raise ValueError("Must specify either 'input' (legacy), 'pool'+'data' (single), or 'pool'+'datasheets' (array)")
         
         if metric is None:
             raise ValueError("metric parameter is required")
@@ -171,28 +172,9 @@ class SelectBest(BaseConfig):
         # Initialize base class
         super().__init__(**kwargs)
         
-        # Set up dependencies
-        if self.use_pool_mode:
-            # Pool mode: add pool(s) and data/datasheet dependencies
-            if self.use_array_mode:
-                # Array mode: add all pools and datasheets
-                for pool_output in self.pool_outputs:
-                    if hasattr(pool_output, 'config'):
-                        self.dependencies.append(pool_output.config)
-                for datasheet in self.datasheets:
-                    if hasattr(datasheet, 'config'):
-                        self.dependencies.append(datasheet.config)
-            else:
-                # Single cycle mode: add pool and data
-                for pool_output in self.pool_outputs:
-                    if hasattr(pool_output, 'config'):
-                        self.dependencies.append(pool_output.config)
-                if self.data_output and hasattr(self.data_output, 'config'):
-                    self.dependencies.append(self.data_output.config)
-        else:
-            # Legacy mode
-            if hasattr(dependency_source, 'config'):
-                self.dependencies.append(dependency_source.config)
+        # Set up dependencies (already handled above in each case)
+        for dep in dependencies:
+            self.dependencies.append(dep)
     
     def _validate_selection_params(self):
         """Validate selection parameters."""
@@ -219,16 +201,16 @@ class SelectBest(BaseConfig):
                 if not isinstance(pool_output, (ToolOutput, StandardizedOutput)):
                     raise ValueError("each pool must be a ToolOutput or StandardizedOutput object")
             
-            if self.use_array_mode:
+            if self.datasheets:
                 # Array mode: validate datasheets
-                if not self.datasheets:
-                    raise ValueError("datasheets parameter is required in array mode")
+                if len(self.datasheets) != len(self.pool_outputs):
+                    raise ValueError(f"Number of datasheets ({len(self.datasheets)}) must match number of pools ({len(self.pool_outputs)})")
                 
                 for datasheet in self.datasheets:
                     if not isinstance(datasheet, (ToolOutput, StandardizedOutput)):
                         raise ValueError("each datasheet must be a ToolOutput or StandardizedOutput object")
             else:
-                # Single-cycle mode: validate data parameter
+                # Legacy pool + data mode: validate data parameter
                 if self.data_name:
                     # String datasheet name
                     if not isinstance(self.data_name, str) or not self.data_name:
@@ -257,7 +239,7 @@ class SelectBest(BaseConfig):
     
     def _configure_pool_mode(self):
         """Configure inputs for pool + data selection mode."""
-        if self.use_array_mode:
+        if self.datasheets:
             # Array mode: pass pools and datasheets arrays directly to script
             self.pool_folders = []
             self.datasheet_paths = []
@@ -494,7 +476,7 @@ class SelectBest(BaseConfig):
         # Create config file for selection
         config_file = os.path.join(output_folder, "select_best_config.json")
         
-        if self.use_array_mode:
+        if self.datasheets:
             # Array mode: pass arrays of pools and datasheets
             config_data = {
                 "selection_metric": self.metric,
