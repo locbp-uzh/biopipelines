@@ -88,7 +88,7 @@ class SelectBest(BaseConfig):
         """
         # Determine which approach is being used
         if pool is not None and datasheets is not None:
-            # New multi-cycle approach: pool + datasheets
+            # Array approach: pool + datasheets arrays
             self.use_multi_cycle_mode = True
             self.use_pool_mode = True
             
@@ -257,7 +257,25 @@ class SelectBest(BaseConfig):
     
     def _configure_pool_mode(self):
         """Configure inputs for pool + data selection mode."""
-        # Get the specified datasheet for evaluation
+        if self.use_multi_cycle_mode:
+            # Array mode: pass pools and datasheets arrays directly to script
+            self.pool_folders = []
+            self.datasheet_paths = []
+            
+            for pool in self.pool_outputs:
+                if hasattr(pool, 'output_folder'):
+                    self.pool_folders.append(pool.output_folder)
+                else:
+                    raise ValueError(f"Pool {pool} must have output_folder")
+            
+            for datasheet in self.datasheets:
+                if hasattr(datasheet, 'path'):
+                    self.datasheet_paths.append(datasheet.path)
+                else:
+                    raise ValueError(f"Datasheet must have path attribute: {datasheet}")
+            return
+        
+        # Single-cycle mode: Get the specified datasheet for evaluation
         self.input_csv_path = None
         
         # Check if data parameter is a tool output (cross-tool evaluation)
@@ -475,21 +493,38 @@ class SelectBest(BaseConfig):
         
         # Create config file for selection
         config_file = os.path.join(output_folder, "select_best_config.json")
-        config_data = {
-            "input_csv": self.input_csv_path,
-            "source_structures_dir": self.source_structures_dir,
-            "selection_metric": self.metric,
-            "selection_mode": self.mode,
-            "weights": self.weights,
-            "tie_breaker": self.tie_breaker,
-            "composite_function": self.composite_function,
-            "output_csv": selected_csv,
-            "output_structure": selected_structure,
-            # New pool mode configuration
-            "use_pool_mode": self.use_pool_mode,
-            "data_name": self.data_name if self.use_pool_mode else None,
-            "pool_output_folder": getattr(self.pool_source, 'output_folder', None) if hasattr(self, 'pool_source') else None
-        }
+        
+        if self.use_multi_cycle_mode:
+            # Array mode: pass arrays of pools and datasheets
+            config_data = {
+                "selection_metric": self.metric,
+                "selection_mode": self.mode,
+                "weights": self.weights,
+                "tie_breaker": self.tie_breaker,
+                "composite_function": self.composite_function,
+                "output_csv": selected_csv,
+                "output_structure": selected_structure,
+                # Array mode configuration
+                "use_array_mode": True,
+                "pool_folders": self.pool_folders,
+                "datasheet_paths": self.datasheet_paths
+            }
+        else:
+            # Single pool/datasheet mode
+            config_data = {
+                "input_csv": self.input_csv_path,
+                "source_structures_dir": self.source_structures_dir,
+                "selection_metric": self.metric,
+                "selection_mode": self.mode,
+                "weights": self.weights,
+                "tie_breaker": self.tie_breaker,
+                "composite_function": self.composite_function,
+                "output_csv": selected_csv,
+                "output_structure": selected_structure,
+                "use_pool_mode": self.use_pool_mode,
+                "data_name": self.data_name if self.use_pool_mode else None,
+                "pool_output_folder": getattr(self.pool_source, 'output_folder', None) if hasattr(self, 'pool_source') else None
+            }
         
         import json
         with open(config_file, 'w') as f:

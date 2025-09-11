@@ -233,6 +233,88 @@ def extract_pool_data_for_id(selected_id: str, pool_folder: str, output_folder: 
     return extracted_files
 
 
+def select_best_from_arrays(config_data: Dict[str, Any]) -> None:
+    """
+    Select best item from multiple datasheets and extract from corresponding pools.
+    
+    Args:
+        config_data: Configuration with pool_folders and datasheet_paths arrays
+    """
+    pool_folders = config_data['pool_folders']
+    datasheet_paths = config_data['datasheet_paths']
+    selection_metric = config_data['selection_metric']
+    selection_mode = config_data['selection_mode']
+    output_csv = config_data['output_csv']
+    output_structure = config_data['output_structure']
+    
+    print(f"Array mode: Selecting best from {len(datasheet_paths)} datasheets")
+    print(f"Selection metric: {selection_metric} ({selection_mode})")
+    
+    # Load and concatenate all datasheets
+    all_dfs = []
+    pool_indices = []  # Track which pool each row comes from
+    
+    for i, datasheet_path in enumerate(datasheet_paths):
+        if not os.path.exists(datasheet_path):
+            print(f"Warning: Datasheet not found: {datasheet_path}")
+            continue
+            
+        try:
+            df = pd.read_csv(datasheet_path)
+            df['_pool_index'] = i  # Add pool index to each row
+            all_dfs.append(df)
+            pool_indices.extend([i] * len(df))
+            print(f"Loaded datasheet {i}: {datasheet_path} ({len(df)} rows)")
+        except Exception as e:
+            print(f"Error loading {datasheet_path}: {e}")
+            continue
+    
+    if not all_dfs:
+        raise ValueError("No valid datasheets found")
+    
+    # Concatenate all dataframes
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    print(f"Combined dataframe: {combined_df.shape}")
+    
+    # Find best row
+    if selection_metric not in combined_df.columns:
+        raise ValueError(f"Metric '{selection_metric}' not found in combined data")
+    
+    metric_values = combined_df[selection_metric]
+    if selection_mode in ["max", "maximize"]:
+        best_idx = metric_values.idxmax()
+    else:
+        best_idx = metric_values.idxmin()
+    
+    selected_row = combined_df.iloc[best_idx]
+    pool_index = selected_row['_pool_index']
+    
+    print(f"Selected best item from pool {pool_index}: {selection_metric} = {selected_row[selection_metric]}")
+    
+    # Save selected row (without _pool_index column)
+    selected_row_clean = selected_row.drop('_pool_index').to_frame().T
+    selected_row_clean.to_csv(output_csv, index=False)
+    
+    # Extract structure from the corresponding pool
+    selected_id = selected_row.get('id', 'unknown')
+    pool_folder = pool_folders[pool_index]
+    output_dir = os.path.dirname(output_structure)
+    
+    print(f"Extracting structure for ID '{selected_id}' from pool: {pool_folder}")
+    extracted_files = extract_pool_data_for_id(selected_id, pool_folder, output_dir)
+    
+    # Rename structure file to match expected output name
+    if 'structure' in extracted_files and os.path.exists(extracted_files['structure']):
+        if extracted_files['structure'] != output_structure:
+            shutil.move(extracted_files['structure'], output_structure)
+            print(f"Renamed structure to: {output_structure}")
+    
+    print(f"Selection completed successfully!")
+    print(f"Selected metric value: {selected_row[selection_metric]}")
+    print(f"Output datasheet: {output_csv}")
+    print(f"Output structure: {output_structure}")
+
+
 def select_best_item(config_data: Dict[str, Any]) -> None:
     """
     Select the best item from analysis results.
@@ -240,6 +322,12 @@ def select_best_item(config_data: Dict[str, Any]) -> None:
     Args:
         config_data: Configuration dictionary with selection parameters
     """
+    # Check for array mode
+    if config_data.get('use_array_mode', False):
+        select_best_from_arrays(config_data)
+        return
+    
+    # Single mode
     input_csv = config_data['input_csv']
     structures_dir = config_data.get('source_structures_dir')
     selection_metric = config_data['selection_metric']
