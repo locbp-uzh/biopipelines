@@ -125,29 +125,26 @@ for CYCLE in range(NUM_CYCLES):
                                     expression="open_chlorine_distance < 5.0"))
     
     """
-    Combine current results with previous best (if not first cycle)
+    Select best for next cycle using multi-cycle approach
     """
     if CYCLE > 0:
-        combined_candidates = pipeline.add(ConcatenateDatasheets(
-            datasheets=[current_analysis.output.datasheets.merged,
-                       previous_analysis.output.datasheets.merged]
+        # Multi-cycle: search across current and previous pools/datasheets
+        best_open = pipeline.add(SelectBest(
+            pool=[best_open.output, boltz_holo_open.output],  # Previous best + current structures
+            datasheets=[previous_analysis.output.datasheets.merged, current_analysis.output.datasheets.merged],
+            metric='affinity_delta',
+            mode='max',
+            name=f'{CYCLE+1}_best'
         ))
-        selection_pool = combined_candidates.output
-        selection_data = combined_candidates.output
     else:
-        selection_pool = current_filtered.output
-        selection_data = current_analysis.output
-    
-    """
-    Select best for next cycle (FIXED)
-    """
-    best_open = pipeline.add(SelectBest(
-        pool=selection_pool,
-        data=selection_data,
-        metric='affinity_delta',
-        mode='max',
-        name=f'{CYCLE+1}_best'
-    ))
+        # First cycle: only current structures and analysis
+        best_open = pipeline.add(SelectBest(
+            pool=[best_open.output, boltz_holo_open.output],  # Original + current structures  
+            datasheets=[original_analysis.output.datasheets.merged, current_analysis.output.datasheets.merged],
+            metric='affinity_delta',
+            mode='max',
+            name=f'{CYCLE+1}_best'
+        ))
     
     # Store analysis for next cycle comparison
     previous_analysis = current_analysis

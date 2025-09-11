@@ -34,8 +34,9 @@ class SelectBest(BaseConfig):
     
     def __init__(self,
                  input: Union[ToolOutput, StandardizedOutput] = None,
-                 pool: Union[ToolOutput, StandardizedOutput] = None,
+                 pool: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]] = None,
                  data: Union[str, ToolOutput, StandardizedOutput] = None,
+                 datasheets: Union[List[Union[ToolOutput, StandardizedOutput]], List[str]] = None,
                  metric: str = None,
                  mode: str = "max",
                  weights: Optional[Dict[str, float]] = None,
@@ -48,8 +49,9 @@ class SelectBest(BaseConfig):
         
         Args:
             input: [LEGACY] Input from previous tool (analysis results or filtered data)
-            pool: Full tool output to select from (new approach)
-            data: Which datasheet to evaluate for selection (string name) or tool output to evaluate (new approach)
+            pool: Single or list of tool outputs to select structures from
+            data: [LEGACY] Which datasheet to evaluate for selection (string name) or tool output to evaluate
+            datasheets: List of datasheets/tool outputs to concatenate for evaluation (new multi-cycle approach)
             metric: Primary metric to optimize for selection
             mode: "max" or "min" the metric
             weights: Dict of {metric_name: weight} for multi-metric selection
@@ -59,9 +61,10 @@ class SelectBest(BaseConfig):
             **kwargs: Additional parameters
             
         Examples:
-            # New approach: pool + data selection
+            # Multi-cycle approach: pools + datasheets
             best = pipeline.add(SelectBest(
-                pool=boltz.output,           # Full tool output
+                pool=[boltz1.output, boltz2.output],     # List of structure pools to search
+                datasheets=[analysis1.output.datasheets.merged, analysis2.output.datasheets.merged],  # List of analysis datasheets
                 data="compounds",            # Evaluate compounds datasheet
                 metric="binding_affinity",
                 mode="max"
@@ -84,10 +87,39 @@ class SelectBest(BaseConfig):
             ))
         """
         # Determine which approach is being used
-        if pool is not None and data is not None:
-            # New pool + data approach
+        if pool is not None and datasheets is not None:
+            # New multi-cycle approach: pool + datasheets
+            self.use_multi_cycle_mode = True
             self.use_pool_mode = True
-            self.pool_output = pool
+            
+            # Handle pool - can be single or list
+            if isinstance(pool, list):
+                self.pool_outputs = pool
+            else:
+                self.pool_outputs = [pool]
+            
+            # Handle datasheets - list of datasheets/tool outputs
+            self.datasheets = datasheets
+            self.data_name = None
+            self.data_output = None
+            self.selection_input = None
+            
+            # Set up dependencies
+            dependencies = []
+            for p in self.pool_outputs:
+                if hasattr(p, 'config'):
+                    dependencies.append(p.config)
+            for ds in self.datasheets:
+                if hasattr(ds, 'config'):
+                    dependencies.append(ds.config)
+            dependency_source = self.pool_outputs[0]
+            
+        elif pool is not None and data is not None:
+            # Legacy pool + data approach
+            self.use_multi_cycle_mode = False
+            self.use_pool_mode = True
+            self.pool_outputs = [pool] if not isinstance(pool, list) else pool
+            self.datasheets = None
             
             # Handle data parameter - can be string (datasheet name) or tool output
             if isinstance(data, str):
@@ -101,19 +133,27 @@ class SelectBest(BaseConfig):
             self.selection_input = None
             
             # Set up dependencies
-            dependencies = [pool]
+            dependencies = []
+            for p in self.pool_outputs:
+                if hasattr(p, 'config'):
+                    dependencies.append(p.config)
             if self.data_output and hasattr(data, 'config'):
                 dependencies.append(data.config)
-            dependency_source = pool
+            dependency_source = self.pool_outputs[0]
+            
         elif input is not None:
             # Legacy input approach (including positional)
+            self.use_multi_cycle_mode = False
             self.use_pool_mode = False
-            self.pool_output = None
+            self.pool_outputs = None
+            self.datasheets = None
             self.data_name = None
+            self.data_output = None
             self.selection_input = input
+            dependencies = []
             dependency_source = input
         else:
-            raise ValueError("Must specify either 'input' (legacy) or both 'pool' and 'data' (new approach)")
+            raise ValueError("Must specify either 'input' (legacy), 'pool'+'data' (single cycle), or 'pool'+'datasheets' (multi-cycle)")
         
         if metric is None:
             raise ValueError("metric parameter is required")
@@ -133,11 +173,22 @@ class SelectBest(BaseConfig):
         
         # Set up dependencies
         if self.use_pool_mode:
-            # Pool mode: add both pool and data dependencies
-            if hasattr(self.pool_output, 'config'):
-                self.dependencies.append(self.pool_output.config)
-            if self.data_output and hasattr(self.data_output, 'config'):
-                self.dependencies.append(self.data_output.config)
+            # Pool mode: add pool(s) and data/datasheet dependencies
+            if self.use_multi_cycle_mode:
+                # Multi-cycle mode: add all pools and datasheets
+                for pool_output in self.pool_outputs:
+                    if hasattr(pool_output, 'config'):
+                        self.dependencies.append(pool_output.config)
+                for datasheet in self.datasheets:
+                    if hasattr(datasheet, 'config'):
+                        self.dependencies.append(datasheet.config)
+            else:
+                # Single cycle mode: add pool and data
+                for pool_output in self.pool_outputs:
+                    if hasattr(pool_output, 'config'):
+                        self.dependencies.append(pool_output.config)
+                if self.data_output and hasattr(self.data_output, 'config'):
+                    self.dependencies.append(self.data_output.config)
         else:
             # Legacy mode
             if hasattr(dependency_source, 'config'):
