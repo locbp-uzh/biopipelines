@@ -61,10 +61,10 @@ class SelectBest(BaseConfig):
             **kwargs: Additional parameters
             
         Examples:
-            # Multi-cycle approach: pools + datasheets
+            # Compare across multiple pools (e.g., engineered vs original)
             best = pipeline.add(SelectBest(
-                pool=[boltz1.output, boltz2.output],     # List of structure pools to search
-                datasheets=[analysis1.output.datasheets.merged, analysis2.output.datasheets.merged],  # List of analysis datasheets
+                pool=[original.output, engineered.output],     # List of structure pools to search
+                datasheets=[original_analysis.output.datasheets.merged, engineered_analysis.output.datasheets.merged],  # List of analysis datasheets
                 data="compounds",            # Evaluate compounds datasheet
                 metric="binding_affinity",
                 mode="max"
@@ -88,8 +88,8 @@ class SelectBest(BaseConfig):
         """
         # Determine which approach is being used
         if pool is not None and datasheets is not None:
-            # Array approach: pool + datasheets arrays
-            self.use_multi_cycle_mode = True
+            # Array approach: compare across multiple pools
+            self.use_array_mode = True
             self.use_pool_mode = True
             
             # Handle pool - can be single or list
@@ -115,8 +115,8 @@ class SelectBest(BaseConfig):
             dependency_source = self.pool_outputs[0]
             
         elif pool is not None and data is not None:
-            # Legacy pool + data approach
-            self.use_multi_cycle_mode = False
+            # Single pool + data approach
+            self.use_array_mode = False
             self.use_pool_mode = True
             self.pool_outputs = [pool] if not isinstance(pool, list) else pool
             self.datasheets = None
@@ -143,7 +143,7 @@ class SelectBest(BaseConfig):
             
         elif input is not None:
             # Legacy input approach (including positional)
-            self.use_multi_cycle_mode = False
+            self.use_array_mode = False
             self.use_pool_mode = False
             self.pool_outputs = None
             self.datasheets = None
@@ -174,8 +174,8 @@ class SelectBest(BaseConfig):
         # Set up dependencies
         if self.use_pool_mode:
             # Pool mode: add pool(s) and data/datasheet dependencies
-            if self.use_multi_cycle_mode:
-                # Multi-cycle mode: add all pools and datasheets
+            if self.use_array_mode:
+                # Array mode: add all pools and datasheets
                 for pool_output in self.pool_outputs:
                     if hasattr(pool_output, 'config'):
                         self.dependencies.append(pool_output.config)
@@ -219,10 +219,10 @@ class SelectBest(BaseConfig):
                 if not isinstance(pool_output, (ToolOutput, StandardizedOutput)):
                     raise ValueError("each pool must be a ToolOutput or StandardizedOutput object")
             
-            if self.use_multi_cycle_mode:
-                # Multi-cycle mode: validate datasheets
+            if self.use_array_mode:
+                # Array mode: validate datasheets
                 if not self.datasheets:
-                    raise ValueError("datasheets parameter is required in multi-cycle mode")
+                    raise ValueError("datasheets parameter is required in array mode")
                 
                 for datasheet in self.datasheets:
                     if not isinstance(datasheet, (ToolOutput, StandardizedOutput)):
@@ -238,7 +238,7 @@ class SelectBest(BaseConfig):
                     if not isinstance(self.data_output, (ToolOutput, StandardizedOutput)):
                         raise ValueError("data must be a ToolOutput or StandardizedOutput object")
                 else:
-                    raise ValueError("data parameter is required in single-cycle pool mode")
+                    raise ValueError("data parameter is required in single pool mode")
         else:
             # Legacy input mode
             if not isinstance(self.selection_input, (ToolOutput, StandardizedOutput)):
@@ -257,7 +257,7 @@ class SelectBest(BaseConfig):
     
     def _configure_pool_mode(self):
         """Configure inputs for pool + data selection mode."""
-        if self.use_multi_cycle_mode:
+        if self.use_array_mode:
             # Array mode: pass pools and datasheets arrays directly to script
             self.pool_folders = []
             self.datasheet_paths = []
@@ -494,7 +494,7 @@ class SelectBest(BaseConfig):
         # Create config file for selection
         config_file = os.path.join(output_folder, "select_best_config.json")
         
-        if self.use_multi_cycle_mode:
+        if self.use_array_mode:
             # Array mode: pass arrays of pools and datasheets
             config_data = {
                 "selection_metric": self.metric,
