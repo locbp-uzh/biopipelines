@@ -203,189 +203,6 @@ class SelectBest(BaseConfig):
         runtime_folder = os.path.dirname(script_path)
         output_folder = self.output_folder
         os.makedirs(output_folder, exist_ok=True)
-                    self.input_csv_path = ds_info
-                else:
-                    self.input_csv_path = str(ds_info)
-            
-            if not self.input_csv_path:
-                raise ValueError(f"Could not predict input CSV path from data_output: {self.data_output}. "
-                               f"The input tool must provide proper datasheet path predictions.")
-                
-        else:
-            # Data comes from a named datasheet within the pool output
-            if hasattr(self.pool_outputs[0], 'datasheets'):
-                datasheets = self.pool_outputs[0].datasheets
-                
-                # Look for the specified datasheet name
-                if hasattr(datasheets, self.data_name):
-                    ds_info = getattr(datasheets, self.data_name)
-                    if hasattr(ds_info, 'path'):
-                        self.input_csv_path = ds_info.path
-                    elif isinstance(ds_info, str):
-                        self.input_csv_path = ds_info
-                    else:
-                        self.input_csv_path = str(ds_info)
-                elif isinstance(datasheets, dict) and self.data_name in datasheets:
-                    ds_info = datasheets[self.data_name]
-                    if isinstance(ds_info, dict) and 'path' in ds_info:
-                        self.input_csv_path = ds_info['path']
-                    else:
-                        self.input_csv_path = str(ds_info)
-            
-            # Fallback: predict path based on pool output folder and data name
-            if not self.input_csv_path and hasattr(self.pool_outputs[0], 'output_folder'):
-                output_folder = self.pool_outputs[0].output_folder
-                predicted_name = f"{self.data_name}_results.csv"
-                self.input_csv_path = os.path.join(output_folder, predicted_name)
-        
-        # Validation
-        if not self.input_csv_path:
-            if self.data_output:
-                raise ValueError(f"Could not predict input CSV path from data tool output: {self.data_output}")
-            else:
-                available_datasheets = []
-                if hasattr(self.pool_outputs[0], 'datasheets'):
-                    if hasattr(self.pool_outputs[0].datasheets, '_datasheets'):
-                        available_datasheets = list(self.pool_outputs[0].datasheets._datasheets.keys())
-                    elif isinstance(self.pool_outputs[0].datasheets, dict):
-                        available_datasheets = list(self.pool_outputs[0].datasheets.keys())
-                
-                raise ValueError(f"Could not find datasheet '{self.data_name}' in pool output. "
-                               f"Available datasheets: {available_datasheets}")
-        
-        # Store the full pool output for later data extraction
-        self.pool_source = self.pool_outputs[0]
-        
-        # Predict source data directories from pool output
-        self.source_structures_dir = None
-        if hasattr(self.pool_outputs[0], 'output_folder'):
-            potential_dirs = [
-                self.pool_outputs[0].output_folder,
-                os.path.join(self.pool_outputs[0].output_folder, 'structures'),
-                os.path.join(self.pool_outputs[0].output_folder, 'pdbs')
-            ]
-            self.source_structures_dir = potential_dirs[0]
-    
-    def _configure_legacy_mode(self):
-        """Configure inputs for legacy input mode."""
-        # Get the input CSV file from the previous tool
-        self.input_csv_path = None
-        
-        if hasattr(self.selection_input, 'datasheets'):
-            datasheets = self.selection_input.datasheets
-            if isinstance(datasheets, dict):
-                # Find the main datasheet (look for 'combined', 'filtered', or first available)
-                priority_names = ['combined', 'filtered', 'analysis', 'structures']
-                
-                for name in priority_names:
-                    if name in datasheets:
-                        ds_info = datasheets[name]
-                        break
-                else:
-                    # Take first available
-                    ds_info = next(iter(datasheets.values()))
-                
-                if isinstance(ds_info, dict) and 'path' in ds_info:
-                    self.input_csv_path = ds_info['path']
-                else:
-                    self.input_csv_path = str(ds_info)
-        
-        if not self.input_csv_path:
-            raise ValueError(f"Could not predict input CSV path from previous tool: {self.selection_input}. "
-                           f"The input tool must provide proper datasheet path predictions.")
-        
-        # Store for legacy compatibility
-        self.pool_source = self.selection_input
-        
-        # Also predict source structures directory
-        self.source_structures_dir = None
-        if hasattr(self.selection_input, 'output_folder'):
-            # Predict common structure directory locations (don't check existence)
-            potential_dirs = [
-                self.selection_input.output_folder,
-                os.path.join(self.selection_input.output_folder, 'structures'),
-                os.path.join(self.selection_input.output_folder, 'pdbs')
-            ]
-            
-            # Use first predicted directory (don't verify contents)
-            self.source_structures_dir = potential_dirs[0]
-    
-    def _get_input_columns(self) -> List[str]:
-        """Get column names from the input datasheet."""
-        if self.use_pool_mode:
-            # Pool mode: get columns from data source
-            if self.data_output:
-                # Data comes from a separate tool output
-                if hasattr(self.data_output, 'datasheets') and hasattr(self.data_output.datasheets, '_datasheets'):
-                    # Look through datasheets to find one with column info
-                    for name, info in self.data_output.datasheets._datasheets.items():
-                        if hasattr(info, 'columns') and info.columns:
-                            return info.columns
-            else:
-                # Data comes from a named datasheet within the pool output
-                if hasattr(self.pool_outputs[0], 'datasheets') and hasattr(self.pool_outputs[0].datasheets, '_datasheets'):
-                    if self.data_name in self.pool_outputs[0].datasheets._datasheets:
-                        info = self.pool_outputs[0].datasheets._datasheets[self.data_name]
-                        if hasattr(info, 'columns') and info.columns:
-                            return info.columns
-        else:
-            # Legacy mode: get columns from selection input
-            if hasattr(self.selection_input, 'datasheets') and hasattr(self.selection_input.datasheets, '_datasheets'):
-                # Look through the datasheets to find one with column info
-                for name, info in self.selection_input.datasheets._datasheets.items():
-                    if hasattr(info, 'columns') and info.columns:
-                        return info.columns
-        
-        # Return empty list if columns cannot be determined
-        return []
-    
-    def get_config_display(self) -> List[str]:
-        """Get configuration display lines."""
-        config_lines = super().get_config_display()
-        
-        if self.use_pool_mode:
-            if self.data_output:
-                config_lines.extend([
-                    f"MODE: Cross-tool Pool + Data Selection",
-                    f"POOL SOURCE: Tool Output",
-                    f"DATA SOURCE: Tool Output",
-                ])
-            else:
-                config_lines.extend([
-                    f"MODE: Pool + Data Selection",
-                    f"DATA SOURCE: {self.data_name}",
-                ])
-        else:
-            config_lines.append("MODE: Legacy Input Selection")
-        
-        config_lines.extend([
-            f"SELECTION METRIC: {self.metric}",
-            f"SELECTION MODE: {self.mode}",
-            f"TIE BREAKER: {self.tie_breaker}",
-        ])
-        
-        if self.weights:
-            weights_str = ", ".join(f"{k}:{v}" for k, v in self.weights.items())
-            config_lines.extend([
-                f"COMPOSITE FUNCTION: {self.composite_function}",
-                f"WEIGHTS: {weights_str}"
-            ])
-        
-        return config_lines
-    
-    def generate_script(self, script_path: str) -> str:
-        """
-        Generate SelectBest execution script.
-        
-        Args:
-            script_path: Path where script should be written
-            
-        Returns:
-            Script content as string
-        """
-        runtime_folder = os.path.dirname(script_path)
-        output_folder = self.output_folder
-        os.makedirs(output_folder, exist_ok=True)
         
         # Output files
         selected_csv = os.path.join(output_folder, "selected_best.csv")
@@ -393,38 +210,18 @@ class SelectBest(BaseConfig):
         
         # Create config file for selection
         config_file = os.path.join(output_folder, "select_best_config.json")
-        
-        if self.datasheets:
-            # Array mode: pass arrays of pools and datasheets
-            config_data = {
-                "selection_metric": self.metric,
-                "selection_mode": self.mode,
-                "weights": self.weights,
-                "tie_breaker": self.tie_breaker,
-                "composite_function": self.composite_function,
-                "output_csv": selected_csv,
-                "output_structure": selected_structure,
-                # Array mode configuration
-                "use_array_mode": True,
-                "pool_folders": self.pool_folders,
-                "datasheet_paths": self.datasheet_paths
-            }
-        else:
-            # Single pool/datasheet mode
-            config_data = {
-                "input_csv": self.input_csv_path,
-                "source_structures_dir": self.source_structures_dir,
-                "selection_metric": self.metric,
-                "selection_mode": self.mode,
-                "weights": self.weights,
-                "tie_breaker": self.tie_breaker,
-                "composite_function": self.composite_function,
-                "output_csv": selected_csv,
-                "output_structure": selected_structure,
-                "use_pool_mode": self.use_pool_mode,
-                "data_name": self.data_name if self.use_pool_mode else None,
-                "pool_output_folder": getattr(self.pool_source, 'output_folder', None) if hasattr(self, 'pool_source') else None
-            }
+        config_data = {
+            "selection_metric": self.metric,
+            "selection_mode": self.mode,
+            "weights": self.weights,
+            "tie_breaker": self.tie_breaker,
+            "composite_function": self.composite_function,
+            "output_csv": selected_csv,
+            "output_structure": selected_structure,
+            "use_array_mode": True,
+            "pool_folders": self.pool_folders,
+            "datasheet_paths": self.datasheet_paths
+        }
         
         import json
         with open(config_file, 'w') as f:
@@ -437,8 +234,7 @@ class SelectBest(BaseConfig):
 
 {self.generate_completion_check_header()}
 
-echo "Selecting best item from analysis results"
-echo "Input: {self.input_csv_path}"
+echo "Selecting best item from {len(self.datasheet_paths)} datasheets"
 echo "Selection metric: {self.metric} ({self.mode})"
 echo "Output: {selected_structure}"
 
@@ -447,11 +243,11 @@ python "{os.path.join(self.folders['HelpScripts'], 'pipe_select_best.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
-    echo "Selection completed successfully"
-    echo "Best structure: {selected_structure}"
-    echo "Best data: {selected_csv}"
+    echo "Successfully selected best item"
+    echo "Selected structure: {selected_structure}"
+    echo "Selected data: {selected_csv}"
 else
-    echo "Error: Selection failed"
+    echo "Error: Failed to select best item"
     exit 1
 fi
 
@@ -467,13 +263,6 @@ fi
         Returns:
             Dictionary with output file paths for selected item
         """
-        if self.use_pool_mode:
-            return self._get_pool_mode_outputs()
-        else:
-            return self._get_legacy_mode_outputs()
-    
-    def _get_pool_mode_outputs(self) -> Dict[str, List[str]]:
-        """Get outputs for pool mode - includes all data types for selected ID."""
         selected_csv = os.path.join(self.output_folder, "selected_best.csv")
         selected_structure = os.path.join(self.output_folder, f"{self.output_name}.pdb")
         selected_compound = os.path.join(self.output_folder, f"{self.output_name}_compound.sdf")
@@ -482,15 +271,12 @@ fi
         # Use output name as the selected ID
         selected_id = self.output_name
         
-        # Get actual column names from evaluation datasheet
-        input_columns = self._get_input_columns()
-        
         # Define datasheets that will be created
         datasheets = {
             "selected": {
                 "path": selected_csv,
-                "columns": input_columns,  # Use actual columns
-                "description": f"Best item selected from {self.data_name} using {self.metric}",
+                "columns": ["id", self.metric],  # Basic columns
+                "description": f"Best item selected using {self.metric}",
                 "count": 1
             }
         }
@@ -506,44 +292,11 @@ fi
             "output_folder": self.output_folder
         }
     
-    def _get_legacy_mode_outputs(self) -> Dict[str, List[str]]:
-        """Get outputs for legacy mode - single structure + datasheet only."""
-        selected_structure = os.path.join(self.output_folder, f"{self.output_name}.pdb")
-        selected_csv = os.path.join(self.output_folder, "selected_best.csv")
-        
-        # Structure ID should match the structure name without extension
-        structure_id = self.output_name
-        
-        # Get actual column names from input
-        input_columns = self._get_input_columns()
-        
-        datasheets = {
-            "selected": {
-                "path": selected_csv,
-                "columns": input_columns,  # Use actual columns
-                "description": f"Single best item selected using {self.metric}",
-                "count": 1
-            }
-        }
-        
-        return {
-            "structures": [selected_structure],
-            "structure_ids": [structure_id],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
-            "datasheets": datasheets,
-            "output_folder": self.output_folder
-        }
-    
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "use_pool_mode": self.use_pool_mode,
-                "data_name": self.data_name if self.use_pool_mode else None,
                 "metric": self.metric,
                 "mode": self.mode,
                 "weights": self.weights,

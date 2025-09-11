@@ -33,11 +33,11 @@ pipeline.resources(
 It is best practise to start from a Boltz2 output with the open form, to have a benchmark affinity.
 One can then load it with the LoadOutput tool, which will contain the same structures (pdbs), ids, and datasheets as the Boltz2 tool of the past pipeline.  
 """
-best_open = pipeline.add(LoadOutput(
+original_holo_open = pipeline.add(LoadOutput(
     '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
     #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
 ))
-best_closed = pipeline.add(LoadOutput(
+original_holo_close = pipeline.add(LoadOutput(
     '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'
     #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
 ))
@@ -46,8 +46,8 @@ best_closed = pipeline.add(LoadOutput(
 Calculate baseline affinity delta for original structures
 """
 original_analysis = pipeline.add(MergeDatasheets(
-    datasheets=[best_open.output.datasheets.affinity,
-               best_closed.output.datasheets.affinity],
+    datasheets=[original_holo_open.output.datasheets.affinity,
+               original_holo_close.output.datasheets.affinity],
     prefixes=["open_", "close_"],
     calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}
 ))
@@ -55,7 +55,7 @@ original_analysis = pipeline.add(MergeDatasheets(
 NUM_CYCLES = 3
 all_sequences_seen = None  # Track all sequences across cycles
 previous_analysis = original_analysis  # Start with original baseline for comparison
-previous_boltz_holo_open = best_open  # Start with original best structure
+previous_boltz_holo_open = original_holo_open  # Start with original best structure
 
 for CYCLE in range(NUM_CYCLES):
     """
