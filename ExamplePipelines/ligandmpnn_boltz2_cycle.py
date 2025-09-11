@@ -129,7 +129,7 @@ for CYCLE in range(NUM_CYCLES):
     """
     best_open = pipeline.add(SelectBest(
         pool=[previous_boltz_holo_open.output, boltz_holo_open.output],  # Previous + current structures
-        datasheets=[previous_analysis.output.datasheets.merged, current_analysis.output.datasheets.merged],
+        datasheets=[previous_analysis.output, current_analysis.output],  # Pass ToolOutput objects
         metric='affinity_delta',
         mode='min',
         name=f'{CYCLE+1}_best'

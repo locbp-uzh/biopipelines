@@ -140,9 +140,9 @@ class SelectBest(BaseConfig):
         if not self.pool_outputs:
             raise ValueError("pool must be provided")
         
-        for pool_output in self.pool_outputs:
+        for i, pool_output in enumerate(self.pool_outputs):
             if not isinstance(pool_output, (ToolOutput, StandardizedOutput)):
-                raise ValueError("each pool must be a ToolOutput or StandardizedOutput object")
+                raise ValueError(f"pool[{i}] is {type(pool_output)}, must be a ToolOutput or StandardizedOutput object. Value: {pool_output}")
         
         # Validate datasheets
         if not self.datasheets:
@@ -151,9 +151,9 @@ class SelectBest(BaseConfig):
         if len(self.datasheets) != len(self.pool_outputs):
             raise ValueError(f"Number of datasheets ({len(self.datasheets)}) must match number of pools ({len(self.pool_outputs)})")
         
-        for datasheet in self.datasheets:
-            if not isinstance(datasheet, (ToolOutput, StandardizedOutput, DatasheetInfo)):
-                raise ValueError("each datasheet must be a ToolOutput, StandardizedOutput, or DatasheetInfo object")
+        for i, datasheet in enumerate(self.datasheets):
+            if not isinstance(datasheet, (ToolOutput, StandardizedOutput)):
+                raise ValueError(f"datasheet[{i}] is {type(datasheet)}, must be a ToolOutput or StandardizedOutput object. Value: {datasheet}")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input datasheet from previous tool."""
@@ -173,10 +173,28 @@ class SelectBest(BaseConfig):
                 raise ValueError(f"Pool {pool} must have output_folder")
         
         for datasheet in self.datasheets:
-            if hasattr(datasheet, 'path'):
-                self.datasheet_paths.append(datasheet.path)
+            # Extract datasheet path from ToolOutput
+            if hasattr(datasheet, 'datasheets'):
+                # Look for a main datasheet - try "merged", "combined", "filtered", or first available
+                ds_obj = datasheet.datasheets
+                datasheet_path = None
+                
+                if hasattr(ds_obj, 'merged'):
+                    datasheet_path = ds_obj.merged.path
+                elif hasattr(ds_obj, 'combined'):
+                    datasheet_path = ds_obj.combined.path
+                elif hasattr(ds_obj, 'filtered'):
+                    datasheet_path = ds_obj.filtered.path
+                elif hasattr(ds_obj, '_datasheets'):
+                    # Get first available datasheet
+                    first_ds = next(iter(ds_obj._datasheets.values()))
+                    datasheet_path = first_ds.path
+                else:
+                    raise ValueError(f"Could not find datasheet in {datasheet}")
+                
+                self.datasheet_paths.append(datasheet_path)
             else:
-                raise ValueError(f"Datasheet must have path attribute: {datasheet}")
+                raise ValueError(f"Datasheet must have datasheets attribute: {datasheet}")
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
