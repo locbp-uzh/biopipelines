@@ -257,10 +257,9 @@ def apply_filter(config_data: Dict[str, Any]) -> None:
         else:
             print("Warning: Could not find ID column for pool mode structure copying")
     
-    # Always create missing_ids.csv for pool mode (shows which IDs were filtered out)
-    if use_pool_mode and pool_output_folder:
-        output_dir = os.path.dirname(output_csv)
-        create_missing_ids_csv(df, filtered_df, pool_output_folder, output_dir)
+    # Always create missing.csv (shows which IDs were filtered out)
+    output_dir = os.path.dirname(output_csv)
+    create_missing_ids_csv(df, filtered_df, pool_output_folder or "", output_dir)
 
 
 def create_missing_ids_csv(original_df: pd.DataFrame, filtered_df: pd.DataFrame, 

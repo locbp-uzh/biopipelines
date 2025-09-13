@@ -85,64 +85,6 @@ def calculate_composite_score(df: pd.DataFrame, weights: Dict[str, float], funct
     return composite
 
 
-def find_matching_structure(row: pd.Series, structures_dir: Optional[str]) -> Optional[str]:
-    """
-    Find the structure file that matches this datasheet row.
-    
-    Args:
-        row: Row from the datasheet
-        structures_dir: Directory containing structure files
-        
-    Returns:
-        Path to matching structure file or None
-    """
-    if not structures_dir or not os.path.exists(structures_dir):
-        return None
-    
-    # Try different strategies to match structure files
-    possible_names = []
-    
-    # Strategy 1: Use 'id' column if available
-    if 'id' in row and pd.notna(row['id']):
-        possible_names.append(str(row['id']))
-    
-    # Strategy 2: Use 'source_structure' column if available
-    if 'source_structure' in row and pd.notna(row['source_structure']):
-        source = str(row['source_structure'])
-        possible_names.append(source)
-        # Also try without extension
-        if '.' in source:
-            possible_names.append(source.rsplit('.', 1)[0])
-    
-    # Strategy 3: Try structure_id or similar columns
-    id_columns = [col for col in row.index if 'id' in col.lower()]
-    for col in id_columns:
-        if pd.notna(row[col]):
-            possible_names.append(str(row[col]))
-    
-    # Search for matching files
-    structure_extensions = ['.pdb', '.cif', '.mmcif']
-    
-    for name in possible_names:
-        for ext in structure_extensions:
-            # Try exact match
-            candidates = [
-                os.path.join(structures_dir, f"{name}{ext}"),
-                os.path.join(structures_dir, f"{name}"),
-            ]
-            
-            for candidate in candidates:
-                if os.path.exists(candidate):
-                    return candidate
-            
-            # Try glob pattern matching
-            pattern = os.path.join(structures_dir, f"*{name}*{ext}")
-            matches = glob.glob(pattern)
-            if matches:
-                return matches[0]  # Return first match
-    
-    return None
-
 
 def extract_pool_data_for_id(selected_id: str, pool_folder: str, output_folder: str) -> Dict[str, str]:
     """
@@ -222,7 +164,8 @@ def extract_pool_data_for_id(selected_id: str, pool_folder: str, output_folder: 
                     # Find rows matching the selected ID
                     matching_rows = df[df['id'] == selected_id]
                     if not matching_rows.empty:
-                        dest = os.path.join(output_folder, "best_sequences.csv")
+                        # Use sequences.csv as the standard filename
+                        dest = os.path.join(output_folder, "sequences.csv")
                         matching_rows.to_csv(dest, index=False)
                         extracted_files['sequences'] = dest
                         print(f"Extracted sequences: {len(matching_rows)} rows -> {dest}")
@@ -276,17 +219,89 @@ def select_best_from_arrays(config_data: Dict[str, Any]) -> None:
     combined_df = pd.concat(all_dfs, ignore_index=True)
     print(f"Combined dataframe: {combined_df.shape}")
     
-    # Find best row
-    if selection_metric not in combined_df.columns:
-        raise ValueError(f"Metric '{selection_metric}' not found in combined data")
+    # Handle weights and composite functions
+    weights = config_data.get('weights', {})
+    tie_breaker = config_data.get('tie_breaker', 'first')
+    composite_function = config_data.get('composite_function', 'weighted_sum')
     
-    metric_values = combined_df[selection_metric]
-    if selection_mode in ["max", "maximize"]:
-        best_idx = metric_values.idxmax()
+    # Convert selection mode
+    if selection_mode == "max":
+        selection_mode = "maximize"
+    elif selection_mode == "min":
+        selection_mode = "minimize"
+    
+    # Determine selection metric
+    if weights:
+        # Multi-objective selection using composite score
+        print(f"Using composite score with weights: {weights}")
+        print(f"Composite function: {composite_function}")
+        
+        composite_scores = calculate_composite_score(combined_df, weights, composite_function)
+        combined_df['composite_score'] = composite_scores
+        
+        # Use composite score as selection metric
+        metric_values = composite_scores
+        effective_metric = 'composite_score'
     else:
-        best_idx = metric_values.idxmin()
+        # Single metric selection
+        if selection_metric not in combined_df.columns:
+            available_cols = ", ".join(combined_df.columns)
+            raise ValueError(f"Selection metric '{selection_metric}' not found. "
+                           f"Available columns: {available_cols}")
+        
+        metric_values = combined_df[selection_metric].astype(float)
+        effective_metric = selection_metric
     
-    selected_row = combined_df.iloc[best_idx]
+    # Handle missing values
+    if metric_values.isnull().any():
+        print(f"Warning: Found {metric_values.isnull().sum()} missing values in {effective_metric}")
+        metric_values = metric_values.fillna(metric_values.median())
+    
+    print(f"Metric '{effective_metric}' statistics:")
+    print(f"  Min: {metric_values.min():.4f}")
+    print(f"  Max: {metric_values.max():.4f}")
+    print(f"  Mean: {metric_values.mean():.4f}")
+    
+    # Find best value with tie handling
+    if selection_mode == "maximize":
+        best_value = metric_values.max()
+        best_indices = metric_values[metric_values == best_value].index
+    else:  # minimize
+        best_value = metric_values.min()
+        best_indices = metric_values[metric_values == best_value].index
+    
+    print(f"Best {effective_metric}: {best_value:.4f}")
+    print(f"Number of items with best value: {len(best_indices)}")
+    
+    # Handle ties
+    if len(best_indices) == 1:
+        selected_idx = best_indices[0]
+        print("No ties - unique best value")
+    else:
+        print(f"Breaking tie between {len(best_indices)} items using: {tie_breaker}")
+        
+        if tie_breaker == "first":
+            selected_idx = best_indices[0]
+            print(f"Selected first item: index {selected_idx}")
+        
+        elif tie_breaker == "random":
+            import random
+            selected_idx = random.choice(best_indices.tolist())
+            print(f"Randomly selected item: index {selected_idx}")
+        
+        else:
+            # Use another metric as tie breaker
+            if tie_breaker not in combined_df.columns:
+                print(f"Warning: Tie breaker metric '{tie_breaker}' not found, using first")
+                selected_idx = best_indices[0]
+            else:
+                tie_values = combined_df.loc[best_indices, tie_breaker].astype(float)
+                # Maximize tie breaker (could make this configurable)
+                best_tie_idx = tie_values.idxmax()
+                selected_idx = best_tie_idx
+                print(f"Used {tie_breaker} as tie breaker: {tie_values[best_tie_idx]:.4f}")
+    
+    selected_row = combined_df.iloc[selected_idx]
     pool_index = selected_row['_pool_index']
     
     print(f"Selected best item from pool {pool_index}: {selection_metric} = {selected_row[selection_metric]}")
@@ -317,198 +332,13 @@ def select_best_from_arrays(config_data: Dict[str, Any]) -> None:
 
 def select_best_item(config_data: Dict[str, Any]) -> None:
     """
-    Select the best item from analysis results.
+    Select the best item from analysis results using array format.
     
     Args:
         config_data: Configuration dictionary with selection parameters
     """
-    # Check for array mode
-    if config_data.get('use_array_mode', False):
-        select_best_from_arrays(config_data)
-        return
-    
-    # Single mode
-    input_csv = config_data['input_csv']
-    structures_dir = config_data.get('source_structures_dir')
-    selection_metric = config_data['selection_metric']
-    selection_mode = config_data['selection_mode']
-    
-    # Convert mode from "max"/"min" to "maximize"/"minimize"
-    if selection_mode == "max":
-        selection_mode = "maximize"
-    elif selection_mode == "min":
-        selection_mode = "minimize"
-    weights = config_data.get('weights', {})
-    tie_breaker = config_data['tie_breaker']
-    composite_function = config_data.get('composite_function', 'weighted_sum')
-    output_csv = config_data['output_csv']
-    output_structure = config_data['output_structure']
-    
-    # New pool mode parameters
-    use_pool_mode = config_data.get('use_pool_mode', False)
-    data_name = config_data.get('data_name')
-    pool_output_folder = config_data.get('pool_output_folder')
-    
-    print(f"Selecting best item using metric: {selection_metric}")
-    print(f"Selection mode: {selection_mode}")
-    print(f"Input: {input_csv}")
-    
-    # Load input data
-    if not os.path.exists(input_csv):
-        raise FileNotFoundError(f"Input CSV not found: {input_csv}")
-    
-    try:
-        df = pd.read_csv(input_csv)
-        print(f"Loaded dataframe: {df.shape}")
-        print(f"Columns: {list(df.columns)}")
-        
-    except Exception as e:
-        raise ValueError(f"Error loading CSV file: {e}")
-    
-    if df.empty:
-        raise ValueError("Input dataframe is empty - nothing to select")
-    
-    if len(df) == 1:
-        print("Only one item in input - selecting it by default")
-        selected_row = df.iloc[0]
-    else:
-        # Determine selection metric value
-        if weights:
-            # Multi-objective selection using composite score
-            print(f"Using composite score with weights: {weights}")
-            print(f"Composite function: {composite_function}")
-            
-            composite_scores = calculate_composite_score(df, weights, composite_function)
-            df['composite_score'] = composite_scores
-            
-            # Use composite score as selection metric
-            metric_values = composite_scores
-            effective_metric = 'composite_score'
-        else:
-            # Single metric selection
-            if selection_metric not in df.columns:
-                available_cols = ", ".join(df.columns)
-                raise ValueError(f"Selection metric '{selection_metric}' not found. "
-                               f"Available columns: {available_cols}")
-            
-            metric_values = df[selection_metric].astype(float)
-            effective_metric = selection_metric
-        
-        # Handle missing values
-        if metric_values.isnull().any():
-            print(f"Warning: Found {metric_values.isnull().sum()} missing values in {effective_metric}")
-            metric_values = metric_values.fillna(metric_values.median())
-        
-        print(f"Metric '{effective_metric}' statistics:")
-        print(f"  Min: {metric_values.min():.4f}")
-        print(f"  Max: {metric_values.max():.4f}")
-        print(f"  Mean: {metric_values.mean():.4f}")
-        
-        # Find best value
-        if selection_mode == "maximize":
-            best_value = metric_values.max()
-            best_indices = metric_values[metric_values == best_value].index
-        else:  # minimize
-            best_value = metric_values.min()
-            best_indices = metric_values[metric_values == best_value].index
-        
-        print(f"Best {effective_metric}: {best_value:.4f}")
-        print(f"Number of items with best value: {len(best_indices)}")
-        
-        # Handle ties
-        if len(best_indices) == 1:
-            selected_idx = best_indices[0]
-            print("No ties - unique best value")
-        else:
-            print(f"Breaking tie between {len(best_indices)} items using: {tie_breaker}")
-            
-            if tie_breaker == "first":
-                selected_idx = best_indices[0]
-                print(f"Selected first item: index {selected_idx}")
-            
-            elif tie_breaker == "random":
-                import random
-                selected_idx = random.choice(best_indices.tolist())
-                print(f"Randomly selected item: index {selected_idx}")
-            
-            else:
-                # Use another metric as tie breaker
-                if tie_breaker not in df.columns:
-                    print(f"Warning: Tie breaker metric '{tie_breaker}' not found, using first")
-                    selected_idx = best_indices[0]
-                else:
-                    tie_values = df.loc[best_indices, tie_breaker].astype(float)
-                    # Maximize tie breaker (could make this configurable)
-                    best_tie_idx = tie_values.idxmax()
-                    selected_idx = best_tie_idx
-                    print(f"Used {tie_breaker} as tie breaker: {tie_values[best_tie_idx]:.4f}")
-        
-        selected_row = df.iloc[selected_idx]
-    
-    # Create output directory
-    os.makedirs(os.path.dirname(output_csv), exist_ok=True)
-    
-    # Save selected item data
-    selected_df = pd.DataFrame([selected_row])
-    selected_df.to_csv(output_csv, index=False)
-    
-    print(f"\\nSelected item saved: {output_csv}")
-    print("Selected item details:")
-    for col, val in selected_row.items():
-        print(f"  {col}: {val}")
-    
-    # Handle data extraction based on mode
-    extracted_files = {}
-    
-    if use_pool_mode and pool_output_folder:
-        # Pool mode: extract all data types for selected ID
-        selected_id = selected_row.get('id', 'unknown')
-        print(f"\\nPool mode: Extracting all data for ID '{selected_id}'")
-        
-        output_dir = os.path.dirname(output_csv)
-        extracted_files = extract_pool_data_for_id(selected_id, pool_output_folder, output_dir)
-        
-        # Rename structure file to match expected output name
-        if 'structure' in extracted_files and output_structure:
-            try:
-                if os.path.exists(extracted_files['structure']) and extracted_files['structure'] != output_structure:
-                    shutil.move(extracted_files['structure'], output_structure)
-                    extracted_files['structure'] = output_structure
-                    print(f"Renamed structure to: {output_structure}")
-            except Exception as e:
-                print(f"Warning: Could not rename structure file: {e}")
-    
-    else:
-        # Legacy mode: try to copy structure file only
-        structure_copied = False
-        if structures_dir and output_structure:
-            matching_structure = find_matching_structure(selected_row, structures_dir)
-            
-            if matching_structure:
-                try:
-                    shutil.copy2(matching_structure, output_structure)
-                    structure_copied = True
-                    extracted_files['structure'] = output_structure
-                    print(f"\\nCopied structure: {matching_structure} -> {output_structure}")
-                except Exception as e:
-                    print(f"Warning: Could not copy structure file: {e}")
-            else:
-                print(f"Warning: Could not find matching structure file for selected item")
-    
-    # Summary
-    print(f"\\nSelection completed successfully!")
-    print(f"Selected metric value: {selected_row.get(effective_metric, 'N/A')}")
-    print(f"Output datasheet: {output_csv}")
-    
-    if use_pool_mode:
-        print(f"Pool mode - Extracted data types: {list(extracted_files.keys())}")
-        for data_type, file_path in extracted_files.items():
-            print(f"  {data_type}: {file_path}")
-    else:
-        if 'structure' in extracted_files:
-            print(f"Output structure: {extracted_files['structure']}")
-        else:
-            print("No structure file available")
+    # Always use array mode - no legacy support
+    select_best_from_arrays(config_data)
 
 
 def main():
@@ -529,8 +359,9 @@ def main():
         print(f"Error loading config: {e}")
         sys.exit(1)
     
-    # Validate required parameters
-    required_params = ['input_csv', 'selection_metric', 'selection_mode', 'output_csv']
+    # Validate required parameters - only support array format
+    required_params = ['datasheet_paths', 'pool_folders', 'selection_metric', 'selection_mode', 'output_csv']
+    
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")

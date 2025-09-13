@@ -189,24 +189,30 @@ class Filter(BaseConfig):
         
         # Configure data input (required)
         self.input_csv_path = None
+        self.input_datasheet_name = "filtered"  # Default name
+        self.input_datasheet_info = None
         
         if hasattr(self.data_input, 'datasheets'):
             datasheets = self.data_input.datasheets
             
             # Handle DatasheetContainer objects
             if hasattr(datasheets, '_datasheets'):
-                # Get the first available DatasheetInfo object
-                ds_info = next(iter(datasheets._datasheets.values()))
+                # Get the first available DatasheetInfo object and its name
+                first_name, ds_info = next(iter(datasheets._datasheets.items()))
                 self.input_csv_path = ds_info.path
+                self.input_datasheet_name = first_name
+                self.input_datasheet_info = ds_info
             elif isinstance(datasheets, dict):
                 # Handle raw dict (legacy format)
-                ds_info = next(iter(datasheets.values()))
+                first_name, ds_info = next(iter(datasheets.items()))
+                self.input_datasheet_name = first_name
                 
                 if isinstance(ds_info, dict) and 'path' in ds_info:
                     self.input_csv_path = ds_info['path']
                 elif hasattr(ds_info, 'path'):
                     # Handle DatasheetInfo objects
                     self.input_csv_path = ds_info.path
+                    self.input_datasheet_info = ds_info
                 else:
                     self.input_csv_path = str(ds_info)
         
@@ -266,8 +272,10 @@ class Filter(BaseConfig):
         output_folder = self.output_folder
         os.makedirs(output_folder, exist_ok=True)
         
-        # Output CSV path
-        filtered_csv = os.path.join(output_folder, "filtered_results.csv")
+        # Output CSV path - use same name as input datasheet to preserve structure
+        output_datasheet_name = getattr(self, 'input_datasheet_name', 'filtered')
+        filtered_csv_name = f"{output_datasheet_name}.csv"
+        filtered_csv = os.path.join(output_folder, filtered_csv_name)
         
         # Create config file for the filter
         config_file = os.path.join(output_folder, "filter_config.json")
@@ -328,9 +336,14 @@ fi
         
         missing_csv = os.path.join(self.output_folder, "missing.csv")
         
+        # Use the same datasheet name as the input to preserve structure
+        output_datasheet_name = getattr(self, 'input_datasheet_name', 'filtered')
+        filtered_csv_name = f"{output_datasheet_name}.csv"
+        filtered_csv = os.path.join(self.output_folder, filtered_csv_name)
+        
         datasheets = {
-            "filtered": DatasheetInfo(
-                name="filtered",
+            output_datasheet_name: DatasheetInfo(
+                name=output_datasheet_name,
                 path=filtered_csv,
                 columns=input_columns,
                 description=f"Filtered results using expression: {self.expression}",

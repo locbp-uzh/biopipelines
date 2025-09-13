@@ -34,7 +34,7 @@ class SelectBest(BaseConfig):
     
     def __init__(self,
                  pool: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]],
-                 datasheets: Union[List[Union[ToolOutput, StandardizedOutput, DatasheetInfo]], List[str]],
+                 datasheets: Union[List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]], List[str]],
                  metric: str,
                  mode: str = "max",
                  weights: Optional[Dict[str, float]] = None,
@@ -152,8 +152,8 @@ class SelectBest(BaseConfig):
             raise ValueError(f"Number of datasheets ({len(self.datasheets)}) must match number of pools ({len(self.pool_outputs)})")
         
         for i, datasheet in enumerate(self.datasheets):
-            if not isinstance(datasheet, (ToolOutput, StandardizedOutput)):
-                raise ValueError(f"datasheet[{i}] is {type(datasheet)}, must be a ToolOutput or StandardizedOutput object. Value: {datasheet}")
+            if not isinstance(datasheet, (ToolOutput, StandardizedOutput, DatasheetInfo, str)):
+                raise ValueError(f"datasheet[{i}] is {type(datasheet)}, must be a ToolOutput, StandardizedOutput, DatasheetInfo, or str object. Value: {datasheet}")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input datasheet from previous tool."""
@@ -173,9 +173,9 @@ class SelectBest(BaseConfig):
                 raise ValueError(f"Pool {pool} must have output_folder")
         
         for datasheet in self.datasheets:
-            # Extract datasheet path from ToolOutput
+            # Handle different datasheet input types
             if hasattr(datasheet, 'datasheets'):
-                # Look for a main datasheet - try "merged", "combined", "filtered", or first available
+                # ToolOutput object - extract datasheet path
                 ds_obj = datasheet.datasheets
                 datasheet_path = None
                 
@@ -193,8 +193,14 @@ class SelectBest(BaseConfig):
                     raise ValueError(f"Could not find datasheet in {datasheet}")
                 
                 self.datasheet_paths.append(datasheet_path)
+            elif hasattr(datasheet, 'path'):
+                # DatasheetInfo object - use path directly
+                self.datasheet_paths.append(datasheet.path)
+            elif isinstance(datasheet, str):
+                # String path - use directly
+                self.datasheet_paths.append(datasheet)
             else:
-                raise ValueError(f"Datasheet must have datasheets attribute: {datasheet}")
+                raise ValueError(f"Unsupported datasheet type: {type(datasheet)}")
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -236,7 +242,7 @@ class SelectBest(BaseConfig):
             "composite_function": self.composite_function,
             "output_csv": selected_csv,
             "output_structure": selected_structure,
-            "use_array_mode": True,
+            "output_sequences": os.path.join(output_folder, "sequences.csv"),
             "pool_folders": self.pool_folders,
             "datasheet_paths": self.datasheet_paths
         }
@@ -284,7 +290,7 @@ fi
         selected_csv = os.path.join(self.output_folder, "selected_best.csv")
         selected_structure = os.path.join(self.output_folder, f"{self.output_name}.pdb")
         selected_compound = os.path.join(self.output_folder, f"{self.output_name}_compound.sdf")
-        selected_sequence = os.path.join(self.output_folder, f"{self.output_name}_sequences.csv")
+        selected_sequence = os.path.join(self.output_folder, "sequences.csv")
         
         # Use output name as the selected ID
         selected_id = self.output_name
@@ -296,15 +302,24 @@ fi
                 "columns": ["id", self.metric],  # Basic columns
                 "description": f"Best item selected using {self.metric}",
                 "count": 1
+            },
+            "sequences": {
+                "path": selected_sequence,
+                "columns": ["id", "sequence"],  # Standard sequence format
+                "description": "Selected best sequence",
+                "count": 1
             }
         }
         
+        # Only predict files we're certain will be created
+        # Structures are always created (extracted from pools)
+        # Compounds and sequences are only created if they exist in source pools
         return {
             "structures": [selected_structure],
             "structure_ids": [selected_id],
-            "compounds": [selected_compound], 
-            "compound_ids": [selected_id],
-            "sequences": [selected_sequence],
+            "compounds": [],  # Only created if available in source pools
+            "compound_ids": [],
+            "sequences": [selected_sequence],  # Include sequences CSV  
             "sequence_ids": [selected_id],
             "datasheets": datasheets,
             "output_folder": self.output_folder
