@@ -348,14 +348,40 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
             seq_list = list(reference_seq)
             mutations_made = []
             mutation_positions = []
+            used_positions = set()  # Track positions already mutated
 
-            # Take the seq_idx-th best mutation from each datasheet
+            # Take mutations from each datasheet, handling conflicts
             for df_idx, mutations in enumerate(datasheet_mutations):
-                if seq_idx < len(mutations):
-                    pos, orig_aa, mut_aa, freq = mutations[seq_idx]
+                selected_mutation = None
+
+                # Try to find a non-conflicting mutation from this datasheet
+                for mutation_idx in range(seq_idx, len(mutations)):
+                    pos, orig_aa, mut_aa, freq = mutations[mutation_idx]
+
+                    if pos not in used_positions:
+                        # No conflict - use this mutation
+                        selected_mutation = (pos, orig_aa, mut_aa, freq)
+                        break
+                    else:
+                        # Conflict detected - log and try next mutation
+                        existing_mut = None
+                        for made_mut in mutations_made:
+                            if f"{pos+1}" in made_mut:
+                                existing_mut = made_mut
+                                break
+                        logger.info(f"Conflict at position {pos+1}: datasheet {df_idx+1} wants {orig_aa}->{mut_aa}, "
+                                  f"but position already has {existing_mut}. Trying next best...")
+
+                # Apply the selected mutation if found
+                if selected_mutation:
+                    pos, orig_aa, mut_aa, freq = selected_mutation
                     seq_list[pos] = mut_aa
                     mutations_made.append(f"{orig_aa}{pos+1}{mut_aa}")
                     mutation_positions.append(pos + 1)
+                    used_positions.add(pos)
+                    logger.debug(f"Applied mutation from datasheet {df_idx+1}: {orig_aa}{pos+1}{mut_aa}")
+                else:
+                    logger.warning(f"No non-conflicting mutation found for datasheet {df_idx+1} in sequence {seq_idx+1}")
 
             # Create sequence only if we have mutations
             if mutations_made:
@@ -363,6 +389,9 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
                 sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"stack_{seq_idx+1:03d}"
                 mutations_desc = ",".join(mutations_made)
                 sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
+                logger.info(f"Generated sequence {seq_idx+1} with {len(mutations_made)} mutations: {mutations_desc}")
+            else:
+                logger.warning(f"No mutations could be applied for sequence {seq_idx+1} - all positions conflicted")
 
         logger.info(f"Generated {len(sequences)} stacked sequences")
         return sequences
