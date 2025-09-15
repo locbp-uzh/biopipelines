@@ -375,7 +375,7 @@ with open('{self.summary_file}', 'w') as f:
     f.write(f'Covalent ligands: {str(self.covalent)}\\n')
     f.write(f'Conformer method: {self.conformer_method}\\n')
     f.write(f'Output file: {os.path.basename(self.compounds_csv)}\\n')
-    if {"true" if self.covalent else "false"} == "true":
+    if self.covalent:
         f.write(f'Covalent library folder: covalent_library/\\n')
 
 print(f'Library processed: {{compound_count}} compounds')
