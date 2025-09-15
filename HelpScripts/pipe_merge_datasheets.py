@@ -25,11 +25,14 @@ def merge_datasheets(config_data: Dict[str, Any]) -> None:
     merge_key = config_data['merge_key']
     prefixes = config_data.get('prefixes', [])
     calculate = config_data.get('calculate', {})
+    id_map = config_data.get('id_map', {})
     output_csv = config_data['output_csv']
     
     print(f"Combining {len(input_csvs)} CSV files on key '{merge_key}'")
     if prefixes:
         print(f"Using prefixes: {prefixes}")
+    if id_map:
+        print(f"ID mapping: {id_map}")
     if calculate:
         print(f"Calculated columns: {list(calculate.keys())}")
     
@@ -51,6 +54,29 @@ def merge_datasheets(config_data: Dict[str, Any]) -> None:
                 print(f"Error: Merge key '{merge_key}' not found in {csv_path}")
                 print(f"Available columns: {list(df.columns)}")
                 continue
+            
+            # Apply ID mapping if specified
+            if id_map:
+                original_ids = df[merge_key].unique()
+                print(f"  - Original IDs: {list(original_ids)}")
+                
+                # Create reverse mapping: old_id -> new_id
+                reverse_map = {}
+                for new_id, old_id_list in id_map.items():
+                    for old_id in old_id_list:
+                        reverse_map[old_id] = new_id
+                
+                # Apply mapping
+                mapped_count = 0
+                for old_id, new_id in reverse_map.items():
+                    if old_id in df[merge_key].values:
+                        df.loc[df[merge_key] == old_id, merge_key] = new_id
+                        mapped_count += 1
+                        print(f"  - Mapped ID: {old_id} -> {new_id}")
+                
+                if mapped_count > 0:
+                    print(f"  - Total ID mappings applied: {mapped_count}")
+                    print(f"  - New IDs: {list(df[merge_key].unique())}")
             
             # Apply prefix to column names (except merge key and common columns)
             if prefixes and i < len(prefixes) and prefixes[i]:
@@ -88,7 +114,10 @@ def merge_datasheets(config_data: Dict[str, Any]) -> None:
         overlap = set(combined_df.columns) & set(df.columns) - {merge_key}
         if overlap:
             print(f"  - Warning: Overlapping columns detected: {overlap}")
-        
+            print(f"  - Dropping overlapping columns from dataframe {i+1} to avoid conflicts")
+            # Drop overlapping columns from the new dataframe (keep first occurrence)
+            df = df.drop(columns=list(overlap))
+
         # Perform outer join to preserve all data
         before_shape = combined_df.shape
         combined_df = pd.merge(combined_df, df, on=merge_key, how='outer')
