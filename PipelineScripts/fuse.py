@@ -178,7 +178,7 @@ class Fuse(BaseConfig):
         
         # Helper script paths
         if hasattr(self, 'folders') and self.folders:
-            self.fuse_queries_py = os.path.join(self.folders["HelpScripts"], "fuse_queries.py")
+            self.fuse_queries_py = os.path.join(self.folders["HelpScripts"], "pipe_fuse_queries.py")
         else:
             self.fuse_queries_py = None
     
