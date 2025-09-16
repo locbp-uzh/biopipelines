@@ -138,6 +138,9 @@ submit_job() {
                 echo "Monitor job with:"
                 echo "  squeue -j $submitted_job_id"
                 echo "  sacct -j $submitted_job_id"
+                echo ""
+                echo "Cancel job with:"
+                echo "  scancel $submitted_job_id"
             fi
         else
             echo ""
