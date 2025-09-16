@@ -51,14 +51,8 @@ run_pipeline_and_get_script() {
     fi
 
     # Extract SLURM script path from pipeline output
-    # Look for pattern like "SLURM script: /path/to/slurm.sh" or similar
-    local slurm_script=$(echo "$pipeline_output" | grep -E "(SLURM script:|sbatch)" | tail -1 | sed 's/.*: //' | sed 's/.*sbatch //')
-
-    # If that doesn't work, try to find slurm.sh in common locations
-    if [ -z "$slurm_script" ] || [ ! -f "$slurm_script" ]; then
-        # Try to find slurm.sh in current directory structure
-        slurm_script=$(find . -name "slurm.sh" -type f 2>/dev/null | head -1)
-    fi
+    # Look for "Slurm saved to: /path/to/slurm.sh" pattern
+    local slurm_script=$(echo "$pipeline_output" | grep "Slurm saved to:" | sed 's/Slurm saved to: //')
 
     if [ -n "$slurm_script" ] && [ -f "$slurm_script" ]; then
         echo "Found SLURM script: $slurm_script"

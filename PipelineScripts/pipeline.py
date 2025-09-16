@@ -424,8 +424,9 @@ module load mamba
         print("="*30+"Slurm Script"+"="*30)
         # Print line by line to ensure proper formatting
         for line in slurm_content.split('\n'):
-            if line != "": 
+            if line != "":
                 print(line)
+        print(f"Slurm saved to: {slurm_path}")
     
     def resources(self, gpu: str = None, memory: str = None, time: str = None):
         if gpu: self.global_resources["gpu"] = gpu #T4, V100, A100, gpu, high-memory
