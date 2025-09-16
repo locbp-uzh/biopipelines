@@ -14,6 +14,8 @@ from .ligand_mpnn import LigandMPNN
 from .boltz2 import Boltz2
 from .compound_library import CompoundLibrary
 from .slice_datasheet import SliceDatasheet
+from .average_by_datasheet import AverageByDatasheet
+from .extract_metric import ExtractMetric
 from .folders import FolderManager
 from .converters import *
 
@@ -32,6 +34,8 @@ __all__ = [
     'Boltz2',
     'CompoundLibrary',
     'SliceDatasheet',
+    'AverageByDatasheet',
+    'ExtractMetric',
     
     # Utility functions
     'pdb_to_jsonl',

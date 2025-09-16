@@ -172,7 +172,9 @@ for CYCLE in range(NUM_CYCLES):
                                             calculate = {
                                                 "affinity_delta_R": "R_affinity_pred_value - RR_affinity_pred_value",
                                                 "affinity_delta_S": "S_affinity_pred_value - SS_affinity_pred_value",
-                                                "affinity_delta": "R_affinity_pred_value - RR_affinity_pred_value + S_affinity_pred_value - SS_affinity_pred_value"
+                                                "affinity_delta": "R_affinity_pred_value - RR_affinity_pred_value + S_affinity_pred_value - SS_affinity_pred_value",
+                                                "affinity_open_sum": "R_affinity_pred_value + S_affinity_pred_value",
+                                                "affinity_close_sum": "RR_affinity_pred_value + SS_affinity_pred_value"
                                                 } ))
     current_filtered = pipeline.add(Filter(data=current_analysis.output,
                                     expression="R_chlorine_distance < 5.0 and S_chlorine_distance < 5.0 and R_cap_distance > 10.0 and S_cap_distance > 10.0"))
@@ -201,12 +203,26 @@ for CYCLE in range(NUM_CYCLES):
     ))
     all_open_best.append({"R":best_R,"S":best_S})
 
+
+trajectories = {k: [all_analyses[0].output.datasheets.merged]+[x[k].output.datasheets.selected for x in all_open_best[1:]] for k in ["R","S"]}
+
+pipeline.set_suffix("TRAJECTORIES")
+pipeline.add(ConcatenateDatasheets(trajectories["R"])) #we only need R because all the data is there anyways
+
 pipeline.set_suffix("ALL_ANALYSIS")
-pipeline.add(ConcatenateDatasheets([x.output.datasheets.merged for x in all_analyses]))
-pipeline.set_suffix("R_TRAJECTORY")
-pipeline.add(ConcatenateDatasheets([all_analyses[0].output.datasheets.merged]+[x["R"].output.datasheets.selected for x in all_open_best[1:]]))
-pipeline.set_suffix("S_TRAJECTORY")
-pipeline.add(ConcatenateDatasheets([all_analyses[0].output.datasheets.merged]+[x["S"].output.datasheets.selected for x in all_open_best[1:]]))
+all_merged = [x.output.datasheets.merged for x in all_analyses]
+pipeline.add(ConcatenateDatasheets(all_merged))
+pipeline.add(AverageByDatasheet(all_merged))
+for metric in ["affinity_delta",
+               "affinity_delta_R",
+               "affinity_delta_S",
+               "R_affinity_pred_value",
+               "S_affinity_pred_value",
+               "RR_affinity_pred_value",
+               "SS_affinity_pred_value"]:
+    pipeline.set_suffix(metric)
+    pipeline.add(ExtractMetric(datasheets=all_merged,
+                            metric=metric))
 
 #Prints
 pipeline.save()
