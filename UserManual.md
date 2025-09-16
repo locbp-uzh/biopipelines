@@ -89,6 +89,37 @@ All tools communicate through standardized CSV datasheets:
 - **Sequence tools**: `id, sequence, source_id, [scores]`
 - **Analysis tools**: `id, source_structure, [measurements]`
 
+#### Accessing Datasheet Information
+
+Tool outputs provide two ways to access datasheet information:
+
+**String Paths (Default)**
+```python
+# Returns file path as string
+path = tool.output.datasheets.sequences  # "/path/to/sequences.csv"
+path = tool.o.datasheets.concatenated    # "/path/to/concatenated.csv"
+```
+
+**DatasheetInfo Objects (with Metadata)**
+```python
+# Returns DatasheetInfo object with metadata
+info = tool.output.datasheets.info('sequences')     # DatasheetInfo object
+info = tool.o.datasheets.info('concatenated')      # DatasheetInfo object
+
+# Access properties
+print(info.path)         # File path
+print(info.columns)      # Column names
+print(info.description)  # Description
+print(info.count)        # Row count
+```
+
+**Usage in Tools**: Most tools accept both string paths and DatasheetInfo objects:
+```python
+# Both work for RemoveDuplicates
+history=tool.output.datasheets.concatenated           # String path
+history=tool.output.datasheets.info('concatenated')   # DatasheetInfo object
+```
+
 ### Tool Chaining
 Connect tools through their `.output` attributes:
 ```python
