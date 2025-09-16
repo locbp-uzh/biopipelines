@@ -1,10 +1,9 @@
 """
-ExtractMetric tool for extracting specific metrics from multiple datasheets.
+ExtractMetrics tool for extracting multiple metrics from multiple datasheets.
 
-Takes a list of datasheets and a metric name, then extracts all values
-for that metric from each datasheet. The output has columns named after
-each datasheet and rows containing the metric values, perfect for copying
-into Prism for column graph analysis.
+Takes a list of datasheets and multiple metric names, then extracts all values
+for each metric from each datasheet. Creates separate CSV files for each metric,
+perfect for copying into Prism for column graph analysis.
 """
 
 import os
@@ -20,53 +19,53 @@ except ImportError:
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
-class ExtractMetric(BaseConfig):
+class ExtractMetrics(BaseConfig):
     """
-    Pipeline tool for extracting specific metrics from multiple datasheets.
+    Pipeline tool for extracting multiple metrics from multiple datasheets.
 
-    Takes a list of datasheets and extracts all values for a specified metric.
-    The output format is optimized for statistical analysis tools like Prism,
-    with columns representing different datasheets/conditions.
+    Takes a list of datasheets and extracts all values for specified metrics.
+    Creates separate CSV files for each metric, with output format optimized
+    for statistical analysis tools like Prism.
 
     Commonly used for:
-    - Extracting metrics across cycles for trend analysis
-    - Preparing data for statistical plotting
+    - Extracting multiple metrics across cycles for trend analysis
+    - Preparing data for statistical plotting with separate files per metric
     - Comparing metric distributions between conditions
-    - Generating input for Prism column graphs
+    - Generating input files for Prism column graphs
     """
 
     # Tool identification
-    TOOL_NAME = "ExtractMetric"
+    TOOL_NAME = "ExtractMetrics"
     DEFAULT_ENV = "ProteinEnv"
     COMPATIBLE_ENVS = ["ProteinEnv", "MutationEnv"]
     DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
 
     def __init__(self,
                  datasheets: List[Union[str, Dict, ToolOutput, StandardizedOutput]],
-                 metric: str,
+                 metrics: List[str],
                  datasheet_names: Optional[List[str]] = None,
                  **kwargs):
         """
-        Initialize ExtractMetric tool.
+        Initialize ExtractMetrics tool.
 
         Args:
             datasheets: List of datasheets to extract metrics from
-            metric: Name of the metric column to extract
+            metrics: List of metric column names to extract
             datasheet_names: Optional custom names for columns (defaults to datasheet indices)
             **kwargs: Additional parameters
 
         Examples:
-            # Extract affinity_delta across cycles
-            affinity_extract = pipeline.add(ExtractMetric(
+            # Extract multiple metrics across cycles
+            metrics_extract = pipeline.add(ExtractMetrics(
                 datasheets=[cycle0.output.datasheets.merged,
                            cycle1.output.datasheets.merged,
                            cycle2.output.datasheets.merged],
-                metric="affinity_delta",
+                metrics=["affinity_delta", "affinity_delta_R", "affinity_delta_S"],
                 datasheet_names=["Cycle0", "Cycle1", "Cycle2"]
             ))
         """
         self.datasheets_input = datasheets
-        self.metric = metric
+        self.metrics = metrics
         self.datasheet_names = datasheet_names
 
         # Initialize base class
@@ -78,15 +77,18 @@ class ExtractMetric(BaseConfig):
                 self.dependencies.append(ds.config)
 
     def validate_params(self):
-        """Validate ExtractMetric parameters."""
+        """Validate ExtractMetrics parameters."""
         if not self.datasheets_input:
             raise ValueError("datasheets parameter is required and cannot be empty")
 
         if not isinstance(self.datasheets_input, list):
             raise ValueError("datasheets must be a list")
 
-        if not self.metric:
-            raise ValueError("metric parameter is required")
+        if not self.metrics:
+            raise ValueError("metrics parameter is required and cannot be empty")
+
+        if not isinstance(self.metrics, list):
+            raise ValueError("metrics must be a list")
 
         if self.datasheet_names and len(self.datasheet_names) != len(self.datasheets_input):
             raise ValueError("datasheet_names length must match datasheets length")
@@ -127,7 +129,7 @@ class ExtractMetric(BaseConfig):
         config_lines = super().get_config_display()
 
         config_lines.extend([
-            f"METRIC: {self.metric}",
+            f"METRICS: {', '.join(self.metrics[:3])}{'...' if len(self.metrics) > 3 else ''} ({len(self.metrics)} total)",
             f"NUM_DATASHEETS: {len(self.datasheets_input)}",
             f"COLUMN_NAMES: {', '.join(self.datasheet_names[:3])}{'...' if len(self.datasheet_names) > 3 else ''}"
         ])
@@ -148,16 +150,13 @@ class ExtractMetric(BaseConfig):
         output_folder = self.output_folder
         os.makedirs(output_folder, exist_ok=True)
 
-        # Output file
-        extracted_csv = os.path.join(output_folder, f"{self.metric}.csv")
-
         # Create config file for the helper script
-        config_file = os.path.join(output_folder, "extract_metric_config.json")
+        config_file = os.path.join(output_folder, "extract_metrics_config.json")
         config_data = {
             "datasheets": self.datasheet_paths,
-            "metric": self.metric,
+            "metrics": self.metrics,
             "datasheet_names": self.datasheet_names,
-            "output": extracted_csv
+            "output_folder": output_folder
         }
 
         import json
@@ -166,25 +165,25 @@ class ExtractMetric(BaseConfig):
 
         # Generate script content
         script_content = f"""#!/bin/bash
-# ExtractMetric execution script
+# ExtractMetrics execution script
 # Generated by BioPipelines pipeline system
 
 {self.generate_completion_check_header()}
 
-echo "Extracting metric '{self.metric}' from datasheets"
-echo "Number of datasheets: {len(self.datasheet_paths)}"
-echo "Output: {extracted_csv}"
+echo "Extracting {len(self.metrics)} metrics from {len(self.datasheet_paths)} datasheets"
+echo "Metrics: {', '.join(self.metrics)}"
+echo "Output folder: {output_folder}"
 
 # Run Python helper script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_extract_metric.py')}" \\
+python "{os.path.join(self.folders['HelpScripts'], 'pipe_extract_metrics.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
-    echo "Successfully extracted metric"
-    echo "Output file: {extracted_csv}"
+    echo "Successfully extracted all metrics"
+    echo "Output files created in: {output_folder}"
     echo "Ready for copy-paste into Prism or other analysis software"
 else
-    echo "Error: Failed to extract metric"
+    echo "Error: Failed to extract metrics"
     exit 1
 fi
 
@@ -200,18 +199,19 @@ fi
         Returns:
             Dictionary with output file paths and datasheet information
         """
-        extracted_csv = os.path.join(self.output_folder, f"{self.metric}.csv")
+        # Create separate CSV file for each metric
+        datasheets = {}
 
-        # Define datasheet that will be created
-        datasheets = {
-            self.metric: DatasheetInfo(
-                name=self.metric,
-                path=extracted_csv,
+        for metric in self.metrics:
+            csv_path = os.path.join(self.output_folder, f"{metric}.csv")
+
+            datasheets[metric] = DatasheetInfo(
+                name=metric,
+                path=csv_path,
                 columns=self.datasheet_names,  # Column names from datasheet names
-                description=f"Extracted '{self.metric}' values from all datasheets, formatted for statistical analysis",
+                description=f"Extracted '{metric}' values from all datasheets, formatted for statistical analysis",
                 count=None  # Will be determined at runtime based on data
             )
-        }
 
         return {
             "structures": [],
@@ -229,7 +229,7 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "metric": self.metric,
+                "metrics": self.metrics,
                 "num_datasheets": len(self.datasheets_input),
                 "datasheet_names": self.datasheet_names
             }
