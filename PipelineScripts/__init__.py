@@ -13,6 +13,7 @@ from .alphafold import AlphaFold
 from .ligand_mpnn import LigandMPNN
 from .boltz2 import Boltz2
 from .compound_library import CompoundLibrary
+from .slice_datasheet import SliceDatasheet
 from .folders import FolderManager
 from .converters import *
 
@@ -30,6 +31,7 @@ __all__ = [
     'LigandMPNN',
     'Boltz2',
     'CompoundLibrary',
+    'SliceDatasheet',
     
     # Utility functions
     'pdb_to_jsonl',

@@ -19,7 +19,7 @@ except ImportError:
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
-class Pymol(BaseConfig):
+class PyMOL(BaseConfig):
     """
     PyMOL visualization configuration for creating molecular sessions.
     
@@ -136,7 +136,7 @@ class Pymol(BaseConfig):
         # Set output folder
         self.output_folder = os.path.join(
             pipeline_folders['job_folder'],
-            f"{self.execution_order}_{self.TOOL_NAME}"
+            f"{self.execution_order:03d}_{self.TOOL_NAME}"
         )
     
     def predict_output_structure(self) -> StandardizedOutput:

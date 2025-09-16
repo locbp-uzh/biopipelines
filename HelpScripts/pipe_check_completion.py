@@ -25,23 +25,22 @@ def check_file_exists(file_path: str) -> bool:
     """
     return os.path.exists(file_path) and (os.path.isfile(file_path) or os.path.isdir(file_path))
 
-def load_expected_missing_files(output_folder: str) -> List[str]:
+def load_expected_missing_files(missing_csv_path: str) -> List[str]:
     """
-    Load expected missing files from missing_ids.csv if it exists.
+    Load expected missing files from missing CSV file if it exists.
     
     Args:
-        output_folder: Tool output folder
+        missing_csv_path: Path to the missing CSV file
         
     Returns:
         List of file paths that are expected to be missing
     """
-    missing_ids_csv = os.path.join(output_folder, "missing_ids.csv")
     expected_missing = []
     
-    if os.path.exists(missing_ids_csv):
+    if os.path.exists(missing_csv_path):
         try:
             import pandas as pd
-            df = pd.read_csv(missing_ids_csv)
+            df = pd.read_csv(missing_csv_path)
             
             # Extract all file paths from non-id columns
             for col in df.columns:
@@ -49,9 +48,9 @@ def load_expected_missing_files(output_folder: str) -> List[str]:
                     file_paths = df[col].dropna().tolist()
                     expected_missing.extend(file_paths)
                     
-            print(f"Found {len(expected_missing)} files expected to be missing from missing_ids.csv")
+            print(f"Found {len(expected_missing)} files expected to be missing from {os.path.basename(missing_csv_path)}")
         except Exception as e:
-            print(f"Warning: Could not read missing_ids.csv: {e}")
+            print(f"Warning: Could not read {os.path.basename(missing_csv_path)}: {e}")
     
     return expected_missing
 
@@ -74,19 +73,22 @@ def check_files_exist(file_list: List[str]) -> tuple[bool, List[str]]:
 
 def is_filter_output(expected_outputs: Dict[str, Any]) -> bool:
     """
-    Check if the expected outputs are from a filtering tool.
+    Check if the expected outputs are from a Filter tool (not RemoveDuplicates).
     
     Args:
         expected_outputs: Dictionary with standardized output format
         
     Returns:
-        True if this is filter output
+        True if this is Filter tool output
     """
-    # Check if datasheets contain missing_ids (indicates this is a filter tool)
+    # Check if datasheets contain missing AND there are structure files expected
+    # This distinguishes Filter (works with structures) from RemoveDuplicates (sequences only)
     if 'datasheets' in expected_outputs and isinstance(expected_outputs['datasheets'], dict):
-        for name, info in expected_outputs['datasheets'].items():
-            if name == 'missing_ids':
-                return True
+        has_missing_datasheet = 'missing' in expected_outputs['datasheets']
+        has_structures = expected_outputs.get('structures', [])
+        
+        # Only treat as filter output if it has missing datasheet AND expects structures
+        return has_missing_datasheet and bool(has_structures)
     
     return False
 
@@ -152,8 +154,22 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
         
         # Check content files (can be partially missing)
         if content_files:
-            # Load expected missing files from missing_ids.csv
-            expected_missing = load_expected_missing_files(output_folder)
+            # Find missing CSV path from expected outputs
+            missing_csv_path = None
+            if 'datasheets' in expected_outputs and isinstance(expected_outputs['datasheets'], dict):
+                if 'missing' in expected_outputs['datasheets']:
+                    missing_info = expected_outputs['datasheets']['missing']
+                    if isinstance(missing_info, dict) and 'path' in missing_info:
+                        missing_csv_path = missing_info['path']
+                    else:
+                        missing_csv_path = str(missing_info)
+            
+            # Load expected missing files from missing CSV (if path found)
+            expected_missing = []
+            if missing_csv_path:
+                expected_missing = load_expected_missing_files(missing_csv_path)
+            else:
+                print("Warning: No missing CSV path found in expected outputs - cannot determine expected missing files")
             
             exists, missing = check_files_exist(content_files)
             if not exists:

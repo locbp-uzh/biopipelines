@@ -48,13 +48,16 @@ original_analysis = pipeline.add(MergeDatasheets(
     datasheets=[best_open.output.datasheets.affinity,
                best_close.output.datasheets.affinity],
     prefixes=["open_", "close_"],
+    id_map={"original":["HT_Cy7_C_R","HT_Cy7_C_RR"]},
     calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}
 ))
 
-NUM_CYCLES = 3
+NUM_CYCLES = 10
 all_sequences_seen = None  # Track all sequences across cycles
-previous_analysis = original_analysis  # Start with original baseline for comparison
-previous_boltz_holo_open = best_open  # Start with original best structure
+
+# Track all analyses and pools across cycles for SelectBest
+all_analyses = [original_analysis]  # Start with original baseline
+all_pools = [best_open]  # Start with original best structure
 
 for CYCLE in range(NUM_CYCLES):
     """
@@ -62,7 +65,7 @@ for CYCLE in range(NUM_CYCLES):
     """
     lmpnn = pipeline.add(LigandMPNN(structures=best_open.output, #this is equivalent to boltz2.output
                                     ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
-                                    num_sequences=3, 
+                                    num_sequences=10, 
                                     redesigned="145-180", #similarly you can specify fixed=...
                                     design_within=4))
     
@@ -124,20 +127,20 @@ for CYCLE in range(NUM_CYCLES):
                                     data=current_analysis.output,
                                     expression="open_chlorine_distance < 5.0"))
     
+    # Add current cycle results to the arrays
+    all_analyses.append(current_analysis)
+    all_pools.append(boltz_holo_open)
+    
     """
-    Select best across previous and current cycles
+    Select best across ALL cycles (guarantees monotonic improvement)
     """
     best_open = pipeline.add(SelectBest(
-        pool=[previous_boltz_holo_open.output, boltz_holo_open.output],  # Previous + current structures
-        datasheets=[previous_analysis.output, current_analysis.output],  # Pass ToolOutput objects
+        pool=[pool.output for pool in all_pools],  # All pools from all cycles
+        datasheets=[analysis.output.datasheets.merged for analysis in all_analyses],  # All analyses from all cycles
         metric='affinity_delta',
         mode='min',
         name=f'{CYCLE+1}_best'
     ))
-    
-    # Store analysis and structures for next cycle comparison
-    previous_analysis = current_analysis
-    previous_boltz_holo_open = boltz_holo_open
 
 #Prints
 pipeline.save()

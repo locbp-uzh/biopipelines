@@ -698,8 +698,17 @@ class StandardizedOutput:
                 # Show the IDs if available
                 if id_list:
                     lines.append(f"{id_key}:")
-                    for id_value in id_list:
-                        lines.append(f"    – {id_value}")
+                    if len(id_list) <= 6:
+                        # Show all IDs if 6 or fewer
+                        for id_value in id_list:
+                            lines.append(f"    – {id_value}")
+                    else:
+                        # Truncated format: show first 3, ..., last 3
+                        for id_value in id_list[:3]:
+                            lines.append(f"    – {id_value}")
+                        lines.append(f"    – ... ({len(id_list) - 6} more) ...")
+                        for id_value in id_list[-3:]:
+                            lines.append(f"    – {id_value}")
         
         # Special handling for datasheets
         if 'datasheets' in self._data and hasattr(self.datasheets, '_datasheets'):

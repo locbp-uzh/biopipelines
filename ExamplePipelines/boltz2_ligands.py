@@ -12,8 +12,8 @@ from PipelineScripts.compound_library import CompoundLibrary
 
 pipeline = Pipeline(
     pipeline_name="Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="HT7_Cy7_CHF2_RESONANCE_EFFECT", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
-    job_description="Folding of HaloTag7 with Cy7-CHF2, several enantiomers, with the positive charge being either on close to the ring closing group (RCG+) or the other cap (CAP+)")
+    job_name="HT7_Cy7_C_RESONANCE_CANONICAL", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    job_description="Folding of HaloTag7 with Cy7, several enantiomers, with the positive charge being either on close to the ring closing group (RCG+) or the other cap (CAP+)")
 
 pipeline.resources(
     gpu="V100",
@@ -28,10 +28,10 @@ We add pipeline=pipeline only so the tool can access the job name. This is not d
 """
 compounds = pipeline.add(CompoundLibrary(
     {
-        '(S)Cy7-CH2F-RCG+':r'C[N+]1=C(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@@](CC4=CN(CCOCCOCCCCCCCl)N=N4)(CC(NCCF)=O)C5=C1C=CC=C5',
-        '(S)Cy7-CH2F-CAP+':r'CN(/C([C@]1(CC(NCCF)=O)CC2=CN(CCOCCOCCCCCCCl)N=N2)=C\C=C\C=C\C=C\C(C3(C)C)=[N+](C)C4=C3C=CC=C4)C5=C1C=CC=C5',
-        '(R)Cy7-CH2F-RCG+':r'C[N+]1=C(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@](CC4=CN(CCOCCOCCCCCCCl)N=N4)(CC(NCCF)=O)C5=C1C=CC=C5',
-        '(R)Cy7-CH2F-CAP+':r'CN(/C([C@@]1(CC(NCCF)=O)CC2=CN(CCOCCOCCCCCCCl)N=N2)=C\C=C\C=C\C=C\C(C3(C)C)=[N+](C)C4=C3C=CC=C4)C5=C1C=CC=C5'
+        '(S)Cy7-C-RCG+':r'CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC',
+        '(S)Cy7-C-CAP+':r'CC1(C)C2=C(C=CC=C2)[N+](=C1/C=C/C=C/C=C/C=C\3/[C@@](CC4=CN(CCOCCOCCCCCCCl)N=N4)(CC(=O)NC)C5=C(C=CC=C5)N3C)C',
+        '(R)Cy7-C-RCG+':r'CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC',
+        '(R)Cy7-C-CAP+':r'CC1(C)C2=C(C=CC=C2)[N+](=C1/C=C/C=C/C=C/C=C\3/[C@](CC4=CN(CCOCCOCCCCCCCl)N=N4)(CC(=O)NC)C5=C(C=CC=C5)N3C)C'
     }
 ))
 

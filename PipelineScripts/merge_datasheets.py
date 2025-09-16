@@ -37,6 +37,7 @@ class MergeDatasheets(BaseConfig):
                  prefixes: Optional[List[str]] = None,
                  key: str = "id",
                  calculate: Optional[Dict[str, str]] = None,
+                 id_map: Optional[Dict[str, List[str]]] = None,
                  **kwargs):
         """
         Initialize MergeDatasheets tool.
@@ -46,6 +47,7 @@ class MergeDatasheets(BaseConfig):
             prefixes: Optional list of prefixes for each datasheet (must match datasheets length)
             key: Column name to merge on (default: "id")
             calculate: Optional dict of {new_column: expression} for calculated columns
+            id_map: Optional dict mapping new_id -> [old_id1, old_id2, ...] to consolidate different IDs
             **kwargs: Additional parameters
             
         Examples:
@@ -62,11 +64,20 @@ class MergeDatasheets(BaseConfig):
                 prefixes=["apo_", "holo_"],
                 calculate={"affinity_diff": "holo_affinity - apo_affinity"}
             ))
+            
+            # With ID mapping to consolidate different IDs into common entities
+            merged = pipeline.add(MergeDatasheets(
+                datasheets=[open_results.output.datasheets.affinity, close_results.output.datasheets.affinity],
+                prefixes=["open_", "close_"],
+                id_map={"original": ["HT_Cy7_C_R", "HT_Cy7_C_RR"]},
+                calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}
+            ))
         """
         self.datasheets = datasheets
         self.prefixes = prefixes or []
         self.merge_key = key
         self.calculate = calculate or {}
+        self.id_map = id_map or {}
         
         # Validate inputs
         if not self.datasheets:
@@ -166,6 +177,10 @@ class MergeDatasheets(BaseConfig):
             calc_str = ", ".join(f"{k}={v}" for k, v in self.calculate.items())
             config_lines.append(f"CALCULATED: {calc_str}")
         
+        if self.id_map:
+            id_map_str = ", ".join(f"{new_id}={old_ids}" for new_id, old_ids in self.id_map.items())
+            config_lines.append(f"ID_MAP: {id_map_str}")
+        
         
         return config_lines
     
@@ -193,6 +208,7 @@ class MergeDatasheets(BaseConfig):
             "merge_key": self.merge_key,
             "prefixes": self.prefixes,
             "calculate": self.calculate,
+            "id_map": self.id_map,
             "output_csv": merged_csv
         }
         
@@ -291,7 +307,8 @@ fi
                 "num_datasheets": len(self.datasheets),
                 "merge_key": self.merge_key,
                 "prefixes": self.prefixes,
-                "calculate": self.calculate
+                "calculate": self.calculate,
+                "id_map": self.id_map
             }
         })
         return base_dict

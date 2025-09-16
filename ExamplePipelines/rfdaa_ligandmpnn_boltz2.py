@@ -26,15 +26,13 @@ pipeline.resources(
 )
 
 """
-It is best practise to start from a Boltz2 output with the open form, to have a benchmark affinity.
-One can then load it with the LoadOutput tool, which will contain the same structures (pdbs), ids, and datasheets as the Boltz2 tool of the past pipeline.  
+Design a couple of backbones with RFD-AA. The output structures will still contain the ligand with the same name as in the original pdb.
 """
 rfdaa = pipeline.add(RFdiffusionAllAtom(
     pdb='rifampicin_2hw2_clean.pdb', #copied within the folder PDBs in the biopipelines folder. 
     ligand='RFP', #in rfdaa always specify the ligand name
     contigs='10-20,A6-140',
     num_designs=2
-    #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
 ))
 
 """
@@ -51,8 +49,7 @@ We run the Apo version first. One can also extract confidence parameters from it
 boltz_apo = pipeline.add(Boltz2(proteins=lmpnn.output))
 
 """
-Run with open form and closed form.
-Important: msas are passed with <tool>.output, not with <tool>.output.msas
+MSAs are passed with <tool>.output, not with <tool>.output.msas
 """
 boltz_holo = pipeline.add(Boltz2(proteins=lmpnn.output,
                                 ligands=r"C[C@H]1/C=C/C=C(C)\C(NC2=C(/C=N/N3CCN(C)CC3)C(O)=C4C(C(O)=C(C)C5=C4C([C@](O/C=C/[C@H](OC)[C@@H](C)[C@@H](OC(C)=O)[C@H](C)[C@H](O)[C@H](C)[C@H]1O)(C)O5)=O)=C2O)=O",

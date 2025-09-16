@@ -30,7 +30,7 @@ It is best practise to start from a Boltz2 output with the open form, to have a 
 One can then load it with the LoadOutput tool, which will contain the same structures (pdbs), ids, and datasheets as the Boltz2 tool of the past pipeline.  
 """
 original = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_CH2F_R_001/ToolOutputs/1_Boltz2_output.json'
+    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
     #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
 ))
 

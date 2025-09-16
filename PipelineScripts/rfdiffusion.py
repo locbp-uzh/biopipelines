@@ -140,7 +140,7 @@ class RFdiffusion(BaseConfig):
         """Extract pipeline name from output folder structure."""
         folder_parts = self.output_folder.split(os.sep)
         for i, part in enumerate(folder_parts):
-            if part.startswith("1_RFdiffusion"):
+            if "RFdiffusion" in part:
                 if i > 0:
                     return folder_parts[i-1]
                 break

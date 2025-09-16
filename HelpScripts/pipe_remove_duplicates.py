@@ -118,6 +118,7 @@ def save_missing_datasheet(new_df: pd.DataFrame, unique_df: pd.DataFrame,
     """
     if 'id' not in new_df.columns:
         print("Warning: No 'id' column found - cannot generate missing datasheet")
+        print(f"Available columns in new_df: {list(new_df.columns) if not new_df.empty else 'DataFrame is empty'}")
         return
     
     # Get IDs that were filtered out (missing/duplicates)
@@ -187,6 +188,13 @@ def remove_duplicates(config_data: Dict[str, Any]) -> None:
     
     # Generate missing datasheet for filtered sequences
     save_missing_datasheet(pool_df, unique_df, output_folder)
+    
+    # Verify missing.csv was created
+    missing_csv_path = os.path.join(output_folder, "missing.csv")
+    if os.path.exists(missing_csv_path):
+        print(f"Verified missing.csv exists: {missing_csv_path}")
+    else:
+        print(f"ERROR: missing.csv not found at expected path: {missing_csv_path}")
     
     print("\nDuplicate removal completed successfully!")
     print(f"Pool sequences: {len(pool_df)}")

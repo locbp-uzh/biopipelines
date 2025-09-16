@@ -1,4 +1,3 @@
-###IN PROGRESS
 """
 This pipeline shows how improve the difference in predicted binding affinity between open and close form of a carbocyanine 7 chloride and halotag7 starting from a Boltz model of the open form.
 """
@@ -75,7 +74,7 @@ for CYCLE in range(NUM_CYCLES):
     
     profiler = pipeline.add(MutationProfiler(original=best_open.output,
                                              mutants=lmpnn.output))
-    composer = pipeline.add(MutationComposer(input=profiler.output.datasheets.absolute_frequencies,
+    composer = pipeline.add(MutationComposer(frequencies=profiler.output.datasheets.absolute_frequencies,
                                              num_sequences=10,
                                              mode="hotspot_focused"))
     

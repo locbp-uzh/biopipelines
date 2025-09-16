@@ -46,6 +46,9 @@ class Pipeline:
         self.tool_outputs = []
         self.execution_order = 0
         
+        # Suffix for tool folder naming
+        self.current_suffix = ""
+        
         # Environment tracking
         self.environments_used = set()
         self.environment_groups = defaultdict(list)
@@ -61,6 +64,20 @@ class Pipeline:
             "memory": "15GB", 
             "time": "24:00:00"
         }
+    
+    def set_suffix(self, suffix: str = ""):
+        """
+        Set suffix for subsequent tool folder names.
+        
+        Args:
+            suffix: Suffix to append to tool folder names (e.g., "single_point")
+                   Empty string clears the suffix.
+        
+        Example:
+            pipeline.set_suffix("single_point")
+            # Next tools will create folders like: 004_MutationComposer_single_point/
+        """
+        self.current_suffix = suffix
     
     def add(self, tool_config: BaseConfig, env: str = None, **kwargs) -> ToolOutput:
         """
@@ -79,7 +96,10 @@ class Pipeline:
         
         # Set execution order and create step-numbered folder immediately
         self.execution_order += 1
-        step_folder_name = f"{self.execution_order}_{tool_config.TOOL_NAME}"
+        if self.current_suffix:
+            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}_{self.current_suffix}"
+        else:
+            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}"
         tool_output_folder = os.path.join(self.folders["output"], step_folder_name)
         os.makedirs(tool_output_folder, exist_ok=True)
         

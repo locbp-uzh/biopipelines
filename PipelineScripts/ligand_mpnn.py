@@ -252,9 +252,13 @@ class LigandMPNN(BaseConfig):
         """Get LigandMPNN configuration display lines."""
         config_lines = super().get_config_display()
         
-        # Input information
+        # Input information - show only structure count, not full details
         if self.input_is_tool_output:
-            config_lines.append(f"INPUT: {self.input_structures.tool_type} output")
+            # Count structures from tool output
+            structure_count = 0
+            if hasattr(self.input_structures, 'structures') and self.input_structures.structures:
+                structure_count = len(self.input_structures.structures)
+            config_lines.append(f"INPUT: {self.input_structures.tool_type} output ({structure_count} structures)")
         else:
             config_lines.append(f"INPUT: {self.input_structures}")
         

@@ -1,16 +1,10 @@
 # BioPipelines
 
-A Python package for computational protein design workflows integrating multiple modeling tools.
+A Python framework for automated computational protein design workflows that generates SLURM-executable bash scripts for high-performance computing clusters.
 
 ## Overview
 
-BioPipelines provides a unified interface for automated protein modeling workflows using:
-
-- **RFdiffusion/RFdiffusion-AllAtom**: Structure generation and design
-- **ProteinMPNN/LigandMPNN**: Sequence design and optimization  
-- **AlphaFold2/ColabFold**: Structure prediction and validation
-- **Boltz1/Boltz2**: Advanced structure prediction with ligand support
-- **OmegaFold**: Alternative folding method
+BioPipelines creates modular, reproducible workflows by connecting bioinformatics tools through standardized interfaces. The system **generates bash scripts** for cluster execution rather than running computations directly.
 
 ## Quick Start
 
@@ -19,67 +13,82 @@ from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.boltz2 import Boltz2
 
-# Create a pipeline
-pipeline = Pipeline(
-    pipeline_name="MyPipeline",
-    job_name="TestJob",
-    job_description="Example workflow"
-)
+# Create pipeline
+pipeline = Pipeline("MyPipeline", "TestJob")
+pipeline.resources(gpu="V100", time="24:00:00", memory="16GB")
 
-# Configure resources
-pipeline.resources(
-    gpu="V100",
-    time="24:00:00",
-    memory="16GB"
-)
+# Add tools
+lmpnn = pipeline.add(LigandMPNN(structures="protein.pdb", num_sequences=10))
+boltz = pipeline.add(Boltz2(proteins=lmpnn.output, ligands="SMILES_STRING"))
 
-# Add tools to pipeline
-lmpnn = pipeline.add(
-    LigandMPNN(
-        structures="protein.pdb",
-        num_sequences=10,
-        redesigned="145-180"
-    )
-)
-
-boltz = pipeline.add(
-    Boltz2(
-        proteins=lmpnn.output,
-        ligand="SMILES_STRING_HERE"
-    )
-)
-
-# Execute pipeline
+# Generate and submit to cluster
 pipeline.save()
-pipeline.slurm()
+pipeline.slurm(email="user@domain.com")
 ```
 
+## Available Tools
 
+### Structure Generation
+- **RFdiffusion** - Backbone structure generation
+- **RFdiffusionAllAtom** - All-atom structure generation with ligands
+
+### Sequence Generation  
+- **LigandMPNN** - Ligand-aware sequence design
+- **ProteinMPNN** - Protein sequence design
+- **MutationComposer** - Mutation-guided sequence generation
+- **Fuse** - Protein-protein fusion design
+
+### Folding/Cofolding
+- **AlphaFold** - Structure prediction (ColabFold backend)
+- **Boltz** - Advanced structure prediction with noncovalent interactions
+
+### Analysis of MPNN Output
+- **MutationProfiler** - Statistical analysis of sequence variations
+
+### Structure Analysis
+- **ResidueAtomDistance** - Distance measurements and contacts
+
+### Filtering
+- **Filter** - Expression-based result filtering
+- **MergeDatasheets** - Combine multiple analysis results
+- **ConcatenateDatasheets** - Merge datasets across cycles
+- **RemoveDuplicates** - Sequence deduplication
+
+### Visualization
+- **PyMOL** - Automated molecular visualization sessions
+
+### Miscellaneous
+- **LoadOutput** - Import results from previous pipelines
 
 ## Documentation
 
-- [User Manual](Docs/user_manual.md) - Complete usage guide
-- [Developer Guide](Docs/developer_guide.md) - Development and customization
-- [Architecture Overview](Docs/ARCHITECTURE_OVERVIEW.md) - System design
-- [Tool I/O Reference](Docs/tool_io_reference.md) - Input/output specifications
+- **[User Manual](UserManual.md)** - Complete usage guide
+- **[Tool Documentation](Docs/)** - Detailed tool-specific guides
+- **[Architecture](Docs/Architecture.md)** - System design and concepts
+- **[Examples](ExamplePipelines/)** - Pipeline examples
 
-## Example Usage
+## Key Features
 
-See `pipeline_setup.py` for a complete example implementing:
-1. LigandMPNN sequence design
-2. Boltz2 structure prediction with ligand binding
-3. Filtering based on distance criteria and confidence scores
+- **SLURM Integration**: Automatic job submission and resource management
+- **Modular Design**: Mix and match tools for custom workflows  
+- **Standardized Interfaces**: CSV datasheets for seamless tool chaining
+- **Environment Management**: Automatic conda environment switching
+- **Filesystem Prediction**: Pre-determines output structure before execution
+- **Cluster Optimization**: Designed for university HPC environments
 
-## Hardware Requirements
+## Installation
 
-- **GPU**: T4/V100/A100 depending on workload
-- **Memory**: 8-16GB for typical workflows
-- **Environment**: Designed for SLURM cluster systems
+```bash
+git clone <repository-url>
+cd biopipelines
+# Run notebooks directly from this directory for optimal functionality
+jupyter notebook
+```
 
-## License
+**⚠️ Important**: Always run pipelines from the BioPipelines root directory for proper path resolution.
 
-MIT License - see LICENSE file for details.
+## Support
 
-## Contributing
-
-This package is developed by LOCBP at the University of Zürich for computational protein design research.
+- Issues and feature requests: [GitHub Issues](https://github.com/your-repo/issues)
+- Documentation: [User Manual](UserManual.md)
+- Examples: [ExamplePipelines/](ExamplePipelines/)

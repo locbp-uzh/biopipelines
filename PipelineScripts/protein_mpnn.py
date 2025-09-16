@@ -182,7 +182,7 @@ class ProteinMPNN(BaseConfig):
         """Extract pipeline name from output folder structure."""
         folder_parts = self.output_folder.split(os.sep)
         for i, part in enumerate(folder_parts):
-            if part.startswith("2_ProteinMPNN"):
+            if "ProteinMPNN" in part:
                 if i > 0:
                     return folder_parts[i-1]
                 break
