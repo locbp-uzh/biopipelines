@@ -56,10 +56,12 @@ run_pipeline_and_get_script() {
 
     if [ -n "$slurm_script" ] && [ -f "$slurm_script" ]; then
         echo "Found SLURM script: $slurm_script"
+        # Just return the path, don't echo it again
         echo "$slurm_script"
+        return 0
     else
         echo "Could not find SLURM script"
-        echo ""
+        return 1
     fi
 }
 
@@ -181,6 +183,7 @@ main() {
     fi
 
     # Run the pipeline and get SLURM script path
+    echo "Running pipeline once to generate SLURM script..."
     local slurm_script=$(run_pipeline_and_get_script "$pipeline_script")
 
     if [ -z "$slurm_script" ]; then
