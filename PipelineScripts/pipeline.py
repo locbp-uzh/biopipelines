@@ -419,6 +419,7 @@ module load mamba
         
         self.slurm_script = slurm_path
         
+        print(f"Slurm saved to: {slurm_path}")
         print("="*30+"Job"+"="*30)
         print(f"{self.pipeline_name}: {self.job_name} ({self.folder_manager.job_id})")
         print("="*30+"Slurm Script"+"="*30)
@@ -426,7 +427,6 @@ module load mamba
         for line in slurm_content.split('\n'):
             if line != "":
                 print(line)
-        print(f"Slurm saved to: {slurm_path}")
     
     def resources(self, gpu: str = None, memory: str = None, time: str = None):
         if gpu: self.global_resources["gpu"] = gpu #T4, V100, A100, gpu, high-memory
