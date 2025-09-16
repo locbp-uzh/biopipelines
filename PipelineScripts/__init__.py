@@ -15,7 +15,6 @@ from .boltz2 import Boltz2
 from .compound_library import CompoundLibrary
 from .slice_datasheet import SliceDatasheet
 from .average_by_datasheet import AverageByDatasheet
-from .extract_metric import ExtractMetric
 from .extract_metrics import ExtractMetrics
 from .folders import FolderManager
 from .converters import *
@@ -36,7 +35,6 @@ __all__ = [
     'CompoundLibrary',
     'SliceDatasheet',
     'AverageByDatasheet',
-    'ExtractMetric',
     'ExtractMetrics',
     
     # Utility functions

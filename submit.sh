@@ -173,15 +173,9 @@ main() {
     echo "Checking environment dependencies..."
     if ! python -c "import pandas" >/dev/null 2>&1; then
         echo ""
-        echo "Error: pandas is not available in the current environment"
-        echo ""
-        echo "BioPipelines requires pandas to run. Please:"
+        echo "Error: BioPipelines requires pandas to run. Please:"
         echo "1. Activate a conda environment that contains pandas, or"
         echo "2. Install pandas in your current environment: pip install pandas"
-        echo ""
-        echo "Example:"
-        echo "  conda activate ProteinEnv"
-        echo "  ./submit.sh"
         return 1
     fi
     echo "✓ pandas available"

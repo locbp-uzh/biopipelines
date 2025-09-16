@@ -23,6 +23,8 @@ from PipelineScripts.concatenate_datasheets import ConcatenateDatasheets
 from PipelineScripts.remove_duplicates import RemoveDuplicates
 from PipelineScripts.filter import Filter
 from PipelineScripts.select_best import SelectBest
+from PipelineScripts.average_by_datasheet import AverageByDatasheet
+from PipelineScripts.extract_metrics import ExtractMetrics
 
 pipeline = Pipeline(
     pipeline_name="LigandMPNN-MutationComposer-Cycle", #Will create a folder in /shares/USER/<pipeline_name>
@@ -213,17 +215,16 @@ pipeline.set_suffix("ALL_ANALYSIS")
 all_merged = [x.output.datasheets.merged for x in all_analyses]
 pipeline.add(ConcatenateDatasheets(all_merged))
 pipeline.add(AverageByDatasheet(all_merged))
-for metric in ["affinity_delta",
-               "affinity_delta_R",
-               "affinity_delta_S",
-               "R_affinity_pred_value",
-               "S_affinity_pred_value",
-               "RR_affinity_pred_value",
-               "SS_affinity_pred_value"]:
-    pipeline.set_suffix(metric)
-    pipeline.add(ExtractMetric(datasheets=all_merged,
-                            metric=metric))
 
+metrics = ["affinity_delta",
+           "affinity_delta_R",
+           "affinity_delta_S",
+           "R_affinity_pred_value",
+           "S_affinity_pred_value",
+           "RR_affinity_pred_value",
+           "SS_affinity_pred_value"]
+pipeline.add(ExtractMetrics(datasheets=all_merged,
+                            metrics=metrics))
 #Prints
 pipeline.save()
 pipeline.slurm(email="") 
