@@ -370,12 +370,26 @@ class Pipeline:
         if time: resources["time"] = time
         
         # Determine GPU constraint
-        if resources["gpu"] == "high-memory":
+        gpu_spec = resources["gpu"]
+
+        if gpu_spec == "high-memory":
             gpu_line = "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB\""
-        elif resources["gpu"] == "gpu":
+        elif gpu_spec == "gpu":
             gpu_line = "#SBATCH --gpus=1"
+        elif gpu_spec in ["32GB", "80GB"] or "|" in gpu_spec:
+            # Memory-based GPU specification
+            if "|" in gpu_spec:
+                # Multiple memory options (e.g., "32GB|80GB")
+                memory_options = gpu_spec.split("|")
+                constraint_parts = [f"GPUMEM{mem}" for mem in memory_options]
+                constraint = "|".join(constraint_parts)
+            else:
+                # Single memory option (e.g., "32GB")
+                constraint = f"GPUMEM{gpu_spec}"
+            gpu_line = f"#SBATCH --gpus=1\n#SBATCH --constraint=\"{constraint}\""
         else:
-            gpu_line = f"#SBATCH --gpus={resources['gpu']}:1"
+            # Specific GPU model (T4, V100, A100, H100)
+            gpu_line = f"#SBATCH --gpus={gpu_spec}:1"
         
         # Convert memory to MB if needed
         memory_mb = resources["memory"]
@@ -429,9 +443,37 @@ module load mamba
                 print(line)
     
     def resources(self, gpu: str = None, memory: str = None, time: str = None):
-        if gpu: self.global_resources["gpu"] = gpu #T4, V100, A100, gpu, high-memory
-        if memory: self.global_resources["memory"] = memory
-        if time: self.global_resources["time"] = time
+        """
+        Configure computational resources for the pipeline.
+
+        Args:
+            gpu: GPU specification. Options:
+                - Specific models: "T4", "V100", "A100", "H100"
+                - Memory-based: "32GB", "80GB", "32GB|80GB" (uses --constraint)
+                - Generic: "gpu" (any available GPU)
+                - High-memory: "high-memory" (equivalent to "32GB|80GB")
+            memory: RAM allocation (e.g., "16GB", "32GB", "64GB")
+            time: Wall time limit in HH:MM:SS format (e.g., "24:00:00", "48:00:00")
+
+        Examples:
+            # Specific GPU model
+            pipeline.resources(gpu="A100", memory="32GB", time="24:00:00")
+
+            # Memory-based GPU selection (uses SLURM constraints)
+            pipeline.resources(gpu="80GB", memory="16GB", time="12:00:00")
+
+            # Multiple memory options
+            pipeline.resources(gpu="32GB|80GB", memory="32GB", time="48:00:00")
+
+            # High-memory GPUs
+            pipeline.resources(gpu="high-memory", memory="64GB", time="24:00:00")
+        """
+        if gpu:
+            self.global_resources["gpu"] = gpu
+        if memory:
+            self.global_resources["memory"] = memory
+        if time:
+            self.global_resources["time"] = time
     
     def get_tool_outputs(self, tool_type: str = None) -> List[ToolOutput]:
         """
