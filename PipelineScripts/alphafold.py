@@ -135,7 +135,7 @@ class AlphaFold(BaseConfig):
         # Helper script paths (only set if folders are available)
         if hasattr(self, 'folders') and self.folders:
             self.colabfold_batch = os.path.join(self.folders["AlphaFold"], "colabfold-conda/bin/colabfold_batch")
-            self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "fa_to_csv_fasta.py")
+            self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py")
         else:
             # Temporary placeholders when folders aren't available yet
             self.colabfold_batch = None

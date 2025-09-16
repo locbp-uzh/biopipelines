@@ -164,7 +164,7 @@ class LigandMPNN(BaseConfig):
         
         # Helper script paths (only set if folders are available)
         if hasattr(self, 'folders') and self.folders:
-            self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "fa_to_csv_fasta.py")
+            self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py")
             self.lmpnn_folder = os.path.join(self.folders["data"], "LigandMPNN")
             self.runtime_positions_py = os.path.join(self.folders["HelpScripts"], "pipe_lmpnn_runtime_positions.py")
         else:

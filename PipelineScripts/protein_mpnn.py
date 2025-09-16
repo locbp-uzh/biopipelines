@@ -169,7 +169,7 @@ class ProteinMPNN(BaseConfig):
             self.fixed_py = os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_fixed_positions.py")
             self.pmpnn_py = os.path.join(self.folders["ProteinMPNN"], "protein_mpnn_run.py")
             self.datasheet_py = os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_datasheet.py")
-            self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "fa_to_csv_fasta.py")
+            self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py")
         else:
             # Temporary placeholders when folders aren't available yet
             self.parse_py = None

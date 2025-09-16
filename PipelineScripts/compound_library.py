@@ -112,7 +112,7 @@ class CompoundLibrary(BaseConfig):
             self.compound_expansion_py = os.path.join(self.folders["HelpScripts"], "pipe_compound_library.py")
             self.smiles_properties_py = os.path.join(self.folders["HelpScripts"], "pipe_smiles_properties.py")
             if self.covalent:
-                self.covalent_generation_py = os.path.join(self.folders["HelpScripts"], "boltz_compound_library.py")
+                self.covalent_generation_py = os.path.join(self.folders["HelpScripts"], "pipe_compound_library.py")
 
     def validate_params(self):
         """Validate CompoundLibrary-specific parameters."""
