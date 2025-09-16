@@ -169,6 +169,24 @@ main() {
         return 0
     fi
 
+    # Check if pandas is available
+    echo "Checking environment dependencies..."
+    if ! python -c "import pandas" >/dev/null 2>&1; then
+        echo ""
+        echo "Error: pandas is not available in the current environment"
+        echo ""
+        echo "BioPipelines requires pandas to run. Please:"
+        echo "1. Activate a conda environment that contains pandas, or"
+        echo "2. Install pandas in your current environment: pip install pandas"
+        echo ""
+        echo "Example:"
+        echo "  conda activate ProteinEnv"
+        echo "  ./submit.sh"
+        return 1
+    fi
+    echo "✓ pandas available"
+    echo ""
+
     # Default to pipeline.py if no script specified
     if [ -z "$pipeline_script" ]; then
         pipeline_script="pipeline.py"
