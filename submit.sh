@@ -15,38 +15,55 @@ set -e  # Exit on any error
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 [pipeline_name] [job_name]"
+    echo "Usage: $0 [pipeline_script]"
     echo ""
-    echo "Submit a BioPipelines job to SLURM"
+    echo "Run a BioPipelines script and submit the generated job to SLURM"
     echo ""
     echo "Arguments:"
-    echo "  pipeline_name    Name of the pipeline (optional)"
-    echo "  job_name         Name of the job (optional)"
-    echo ""
-    echo "If no arguments provided, will look for the most recent pipeline output."
+    echo "  pipeline_script  Path to pipeline script (optional, defaults to pipeline.py)"
     echo ""
     echo "Examples:"
-    echo "  $0                                    # Submit most recent pipeline"
-    echo "  $0 DummyPipeline TestJob             # Submit specific pipeline/job"
+    echo "  $0                                           # Run pipeline.py"
+    echo "  $0 pipeline.py                               # Run pipeline.py"
+    echo "  $0 ExamplePipelines/ligandmpnn_boltz2.py    # Run specific pipeline"
     echo ""
 }
 
-# Function to find the most recent pipeline
-find_recent_pipeline() {
-    local base_dir="/shares/locbp.chem.uzh/$USER"
+# Function to run pipeline and extract SLURM script path
+run_pipeline_and_get_script() {
+    local pipeline_script="$1"
 
-    # If base directory doesn't exist, look locally
-    if [ ! -d "$base_dir" ]; then
-        base_dir="$HOME"
-        echo "Warning: SLURM shares directory not found, looking locally in $base_dir"
+    echo "Running pipeline: $pipeline_script"
+    echo ""
+
+    # Run the pipeline and capture output
+    local pipeline_output=$(python "$pipeline_script" 2>&1)
+    local exit_code=$?
+
+    # Show pipeline output
+    echo "$pipeline_output"
+    echo ""
+
+    if [ $exit_code -ne 0 ]; then
+        echo "Error: Pipeline execution failed with exit code $exit_code"
+        return 1
     fi
 
-    # Find the most recent job folder with a slurm.sh script
-    local recent_job=$(find "$base_dir" -name "slurm.sh" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+    # Extract SLURM script path from pipeline output
+    # Look for pattern like "SLURM script: /path/to/slurm.sh" or similar
+    local slurm_script=$(echo "$pipeline_output" | grep -E "(SLURM script:|sbatch)" | tail -1 | sed 's/.*: //' | sed 's/.*sbatch //')
 
-    if [ -n "$recent_job" ]; then
-        echo "$(dirname "$recent_job")"
+    # If that doesn't work, try to find slurm.sh in common locations
+    if [ -z "$slurm_script" ] || [ ! -f "$slurm_script" ]; then
+        # Try to find slurm.sh in current directory structure
+        slurm_script=$(find . -name "slurm.sh" -type f 2>/dev/null | head -1)
+    fi
+
+    if [ -n "$slurm_script" ] && [ -f "$slurm_script" ]; then
+        echo "Found SLURM script: $slurm_script"
+        echo "$slurm_script"
     else
+        echo "Could not find SLURM script"
         echo ""
     fi
 }
@@ -140,8 +157,7 @@ submit_job() {
 
 # Main execution
 main() {
-    local pipeline_name="$1"
-    local job_name="$2"
+    local pipeline_script="$1"
 
     echo "BioPipelines SLURM Submission Script"
     echo "===================================="
@@ -153,76 +169,46 @@ main() {
         return 0
     fi
 
-    local job_folder=""
-    local slurm_script=""
-
-    if [ -n "$pipeline_name" ] && [ -n "$job_name" ]; then
-        # Look for specific pipeline/job
-        echo "Looking for pipeline: $pipeline_name, job: $job_name"
-
-        # Try standard locations
-        local base_dirs=("/shares/locbp.chem.uzh/$USER" "$HOME")
-
-        for base_dir in "${base_dirs[@]}"; do
-            if [ -d "$base_dir" ]; then
-                # Look for job folder with pattern: PipelineName/JobName_NNN or PipelineName/JobName
-                local pattern1="$base_dir/$pipeline_name/${job_name}_*/RunTime"
-                local pattern2="$base_dir/$pipeline_name/$job_name/RunTime"
-
-                for pattern in "$pattern1" "$pattern2"; do
-                    local found=$(find $(dirname "$pattern") -maxdepth 2 -name "RunTime" -type d 2>/dev/null | head -1)
-                    if [ -n "$found" ]; then
-                        job_folder="$found"
-                        break 2
-                    fi
-                done
-            fi
-        done
-
-        if [ -z "$job_folder" ]; then
-            echo "Error: Could not find job folder for pipeline '$pipeline_name', job '$job_name'"
-            echo "Searched in: /shares/locbp.chem.uzh/$USER and $HOME"
-            return 1
-        fi
-    else
-        # Look for most recent pipeline
-        echo "No specific pipeline specified, looking for most recent..."
-        job_folder=$(find_recent_pipeline)
-
-        if [ -z "$job_folder" ]; then
-            echo "Error: No recent pipeline found with slurm.sh script"
-            echo "Please run a pipeline first (e.g., python pipeline.py)"
-            return 1
-        fi
+    # Default to pipeline.py if no script specified
+    if [ -z "$pipeline_script" ]; then
+        pipeline_script="pipeline.py"
     fi
 
-    # Construct slurm script path
-    slurm_script="$job_folder/slurm.sh"
+    # Check if pipeline script exists
+    if [ ! -f "$pipeline_script" ]; then
+        echo "Error: Pipeline script not found: $pipeline_script"
+        echo ""
+        echo "Available options:"
+        echo "  ./submit.sh                     # Run pipeline.py"
+        echo "  ./submit.sh pipeline.py         # Run specific pipeline script"
+        echo "  ./submit.sh ExamplePipelines/ligandmpnn_boltz2.py"
+        return 1
+    fi
 
-    echo "Found job folder: $job_folder"
+    # Run the pipeline and get SLURM script path
+    local slurm_script=$(run_pipeline_and_get_script "$pipeline_script")
 
-    # Extract job information
+    if [ -z "$slurm_script" ]; then
+        echo "Error: Could not extract SLURM script path from pipeline output"
+        return 1
+    fi
+
+    # Extract job information from SLURM script path
+    local job_folder=$(dirname "$slurm_script")
     local job_info=$(extract_job_info "$job_folder")
     IFS=':' read -r extracted_pipeline extracted_job extracted_id <<< "$job_info"
 
-    # Use extracted info if not provided
-    if [ -z "$pipeline_name" ]; then
-        pipeline_name="$extracted_pipeline"
-    fi
-    if [ -z "$job_name" ]; then
-        job_name="$extracted_job"
-    fi
-
     echo ""
     echo "Job Information:"
-    echo "  Pipeline: $pipeline_name"
-    echo "  Job: $job_name"
+    echo "  Pipeline script: $pipeline_script"
+    echo "  Pipeline: $extracted_pipeline"
+    echo "  Job: $extracted_job"
     echo "  ID: $extracted_id"
     echo "  SLURM script: $slurm_script"
     echo ""
 
     # Submit the job
-    submit_job "$slurm_script" "$job_name" "$pipeline_name" "$extracted_id"
+    submit_job "$slurm_script" "$extracted_job" "$extracted_pipeline" "$extracted_id"
 }
 
 # Run main function with all arguments
