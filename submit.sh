@@ -33,21 +33,21 @@ usage() {
 run_pipeline_and_get_script() {
     local pipeline_script="$1"
 
-    echo "Running pipeline: $pipeline_script"
-    echo ""
+    echo "Running pipeline: $pipeline_script" >&2
+    echo "" >&2
 
     # Run the pipeline and capture output
     local pipeline_output=$(python "$pipeline_script" 2>&1)
     local exit_code=$?
 
-    # Show pipeline output
-    echo "$pipeline_output"
-    echo ""
+    # Show pipeline output to stderr so it doesn't interfere with return value
+    echo "$pipeline_output" >&2
+    echo "" >&2
 
     if [ $exit_code -ne 0 ]; then
-        echo "Pipeline execution completed with exit code $exit_code"
-        echo "Note: This is expected for dummy/test pipelines"
-        echo ""
+        echo "Pipeline execution completed with exit code $exit_code" >&2
+        echo "Note: This is expected for dummy/test pipelines" >&2
+        echo "" >&2
     fi
 
     # Extract SLURM script path from pipeline output
@@ -55,12 +55,12 @@ run_pipeline_and_get_script() {
     local slurm_script=$(echo "$pipeline_output" | grep "Slurm saved to:" | sed 's/Slurm saved to: //')
 
     if [ -n "$slurm_script" ] && [ -f "$slurm_script" ]; then
-        echo "Found SLURM script: $slurm_script"
-        # Just return the path, don't echo it again
+        echo "Found SLURM script: $slurm_script" >&2
+        # Only output the path to stdout (this will be captured)
         echo "$slurm_script"
         return 0
     else
-        echo "Could not find SLURM script"
+        echo "Could not find SLURM script" >&2
         return 1
     fi
 }
