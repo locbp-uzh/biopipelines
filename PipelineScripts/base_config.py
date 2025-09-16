@@ -937,7 +937,19 @@ class ToolOutput:
             output_files = self._output_files
         
         return StandardizedOutput(output_files)
-    
+
+    @property
+    def o(self) -> StandardizedOutput:
+        """
+        Shorthand for .output - elegant access to tool outputs.
+
+        Allows usage like:
+        - tool.o.structures
+        - tool.o.datasheets.sequences
+        - tool.o.datasheets.concatenated
+        """
+        return self.output
+
     def __str__(self) -> str:
         return f"ToolOutput({self.tool_type}, {len(self._output_files)} output types)"
     

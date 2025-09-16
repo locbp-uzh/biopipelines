@@ -33,19 +33,19 @@ class RemoveDuplicates(BaseConfig):
     DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
     
     def __init__(self,
-                 pool: Union[ToolOutput, StandardizedOutput],
-                 history: Optional[Union[ToolOutput, StandardizedOutput]] = None,
+                 pool: Union[ToolOutput, StandardizedOutput, DatasheetInfo],
+                 history: Optional[Union[ToolOutput, StandardizedOutput, DatasheetInfo]] = None,
                  compare: str = "sequence",
                  **kwargs):
         """
         Initialize RemoveDuplicates tool.
-        
+
         Args:
-            pool: Tool output containing sequences to check for duplicates
-            history: Tool output containing historical sequences to compare against (None for first cycle)
+            pool: Tool output or direct datasheet containing sequences to check for duplicates
+            history: Tool output or direct datasheet containing historical sequences to compare against (None for first cycle)
             compare: Column name to compare for duplicates (e.g. "sequence")
             **kwargs: Additional parameters
-            
+
         Examples:
             # First cycle - remove self-duplicates only
             unique_sequences = pipeline.add(RemoveDuplicates(
@@ -53,11 +53,18 @@ class RemoveDuplicates(BaseConfig):
                 history=None,
                 compare="sequence"
             ))
-            
-            # Subsequent cycles - remove against history
+
+            # Subsequent cycles - remove against history (tool output)
             unique_sequences = pipeline.add(RemoveDuplicates(
                 pool=lmpnn_current.output,
                 history=all_sequences_seen.output,
+                compare="sequence"
+            ))
+
+            # Elegant direct datasheet access
+            unique_sequences = pipeline.add(RemoveDuplicates(
+                pool=composer.o.datasheets.sequences,
+                history=all_sequences_seen.o.datasheets.concatenated,
                 compare="sequence"
             ))
         """
@@ -66,17 +73,17 @@ class RemoveDuplicates(BaseConfig):
         self.compare = compare
         
         # Validate inputs
-        if not isinstance(pool, (ToolOutput, StandardizedOutput)):
-            raise ValueError("pool must be a ToolOutput or StandardizedOutput object")
-        
-        if history is not None and not isinstance(history, (ToolOutput, StandardizedOutput)):
-            raise ValueError("history must be a ToolOutput or StandardizedOutput object or None")
-        
+        if not isinstance(pool, (ToolOutput, StandardizedOutput, DatasheetInfo)):
+            raise ValueError("pool must be a ToolOutput, StandardizedOutput, or DatasheetInfo object")
+
+        if history is not None and not isinstance(history, (ToolOutput, StandardizedOutput, DatasheetInfo)):
+            raise ValueError("history must be a ToolOutput, StandardizedOutput, DatasheetInfo object, or None")
+
         # compare can be any column name - no validation needed for specific values
-        
+
         # Initialize base class
         super().__init__(**kwargs)
-        
+
         # Set up dependencies
         if hasattr(pool, 'config'):
             self.dependencies.append(pool.config)
@@ -85,11 +92,11 @@ class RemoveDuplicates(BaseConfig):
     
     def validate_params(self):
         """Validate RemoveDuplicates parameters."""
-        if not isinstance(self.pool, (ToolOutput, StandardizedOutput)):
-            raise ValueError("pool must be a ToolOutput or StandardizedOutput object")
-        
-        if self.history is not None and not isinstance(self.history, (ToolOutput, StandardizedOutput)):
-            raise ValueError("history must be a ToolOutput or StandardizedOutput object or None")
+        if not isinstance(self.pool, (ToolOutput, StandardizedOutput, DatasheetInfo)):
+            raise ValueError("pool must be a ToolOutput, StandardizedOutput, or DatasheetInfo object")
+
+        if self.history is not None and not isinstance(self.history, (ToolOutput, StandardizedOutput, DatasheetInfo)):
+            raise ValueError("history must be a ToolOutput, StandardizedOutput, DatasheetInfo object, or None")
         
         # compare can be any column name - no validation needed for specific values
     
@@ -115,8 +122,8 @@ class RemoveDuplicates(BaseConfig):
                 "sequence_csv": None
             }
     
-    def _extract_pool_config(self, pool: Union[ToolOutput, StandardizedOutput], prefix: str) -> Dict[str, Any]:
-        """Extract configuration from a pool tool output."""
+    def _extract_pool_config(self, pool: Union[ToolOutput, StandardizedOutput, DatasheetInfo], prefix: str) -> Dict[str, Any]:
+        """Extract configuration from a pool tool output or direct datasheet."""
         config = {
             "prefix": prefix,
             "structures": [],
@@ -126,7 +133,13 @@ class RemoveDuplicates(BaseConfig):
             "output_folder": None,
             "sequence_csv": None
         }
-        
+
+        # Handle direct DatasheetInfo objects
+        if isinstance(pool, DatasheetInfo):
+            config["sequence_csv"] = pool.path
+            config["output_folder"] = os.path.dirname(pool.path)
+            return config
+
         if hasattr(pool, 'output_folder'):
             config["output_folder"] = pool.output_folder
             
@@ -151,23 +164,40 @@ class RemoveDuplicates(BaseConfig):
             datasheets = pool.datasheets
             
             if hasattr(datasheets, '_datasheets'):
-                # Standard BioPipelines format - look for sequences datasheet
+                # Standard BioPipelines format - look for sequences/concatenated datasheet
                 for name, info in datasheets._datasheets.items():
-                    if 'sequence' in name.lower() or name == 'datasheet':
+                    if 'sequence' in name.lower() or 'concatenated' in name.lower() or name == 'datasheet':
                         if hasattr(info, 'path'):
                             config["sequence_csv"] = info.path
                         else:
                             config["sequence_csv"] = str(info)
                         break
+
+                # Fallback: if no specific pattern found, use first available datasheet
+                if config["sequence_csv"] is None and datasheets._datasheets:
+                    first_name, first_info = next(iter(datasheets._datasheets.items()))
+                    if hasattr(first_info, 'path'):
+                        config["sequence_csv"] = first_info.path
+                    else:
+                        config["sequence_csv"] = str(first_info)
+
             elif isinstance(datasheets, dict):
-                # Dict format - look for sequences
+                # Dict format - look for sequences/concatenated
                 for name, info in datasheets.items():
-                    if 'sequence' in name.lower() or name == 'datasheet':
+                    if 'sequence' in name.lower() or 'concatenated' in name.lower() or name == 'datasheet':
                         if isinstance(info, dict) and 'path' in info:
                             config["sequence_csv"] = info['path']
                         else:
                             config["sequence_csv"] = str(info)
                         break
+
+                # Fallback: if no specific pattern found, use first available datasheet
+                if config["sequence_csv"] is None and datasheets:
+                    first_name, first_info = next(iter(datasheets.items()))
+                    if isinstance(first_info, dict) and 'path' in first_info:
+                        config["sequence_csv"] = first_info['path']
+                    else:
+                        config["sequence_csv"] = str(first_info)
         
         return config
     
