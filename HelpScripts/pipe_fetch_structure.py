@@ -128,7 +128,7 @@ def fetch_structure(pdb_id: str, custom_id: str, format: str, include_biological
         
         # Download with proper headers
         headers = {
-            'User-Agent': 'BioPipelines-FetchStructure/1.0 (https://github.com/your-org/biopipelines)'
+            'User-Agent': 'BioPipelines-FetchStructure/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
         }
         
         response = requests.get(url, headers=headers, timeout=30)

@@ -119,17 +119,30 @@ submit_job() {
     # Make sure script is executable
     chmod +x "$slurm_script"
 
+    # Fix output path to prevent conflicts between multiple jobs
+    local runtime_dir=$(dirname "$slurm_script")
+    local output_path="$runtime_dir/slurm.out"
+    echo "Updating SLURM output path to: $output_path"
+
+    # Create a temporary copy and modify the output line
+    local temp_script="$slurm_script.tmp"
+    sed "s|#SBATCH --output=job.out|#SBATCH --output=$output_path|" "$slurm_script" > "$temp_script"
+
     # Submit with proper job name
-    echo "Running: sbatch --job-name=\"$slurm_job_name\" \"$slurm_script\""
+    echo "Running: sbatch --job-name=\"$slurm_job_name\" \"$temp_script\""
 
     if command -v sbatch >/dev/null 2>&1; then
-        local job_output=$(sbatch --job-name="$slurm_job_name" "$slurm_script")
+        local job_output=$(sbatch --job-name="$slurm_job_name" "$temp_script")
         local exit_code=$?
+
+        # Clean up temporary script
+        rm -f "$temp_script"
 
         if [ $exit_code -eq 0 ]; then
             echo ""
             echo "✓ Job submitted successfully!"
             echo "$job_output"
+            echo "✓ Output will be saved to: $output_path"
 
             # Extract job ID if available
             if [[ "$job_output" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
@@ -141,6 +154,9 @@ submit_job() {
                 echo ""
                 echo "Cancel job with:"
                 echo "  scancel $submitted_job_id"
+                echo ""
+                echo "View output log:"
+                echo "  tail -f $output_path"
             fi
         else
             echo ""
@@ -148,9 +164,13 @@ submit_job() {
             return $exit_code
         fi
     else
+        # Clean up temporary script
+        rm -f "$temp_script"
+
         echo "Warning: sbatch command not found. This might not be a SLURM system."
         echo "The SLURM script has been generated at: $slurm_script"
         echo "You can submit it manually when on a SLURM system."
+        echo "Note: When submitting manually, output will go to job.out in current directory."
         return 0
     fi
 }
@@ -175,7 +195,8 @@ main() {
         echo ""
         echo "Error: BioPipelines requires pandas to run. Please:"
         echo "1. Activate a conda environment that contains pandas, or"
-        echo "2. Install pandas in your current environment: pip install pandas"
+        echo "2. Install pandas in your current environment: pip install pandas, or try to first run"
+        echo "   module load mamba"
         return 1
     fi
     echo "✓ pandas available"
