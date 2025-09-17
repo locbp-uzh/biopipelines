@@ -271,6 +271,7 @@ class Pipeline:
             f"# Tools: {', '.join([t.TOOL_NAME for t in self.tools])}",
             "",
             "set -e  # Exit on any error",
+            "umask 002  # Make all files group-writable by default",
             ""
         ]
         
@@ -404,6 +405,9 @@ class Pipeline:
 #SBATCH --output=job.out
 #SBATCH --begin=now+0hour
 {email_line}
+
+# Make all files group-writable by default
+umask 002
 
 # Check if nvidia-smi is available
 if ! command -v nvidia-smi &> /dev/null

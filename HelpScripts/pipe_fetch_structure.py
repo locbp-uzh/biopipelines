@@ -204,12 +204,15 @@ def fetch_structure(pdb_id: str, custom_id: str, format: str, include_biological
         return False, "", "", metadata
 
 
-def fetch_structures(config_data: Dict[str, Any]) -> None:
+def fetch_structures(config_data: Dict[str, Any]) -> int:
     """
     Fetch multiple structures from RCSB PDB.
-    
+
     Args:
         config_data: Configuration dictionary with fetch parameters
+
+    Returns:
+        Number of failed downloads
     """
     pdb_ids = config_data['pdb_ids']
     custom_ids = config_data.get('custom_ids', pdb_ids)
@@ -317,6 +320,9 @@ def fetch_structures(config_data: Dict[str, Any]) -> None:
         for failure in failed_downloads:
             print(f"  - {failure['pdb_id']}: {failure['error_message']}")
 
+    # Return the number of failures
+    return len(failed_downloads)
+
 
 def main():
     parser = argparse.ArgumentParser(description='Fetch protein structures from RCSB PDB')
@@ -344,8 +350,17 @@ def main():
             sys.exit(1)
     
     try:
-        fetch_structures(config_data)
-        
+        failed_count = fetch_structures(config_data)
+
+        # Fail if ANY downloads failed
+        if failed_count > 0:
+            print(f"\nERROR: {failed_count} structure download(s) failed")
+            print("Pipeline cannot continue with incomplete structure set")
+            print("Check failed_downloads.csv for details")
+            sys.exit(1)
+
+        print("\nAll structures downloaded successfully")
+
     except Exception as e:
         print(f"Error fetching structures: {e}")
         import traceback

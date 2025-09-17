@@ -116,7 +116,7 @@ def extract_multiple_metrics(datasheets, datasheet_paths, datasheet_names, metri
 
         # Save to separate CSV file
         output_path = os.path.join(output_folder, f"{metric}.csv")
-        extracted_df.to_csv(output_path, index=False)
+        extracted_df.to_csv(output_path, index=False, na_rep='')
 
         output_files[metric] = output_path
 

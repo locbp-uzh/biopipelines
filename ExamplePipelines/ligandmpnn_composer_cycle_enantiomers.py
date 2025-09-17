@@ -91,8 +91,8 @@ for CYCLE in range(NUM_CYCLES):
     composer = pipeline.add(MutationComposer(frequencies=[profiler_R.output.datasheets.absolute_frequencies,
                                                           profiler_S.output.datasheets.absolute_frequencies],
                                              num_sequences=12,
-                                             mode="weighted_random",
-                                             combination_strategy="stack", #take one mutation from R one from S together
+                                             mode="single_point",
+                                             combination_strategy="round_robin", #take one mutation from R one from S together
                                              prefix=f"HT_C{CYCLE+1}"))
     
     """
@@ -100,7 +100,7 @@ for CYCLE in range(NUM_CYCLES):
     """
     unique_new_sequences = pipeline.add(RemoveDuplicates(
         pool=composer.output,           # Current cycle sequences  
-        history=all_sequences_seen.output if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
+        history=all_sequences_seen.output.datasheets.concatenated if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
         compare="sequence"           # Compare protein sequences
     ))
     
@@ -192,14 +192,14 @@ for CYCLE in range(NUM_CYCLES):
     best_R = pipeline.add(SelectBest(
         pool=[pool["R"].output for pool in all_pools],  # All pools from all cycles
         datasheets=[x.output.datasheets.merged for x in all_analyses],  # All analyses from all cycles
-        metric='affinity_delta',
+        metric='affinity_open_sum',
         mode='min',
         name=f'{CYCLE+1}_best'
     ))
     best_S = pipeline.add(SelectBest(
         pool=[pool["S"].output for pool in all_pools],  # All pools from all cycles
         datasheets=[x.output.datasheets.merged for x in all_analyses],  # All analyses from all cycles
-        metric='affinity_delta',
+        metric='affinity_open_sum',
         mode='min',
         name=f'{CYCLE+1}_best'
     ))
@@ -216,9 +216,12 @@ all_merged = [x.output.datasheets.merged for x in all_analyses]
 pipeline.add(ConcatenateDatasheets(all_merged))
 pipeline.add(AverageByDatasheet(all_merged))
 
+#extract metrics for column analysis on Prism
 metrics = ["affinity_delta",
            "affinity_delta_R",
            "affinity_delta_S",
+           "affinity_open_sum",
+           "affinity_close_sum",
            "R_affinity_pred_value",
            "S_affinity_pred_value",
            "RR_affinity_pred_value",
