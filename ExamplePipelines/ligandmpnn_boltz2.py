@@ -8,6 +8,7 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.distance_selector import DistanceSelector
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.residue_atom_distance import ResidueAtomDistance
@@ -35,40 +36,49 @@ original = pipeline.add(LoadOutput(
 ))
 
 """
-Diversify with LigandMPNN
+Generate distance-based residue selections
+This new approach replaces the previous design_within post-processing with explicit
+distance analysis that generates PyMOL-formatted selections for each structure.
 """
-lmpnn = pipeline.add(LigandMPNN(structures=original.output, #this is equivalent to boltz2.output
+distance_analysis = pipeline.add(DistanceSelector(structures=original,
+                                                       ligand="LIG",
+                                                       distance=4.0))
+
+"""
+Diversify with LigandMPNN using distance-based selections
+"""
+lmpnn = pipeline.add(LigandMPNN(structures=original, #this is equivalent to boltz2
                                 ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
-                                num_sequences=3, 
-                                redesigned="145-180", #similarly you can specify fixed=...
-                                design_within=4))
+                                num_sequences=3,
+                                redesigned=(distance_analysis.datasheets.selections, "within") #use residues within 4Å of ligand
+))
 
 """
 We run the Apo version first. One can also extract confidence parameters from it, and in general here is where we calculate the MSAs, which will be recycled later on with the msas input parameter.
 """
-boltz_apo = pipeline.add(Boltz2(proteins=lmpnn.output))
+boltz_apo = pipeline.add(Boltz2(proteins=lmpnn))
 
 """
 Run with open form and closed form.
-Important: msas are passed with <tool>.output, not with <tool>.output.msas
+Important: msas are passed with <tool>, not with <tool>.msas
 """
-boltz_holo_open = pipeline.add(Boltz2(proteins=lmpnn.output,
+boltz_holo_open = pipeline.add(Boltz2(proteins=lmpnn,
                                 ligands=r"C[N+](C1=C2C=CC=C1)=C([C@]2(CC3=CN(N=N3)CCOCCOCCCCCCCl)CC(NCC(F)F)=O)/C=C/C=C/C=C/C=C(N(C4=C5C=CC=C4)C)\C5(C)C",
-                                msas=boltz_apo.output,
+                                msas=boltz_apo,
                                 affinity=True))
-boltz_holo_close = pipeline.add(Boltz2(proteins=lmpnn.output,
+boltz_holo_close = pipeline.add(Boltz2(proteins=lmpnn,
                                 ligands=r"CN([C@@]1(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@@]4(CC(N1CC(F)F)=O)CC5=CN(CCOCCOCCCCCCCl)N=N5)C6=C4C=CC=C6",
-                                msas=boltz_apo.output,
+                                msas=boltz_apo,
                                 affinity=True))
 
 """
 Now we want to calculate the distance between the active aspartate and the chlorine in the ligand. This can be done with an analysis tool called ResidueAtomDistance. The residue can be specified with it position e.g. residue="106" or with its context e.g. "D in IHDWG". The context is useful if the analysis follows e.g. RFdiffusion with non-fixed length contigs, but make sure LigandMPNN is not mutating it. The ligand name has to be specified, which is always LIG when using Boltz for folding. The output will be a datasheet containing columns id, <metric_name>, where id comes from boltz and therefore is associated to a specific protein sequence.
 """
-open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open.output,
+open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open,
                                                                     residue='D in IHDWG',
                                                                     atom='LIG.Cl',
                                                                     metric_name='open_chlorine_distance'))
-close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_close.output,
+close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_close,
                                                                     residue='D in IHDWG',
                                                                     atom='LIG.Cl',
                                                                     metric_name='close_chlorine_distance'))
@@ -77,18 +87,18 @@ close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz
 Now we merge the datasheets based on the id (i.e. same protein sequence) and have some prefixes to distinguish between apo and holo affinity parameters. Here we can also define new columns based on previous ones.
 Analysis tools always output a datasheet called analysis.
 """
-analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_open.output.datasheets.affinity,
-                                                    boltz_holo_close.output.datasheets.affinity,
-                                                    open_chlorine_aspartate_distance.output.datasheets.analysis,
-                                                    close_chlorine_aspartate_distance.output.datasheets.analysis],
+analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_open.datasheets.affinity,
+                                                    boltz_holo_close.datasheets.affinity,
+                                                    open_chlorine_aspartate_distance.datasheets.analysis,
+                                                    close_chlorine_aspartate_distance.datasheets.analysis],
                                         prefixes=["open_","close_","",""],
                                         calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"} ))
 """
 Now we want to make sure we only take poses in which the chlorine atom is close to the aspartate.
 By defining the pool, we make sure we will find in the output folder of the filter tool all the structures with open form respecting the expression. If pool is not defined, we will only have a datasheet.
 """
-filtered  = pipeline.add(Filter(pool=boltz_holo_open.output,
-                                data=analysis.output,
+filtered  = pipeline.add(Filter(pool=boltz_holo_open,
+                                data=analysis,
                                 expression="open_chlorine_distance < 5.0"))
 
 #Prints

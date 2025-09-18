@@ -104,14 +104,14 @@ class Filter(BaseConfig):
         Examples:
             # Data mode - filter datasheet only
             filtered = pipeline.add(Filter(
-                data=combined_analysis.output,
+                data=combined_analysis,
                 expression="pLDDT > 80"
             ))
             
             # Pool mode - filter datasheet and copy structures
             filtered = pipeline.add(Filter(
-                pool=boltz_results.output,
-                data=combined_analysis.output,
+                pool=boltz_results,
+                data=combined_analysis,
                 expression="pLDDT > 80 and distance < 5.0"
             ))
         """

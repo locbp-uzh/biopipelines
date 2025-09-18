@@ -74,7 +74,7 @@ class ResidueAtomDistance(BaseConfig):
         Examples:
             # Analyze ligand chlorine distance to specific aspartic acids
             distance_analysis = pipeline.add(ResidueAtomDistance(
-                input=boltz_results.output,
+                input=boltz_results,
                 atom='LIG.Cl',
                 residue='D in IGDWG',
                 metric_name='chlorine_distance'
@@ -82,7 +82,7 @@ class ResidueAtomDistance(BaseConfig):
             
             # Analyze specific residue distance to ligand  
             ca_analysis = pipeline.add(ResidueAtomDistance(
-                input=structure_tool.output,
+                input=structure_tool,
                 atom='LIG.Br',
                 residue='145-150',
                 method='mean',

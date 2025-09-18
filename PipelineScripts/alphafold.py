@@ -55,9 +55,9 @@ class AlphaFold(BaseConfig):
         """
         # Handle standardized input format
         if input is not None:
-            # New standardized format: input=pmpnn.output
+            # New standardized format: input=pmpnn
             if isinstance(input, StandardizedOutput):
-                # StandardizedOutput object (pmpnn.output)
+                # StandardizedOutput object (pmpnn)
                 self.input_sequences = input.sequences
                 self.input_datasheets = input.datasheets
                 self.input_is_tool_output = False  # Direct file paths now
@@ -374,7 +374,7 @@ cd - > /dev/null
         # AlphaFold/ColabFold generates files with specific patterns
         # Format: {sequence_id}_unrelaxed_rank_{rank}_alphafold2_ptm.pdb
         
-        # Try to get sequence IDs from standardized input (pmpnn.output)
+        # Try to get sequence IDs from standardized input (pmpnn)
         if hasattr(self, 'standardized_input') and self.standardized_input:
             if hasattr(self.standardized_input, 'sequence_ids'):
                 sequence_ids = self.standardized_input.sequence_ids

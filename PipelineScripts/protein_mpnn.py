@@ -44,8 +44,8 @@ class ProteinMPNN(BaseConfig):
             structures: Input structures (PDB files, folder, or ToolOutput)
             datasheets: Input datasheet files for metadata
             num_sequences: Number of sequences to generate per structure
-            fixed_positions: PyMOL-style selection or datasheet reference (e.g., "input.datasheets.structures.fixed")
-            designed_positions: PyMOL-style selection or datasheet reference (e.g., "input.datasheets.structures.designed")
+            fixed_positions: PyMOL-style selection or datasheet reference (e.g., "structures.fixed")
+            designed_positions: PyMOL-style selection or datasheet reference (e.g., "structures.designed")
             fixed_chain: Chain to apply fixed positions to
             plddt_threshold: pLDDT threshold for automatic fixing (100 = no fixing)
             sampling_temp: Sampling temperature for sequence generation
@@ -56,7 +56,7 @@ class ProteinMPNN(BaseConfig):
         # Handle standardized input format
         if input is not None:
             if isinstance(input, StandardizedOutput):
-                # StandardizedOutput object (e.g., rfd.output)
+                # StandardizedOutput object (e.g., rfd)
                 self.input_structures = input.structures
                 self.input_datasheets = input.datasheets
                 self.input_is_tool_output = False  # Direct file paths now
@@ -213,7 +213,7 @@ class ProteinMPNN(BaseConfig):
                 self.input_sources[pdb_name] = pdb_path
                 
         elif isinstance(self.input_structures, list):
-            # Direct list of PDB file paths (from rfd.output.structures)
+            # Direct list of PDB file paths (from rfd.structures)
             self.input_pdb_files = []
             for pdb_path in self.input_structures:
                 pdb_name = os.path.basename(pdb_path)
@@ -462,7 +462,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                         sequence_ids.append(f"{pdb_base}_{seq_num}")
         
         elif direct_file_paths:
-            # Handle direct file paths from StandardizedOutput (input=rfd.output)
+            # Handle direct file paths from StandardizedOutput (input=rfd)
             for pdb_path in direct_file_paths:
                 pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
                 # ProteinMPNN generates sequences numbered from 1

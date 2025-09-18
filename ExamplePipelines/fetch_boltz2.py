@@ -27,7 +27,7 @@ Importantly, when writing the ligand smiles as a string, use r prefix (raw strin
 We set global_msas_cache to True to save the protein msa for any later use of it – or to retrieve it if it was already computed.
 We add pipeline=pipeline only so the tool can access the job name. This is not done when folding sequences from previous tools.
 """
-boltz2 = pipeline.add(Boltz2(proteins=HaloTag.output,
+boltz2 = pipeline.add(Boltz2(proteins=HaloTag,
 ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
 affinity=True,
 global_msas_cache=True,

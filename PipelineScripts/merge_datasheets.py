@@ -52,21 +52,21 @@ class MergeDatasheets(BaseConfig):
         Examples:
             # Simple combination
             merged = pipeline.add(MergeDatasheets(
-                datasheets=[confidence_results.output.datasheets.analysis,
-                           distance_results.output.datasheets.analysis],
+                datasheets=[confidence_results.datasheets.analysis,
+                           distance_results.datasheets.analysis],
                 key="structure_id"
             ))
             
             # With prefixes and explicit datasheet specification
             merged = pipeline.add(MergeDatasheets(
-                datasheets=[boltz_apo.output.datasheets.affinity, boltz_holo.output.datasheets.affinity],
+                datasheets=[boltz_apo.datasheets.affinity, boltz_holo.datasheets.affinity],
                 prefixes=["apo_", "holo_"],
                 calculate={"affinity_diff": "holo_affinity - apo_affinity"}
             ))
             
             # With ID mapping to consolidate different IDs into common entities
             merged = pipeline.add(MergeDatasheets(
-                datasheets=[open_results.output.datasheets.affinity, close_results.output.datasheets.affinity],
+                datasheets=[open_results.datasheets.affinity, close_results.datasheets.affinity],
                 prefixes=["open_", "close_"],
                 id_map={"original": ["HT_Cy7_C_R", "HT_Cy7_C_RR"]},
                 calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}
@@ -144,7 +144,7 @@ class MergeDatasheets(BaseConfig):
                 else:
                     # Multiple datasheets - ambiguous
                     datasheet_names = list(datasheets.keys())
-                    raise ValueError(f"Ambiguous: ToolOutput has multiple datasheets {datasheet_names}. Use explicit specification like datasheets=[tool.output.datasheets.affinity, ...]")
+                    raise ValueError(f"Ambiguous: ToolOutput has multiple datasheets {datasheet_names}. Use explicit specification like datasheets=[tool.datasheets.affinity, ...]")
                 
                 if isinstance(ds_info, dict) and 'path' in ds_info:
                     return ds_info['path']
