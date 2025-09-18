@@ -1000,6 +1000,9 @@ python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_para
         
         if self.diffusion_samples is not None:
             boltz_options += f" --diffusion_samples {self.diffusion_samples}"
+
+        if getattr(self, "use_potentials", False):
+            boltz_options += " --use_potentials"
         
         if self.queries_csv_file or self.input_fasta_files or (hasattr(self, 'input_direct_sequence') and self.input_direct_sequence and (has_multiple_ligands or hasattr(self, '_needs_global_msa_cache') or hasattr(self, '_needs_msa_integration'))):
             # Multiple config files - run prediction for each one
