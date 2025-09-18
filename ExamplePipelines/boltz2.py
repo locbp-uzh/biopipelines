@@ -11,8 +11,9 @@ from PipelineScripts.boltz2 import Boltz2
 
 pipeline = Pipeline(
     pipeline_name="Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="HT7_Cy7_C_S", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
-    job_description="Folding of HaloTag7 with Cy7 methyl amide open enantiomer S")
+    job_name="HT7_Cy7_C_SS", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    job_description="Folding of HaloTag7 with Cy7 methyl amide close enantiomer SS",
+    shared=True)
 
 pipeline.resources(
     gpu="V100",
@@ -26,7 +27,7 @@ We set global_msas_cache to True to save the protein msa for any later use of it
 We add pipeline=pipeline only so the tool can access the job name. This is not done when folding sequences from previous tools.
 """
 boltz2 = pipeline.add(Boltz2(proteins="MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
-ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
+ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@@]34[C@@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
 affinity=True,
 global_msas_cache=True,
 pipeline=pipeline))
