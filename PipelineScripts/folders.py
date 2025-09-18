@@ -17,7 +17,7 @@ class FolderManager:
     following conventions established in the Jupyter notebooks.
     """
     
-    def __init__(self, pipeline_name:str, job_folder: str, debug: bool=False):
+    def __init__(self, pipeline_name: str, job_folder: str, debug: bool=False, shared: bool=False):
         """
         Initialize folder manager for a pipeline.
         
@@ -25,13 +25,17 @@ class FolderManager:
             pipeline_name: Name of the pipeline (used for output folders)
             job_folder: Name of the job (used for output folders)
             debug: if True, it will not attempt to generate folder. Useful to check locally the expected input output of models
+            shared: if True, uses 'public' as the user name for shared/public pipelines
         """
         self._folders = {}
 
         """Setup base folder structure following notebook conventions."""
         # Get user info from current directory structure
         notebooks_folder = os.getcwd() if not debug else "biopipelines"
-        user_name = os.path.basename(os.path.dirname(notebooks_folder)) if not debug else "USER"
+        if shared:
+            user_name = "public"
+        else:
+            user_name = os.path.basename(os.path.dirname(notebooks_folder)) if not debug else "USER"
         self.user_name = user_name
         
         # Base system folders

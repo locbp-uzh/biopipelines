@@ -37,7 +37,7 @@ class Boltz2(BaseConfig):
                  # Primary input parameters (matching usage examples)
                  config: Optional[str] = None,
                  proteins: Union[str, List[str], ToolOutput] = None,
-                 ligands: Optional[str] = None,
+                 ligands: Union[str, ToolOutput, StandardizedOutput, None] = None,
                  msas: Optional[Union[str, ToolOutput]] = None,
                  # Legacy compatibility
                  sequences: Union[str, List[str], ToolOutput] = None,
@@ -63,7 +63,7 @@ class Boltz2(BaseConfig):
             input: Complete standardized input with sequences, datasheets, etc. (e.g., lmpnn)
             config: Direct YAML configuration string (Example 1: Boltz2(config=yaml))
             proteins: Protein sequences - can be ToolOutput, file path, or direct sequence (Examples 2&3)
-            ligands: Single ligand SMILES string or datasheet reference
+            ligands: Single ligand SMILES string, ToolOutput with compounds, or datasheet reference
             msas: MSA files for recycling (e.g., boltz2_apo.datasheets.msas)
             sequences: Legacy parameter, same as proteins (for backward compatibility)
             ligand_smiles: Legacy parameter, same as ligands (for backward compatibility)
@@ -98,11 +98,17 @@ class Boltz2(BaseConfig):
             self.input_is_tool_output = False
             self.standardized_input = proteins
             # Keep proteins as StandardizedOutput reference
-        elif isinstance(ligands, StandardizedOutput):
-            # Explicit: ligands=compounds  
-            self.input_compounds = getattr(ligands, 'compounds', [])
-            self.input_datasheets = getattr(ligands, 'datasheets', {})
-            # Keep ligands as StandardizedOutput reference
+        elif isinstance(ligands, (StandardizedOutput, ToolOutput)):
+            # Explicit: ligands=compounds from previous tool
+            if isinstance(ligands, StandardizedOutput):
+                self.input_compounds = getattr(ligands, 'compounds', [])
+                self.input_datasheets = getattr(ligands, 'datasheets', {})
+            else:  # ToolOutput
+                self.input_compounds = ligands.get_output_files("compounds")
+                self.input_datasheets = ligands.get_output_files("datasheets")
+                # Add dependency for ToolOutput
+                self.dependencies.append(ligands.config)
+            # Keep ligands as tool reference
         elif isinstance(msas, StandardizedOutput):
             # Explicit: msas=previous_boltz
             self.input_datasheets = getattr(msas, 'datasheets', {})
@@ -735,6 +741,11 @@ EOF
                     # Extract compounds CSV path from StandardizedOutput
                     if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
                         ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, ToolOutput):
+                    # Extract compounds CSV path from ToolOutput
+                    compounds_files = self.ligands.get_output_files("compounds")
+                    if compounds_files:
+                        ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
                     # Direct file path or datasheet reference
                     ligand_param = self.resolve_datasheet_reference(self.ligands)
@@ -843,6 +854,11 @@ python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_
                     # Extract compounds CSV path from StandardizedOutput
                     if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
                         ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, ToolOutput):
+                    # Extract compounds CSV path from ToolOutput
+                    compounds_files = self.ligands.get_output_files("compounds")
+                    if compounds_files:
+                        ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
                     # Direct file path or datasheet reference
                     ligand_param = self.resolve_datasheet_reference(self.ligands)
@@ -881,6 +897,11 @@ python {self.boltz_csv_to_configs_py} {self.queries_csv_file} {config_files_dir}
                     # Extract compounds CSV path from StandardizedOutput
                     if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
                         ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, ToolOutput):
+                    # Extract compounds CSV path from ToolOutput
+                    compounds_files = self.ligands.get_output_files("compounds")
+                    if compounds_files:
+                        ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
                     # Direct file path or datasheet reference
                     ligand_param = self.resolve_datasheet_reference(self.ligands)
@@ -918,6 +939,11 @@ python {self.boltz_fasta_to_configs_py} "{fasta_files_str}" {config_files_dir} "
                     # Extract compounds CSV path from StandardizedOutput
                     if hasattr(self.ligands, 'compounds') and self.ligands.compounds:
                         ligand_param = self.ligands.compounds[0]
+                elif isinstance(self.ligands, ToolOutput):
+                    # Extract compounds CSV path from ToolOutput
+                    compounds_files = self.ligands.get_output_files("compounds")
+                    if compounds_files:
+                        ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
                     # Direct file path or datasheet reference
                     ligand_param = self.resolve_datasheet_reference(self.ligands)
@@ -1134,11 +1160,11 @@ boltz predict {config_file_path} {boltz_options}
         # Compounds handling
         compounds = []
         compound_ids = []
-        
+
         # Handle compounds from various sources
         if hasattr(self, 'ligand_library') and self.ligand_library:
             compounds = [self.ligand_library]  # Point to the compound library CSV
-            
+
             # Try to get compound_ids from standardized input
             if isinstance(getattr(self, 'ligands', None), StandardizedOutput):
                 # Explicit ligands=compounds
@@ -1149,7 +1175,7 @@ boltz predict {config_file_path} {boltz_options}
             else:
                 # Fallback placeholder
                 compound_ids = ["library_compounds"]
-            
+
             # Add compounds datasheet pointing to the ligand library
             datasheets["compounds"] = DatasheetInfo(
                 name="compounds",
@@ -1157,6 +1183,22 @@ boltz predict {config_file_path} {boltz_options}
                 columns=["id", "format", "smiles", "ccd"],
                 description="Compound library used for ligand binding predictions",
                 count=len(compound_ids) if isinstance(compound_ids, list) else 0
+            )
+
+        # Handle single SMILES string - create compounds table
+        elif isinstance(self.ligands, str) and self.ligands and not self.ligands.endswith('.csv'):
+            # Create a compounds table for the single SMILES string
+            compounds_csv = os.path.join(self.output_folder, "ligands.csv")
+            compounds = [compounds_csv]
+            compound_ids = ["ligand"]
+
+            # Add compounds datasheet for single SMILES
+            datasheets["compounds"] = DatasheetInfo(
+                name="compounds",
+                path=compounds_csv,
+                columns=["id", "format", "smiles", "ccd"],
+                description="Single ligand compound used for binding prediction",
+                count=1
             )
         
         return {

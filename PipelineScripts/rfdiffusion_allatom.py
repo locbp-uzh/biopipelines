@@ -10,13 +10,13 @@ import shutil
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput
 
 
 class RFdiffusionAllAtom(BaseConfig):
@@ -30,7 +30,7 @@ class RFdiffusionAllAtom(BaseConfig):
     TOOL_NAME = "RFdiffusionAllAtom"
     DEFAULT_ENV = "ProteinEnv"
     
-    def __init__(self, ligand: str, pdb: str = "", contigs: str = "", inpaint: str = "",
+    def __init__(self, ligand: str, pdb: Union[str, ToolOutput, StandardizedOutput] = "", contigs: str = "", inpaint: str = "",
                  num_designs: int = 1, active_site: bool = False, 
                  steps: int = 200, partial_steps: int = 0, 
                  reproducible: bool = False, reproducibility_number: int = 0,
@@ -46,7 +46,7 @@ class RFdiffusionAllAtom(BaseConfig):
         
         Args:
             ligand: Ligand identifier (e.g., 'ZIT', 'RFP')
-            pdb: Input PDB file (optional template)
+            pdb: Input PDB file (optional template), ToolOutput, or StandardizedOutput
             contigs: Contig specification (e.g., "A1-100,10-20")
             inpaint: Inpainting specification (same format as contigs)
             num_designs: Number of designs to generate
@@ -72,6 +72,34 @@ class RFdiffusionAllAtom(BaseConfig):
         """
         # In common with RFdiffusion
         self.pdb = pdb
+        self.pdb_is_tool_output = False
+        self.pdb_source_file = None
+
+        # Handle tool output for PDB input
+        if isinstance(pdb, (ToolOutput, StandardizedOutput)):
+            self.pdb_is_tool_output = True
+            if isinstance(pdb, StandardizedOutput):
+                # Get first structure from StandardizedOutput
+                if hasattr(pdb, 'structures') and pdb.structures:
+                    self.pdb_source_file = pdb.structures[0]
+                    if len(pdb.structures) > 1:
+                        print(f"Warning: Multiple structures found in input, using first one: {os.path.basename(self.pdb_source_file)}")
+                        print("Note: Multiple structure support not yet implemented")
+                else:
+                    raise ValueError("No structures found in StandardizedOutput for pdb parameter")
+            else:  # ToolOutput
+                # Get first structure from ToolOutput
+                structures = pdb.get_output_files("structures")
+                if structures:
+                    self.pdb_source_file = structures[0]
+                    if len(structures) > 1:
+                        print(f"Warning: Multiple structures found in tool output, using first one: {os.path.basename(self.pdb_source_file)}")
+                        print("Note: Multiple structure support not yet implemented")
+                    # Add dependency
+                    self.dependencies.append(pdb.config)
+                else:
+                    raise ValueError("No structures found in ToolOutput for pdb parameter")
+
         self.contigs = contigs
         self.inpaint = inpaint
         self.num_designs = num_designs
@@ -141,11 +169,13 @@ class RFdiffusionAllAtom(BaseConfig):
         if self.partial_steps < 0:
             raise ValueError("partial_steps cannot be negative")
         
-        if self.pdb and not (self.pdb.endswith('.pdb') or os.path.exists(self.pdb)):
-            # Check if it exists in PDBs folder
-            pdb_path = os.path.join(os.getcwd(), "PDBs", self.pdb + ".pdb" if not self.pdb.endswith('.pdb') else self.pdb)
-            if not os.path.exists(pdb_path):
-                raise ValueError(f"PDB file not found: {self.pdb}")
+        # Skip PDB validation for tool outputs (will be validated at runtime)
+        if self.pdb and not self.pdb_is_tool_output:
+            if not (isinstance(self.pdb, str) and (self.pdb.endswith('.pdb') or os.path.exists(self.pdb))):
+                # Check if it exists in PDBs folder
+                pdb_path = os.path.join(os.getcwd(), "PDBs", self.pdb + ".pdb" if not self.pdb.endswith('.pdb') else self.pdb)
+                if not os.path.exists(pdb_path):
+                    raise ValueError(f"PDB file not found: {self.pdb}")
         
         # Additional validation for PPI design
         if self.ppi_design and not self.ppi_hotspot_residues:
@@ -163,10 +193,14 @@ class RFdiffusionAllAtom(BaseConfig):
         self._setup_file_paths()  # Set up all file paths now that we have folders
         
         # Handle PDB input if provided
-        if self.pdb:
+        if self.pdb_is_tool_output:
+            # Tool output - file already exists at pdb_source_file path
+            self.input_sources["pdb"] = self.pdb_source_file
+        elif self.pdb:
+            # String filename - look in PDBs folder
             pdb_temp = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
             pdb_source = os.path.join(pipeline_folders["PDBs"], pdb_temp)
-            
+
             if os.path.exists(pdb_source):
                 # Will be copied in script generation
                 self.input_sources["pdb"] = pdb_source
@@ -266,7 +300,11 @@ class RFdiffusionAllAtom(BaseConfig):
             self.datasheet_py_file = os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_datasheet.py")
             
             # Input PDB file path (if PDB is provided)
-            if self.pdb:
+            if self.pdb_is_tool_output:
+                # Use the actual file path from tool output
+                self.input_pdb_file = self.pdb_source_file
+            elif self.pdb:
+                # Handle string PDB filename
                 pdb_temp = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
                 self.input_pdb_file = os.path.join(self.folders["runtime"], pdb_temp)
             else:

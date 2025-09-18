@@ -53,8 +53,7 @@ MSAs are passed with <tool>, not with <tool>.msas
 """
 boltz_holo = pipeline.add(Boltz2(proteins=lmpnn,
                                 ligands=r"C[C@H]1/C=C/C=C(C)\C(NC2=C(/C=N/N3CCN(C)CC3)C(O)=C4C(C(O)=C(C)C5=C4C([C@](O/C=C/[C@H](OC)[C@@H](C)[C@@H](OC(C)=O)[C@H](C)[C@H](O)[C@H](C)[C@H]1O)(C)O5)=O)=C2O)=O",
-                                msas=boltz_apo,
-                                affinity=True))
+                                msas=boltz_apo))
 
 #Prints
 pipeline.save()

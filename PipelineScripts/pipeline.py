@@ -30,15 +30,26 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, pipeline_name: str, job_name: str, job_description: str="Description missing", debug: bool=False):
+    def __init__(self, pipeline_name: str, job_name: str, job_description: str="Description missing", debug: bool=False, shared: bool=False):
+        """
+        Initialize a new pipeline instance.
+
+        Args:
+            pipeline_name: Name of the pipeline (used for output folders)
+            job_name: Name of the specific job (used for output folders)
+            job_description: Optional description of what this job does
+            debug: If True, runs in debug mode without creating folders
+            shared: If True, uses shared/public user for folder structure (default: False)
+        """
         if ' ' in job_name: job_name=job_name.replace(' ','_') #It will create issues at runtime otherwise
         
         self.pipeline_name = pipeline_name
         self.job_name = job_name
         self.job_description = job_description
         self.debug = debug
+        self.shared = shared
 
-        self.folder_manager = FolderManager(pipeline_name,job_name,debug)
+        self.folder_manager = FolderManager(pipeline_name, job_name, debug, shared)
         self.folders = self.folder_manager.get_folders()
         
         # Tool management
