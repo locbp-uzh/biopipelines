@@ -306,8 +306,8 @@ class LigandMPNN(BaseConfig):
             raise ValueError("No structure sources found")
         
         # Determine fixed positions approach - prioritize explicit positions over datasheets
-        if self.fixed_positions or self.designed_positions:
-            # Use directly specified positions (highest priority)
+        if self.fixed_positions is not None or self.designed_positions is not None:
+            # Use directly specified positions (highest priority) - includes empty strings
             input_source = "selection"  
             input_datasheet = "-"
         elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
@@ -375,8 +375,8 @@ cd {self.lmpnn_folder}
             raise ValueError("No structure sources found")
             
         # Determine fixed positions approach - prioritize explicit positions over datasheets
-        if self.fixed_positions or self.designed_positions:
-            # Use directly specified positions (highest priority)
+        if self.fixed_positions is not None or self.designed_positions is not None:
+            # Use directly specified positions (highest priority) - includes empty strings
             input_source = "selection"  
             input_datasheet = "-"
         elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
