@@ -47,13 +47,13 @@ class SliceDatasheet(BaseConfig):
         Examples:
             # Take first 10 sequences from LigandMPNN output
             first_ten = pipeline.add(SliceDatasheet(
-                input=lmpnn.output,
+                input=lmpnn,
                 n_rows=10
             ))
 
             # Take first 5 structures for quick testing
             sample = pipeline.add(SliceDatasheet(
-                input=boltz.output,
+                input=boltz,
                 n_rows=5
             ))
         """

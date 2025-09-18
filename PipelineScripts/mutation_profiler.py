@@ -55,14 +55,14 @@ class MutationProfiler(BaseConfig):
         Examples:
             # Analyze LigandMPNN mutations against original
             profiler = pipeline.add(MutationProfiler(
-                original=original_structure.output,
-                mutants=lmpnn.output
+                original=original_structure,
+                mutants=lmpnn
             ))
             
             # Profile mutations without including original in statistics
             profiler = pipeline.add(MutationProfiler(
-                original=wild_type.output,
-                mutants=engineered_variants.output,
+                original=wild_type,
+                mutants=engineered_variants,
                 include_original=False
             ))
         """

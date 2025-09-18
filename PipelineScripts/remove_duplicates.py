@@ -48,15 +48,15 @@ class RemoveDuplicates(BaseConfig):
         Examples:
             # First cycle - remove self-duplicates only
             unique_sequences = pipeline.add(RemoveDuplicates(
-                pool=lmpnn_current.output,
+                pool=lmpnn_current,
                 history=None,
                 compare="sequence"
             ))
 
             # Subsequent cycles - remove against history (tool output)
             unique_sequences = pipeline.add(RemoveDuplicates(
-                pool=lmpnn_current.output,
-                history=all_sequences_seen.output,
+                pool=lmpnn_current,
+                history=all_sequences_seen,
                 compare="sequence"
             ))
 
@@ -69,8 +69,8 @@ class RemoveDuplicates(BaseConfig):
 
             # Direct file path access (most elegant)
             unique_sequences = pipeline.add(RemoveDuplicates(
-                pool=composer.output.datasheets.sequences,
-                history=all_sequences_seen.output.datasheets.concatenated,
+                pool=composer.datasheets.sequences,
+                history=all_sequences_seen.datasheets.concatenated,
                 compare="sequence"
             ))
         """

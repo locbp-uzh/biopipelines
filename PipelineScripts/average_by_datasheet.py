@@ -51,9 +51,9 @@ class AverageByDatasheet(BaseConfig):
         Examples:
             # Average metrics across cycles
             averages = pipeline.add(AverageByDatasheet(
-                datasheets=[cycle0.output.datasheets.merged,
-                           cycle1.output.datasheets.merged,
-                           cycle2.output.datasheets.merged]
+                datasheets=[cycle0.datasheets.merged,
+                           cycle1.datasheets.merged,
+                           cycle2.datasheets.merged]
             ))
         """
         self.datasheets_input = datasheets

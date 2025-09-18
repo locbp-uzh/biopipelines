@@ -46,7 +46,7 @@ class PyMOL(BaseConfig):
             structures: Structure source(s). Either:
                 - Single ToolOutput for simple visualization
                 - List of (ToolOutput, prefix) tuples for multi-tool combination
-            color_by: Datasheet column reference for coloring (e.g., "tool.output.datasheets.analysis.plddt")
+            color_by: Datasheet column reference for coloring (e.g., "tool.datasheets.analysis.plddt")
             reference_structure: Structure prefix to use as alignment reference (default: first structure)
             alignment: Alignment method - "align", "cealign", "super", "alignto", or "none"
             session_name: Name for output PyMOL session file (default: auto-generated)
@@ -102,7 +102,7 @@ class PyMOL(BaseConfig):
             parts = self.color_by.split('.')
             if len(parts) < 4 or parts[1] != "output" or parts[2] != "datasheets":
                 raise ValueError(
-                    "color_by must follow format 'tool.output.datasheets.sheet.column', "
+                    "color_by must follow format 'tool.datasheets.sheet.column', "
                     f"got '{self.color_by}'"
                 )
         

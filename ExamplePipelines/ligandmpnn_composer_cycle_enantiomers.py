@@ -46,10 +46,10 @@ best_S = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/gquarg/BioPipelines/Bol
 best_SS = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_C_SS_001/ToolOutputs/1_Boltz2_output.json'))
 
 original_analysis = pipeline.add(MergeDatasheets(
-    datasheets=[best_R.output.datasheets.affinity,
-               best_RR.output.datasheets.affinity,
-               best_S.output.datasheets.affinity,
-               best_SS.output.datasheets.affinity],
+    datasheets=[best_R.datasheets.affinity,
+               best_RR.datasheets.affinity,
+               best_S.datasheets.affinity,
+               best_SS.datasheets.affinity],
     prefixes=["R_", "RR_","S_","SS_"],
     id_map={"original":["HT7_Cy7_C_R","HT7_Cy7_C_RR","HT7_Cy7_C_S","HT7_Cy7_C_SS"]},
     calculate={"affinity_delta_R": "R_affinity_pred_value - RR_affinity_pred_value",
@@ -71,25 +71,25 @@ for CYCLE in range(NUM_CYCLES):
     Diversify with LigandMPNN
     """
     mutation_range = "141+143+145+147-149+151-152+154+157+160-161+165+167-168+170-172+175-176+178+180+245+271"
-    lmpnn_R = pipeline.add(LigandMPNN(structures=best_R.output, #this is equivalent to boltz2.output
+    lmpnn_R = pipeline.add(LigandMPNN(structures=best_R, #this is equivalent to boltz2
                                     ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                                     num_sequences=1000,
                                     batch_size=25, 
                                     redesigned=mutation_range, 
                                     design_within=4))
-    lmpnn_S = pipeline.add(LigandMPNN(structures=best_S.output, #this is equivalent to boltz2.output
+    lmpnn_S = pipeline.add(LigandMPNN(structures=best_S, #this is equivalent to boltz2
                                     ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                                     num_sequences=1000,
                                     batch_size=25, 
                                     redesigned=mutation_range,
                                     design_within=4))
     
-    profiler_R = pipeline.add(MutationProfiler(original=best_R.output,
-                                             mutants=lmpnn_R.output))
-    profiler_S = pipeline.add(MutationProfiler(original=best_S.output,
-                                             mutants=lmpnn_S.output))
-    composer = pipeline.add(MutationComposer(frequencies=[profiler_R.output.datasheets.absolute_frequencies,
-                                                          profiler_S.output.datasheets.absolute_frequencies],
+    profiler_R = pipeline.add(MutationProfiler(original=best_R,
+                                             mutants=lmpnn_R))
+    profiler_S = pipeline.add(MutationProfiler(original=best_S,
+                                             mutants=lmpnn_S))
+    composer = pipeline.add(MutationComposer(frequencies=[profiler_R.datasheets.absolute_frequencies,
+                                                          profiler_S.datasheets.absolute_frequencies],
                                              num_sequences=12,
                                              mode="single_point",
                                              combination_strategy="round_robin", #take one mutation from R one from S together
@@ -99,8 +99,8 @@ for CYCLE in range(NUM_CYCLES):
     Filter NEW sequences only (remove duplicates against historical)
     """
     unique_new_sequences = pipeline.add(RemoveDuplicates(
-        pool=composer.output,           # Current cycle sequences  
-        history=all_sequences_seen.output.datasheets.concatenated if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
+        pool=composer,           # Current cycle sequences  
+        history=all_sequences_seen.datasheets.concatenated if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
         compare="sequence"           # Compare protein sequences
     ))
     
@@ -110,66 +110,66 @@ for CYCLE in range(NUM_CYCLES):
     if all_sequences_seen is None:
         # First cycle - initialize history with ConcatenateDatasheets (single input)
         all_sequences_seen = pipeline.add(ConcatenateDatasheets(
-            datasheets=[unique_new_sequences.output.datasheets.sequences]
+            datasheets=[unique_new_sequences.datasheets.sequences]
         ))
     else:
         # Subsequent cycles - concatenate unique sequences with existing history
         all_sequences_seen = pipeline.add(ConcatenateDatasheets(
-            datasheets=[unique_new_sequences.output.datasheets.sequences, 
-                       all_sequences_seen.output.datasheets.concatenated]
+            datasheets=[unique_new_sequences.datasheets.sequences, 
+                       all_sequences_seen.datasheets.concatenated]
         ))
     
     """
     Fold only the NEW unique structures
     SMILES canonicized @ https://www.leskoff.com/s01812-0
     """
-    boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences.output))
-    boltz_holo_R = pipeline.add(Boltz2(proteins=unique_new_sequences.output,
+    boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences))
+    boltz_holo_R = pipeline.add(Boltz2(proteins=unique_new_sequences,
                                     ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
-                                    msas=boltz_apo.output,
+                                    msas=boltz_apo,
                                     affinity=True))
-    boltz_holo_RR = pipeline.add(Boltz2(proteins=unique_new_sequences.output,
+    boltz_holo_RR = pipeline.add(Boltz2(proteins=unique_new_sequences,
                                     ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@]34[C@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
-                                    msas=boltz_apo.output,
+                                    msas=boltz_apo,
                                     affinity=True))
-    boltz_holo_S = pipeline.add(Boltz2(proteins=unique_new_sequences.output,
+    boltz_holo_S = pipeline.add(Boltz2(proteins=unique_new_sequences,
                                     ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
-                                    msas=boltz_apo.output,
+                                    msas=boltz_apo,
                                     affinity=True))
-    boltz_holo_SS = pipeline.add(Boltz2(proteins=unique_new_sequences.output,
+    boltz_holo_SS = pipeline.add(Boltz2(proteins=unique_new_sequences,
                                     ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@@]34[C@@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
-                                    msas=boltz_apo.output,
+                                    msas=boltz_apo,
                                     affinity=True))
     
     """
     Calculate distances and analysis 
     """
-    R_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_R.output,
+    R_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_R,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='chlorine_distance'))
-    S_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_S.output,
+    S_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_S,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='chlorine_distance'))
-    R_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_R.output,
+    R_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_R,
                                                                    residue='D in IHDWG',
                                                                    atom='LIG.N88',
                                                                    metric_name='cap_distance'))
-    S_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_S.output,
+    S_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_S,
                                                                    residue='D in IHDWG',
                                                                    atom='LIG.N88',
                                                                    metric_name='cap_distance'))
     
     ##analysis datasheets are merged 
-    current_analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_R.output.datasheets.affinity,
-                                                        boltz_holo_RR.output.datasheets.affinity,
-                                                        boltz_holo_S.output.datasheets.affinity,
-                                                        boltz_holo_SS.output.datasheets.affinity,
-                                                        R_chlorine_aspartate_distance.output.datasheets.analysis,
-                                                        S_chlorine_aspartate_distance.output.datasheets.analysis,
-                                                        R_cap_aspartate_distance.output.datasheets.analysis,
-                                                        S_cap_aspartate_distance.output.datasheets.analysis],
+    current_analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_R.datasheets.affinity,
+                                                        boltz_holo_RR.datasheets.affinity,
+                                                        boltz_holo_S.datasheets.affinity,
+                                                        boltz_holo_SS.datasheets.affinity,
+                                                        R_chlorine_aspartate_distance.datasheets.analysis,
+                                                        S_chlorine_aspartate_distance.datasheets.analysis,
+                                                        R_cap_aspartate_distance.datasheets.analysis,
+                                                        S_cap_aspartate_distance.datasheets.analysis],
                                             prefixes=["R_","RR_","S_","SS_","R_","S_","R_","S_"],
                                             calculate = {
                                                 "affinity_delta_R": "R_affinity_pred_value - RR_affinity_pred_value",
@@ -178,7 +178,7 @@ for CYCLE in range(NUM_CYCLES):
                                                 "affinity_open_sum": "R_affinity_pred_value + S_affinity_pred_value",
                                                 "affinity_close_sum": "RR_affinity_pred_value + SS_affinity_pred_value"
                                                 } ))
-    current_filtered = pipeline.add(Filter(data=current_analysis.output,
+    current_filtered = pipeline.add(Filter(data=current_analysis,
                                     expression="R_chlorine_distance < 5.0 and S_chlorine_distance < 5.0 and R_cap_distance > 10.0 and S_cap_distance > 10.0"))
     
     # Add current cycle results to the arrays
@@ -190,15 +190,15 @@ for CYCLE in range(NUM_CYCLES):
     We select based on the same metric such that we end up with two proteins with the next sequence for the next round
     """
     best_R = pipeline.add(SelectBest(
-        pool=[pool["R"].output for pool in all_pools],  # All pools from all cycles
-        datasheets=[x.output.datasheets.merged for x in all_analyses],  # All analyses from all cycles
+        pool=[pool["R"] for pool in all_pools],  # All pools from all cycles
+        datasheets=[x.datasheets.merged for x in all_analyses],  # All analyses from all cycles
         metric='affinity_open_sum',
         mode='min',
         name=f'{CYCLE+1}_best'
     ))
     best_S = pipeline.add(SelectBest(
-        pool=[pool["S"].output for pool in all_pools],  # All pools from all cycles
-        datasheets=[x.output.datasheets.merged for x in all_analyses],  # All analyses from all cycles
+        pool=[pool["S"] for pool in all_pools],  # All pools from all cycles
+        datasheets=[x.datasheets.merged for x in all_analyses],  # All analyses from all cycles
         metric='affinity_open_sum',
         mode='min',
         name=f'{CYCLE+1}_best'
@@ -206,13 +206,13 @@ for CYCLE in range(NUM_CYCLES):
     all_open_best.append({"R":best_R,"S":best_S})
 
 
-trajectories = {k: [all_analyses[0].output.datasheets.merged]+[x[k].output.datasheets.selected for x in all_open_best[1:]] for k in ["R","S"]}
+trajectories = {k: [all_analyses[0].datasheets.merged]+[x[k].datasheets.selected for x in all_open_best[1:]] for k in ["R","S"]}
 
 pipeline.set_suffix("TRAJECTORIES")
 pipeline.add(ConcatenateDatasheets(trajectories["R"])) #we only need R because all the data is there anyways
 
 pipeline.set_suffix("ALL_ANALYSIS")
-all_merged = [x.output.datasheets.merged for x in all_analyses]
+all_merged = [x.datasheets.merged for x in all_analyses]
 pipeline.add(ConcatenateDatasheets(all_merged))
 pipeline.add(AverageByDatasheet(all_merged))
 

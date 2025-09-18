@@ -34,7 +34,7 @@ original = pipeline.add(LoadOutput(
 """
 Diversify with LigandMPNN
 """
-lmpnn = pipeline.add(LigandMPNN(structures=original.output, #this is equivalent to boltz2.output
+lmpnn = pipeline.add(LigandMPNN(structures=original, #this is equivalent to boltz2
                                 ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                                 num_sequences=1000, 
                                 batch_size=25, #1000 sequences will be split in 25 batches, 40 sequences each
@@ -57,8 +57,8 @@ Profiler gives in output four datasheets:
     - Contains frequencies relative to mutations at each position
 Plus some plots
 """
-profiler = pipeline.add(MutationProfiler(original=original.output,
-                        mutants=lmpnn.output))
+profiler = pipeline.add(MutationProfiler(original=original,
+                        mutants=lmpnn))
 
 #Prints
 pipeline.save()

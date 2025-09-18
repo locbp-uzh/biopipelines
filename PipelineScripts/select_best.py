@@ -58,24 +58,24 @@ class SelectBest(BaseConfig):
         Examples:
             # Compare across multiple pools (e.g., engineered vs original)
             best = pipeline.add(SelectBest(
-                pool=[original.output, engineered.output],
-                datasheets=[original_analysis.output.datasheets.merged, engineered_analysis.output.datasheets.merged],
+                pool=[original, engineered],
+                datasheets=[original_analysis.datasheets.merged, engineered_analysis.datasheets.merged],
                 metric="binding_affinity",
                 mode="max"
             ))
             
             # Single pool selection
             best = pipeline.add(SelectBest(
-                pool=boltz.output,
-                datasheets=analysis.output.datasheets.merged,
+                pool=boltz,
+                datasheets=analysis.datasheets.merged,
                 metric="pLDDT",
                 mode="max"
             ))
             
             # Multi-objective with weights
             best = pipeline.add(SelectBest(
-                pool=combined_results.output,
-                datasheets=analysis.output.datasheets.merged,
+                pool=combined_results,
+                datasheets=analysis.datasheets.merged,
                 metric="composite_score",
                 weights={"binding_affinity": 0.6, "pLDDT": 0.4},
                 mode="max"

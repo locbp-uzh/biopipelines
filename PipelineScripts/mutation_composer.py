@@ -77,15 +77,15 @@ class MutationComposer(BaseConfig):
         Examples:
             # Generate single-point mutations from single datasheet
             composer = pipeline.add(MutationComposer(
-                frequencies=profiler.output.datasheets.absolute_frequencies,
+                frequencies=profiler.datasheets.absolute_frequencies,
                 num_sequences=20,
                 mode="single_point"
             ))
 
             # Generate sequences with one mutation from each enantiomer
             composer = pipeline.add(MutationComposer(
-                frequencies=[profiler_R.output.datasheets.absolute_frequencies,
-                           profiler_S.output.datasheets.absolute_frequencies],
+                frequencies=[profiler_R.datasheets.absolute_frequencies,
+                           profiler_S.datasheets.absolute_frequencies],
                 num_sequences=50,
                 mode="single_point",
                 combination_strategy="stack"

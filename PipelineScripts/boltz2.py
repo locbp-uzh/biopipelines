@@ -60,11 +60,11 @@ class Boltz2(BaseConfig):
         Initialize Boltz2 configuration.
         
         Args:
-            input: Complete standardized input with sequences, datasheets, etc. (e.g., lmpnn.output)
+            input: Complete standardized input with sequences, datasheets, etc. (e.g., lmpnn)
             config: Direct YAML configuration string (Example 1: Boltz2(config=yaml))
             proteins: Protein sequences - can be ToolOutput, file path, or direct sequence (Examples 2&3)
             ligands: Single ligand SMILES string or datasheet reference
-            msas: MSA files for recycling (e.g., boltz2_apo.output.datasheets.msas)
+            msas: MSA files for recycling (e.g., boltz2_apo.datasheets.msas)
             sequences: Legacy parameter, same as proteins (for backward compatibility)
             ligand_smiles: Legacy parameter, same as ligands (for backward compatibility)
             ligand_library: Path to CSV file with ligand library
@@ -92,24 +92,24 @@ class Boltz2(BaseConfig):
 
         # Handle explicit parameter inputs from previous tools
         if isinstance(proteins, StandardizedOutput):
-            # Explicit: proteins=tool.output
+            # Explicit: proteins=tool
             self.input_sequences = proteins.sequences
             self.input_datasheets = getattr(proteins, 'datasheets', {})
             self.input_is_tool_output = False
             self.standardized_input = proteins
             # Keep proteins as StandardizedOutput reference
         elif isinstance(ligands, StandardizedOutput):
-            # Explicit: ligands=compounds.output  
+            # Explicit: ligands=compounds  
             self.input_compounds = getattr(ligands, 'compounds', [])
             self.input_datasheets = getattr(ligands, 'datasheets', {})
             # Keep ligands as StandardizedOutput reference
         elif isinstance(msas, StandardizedOutput):
-            # Explicit: msas=previous_boltz.output
+            # Explicit: msas=previous_boltz
             self.input_datasheets = getattr(msas, 'datasheets', {})
 
         # Handle legacy standardized input format (less preferred)
         elif input is not None:
-            # Legacy format: input=lmpnn.output (ambiguous)
+            # Legacy format: input=lmpnn (ambiguous)
             if isinstance(input, StandardizedOutput):
                 # StandardizedOutput object - try to infer what to use
                 self.input_sequences = getattr(input, 'sequences', [])
@@ -403,7 +403,7 @@ class Boltz2(BaseConfig):
                     raise ValueError(f"FASTA file not found: {fasta_path}")
         
         elif hasattr(primary_input, '__class__') and 'StandardizedOutput' in str(type(primary_input)):
-            # StandardizedOutput object (e.g., from lmpnn.output)
+            # StandardizedOutput object (e.g., from lmpnn)
             if hasattr(primary_input, 'sequences') and primary_input.sequences:
                 # Use the first sequence file from StandardizedOutput
                 self.queries_csv_file = primary_input.sequences[0]
@@ -1138,10 +1138,10 @@ boltz predict {config_file_path} {boltz_options}
             
             # Try to get compound_ids from standardized input
             if isinstance(getattr(self, 'ligands', None), StandardizedOutput):
-                # Explicit ligands=compounds.output
+                # Explicit ligands=compounds
                 compound_ids = self.ligands.compound_ids
             elif hasattr(self, 'standardized_input') and self.standardized_input:
-                # Legacy input=compounds.output
+                # Legacy input=compounds
                 compound_ids = getattr(self.standardized_input, 'compound_ids', ["library_compounds"])
             else:
                 # Fallback placeholder

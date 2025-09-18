@@ -45,8 +45,8 @@ best_close = pipeline.add(LoadOutput(
 Calculate baseline affinity delta for original structures
 """
 original_analysis = pipeline.add(MergeDatasheets(
-    datasheets=[best_open.output.datasheets.affinity,
-               best_close.output.datasheets.affinity],
+    datasheets=[best_open.datasheets.affinity,
+               best_close.datasheets.affinity],
     prefixes=["open_", "close_"],
     id_map={"original":["HT_Cy7_C_R","HT_Cy7_C_RR"]},
     calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}
@@ -63,7 +63,7 @@ for CYCLE in range(NUM_CYCLES):
     """
     Diversify with LigandMPNN
     """
-    lmpnn = pipeline.add(LigandMPNN(structures=best_open.output, #this is equivalent to boltz2.output
+    lmpnn = pipeline.add(LigandMPNN(structures=best_open, #this is equivalent to boltz2
                                     ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                                     num_sequences=10, 
                                     redesigned="145-180", #similarly you can specify fixed=...
@@ -73,8 +73,8 @@ for CYCLE in range(NUM_CYCLES):
     Filter NEW sequences only (remove duplicates against historical)
     """
     unique_new_sequences = pipeline.add(RemoveDuplicates(
-        pool=lmpnn.output,           # Current cycle sequences  
-        history=all_sequences_seen.output if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
+        pool=lmpnn,           # Current cycle sequences
+        history=all_sequences_seen if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
         compare="sequence"           # Compare protein sequences
     ))
     
@@ -84,47 +84,47 @@ for CYCLE in range(NUM_CYCLES):
     if all_sequences_seen is None:
         # First cycle - initialize history with ConcatenateDatasheets (single input)
         all_sequences_seen = pipeline.add(ConcatenateDatasheets(
-            datasheets=[unique_new_sequences.output.datasheets.sequences]
+            datasheets=[unique_new_sequences.datasheets.sequences]
         ))
     else:
         # Subsequent cycles - concatenate unique sequences with existing history
         all_sequences_seen = pipeline.add(ConcatenateDatasheets(
-            datasheets=[unique_new_sequences.output.datasheets.sequences, 
-                       all_sequences_seen.output.datasheets.concatenated]
+            datasheets=[unique_new_sequences.datasheets.sequences,
+                       all_sequences_seen.datasheets.concatenated]
         ))
     
     """
     Fold only the NEW unique structures
     """
-    boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences.output))
-    boltz_holo_open = pipeline.add(Boltz2(proteins=unique_new_sequences.output,
+    boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences))
+    boltz_holo_open = pipeline.add(Boltz2(proteins=unique_new_sequences,
                                     ligands=r"C[N+]1=C(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@](CC4=CN(CCOCCOCCCCCCCl)N=N4)(CC(NC)=O)C5=C1C=CC=C5",
-                                    msas=boltz_apo.output,
+                                    msas=boltz_apo,
                                     affinity=True))
-    boltz_holo_close = pipeline.add(Boltz2(proteins=unique_new_sequences.output,
+    boltz_holo_close = pipeline.add(Boltz2(proteins=unique_new_sequences,
                                     ligands=r"CN([C@@]1(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@@]4(CC(N1C)=O)CC5=CN(CCOCCOCCCCCCCl)N=N5)C6=C4C=CC=C6",
-                                    msas=boltz_apo.output,
+                                    msas=boltz_apo,
                                     affinity=True))
     
     """
     Calculate distances and analysis (unchanged)
     """
-    open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open.output,
+    open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='open_chlorine_distance'))
-    close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_close.output,
+    close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_close,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='close_chlorine_distance'))
-    current_analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_open.output.datasheets.affinity,
-                                                        boltz_holo_close.output.datasheets.affinity,
-                                                        open_chlorine_aspartate_distance.output.datasheets.analysis,
-                                                        close_chlorine_aspartate_distance.output.datasheets.analysis],
+    current_analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_open.datasheets.affinity,
+                                                        boltz_holo_close.datasheets.affinity,
+                                                        open_chlorine_aspartate_distance.datasheets.analysis,
+                                                        close_chlorine_aspartate_distance.datasheets.analysis],
                                             prefixes=["open_","close_","",""],
                                             calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"} ))
-    current_filtered = pipeline.add(Filter(pool=boltz_holo_open.output,
-                                    data=current_analysis.output,
+    current_filtered = pipeline.add(Filter(pool=boltz_holo_open,
+                                    data=current_analysis,
                                     expression="open_chlorine_distance < 5.0"))
     
     # Add current cycle results to the arrays
@@ -135,8 +135,8 @@ for CYCLE in range(NUM_CYCLES):
     Select best across ALL cycles (guarantees monotonic improvement)
     """
     best_open = pipeline.add(SelectBest(
-        pool=[pool.output for pool in all_pools],  # All pools from all cycles
-        datasheets=[analysis.output.datasheets.merged for analysis in all_analyses],  # All analyses from all cycles
+        pool=[pool for pool in all_pools],  # All pools from all cycles
+        datasheets=[analysis.datasheets.merged for analysis in all_analyses],  # All analyses from all cycles
         metric='affinity_delta',
         mode='min',
         name=f'{CYCLE+1}_best'

@@ -47,14 +47,14 @@ class ConcatenateDatasheets(BaseConfig):
         Examples:
             # Simple concatenation removing non-common columns
             combined = pipeline.add(ConcatenateDatasheets(
-                datasheets=[cycle0_sequences.output.datasheets.sequences,
-                           cycle1_sequences.output.datasheets.sequences]
+                datasheets=[cycle0_sequences.datasheets.sequences,
+                           cycle1_sequences.datasheets.sequences]
             ))
             
             # Fill missing columns with empty string
             all_results = pipeline.add(ConcatenateDatasheets(
-                datasheets=[tool1.output.datasheets.analysis,
-                           tool2.output.datasheets.analysis],
+                datasheets=[tool1.datasheets.analysis,
+                           tool2.datasheets.analysis],
                 fill=""
             ))
         """

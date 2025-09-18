@@ -258,35 +258,72 @@ fi
     def __repr__(self) -> str:
         return self.__str__()
     
-    def resolve_datasheet_reference(self, reference: str) -> str:
+    def resolve_datasheet_reference(self, reference) -> str:
         """
-        Resolve datasheet column references like 'input.datasheets.structures.fixed' to actual values.
-        
+        Resolve datasheet column references to actual values.
+
+        Supports two formats:
+        - String: 'datasheet_name.column_name' (e.g., "structures.fixed", "selections.within")
+        - Tuple: (datasheet_object, "column_name") (e.g., (tool.datasheets.selections, "within"))
+
         This provides a general way to reference any column from any input datasheet across all tools.
-        
+
         Args:
-            reference: Reference string (e.g., "input.datasheets.structures.fixed")
-            
+            reference: Reference string or tuple (e.g., "structures.fixed" or (tool.datasheets.selections, "within"))
+
         Returns:
             Resolved value from datasheet or original reference if not a datasheet reference
         """
-        if not reference or not reference.startswith("input.datasheets."):
+        if not reference:
             return reference
-        
-        # Parse reference: input.datasheets.structures.fixed -> datasheet_name=structures, column=fixed
-        parts = reference.split(".")
-        if len(parts) < 4:
-            raise ValueError(f"Invalid datasheet reference format: {reference}. Expected: input.datasheets.datasheet_name.column_name")
-        
-        datasheet_name = parts[2]  # e.g., "structures"
-        column_name = parts[3]     # e.g., "fixed"
-        
-        # Get the datasheet path
-        datasheet_path = self._find_datasheet_path(datasheet_name)
-        
-        if not datasheet_path:
-            raise ValueError(f"Datasheet '{datasheet_name}' not found in input datasheets")
-        
+
+        # Handle tuple format: (datasheet_object, "column_name")
+        if isinstance(reference, tuple) and len(reference) == 2:
+            datasheet_object, column_name = reference
+
+            # Get the datasheet path from the object
+            if hasattr(datasheet_object, 'path'):
+                datasheet_path = datasheet_object.path
+            else:
+                raise ValueError(f"Invalid datasheet object in tuple reference: {datasheet_object}")
+
+            # Read and resolve the column value
+            return self._resolve_column_from_datasheet(datasheet_path, column_name)
+
+        # Handle string format: "datasheet.column"
+        if isinstance(reference, str) and "." in reference:
+            parts = reference.split(".")
+            if len(parts) == 2:
+                # Datasheet reference format: "structures.fixed"
+                datasheet_name = parts[0]
+                column_name = parts[1]
+
+                # Get the datasheet path
+                datasheet_path = self._find_datasheet_path(datasheet_name)
+
+                if not datasheet_path:
+                    raise ValueError(f"Datasheet '{datasheet_name}' not found in input datasheets")
+
+                # Read and resolve the column value
+                return self._resolve_column_from_datasheet(datasheet_path, column_name)
+            else:
+                # Not a datasheet reference
+                return reference
+        else:
+            # Not a datasheet reference
+            return reference
+
+    def _resolve_column_from_datasheet(self, datasheet_path: str, column_name: str) -> str:
+        """
+        Resolve a column value from a datasheet file.
+
+        Args:
+            datasheet_path: Path to the datasheet CSV file
+            column_name: Name of the column to resolve
+
+        Returns:
+            Placeholder string for script generation
+        """
         # For script generation, return a placeholder that indicates this is a datasheet reference
         # The actual resolution will happen in the script generation where we have access to pandas
         return f"DATASHEET_REFERENCE:{datasheet_path}:{column_name}"
@@ -316,21 +353,34 @@ fi
         
         return None
     
-    def validate_datasheet_reference(self, reference: str):
+    def validate_datasheet_reference(self, reference):
         """Validate datasheet reference format."""
-        # Skip validation for regular values (don't contain dots or only have numeric ranges)
-        if not reference or "datasheets" not in reference:
+        if not reference:
             return
-            
-        parts = reference.split(".")
-        if len(parts) < 4:
-            raise ValueError(f"Invalid datasheet reference format: {reference}. Expected format: input.datasheets.datasheet_name.column_name")
-        
-        if parts[0] != "input" or parts[1] != "datasheets":
-            raise ValueError(f"Invalid datasheet reference format: {reference}. Must start with 'input.datasheets.' not '{parts[0]}.{parts[1]}.'")
-            
-        # Additional validation could check if the referenced datasheet/column exists,
-        # but we'll do that at runtime when the datasheet is available
+
+        # Handle tuple format: (datasheet_object, "column_name")
+        if isinstance(reference, tuple):
+            if len(reference) == 2:
+                datasheet_object, column_name = reference
+                if hasattr(datasheet_object, 'path') and isinstance(column_name, str):
+                    # Valid tuple format
+                    return
+                else:
+                    raise ValueError(f"Invalid tuple format: expected (datasheet_object, 'column_name'), got {reference}")
+            else:
+                raise ValueError(f"Invalid tuple format: expected (datasheet_object, 'column_name'), got {reference}")
+
+        # Handle string format: datasheet.column
+        if isinstance(reference, str) and "." in reference:
+            parts = reference.split(".")
+            if len(parts) == 2:
+                # Valid datasheet reference format
+                return
+            else:
+                # Multiple dots - not a valid datasheet reference
+                return
+
+        # No dots - regular value, not a datasheet reference
 
 
 class DatasheetInfo:
@@ -446,7 +496,7 @@ class StandardizedOutput:
     """
     Provides dot-notation access to standardized output keys.
     
-    Allows usage like: rfd.output.structures, rfd.output.datasheets
+    Allows usage like: rfd.structures, rfd.datasheets
     Enhanced with better visualization and named datasheets support.
     """
     
@@ -832,7 +882,7 @@ class StandardizedOutput:
 class ToolOutput:
     """
     Container for tool output information.
-    
+
     Returned by pipeline.add() to provide rich metadata about tool outputs
     and enable flexible chaining between tools.
     """
@@ -916,9 +966,9 @@ class ToolOutput:
         Get standardized output with dot notation access.
         
         Allows usage like:
-        - rfd.output.structures
-        - rfd.output.datasheets
-        - rfd.output['structures'] (dict-style)
+        - rfd.structures
+        - rfd.datasheets
+        - rfd['structures'] (dict-style)
         """
         # Get current output files from the config
         if hasattr(self.config, 'get_output_files'):
@@ -926,7 +976,10 @@ class ToolOutput:
         else:
             output_files = self._output_files
         
-        return StandardizedOutput(output_files)
+        standardized_output = StandardizedOutput(output_files)
+        # Add tool reference for user access
+        standardized_output.tool = self.config
+        return standardized_output
 
     @property
     def o(self) -> StandardizedOutput:
@@ -938,7 +991,7 @@ class ToolOutput:
         - tool.o.datasheets.sequences
         - tool.o.datasheets.concatenated
         """
-        return self.output
+        return self
 
     def __str__(self) -> str:
         return f"ToolOutput({self.tool_type}, {len(self._output_files)} output types)"

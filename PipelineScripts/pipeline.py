@@ -79,17 +79,17 @@ class Pipeline:
         """
         self.current_suffix = suffix
     
-    def add(self, tool_config: BaseConfig, env: str = None, **kwargs) -> ToolOutput:
+    def add(self, tool_config: BaseConfig, env: str = None, **kwargs):
         """
         Add a tool to the pipeline.
-        
+
         Args:
             tool_config: Configured tool instance (e.g., RFdiffusion())
             env: Environment override
             **kwargs: Additional pipeline-specific options
-            
+
         Returns:
-            ToolOutput object with metadata and output information
+            ToolAwareOutput object with standardized output interface and .tool access
         """
         if env is not None: tool_config.environment = env
         tool_config.resources.update(self.global_resources) #will warn if resources are insufficient
@@ -120,7 +120,7 @@ class Pipeline:
         
         # Create and configure output object
         tool_output = ToolOutput(tool_config)
-        
+
         # Immediately populate expected outputs using pure path construction
         try:
             expected_outputs = tool_config.get_output_files()
@@ -129,10 +129,10 @@ class Pipeline:
             # If get_output_files fails, tool may need dependencies resolved first
             # We'll populate it later during script generation
             print(f"Warning: Could not immediately populate outputs for {tool_config.TOOL_NAME}: {e}")
-        
+
         self.tool_outputs.append(tool_output)
-        
-        return tool_output
+
+        return tool_output.output
     
     def validate_pipeline(self) -> bool:
         """
@@ -177,7 +177,7 @@ class Pipeline:
         # Print tool outputs with execution order
         for i, tool_output in enumerate(self.tool_outputs, 1):
             print("="*30+f"{i}.{tool_output.config.TOOL_NAME}"+"="*30)
-            print(tool_output.output)
+            print(tool_output)
         
         print("="*30+"Pipeline"+"="*30)
         self.validate_pipeline()

@@ -137,7 +137,7 @@ class ResidueDistanceFilter(BaseConfig):
                 raise ValueError("Empty structure list provided")
 
         elif isinstance(self.input_structures, StandardizedOutput):
-            # StandardizedOutput object (from tool.output)
+            # StandardizedOutput object (from tool)
             if self.input_structures.structures:
                 self.input_sources = {"structures": self.input_structures.structures}
             else:

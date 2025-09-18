@@ -52,8 +52,8 @@ class LigandMPNN(BaseConfig):
             datasheets: Input datasheet files for metadata (from previous tool)
             name: Job name for output files
             num_sequences: Number of sequences to generate (batch_size * num_batches)
-            fixed: Fixed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., "input.datasheets.structures.fixed")
-            redesigned: Designed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., "input.datasheets.structures.designed")  
+            fixed: Fixed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., (tool.datasheets.structures, "fixed"))
+            redesigned: Designed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., (distance_analysis.datasheets.selections, "within"))  
             design_within: Distance in Å from ligand to redesign (fallback if positions not specified)
             model: LigandMPNN model version to use
             batch_size: Batch size for processing
@@ -62,7 +62,7 @@ class LigandMPNN(BaseConfig):
         # Handle standardized input format (matching ProteinMPNN/AlphaFold pattern)
         if input is not None:
             if isinstance(input, StandardizedOutput):
-                # StandardizedOutput object (e.g., rfd.output)
+                # StandardizedOutput object (e.g., rfd)
                 self.input_structures = input.structures
                 self.input_datasheets = input.datasheets
                 self.input_is_tool_output = False  # Direct file paths now
@@ -222,7 +222,7 @@ class LigandMPNN(BaseConfig):
                 raise ValueError("Empty structure list provided")
                 
         elif isinstance(self.input_structures, StandardizedOutput):
-            # StandardizedOutput object (from tool.output)
+            # StandardizedOutput object (from tool)
             if self.input_structures.structures:
                 self.input_sources["structures"] = self.input_structures.structures
                 # Also store structure IDs for proper tracking
@@ -529,7 +529,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                         sequence_ids.append(f"{pdb_base}_{seq_num}")
         
         elif direct_file_paths:
-            # Handle direct file paths from StandardizedOutput (input=tool.output)
+            # Handle direct file paths from StandardizedOutput (input=tool)
             for pdb_path in direct_file_paths:
                 pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
                 # LigandMPNN generates sequences numbered from 1

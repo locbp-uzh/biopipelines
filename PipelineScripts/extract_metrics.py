@@ -56,9 +56,9 @@ class ExtractMetrics(BaseConfig):
         Examples:
             # Extract multiple metrics across cycles
             metrics_extract = pipeline.add(ExtractMetrics(
-                datasheets=[cycle0.output.datasheets.merged,
-                           cycle1.output.datasheets.merged,
-                           cycle2.output.datasheets.merged],
+                datasheets=[cycle0.datasheets.merged,
+                           cycle1.datasheets.merged,
+                           cycle2.datasheets.merged],
                 metrics=["affinity_delta", "affinity_delta_R", "affinity_delta_S"],
                 datasheet_names=["Cycle0", "Cycle1", "Cycle2"]
             ))
