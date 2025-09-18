@@ -7,7 +7,7 @@ a specified distance from a reference (ligand, atoms, or residues), generating
 PyMOL-formatted selections for use in downstream tools like LigandMPNN.
 
 Usage:
-    python pipe_residue_distance_filter.py <structure_files> <reference_spec> <distance> <output_csv>
+    python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <output_csv>
 
 Arguments:
     structure_files: Comma-separated list of PDB file paths
@@ -231,7 +231,7 @@ def analyze_structure_distance(pdb_file, reference_spec, distance_cutoff):
 
 def main():
     if len(sys.argv) != 5:
-        print("Usage: python pipe_residue_distance_filter.py <structure_files> <reference_spec> <distance> <output_csv>")
+        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <output_csv>")
         print("")
         print("Arguments:")
         print("  structure_files: Comma-separated list of PDB file paths")

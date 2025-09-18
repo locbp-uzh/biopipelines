@@ -8,7 +8,7 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.load_output import LoadOutput
-from PipelineScripts.residue_distance_filter import ResidueDistanceFilter
+from PipelineScripts.distance_selector import DistanceSelector
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.residue_atom_distance import ResidueAtomDistance
@@ -40,7 +40,7 @@ Generate distance-based residue selections
 This new approach replaces the previous design_within post-processing with explicit
 distance analysis that generates PyMOL-formatted selections for each structure.
 """
-distance_analysis = pipeline.add(ResidueDistanceFilter(structures=original,
+distance_analysis = pipeline.add(DistanceSelector(structures=original,
                                                        ligand="LIG",
                                                        distance=4.0))
 
@@ -51,7 +51,7 @@ lmpnn = pipeline.add(LigandMPNN(structures=original, #this is equivalent to bolt
                                 ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                                 num_sequences=3,
                                 redesigned=(distance_analysis.datasheets.selections, "within") #use residues within 4Å of ligand
-)
+))
 
 """
 We run the Apo version first. One can also extract confidence parameters from it, and in general here is where we calculate the MSAs, which will be recycled later on with the msas input parameter.
