@@ -61,6 +61,7 @@ original_analysis = pipeline.add(MergeDatasheets(datasheets=[original_open.o.dat
 Diversify with LigandMPNN - generate 1000 sequences
 """
 mutation_range = "141+143+145+147-149+151-152+154+157+160-161+165+167-168+170-172+175-176+178+180+245+271"
+
 lmpnn = pipeline.add(LigandMPNN(structures=original_open.output, #this is equivalent to boltz2.output
                                 ligand="LIG",
                                 num_sequences=1000,

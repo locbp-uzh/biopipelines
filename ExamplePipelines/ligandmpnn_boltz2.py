@@ -8,6 +8,7 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.residue_distance_filter import ResidueDistanceFilter
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.residue_atom_distance import ResidueAtomDistance
@@ -35,12 +36,22 @@ original = pipeline.add(LoadOutput(
 ))
 
 """
-Diversify with LigandMPNN
+Generate distance-based residue selections
+This new approach replaces the previous design_within post-processing with explicit
+distance analysis that generates PyMOL-formatted selections for each structure.
+"""
+distance_analysis = pipeline.add(ResidueDistanceFilter(structures=original.output,
+                                                       ligand="LIG",
+                                                       distance=4.0))
+
+"""
+Diversify with LigandMPNN using distance-based selections
 """
 lmpnn = pipeline.add(LigandMPNN(structures=original.output, #this is equivalent to boltz2.output
                                 ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
-                                num_sequences=3, 
-                                redesigned="145-180", #similarly you can specify fixed=...
+                                num_sequences=3,
+                                redesigned="input.datasheets.selections.within", #use residues within 4Å of ligand
+                                datasheets=distance_analysis.output, #pass distance analysis results
                                 design_within=4))
 
 """
