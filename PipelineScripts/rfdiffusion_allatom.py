@@ -255,7 +255,7 @@ class RFdiffusionAllAtom(BaseConfig):
         if '_' in folder_name and folder_name.split('_')[0].isdigit():
             index = folder_name.split('_')[0]
             tool_name = folder_name.split('_', 1)[1].lower()  # Get everything after first underscore, lowercase
-            self.rfd_log_file = os.path.join(pipeline_folder, f"_{index}_{tool_name}.log")
+            self.rfd_log_file = os.path.join(pipeline_folder, f"_{index:0>3}_{tool_name}.log")
         else:
             raise ValueError(f"Invalid output folder naming pattern: {folder_name}. Expected 'N_RFdiffusionAllAtom' format.")
         
