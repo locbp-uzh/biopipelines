@@ -177,7 +177,7 @@ class Pipeline:
         # Print tool outputs with execution order
         for i, tool_output in enumerate(self.tool_outputs, 1):
             print("="*30+f"{i}.{tool_output.config.TOOL_NAME}"+"="*30)
-            print(tool_output)
+            print(tool_output.output)
         
         print("="*30+"Pipeline"+"="*30)
         self.validate_pipeline()
