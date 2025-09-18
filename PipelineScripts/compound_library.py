@@ -32,7 +32,6 @@ class CompoundLibrary(BaseConfig):
     # Tool identification
     TOOL_NAME = "CompoundLibrary"
     DEFAULT_ENV = "ProteinEnv"
-    COMPATIBLE_ENVS = ["ProteinEnv", "ligandmpnn_env", "Boltz2Env"]
     DEFAULT_RESOURCES = {"gpu": "none", "memory": "8GB", "time": "02:00:00"}
     
     def __init__(self, 

@@ -29,7 +29,6 @@ class RFdiffusion(BaseConfig):
     
     TOOL_NAME = "RFdiffusion"
     DEFAULT_ENV = "ProteinEnv"
-    COMPATIBLE_ENVS = ["ProteinEnv"]
     
     def __init__(self, pdb: str = "", contigs: str = "", inpaint: str = "",
                  num_designs: int = 1, active_site: bool = False, 

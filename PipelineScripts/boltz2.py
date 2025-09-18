@@ -29,7 +29,6 @@ class Boltz2(BaseConfig):
     # Tool identification
     TOOL_NAME = "Boltz2"
     DEFAULT_ENV = "Boltz2Env"
-    COMPATIBLE_ENVS = ["Boltz2Env"]
     DEFAULT_RESOURCES = {"gpu": "V100", "memory": "16GB", "time": "24:00:00"}
     
     def __init__(self, 

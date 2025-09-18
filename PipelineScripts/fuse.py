@@ -31,7 +31,6 @@ class Fuse(BaseConfig):
     
     TOOL_NAME = "Fuse"
     DEFAULT_ENV = "ProteinEnv"
-    COMPATIBLE_ENVS = ["ProteinEnv"]
     DEFAULT_RESOURCES = {"gpu": "T4", "memory": "8GB", "time": "2:00:00"}
     
     def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,

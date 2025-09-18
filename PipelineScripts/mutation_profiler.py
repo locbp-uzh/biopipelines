@@ -36,7 +36,6 @@ class MutationProfiler(BaseConfig):
     # Tool identification
     TOOL_NAME = "MutationProfiler"
     DEFAULT_ENV = "MutationEnv"  #with seaborn pandas matplotlib logomaker
-    COMPATIBLE_ENVS = ["MutationEnv"]
     DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "2:00:00"}
     
     def __init__(self,

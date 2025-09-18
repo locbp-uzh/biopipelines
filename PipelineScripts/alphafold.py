@@ -30,7 +30,6 @@ class AlphaFold(BaseConfig):
     
     TOOL_NAME = "AlphaFold"
     DEFAULT_ENV = "ProteinEnv"
-    COMPATIBLE_ENVS = ["ProteinEnv"]
     DEFAULT_RESOURCES = {"gpu": "V100", "memory": "15GB", "time": "24:00:00"}
     
     def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,

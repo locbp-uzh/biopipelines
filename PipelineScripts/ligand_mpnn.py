@@ -28,7 +28,6 @@ class LigandMPNN(BaseConfig):
     
     TOOL_NAME = "LigandMPNN"
     DEFAULT_ENV = "ligandmpnn_env"
-    COMPATIBLE_ENVS = ["ligandmpnn_env"]
     DEFAULT_RESOURCES = {"gpu": "V100", "memory": "16GB", "time": "12:00:00"}
     
     def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,

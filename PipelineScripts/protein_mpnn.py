@@ -28,7 +28,6 @@ class ProteinMPNN(BaseConfig):
     
     TOOL_NAME = "ProteinMPNN" 
     DEFAULT_ENV = "ProteinEnv"
-    COMPATIBLE_ENVS = ["ProteinEnv"]
     
     def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
                  structures: Union[str, List[str], ToolOutput] = "",

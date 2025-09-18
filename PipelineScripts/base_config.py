@@ -23,7 +23,6 @@ class BaseConfig(ABC):
     # Tool-specific defaults (override in subclasses)
     TOOL_NAME = "base"
     DEFAULT_ENV = "ProteinEnv"
-    COMPATIBLE_ENVS = ["ProteinEnv"]
     DEFAULT_RESOURCES = {"gpu": "V100", "memory": "15GB", "time": "24:00:00"}
     
     def __init__(self, **kwargs):
@@ -55,19 +54,10 @@ class BaseConfig(ABC):
         
         # Store all parameters for validation and serialization
         self.params = kwargs
-        
+
         # Validate configuration
-        self.validate_environment()
         self.validate_params()
     
-    def validate_environment(self):
-        """Validate that specified environment is compatible with tool."""
-        if self.environment not in self.COMPATIBLE_ENVS:
-            compatible_str = ", ".join(self.COMPATIBLE_ENVS)
-            raise ValueError(
-                f"{self.TOOL_NAME} is not compatible with environment '{self.environment}'. "
-                f"Compatible environments: {compatible_str}"
-            )
     
     @abstractmethod
     def validate_params(self):

@@ -39,7 +39,6 @@ class LoadOutput(BaseConfig):
     # Tool identification
     TOOL_NAME = "LoadOutput"
     DEFAULT_ENV = "ProteinEnv"  # Can run in any environment since it just loads files
-    COMPATIBLE_ENVS = ["ProteinEnv", "Boltz2Env", "ligandmpnn_env"]
     DEFAULT_RESOURCES = {"memory": "1GB", "time": "0:10:00"}  # Minimal resources needed
     
     def __init__(self, output_json: str, filter = None, validate_files: bool = True, **kwargs):
