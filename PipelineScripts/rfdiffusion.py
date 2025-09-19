@@ -296,7 +296,7 @@ python {self.inference_py_file} {rfd_options}
         
         return f"""echo "Creating results datasheet"
 # Create main datasheet with id, pdb, fixed, designed columns by parsing RFdiffusion log
-python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{design_character}" "{self.pipeline_name}" {self.num_designs} "{self.main_datasheet}"
+python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{design_character}" "{self.pipeline_name}" {self.num_designs} "{self.main_datasheet}" {self.design_startnum}
 
 """
     

@@ -82,6 +82,7 @@ def main():
     parser.add_argument('pipeline_name', type=str, help="Pipeline name for ID generation")
     parser.add_argument('num_designs', type=int, help="Number of designs generated")
     parser.add_argument('datasheet_path', type=str, help="Output CSV datasheet path")
+    parser.add_argument('design_startnum', type=int, nargs='?', default=0, help="Starting number for design numbering (default: 0 for backward compatibility)")
     
     args = parser.parse_args()
     
@@ -92,9 +93,10 @@ def main():
     designs = []
     
     for i in range(args.num_designs):
-        pdb_file = f"{args.pipeline_name}_{i}.pdb"
+        design_num = args.design_startnum + i
+        pdb_file = f"{args.pipeline_name}_{design_num}.pdb"
         pdb_path = os.path.join(args.output_folder, pdb_file)
-        design_id = f"{args.pipeline_name}_{i}"
+        design_id = f"{args.pipeline_name}_{design_num}"
         
         # Get fixed/designed from log file using design ID (no fallback - fail if not found)
         if design_id not in fixed_dict:

@@ -404,7 +404,7 @@ python {self.inference_py_file} {' '.join(aa_args)}
         
         return f"""echo "Creating results datasheet"
 # Create main datasheet with id, pdb, fixed, designed columns by parsing RFdiffusion-AllAtom log
-python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{design_character}" "{self.pipeline_name}" {self.num_designs} "{self.main_datasheet}"
+python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{design_character}" "{self.pipeline_name}" {self.num_designs} "{self.main_datasheet}" {self.design_startnum}
 
 """
     
