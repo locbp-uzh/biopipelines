@@ -266,7 +266,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    DEFAULT_ENV = "MMseqs2Env"
+    DEFAULT_ENV = None  # MMseqs2Server doesn't require conda environment
 
     def __init__(self, mode: str = "cpu",
                  database: str = "uniref30_2302_db",
@@ -290,6 +290,18 @@ class MMseqs2Server(BaseConfig):
         self.max_seqs = max_seqs
         self.threads = threads
         self.poll_interval = poll_interval
+
+        # Set mode-specific default resources
+        if mode == "cpu":
+            mode_resources = {"gpu": "none", "memory": "16GB", "time": "24:00:00"}
+        else:  # gpu mode
+            mode_resources = {"gpu": "V100", "memory": "32GB", "time": "24:00:00"}
+
+        # Merge mode-specific resources with any user-provided resources
+        if 'resources' in kwargs:
+            kwargs['resources'] = {**mode_resources, **kwargs['resources']}
+        else:
+            kwargs['resources'] = mode_resources
 
         # Initialize base class
         super().__init__(**kwargs)

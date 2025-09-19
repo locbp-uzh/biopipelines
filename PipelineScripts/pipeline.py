@@ -415,7 +415,10 @@ class Pipeline:
         # Determine GPU constraint
         gpu_spec = resources["gpu"]
 
-        if gpu_spec == "high-memory":
+        if gpu_spec == "none":
+            # No GPU requested
+            gpu_line = ""
+        elif gpu_spec == "high-memory":
             gpu_line = "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB\""
         elif gpu_spec == "gpu":
             gpu_line = "#SBATCH --gpus=1"
@@ -449,6 +452,24 @@ class Pipeline:
                 sbatch_lines.append(f"#SBATCH --{slurm_param}={value}")
             additional_sbatch_lines = "\n" + "\n".join(sbatch_lines)
 
+        # Conditional GPU setup
+        if gpu_spec == "none":
+            gpu_setup = ""
+            module_load = ""
+        else:
+            gpu_setup = """
+# Check if nvidia-smi is available
+if ! command -v nvidia-smi &> /dev/null
+then
+    echo "Could not load GPU correctly: nvidia-smi could not be found"
+    exit 1
+fi
+
+gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader)
+echo "GPU Type: $gpu_type"
+"""
+            module_load = "module load mamba"
+
         # Generate SLURM script
         slurm_content = f"""#!/usr/bin/bash
 {gpu_line}
@@ -460,18 +481,8 @@ class Pipeline:
 
 # Make all files group-writable by default
 umask 002
-
-# Check if nvidia-smi is available
-if ! command -v nvidia-smi &> /dev/null
-then
-    echo "Could not load GPU correctly: nvidia-smi could not be found"
-    exit 1
-fi
-
-gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader)
-echo "GPU Type: $gpu_type"
-
-module load mamba
+{gpu_setup}
+{module_load}
 
 # Execute pipeline
 {self.pipeline_script}
