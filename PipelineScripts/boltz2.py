@@ -178,7 +178,12 @@ class Boltz2(BaseConfig):
         self.primary_key = primary_key
         self.library_repr = library_repr
         self.library_type = library_type
-        self.affinity = affinity  # Renamed from calculate_affinity
+        # Override affinity to False if no ligands are present
+        if self.ligands is None and affinity:
+            print("Warning: No ligands detected, setting affinity=False")
+            self.affinity = False
+        else:
+            self.affinity = affinity  # Renamed from calculate_affinity
         self.output_format = output_format
         self.msa_server = msa_server
         self.global_msas_cache = global_msas_cache
