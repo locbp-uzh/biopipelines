@@ -11,6 +11,8 @@ import pandas as pd
 import yaml
 import os
 import sys
+import glob
+import hashlib
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Generate Boltz2 config files for protein-ligand combinations')
@@ -99,9 +101,6 @@ def create_config(protein, ligand, msa_file, enable_affinity, use_global_cache=F
         config['sequences'][0]['protein']['msa'] = msa_file
     elif use_global_cache and msa_folder:
         # Check for MSA file that matches this protein sequence
-        import glob
-        import os
-        import hashlib
         
         if os.path.exists(msa_folder):
             # Calculate sequence hash to match against MSA files
