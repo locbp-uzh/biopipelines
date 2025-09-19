@@ -142,7 +142,7 @@ def generate_mutants(sequence: str, sequence_id: str, position: int, mode: str,
         mutant_sequence = sequence[:position-1] + new_aa + sequence[position:]
 
         # Generate mutant ID
-        mutant_id = f"{sequence_id}_{original_aa}{position}{new_aa}"
+        mutant_id = f"{sequence_id}_{position}{new_aa}"
 
         # Create mutation description
         mutation = f"{original_aa}{position}{new_aa}"

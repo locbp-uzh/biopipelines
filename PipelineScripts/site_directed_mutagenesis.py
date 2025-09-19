@@ -185,6 +185,7 @@ class SDM(BaseConfig):
         """Set up all file paths after output_folder is known."""
         # Output files
         self.sequences_csv = os.path.join(self.output_folder, "sequences.csv")
+        self.missing_sequences_csv = os.path.join(self.output_folder, "missing_sequences.csv")
 
         # Helper script paths
         if hasattr(self, 'folders') and self.folders:
@@ -231,6 +232,40 @@ python {self.sdm_helper_py} \\
 echo "SDM completed successfully"
 echo "Generated sequences saved to: {self.sequences_csv}"
 
+# Generate missing sequences CSV if original is excluded
+if [ "{str(self.include_original).lower()}" = "false" ]; then
+    echo "Creating missing sequences datasheet..."
+    python -c "
+import pandas as pd
+import sys
+
+# Get original sequence and ID from sequences CSV
+try:
+    sequences_df = pd.read_csv('{self.sequences_csv}')
+    if len(sequences_df) > 0:
+        first_row = sequences_df.iloc[0]
+        original_sequence = first_row['sequence']
+        base_id = first_row['id'].rsplit('_', 1)[0]  # Remove _{self.position}{aa} suffix
+        original_aa = first_row['original_aa']
+
+        # Create missing sequence entry
+        original_id = base_id + '_{self.position}' + original_aa
+        missing_data = [{{
+            'id': original_id,
+            'sequence': original_sequence[:({self.position}-1)] + original_aa + original_sequence[{self.position}:],
+            'reason': 'Original amino acid excluded from mutagenesis'
+        }}]
+
+        missing_df = pd.DataFrame(missing_data)
+        missing_df.to_csv('{self.missing_sequences_csv}', index=False)
+        print(f'Created missing sequences CSV: {self.missing_sequences_csv}')
+    else:
+        print('Warning: No sequences found in main CSV')
+except Exception as e:
+    print(f'Error creating missing sequences CSV: {{e}}')
+"
+fi
+
 """
         script_content += self.generate_completion_check_footer()
 
@@ -263,8 +298,29 @@ echo "Generated sequences saved to: {self.sequences_csv}"
 
         sequence_ids = []
         for aa in amino_acids:
-            mutant_id = f"{base_id}_{original_aa}{self.position}{aa}"
+            mutant_id = f"{base_id}_{self.position}{aa}"
             sequence_ids.append(mutant_id)
+
+        # Prepare datasheets
+        datasheets = {
+            "sequences": DatasheetInfo(
+                name="sequences",
+                path=self.sequences_csv,
+                columns=["id", "sequence", "mutation", "position", "original_aa", "new_aa"],
+                description=f"Site-directed mutants at position {self.position} using {self.mode} mode",
+                count=num_mutants
+            )
+        }
+
+        # Add missing sequences datasheet if original is excluded
+        if not self.include_original:
+            datasheets["missing_sequences"] = DatasheetInfo(
+                name="missing_sequences",
+                path=self.missing_sequences_csv,
+                columns=["id", "sequence", "reason"],
+                description="Sequences excluded from mutagenesis (original amino acid)",
+                count=1
+            )
 
         return {
             "sequences": [self.sequences_csv],
@@ -273,15 +329,7 @@ echo "Generated sequences saved to: {self.sequences_csv}"
             "structure_ids": [],
             "compounds": [],
             "compound_ids": [],
-            "datasheets": {
-                "sequences": DatasheetInfo(
-                    name="sequences",
-                    path=self.sequences_csv,
-                    columns=["id", "sequence", "mutation", "position", "original_aa", "new_aa"],
-                    description=f"Site-directed mutants at position {self.position} using {self.mode} mode",
-                    count=num_mutants
-                )
-            },
+            "datasheets": datasheets,
             "output_folder": self.output_folder
         }
 
