@@ -55,6 +55,7 @@ class Boltz2(BaseConfig):
                  # Advanced prediction parameters
                  recycling_steps: Optional[int] = None,
                  diffusion_samples: Optional[int] = None,
+                 use_potentials: bool = False,
                  **kwargs):
         """
         Initialize Boltz2 configuration.
@@ -77,6 +78,7 @@ class Boltz2(BaseConfig):
             global_msas_cache: Enable global MSA caching to reuse MSAs across jobs
             recycling_steps: Number of recycling steps (default: Boltz2 default 3)
             diffusion_samples: Number of diffusion samples (default: Boltz2 default 1)
+            use_potentials: Enable potentials for improved structure prediction
             **kwargs: Additional parameters
         """
         # Initialize default values
@@ -182,6 +184,7 @@ class Boltz2(BaseConfig):
         self.global_msas_cache = global_msas_cache
         self.recycling_steps = recycling_steps
         self.diffusion_samples = diffusion_samples
+        self.use_potentials = use_potentials
         
         # Track input source type and files (tool-agnostic)
         self.input_yaml_entities = None
@@ -257,9 +260,6 @@ class Boltz2(BaseConfig):
         if hasattr(self, 'folders') and self.folders:
             self.smiles_library_py = os.path.join(self.folders["HelpScripts"], "pipe_smiles_library.py")
             self.boltz_config_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_config.py")
-            self.boltz_csv_to_configs_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_csv_to_configs.py")
-            self.boltz_fasta_to_configs_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_fasta_to_configs.py")
-            self.boltz_direct_sequence_config_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_direct_sequence_config.py")
             self.boltz_protein_ligand_configs_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_protein_ligand_configs.py")
             self.boltz_results_py = os.path.join(self.folders["HelpScripts"], "pipe_boltz_results.py")
             self.mmseqs2_client_sh = os.path.join(self.folders.get("MMseqs2", "MMseqs2"), "mmseqs2_client.sh")
@@ -268,9 +268,6 @@ class Boltz2(BaseConfig):
             # Temporary placeholders when folders aren't available yet
             self.smiles_library_py = None
             self.boltz_config_py = None
-            self.boltz_csv_to_configs_py = None
-            self.boltz_fasta_to_configs_py = None
-            self.boltz_direct_sequence_config_py = None
             self.boltz_protein_ligand_configs_py = None
             self.boltz_results_py = None
             self.mmseqs2_client_sh = None
@@ -778,11 +775,12 @@ EOF
             
             # Add ligand CSV creation if needed
             if ligand_param != "None" and not ligand_param.endswith('.csv'):
+                ligand_id = config_name if config_name != "prediction" else "ligand"
                 script_content += f"""
 # Create ligand CSV from direct ligand string
 cat > {os.path.join(self.output_folder, "ligands.csv")} << 'EOF'
 id,format,smiles,ccd
-ligand,smiles,{ligand_param},
+{ligand_id},smiles,{ligand_param},
 EOF
 """
             
@@ -882,7 +880,7 @@ python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_
             script_content += f"""
 echo "Converting CSV to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_csv_to_configs_py} {self.queries_csv_file} {config_files_dir} "{ligand_param}" {affinity_flag} {msa_datasheet_flag}
+python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_param}" {config_files_dir} {affinity_flag} {msa_datasheet_flag}
 
 """
         
@@ -925,7 +923,7 @@ python {self.boltz_csv_to_configs_py} {self.queries_csv_file} {config_files_dir}
             script_content += f"""
 echo "Converting FASTA files to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_fasta_to_configs_py} "{fasta_files_str}" {config_files_dir} "{ligand_param}" {affinity_flag} {msa_datasheet_flag}
+python {self.boltz_protein_ligand_configs_py} "{fasta_files_str}" "{ligand_param}" {config_files_dir} {affinity_flag} {msa_datasheet_flag}
 
 """
             base_config_file = self.queries_csv
@@ -985,11 +983,12 @@ EOF
             
             # Add ligand CSV creation if needed
             if ligand_param != "None" and not ligand_param.endswith('.csv'):
+                ligand_id = config_name if config_name != "prediction" else "ligand"
                 script_content += f"""
 # Create ligand CSV from direct ligand string
 cat > {os.path.join(self.output_folder, "ligands.csv")} << 'EOF'
 id,format,smiles,ccd
-ligand,smiles,{ligand_param},
+{ligand_id},smiles,{ligand_param},
 EOF
 """
             
@@ -1027,7 +1026,7 @@ python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_para
         if self.diffusion_samples is not None:
             boltz_options += f" --diffusion_samples {self.diffusion_samples}"
 
-        if getattr(self, "use_potentials", False):
+        if self.use_potentials:
             boltz_options += " --use_potentials"
         
         if self.queries_csv_file or self.input_fasta_files or (hasattr(self, 'input_direct_sequence') and self.input_direct_sequence and (has_multiple_ligands or hasattr(self, '_needs_global_msa_cache') or hasattr(self, '_needs_msa_integration'))):
@@ -1586,7 +1585,10 @@ echo "Post-processing completed - structures renamed with sequence IDs"
         
         if self.diffusion_samples is not None:
             config_lines.append(f"Diffusion samples: {self.diffusion_samples}")
-        
+
+        if self.use_potentials:
+            config_lines.append(f"Use potentials: {self.use_potentials}")
+
         return config_lines
     
     def to_dict(self) -> Dict[str, Any]:
@@ -1606,7 +1608,8 @@ echo "Post-processing completed - structures renamed with sequence IDs"
                 "output_format": self.output_format,
                 "msa_server": self.msa_server,
                 "recycling_steps": self.recycling_steps,
-                "diffusion_samples": self.diffusion_samples
+                "diffusion_samples": self.diffusion_samples,
+                "use_potentials": self.use_potentials
             }
         })
         return base_dict

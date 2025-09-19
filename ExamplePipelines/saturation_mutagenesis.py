@@ -31,7 +31,7 @@ single_point_mutants = pp.add(SDM(original=best_R,
                                   mode="saturation"))
 
 boltz2 = pp.add(Boltz2(proteins=single_point_mutants,
-                        ligands="CCC(=O)N(CC1=C2C=CC=C(CC(=O)N(O)C(=O)N[C@@H]3CC4=CC=C(C=C4)C5=CC=C(C[C@H]6CC[C@H](O)CC6)C=C5)C=C2S1)N1C(=O)CCC1=O"))
+                        ligands=best_R))
 
 pp.save()
 pp.slurm(email="")
