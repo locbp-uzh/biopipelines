@@ -1189,7 +1189,14 @@ boltz predict {config_file_path} {boltz_options}
             # Create a compounds table for the single SMILES string
             compounds_csv = os.path.join(self.output_folder, "ligands.csv")
             compounds = [compounds_csv]
-            compound_ids = ["ligand"]
+
+            # Use same logic as script generation for ligand ID
+            effective_job_name = self.get_effective_job_name()
+            if effective_job_name is None:
+                ligand_id = "ligand"
+            else:
+                ligand_id = effective_job_name
+            compound_ids = [ligand_id]
 
             # Add compounds datasheet for single SMILES
             datasheets["compounds"] = DatasheetInfo(

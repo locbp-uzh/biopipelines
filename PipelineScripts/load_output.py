@@ -325,7 +325,45 @@ class LoadOutput(BaseConfig):
                         filtered_structure['datasheets'][ds_name]['count'] = len(self.filtered_ids)
         
         return filtered_structure
-    
+
+    def _update_ids_from_csv(self, output_structure: Dict[str, Any]):
+        """Update compound_ids and sequence_ids with actual IDs from CSV files."""
+        import pandas as pd
+
+        # Update compound_ids from compounds CSV files
+        if 'compounds' in output_structure and output_structure['compounds']:
+            updated_compound_ids = []
+            for compound_file in output_structure['compounds']:
+                if isinstance(compound_file, str) and os.path.exists(compound_file) and compound_file.endswith('.csv'):
+                    try:
+                        df = pd.read_csv(compound_file)
+                        if 'id' in df.columns:
+                            updated_compound_ids.extend(df['id'].tolist())
+                    except Exception as e:
+                        # If we can't read the file, keep the original IDs
+                        print(f"Warning: Could not read compound file {compound_file}: {e}")
+                        continue
+
+            if updated_compound_ids:
+                output_structure['compound_ids'] = updated_compound_ids
+
+        # Update sequence_ids from sequences CSV files
+        if 'sequences' in output_structure and output_structure['sequences']:
+            updated_sequence_ids = []
+            for sequence_file in output_structure['sequences']:
+                if isinstance(sequence_file, str) and os.path.exists(sequence_file) and sequence_file.endswith('.csv'):
+                    try:
+                        df = pd.read_csv(sequence_file)
+                        if 'id' in df.columns:
+                            updated_sequence_ids.extend(df['id'].tolist())
+                    except Exception as e:
+                        # If we can't read the file, keep the original IDs
+                        print(f"Warning: Could not read sequence file {sequence_file}: {e}")
+                        continue
+
+            if updated_sequence_ids:
+                output_structure['sequence_ids'] = updated_sequence_ids
+
     def validate_params(self):
         """Validate LoadOutput parameters."""
         if not self.loaded_result:
@@ -345,20 +383,23 @@ class LoadOutput(BaseConfig):
     def get_output_files(self) -> Dict[str, Any]:
         """
         Return the loaded output structure, optionally filtered.
-        
+
         Returns:
             The output structure from the saved result, filtered if filter was applied
         """
         if not self.loaded_result:
             raise RuntimeError("No result loaded")
-        
+
         # Get the original output structure
         output_structure = self.loaded_result['output_structure'].copy()
-        
+
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:
             output_structure = self._apply_filter_to_output_structure(output_structure)
-        
+
+        # Update compound_ids with actual IDs from CSV files
+        self._update_ids_from_csv(output_structure)
+
         # Ensure we have all expected keys for compatibility
         default_structure = {
             "structures": [],
@@ -370,12 +411,12 @@ class LoadOutput(BaseConfig):
             "datasheets": {},
             "output_folder": ""
         }
-        
+
         # Merge with defaults
         for key, default_value in default_structure.items():
             if key not in output_structure:
                 output_structure[key] = default_value
-        
+
         return output_structure
     
     def generate_script(self, script_path: str) -> str:

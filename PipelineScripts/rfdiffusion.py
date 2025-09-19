@@ -246,9 +246,12 @@ class RFdiffusion(BaseConfig):
         """Generate the RFdiffusion execution part of the script."""
         rfd_job_folder = self.output_folder
         
-        # Copy input PDB if provided
+        # Copy input PDB if provided (only if source and destination are different)
         if self.pdb and "pdb" in self.input_sources:
-            shutil.copy(self.input_sources["pdb"], self.input_pdb_file)
+            source_path = os.path.abspath(self.input_sources["pdb"])
+            dest_path = os.path.abspath(self.input_pdb_file)
+            if source_path != dest_path:
+                shutil.copy(source_path, dest_path)
         
         # Build RFdiffusion options
         rfd_options = f"'contigmap.contigs=[{self.contigs}]'"
