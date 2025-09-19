@@ -34,6 +34,7 @@ class RFdiffusionAllAtom(BaseConfig):
                  num_designs: int = 1, active_site: bool = False, 
                  steps: int = 200, partial_steps: int = 0, 
                  reproducible: bool = False, reproducibility_number: int = 0,
+                 design_startnum: int = 1,
                  ppi_design: bool = False, ppi_hotspot_residues: List[str] = None, 
                  ppi_binder_length: int = None, autogenerate_contigs: bool = False, 
                  model_only_neighbors: bool = False, num_recycles: int = 1, 
@@ -55,6 +56,7 @@ class RFdiffusionAllAtom(BaseConfig):
             partial_steps: Partial diffusion steps
             reproducible: Use deterministic sampling
             reproducibility_number: Seed for reproducible runs
+            design_startnum: Starting number for design numbering (default: 1)
             ppi_design: Enable protein-protein interaction design
             ppi_hotspot_residues: List of hotspot residues for PPI (e.g., ["A116","A150"])
             ppi_binder_length: Length of PPI binder
@@ -108,6 +110,7 @@ class RFdiffusionAllAtom(BaseConfig):
         self.partial_steps = partial_steps
         self.reproducible = reproducible
         self.reproducibility_number = reproducibility_number
+        self.design_startnum = design_startnum
         # Specific to RFdiffusion-AllAtom
         self.ligand = ligand
         self.ppi_design = ppi_design
@@ -339,7 +342,7 @@ class RFdiffusionAllAtom(BaseConfig):
         
         aa_args.append(f"inference.num_designs={self.num_designs}")
         aa_args.append(f"inference.output_prefix={os.path.join(rfd_job_folder, f'{self.pipeline_name}')}")
-        aa_args.append(f"inference.design_startnum={self.reproducibility_number}")
+        aa_args.append(f"inference.design_startnum={self.design_startnum}")
         
         # Ligand parameter
         if self.ligand:

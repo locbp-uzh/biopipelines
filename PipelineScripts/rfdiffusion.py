@@ -34,6 +34,7 @@ class RFdiffusion(BaseConfig):
                  num_designs: int = 1, active_site: bool = False, 
                  steps: int = 50, partial_steps: int = 0, 
                  reproducible: bool = False, reproducibility_number: int = 0,
+                 design_startnum: int = 1,
                  **kwargs):
         """
         Initialize RFdiffusion configuration.
@@ -48,6 +49,7 @@ class RFdiffusion(BaseConfig):
             partial_steps: Partial diffusion steps
             reproducible: Use deterministic sampling
             reproducibility_number: Seed for reproducible runs
+            design_startnum: Starting number for design numbering (default: 1)
             **kwargs: Additional parameters
         """
         # Store RFdiffusion-specific parameters
@@ -88,6 +90,7 @@ class RFdiffusion(BaseConfig):
         self.partial_steps = partial_steps
         self.reproducible = reproducible
         self.reproducibility_number = reproducibility_number
+        self.design_startnum = design_startnum
         
         # Initialize base class
         super().__init__(**kwargs)
@@ -267,7 +270,7 @@ class RFdiffusion(BaseConfig):
         rfd_options += f" inference.output_prefix={prefix}"
         rfd_options += f" inference.num_designs={self.num_designs}"
         rfd_options += f" inference.deterministic={self.reproducible}"
-        rfd_options += f" inference.design_startnum={self.reproducibility_number}"
+        rfd_options += f" inference.design_startnum={self.design_startnum}"
         
         if self.steps != 50:
             rfd_options += f" diffuser.T={self.steps}"
