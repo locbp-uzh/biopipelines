@@ -315,13 +315,18 @@ class MMseqs2Server(BaseConfig):
         """Initialize common file paths used throughout the class."""
         self.server_script_path = None
         self.pipeline_name = None
+        self.shared_server_folder = None
 
     def _setup_file_paths(self):
-        """Set up all file paths after output_folder is known."""
-        # Extract pipeline name from folder structure
-        self.pipeline_name = self._extract_pipeline_name()
+        """Set up dual folder structure for MMseqs2Server."""
+        # Extract user from output folder to create shared persistent location
+        self.shared_server_folder = self._get_shared_server_folder()
 
-        # Server script path based on mode
+        # Create shared folders for queue and results
+        os.makedirs(os.path.join(self.shared_server_folder, "job_queue"), exist_ok=True)
+        os.makedirs(os.path.join(self.shared_server_folder, "results"), exist_ok=True)
+
+        # Server script path based on mode (in standard pipeline location for logs)
         if hasattr(self, 'folders') and self.folders:
             if self.mode == "gpu":
                 # Create modified GPU server script
@@ -329,6 +334,12 @@ class MMseqs2Server(BaseConfig):
             else:
                 # Create modified CPU server script
                 self.server_script_path = os.path.join(self.output_folder, "mmseqs2_server_cpu_modified.sh")
+
+    def _get_shared_server_folder(self) -> str:
+        """Get shared persistent folder for MMseqs2Server queue and results."""
+        # Use global shared location that matches the client script
+        # This is shared across all users
+        return "/shares/locbp.chem.uzh/models/mmseqs2_server"
 
     def _extract_pipeline_name(self) -> str:
         """Extract pipeline name from output folder structure."""
@@ -358,6 +369,13 @@ class MMseqs2Server(BaseConfig):
 
         if self.threads:
             config_lines.append(f"THREADS: {self.threads}")
+
+        # Show dual folder structure
+        if hasattr(self, 'shared_server_folder') and self.shared_server_folder:
+            config_lines.extend([
+                f"SHARED QUEUE/RESULTS: {self.shared_server_folder}",
+                f"PIPELINE LOGS: {self.output_folder}"
+            ])
 
         return config_lines
 
@@ -393,32 +411,39 @@ class MMseqs2Server(BaseConfig):
             return self._generate_cpu_server_script()
 
     def _generate_cpu_server_script(self) -> str:
-        """Generate CPU server script (without database copying to scratch)."""
+        """Generate CPU server script using dual folder structure."""
         threads_setting = f"export OMP_NUM_THREADS={self.threads}" if self.threads else "export OMP_NUM_THREADS=$(nproc)"
 
         return f"""echo "Starting MMseqs2 CPU server"
 echo "Database: {self.database}"
 echo "Max sequences: {self.max_seqs}"
+echo "Shared server folder: {self.shared_server_folder}"
+echo "Pipeline log folder: {self.output_folder}"
 
-# Configuration
+# Configuration - dual folder structure
 USER=${{USER:-$(whoami)}}
-JOB_QUEUE_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server/job_queue"
-RESULTS_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server/results"
+JOB_QUEUE_DIR="{self.shared_server_folder}/job_queue"
+RESULTS_DIR="{self.shared_server_folder}/results"
 DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/cpu"
 DB_PATH="$DB_DIR/{self.database}"
 POLL_INTERVAL={self.poll_interval}
 MAX_SEQS={self.max_seqs}
 
-mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR"
+# Pipeline-specific log in standard location
+PIPELINE_LOG_FILE="{self.output_folder}/server.log"
 
-# Logging setup
+mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR"
+mkdir -p "{self.output_folder}"
+
+# Logging setup - logs go to both shared and pipeline locations
 LOG_FILE="$RESULTS_DIR/server.log"
 : > "$LOG_FILE"
+: > "$PIPELINE_LOG_FILE"
 {threads_setting}
 
-# Timestamped logging
+# Timestamped logging - write to both shared and pipeline logs
 timestamp() {{ date '+%Y-%m-%d %H:%M:%S'; }}
-log() {{ echo "[$(timestamp)] $*" | tee -a "$LOG_FILE"; }}
+log() {{ echo "[$(timestamp)] $*" | tee -a "$LOG_FILE" | tee -a "$PIPELINE_LOG_FILE"; }}
 
 log "MMseqs2 CPU server starting (using $OMP_NUM_THREADS threads)"
 log "Database path: $DB_PATH"
@@ -558,12 +583,14 @@ done
 """
 
     def _generate_gpu_server_script(self) -> str:
-        """Generate GPU server script (without database copying to scratch)."""
+        """Generate GPU server script using dual folder structure."""
         threads_setting = f"export OMP_NUM_THREADS={self.threads}" if self.threads else "export OMP_NUM_THREADS=16"
 
         return f"""echo "Starting MMseqs2 GPU server"
 echo "Database: {self.database}"
 echo "Max sequences: {self.max_seqs}"
+echo "Shared server folder: {self.shared_server_folder}"
+echo "Pipeline log folder: {self.output_folder}"
 
 # Check GPU availability
 if ! command -v nvidia-smi &> /dev/null; then
@@ -576,19 +603,26 @@ gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader)
 echo "GPU Type: $gpu_type"
 nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits
 
-# Configuration
+# Configuration - dual folder structure
 USER=${{USER:-$(whoami)}}
-WORK_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server/"
-JOB_QUEUE_DIR="$WORK_DIR/job_queue"
-RESULTS_DIR="$WORK_DIR/results"
-LOG_FILE="$WORK_DIR/server.log"
+JOB_QUEUE_DIR="{self.shared_server_folder}/job_queue"
+RESULTS_DIR="{self.shared_server_folder}/results"
 DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/gpu"
 DB_PATH="$DB_DIR/{self.database}"
 THREADS={self.threads if self.threads else 32}
 POLL_INTERVAL={self.poll_interval}
 MAX_SEQS={self.max_seqs}
 
+# Pipeline-specific log in standard location
+PIPELINE_LOG_FILE="{self.output_folder}/server.log"
+
 mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR"
+mkdir -p "{self.output_folder}"
+
+# Logging setup - logs go to both shared and pipeline locations
+LOG_FILE="$RESULTS_DIR/server.log"
+: > "$LOG_FILE"
+: > "$PIPELINE_LOG_FILE"
 
 # GPU Memory optimization
 export MMSEQS_MAX_MEMORY=${{MMSEQS_MAX_MEMORY:-150G}}
@@ -597,14 +631,14 @@ export CUDA_VISIBLE_DEVICES=0
 export CUDA_CACHE_MAXSIZE=2147483648
 export CUDA_CACHE_DISABLE=0
 
-# Logging function
+# Logging function - write to both shared and pipeline logs
 log() {{
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE" | tee -a "$PIPELINE_LOG_FILE"
 }}
 
 log "Memory settings: MMSEQS_MAX_MEMORY=$MMSEQS_MAX_MEMORY, OMP_NUM_THREADS=$OMP_NUM_THREADS"
 log "GPU Memory status:"
-nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits | tee -a "$LOG_FILE"
+nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits | tee -a "$LOG_FILE" | tee -a "$PIPELINE_LOG_FILE"
 
 # Start GPU server
 log "Starting MMseqs2 GPU server for $DB_PATH"

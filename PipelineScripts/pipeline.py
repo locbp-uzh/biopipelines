@@ -378,7 +378,13 @@ class Pipeline:
             gpu: GPU type requirement
             memory: Memory requirement
             time: Time limit
-            **slurm_options: Additional SLURM options
+            **slurm_options: Additional SLURM options passed as param=value pairs.
+                Each parameter will be converted to #SBATCH --param=value.
+                Examples:
+                - nodes=1 → #SBATCH --nodes=1
+                - ntasks_per_node=1 → #SBATCH --ntasks-per-node=1
+                - cpus_per_task=32 → #SBATCH --cpus-per-task=32
+                - partition="gpu" → #SBATCH --partition=gpu
 
         Returns:
             SLURM script content
@@ -432,14 +438,24 @@ class Pipeline:
         memory_mb = resources["memory"]
         if memory_mb.endswith("GB"):
             memory_mb = str(int(float(memory_mb[:-2]) * 1000))
-        
+
+        # Process additional SLURM options
+        additional_sbatch_lines = ""
+        if slurm_options:
+            sbatch_lines = []
+            for param, value in slurm_options.items():
+                # Convert underscores to hyphens for SLURM parameter names
+                slurm_param = param.replace('_', '-')
+                sbatch_lines.append(f"#SBATCH --{slurm_param}={value}")
+            additional_sbatch_lines = "\n" + "\n".join(sbatch_lines)
+
         # Generate SLURM script
         slurm_content = f"""#!/usr/bin/bash
 {gpu_line}
 #SBATCH --mem={memory_mb}
 #SBATCH --time={resources["time"]}
 #SBATCH --output=job.out
-#SBATCH --begin=now+0hour
+#SBATCH --begin=now+0hour{additional_sbatch_lines}
 {email_line}
 
 # Make all files group-writable by default
