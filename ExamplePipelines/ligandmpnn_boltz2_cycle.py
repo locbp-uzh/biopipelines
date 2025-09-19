@@ -33,11 +33,11 @@ pipeline.resources(
 We load both open and close form so that we calculate the delta in affinity and use it as benchmark
 """
 best_open = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
+    '/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
     #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
 ))
 best_close = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'
+    '/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'
     #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
 ))
 
@@ -144,4 +144,4 @@ for CYCLE in range(NUM_CYCLES):
 
 #Prints
 pipeline.save()
-pipeline.slurm(email="") 
+pipeline.slurm() 

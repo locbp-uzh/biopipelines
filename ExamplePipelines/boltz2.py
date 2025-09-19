@@ -33,4 +33,4 @@ global_msas_cache=True,
 pipeline=pipeline))
 
 pipeline.save()
-pipeline.slurm(email="")
+pipeline.slurm()

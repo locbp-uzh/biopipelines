@@ -7,6 +7,7 @@ and script generation for protein modeling pipelines.
 
 import os
 import json
+import getpass
 from typing import Dict, List, Any, Optional, Union
 from collections import defaultdict
 from datetime import datetime
@@ -20,6 +21,17 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput
+
+# Email mapping for auto email functionality
+EMAILS = {
+    'rebeca': 'rebecca.andrews@uzh.ch',
+    'dkossm': 'dorothea.kossmann@chem.uzh.ch',
+    'hlaemm': 'henriette.laemmermann@chem.uzh.ch',
+    'gquarg': 'gianluca.quargnali@chem.uzh.ch',
+    'pabriv': 'pablo.riverafuentes@uzh.ch',
+    'clsonn': 'clarissa.sonnemann@chem.uzh.ch',
+    'crstev': 'craig.steven@chem.uzh.ch'
+}
 
 
 class Pipeline:
@@ -353,24 +365,37 @@ class Pipeline:
         
         return "\n".join(script_lines)
     
-    def slurm(self, email: str = "", gpu: str = None, memory: str = None, 
+    def slurm(self, email: str = "auto", gpu: str = None, memory: str = None,
               time: str = None, **slurm_options):
         """
         Generate SLURM job submission script.
-        
+
         Args:
-            user: Username for job submission
+            email: Email for job notifications. Options:
+                - "auto": Automatically detect email from current username (default)
+                - "": No email notifications
+                - specific email: Use provided email address
             gpu: GPU type requirement
             memory: Memory requirement
             time: Time limit
             **slurm_options: Additional SLURM options
-            
+
         Returns:
             SLURM script content
         """
         if not self.scripts_generated:
             raise ValueError("Must call save() before generating SLURM script")
-        
+
+        # Handle auto email detection
+        if email == "auto":
+            current_user = getpass.getuser()
+            if current_user in EMAILS:
+                email = EMAILS[current_user]
+                print(f"Auto-detected email: {email} (user: {current_user})")
+            else:
+                print(f"Warning: No email mapping found for user '{current_user}'. Disabling email notifications.")
+                email = ""
+
         email_line = "" if email == "" else f"""
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user={email}"""

@@ -33,14 +33,8 @@ pipeline.resources(
 """
 We load both open and close form so that we calculate the delta in affinity and use it as benchmark
 """
-best_open = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
-    #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
-))
-best_close = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'
-    #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
-))
+best_open = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'))
+best_close = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'))
 
 """
 Calculate baseline affinity delta for original structures
@@ -49,7 +43,7 @@ original_analysis = pipeline.add(MergeDatasheets(
     datasheets=[best_open.datasheets.affinity,
                best_close.datasheets.affinity],
     prefixes=["open_", "close_"],
-    id_map={"original":["HT_Cy7_C_R","HT_Cy7_C_RR"]},
+    id_map={"original":["HT7_Cy7_C_R","HT7_Cy7_C_RR"]},
     calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}
 ))
 
@@ -107,11 +101,11 @@ for CYCLE in range(NUM_CYCLES):
     """
     boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences))
     boltz_holo_open = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=r"C[N+]1=C(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@](CC4=CN(CCOCCOCCCCCCCl)N=N4)(CC(NC)=O)C5=C1C=CC=C5",
+                                    ligands=best_open,
                                     msas=boltz_apo,
                                     affinity=True))
     boltz_holo_close = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=r"CN([C@@]1(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@@]4(CC(N1C)=O)CC5=CN(CCOCCOCCCCCCCl)N=N5)C6=C4C=CC=C6",
+                                    ligands=best_close,
                                     msas=boltz_apo,
                                     affinity=True))
     
@@ -154,4 +148,4 @@ combined_datasheets = pipeline.add(ConcatenateDatasheets([x.datasheets.merged fo
 
 #Prints
 pipeline.save()
-pipeline.slurm(email="") 
+pipeline.slurm() 

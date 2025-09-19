@@ -35,21 +35,12 @@ pipeline.resources(
     memory="16GB"
 )
 
-OPEN_SMILES_R = r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC"
-CLOSE_SMILES_R = r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@]34[C@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C"
-
 """
 It is best practise to start from a Boltz2 output with the open form, to have a benchmark affinity.
 One can then load it with the LoadOutput tool, which will contain the same structures (pdbs), ids, and datasheets as the Boltz2 tool of the past pipeline.
 """
-original_open = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
-    #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
-))
-original_close = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'
-    #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
-))
+original_open = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'))
+original_close = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'))
 
 original_analysis = pipeline.add(MergeDatasheets(datasheets=[original_open.datasheets.affinity,
                                                              original_close.datasheets.affinity],
@@ -84,11 +75,11 @@ Fold the first 10 sequences from LigandMPNN for comparison
 """
 boltz_apo_first10 = pipeline.add(Boltz2(proteins=first_10_sequences))
 boltz_holo_open_first10 = pipeline.add(Boltz2(proteins=first_10_sequences,
-                                ligands=OPEN_SMILES_R,
+                                ligands=original_open,
                                 msas=boltz_apo_first10,
                                 affinity=True))
 boltz_holo_close_first10 = pipeline.add(Boltz2(proteins=first_10_sequences,
-                                ligands=CLOSE_SMILES_R,
+                                ligands=original_close,
                                 msas=boltz_apo_first10,
                                 affinity=True))
 open_chlorine_aspartate_distance_first10 = pipeline.add(ResidueAtomDistance(input=boltz_holo_open_first10,
@@ -133,11 +124,11 @@ for mode in ["single_point","weighted_random","hotspot_focused","top_mutations"]
     Important: msas are passed with <tool>, not with <tool>.msas
     """
     boltz_holo_open = pipeline.add(Boltz2(proteins=composer,
-                                    ligands=OPEN_SMILES_R,
+                                    ligands=original_open,
                                     msas=boltz_apo,
                                     affinity=True))
     boltz_holo_close = pipeline.add(Boltz2(proteins=composer,
-                                    ligands=CLOSE_SMILES_R,
+                                    ligands=original_close,
                                     msas=boltz_apo,
                                     affinity=True))
     open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open,
@@ -175,4 +166,4 @@ pipeline.add(ExtractMetrics(datasheets=[x.datasheets.merged for x in all_analysi
 
 #Prints
 pipeline.save()
-pipeline.slurm(email="")
+pipeline.slurm()

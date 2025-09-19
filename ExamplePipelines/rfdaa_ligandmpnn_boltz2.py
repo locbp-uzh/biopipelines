@@ -57,4 +57,4 @@ boltz_holo = pipeline.add(Boltz2(proteins=lmpnn,
 
 #Prints
 pipeline.save()
-pipeline.slurm(email="") 
+pipeline.slurm() 

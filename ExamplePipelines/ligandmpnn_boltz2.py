@@ -31,7 +31,7 @@ It is best practise to start from a Boltz2 output with the open form, to have a 
 One can then load it with the LoadOutput tool, which will contain the same structures (pdbs), ids, and datasheets as the Boltz2 tool of the past pipeline.  
 """
 original = pipeline.add(LoadOutput(
-    '/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
+    '/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'
     #'path/to/job/ToolOutputs/<Job>_Boltz2_output.json'
 ))
 
@@ -63,11 +63,7 @@ Run with open form and closed form.
 Important: msas are passed with <tool>, not with <tool>.msas
 """
 boltz_holo_open = pipeline.add(Boltz2(proteins=lmpnn,
-                                ligands=r"C[N+](C1=C2C=CC=C1)=C([C@]2(CC3=CN(N=N3)CCOCCOCCCCCCCl)CC(NCC(F)F)=O)/C=C/C=C/C=C/C=C(N(C4=C5C=CC=C4)C)\C5(C)C",
-                                msas=boltz_apo,
-                                affinity=True))
-boltz_holo_close = pipeline.add(Boltz2(proteins=lmpnn,
-                                ligands=r"CN([C@@]1(/C=C/C=C/C=C/C=C(C2(C)C)/N(C)C3=C2C=CC=C3)[C@@]4(CC(N1CC(F)F)=O)CC5=CN(CCOCCOCCCCCCCl)N=N5)C6=C4C=CC=C6",
+                                ligands=original,
                                 msas=boltz_apo,
                                 affinity=True))
 
@@ -78,21 +74,13 @@ open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_
                                                                     residue='D in IHDWG',
                                                                     atom='LIG.Cl',
                                                                     metric_name='open_chlorine_distance'))
-close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_close,
-                                                                    residue='D in IHDWG',
-                                                                    atom='LIG.Cl',
-                                                                    metric_name='close_chlorine_distance'))
 
 """
 Now we merge the datasheets based on the id (i.e. same protein sequence) and have some prefixes to distinguish between apo and holo affinity parameters. Here we can also define new columns based on previous ones.
 Analysis tools always output a datasheet called analysis.
 """
 analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_open.datasheets.affinity,
-                                                    boltz_holo_close.datasheets.affinity,
-                                                    open_chlorine_aspartate_distance.datasheets.analysis,
-                                                    close_chlorine_aspartate_distance.datasheets.analysis],
-                                        prefixes=["open_","close_","",""],
-                                        calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"} ))
+                                                    open_chlorine_aspartate_distance.datasheets.analysis]))
 """
 Now we want to make sure we only take poses in which the chlorine atom is close to the aspartate.
 By defining the pool, we make sure we will find in the output folder of the filter tool all the structures with open form respecting the expression. If pool is not defined, we will only have a datasheet.
@@ -103,4 +91,4 @@ filtered  = pipeline.add(Filter(pool=boltz_holo_open,
 
 #Prints
 pipeline.save()
-pipeline.slurm(email="") 
+pipeline.slurm() 

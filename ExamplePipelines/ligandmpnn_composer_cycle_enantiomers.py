@@ -40,10 +40,10 @@ pipeline.resources(
 """
 We load both open and close form so that we calculate the delta in affinity and use it as benchmark
 """
-best_R = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'))
-best_RR = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'))
-best_S = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_C_S_001/ToolOutputs/1_Boltz2_output.json'))
-best_SS = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/gquarg/BioPipelines/Boltz/HT7_Cy7_C_SS_001/ToolOutputs/1_Boltz2_output.json'))
+best_R = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'))
+best_RR = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'))
+best_S = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_S_001/ToolOutputs/1_Boltz2_output.json'))
+best_SS = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_SS_001/ToolOutputs/1_Boltz2_output.json'))
 
 original_analysis = pipeline.add(MergeDatasheets(
     datasheets=[best_R.datasheets.affinity,
@@ -125,19 +125,19 @@ for CYCLE in range(NUM_CYCLES):
     """
     boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences))
     boltz_holo_R = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
+                                    ligands=best_R,
                                     msas=boltz_apo,
                                     affinity=True))
     boltz_holo_RR = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@]34[C@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
+                                    ligands=best_R,
                                     msas=boltz_apo,
                                     affinity=True))
     boltz_holo_S = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
+                                    ligands=best_S,
                                     msas=boltz_apo,
                                     affinity=True))
     boltz_holo_SS = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@@]34[C@@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
+                                    ligands=best_SS,
                                     msas=boltz_apo,
                                     affinity=True))
     
@@ -230,4 +230,4 @@ pipeline.add(ExtractMetrics(datasheets=all_merged,
                             metrics=metrics))
 #Prints
 pipeline.save()
-pipeline.slurm(email="") 
+pipeline.slurm() 
