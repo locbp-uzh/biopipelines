@@ -327,7 +327,7 @@ python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{desig
         design_pdbs = []
         structure_ids = []
         for i in range(self.num_designs):
-            design_id = f"{pipeline_name}_{i}"
+            design_id = f"{pipeline_name}_{self.design_startnum + i}"
             design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
             design_pdbs.append(design_path)
             structure_ids.append(design_id)
