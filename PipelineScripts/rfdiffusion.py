@@ -33,8 +33,7 @@ class RFdiffusion(BaseConfig):
     def __init__(self, pdb: Union[str, ToolOutput, StandardizedOutput] = "", contigs: str = "", inpaint: str = "",
                  num_designs: int = 1, active_site: bool = False, 
                  steps: int = 50, partial_steps: int = 0, 
-                 reproducible: bool = False, reproducibility_number: int = 0,
-                 design_startnum: int = 1,
+                 reproducible: bool = False, design_startnum: int = 1,
                  **kwargs):
         """
         Initialize RFdiffusion configuration.
@@ -48,7 +47,6 @@ class RFdiffusion(BaseConfig):
             steps: Diffusion steps (default 50)
             partial_steps: Partial diffusion steps
             reproducible: Use deterministic sampling
-            reproducibility_number: Seed for reproducible runs
             design_startnum: Starting number for design numbering (default: 1)
             **kwargs: Additional parameters
         """
@@ -89,7 +87,6 @@ class RFdiffusion(BaseConfig):
         self.steps = steps
         self.partial_steps = partial_steps
         self.reproducible = reproducible
-        self.reproducibility_number = reproducibility_number
         self.design_startnum = design_startnum
         
         # Initialize base class
@@ -216,7 +213,7 @@ class RFdiffusion(BaseConfig):
         if self.partial_steps > 0:
             config_lines.append(f"PARTIAL STEPS: {self.partial_steps}")
         if self.reproducible:
-            config_lines.append(f"REPRODUCIBLE: {self.reproducible} (seed: {self.reproducibility_number})")
+            config_lines.append(f"REPRODUCIBLE: {self.reproducible}")
         
         return config_lines
 
@@ -372,7 +369,7 @@ python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{desig
                 "steps": self.steps,
                 "partial_steps": self.partial_steps,
                 "reproducible": self.reproducible,
-                "reproducibility_number": self.reproducibility_number
+                "design_startnum": self.design_startnum
             }
         })
         return base_dict

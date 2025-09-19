@@ -33,8 +33,7 @@ class RFdiffusionAllAtom(BaseConfig):
     def __init__(self, ligand: str, pdb: Union[str, ToolOutput, StandardizedOutput] = "", contigs: str = "", inpaint: str = "",
                  num_designs: int = 1, active_site: bool = False, 
                  steps: int = 200, partial_steps: int = 0, 
-                 reproducible: bool = False, reproducibility_number: int = 0,
-                 design_startnum: int = 1,
+                 reproducible: bool = False, design_startnum: int = 1,
                  ppi_design: bool = False, ppi_hotspot_residues: List[str] = None, 
                  ppi_binder_length: int = None, autogenerate_contigs: bool = False, 
                  model_only_neighbors: bool = False, num_recycles: int = 1, 
@@ -55,7 +54,6 @@ class RFdiffusionAllAtom(BaseConfig):
             steps: Diffusion steps (default 200 for AllAtom)
             partial_steps: Partial diffusion steps
             reproducible: Use deterministic sampling
-            reproducibility_number: Seed for reproducible runs
             design_startnum: Starting number for design numbering (default: 1)
             ppi_design: Enable protein-protein interaction design
             ppi_hotspot_residues: List of hotspot residues for PPI (e.g., ["A116","A150"])
@@ -109,7 +107,6 @@ class RFdiffusionAllAtom(BaseConfig):
         self.steps = steps
         self.partial_steps = partial_steps
         self.reproducible = reproducible
-        self.reproducibility_number = reproducibility_number
         self.design_startnum = design_startnum
         # Specific to RFdiffusion-AllAtom
         self.ligand = ligand
@@ -229,7 +226,7 @@ class RFdiffusionAllAtom(BaseConfig):
         if self.partial_steps > 0:
             config_lines.append(f"PARTIAL STEPS: {self.partial_steps}")
         if self.reproducible:
-            config_lines.append(f"REPRODUCIBLE: {self.reproducible} (seed: {self.reproducibility_number})")
+            config_lines.append(f"REPRODUCIBLE: {self.reproducible}")
         
         # Add AllAtom-specific parameters
         if self.ligand:
@@ -481,7 +478,7 @@ python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{desig
                 "steps": self.steps,
                 "partial_steps": self.partial_steps,
                 "reproducible": self.reproducible,
-                "reproducibility_number": self.reproducibility_number,
+                "design_startnum": self.design_startnum,
                 # AllAtom-specific parameters
                 "ligand": self.ligand,
                 "ppi_design": self.ppi_design,
