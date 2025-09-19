@@ -37,8 +37,7 @@ rfdaa = pipeline.add(RFdiffusionAllAtom(pdb=rifampicin, #can also be a path, pre
 
 lmpnn = pipeline.add(LigandMPNN(structures=rfdaa, 
                                 ligand="LIG", #in ligand mpnn you should always specify the ligand name. 
-                                num_sequences=2, 
-                                design_within=4))
+                                num_sequences=2))
 
 boltz_apo = pipeline.add(Boltz2(proteins=lmpnn))
 boltz_holo = pipeline.add(Boltz2(proteins=lmpnn,
