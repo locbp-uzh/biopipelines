@@ -83,8 +83,8 @@ class Pipeline:
 
         # Resource management
         self.global_resources = {
-            "gpu": "V100",
-            "memory": "15GB", 
+            "gpu": None,  # No GPU by default
+            "memory": "15GB",
             "time": "24:00:00"
         }
     
@@ -116,12 +116,10 @@ class Pipeline:
         """
         if env is not None: tool_config.environment = env
 
-        # Merge resources intelligently - respect tool-specific settings like gpu="none"
+        # Merge pipeline resources with tool resources (pipeline settings take precedence if not None)
         for key, value in self.global_resources.items():
-            if key == "gpu" and tool_config.resources.get("gpu") == "none":
-                # Don't override gpu="none" set by tools (e.g., CPU-only tools)
-                continue
-            tool_config.resources[key] = value
+            if value is not None:  # Only override if pipeline has a non-None value
+                tool_config.resources[key] = value
         
         # Set execution order and create step-numbered folder immediately
         self.execution_order += 1
@@ -421,7 +419,7 @@ class Pipeline:
         # Determine GPU constraint
         gpu_spec = resources["gpu"]
 
-        if gpu_spec == "none":
+        if gpu_spec is None or gpu_spec == "none":
             # No GPU requested
             gpu_line = ""
         elif gpu_spec == "high-memory":
@@ -473,7 +471,7 @@ class Pipeline:
             additional_sbatch_lines = "\n" + "\n".join(sbatch_lines)
 
         # Conditional GPU setup
-        if gpu_spec == "none":
+        if gpu_spec is None or gpu_spec == "none":
             gpu_setup = ""
             module_load = ""
         else:
