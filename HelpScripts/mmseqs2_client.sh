@@ -87,10 +87,6 @@ if [[ "$STATUS" -eq 1 ]]; then
   fi
   job_count=$(ls -1 "$JOB_QUEUE_DIR"/*.job 2>/dev/null | wc -l)
   log "Jobs in queue: $job_count"
-  if [[ -f "$RESULTS_DIR/server.log" ]]; then
-    log "Last 10 lines of server.log:"
-    tail -n 10 "$RESULTS_DIR/server.log"
-  fi
   exit 0
 fi
 
