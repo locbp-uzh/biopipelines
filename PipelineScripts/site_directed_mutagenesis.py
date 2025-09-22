@@ -250,19 +250,19 @@ try:
 
         # Create missing sequence entry
         original_id = f"{{base_id}}_{self.position}{{original_aa}}"
-        missing_data = [{
+        missing_data = [{{
             'id': original_id,
             'sequence': original_sequence[:(self.position-1)] + original_aa + original_sequence[self.position:],
             'reason': 'Original amino acid excluded from mutagenesis'
-        }]
+        }}]
 
         missing_df = pd.DataFrame(missing_data)
         missing_df.to_csv(self.missing_sequences_csv, index=False)
-        print(f'Created missing sequences CSV: {self.missing_sequences_csv}')
+        print(f'Created missing sequences CSV: {{self.missing_sequences_csv}}')
     else:
         print('Warning: No sequences found in main CSV')
 except Exception as e:
-    print(f'Error creating missing sequences CSV: {e}')
+    print(f'Error creating missing sequences CSV: {{e}}')
 "
 fi
 
