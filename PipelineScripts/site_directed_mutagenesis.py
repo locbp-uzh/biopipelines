@@ -245,7 +245,7 @@ try:
     if len(sequences_df) > 0:
         first_row = sequences_df.iloc[0]
         original_sequence = first_row['sequence']
-        base_id = first_row['id'].rsplit('_', 1)[0]  # Remove _{self.position}{aa} suffix
+        base_id = first_row['id'].rsplit('_', 1)[0]  # Remove _{{position}}{{aa}} suffix
         original_aa = first_row['original_aa']
 
         # Create missing sequence entry

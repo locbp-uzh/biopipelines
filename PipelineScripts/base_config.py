@@ -731,9 +731,20 @@ class StandardizedOutput:
                 
                 # Show the file paths with bullet points
                 lines.append(f"{content_key}:")
-                for file_path in content_files:
-                    relative_path = make_relative_path(file_path)
-                    lines.append(f"    – '{relative_path}'")
+                if len(content_files) <= 6:
+                    # Show all files if 6 or fewer
+                    for file_path in content_files:
+                        relative_path = make_relative_path(file_path)
+                        lines.append(f"    – '{relative_path}'")
+                else:
+                    # Truncated format: show first 3, ..., last 3
+                    for file_path in content_files[:3]:
+                        relative_path = make_relative_path(file_path)
+                        lines.append(f"    – '{relative_path}'")
+                    lines.append(f"    – ... ({len(content_files) - 6} more) ...")
+                    for file_path in content_files[-3:]:
+                        relative_path = make_relative_path(file_path)
+                        lines.append(f"    – '{relative_path}'")
                 
                 # Show the IDs if available
                 if id_list:
