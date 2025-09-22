@@ -385,25 +385,41 @@ fi
 
 class DatasheetInfo:
     """Information about a datasheet including name, path, and expected columns."""
-    
-    def __init__(self, name: str, path: str, columns: List[str] = None, 
+
+    def __init__(self, name: str, path: str, columns: List[str] = None,
                  description: str = "", count: int = 0):
         self.name = name
         self.path = path
         self.columns = columns or []
         self.description = description
         self.count = count
-    
+
+        # Set column attributes for IDE autocompletion
+        for column in self.columns:
+            setattr(self, column, self._create_column_reference(column))
+
+    def _create_column_reference(self, column_name: str):
+        """Create a column reference tuple for datasheet access."""
+        return (self, column_name)
+
+    def __getattr__(self, column_name: str):
+        """
+        Handle access to any column name, including those not predefined.
+        This enables both IDE autocompletion for known columns and dynamic access.
+        """
+        # Return column reference tuple for any column name
+        return self._create_column_reference(column_name)
+
     def __str__(self) -> str:
         if self.columns:
-            # Show all columns 
+            # Show all columns
             col_display = ', '.join(self.columns)
             return f"${self.name} ({col_display})"
         return f"${self.name}"
-    
+
     def __repr__(self) -> str:
         return f"DatasheetInfo(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert DatasheetInfo to dictionary for JSON serialization."""
         return {
@@ -420,10 +436,10 @@ class DatasheetContainer:
     
     def __init__(self, datasheets: Dict[str, DatasheetInfo]):
         self._datasheets = datasheets
-        
-        # Set attributes for dot notation access
+
+        # Set attributes for dot notation access to DatasheetInfo objects (not just paths)
         for name, info in datasheets.items():
-            setattr(self, name, info.path)
+            setattr(self, name, info)
     
     def __getitem__(self, key: str) -> str:
         """Get datasheet path by name with legacy 'main' support."""
@@ -440,10 +456,10 @@ class DatasheetContainer:
         
         return ""
     
-    def __getattr__(self, name: str) -> str:
-        """Get datasheet path by name via dot notation."""
+    def __getattr__(self, name: str) -> DatasheetInfo:
+        """Get DatasheetInfo object by name via dot notation."""
         if name in self._datasheets:
-            return self._datasheets[name].path
+            return self._datasheets[name]
         raise AttributeError(f"No datasheet named '{name}'")
     
     def keys(self):
