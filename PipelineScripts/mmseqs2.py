@@ -226,6 +226,21 @@ echo "MMseqs2 processing completed"
 
 """
 
+    def _predict_sequence_ids(self) -> List[str]:
+        """
+        Predict sequence IDs from input sources.
+
+        Returns:
+            List of expected sequence IDs that will have MSAs generated
+        """
+        # Try to get from standardized input first (highest priority)
+        if hasattr(self, 'standardized_input') and self.standardized_input:
+            if hasattr(self.standardized_input, 'sequence_ids') and self.standardized_input.sequence_ids:
+                return self.standardized_input.sequence_ids
+
+        # Extract from sequence CSV files or datasheets
+        return self._extract_sequence_ids()
+
     def get_output_files(self) -> Dict[str, List[str]]:
         """
         Get expected output files after MMseqs2 execution.
@@ -236,6 +251,18 @@ echo "MMseqs2 processing completed"
         # Ensure file paths are set up
         if not hasattr(self, 'pipeline_name') or self.pipeline_name is None:
             self._setup_file_paths()
+
+        # Predict sequence IDs and individual MSA files
+        sequence_ids = self._predict_sequence_ids()
+        individual_msas = []
+
+        # Generate individual MSA file paths based on sequence IDs
+        for seq_id in sequence_ids:
+            if self.output_format == "csv":
+                msa_file = os.path.join(self.output_folder, f"{seq_id}.csv")
+            else:  # a3m
+                msa_file = os.path.join(self.output_folder, f"{seq_id}.a3m")
+            individual_msas.append(msa_file)
 
         # Organize datasheets by content type
         datasheets = {
@@ -248,10 +275,10 @@ echo "MMseqs2 processing completed"
         }
 
         return {
-            "msas": [self.output_msa_csv],
-            "msa_ids": [self.pipeline_name],
+            "msas": individual_msas,  # Now returns individual MSA files like Boltz2 structures
+            "msa_ids": sequence_ids,
             "sequences": [],
-            "sequence_ids": [],
+            "sequence_ids": sequence_ids,
             "structures": [],
             "structure_ids": [],
             "compounds": [],

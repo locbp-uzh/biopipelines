@@ -157,11 +157,27 @@ def main():
             log(f"WARNING: Skipping sequence {sequence_id} due to server error")
             continue
 
-        # Process result based on format
+        # Save individual MSA file with sequence ID name
+        output_dir = os.path.dirname(args.output_msa_csv)
+        individual_msa_file = os.path.join(output_dir, f"{sequence_id}.{args.output_format}")
+
+        try:
+            # Copy the result file to the output directory with proper name
+            import shutil
+            shutil.copy2(result_file, individual_msa_file)
+            log(f"Saved individual MSA file: {individual_msa_file}")
+        except Exception as e:
+            log(f"WARNING: Failed to save individual MSA file: {e}")
+
+        # Process result based on format for combined CSV
         if args.output_format == 'a3m':
             msa_rows = convert_a3m_to_csv_format(result_file, sequence_id)
         else:  # csv
             msa_rows = process_csv_output(result_file, sequence_id)
+
+        # Update msa_file references to point to individual files
+        for row in msa_rows:
+            row['msa_file'] = individual_msa_file
 
         all_msa_rows.extend(msa_rows)
 
