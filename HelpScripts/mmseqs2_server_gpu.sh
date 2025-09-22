@@ -31,10 +31,41 @@ MAX_SEQS=10000    # limit homologs per query
 
 mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$GPU_TMP_DIR"
 
+# Check and install MMseqs2 if needed
+check_mmseqs_installation() {
+    local mmseqs_dir="/data/$USER/mmseqs"
+    local mmseqs_bin="$mmseqs_dir/bin/mmseqs"
+
+    if [[ ! -f "$mmseqs_bin" ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - MMseqs2 not found at $mmseqs_bin, downloading..."
+        cd "/data/$USER" || { echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot access /data/$USER"; exit 1; }
+
+        # Download MMseqs2
+        wget https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
+
+        # Extract and cleanup
+        tar xvfz mmseqs-linux-gpu.tar.gz
+        rm mmseqs-linux-gpu.tar.gz
+
+        # Verify installation
+        if [[ -f "$mmseqs_bin" ]]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - MMseqs2 successfully installed at $mmseqs_bin"
+        else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: MMseqs2 installation failed"
+            exit 1
+        fi
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - MMseqs2 found at $mmseqs_bin"
+    fi
+}
+
 # Logging setup
 LOG_FILE="$RESULTS_DIR/server.log"
 PID_FILE="$RESULTS_DIR/server_gpu.pid"
 echo $$ > "$PID_FILE"   # record server PID
+
+# Check and install MMseqs2 if needed
+check_mmseqs_installation
 
 # Optimized Memory Settings
 export MMSEQS_MAX_MEMORY=${MMSEQS_MAX_MEMORY:-150G}  # Reduced from 200G
