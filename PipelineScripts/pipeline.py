@@ -445,10 +445,8 @@ class Pipeline:
             # Specific GPU model (T4, V100, A100, H100)
             gpu_line = f"#SBATCH --gpus={gpu_spec}:1"
         
-        # Convert memory to MB if needed
-        memory_mb = resources["memory"]
-        if memory_mb.endswith("GB"):
-            memory_mb = str(int(float(memory_mb[:-2]) * 1000))
+        # Use memory specification directly (SLURM accepts human-readable formats)
+        memory_spec = resources["memory"]
 
         # Process additional SLURM options
         additional_sbatch_lines = ""
@@ -495,7 +493,7 @@ echo "GPU Type: $gpu_type"
         # Generate SLURM script
         slurm_content = f"""#!/usr/bin/bash
 {gpu_line}
-#SBATCH --mem={memory_mb}
+#SBATCH --mem={memory_spec}
 #SBATCH --time={resources["time"]}
 #SBATCH --output=job.out
 #SBATCH --begin=now+0hour{additional_sbatch_lines}
