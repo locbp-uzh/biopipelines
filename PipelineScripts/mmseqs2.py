@@ -233,13 +233,25 @@ echo "MMseqs2 processing completed"
         Returns:
             List of expected sequence IDs that will have MSAs generated
         """
-        # Try to get from standardized input first (highest priority)
-        if hasattr(self, 'standardized_input') and self.standardized_input:
-            if hasattr(self.standardized_input, 'sequence_ids') and self.standardized_input.sequence_ids:
-                return self.standardized_input.sequence_ids
+        sequence_ids = []
 
-        # Extract from sequence CSV files or datasheets
-        return self._extract_sequence_ids()
+        # Case 1: ToolOutput input (from upstream tools like SDM)
+        if hasattr(self.sequences, 'get_output_files'):
+            upstream_tool = self.sequences
+            output_files = upstream_tool.get_output_files()
+            if 'sequence_ids' in output_files and output_files['sequence_ids']:
+                sequence_ids = output_files['sequence_ids']
+
+        # Case 2: StandardizedOutput input (input=tool)
+        elif hasattr(self, 'standardized_input') and self.standardized_input:
+            if hasattr(self.standardized_input, 'sequence_ids') and self.standardized_input.sequence_ids:
+                sequence_ids = self.standardized_input.sequence_ids
+
+        # Must have sequence IDs from input sources
+        if not sequence_ids:
+            raise ValueError("Could not determine sequence IDs - no valid input sequences found")
+
+        return sequence_ids
 
     def get_output_files(self) -> Dict[str, List[str]]:
         """
