@@ -138,11 +138,12 @@ while true; do
     if [[ "$status" == "SUCCESS" ]]; then
       # pick up output_file=…
       result_file=$(sed -n '2p' "$status_file" | cut -d'=' -f2)
+      elapsed_time=$(($(date +%s) - start_time))
       if [[ -n "$OUTPUT_PATH" ]]; then
         cp "$result_file" "$OUTPUT_PATH"
-        log "Saved results to: $OUTPUT_PATH"
+        log "Saved results to: $OUTPUT_PATH (completed in ${elapsed_time}s)"
       else
-        log "Results ready: $result_file"
+        log "Results ready: $result_file (completed in ${elapsed_time}s)"
       fi
       exit 0
     else
