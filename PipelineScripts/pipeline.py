@@ -308,10 +308,14 @@ class Pipeline:
             env_counts[tool.environment] = env_counts.get(tool.environment, 0) + 1
         primary_env = max(env_counts, key=env_counts.get)
         
-        # Activate primary environment
+        # Activate primary environment (if one is needed)
+        if primary_env is not None:
+            script_lines.extend([
+                f"source activate {primary_env}",
+                "echo"
+            ])
+
         script_lines.extend([
-            f"source activate {primary_env}",
-            "echo",
             "echo Configuration",
             f"{config_script} | tee {os.path.join(self.folders['output'], f'{self.pipeline_name}_config.txt')}",
             "echo"
@@ -322,7 +326,7 @@ class Pipeline:
         
         for i, tool in enumerate(self.tools, 1):
             # Environment switch if needed
-            if tool.environment != current_env:
+            if tool.environment != current_env and tool.environment is not None:
                 script_lines.extend([
                     f"source activate {tool.environment}",
                     "echo"
