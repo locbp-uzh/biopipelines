@@ -11,6 +11,8 @@
 # If no arguments provided, will look for the most recent pipeline output.
 #
 
+module load mamba
+
 set -e  # Exit on any error
 
 # Function to print usage
@@ -195,7 +197,7 @@ main() {
         echo ""
         echo "Error: BioPipelines requires pandas to run. It is usually enough to run:"
         echo "   module load mamba"
-        echo "before running the running the submit script. Otherwise:"
+        echo "before running the submit script. Otherwise you might have to:"
         echo "A. Install pandas first with pip install pandas, or"
         echo "B. Activate a conda environment that contains pandas"
         return 1

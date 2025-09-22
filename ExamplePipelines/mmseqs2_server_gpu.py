@@ -12,7 +12,7 @@ from PipelineScripts.mmseqs2 import MMseqs2Server
 pipeline = Pipeline(
     pipeline_name="MMseqs2Server", #Will create a folder in /shares/USER/<pipeline_name>
     job_name="GPU", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
-    job_description="Test of MMseqs2 local")
+    job_description="Runs MMseqs2 server with GPU accelaration for 1 against many sequence alignment")
 
 pipeline.resources(
     gpu="80GB",
