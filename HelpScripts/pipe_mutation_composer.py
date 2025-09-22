@@ -778,57 +778,95 @@ def generate_weighted_random_mutations(freq_df: pd.DataFrame, num_sequences: int
             max_muts_this_seq = len(reference_seq)
         else:
             max_muts_this_seq = max_mutations
-        
+
         num_mutations = random.randint(1, min(max_muts_this_seq, 5))  # Cap at 5 for reasonable sequences
-        
-        # Select positions to mutate
-        available_positions = list(range(len(reference_seq)))
-        random.shuffle(available_positions)
-        
-        mutations_count = 0
-        for pos in available_positions:
-            if mutations_count >= num_mutations:
-                break
-                
-            row_idx = pos  # Assuming freq_df is ordered by position
-            if row_idx >= len(freq_df):
+
+        # Step 1: Calculate absolute mutation frequencies per position for position selection
+        position_absolute_freqs = []
+        position_data = []
+
+        for row_idx, row in freq_df.iterrows():
+            pos = int(row['position']) - 1  # Convert to 0-indexed
+            if pos >= len(reference_seq):
                 continue
-                
-            row = freq_df.iloc[row_idx]
-            # Use original column if available
+
+            # Get original amino acid
             if 'original' in row:
                 original_aa = row['original']
             else:
                 original_aa = reference_seq[pos]
-            
-            # Build probability distribution for this position
-            aa_probs = []
-            aa_choices = []
-            
+
+            # Calculate total absolute frequency for mutations at this position
+            absolute_freq = 0.0
+            valid_mutations = []
+
             for aa in AMINO_ACIDS:
                 if aa in row and aa != original_aa:
                     freq = row[aa]
                     if freq >= min_frequency:
-                        aa_probs.append(freq)
-                        aa_choices.append(aa)
-            
-            # If no valid mutations at this position, skip
-            if not aa_choices:
+                        absolute_freq += freq
+                        valid_mutations.append((aa, freq))
+
+            # Only include positions that have valid mutations
+            if valid_mutations:
+                position_absolute_freqs.append(absolute_freq)
+                position_data.append((pos, original_aa, valid_mutations, absolute_freq))
+
+        # If no valid positions found, skip this sequence
+        if not position_data:
+            continue
+
+        # Step 2: Select positions to mutate based on absolute frequencies
+        total_absolute_freq = sum(position_absolute_freqs)
+        if total_absolute_freq == 0:
+            continue
+
+        # Normalize position probabilities
+        position_probs = [freq / total_absolute_freq for freq in position_absolute_freqs]
+
+        # Select positions without replacement using weighted sampling
+        selected_positions = []
+        remaining_positions = list(range(len(position_data)))
+        remaining_probs = position_probs.copy()
+
+        for _ in range(min(num_mutations, len(position_data))):
+            if not remaining_positions:
+                break
+
+            # Normalize remaining probabilities
+            total_remaining = sum(remaining_probs)
+            if total_remaining == 0:
+                break
+            normalized_probs = [p / total_remaining for p in remaining_probs]
+
+            # Select position
+            selected_idx = np.random.choice(remaining_positions, p=normalized_probs)
+            selected_positions.append(selected_idx)
+
+            # Remove from remaining
+            list_idx = remaining_positions.index(selected_idx)
+            remaining_positions.pop(list_idx)
+            remaining_probs.pop(list_idx)
+
+        # Step 3: For each selected position, choose amino acid based on relative frequencies
+        for pos_idx in selected_positions:
+            pos, original_aa, valid_mutations, _ = position_data[pos_idx]
+
+            # Calculate relative frequencies for amino acid selection
+            total_mut_freq = sum(freq for aa, freq in valid_mutations)
+            if total_mut_freq == 0:
                 continue
-            
-            # Normalize probabilities
-            total_prob = sum(aa_probs)
-            if total_prob > 0:
-                aa_probs = [p / total_prob for p in aa_probs]
-                
-                # Select amino acid based on probability
-                selected_aa = np.random.choice(aa_choices, p=aa_probs)
-                
-                # Apply mutation
-                seq_list[pos] = selected_aa
-                mutations_made.append(f"{original_aa}{pos+1}{selected_aa}")
-                mutation_positions.append(pos + 1)
-                mutations_count += 1
+
+            aa_choices = [aa for aa, freq in valid_mutations]
+            aa_probs = [freq / total_mut_freq for aa, freq in valid_mutations]
+
+            # Select amino acid based on relative probability
+            selected_aa = np.random.choice(aa_choices, p=aa_probs)
+
+            # Apply mutation
+            seq_list[pos] = selected_aa
+            mutations_made.append(f"{original_aa}{pos+1}{selected_aa}")
+            mutation_positions.append(pos + 1)
         
         # Create final sequence
         mutated_seq = ''.join(seq_list)
