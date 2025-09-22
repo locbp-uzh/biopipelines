@@ -5,9 +5,10 @@ set -e
 timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(timestamp)] $*"; }
 
-WORK_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
-JOB_QUEUE="$WORK_DIR/job_queue"
-RESULTS_DIR="$WORK_DIR/results"
+# MMseqs2 client working directories - must match server script structure
+USER=${USER:-$(whoami)}
+JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/job_queue"
+RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/results"
 TIMEOUT=3600
 
 usage() {
@@ -31,12 +32,15 @@ done
 
 # -- status check --
 if [[ "$STATUS" -eq 1 ]]; then
-  if pgrep -f mmseqs2_server_cpu.sh >/dev/null; then
-    log "MMseqs2 server is running"
+  cpu_running=$(pgrep -f mmseqs2_server_cpu.sh >/dev/null && echo "yes" || echo "no")
+  gpu_running=$(pgrep -f mmseqs2_server_gpu.sh >/dev/null && echo "yes" || echo "no")
+
+  if [[ "$cpu_running" == "yes" || "$gpu_running" == "yes" ]]; then
+    log "MMseqs2 server is running (CPU: $cpu_running, GPU: $gpu_running)"
   else
     log "MMseqs2 server is not running"
   fi
-  job_count=$(ls -1 "$JOB_QUEUE"/*.job 2>/dev/null | wc -l)
+  job_count=$(ls -1 "$JOB_QUEUE_DIR"/*.job 2>/dev/null | wc -l)
   log "Jobs in queue: $job_count"
   if [[ -f "$RESULTS_DIR/server.log" ]]; then
     log "Last 10 lines of server.log:"
@@ -50,14 +54,14 @@ if [[ -z "$SEQUENCE" && -z "$FASTA_FILE" ]]; then
   exit 1
 fi
 
-mkdir -p "$JOB_QUEUE" "$RESULTS_DIR"
+mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR"
 
 # If user gave -f, use it; otherwise write SEQUENCE to a temp FASTA
 if [[ -n "$FASTA_FILE" ]]; then
   fasta_file="$FASTA_FILE"
 else
   job_id="msa_$(date +%s)_$$"
-  fasta_file="$JOB_QUEUE/$job_id.fasta"
+  fasta_file="$JOB_QUEUE_DIR/$job_id.fasta"
   echo ">query_sequence" > "$fasta_file"
   echo "$SEQUENCE"       >> "$fasta_file"
 fi
@@ -67,7 +71,7 @@ if [[ -z "$job_id" ]]; then
 fi
 
 log "Submitting MSA job: $job_id (format: $OUTPUT_FORMAT)"
-job_file="$JOB_QUEUE/$job_id.job"
+job_file="$JOB_QUEUE_DIR/$job_id.job"
 
 # Write out all needed params
 {

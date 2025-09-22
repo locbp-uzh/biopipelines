@@ -15,22 +15,24 @@ nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheade
 
 # Memory-Optimized MMseqs2 GPU MSA Server Script
 
-# Configuration
+# Configuration - must match CPU server and client directory structure
 USER=${USER:-$(whoami)}
-WORK_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server/"
-JOB_QUEUE_DIR="$WORK_DIR/job_queue"
-RESULTS_DIR="$WORK_DIR/results"
-LOG_FILE="$WORK_DIR/server.log"
+JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/job_queue"
+RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/results"
 DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/gpu"
+
+TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp"
+GPU_TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp/gpu"
 UNIREF_DB="uniref30_2302_db"
-TMP_DIR="/scratch/$USER/mmseqs2"
-GPU_TMP_DIR="/scratch/$USER/mmseqs2/gpu"
 DB_PATH="$DB_DIR/$UNIREF_DB"  # Use databases directly from shares
 THREADS=32
 POLL_INTERVAL=10                     # seconds
 MAX_SEQS=10000    # limit homologs per query
 
 mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$GPU_TMP_DIR"
+
+# Logging setup
+LOG_FILE="$RESULTS_DIR/server.log"
 
 # Optimized Memory Settings
 export MMSEQS_MAX_MEMORY=${MMSEQS_MAX_MEMORY:-150G}  # Reduced from 200G

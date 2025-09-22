@@ -444,11 +444,25 @@ class Pipeline:
 
         # Process additional SLURM options
         additional_sbatch_lines = ""
+        all_slurm_options = {}
+
+        # Include SLURM options from resources() method
+        if "slurm_options" in resources:
+            all_slurm_options.update(resources["slurm_options"])
+
+        # Include SLURM options from slurm() method call (these override resources() options)
         if slurm_options:
+            all_slurm_options.update(slurm_options)
+
+        if all_slurm_options:
             sbatch_lines = []
-            for param, value in slurm_options.items():
-                # Convert underscores to hyphens for SLURM parameter names
-                slurm_param = param.replace('_', '-')
+            for param, value in all_slurm_options.items():
+                # Handle special case for cpus -> cpus-per-task
+                if param == "cpus":
+                    slurm_param = "cpus-per-task"
+                else:
+                    # Convert underscores to hyphens for SLURM parameter names
+                    slurm_param = param.replace('_', '-')
                 sbatch_lines.append(f"#SBATCH --{slurm_param}={value}")
             additional_sbatch_lines = "\n" + "\n".join(sbatch_lines)
 
@@ -509,7 +523,7 @@ umask 002
             if line != "":
                 print(line)
     
-    def resources(self, gpu: str = None, memory: str = None, time: str = None):
+    def resources(self, gpu: str = None, memory: str = None, time: str = None, **slurm_options):
         """
         Configure computational resources for the pipeline.
 
@@ -519,8 +533,14 @@ umask 002
                 - Memory-based: "32GB", "80GB", "32GB|80GB" (uses --constraint)
                 - Generic: "gpu" (any available GPU)
                 - High-memory: "high-memory" (equivalent to "32GB|80GB")
+                - "none": No GPU required
             memory: RAM allocation (e.g., "16GB", "32GB", "64GB")
             time: Wall time limit in HH:MM:SS format (e.g., "24:00:00", "48:00:00")
+            **slurm_options: Additional SLURM parameters. Examples:
+                - cpus=32 → #SBATCH --cpus-per-task=32
+                - nodes=1 → #SBATCH --nodes=1
+                - ntasks_per_node=1 → #SBATCH --ntasks-per-node=1
+                - partition="gpu" → #SBATCH --partition=gpu
 
         Examples:
             # Specific GPU model
@@ -534,6 +554,12 @@ umask 002
 
             # High-memory GPUs
             pipeline.resources(gpu="high-memory", memory="64GB", time="24:00:00")
+
+            # CPU-only with multiple cores and nodes
+            pipeline.resources(gpu="none", memory="128GB", time="24:00:00", cpus=32, nodes=1)
+
+            # GPU with specific CPU allocation
+            pipeline.resources(gpu="V100", memory="32GB", time="12:00:00", cpus=16)
         """
         if gpu:
             self.global_resources["gpu"] = gpu
@@ -541,6 +567,12 @@ umask 002
             self.global_resources["memory"] = memory
         if time:
             self.global_resources["time"] = time
+
+        # Store additional SLURM options for later use in slurm() method
+        if slurm_options:
+            if "slurm_options" not in self.global_resources:
+                self.global_resources["slurm_options"] = {}
+            self.global_resources["slurm_options"].update(slurm_options)
     
     def get_tool_outputs(self, tool_type: str = None) -> List[ToolOutput]:
         """

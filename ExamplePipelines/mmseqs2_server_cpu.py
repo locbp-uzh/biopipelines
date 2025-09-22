@@ -16,7 +16,9 @@ pipeline = Pipeline(
 
 pipeline.resources(
     time="24:00:00",
-    memory="16GB"
+    memory="128GB",
+    cpus=32,
+    nodes=1
 )
 
 pipeline.add(MMseqs2Server("cpu"))

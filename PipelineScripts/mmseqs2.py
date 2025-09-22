@@ -24,6 +24,13 @@ class MMseqs2(BaseConfig):
     Configuration for MMseqs2 client - processes sequences through server.
 
     Submits sequences to a running MMseqs2 server for MSA generation.
+
+    ARCHITECTURE NOTE: MMseqs2 is an exception to the standard BioPipelines pattern.
+    Unlike other tools that generate bash scripts and call pipe_<tool>.py at SLURM runtime,
+    MMseqs2 calls existing bash scripts from HelpScripts (mmseqs2_client.sh) and helper
+    python scripts (pipe_mmseqs2_sequences.py) directly. This is necessary because MMseqs2
+    requires interaction with pre-existing server infrastructure rather than generating
+    new computational workflows.
     """
 
     TOOL_NAME = "MMseqs2"
@@ -187,7 +194,16 @@ class MMseqs2(BaseConfig):
         return script_content
 
     def generate_script_run_mmseqs2(self) -> str:
-        """Generate the MMseqs2 execution part of the script."""
+        """
+        Generate the MMseqs2 execution part of the script.
+
+        NOTE: MMseqs2 is an exception to the standard architecture pattern.
+        Unlike other tools that generate bash scripts and call pipe_<tool>.py,
+        MMseqs2 calls existing bash scripts from HelpScripts (mmseqs2_client.sh)
+        and helper python scripts (pipe_mmseqs2_sequences.py) directly.
+        This is because MMseqs2 requires interaction with pre-existing server
+        infrastructure rather than generating new computational workflows.
+        """
 
         return f"""echo "Starting MMseqs2 MSA generation"
 echo "Input sequences: {self.input_sequences_csv}"
@@ -263,6 +279,12 @@ class MMseqs2Server(BaseConfig):
 
     Starts and manages MMseqs2 server processes with CPU or GPU modes.
     Does not process sequences - only manages server infrastructure.
+
+    ARCHITECTURE NOTE: MMseqs2Server is an exception to the standard BioPipelines pattern.
+    Unlike other tools that generate bash scripts and call pipe_<tool>.py at SLURM runtime,
+    MMseqs2Server calls existing bash scripts from HelpScripts (mmseqs2_server_cpu.sh,
+    mmseqs2_server_gpu.sh) directly. This is necessary because MMseqs2Server manages
+    pre-existing server infrastructure rather than generating new computational workflows.
     """
 
     TOOL_NAME = "MMseqs2Server"
@@ -416,15 +438,45 @@ class MMseqs2Server(BaseConfig):
         return script_content
 
     def generate_script_run_server(self) -> str:
-        """Generate the MMseqs2Server execution part of the script."""
+        """
+        Generate the MMseqs2Server execution part of the script.
+
+        NOTE: MMseqs2Server is an exception to the standard architecture pattern.
+        Unlike other tools that generate bash scripts and call pipe_<tool>.py,
+        MMseqs2Server calls existing bash scripts from HelpScripts directly.
+        This is because MMseqs2Server manages pre-existing server infrastructure
+        rather than generating new computational workflows.
+        """
         if self.mode == "gpu":
             return self._generate_gpu_server_script()
         else:
             return self._generate_cpu_server_script()
 
     def _generate_cpu_server_script(self) -> str:
-        """Generate CPU server script using dual folder structure."""
-        threads_setting = f"export OMP_NUM_THREADS={self.threads}" if self.threads else "export OMP_NUM_THREADS=$(nproc)"
+        """
+        Generate CPU server script by calling existing HelpScripts bash script.
+
+        Rather than generating the entire server logic inline, this calls the
+        pre-existing mmseqs2_server_cpu.sh script from HelpScripts with
+        appropriate environment variables set.
+        """
+        # Set environment variables for the server script
+        env_vars = []
+        if self.threads:
+            env_vars.append(f"export OMP_NUM_THREADS={self.threads}")
+        else:
+            env_vars.append("export OMP_NUM_THREADS=$(nproc)")
+
+        env_vars.extend([
+            f"export MMSEQS2_DATABASE={self.database}",
+            f"export MMSEQS2_MAX_SEQS={self.max_seqs}",
+            f"export MMSEQS2_POLL_INTERVAL={self.poll_interval}",
+            f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
+            f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log"
+        ])
+
+        env_setup = "\n".join(env_vars)
+        cpu_script_path = os.path.join(self.folders["HelpScripts"], "mmseqs2_server_cpu.sh")
 
         return f"""echo "Starting MMseqs2 CPU server"
 echo "Database: {self.database}"
@@ -432,171 +484,43 @@ echo "Max sequences: {self.max_seqs}"
 echo "Shared server folder: {self.shared_server_folder}"
 echo "Pipeline log folder: {self.output_folder}"
 
-# Configuration - dual folder structure
-USER=${{USER:-$(whoami)}}
-JOB_QUEUE_DIR="{self.shared_server_folder}/job_queue"
-RESULTS_DIR="{self.shared_server_folder}/results"
-DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/cpu"
-DB_PATH="$DB_DIR/{self.database}"
-POLL_INTERVAL={self.poll_interval}
-MAX_SEQS={self.max_seqs}
+# Set environment variables for server script
+{env_setup}
 
-# Pipeline-specific log in standard location
-PIPELINE_LOG_FILE="{self.output_folder}/server.log"
-
-mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR"
-mkdir -p "{self.output_folder}"
-
-# Logging setup - logs go to both shared and pipeline locations
-LOG_FILE="$RESULTS_DIR/server.log"
-: > "$LOG_FILE"
-: > "$PIPELINE_LOG_FILE"
-{threads_setting}
-
-# Timestamped logging - write to both shared and pipeline logs
-timestamp() {{ date '+%Y-%m-%d %H:%M:%S'; }}
-log() {{ echo "[$(timestamp)] $*" | tee -a "$LOG_FILE" | tee -a "$PIPELINE_LOG_FILE"; }}
-
-log "MMseqs2 CPU server starting (using $OMP_NUM_THREADS threads)"
-log "Database path: $DB_PATH"
-
-# Conversion functions
-convert_to_a3m() {{
-    local result_db=$1
-    local query_db=$2
-    local target_db=$3
-    local output_file=$4
-    local tmp_dir=$5
-
-    mmseqs result2msa "$query_db" "$target_db" "$result_db" "$output_file" \\
-        --msa-format-mode 5 \\
-        --threads "$OMP_NUM_THREADS" \\
-        2>&1 | tee -a "$LOG_FILE"
-
-    # Remove null byte at end
-    head -c -1 "$output_file" > "${{output_file}}.clean"
-    mv "${{output_file}}.clean" "$output_file"
-
-    local seq_count=$(grep -c "^>" "$output_file" || echo "0")
-    log "A3M file created with $seq_count sequences"
-}}
-
-convert_a3m_to_csv() {{
-    local a3m_file=$1
-    local output_file=$2
-
-    echo "key,sequence" > "$output_file"
-    awk '/^[^>]/ {{print "-1," $0}}' "$a3m_file" >> "$output_file"
-
-    local line_count=$(wc -l < "$output_file")
-    log "CSV file created with $((line_count - 1)) data rows"
-}}
-
-handle_job() {{
-    local job_meta="$1"
-    local fname=$(basename "$job_meta")
-    local job_id="${{fname%.job}}"
-    local tmp="$RESULTS_DIR/tmp_$job_id"
-    mkdir -p "$tmp"
-
-    log "Picked up job $job_id"
-    if [[ -f "$job_meta" ]]; then
-        mv "$job_meta" "$tmp/"
-    else
-        log "Warning: job file $job_meta not found; skipping."
-        return
-    fi
-
-    # Parse params
-    output_format="csv"; fasta=""
-    while IFS='=' read -r key val; do
-        case $key in
-            fasta)         fasta="$val"         ;;
-            output_format) output_format="$val" ;;
-        esac
-    done < "$tmp/$fname"
-
-    # Fallback FASTA
-    [[ -n "$fasta" ]] || fasta="$JOB_QUEUE_DIR/${{job_id}}.fasta"
-    if [[ ! -f "$fasta" ]]; then
-        log "ERROR: FASTA not found at $fasta"
-        echo -e "FAILED\\nInput FASTA not found" > "$RESULTS_DIR/$job_id.status"
-        return
-    fi
-
-    cp "$fasta" "$tmp/query.fasta"
-    local query_db="$tmp/queryDB"
-    log "Creating queryDB"
-    mmseqs createdb "$tmp/query.fasta" "$query_db" 2>&1 | tee -a "$LOG_FILE"
-
-    local result_db="$tmp/resultDB"
-    local out_prefix="$RESULTS_DIR/$job_id"
-
-    log "Running search for $job_id"
-    if ! mmseqs search \\
-        "$query_db" "$DB_PATH" "$result_db" "$tmp/search_tmp" \\
-        --db-load-mode 2 \\
-        -s 7.5 \\
-        -a 1 \\
-        --alignment-mode 0 \\
-        --threads "$OMP_NUM_THREADS" \\
-        --max-seqs "$MAX_SEQS" \\
-      2>&1 | tee -a "$LOG_FILE"; then
-        log "Search failed for $job_id"
-        echo -e "FAILED\\nSearch error" > "$RESULTS_DIR/$job_id.status"
-        return
-    fi
-
-    log "Converting to $output_format format"
-    case $output_format in
-        a3m)
-            convert_to_a3m "$result_db" "$query_db" "$DB_PATH" "$out_prefix.a3m" "$tmp"
-            echo -e "SUCCESS\\noutput_file=$out_prefix.a3m" > "$RESULTS_DIR/$job_id.status"
-            ;;
-        csv)
-            convert_to_a3m "$result_db" "$query_db" "$DB_PATH" "$tmp/temp.a3m" "$tmp"
-            convert_a3m_to_csv "$tmp/temp.a3m" "$out_prefix.csv"
-            rm "$tmp/temp.a3m"
-            echo -e "SUCCESS\\noutput_file=$out_prefix.csv" > "$RESULTS_DIR/$job_id.status"
-            ;;
-        *)
-            log "Unknown format $output_format"
-            echo -e "FAILED\\nUnknown format" > "$RESULTS_DIR/$job_id.status"
-            ;;
-    esac
-
-    # Cleanup
-    rm -rf "$tmp"
-    log "Job $job_id completed successfully"
-}}
-
-# Main processing loop
-log "Entering job processing loop"
-while true; do
-  # Process current user's jobs first
-  for job_meta in "$JOB_QUEUE_DIR"/*.job; do
-    [[ -e "$job_meta" ]] || continue
-    if [[ $(stat -c '%U' "$job_meta" 2>/dev/null || stat -f '%Su' "$job_meta") == "$USER" ]]; then
-      handle_job "$job_meta"
-    fi
-  done
-
-  # Then process other users' jobs
-  for job_meta in "$JOB_QUEUE_DIR"/*.job; do
-    [[ -e "$job_meta" ]] || continue
-    if [[ $(stat -c '%U' "$job_meta" 2>/dev/null || stat -f '%Su' "$job_meta") != "$USER" ]]; then
-      handle_job "$job_meta"
-    fi
-  done
-
-  sleep $POLL_INTERVAL
-done
+# Call existing CPU server script from HelpScripts
+echo "Executing MMseqs2 CPU server script..."
+bash {cpu_script_path}
 
 """
 
     def _generate_gpu_server_script(self) -> str:
-        """Generate GPU server script using dual folder structure."""
-        threads_setting = f"export OMP_NUM_THREADS={self.threads}" if self.threads else "export OMP_NUM_THREADS=16"
+        """
+        Generate GPU server script by calling existing HelpScripts bash script.
+
+        Rather than generating the entire server logic inline, this calls the
+        pre-existing mmseqs2_server_gpu.sh script from HelpScripts with
+        appropriate environment variables set.
+        """
+        # Set environment variables for the server script
+        env_vars = []
+        if self.threads:
+            env_vars.append(f"export OMP_NUM_THREADS={self.threads}")
+        else:
+            env_vars.append("export OMP_NUM_THREADS=16")
+
+        env_vars.extend([
+            f"export MMSEQS2_DATABASE={self.database}",
+            f"export MMSEQS2_MAX_SEQS={self.max_seqs}",
+            f"export MMSEQS2_POLL_INTERVAL={self.poll_interval}",
+            f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
+            f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log",
+            "export CUDA_VISIBLE_DEVICES=0",
+            "export CUDA_CACHE_MAXSIZE=2147483648",
+            "export CUDA_CACHE_DISABLE=0"
+        ])
+
+        env_setup = "\n".join(env_vars)
+        gpu_script_path = os.path.join(self.folders["HelpScripts"], "mmseqs2_server_gpu.sh")
 
         return f"""echo "Starting MMseqs2 GPU server"
 echo "Database: {self.database}"
@@ -615,171 +539,12 @@ gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader)
 echo "GPU Type: $gpu_type"
 nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits
 
-# Configuration - dual folder structure
-USER=${{USER:-$(whoami)}}
-JOB_QUEUE_DIR="{self.shared_server_folder}/job_queue"
-RESULTS_DIR="{self.shared_server_folder}/results"
-DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/gpu"
-DB_PATH="$DB_DIR/{self.database}"
-THREADS={self.threads if self.threads else 32}
-POLL_INTERVAL={self.poll_interval}
-MAX_SEQS={self.max_seqs}
+# Set environment variables for server script
+{env_setup}
 
-# Pipeline-specific log in standard location
-PIPELINE_LOG_FILE="{self.output_folder}/server.log"
-
-mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR"
-mkdir -p "{self.output_folder}"
-
-# Logging setup - logs go to both shared and pipeline locations
-LOG_FILE="$RESULTS_DIR/server.log"
-: > "$LOG_FILE"
-: > "$PIPELINE_LOG_FILE"
-
-# GPU Memory optimization
-export MMSEQS_MAX_MEMORY=${{MMSEQS_MAX_MEMORY:-150G}}
-{threads_setting}
-export CUDA_VISIBLE_DEVICES=0
-export CUDA_CACHE_MAXSIZE=2147483648
-export CUDA_CACHE_DISABLE=0
-
-# Logging function - write to both shared and pipeline logs
-log() {{
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE" | tee -a "$PIPELINE_LOG_FILE"
-}}
-
-log "Memory settings: MMSEQS_MAX_MEMORY=$MMSEQS_MAX_MEMORY, OMP_NUM_THREADS=$OMP_NUM_THREADS"
-log "GPU Memory status:"
-nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits | tee -a "$LOG_FILE" | tee -a "$PIPELINE_LOG_FILE"
-
-# Start GPU server
-log "Starting MMseqs2 GPU server for $DB_PATH"
-CUDA_VISIBLE_DEVICES=0 mmseqs gpuserver "$DB_PATH" \\
-  --max-seqs "$MAX_SEQS" \\
-  --db-load-mode 0 \\
-  --prefilter-mode 1 &
-GPUSERVER_PID=$!
-log "GPU server PID=$GPUSERVER_PID"
-
-# Wait for GPU server to stabilize
-log "Waiting for gpuserver to finish preloading DB into GPU memory"
-prev_mem=-1
-while true; do
-  curr_mem=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-  if [[ "$curr_mem" -eq "$prev_mem" ]]; then
-    log "GPU memory stabilized at ${{curr_mem}} MiB — assuming preload is done"
-    break
-  else
-    log "GPU memory at ${{curr_mem}} MiB (loading…)"
-    prev_mem=$curr_mem
-    sleep 5
-  fi
-done
-
-# Cleanup on exit
-cleanup() {{
-  log "Stopping GPU server PID=$GPUSERVER_PID"
-  kill $GPUSERVER_PID || true
-  sleep 5
-  kill -9 $GPUSERVER_PID 2>/dev/null || true
-  exit 0
-}}
-trap cleanup SIGINT SIGTERM
-
-# GPU server processing loop (simplified - uses gpuserver)
-log "Entering job processing loop"
-while true; do
-  for job_meta in "$JOB_QUEUE_DIR"/*.job; do
-    [[ -e "$job_meta" ]] || continue
-
-    fname=$(basename "$job_meta")
-    job_id="${{fname%.job}}"
-    tmp="$RESULTS_DIR/tmp_$job_id"
-    mkdir -p "$tmp"
-
-    log "Picked up job $job_id"
-    mv "$job_meta" "$tmp/"
-
-    # Parse params
-    output_format="csv"; fasta=""
-    while IFS='=' read -r key val; do
-      case $key in
-        fasta)         fasta="$val"         ;;
-        output_format) output_format="$val" ;;
-      esac
-    done < "$tmp/$fname"
-
-    [[ -n "$fasta" ]] || fasta="$JOB_QUEUE_DIR/${{job_id}}.fasta"
-    if [[ ! -f "$fasta" ]]; then
-      log "ERROR: FASTA not found at $fasta"
-      echo -e "FAILED\\nInput FASTA not found" > "$RESULTS_DIR/$job_id.status"
-      continue
-    fi
-
-    # Prepare query DB
-    cp "$fasta" "$tmp/query.fasta"
-    query_db="$tmp/queryDB"
-    log "Creating queryDB"
-    mmseqs createdb "$tmp/query.fasta" "$query_db" 2>&1 | tee -a "$LOG_FILE"
-
-    result_db="$tmp/resultDB"
-    out_prefix="$RESULTS_DIR/$job_id"
-
-    gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-    log "GPU memory before search: ${{gpu_mem_before}}MB"
-
-    if ! CUDA_VISIBLE_DEVICES=0 mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \\
-      --gpu 1 \\
-      --gpu-server 1 \\
-      --prefilter-mode 1 \\
-      --db-load-mode 2 \\
-      -a 1 \\
-      --alignment-mode 0 \\
-      --threads "$OMP_NUM_THREADS" \\
-      --max-seqs "$MAX_SEQS" \\
-      -s 7.5; then
-      log "Search failed for job $job_id"
-      gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-      log "GPU memory after failed search: ${{gpu_mem_after}}MB"
-      echo "FAILED: Search failed" > "$RESULTS_DIR/$job_id.status"
-      continue
-    fi
-
-    gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-    log "GPU memory after successful search: ${{gpu_mem_after}}MB"
-
-    log "Converting to $output_format format"
-    case $output_format in
-      a3m)
-        mmseqs result2msa "$query_db" "$DB_PATH" "$result_db" "$out_prefix.a3m" \\
-            --msa-format-mode 5 \\
-            --threads "$OMP_NUM_THREADS" \\
-            2>&1 | tee -a "$LOG_FILE"
-        head -c -1 "$out_prefix.a3m" > "${{out_prefix}}.a3m.clean"
-        mv "${{out_prefix}}.a3m.clean" "$out_prefix.a3m"
-        echo -e "SUCCESS\\noutput_file=$out_prefix.a3m" > "$RESULTS_DIR/$job_id.status"
-        ;;
-      csv)
-        mmseqs result2msa "$query_db" "$DB_PATH" "$result_db" "$tmp/temp.a3m" \\
-            --msa-format-mode 5 \\
-            --threads "$OMP_NUM_THREADS" \\
-            2>&1 | tee -a "$LOG_FILE"
-        echo "key,sequence" > "$out_prefix.csv"
-        awk '/^[^>]/ {{print "-1," $0}}' "$tmp/temp.a3m" >> "$out_prefix.csv"
-        echo -e "SUCCESS\\noutput_file=$out_prefix.csv" > "$RESULTS_DIR/$job_id.status"
-        ;;
-      *)
-        log "Unknown format $output_format"
-        echo -e "FAILED\\nUnknown format" > "$RESULTS_DIR/$job_id.status"
-        ;;
-    esac
-
-    # Cleanup
-    rm -rf "$tmp"
-    log "Job $job_id completed successfully"
-  done
-  sleep 5
-done
+# Call existing GPU server script from HelpScripts
+echo "Executing MMseqs2 GPU server script..."
+bash {gpu_script_path}
 
 """
 

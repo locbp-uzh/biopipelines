@@ -12,11 +12,12 @@ log() { echo "[$(timestamp)] $*"; }
 # -----------------------------------------------------------------------------
 
 USER=${USER:-$(whoami)}
-JOB_QUEUE_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server/job_queue"
-RESULTS_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server/results"
+JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/job_queue"
+RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/results"
 DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/cpu"
-TMP_DIR="/scratch/$USER/mmseqs2"
-CPU_TMP_DIR="/scratch/$USER/mmseqs2/cpu"
+
+TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp"
+CPU_TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp/cpu"
 UNIREF_DB="uniref30_2302_db"
 DB_PATH="$DB_DIR/$UNIREF_DB"   # Use databases directly from shares
 POLL_INTERVAL=10                     # seconds

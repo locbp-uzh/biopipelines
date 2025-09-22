@@ -15,8 +15,10 @@ pipeline = Pipeline(
     job_description="Test of MMseqs2 local")
 
 pipeline.resources(
+    gpu="80GB",
     time="24:00:00",
-    memory="16GB"
+    memory="32GB",
+    cpus=16
 )
 
 pipeline.add(MMseqs2Server("gpu"))
