@@ -124,6 +124,36 @@ class SDM(BaseConfig):
         self.sequences_csv = None
         self.sdm_helper_py = None
 
+        # Set up datasheets attribute for IDE autocompletion
+        self._setup_datasheets_for_ide()
+
+    def _setup_datasheets_for_ide(self):
+        """Set up datasheets attribute with predefined columns for IDE autocompletion."""
+        from .base_config import DatasheetContainer, DatasheetInfo
+
+        # Create temporary DatasheetInfo objects with known columns for IDE support
+        sequences_datasheet = DatasheetInfo(
+            name="sequences",
+            path="",  # Path will be set when output_folder is known
+            columns=["id", "sequence", "mutation", "position", "original_aa", "new_aa"],
+            description=f"Site-directed mutants at position {self.position} using {self.mode} mode"
+        )
+
+        datasheets_dict = {"sequences": sequences_datasheet}
+
+        # Add missing sequences datasheet if original is excluded
+        if not self.include_original:
+            missing_sequences_datasheet = DatasheetInfo(
+                name="missing_sequences",
+                path="",
+                columns=["id", "sequence", "reason"],
+                description="Sequences excluded from mutagenesis (original amino acid)"
+            )
+            datasheets_dict["missing_sequences"] = missing_sequences_datasheet
+
+        # Set up datasheets container for IDE autocompletion
+        self.datasheets = DatasheetContainer(datasheets_dict)
+
     def validate_params(self):
         """Validate SDM-specific parameters."""
         # Validate mode
