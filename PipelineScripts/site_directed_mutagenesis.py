@@ -212,7 +212,15 @@ class SDM(BaseConfig):
             sequence_id_param = f'"{self.input_sequence_id}"'
             sequence_source = "file"
 
-        script_content += f"""echo "Running Site-Directed Mutagenesis"
+        script_content += self.generate_script_run_sdm(sequence_source, sequence_param, sequence_id_param)
+        script_content += self.generate_script_missing_sequences()
+        script_content += self.generate_completion_check_footer()
+
+        return script_content
+
+    def generate_script_run_sdm(self, sequence_source: str, sequence_param: str, sequence_id_param: str) -> str:
+        """Generate the SDM execution part of the script."""
+        return f"""echo "Running Site-Directed Mutagenesis"
 echo "Position: {self.position}"
 echo "Mode: {self.mode}"
 echo "Include original: {self.include_original}"
@@ -232,7 +240,11 @@ python {self.sdm_helper_py} \\
 echo "SDM completed successfully"
 echo "Generated sequences saved to: {self.sequences_csv}"
 
-# Generate missing sequences CSV if original is excluded
+"""
+
+    def generate_script_missing_sequences(self) -> str:
+        """Generate the missing sequences creation part of the script."""
+        return f"""# Generate missing sequences CSV if original is excluded
 if [ "{str(self.include_original).lower()}" = "false" ]; then
     echo "Creating missing sequences datasheet..."
     python -c "
@@ -245,11 +257,11 @@ try:
     if len(sequences_df) > 0:
         first_row = sequences_df.iloc[0]
         original_sequence = first_row['sequence']
-        base_id = first_row['id'].rsplit('_', 1)[0]  # Remove _{{position}}{{aa}} suffix
+        base_id = first_row['id'].rsplit('_', 1)[0]  # Remove _position_aa suffix
         original_aa = first_row['original_aa']
 
         # Create missing sequence entry
-        original_id = f"{{base_id}}_{self.position}{{original_aa}}"
+        original_id = f'{{base_id}}_{self.position}{{original_aa}}'
         missing_data = [{{
             'id': original_id,
             'sequence': original_sequence[:(self.position-1)] + original_aa + original_sequence[self.position:],
@@ -257,8 +269,8 @@ try:
         }}]
 
         missing_df = pd.DataFrame(missing_data)
-        missing_df.to_csv(self.missing_sequences_csv, index=False)
-        print(f'Created missing sequences CSV: {{self.missing_sequences_csv}}')
+        missing_df.to_csv('{self.missing_sequences_csv}', index=False)
+        print(f'Created missing sequences CSV: {self.missing_sequences_csv}')
     else:
         print('Warning: No sequences found in main CSV')
 except Exception as e:
@@ -267,9 +279,6 @@ except Exception as e:
 fi
 
 """
-        script_content += self.generate_completion_check_footer()
-
-        return script_content
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after SDM execution."""
