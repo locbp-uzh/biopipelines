@@ -65,7 +65,7 @@ convert_to_a3m() {
     local scratch_a3m="$tmp_dir/raw.a3m"
     local final_a3m="$output_file"
 
-    /data/gquarg/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
+    /data/$USER/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
         --msa-format-mode 5 \
         --threads "$OMP_NUM_THREADS" \
         2>&1 | tee -a "$LOG_FILE"
@@ -97,7 +97,7 @@ convert_a3m_to_csv() {
 
 # Start GPU server with optimized settings
 log "Starting MMseqs2 GPU server for $DB_PATH"
-CUDA_VISIBLE_DEVICES=0 /data/gquarg/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
+CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
@@ -175,7 +175,7 @@ while true; do
     cp "$fasta" "$tmp/query.fasta"
     query_db="$tmp/queryDB"
     log "Creating queryDB"
-    /data/gquarg/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db" \
+    /data/$USER/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db" \
      2>&1 | tee -a "$LOG_FILE"
 
     # Result database (not m8 format)
@@ -191,7 +191,7 @@ while true; do
     gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory before search: ${gpu_mem_before}MB"
 
-    if ! CUDA_VISIBLE_DEVICES=0 /data/gquarg/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
+    if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
       --gpu 1 \
       --gpu-server 1 \
       --prefilter-mode 1 \

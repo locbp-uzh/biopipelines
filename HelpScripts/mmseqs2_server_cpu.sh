@@ -45,7 +45,7 @@ convert_to_a3m() {
     local scratch_a3m="$tmp_dir/raw.a3m"
     local final_a3m="$output_file"
 
-    /data/gquarg/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
+    /data/$USER/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
         --msa-format-mode 5 \
         --threads "$OMP_NUM_THREADS" \
         2>&1 | tee -a "$LOG_FILE"
@@ -110,13 +110,13 @@ handle_job() {
     cp "$fasta" "$tmp/query.fasta"
     local query_db="$tmp/queryDB"
     log "Creating queryDB"
-    /data/gquarg/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db" 2>&1 | tee -a "$LOG_FILE"
+    /data/$USER/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db" 2>&1 | tee -a "$LOG_FILE"
 
     local result_db="$tmp/resultDB"
     local out_prefix="$RESULTS_DIR/$job_id"
 
     log "Running search for $job_id"
-    if ! /data/gquarg/mmseqs/bin/mmseqs search \
+    if ! /data/$USER/mmseqs/bin/mmseqs search \
         "$query_db" "$DB_PATH" "$result_db" "$tmp/search_tmp" \
         --db-load-mode 2 \
         -s 7.5 \
