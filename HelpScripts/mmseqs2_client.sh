@@ -32,13 +32,58 @@ done
 
 # -- status check --
 if [[ "$STATUS" -eq 1 ]]; then
-  cpu_running=$(pgrep -f mmseqs2_server_cpu.sh >/dev/null && echo "yes" || echo "no")
-  gpu_running=$(pgrep -f mmseqs2_server_gpu.sh >/dev/null && echo "yes" || echo "no")
+  # Check CPU server using PID file
+  cpu_pid_file="$RESULTS_DIR/server_cpu.pid"
+  if [[ -f "$cpu_pid_file" ]]; then
+    cpu_pid=$(cat "$cpu_pid_file")
+    if kill -0 "$cpu_pid" 2>/dev/null; then
+      cpu_running="yes"
+    else
+      cpu_running="no (stale PID file)"
+      rm -f "$cpu_pid_file"  # cleanup stale PID file
+    fi
+  else
+    cpu_running="no"
+  fi
+
+  # Check GPU server using PID file
+  gpu_pid_file="$RESULTS_DIR/server_gpu.pid"
+  if [[ -f "$gpu_pid_file" ]]; then
+    gpu_pid=$(cat "$gpu_pid_file")
+    if kill -0 "$gpu_pid" 2>/dev/null; then
+      gpu_running="yes"
+    else
+      gpu_running="no (stale PID file)"
+      rm -f "$gpu_pid_file"  # cleanup stale PID file
+    fi
+  else
+    gpu_running="no"
+  fi
 
   if [[ "$cpu_running" == "yes" || "$gpu_running" == "yes" ]]; then
     log "MMseqs2 server is running (CPU: $cpu_running, GPU: $gpu_running)"
+
+    # Check server activity using log timestamps
+    if [[ -f "$RESULTS_DIR/server.log" ]]; then
+      last_activity=$(tail -n 1 "$RESULTS_DIR/server.log" | grep -o '\[.*\]' | tr -d '[]' 2>/dev/null || echo "unknown")
+      if [[ "$last_activity" != "unknown" ]]; then
+        log "Last server activity: $last_activity"
+
+        # Check if server is actively processing (recent activity within 5 minutes)
+        if command -v date >/dev/null 2>&1; then
+          current_time=$(date +%s)
+          last_time=$(date -d "$last_activity" +%s 2>/dev/null || echo "0")
+          time_diff=$((current_time - last_time))
+          if [[ $time_diff -lt 300 ]]; then  # 5 minutes
+            log "Server is actively processing (last activity ${time_diff}s ago)"
+          else
+            log "Server may be idle (last activity ${time_diff}s ago)"
+          fi
+        fi
+      fi
+    fi
   else
-    log "MMseqs2 server is not running"
+    log "MMseqs2 server is not running (CPU: $cpu_running, GPU: $gpu_running)"
   fi
   job_count=$(ls -1 "$JOB_QUEUE_DIR"/*.job 2>/dev/null | wc -l)
   log "Jobs in queue: $job_count"

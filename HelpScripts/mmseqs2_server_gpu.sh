@@ -33,6 +33,8 @@ mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$GPU_TMP_DIR"
 
 # Logging setup
 LOG_FILE="$RESULTS_DIR/server.log"
+PID_FILE="$RESULTS_DIR/server_gpu.pid"
+echo $$ > "$PID_FILE"   # record server PID
 
 # Optimized Memory Settings
 export MMSEQS_MAX_MEMORY=${MMSEQS_MAX_MEMORY:-150G}  # Reduced from 200G
@@ -128,12 +130,14 @@ done
 
 # Cleanup on exit
 cleanup() {
+  log "MMseqs2 GPU server shutting down"
   log "Stopping GPU server PID=$GPUSERVER_PID"
   kill $GPUSERVER_PID || true
   # Wait for graceful shutdown
   sleep 5
   # Force kill if still running
   kill -9 $GPUSERVER_PID 2>/dev/null || true
+  rm -f "$PID_FILE"
   exit 0
 }
 trap cleanup SIGINT SIGTERM

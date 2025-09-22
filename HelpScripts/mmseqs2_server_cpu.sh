@@ -27,11 +27,21 @@ mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$CPU_TMP_DIR"
 
 # Logging setup
 LOG_FILE="$RESULTS_DIR/server.log"
+PID_FILE="$RESULTS_DIR/server_cpu.pid"
 : > "$LOG_FILE"   # truncate on each start
+echo $$ > "$PID_FILE"   # record server PID
 export OMP_NUM_THREADS=$(nproc)
 
-log "MMseqs2 CPU server starting (using $OMP_NUM_THREADS threads)"
+log "MMseqs2 CPU server starting (PID: $$, using $OMP_NUM_THREADS threads)"
 echo # blank line
+
+# cleanup PID file on exit
+cleanup() {
+    log "MMseqs2 CPU server shutting down"
+    rm -f "$PID_FILE"
+    exit
+}
+trap cleanup EXIT INT TERM
 
 convert_to_a3m() {
     local result_db=$1
