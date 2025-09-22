@@ -115,7 +115,13 @@ class Pipeline:
             ToolAwareOutput object with standardized output interface and .tool access
         """
         if env is not None: tool_config.environment = env
-        tool_config.resources.update(self.global_resources) #will warn if resources are insufficient
+
+        # Merge resources intelligently - respect tool-specific settings like gpu="none"
+        for key, value in self.global_resources.items():
+            if key == "gpu" and tool_config.resources.get("gpu") == "none":
+                # Don't override gpu="none" set by tools (e.g., CPU-only tools)
+                continue
+            tool_config.resources[key] = value
         
         # Set execution order and create step-numbered folder immediately
         self.execution_order += 1

@@ -15,7 +15,6 @@ pipeline = Pipeline(
     job_description="Test of MMseqs2 local")
 
 pipeline.resources(
-    gpu="none",
     time="24:00:00",
     memory="128GB",
     cpus=32,
