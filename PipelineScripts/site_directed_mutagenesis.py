@@ -249,7 +249,7 @@ try:
         original_aa = first_row['original_aa']
 
         # Create missing sequence entry
-        original_id = f"{base_id}_{self.position}{original_aa}"
+        original_id = f"{{base_id}}_{self.position}{{original_aa}}"
         missing_data = [{
             'id': original_id,
             'sequence': original_sequence[:(self.position-1)] + original_aa + original_sequence[self.position:],
