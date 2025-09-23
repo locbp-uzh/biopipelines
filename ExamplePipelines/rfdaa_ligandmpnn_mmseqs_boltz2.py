@@ -17,8 +17,7 @@ from PipelineScripts.boltz2 import Boltz2
 pipeline = Pipeline(
     pipeline_name="RFDAA-LigandMPNN-MMseqs2-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
     job_name="rifampicin", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
-    job_description="redesign of N terminus of rifampicin binding protein",
-    debug=True)
+    job_description="redesign of N terminus of rifampicin binding protein")
 
 pipeline.resources(
     gpu="80GB", #ask for A100-80GB or H100-80GB
@@ -30,17 +29,17 @@ pipeline.resources(
 rifampicin = pipeline.add(LoadOutput("/shares/locbp.chem.uzh/public/BioPipelines/Boltz/rifampicin_001/ToolOutputs/1_Boltz2_output.json"))
 
 
-rfdaa = pipeline.add(RFdiffusionAllAtom(#pdb=rifampicin, #can also be a path, preferentially to PDBs folder inside biopipelines folder
+rfdaa = pipeline.add(RFdiffusionAllAtom(pdb=rifampicin, #can also be a path, preferentially to PDBs folder inside biopipelines folder
                                         ligand='LIG', #in rfdaa always specify the ligand name
                                         contigs='10-20,A6-140',
                                         num_designs=2,
-                                        steps=20))
+                                        steps=200))
 
 
 lmpnn = pipeline.add(LigandMPNN(structures=rfdaa,
                                 ligand="LIG",
                                 num_sequences=2,
-                                redesigned="structures.designed"))
+                                redesigned=rfdaa.datasheets.structures.designed))
 
 msas = pipeline.add(MMseqs2(sequences=lmpnn))
 

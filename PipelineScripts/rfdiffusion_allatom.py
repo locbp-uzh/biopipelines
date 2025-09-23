@@ -336,6 +336,9 @@ class RFdiffusionAllAtom(BaseConfig):
         
         if self.input_pdb_file:
             aa_args.append(f"inference.input_pdb={self.input_pdb_file}")
+        else:
+            # Explicitly set empty input_pdb to override any default test file
+            aa_args.append("inference.input_pdb=null")
         
         aa_args.append(f"inference.num_designs={self.num_designs}")
         aa_args.append(f"inference.output_prefix={os.path.join(rfd_job_folder, f'{self.pipeline_name}')}")
