@@ -124,27 +124,6 @@ class MutationComposer(BaseConfig):
             if hasattr(mutation_input, 'config'):
                 self.dependencies.append(mutation_input.config)
 
-        # Set up datasheets attribute for IDE autocompletion
-        self._setup_datasheets_for_ide()
-
-    def _setup_datasheets_for_ide(self):
-        """Set up datasheets attribute with predefined columns for IDE autocompletion."""
-        from .base_config import DatasheetContainer, DatasheetInfo
-
-        # Create temporary DatasheetInfo objects with known columns for IDE support
-        sequences_datasheet = DatasheetInfo(
-            name="sequences",
-            path="",  # Path will be set when output_folder is known
-            columns=["id", "sequence", "mutations", "source_frequencies"],
-            description=f"Composed sequences using {self.mode} mode with {self.combination_strategy} strategy"
-        )
-
-        # Set up datasheets container for IDE autocompletion
-        self.datasheets = DatasheetContainer({"sequences": sequences_datasheet})
-
-        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
-        self.datasheets.sequences = sequences_datasheet
-
     def validate_params(self):
         """Validate MutationComposer parameters."""
         # Validate each mutation input
