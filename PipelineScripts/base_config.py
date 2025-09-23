@@ -827,12 +827,30 @@ class StandardizedOutput:
             if not found_alias:
                 if isinstance(value, list):
                     additional_items.append(f"{key}:")
-                    for item in value:
-                        if isinstance(item, str):
-                            relative_path = make_relative_path(item)
-                            additional_items.append(f"    – '{relative_path}'")
-                        else:
-                            additional_items.append(f"    – {item}")
+                    # Apply compression logic for lists > 6 items (same as main content sections)
+                    if len(value) <= 6:
+                        # Show all items if 6 or fewer
+                        for item in value:
+                            if isinstance(item, str):
+                                relative_path = make_relative_path(item)
+                                additional_items.append(f"    – '{relative_path}'")
+                            else:
+                                additional_items.append(f"    – {item}")
+                    else:
+                        # Truncated format: show first 3, ..., last 3
+                        for item in value[:3]:
+                            if isinstance(item, str):
+                                relative_path = make_relative_path(item)
+                                additional_items.append(f"    – '{relative_path}'")
+                            else:
+                                additional_items.append(f"    – {item}")
+                        additional_items.append(f"    – ... ({len(value) - 6} more) ...")
+                        for item in value[-3:]:
+                            if isinstance(item, str):
+                                relative_path = make_relative_path(item)
+                                additional_items.append(f"    – '{relative_path}'")
+                            else:
+                                additional_items.append(f"    – {item}")
                 else:
                     # Single value - format with relative path if it's a path
                     if isinstance(value, str):
