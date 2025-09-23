@@ -79,47 +79,6 @@ class MutationProfiler(BaseConfig):
         if hasattr(mutants, 'config'):
             self.dependencies.append(mutants.config)
 
-        # Set up datasheets attribute for IDE autocompletion
-        self._setup_datasheets_for_ide()
-
-    def _setup_datasheets_for_ide(self):
-        """Set up datasheets attribute with predefined columns for IDE autocompletion."""
-        from .base_config import DatasheetContainer, DatasheetInfo
-
-        # Standard amino acids for frequency columns
-        amino_acids = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
-        common_columns = ["position", "original"] + amino_acids
-
-        # Create temporary DatasheetInfo objects with known columns for IDE support
-        absolute_frequencies = DatasheetInfo(
-            name="absolute_frequencies",
-            path="",  # Path will be set when output_folder is known
-            columns=common_columns,
-            description="Absolute mutation frequencies per position"
-        )
-
-        relative_frequencies = DatasheetInfo(
-            name="relative_frequencies",
-            path="",
-            columns=common_columns,
-            description="Relative mutation frequencies per position"
-        )
-
-        mutation_summary = DatasheetInfo(
-            name="mutation_summary",
-            path="",
-            columns=["mutation", "count", "frequency", "mutation_type"],
-            description="Summary of all observed mutations"
-        )
-
-        # Set up datasheets container for IDE autocompletion
-        datasheets_dict = {
-            "absolute_frequencies": absolute_frequencies,
-            "relative_frequencies": relative_frequencies,
-            "mutation_summary": mutation_summary
-        }
-        self.datasheets = DatasheetContainer(datasheets_dict)
-
     def validate_params(self):
         """Validate MutationProfiler parameters."""
         if not isinstance(self.original_input, (ToolOutput, StandardizedOutput)):

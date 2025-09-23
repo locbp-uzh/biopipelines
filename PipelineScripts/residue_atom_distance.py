@@ -106,25 +106,6 @@ class ResidueAtomDistance(BaseConfig):
         if hasattr(input, 'config'):
             self.dependencies.append(input.config)
 
-        # Set up datasheets attribute for IDE autocompletion
-        self._setup_datasheets_for_ide()
-
-    def _setup_datasheets_for_ide(self):
-        """Set up datasheets attribute with predefined columns for IDE autocompletion."""
-        from .base_config import DatasheetContainer, DatasheetInfo
-
-        # Create temporary DatasheetInfo objects with known columns for IDE support
-        # These will be replaced by actual output in get_output_files()
-        analysis_datasheet = DatasheetInfo(
-            name="analysis",
-            path="",  # Path will be set when output_folder is known
-            columns=["id", "source_structure", self.get_metric_name()],
-            description=f"Distance analysis: {self.atom_selection} to {self.residue_selection}"
-        )
-
-        # Set up datasheets container for IDE autocompletion
-        self.datasheets = DatasheetContainer({"analysis": analysis_datasheet})
-
     def get_metric_name(self) -> str:
         """Get the default metric name.""" 
         if self.custom_metric_name:
