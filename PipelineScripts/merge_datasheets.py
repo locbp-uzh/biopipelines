@@ -126,7 +126,15 @@ class MergeDatasheets(BaseConfig):
         Returns:
             Predicted path to CSV file or None if cannot determine
         """
-        # Direct path string  
+        # Handle tuple from column reference (datasheet_info, column_name)
+        if isinstance(datasheet, tuple) and len(datasheet) == 2:
+            # Extract the DatasheetInfo object from the tuple
+            datasheet_info, column_name = datasheet
+            # Use the DatasheetInfo path
+            if hasattr(datasheet_info, 'path'):
+                return datasheet_info.path
+
+        # Direct path string
         if isinstance(datasheet, str):
             return datasheet
         
