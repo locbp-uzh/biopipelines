@@ -8,6 +8,8 @@ and script generation for protein modeling pipelines.
 import os
 import json
 import getpass
+import inspect
+import shutil
 from typing import Dict, List, Any, Optional, Union
 from collections import defaultdict
 from datetime import datetime
@@ -225,7 +227,10 @@ class Pipeline:
         
         # Export tool outputs for potential reuse with LoadOutput
         self._export_tool_outputs()
-        
+
+        # Save the original pipeline Python script to runtime folder
+        self._save_original_pipeline_script()
+
         print(f"Pipeline saved to: {script_path}")
         return script_path
     
@@ -700,3 +705,61 @@ umask 002
             return obj.__dict__
         else:
             return str(obj)
+
+    def _save_original_pipeline_script(self):
+        """
+        Save the original Python pipeline script to the runtime folder.
+
+        This copies the calling script (e.g., example_pipeline.py) to the runtime
+        folder for reproducibility and debugging purposes.
+        """
+        try:
+            # Get the calling script path using inspect
+            # We need to go up the call stack to find the original script
+            current_frame = inspect.currentframe()
+            calling_frame = current_frame
+
+            # Walk up the stack to find the first frame outside this module
+            while calling_frame:
+                calling_frame = calling_frame.f_back
+                if calling_frame is None:
+                    break
+
+                frame_filename = calling_frame.f_code.co_filename
+
+                # Skip frames from this module and built-in modules
+                if (not frame_filename.endswith('pipeline.py') and
+                    not frame_filename.startswith('<') and
+                    frame_filename.endswith('.py')):
+
+                    # Found the original calling script
+                    original_script_path = os.path.abspath(frame_filename)
+
+                    if os.path.exists(original_script_path):
+                        # Get just the filename
+                        script_filename = os.path.basename(original_script_path)
+
+                        # Copy to runtime folder
+                        runtime_script_path = os.path.join(self.folders["runtime"], script_filename)
+                        shutil.copy2(original_script_path, runtime_script_path)
+
+                        print(f"Original pipeline script copied to: {runtime_script_path}")
+                        return runtime_script_path
+
+            # If we couldn't find the calling script automatically, try to find it from sys.argv
+            import sys
+            if len(sys.argv) > 0 and sys.argv[0].endswith('.py'):
+                original_script_path = os.path.abspath(sys.argv[0])
+                if os.path.exists(original_script_path):
+                    script_filename = os.path.basename(original_script_path)
+                    runtime_script_path = os.path.join(self.folders["runtime"], script_filename)
+                    shutil.copy2(original_script_path, runtime_script_path)
+                    print(f"Original pipeline script copied to: {runtime_script_path}")
+                    return runtime_script_path
+
+            print("Warning: Could not automatically detect original pipeline script")
+
+        except Exception as e:
+            print(f"Warning: Could not save original pipeline script: {e}")
+
+        return None
