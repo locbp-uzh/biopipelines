@@ -177,8 +177,18 @@ class CompoundLibrary(BaseConfig):
         # Expand each base compound from the primary key
         if primary_lib_key:
             final_compounds = []
-            for base in library[primary_lib_key]:
-                final_compounds.append({'smiles': base, 'branching': {}})
+            primary_value = library[primary_lib_key]
+
+            # Handle both string and list values for primary key
+            if isinstance(primary_value, str):
+                # Single SMILES string
+                final_compounds.append({'smiles': primary_value, 'branching': {}})
+            elif isinstance(primary_value, list):
+                # List of SMILES strings
+                for base in primary_value:
+                    final_compounds.append({'smiles': base, 'branching': {}})
+            else:
+                raise ValueError(f"Primary key '{primary_lib_key}' must be a string or list of strings")
             
             no_new_branching = False
             while not no_new_branching:
@@ -196,7 +206,12 @@ class CompoundLibrary(BaseConfig):
                             key_found = True
                             no_new_branching = False
                             # For every possible substitution for the key, create a new compound
-                            for option in library[key]:
+                            key_options = library[key]
+                            # Handle both string and list values for expansion keys
+                            if isinstance(key_options, str):
+                                key_options = [key_options]
+
+                            for option in key_options:
                                 new_smiles = compound['smiles'].replace(key_pattern, option, 1)
                                 new_branching = compound['branching'].copy()
                                 new_branching[key] = option
@@ -299,7 +314,7 @@ with open('{self.compounds_csv}', 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
     
     # Write header with standardized columns
-    header = ['id', 'smiles', 'format', 'ccd']
+    header = ['id', 'format', 'smiles', 'ccd']
     
     # Add branching columns
     all_branch_keys = set()
@@ -315,8 +330,8 @@ with open('{self.compounds_csv}', 'w', newline='') as csvfile:
         compound_id = compound_ids[i]
         row = [
             compound_id,
-            compound_data['smiles'],
             'smiles',  # format
+            compound_data['smiles'],
             ''  # ccd (empty for non-covalent)
         ]
         
@@ -412,7 +427,7 @@ print(f'Output: {self.compounds_csv}')
         # Build datasheets with rich metadata
         datasheets = {}
         if self.compounds_csv:
-            columns = ["id", "smiles", "format", "ccd"]
+            columns = ["id", "format", "smiles", "ccd"]
             if self.library_dict:
                 # Add branching columns
                 all_branch_keys = set()
@@ -441,7 +456,7 @@ print(f'Output: {self.compounds_csv}')
             datasheets["covalent_compounds"] = DatasheetInfo(
                 name="covalent_compounds",
                 path=self.covalent_compounds_csv,
-                columns=["id", "smiles", "format", "ccd"],
+                columns=["id", "format", "smiles", "ccd"],
                 description="Covalent compound library with CCD identifiers"
             )
         
