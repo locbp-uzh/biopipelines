@@ -438,6 +438,7 @@ class DatasheetContainer:
         self._datasheets = datasheets
 
         # Set attributes for dot notation access to DatasheetInfo objects (not just paths)
+        # Note: For IDE autocompletion, attributes should also be explicitly set in calling code
         for name, info in datasheets.items():
             setattr(self, name, info)
     
@@ -976,6 +977,29 @@ class ToolOutput:
     def output_datasheets(self) -> List[str]:
         """Convenience property for datasheet outputs (JSON, CSV, etc.)."""
         return self.get_output_files('datasheets')
+
+    @property
+    def datasheets(self):
+        """
+        Access tool's datasheets for IDE autocompletion and column access.
+
+        Enables usage like: tool_output.datasheets.structures.fixed
+        Returns the tool's datasheets container with full column access.
+        """
+        if hasattr(self.config, 'datasheets'):
+            return self.config.datasheets
+
+        # Fallback: create DatasheetContainer from get_output_files if available
+        try:
+            output_files = self.config.get_output_files()
+            datasheets_dict = output_files.get('datasheets', {})
+            if datasheets_dict:
+                return DatasheetContainer(datasheets_dict)
+        except:
+            pass
+
+        # Return empty container if nothing available
+        return DatasheetContainer({})
     
     @property
     def job_name(self) -> str:

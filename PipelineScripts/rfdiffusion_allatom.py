@@ -129,10 +129,31 @@ class RFdiffusionAllAtom(BaseConfig):
         
         # Initialize base class
         super().__init__(**kwargs)
-        
+
         # Initialize file paths (will be set in configure_inputs)
         self._initialize_file_paths()
-    
+
+        # Set up datasheets attribute for IDE autocompletion
+        self._setup_datasheets_for_ide()
+
+    def _setup_datasheets_for_ide(self):
+        """Set up datasheets attribute with predefined columns for IDE autocompletion."""
+        from .base_config import DatasheetContainer, DatasheetInfo
+
+        # Create temporary DatasheetInfo objects with known columns for IDE support
+        structures_datasheet = DatasheetInfo(
+            name="structures",
+            path="",  # Path will be set when output_folder is known
+            columns=["id", "source_id", "pdb", "fixed", "designed", "contigs", "time", "status"],
+            description="RFdiffusion-AllAtom structure generation results with fixed/designed regions"
+        )
+
+        # Set up datasheets container for IDE autocompletion
+        self.datasheets = DatasheetContainer({"structures": structures_datasheet})
+
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.structures = structures_datasheet
+
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
         self.input_pdb_file = None
@@ -440,14 +461,18 @@ python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{desig
             design_pdbs.append(design_path)
             structure_ids.append(design_id)
         
+        # Import DatasheetInfo
+        from .base_config import DatasheetInfo
+
         # Organize datasheets by content type
         datasheets = {
-            "structures": {
-                "path": main_datasheet,
-                "columns": ["id", "source_id", "pdb", "fixed", "designed", "contigs", "time", "status"],
-                "description": "RFdiffusion-AllAtom structure generation results with fixed/designed regions",
-                "count": self.num_designs
-            }
+            "structures": DatasheetInfo(
+                name="structures",
+                path=main_datasheet,
+                columns=["id", "source_id", "pdb", "fixed", "designed", "contigs", "time", "status"],
+                description="RFdiffusion-AllAtom structure generation results with fixed/designed regions",
+                count=self.num_designs
+            )
         }
         
         return {

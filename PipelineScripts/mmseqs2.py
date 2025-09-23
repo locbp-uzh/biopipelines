@@ -82,6 +82,27 @@ class MMseqs2(BaseConfig):
         # Initialize file paths
         self._initialize_file_paths()
 
+        # Set up datasheets attribute for IDE autocompletion
+        self._setup_datasheets_for_ide()
+
+    def _setup_datasheets_for_ide(self):
+        """Set up datasheets attribute with predefined columns for IDE autocompletion."""
+        from .base_config import DatasheetContainer, DatasheetInfo
+
+        # Create temporary DatasheetInfo objects with known columns for IDE support
+        msas_datasheet = DatasheetInfo(
+            name="msas",
+            path="",  # Path will be set when output_folder is known
+            columns=["id", "sequence_id", "sequence", "msa_file"],
+            description="MSA files for sequence alignment"
+        )
+
+        # Set up datasheets container for IDE autocompletion
+        self.datasheets = DatasheetContainer({"msas": msas_datasheet})
+
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.msas = msas_datasheet
+
     def validate_params(self):
         """Validate MMseqs2-specific parameters."""
         if not self.sequences:
