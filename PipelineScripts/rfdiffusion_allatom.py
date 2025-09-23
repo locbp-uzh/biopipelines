@@ -458,6 +458,9 @@ python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{desig
             design_pdbs.append(design_path)
             structure_ids.append(design_id)
         
+        # Import DatasheetInfo
+        from .base_config import DatasheetInfo
+
         # Organize datasheets by content type
         datasheets = {
             "structures": DatasheetInfo(

@@ -103,6 +103,7 @@ class RFdiffusion(BaseConfig):
         from .base_config import DatasheetContainer, DatasheetInfo
 
         # Create temporary DatasheetInfo objects with known columns for IDE support
+        # These act as templates for IDE autocompletion - real objects created in get_output_files()
         structures_datasheet = DatasheetInfo(
             name="structures",
             path="",  # Path will be set when output_folder is known
@@ -350,6 +351,14 @@ python {self.datasheet_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{desig
             design_pdbs.append(design_path)
             structure_ids.append(design_id)
         
+        # Import DatasheetInfo
+        from .base_config import DatasheetInfo
+
+        # Update the existing datasheet path if already initialized for IDE
+        if hasattr(self, 'datasheets') and hasattr(self.datasheets, 'structures'):
+            self.datasheets.structures.path = main_datasheet
+            self.datasheets.structures.count = self.num_designs
+
         # Organize datasheets by content type
         datasheets = {
             "structures": DatasheetInfo(

@@ -546,6 +546,9 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         sequence_ids = self._predict_sequence_ids()
         
         # Organize datasheets by content type with detailed metadata
+        # Import DatasheetInfo
+        from .base_config import DatasheetInfo
+
         datasheets = {
             "sequences": DatasheetInfo(
                 name="sequences",
