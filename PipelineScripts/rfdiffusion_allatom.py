@@ -151,6 +151,9 @@ class RFdiffusionAllAtom(BaseConfig):
         # Set up datasheets container for IDE autocompletion
         self.datasheets = DatasheetContainer({"structures": structures_datasheet})
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.structures = structures_datasheet
+
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
         self.input_pdb_file = None

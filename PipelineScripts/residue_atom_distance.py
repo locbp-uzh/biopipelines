@@ -125,6 +125,9 @@ class ResidueAtomDistance(BaseConfig):
         # Set up datasheets container for IDE autocompletion
         self.datasheets = DatasheetContainer({"analysis": analysis_datasheet})
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.analysis = analysis_datasheet
+
     def get_metric_name(self) -> str:
         """Get the default metric name.""" 
         if self.custom_metric_name:

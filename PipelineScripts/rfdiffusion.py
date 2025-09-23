@@ -114,6 +114,10 @@ class RFdiffusion(BaseConfig):
         # Set up datasheets container for IDE autocompletion
         self.datasheets = DatasheetContainer({"structures": structures_datasheet})
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        # IDE needs these to be explicitly defined in __init__ to show autocompletion
+        self.datasheets.structures = structures_datasheet
+
     def validate_params(self):
         """Validate RFdiffusion-specific parameters."""
         if not self.contigs:

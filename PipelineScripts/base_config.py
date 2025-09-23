@@ -438,6 +438,7 @@ class DatasheetContainer:
         self._datasheets = datasheets
 
         # Set attributes for dot notation access to DatasheetInfo objects (not just paths)
+        # Note: For IDE autocompletion, attributes should also be explicitly set in calling code
         for name, info in datasheets.items():
             setattr(self, name, info)
     

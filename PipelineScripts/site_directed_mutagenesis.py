@@ -154,6 +154,11 @@ class SDM(BaseConfig):
         # Set up datasheets container for IDE autocompletion
         self.datasheets = DatasheetContainer(datasheets_dict)
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.sequences = sequences_datasheet
+        if not self.include_original:
+            self.datasheets.missing_sequences = missing_sequences_datasheet
+
     def validate_params(self):
         """Validate SDM-specific parameters."""
         # Validate mode

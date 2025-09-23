@@ -142,6 +142,9 @@ class MutationComposer(BaseConfig):
         # Set up datasheets container for IDE autocompletion
         self.datasheets = DatasheetContainer({"sequences": sequences_datasheet})
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.sequences = sequences_datasheet
+
     def validate_params(self):
         """Validate MutationComposer parameters."""
         # Validate each mutation input

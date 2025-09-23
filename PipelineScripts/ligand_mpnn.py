@@ -129,6 +129,9 @@ class LigandMPNN(BaseConfig):
         # Set up datasheets container for IDE autocompletion
         self.datasheets = DatasheetContainer({"sequences": sequences_datasheet})
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.sequences = sequences_datasheet
+
     def validate_params(self):
         """Validate LigandMPNN-specific parameters."""
         if not self.input_structures:

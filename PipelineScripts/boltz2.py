@@ -221,6 +221,9 @@ class Boltz2(BaseConfig):
         datasheets_dict = {"affinity": affinity_datasheet}
         self.datasheets = DatasheetContainer(datasheets_dict)
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.affinity = affinity_datasheet
+
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
         # Folder structure

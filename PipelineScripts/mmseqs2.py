@@ -100,6 +100,9 @@ class MMseqs2(BaseConfig):
         # Set up datasheets container for IDE autocompletion
         self.datasheets = DatasheetContainer({"msas": msas_datasheet})
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.msas = msas_datasheet
+
     def validate_params(self):
         """Validate MMseqs2-specific parameters."""
         if not self.sequences:

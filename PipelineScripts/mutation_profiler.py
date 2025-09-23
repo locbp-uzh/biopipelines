@@ -120,6 +120,11 @@ class MutationProfiler(BaseConfig):
         }
         self.datasheets = DatasheetContainer(datasheets_dict)
 
+        # CRITICAL: Explicitly set datasheet attributes for IDE autocompletion
+        self.datasheets.absolute_frequencies = absolute_frequencies
+        self.datasheets.relative_frequencies = relative_frequencies
+        self.datasheets.mutation_summary = mutation_summary
+
     def validate_params(self):
         """Validate MutationProfiler parameters."""
         if not isinstance(self.original_input, (ToolOutput, StandardizedOutput)):
