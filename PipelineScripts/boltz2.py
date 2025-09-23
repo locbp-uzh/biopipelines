@@ -1062,10 +1062,112 @@ boltz predict {config_file_path} {boltz_options}
         # Add newly calculated MSAs to global cache after post-processing
         if hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
             script_content += self._generate_global_msa_cache_storage_section(boltz_cache_folder)
-        
-        script_content += self.generate_completion_check_footer()
-        
+
+        script_content += self._generate_boltz2_completion_check()
+
         return script_content
+
+    def _generate_boltz2_completion_check(self) -> str:
+        """
+        Generate custom completion check that accounts for missing sequences from upstream tools.
+        """
+        # Check if we need to filter missing sequences
+        has_missing_sequences = False
+        missing_datasheet_path = None
+
+        # Try to find missing sequences datasheet in proteins input
+        if hasattr(self.proteins, 'datasheets'):
+            datasheets = self.proteins.datasheets
+            if hasattr(datasheets, '_datasheets'):
+                # Standard BioPipelines format
+                for name, info in datasheets._datasheets.items():
+                    if 'missing' in name.lower():
+                        has_missing_sequences = True
+                        if hasattr(info, 'path'):
+                            missing_datasheet_path = info.path
+                        elif isinstance(info, str):
+                            missing_datasheet_path = info
+                        break
+            elif isinstance(datasheets, dict):
+                # Dict format
+                for name, info in datasheets.items():
+                    if 'missing' in name.lower():
+                        has_missing_sequences = True
+                        if isinstance(info, str):
+                            missing_datasheet_path = info
+                        elif isinstance(info, dict) and 'path' in info:
+                            missing_datasheet_path = info['path']
+                        break
+
+        if has_missing_sequences and missing_datasheet_path:
+            return f"""
+# Custom completion check that accounts for missing sequences
+echo "Checking outputs and filtering missing sequences..."
+
+# Create a temporary file to store expected sequence IDs
+expected_ids_file=$(mktemp)
+
+# Get sequence IDs excluding missing ones
+python -c "
+import pandas as pd
+import sys
+
+try:
+    # Read main sequences
+    sequences_df = pd.read_csv('{self.input_sequences_file}')
+    all_ids = set(sequences_df['id'].tolist())
+    print(f'Found {{len(all_ids)}} total sequence IDs')
+
+    # Read missing sequences
+    try:
+        missing_df = pd.read_csv('{missing_datasheet_path}')
+        missing_ids = set(missing_df['id'].tolist())
+        print(f'Found {{len(missing_ids)}} missing sequence IDs: {{sorted(missing_ids)}}')
+    except:
+        missing_ids = set()
+        print('No missing sequences found')
+
+    # Expected IDs are all IDs minus missing IDs
+    expected_ids = all_ids - missing_ids
+    print(f'Expecting {{len(expected_ids)}} output structures')
+
+    # Write expected IDs to file
+    with open('$expected_ids_file', 'w') as f:
+        for seq_id in sorted(expected_ids):
+            f.write(seq_id + '\\n')
+
+except Exception as e:
+    print(f'Error processing sequences: {{e}}')
+    sys.exit(1)
+"
+
+# Check if expected output files exist
+missing_outputs=()
+while IFS= read -r seq_id; do
+    expected_file="{self.output_folder}/${{seq_id}}.{self.output_format.lower()}"
+    if [ ! -f "$expected_file" ]; then
+        missing_outputs+=("$expected_file")
+    fi
+done < "$expected_ids_file"
+
+# Clean up temporary file
+rm -f "$expected_ids_file"
+
+# Report results
+if [ ${{#missing_outputs[@]}} -eq 0 ]; then
+    echo "All expected outputs found"
+    {self.generate_completion_status_success()}
+else
+    echo "Missing critical outputs for Boltz2:"
+    echo "  structures:"
+    printf '    - %s\\n' "${{missing_outputs[@]}}"
+    {self.generate_completion_status_failure()}
+    echo "Boltz2 failed - some outputs missing"
+fi
+"""
+        else:
+            # No missing sequences, use standard completion check
+            return self.generate_completion_check_footer()
     
     def get_output_files(self) -> Dict[str, List[str]]:
         """
@@ -1251,25 +1353,60 @@ boltz predict {config_file_path} {boltz_options}
             # Default fallback
             return [self.job_name or "prediction"]
     
+    def _get_missing_sequence_ids(self) -> List[str]:
+        """
+        Get sequence IDs that are marked as missing in upstream tools.
+
+        Returns:
+            List of missing sequence IDs
+        """
+        missing_ids = []
+
+        # Check proteins input for missing sequences datasheet
+        if hasattr(self.proteins, 'datasheets'):
+            datasheets = self.proteins.datasheets
+            if hasattr(datasheets, '_datasheets'):
+                # Standard BioPipelines format
+                for name, info in datasheets._datasheets.items():
+                    if 'missing' in name.lower():
+                        # This is a missing sequences datasheet - we'll extract IDs at runtime
+                        # For now, we can't predict them, so we'll handle this in the script
+                        pass
+            elif isinstance(datasheets, dict):
+                # Dict format
+                for name, info in datasheets.items():
+                    if 'missing' in name.lower():
+                        # This is a missing sequences datasheet
+                        pass
+
+        return missing_ids
+
     def _predict_sequence_ids(self) -> List[str]:
         """
         Predict sequence IDs from input sources (tool-agnostic).
-        
+        Filters out missing sequences from upstream tools.
+
         Returns:
-            List of expected sequence IDs
+            List of expected sequence IDs (excluding missing ones)
         """
         # Try to get from standardized input first (highest priority)
         if hasattr(self, 'standardized_input') and self.standardized_input:
             if hasattr(self.standardized_input, 'sequence_ids') and self.standardized_input.sequence_ids:
-                return self.standardized_input.sequence_ids
-        
+                sequence_ids = self.standardized_input.sequence_ids
+                # Filter out missing sequences - handled at runtime
+                return sequence_ids
+
         # Try to get from proteins parameter if it's StandardizedOutput
         if hasattr(self.proteins, 'sequence_ids') and self.proteins.sequence_ids:
-            return self.proteins.sequence_ids
-            
-        # Try to get from input_sequences if it's StandardizedOutput  
+            sequence_ids = self.proteins.sequence_ids
+            # Note: Missing sequences will be filtered out at runtime in the script
+            return sequence_ids
+
+        # Try to get from input_sequences if it's StandardizedOutput
         if hasattr(self.input_sequences, 'sequence_ids') and self.input_sequences.sequence_ids:
-            return self.input_sequences.sequence_ids
+            sequence_ids = self.input_sequences.sequence_ids
+            # Note: Missing sequences will be filtered out at runtime in the script
+            return sequence_ids
         
         # Try to extract from dependencies
         for dep in self.dependencies:
