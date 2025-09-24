@@ -471,8 +471,11 @@ class DatasheetInfo:
         self.count = count
 
         # Set column attributes for IDE autocompletion
+        # Avoid overwriting existing attributes (name, path, columns, description, count)
+        reserved_attributes = {'name', 'path', 'columns', 'description', 'count'}
         for column in self.columns:
-            setattr(self, column, self._create_column_reference(column))
+            if column not in reserved_attributes:
+                setattr(self, column, self._create_column_reference(column))
 
     def _create_column_reference(self, column_name: str):
         """Create a column reference tuple for datasheet access."""
