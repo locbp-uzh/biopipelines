@@ -1067,6 +1067,23 @@ boltz predict {config_file_path} {boltz_options}
 
         return script_content
 
+    def _get_sequences_file_path(self) -> str:
+        """Get the path to the sequences file used for input."""
+        # Check if we're using protein queries (most common case)
+        if hasattr(self, 'queries_csv_file') and self.queries_csv_file:
+            return self.queries_csv_file
+
+        # Check if we have tool input with sequences
+        if hasattr(self, 'proteins') and hasattr(self.proteins, 'sequences') and self.proteins.sequences:
+            return self.proteins.sequences[0]
+
+        # Check other possible sources
+        proteins_csv = os.path.join(self.output_folder, "proteins.csv")
+        input_sequences_csv = os.path.join(self.output_folder, "input_sequences.csv")
+
+        # Return the most likely file path (proteins.csv is created in most cases)
+        return proteins_csv
+
     def _generate_boltz2_completion_check(self) -> str:
         """
         Generate custom completion check that accounts for missing sequences from upstream tools.
@@ -1114,7 +1131,7 @@ import sys
 
 try:
     # Read main sequences
-    sequences_df = pd.read_csv('{os.path.join(self.output_folder, "input_sequences.csv")}')
+    sequences_df = pd.read_csv('{self._get_sequences_file_path()}')
     all_ids = set(sequences_df['id'].tolist())
     print(f'Found {{len(all_ids)}} total sequence IDs')
 
