@@ -172,12 +172,18 @@ class SelectBest(BaseConfig):
                 raise ValueError(f"Pool {pool} must have output_folder")
         
         for datasheet in self.datasheets:
-            # Handle different datasheet input types
-            if hasattr(datasheet, 'datasheets'):
+            # Handle different datasheet input types - check DatasheetInfo first
+            if hasattr(datasheet, 'path') and hasattr(datasheet, 'name') and hasattr(datasheet, 'columns'):
+                # DatasheetInfo object - use path directly
+                self.datasheet_paths.append(datasheet.path)
+            elif isinstance(datasheet, str):
+                # String path - use directly
+                self.datasheet_paths.append(datasheet)
+            elif hasattr(datasheet, 'datasheets'):
                 # ToolOutput object - extract datasheet path
                 ds_obj = datasheet.datasheets
                 datasheet_path = None
-                
+
                 if hasattr(ds_obj, 'merged'):
                     datasheet_path = ds_obj.merged.path
                 elif hasattr(ds_obj, 'combined'):
@@ -190,14 +196,8 @@ class SelectBest(BaseConfig):
                     datasheet_path = first_ds.path
                 else:
                     raise ValueError(f"Could not find datasheet in {datasheet}")
-                
+
                 self.datasheet_paths.append(datasheet_path)
-            elif hasattr(datasheet, 'path'):
-                # DatasheetInfo object - use path directly
-                self.datasheet_paths.append(datasheet.path)
-            elif isinstance(datasheet, str):
-                # String path - use directly
-                self.datasheet_paths.append(datasheet)
             else:
                 raise ValueError(f"Unsupported datasheet type: {type(datasheet)}")
     
