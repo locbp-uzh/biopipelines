@@ -1169,13 +1169,13 @@ rm -f "$expected_ids_file"
 # Report results
 if [ ${{#missing_outputs[@]}} -eq 0 ]; then
     echo "All expected outputs found"
-    {self.generate_completion_status_success()}
+    echo "Boltz2 completed successfully"
 else
     echo "Missing critical outputs for Boltz2:"
     echo "  structures:"
     printf '    - %s\\n' "${{missing_outputs[@]}}"
-    {self.generate_completion_status_failure()}
     echo "Boltz2 failed - some outputs missing"
+    exit 1
 fi
 """
         else:
