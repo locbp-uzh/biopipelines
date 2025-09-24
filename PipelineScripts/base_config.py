@@ -217,25 +217,34 @@ fi
         expected_outputs = self.get_expected_output_paths()
         
         # Convert DatasheetInfo objects to dictionaries for JSON serialization
-        def make_json_safe(obj, path="root"):
+        def make_json_safe(obj, seen=None):
             """Recursively convert DatasheetInfo objects to dictionaries."""
-            try:
-                if isinstance(obj, DatasheetInfo):
-                    return obj.to_dict()
-                elif hasattr(obj, 'to_dict') and callable(getattr(obj, 'to_dict')):
-                    # Handle any other objects with to_dict method
-                    return obj.to_dict()
-                elif isinstance(obj, dict):
-                    return {k: make_json_safe(v, f"{path}.{k}") for k, v in obj.items()}
-                elif isinstance(obj, (list, tuple)):
-                    return [make_json_safe(item, f"{path}[{i}]") for i, item in enumerate(obj)]
-                else:
-                    # Try to serialize to catch non-serializable objects early
-                    json.dumps(obj)
-                    return obj
-            except (TypeError, ValueError) as e:
-                print(f"Warning: Cannot serialize object at {path}: {type(obj)} - {e}")
-                return str(obj)  # Fallback to string representation
+            if seen is None:
+                seen = set()
+
+            # Avoid infinite recursion from circular references
+            obj_id = id(obj)
+            if obj_id in seen:
+                return f"<circular reference to {type(obj).__name__}>"
+
+            if isinstance(obj, DatasheetInfo):
+                # Use to_dict() for DatasheetInfo objects, avoiding circular references
+                return obj.to_dict()
+            elif isinstance(obj, dict):
+                seen.add(obj_id)
+                result = {k: make_json_safe(v, seen) for k, v in obj.items()}
+                seen.remove(obj_id)
+                return result
+            elif isinstance(obj, (list, tuple)):
+                seen.add(obj_id)
+                result = [make_json_safe(item, seen) for item in obj]
+                seen.remove(obj_id)
+                return result
+            elif hasattr(obj, '__dict__'):
+                # Handle custom objects by converting to string
+                return str(obj)
+            else:
+                return obj
 
         json_safe_outputs = make_json_safe(expected_outputs)
         
@@ -430,10 +439,11 @@ class DatasheetInfo:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert DatasheetInfo to dictionary for JSON serialization."""
+        # Only return core data, not the dynamically set column attributes which contain circular references
         return {
             "name": self.name,
             "path": self.path,
-            "columns": self.columns,
+            "columns": self.columns.copy() if self.columns else [],
             "description": self.description,
             "count": self.count
         }
