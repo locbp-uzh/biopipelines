@@ -92,13 +92,23 @@ for boltz_folder in sorted(boltz_results_folders):
             print(f"Warning: Predictions path not found: {predictions_path}")
             continue
         
-        # Use config_id directly as sequence_id (extracted from folder name)
-        sequence_id = config_id
-        
-        # Validate against expected sequence_ids if available
-        if sequence_ids and config_id not in sequence_ids:
-            print(f"Warning: {config_id} not found in expected sequence IDs: {sequence_ids}")
-            print(f"This might indicate folder naming issues or prediction logic mismatch")
+        # Determine sequence_id from expected sequence IDs if available
+        if sequence_ids:
+            if len(sequence_ids) == 1:
+                # Single expected sequence - use it regardless of folder name
+                sequence_id = sequence_ids[0]
+                print(f"Mapping {config_id} to expected sequence ID: {sequence_id}")
+            elif config_id in sequence_ids:
+                # Config ID matches expected - use it
+                sequence_id = config_id
+            else:
+                # Try to find best match or use the first available expected ID
+                print(f"Warning: {config_id} not found in expected sequence IDs: {sequence_ids}")
+                print(f"Using first expected sequence ID as fallback")
+                sequence_id = sequence_ids[0]
+        else:
+            # No expected sequence IDs - use config_id as fallback
+            sequence_id = config_id
         
         folder_to_sequence_map[config_id] = sequence_id
         
