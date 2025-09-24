@@ -1114,7 +1114,7 @@ import sys
 
 try:
     # Read main sequences
-    sequences_df = pd.read_csv('{self.input_sequences_file}')
+    sequences_df = pd.read_csv('{os.path.join(self.output_folder, "input_sequences.csv")}')
     all_ids = set(sequences_df['id'].tolist())
     print(f'Found {{len(all_ids)}} total sequence IDs')
 
