@@ -678,8 +678,8 @@ umask 002
                     "runtime_notes": "Execution metadata will be available after pipeline execution"
                 }
                 
-                # Generate filename
-                output_filename = f"{i}_{tool.TOOL_NAME}_output.json" #{self.job_name}_
+                # Generate filename with 3-digit execution order
+                output_filename = f"{i:03d}_{tool.TOOL_NAME}_output.json" #{self.job_name}_
                 output_path = os.path.join(tool_outputs_dir, output_filename)
                 
                 # Save to JSON file with custom serialization
