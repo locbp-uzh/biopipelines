@@ -228,8 +228,14 @@ fi
                 return f"<circular reference to {type(obj).__name__}>"
 
             if isinstance(obj, DatasheetInfo):
-                # Use to_dict() for DatasheetInfo objects, avoiding circular references
-                return obj.to_dict()
+                # Explicitly convert DatasheetInfo to plain dict, avoiding all attributes
+                return {
+                    "name": obj.name,
+                    "path": obj.path,
+                    "columns": list(obj.columns) if obj.columns else [],
+                    "description": obj.description,
+                    "count": obj.count
+                }
             elif isinstance(obj, dict):
                 seen.add(obj_id)
                 result = {k: make_json_safe(v, seen) for k, v in obj.items()}
@@ -241,8 +247,19 @@ fi
                 seen.remove(obj_id)
                 return result
             elif hasattr(obj, '__dict__'):
-                # Handle custom objects by converting to string
-                return str(obj)
+                # Handle custom objects - check for DatasheetInfo first
+                if hasattr(obj, 'name') and hasattr(obj, 'path') and hasattr(obj, 'columns'):
+                    # This looks like a DatasheetInfo object that wasn't caught above
+                    return {
+                        "name": getattr(obj, 'name', ''),
+                        "path": getattr(obj, 'path', ''),
+                        "columns": list(getattr(obj, 'columns', [])),
+                        "description": getattr(obj, 'description', ''),
+                        "count": getattr(obj, 'count', None)
+                    }
+                else:
+                    # Convert other custom objects to string
+                    return str(obj)
             else:
                 return obj
 
