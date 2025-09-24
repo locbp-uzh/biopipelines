@@ -217,16 +217,25 @@ fi
         expected_outputs = self.get_expected_output_paths()
         
         # Convert DatasheetInfo objects to dictionaries for JSON serialization
-        def make_json_safe(obj):
+        def make_json_safe(obj, path="root"):
             """Recursively convert DatasheetInfo objects to dictionaries."""
-            if isinstance(obj, DatasheetInfo):
-                return obj.to_dict()
-            elif isinstance(obj, dict):
-                return {k: make_json_safe(v) for k, v in obj.items()}
-            elif isinstance(obj, (list, tuple)):
-                return [make_json_safe(item) for item in obj]
-            else:
-                return obj
+            try:
+                if isinstance(obj, DatasheetInfo):
+                    return obj.to_dict()
+                elif hasattr(obj, 'to_dict') and callable(getattr(obj, 'to_dict')):
+                    # Handle any other objects with to_dict method
+                    return obj.to_dict()
+                elif isinstance(obj, dict):
+                    return {k: make_json_safe(v, f"{path}.{k}") for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [make_json_safe(item, f"{path}[{i}]") for i, item in enumerate(obj)]
+                else:
+                    # Try to serialize to catch non-serializable objects early
+                    json.dumps(obj)
+                    return obj
+            except (TypeError, ValueError) as e:
+                print(f"Warning: Cannot serialize object at {path}: {type(obj)} - {e}")
+                return str(obj)  # Fallback to string representation
 
         json_safe_outputs = make_json_safe(expected_outputs)
         
