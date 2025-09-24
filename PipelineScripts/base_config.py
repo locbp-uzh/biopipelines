@@ -288,6 +288,13 @@ fi
                                 print(f"  ✓ Subkey '{subkey}' OK")
                             except Exception as subsub_e:
                                 print(f"  ✗ Subkey '{subkey}' failed: {subsub_e} (type: {type(subvalue)})")
+                                # Drill down further if it's a dict
+                                if isinstance(subvalue, dict):
+                                    print(f"    Contents: {list(subvalue.keys())}")
+                                    for k, v in subvalue.items():
+                                        print(f"    '{k}': {type(v)} = {repr(v)[:100]}...")
+                                        if hasattr(v, '__dict__'):
+                                            print(f"      __dict__ keys: {list(v.__dict__.keys()) if hasattr(v, '__dict__') else 'None'}")
 
             # Fallback: convert everything to strings
             def stringify_all(obj):
