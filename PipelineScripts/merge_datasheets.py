@@ -141,7 +141,12 @@ class MergeDatasheets(BaseConfig):
         # Dict with path key
         if isinstance(datasheet, dict) and 'path' in datasheet:
             return datasheet['path']
-            
+
+        # DatasheetInfo object (from LoadOutput)
+        if hasattr(datasheet, 'path') and hasattr(datasheet, 'name') and hasattr(datasheet, 'columns'):
+            # This is likely a DatasheetInfo object - use its path directly
+            return datasheet.path
+
         # ToolOutput object
         if hasattr(datasheet, 'datasheets'):
             datasheets = datasheet.datasheets

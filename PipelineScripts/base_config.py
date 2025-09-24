@@ -404,7 +404,7 @@ class DatasheetInfo:
 
     def __getattr__(self, column_name: str):
         """
-        Handle access to any column name, including those not predefined.
+        Handle access to any column name.
         This enables both IDE autocompletion for known columns and dynamic access.
         """
         # Return column reference tuple for any column name
@@ -466,6 +466,12 @@ class DatasheetContainer:
     def keys(self):
         """Get all datasheet names."""
         return self._datasheets.keys()
+
+    def info(self, name: str) -> DatasheetInfo:
+        """Get DatasheetInfo object by name."""
+        if name in self._datasheets:
+            return self._datasheets[name]
+        raise ValueError(f"No datasheet named '{name}'")
     
     def items(self):
         """Get all name, path pairs."""
