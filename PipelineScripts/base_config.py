@@ -217,19 +217,18 @@ fi
         expected_outputs = self.get_expected_output_paths()
         
         # Convert DatasheetInfo objects to dictionaries for JSON serialization
-        json_safe_outputs = {}
-        for key, value in expected_outputs.items():
-            if key == 'datasheets' and isinstance(value, dict):
-                # Convert DatasheetInfo objects to dictionaries
-                json_safe_datasheets = {}
-                for ds_name, ds_info in value.items():
-                    if isinstance(ds_info, DatasheetInfo):
-                        json_safe_datasheets[ds_name] = ds_info.to_dict()
-                    else:
-                        json_safe_datasheets[ds_name] = ds_info
-                json_safe_outputs[key] = json_safe_datasheets
+        def make_json_safe(obj):
+            """Recursively convert DatasheetInfo objects to dictionaries."""
+            if isinstance(obj, DatasheetInfo):
+                return obj.to_dict()
+            elif isinstance(obj, dict):
+                return {k: make_json_safe(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [make_json_safe(item) for item in obj]
             else:
-                json_safe_outputs[key] = value
+                return obj
+
+        json_safe_outputs = make_json_safe(expected_outputs)
         
         expected_outputs_json = json.dumps(json_safe_outputs).replace('"', '\\"')
         
