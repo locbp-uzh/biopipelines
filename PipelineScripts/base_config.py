@@ -247,8 +247,43 @@ fi
                 return obj
 
         json_safe_outputs = make_json_safe(expected_outputs)
-        
-        expected_outputs_json = json.dumps(json_safe_outputs).replace('"', '\\"')
+
+        # Debug: try to serialize and catch the exact error
+        try:
+            expected_outputs_json = json.dumps(json_safe_outputs).replace('"', '\\"')
+        except TypeError as e:
+            print(f"JSON serialization error: {e}")
+            print(f"Expected outputs keys: {list(expected_outputs.keys()) if isinstance(expected_outputs, dict) else 'Not a dict'}")
+            print(f"JSON safe outputs keys: {list(json_safe_outputs.keys()) if isinstance(json_safe_outputs, dict) else 'Not a dict'}")
+
+            # Try to find the problematic object
+            for key, value in json_safe_outputs.items():
+                try:
+                    json.dumps(value)
+                    print(f"✓ Key '{key}' serializes OK")
+                except Exception as sub_e:
+                    print(f"✗ Key '{key}' failed: {sub_e}")
+                    print(f"  Type: {type(value)}")
+                    if isinstance(value, dict):
+                        for subkey, subvalue in value.items():
+                            try:
+                                json.dumps(subvalue)
+                                print(f"  ✓ Subkey '{subkey}' OK")
+                            except Exception as subsub_e:
+                                print(f"  ✗ Subkey '{subkey}' failed: {subsub_e} (type: {type(subvalue)})")
+
+            # Fallback: convert everything to strings
+            def stringify_all(obj):
+                if isinstance(obj, dict):
+                    return {k: stringify_all(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [stringify_all(item) for item in obj]
+                else:
+                    return str(obj)
+
+            print("Using fallback string conversion for all objects")
+            json_safe_outputs = stringify_all(expected_outputs)
+            expected_outputs_json = json.dumps(json_safe_outputs).replace('"', '\\"')
         
         pipe_check_completion = os.path.join(
             self.folders.get("HelpScripts", "HelpScripts"), 
