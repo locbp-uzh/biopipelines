@@ -1077,12 +1077,8 @@ boltz predict {config_file_path} {boltz_options}
         if hasattr(self, 'proteins') and hasattr(self.proteins, 'sequences') and self.proteins.sequences:
             return self.proteins.sequences[0]
 
-        # Check other possible sources
-        proteins_csv = os.path.join(self.output_folder, "proteins.csv")
-        input_sequences_csv = os.path.join(self.output_folder, "input_sequences.csv")
-
-        # Return the most likely file path (proteins.csv is created in most cases)
-        return proteins_csv
+        # No valid sequences file source found - fail explicitly
+        raise ValueError("Cannot determine sequences file path: no valid source found (queries_csv_file, proteins.sequences)")
 
     def _generate_boltz2_completion_check(self) -> str:
         """
