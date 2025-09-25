@@ -222,6 +222,9 @@ class ProteinMPNN(BaseConfig):
                 runtime_pdb = os.path.join(runtime_folder, pdb_name)
                 self.input_pdb_files.append(runtime_pdb)
                 self.input_sources[pdb_name] = pdb_path
+
+            # Store source PDbs for script generation (like LigandMPNN)
+            self.input_sources["structures"] = source_pdbs
                 
         elif isinstance(self.input_structures, list):
             # Direct list of PDB file paths (from rfd.structures)
@@ -230,7 +233,7 @@ class ProteinMPNN(BaseConfig):
                 pdb_name = os.path.basename(pdb_path)
                 runtime_pdb = os.path.join(runtime_folder, pdb_name)
                 self.input_pdb_files.append(runtime_pdb)
-                
+
                 # Only check existence for non-pipeline inputs (e.g., user files)
                 # Pipeline-generated files don't exist yet during configuration
                 if hasattr(self, 'is_pipeline_input') and self.is_pipeline_input:
@@ -242,7 +245,25 @@ class ProteinMPNN(BaseConfig):
                         self.input_sources[pdb_name] = pdb_path
                     else:
                         raise ValueError(f"PDB file not found: {pdb_path}")
-        
+
+            # Store source structures for script generation (like LigandMPNN)
+            self.input_sources["structures"] = self.input_structures
+
+        elif hasattr(self.input_structures, 'structures'):
+            # StandardizedOutput object (from pipeline.add)
+            if self.input_structures.structures:
+                self.input_pdb_files = []
+                for pdb_path in self.input_structures.structures:
+                    pdb_name = os.path.basename(pdb_path)
+                    runtime_pdb = os.path.join(runtime_folder, pdb_name)
+                    self.input_pdb_files.append(runtime_pdb)
+                    self.input_sources[pdb_name] = pdb_path
+
+                # Store source structures for script generation (like LigandMPNN)
+                self.input_sources["structures"] = self.input_structures.structures
+            else:
+                raise ValueError("No structures found in StandardizedOutput")
+
         elif isinstance(self.input_structures, str):
             # String input - could be file or folder
             if self.input_structures.endswith('.pdb'):
@@ -252,6 +273,8 @@ class ProteinMPNN(BaseConfig):
                     runtime_pdb = os.path.join(runtime_folder, self.input_structures)
                     self.input_pdb_files = [runtime_pdb]
                     self.input_sources[self.input_structures] = pdb_source
+                    # Store source structures for script generation (like LigandMPNN)
+                    self.input_sources["structures"] = [pdb_source]
                 else:
                     raise ValueError(f"PDB file not found: {pdb_source}")
             else:
@@ -264,11 +287,15 @@ class ProteinMPNN(BaseConfig):
                     
                     self.input_is_folder = True
                     self.input_pdb_files = []
+                    source_structures = []
                     for pdb_file in pdb_files:
                         source_path = os.path.join(folder_path, pdb_file)
                         runtime_pdb = os.path.join(runtime_folder, pdb_file)
                         self.input_pdb_files.append(runtime_pdb)
                         self.input_sources[pdb_file] = source_path
+                        source_structures.append(source_path)
+                    # Store source structures for script generation (like LigandMPNN)
+                    self.input_sources["structures"] = source_structures
                 else:
                     raise ValueError(f"Input folder not found: {folder_path}")
     
