@@ -1010,6 +1010,33 @@ class StandardizedOutput:
             return kept_count / original_count
         return None
 
+    def get_output_files(self, output_type: str = None) -> Union[Dict[str, List[str]], List[str]]:
+        """
+        Get output files, delegating to the original tool config.
+
+        Args:
+            output_type: Specific output type to retrieve (e.g., 'pdbs', 'structures')
+
+        Returns:
+            All outputs if output_type is None, otherwise specific output list
+        """
+        if hasattr(self, 'tool') and hasattr(self.tool, 'get_output_files'):
+            try:
+                config_outputs = self.tool.get_output_files()
+                if output_type is None:
+                    return config_outputs
+                return config_outputs.get(output_type, [])
+            except Exception as e:
+                # Fallback to data stored in StandardizedOutput
+                if output_type is None:
+                    return self._data
+                return self._data.get(output_type, [])
+
+        # Fallback if no tool reference
+        if output_type is None:
+            return self._data
+        return self._data.get(output_type, [])
+
 
 class ToolOutput:
     """
