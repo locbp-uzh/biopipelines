@@ -446,16 +446,10 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         upstream_tool = None
         direct_file_paths = []
 
-        # Case 1: StandardizedOutput (from pipeline.add)
-        if hasattr(input_source, 'structures'):
-            # StandardizedOutput object - access structures directly
-            direct_file_paths = getattr(input_source, 'structures', [])
-            if not direct_file_paths:
-                direct_file_paths = getattr(input_source, 'pdbs', [])
-        # Case 2: ToolOutput input (has get_output_files)
-        elif hasattr(input_source, 'get_output_files'):
+        # Case 1: ToolOutput input
+        if hasattr(input_source, 'get_output_files'):
             upstream_tool = input_source
-        # Case 3: Direct file paths (list)
+        # Case 2: Direct file paths (from StandardizedOutput)
         elif isinstance(input_source, list):
             direct_file_paths = input_source
 
@@ -463,21 +457,12 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             # Get input PDB files from upstream tool
             input_pdbs = []
 
-            try:
-                # Get input PDB files from upstream tool
-                input_pdbs = upstream_tool.get_output_files("pdbs")
-                if not input_pdbs:
-                    input_pdbs = upstream_tool.get_output_files("structures")
-                if not input_pdbs:
-                    # Try getting all outputs to debug
-                    all_outputs = upstream_tool.get_output_files()
-                    print(f"[DEBUG] All outputs from {getattr(upstream_tool, 'tool_type', 'unknown')}: {all_outputs}")
-                    raise ValueError(f"No PDB/structure files found in upstream tool {getattr(upstream_tool, 'tool_type', 'unknown')}")
-            except Exception as e:
-                print(f"[DEBUG] Error getting outputs from upstream tool: {e}")
-                print(f"[DEBUG] Upstream tool type: {type(upstream_tool)}")
-                print(f"[DEBUG] Upstream tool attributes: {dir(upstream_tool)}")
-                raise
+            # Get input PDB files from upstream tool
+            input_pdbs = upstream_tool.get_output_files("pdbs")
+            if not input_pdbs:
+                input_pdbs = upstream_tool.get_output_files("structures")
+            if not input_pdbs:
+                raise ValueError(f"No PDB/structure files found in upstream tool {upstream_tool.tool_type}")
 
             # Process the PDB files if we got any
             if input_pdbs:
