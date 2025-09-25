@@ -54,15 +54,15 @@ distances = pipeline.add(DistanceSelector(structures=rfdaa,
 
 pmpnn = pipeline.add(ProteinMPNN(structures=rfdaa,
                                  num_sequences=1,
-                                 redesigned=distances.datasheets.analysis.beyond))
+                                 redesigned=distances.datasheets.selections.beyond))
 
-lmpnn = pipeline.add(LigandMPNN(structures=rfdaa, 
-                                ligand="RFP", #in ligand mpnn you should always specify the ligand name. 
+lmpnn = pipeline.add(LigandMPNN(structures=rfdaa,
+                                ligand="RFP", #in ligand mpnn you should always specify the ligand name.
                                 num_sequences=1,
-                                redesigned=distances.datasheets.analysis.within))
+                                redesigned=distances.datasheets.selections.within))
 
 sequences = pipeline.add(StitchSequences(sequences=[pmpnn,lmpnn],
-                                         selections=["",distances.datasheets.analysis.within]))
+                                         selections=["",distances.datasheets.selections.within]))
 
 msas = pipeline.add(MMseqs2(sequences=sequences))
 boltz_holo = pipeline.add(Boltz2(proteins=sequences,
