@@ -314,9 +314,13 @@ class ProteinMPNN(BaseConfig):
     
     def generate_script_prepare_inputs(self) -> str:
         """Generate the input preparation part of the script."""
-        # Determine input directory for parsing
-        first_source = list(self.input_sources.values())[0]
-        input_directory = os.path.dirname(first_source)
+        # Get specific structure files instead of directory
+        if "structures" in self.input_sources:
+            structure_files = self.input_sources["structures"]
+            # Use first file's directory as input directory
+            input_directory = os.path.dirname(structure_files[0]) if structure_files else ""
+        else:
+            raise ValueError("No structure sources found")
         
         # Determine input source and parameters for fixed positions script
         if (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
