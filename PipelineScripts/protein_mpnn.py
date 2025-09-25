@@ -452,6 +452,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         # Case 2: Direct file paths (from StandardizedOutput)
         elif isinstance(input_source, list):
             direct_file_paths = input_source
+        # Case 3: StandardizedOutput (from pipeline.add)
+        elif hasattr(input_source, 'structures'):
+            direct_file_paths = getattr(input_source, 'structures', [])
+            if not direct_file_paths:
+                direct_file_paths = getattr(input_source, 'pdbs', [])
 
         if upstream_tool:
             # Get input PDB files from upstream tool
