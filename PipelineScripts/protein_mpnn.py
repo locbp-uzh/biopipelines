@@ -439,33 +439,55 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         """
         sequence_ids = []
 
-        # Handle ToolOutput from upstream tool
-        if hasattr(self.input_structures, 'get_output_files'):
-            # Get structure files from upstream tool
-            input_pdbs = self.input_structures.get_output_files("structures")
-            if not input_pdbs:
-                input_pdbs = self.input_structures.get_output_files("pdbs")
+        # Use structures parameter directly
+        input_source = self.input_structures
 
+        # Check for input data from upstream tools or direct file paths
+        upstream_tool = None
+        direct_file_paths = []
+
+        # Case 1: ToolOutput input
+        if hasattr(input_source, 'get_output_files'):
+            upstream_tool = input_source
+        # Case 2: Direct file paths (from StandardizedOutput)
+        elif isinstance(input_source, list):
+            direct_file_paths = input_source
+
+        if upstream_tool:
+            # Get input PDB files from upstream tool
+            input_pdbs = []
+
+            # Get input PDB files from upstream tool
+            input_pdbs = upstream_tool.get_output_files("pdbs")
+            if not input_pdbs:
+                input_pdbs = upstream_tool.get_output_files("structures")
+            if not input_pdbs:
+                raise ValueError(f"No PDB/structure files found in upstream tool {upstream_tool.tool_type}")
+
+            # Process the PDB files if we got any
             if input_pdbs:
                 for pdb_path in input_pdbs:
                     pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
+                    # ProteinMPNN generates sequences numbered from 1
                     for seq_num in range(1, self.num_sequences + 1):
                         sequence_ids.append(f"{pdb_base}_{seq_num}")
 
-        # Handle direct file paths
-        elif isinstance(self.input_structures, list):
-            for pdb_path in self.input_structures:
+        elif direct_file_paths:
+            # Handle direct file paths from StandardizedOutput (input=tool)
+            for pdb_path in direct_file_paths:
+                pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
+                # ProteinMPNN generates sequences numbered from 1
+                for seq_num in range(1, self.num_sequences + 1):
+                    sequence_ids.append(f"{pdb_base}_{seq_num}")
+
+        elif hasattr(self, 'input_sources') and self.input_sources and "structures" in self.input_sources:
+            # Direct PDB file inputs
+            for pdb_path in self.input_sources["structures"]:
                 pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
                 for seq_num in range(1, self.num_sequences + 1):
                     sequence_ids.append(f"{pdb_base}_{seq_num}")
 
-        # Handle single file path
-        elif isinstance(self.input_structures, str):
-            pdb_base = os.path.splitext(os.path.basename(self.input_structures))[0]
-            for seq_num in range(1, self.num_sequences + 1):
-                sequence_ids.append(f"{pdb_base}_{seq_num}")
-
-        # Must have sequence IDs
+        # Must have sequence IDs from input sources
         if not sequence_ids:
             raise ValueError("Could not determine sequence IDs - no valid input structures found")
 
