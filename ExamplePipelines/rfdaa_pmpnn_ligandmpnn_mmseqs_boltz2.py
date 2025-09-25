@@ -26,10 +26,8 @@ from PipelineScripts.distance_selector import DistanceSelector
 from PipelineScripts.protein_mpnn import ProteinMPNN
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.stitch_sequences import StitchSequences
+from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.residue_atom_distance import ResidueAtomDistance
-from PipelineScripts.merge_datasheets import MergeDatasheets
-from PipelineScripts.filter import Filter
 
 pipeline = Pipeline(
     pipeline_name="RFDAA-ProteinMPNN-LigandMPNN-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
@@ -66,11 +64,11 @@ lmpnn = pipeline.add(LigandMPNN(structures=rfdaa,
 sequences = pipeline.add(StitchSequences(sequences=[pmpnn,lmpnn],
                                          selections=["",distances.datasheets.analysis.within]))
 
-boltz_apo = pipeline.add(Boltz2(proteins=sequences))
+msas = pipeline.add(MMseqs2(sequences=sequences))
 boltz_holo = pipeline.add(Boltz2(proteins=sequences,
                                 ligands=rifampicin, #ligand smiles taken from original
-                                msas=boltz_apo)) #MSAs are passed with <tool output>, not with <tool output>.msas
+                                msas=msas)) #MSAs are passed with <tool output>, not with <tool output>.msas
 
-#Prints
+
 pipeline.save()
 pipeline.slurm() 
