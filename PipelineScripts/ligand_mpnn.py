@@ -30,8 +30,8 @@ class LigandMPNN(BaseConfig):
     DEFAULT_ENV = "ligandmpnn_env"
     DEFAULT_RESOURCES = {"gpu": "V100", "memory": "16GB", "time": "12:00:00"}
     
-    def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
-                 structures: Union[str, List[str], ToolOutput] = "",
+    def __init__(self,
+                 structures: Union[str, List[str], ToolOutput],
                  ligand: str = "",
                  datasheets: Optional[List[str]] = None,
                  name: str = "",
@@ -44,9 +44,8 @@ class LigandMPNN(BaseConfig):
                  **kwargs):
         """
         Initialize LigandMPNN configuration.
-        
+
         Args:
-            input: Complete standardized input dictionary with structures, datasheets, etc.
             structures: Input structures (PDB files or ToolOutput from previous tool)
             ligand: Ligand identifier for binding site focus
             datasheets: Input datasheet files for metadata (from previous tool)
@@ -59,38 +58,10 @@ class LigandMPNN(BaseConfig):
             batch_size: Batch size for processing
             **kwargs: Additional parameters
         """
-        # Handle standardized input format (matching ProteinMPNN/AlphaFold pattern)
-        if input is not None:
-            if isinstance(input, StandardizedOutput):
-                # StandardizedOutput object (e.g., rfd)
-                self.input_structures = input.structures
-                self.input_datasheets = input.datasheets
-                self.input_is_tool_output = False  # Direct file paths now
-                self.standardized_input = input  # Keep reference for metadata
-            elif isinstance(input, ToolOutput):
-                # Direct ToolOutput object
-                self.input_structures = input
-                self.input_datasheets = input.get_output_files("datasheets")
-                self.input_is_tool_output = True
-                self.standardized_input = None
-            elif isinstance(input, dict):
-                # Dictionary format with standardized keys
-                self.input_structures = input.get('structures', [])
-                self.input_datasheets = input.get('datasheets', {})
-                self.input_is_tool_output = False  # Direct file paths
-                self.standardized_input = None
-            else:
-                # Fallback to treating as input_structures
-                self.input_structures = input
-                self.input_datasheets = datasheets or {}
-                self.input_is_tool_output = isinstance(input, ToolOutput)
-                self.standardized_input = None
-        else:
-            # Legacy format: structures=previous_tool
-            self.input_structures = structures
-            self.input_datasheets = datasheets or {}
-            self.input_is_tool_output = isinstance(structures, ToolOutput)
-            self.standardized_input = None
+        # Store input parameters
+        self.input_structures = structures
+        self.input_datasheets = datasheets or {}
+        self.input_is_tool_output = isinstance(structures, ToolOutput)
         
         # Store LigandMPNN-specific parameters
         self.ligand = ligand
@@ -495,7 +466,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         """
         sequence_ids = []
         
-        # Use the original input parameter (set in constructor)
+        # Use structures parameter directly
         input_source = self.input_structures
         
         # Check for input data from upstream tools or direct file paths

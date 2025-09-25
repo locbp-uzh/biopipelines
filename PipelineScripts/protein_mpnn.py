@@ -29,8 +29,8 @@ class ProteinMPNN(BaseConfig):
     TOOL_NAME = "ProteinMPNN" 
     DEFAULT_ENV = "ProteinEnv"
     
-    def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
-                 structures: Union[str, List[str], ToolOutput] = "",
+    def __init__(self,
+                 structures: Union[str, List[str], ToolOutput],
                  datasheets: Optional[List[str]] = None,
                  num_sequences: int = 1,
                  fixed: str = "",
@@ -46,9 +46,8 @@ class ProteinMPNN(BaseConfig):
         Initialize ProteinMPNN configuration.
 
         Args:
-            input: Complete standardized input dictionary with structures, datasheets, etc.
-            structures: Input structures (PDB files, folder, or ToolOutput)
-            datasheets: Input datasheet files for metadata
+            structures: Input structures (PDB files, folder, or ToolOutput from previous tool)
+            datasheets: Input datasheet files for metadata (optional)
             num_sequences: Number of sequences to generate per structure
             fixed: PyMOL-style selection or datasheet reference (e.g., "structures.fixed")
             redesigned: PyMOL-style selection or datasheet reference (e.g., "structures.designed")
@@ -70,45 +69,17 @@ class ProteinMPNN(BaseConfig):
                 redesigned="20-40"
             ))
 
-            # Using datasheet references (like LigandMPNN)
+            # Using datasheet references
             pmpnn = pipeline.add(ProteinMPNN(
                 structures=rfdaa,
                 num_sequences=5,
-                redesigned=distances.datasheets.analysis.beyond
+                redesigned=distances.datasheets.selections.beyond
             ))
         """
-        # Handle standardized input format
-        if input is not None:
-            if isinstance(input, StandardizedOutput):
-                # StandardizedOutput object (e.g., rfd)
-                self.input_structures = input.structures
-                self.input_datasheets = input.datasheets
-                self.input_is_tool_output = False  # Direct file paths now
-                self.standardized_input = input  # Keep reference for metadata
-            elif isinstance(input, ToolOutput):
-                # Direct ToolOutput object
-                self.input_structures = input
-                self.input_datasheets = input.get_output_files("datasheets")
-                self.input_is_tool_output = True
-                self.standardized_input = None
-            elif isinstance(input, dict):
-                # Dictionary format with standardized keys
-                self.input_structures = input.get('structures', [])
-                self.input_datasheets = input.get('datasheets', {})
-                self.input_is_tool_output = False  # Direct file paths
-                self.standardized_input = None
-            else:
-                # Fallback to treating as input_structures
-                self.input_structures = input
-                self.input_datasheets = datasheets or {}
-                self.input_is_tool_output = isinstance(input, ToolOutput)
-                self.standardized_input = None
-        else:
-            # Legacy format: structures=previous_tool
-            self.input_structures = structures
-            self.input_datasheets = datasheets or {}
-            self.input_is_tool_output = isinstance(structures, ToolOutput)
-            self.standardized_input = None
+        # Store input parameters
+        self.input_structures = structures
+        self.input_datasheets = datasheets or {}
+        self.input_is_tool_output = isinstance(structures, ToolOutput)
         
         # Store ProteinMPNN-specific parameters
         self.num_sequences = num_sequences
@@ -462,64 +433,42 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
     def _predict_sequence_ids(self) -> List[str]:
         """
         Predict the sequence IDs that ProteinMPNN will generate.
-        
+
         Based on input structures and num_sequences parameter.
         Returns list of sequence IDs in the format: {pdb_base}_{seq_num}
         """
         sequence_ids = []
-        
-        # Use the original input parameter (set in constructor), not the processed one
-        input_source = self.input if hasattr(self, 'input') else self.input_structures
-        
-        # Check for input data from upstream tools or direct file paths
-        upstream_tool = None
-        direct_file_paths = []
-        
-        # Case 1: ToolOutput input 
-        if hasattr(input_source, 'get_output_files'):
-            upstream_tool = input_source
-        # Case 2: Direct file paths (from StandardizedOutput)
-        elif isinstance(input_source, list):
-            direct_file_paths = input_source
-        
-        if upstream_tool:
-            # Get input PDB files from upstream tool
-            input_pdbs = []
-            
-            # Get input PDB files from upstream tool
-            input_pdbs = upstream_tool.get_output_files("pdbs")
+
+        # Handle ToolOutput from upstream tool
+        if hasattr(self.input_structures, 'get_output_files'):
+            # Get structure files from upstream tool
+            input_pdbs = self.input_structures.get_output_files("structures")
             if not input_pdbs:
-                input_pdbs = upstream_tool.get_output_files("structures")
-            if not input_pdbs:
-                raise ValueError(f"No PDB/structure files found in upstream tool {upstream_tool.tool_type}")
-            
-            # Process the PDB files if we got any
+                input_pdbs = self.input_structures.get_output_files("pdbs")
+
             if input_pdbs:
                 for pdb_path in input_pdbs:
                     pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-                    # ProteinMPNN generates sequences numbered from 1
                     for seq_num in range(1, self.num_sequences + 1):
                         sequence_ids.append(f"{pdb_base}_{seq_num}")
-        
-        elif direct_file_paths:
-            # Handle direct file paths from StandardizedOutput (input=rfd)
-            for pdb_path in direct_file_paths:
-                pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-                # ProteinMPNN generates sequences numbered from 1
-                for seq_num in range(1, self.num_sequences + 1):
-                    sequence_ids.append(f"{pdb_base}_{seq_num}")
-        
-        elif hasattr(self, 'input_sources') and self.input_sources:
-            # Direct PDB file inputs
-            for pdb_path in self.input_sources.values():
+
+        # Handle direct file paths
+        elif isinstance(self.input_structures, list):
+            for pdb_path in self.input_structures:
                 pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
                 for seq_num in range(1, self.num_sequences + 1):
                     sequence_ids.append(f"{pdb_base}_{seq_num}")
-        
-        # Must have sequence IDs from input sources
+
+        # Handle single file path
+        elif isinstance(self.input_structures, str):
+            pdb_base = os.path.splitext(os.path.basename(self.input_structures))[0]
+            for seq_num in range(1, self.num_sequences + 1):
+                sequence_ids.append(f"{pdb_base}_{seq_num}")
+
+        # Must have sequence IDs
         if not sequence_ids:
             raise ValueError("Could not determine sequence IDs - no valid input structures found")
-        
+
         return sequence_ids
 
     def get_output_files(self) -> Dict[str, List[str]]:
