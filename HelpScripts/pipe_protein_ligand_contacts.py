@@ -1,0 +1,496 @@
+#!/usr/bin/env python3
+"""
+Runtime helper script for ProteinLigandContacts analysis.
+
+This script analyzes protein structures to calculate minimum distances between
+selected protein residues and ligands, returning contact count and normalized distance sum.
+Uses native PDB file parsing instead of external libraries.
+"""
+
+import os
+import sys
+import argparse
+import json
+import pandas as pd
+import numpy as np
+import math
+from typing import Dict, List, Any, Optional, Tuple, NamedTuple
+
+
+class Atom(NamedTuple):
+    """Simple atom representation."""
+    atom_name: str
+    residue_name: str
+    residue_number: int
+    chain_id: str
+    x: float
+    y: float
+    z: float
+
+
+def parse_pdb_file(pdb_path: str) -> List[Atom]:
+    """
+    Parse PDB file and extract atom information.
+
+    Args:
+        pdb_path: Path to PDB file
+
+    Returns:
+        List of Atom objects
+    """
+    atoms = []
+
+    with open(pdb_path, 'r') as f:
+        for line in f:
+            if line.startswith('ATOM') or line.startswith('HETATM'):
+                try:
+                    atom_name = line[12:16].strip()
+                    residue_name = line[17:20].strip()
+                    chain_id = line[21:22].strip()
+                    residue_number = int(line[22:26].strip())
+                    x = float(line[30:38].strip())
+                    y = float(line[38:46].strip())
+                    z = float(line[46:54].strip())
+
+                    atom = Atom(
+                        atom_name=atom_name,
+                        residue_name=residue_name,
+                        residue_number=residue_number,
+                        chain_id=chain_id,
+                        x=x,
+                        y=y,
+                        z=z
+                    )
+                    atoms.append(atom)
+
+                except (ValueError, IndexError) as e:
+                    print(f"Warning: Could not parse line: {line.strip()}")
+                    continue
+
+    return atoms
+
+
+def parse_residue_selection(selection_str: str) -> List[int]:
+    """
+    Parse residue selection string into list of residue numbers.
+
+    Args:
+        selection_str: Selection string like '10-20+30-40+145'
+
+    Returns:
+        List of residue numbers
+    """
+    residue_numbers = []
+
+    if not selection_str or selection_str.lower() in ['all', 'none', 'null']:
+        return residue_numbers
+
+    # Split by '+' to get individual parts
+    parts = selection_str.split('+')
+
+    for part in parts:
+        part = part.strip()
+        if '-' in part:
+            # Range specification like '10-20'
+            try:
+                start, end = part.split('-')
+                start_num = int(start.strip())
+                end_num = int(end.strip())
+                residue_numbers.extend(range(start_num, end_num + 1))
+            except ValueError:
+                print(f"Warning: Could not parse range: {part}")
+        else:
+            # Single residue number
+            try:
+                residue_numbers.append(int(part))
+            except ValueError:
+                print(f"Warning: Could not parse residue number: {part}")
+
+    return sorted(list(set(residue_numbers)))  # Remove duplicates and sort
+
+
+def get_protein_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
+    """
+    Filter atoms to get only protein atoms (excluding specified ligands).
+
+    Args:
+        atoms: List of all atoms
+        ligand_name: Ligand residue name to exclude
+
+    Returns:
+        List of protein atoms
+    """
+    protein_atoms = []
+
+    # Standard amino acid names
+    standard_aa = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLU', 'GLN', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+
+    for atom in atoms:
+        # Include standard amino acids, exclude specified ligand
+        if atom.residue_name in standard_aa and atom.residue_name != ligand_name:
+            protein_atoms.append(atom)
+
+    return protein_atoms
+
+
+def get_ligand_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
+    """
+    Filter atoms to get only ligand atoms.
+
+    Args:
+        atoms: List of all atoms
+        ligand_name: Ligand residue name to include
+
+    Returns:
+        List of ligand atoms
+    """
+    return [atom for atom in atoms if atom.residue_name == ligand_name]
+
+
+def filter_atoms_by_selection(atoms: List[Atom], residue_numbers: List[int]) -> List[Atom]:
+    """
+    Filter atoms to include only specified residue numbers.
+
+    Args:
+        atoms: List of atoms
+        residue_numbers: List of residue numbers to include
+
+    Returns:
+        Filtered list of atoms
+    """
+    if not residue_numbers:  # Empty list means no filtering
+        return atoms
+
+    return [atom for atom in atoms if atom.residue_number in residue_numbers]
+
+
+def calculate_distance(atom1: Atom, atom2: Atom) -> float:
+    """
+    Calculate Euclidean distance between two atoms.
+
+    Args:
+        atom1: First atom
+        atom2: Second atom
+
+    Returns:
+        Distance in Angstroms
+    """
+    dx = atom1.x - atom2.x
+    dy = atom1.y - atom2.y
+    dz = atom1.z - atom2.z
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+
+
+def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float) -> Tuple[Optional[int], Optional[float]]:
+    """
+    Calculate protein-ligand contact metrics for a structure.
+
+    Args:
+        atoms: List of atoms from PDB file
+        protein_selections: Protein region selections (e.g., '10-20+30-40' or None for all)
+        ligand_name: Ligand residue name (3-letter code)
+        contact_threshold: Distance threshold for counting contacts
+
+    Returns:
+        Tuple of (contact_count, normalized_distance) or (None, None) if calculation failed
+    """
+    try:
+        # Get protein and ligand atoms
+        protein_atoms = get_protein_atoms(atoms, ligand_name)
+        ligand_atoms = get_ligand_atoms(atoms, ligand_name)
+
+        print(f"[DEBUG] - Found {len(protein_atoms)} protein atoms")
+        print(f"[DEBUG] - Found {len(ligand_atoms)} ligand atoms")
+
+        if not ligand_atoms:
+            print(f"[WARNING] - No ligand atoms found for '{ligand_name}'")
+            return None, None
+
+        # Filter protein atoms by selection if specified
+        if protein_selections and protein_selections.lower() not in ['all', 'none', 'null']:
+            residue_numbers = parse_residue_selection(protein_selections)
+            if residue_numbers:
+                protein_atoms = filter_atoms_by_selection(protein_atoms, residue_numbers)
+                print(f"[DEBUG] - After selection filtering: {len(protein_atoms)} protein atoms")
+
+        if not protein_atoms:
+            print(f"[WARNING] - No protein atoms found after selection filtering")
+            return None, None
+
+        # Calculate minimum distances per residue
+        distances = {}
+
+        for protein_atom in protein_atoms:
+            residue_key = (protein_atom.chain_id, protein_atom.residue_number)
+
+            if residue_key not in distances:
+                distances[residue_key] = float('inf')
+
+            # Find minimum distance to any ligand atom
+            for ligand_atom in ligand_atoms:
+                dist = calculate_distance(protein_atom, ligand_atom)
+                if dist < distances[residue_key]:
+                    distances[residue_key] = dist
+
+        if not distances:
+            print(f"[WARNING] - No distances calculated")
+            return None, None
+
+        # Count contacts below threshold
+        contact_count = sum(1 for dist in distances.values() if dist < contact_threshold)
+
+        # Calculate normalized distance sum
+        num_residues = len(distances)
+        distance_sum = sum(distances.values())
+        normalized_distance = distance_sum / math.sqrt(num_residues) if num_residues > 0 else 0.0
+
+        print(f"[DEBUG] - Residue distances: {dict(distances)}")
+        print(f"[DEBUG] - Contact count: {contact_count}")
+        print(f"[DEBUG] - Normalized distance: {normalized_distance:.3f}")
+
+        return contact_count, normalized_distance
+
+    except Exception as e:
+        print(f"[ERROR] - Error calculating contact metrics: {e}")
+        return None, None
+
+
+def load_selections_from_datasheet(datasheet_path: str, column_name: str) -> Dict[str, str]:
+    """
+    Load protein selections from datasheet CSV file.
+
+    Args:
+        datasheet_path: Path to CSV file
+        column_name: Column containing selection specifications
+
+    Returns:
+        Dictionary mapping structure IDs to selection strings
+    """
+    if not os.path.exists(datasheet_path):
+        raise FileNotFoundError(f"Datasheet file not found: {datasheet_path}")
+
+    df = pd.read_csv(datasheet_path)
+    if column_name not in df.columns:
+        raise ValueError(f"Column '{column_name}' not found in datasheet. Available columns: {list(df.columns)}")
+
+    # Assuming the first column contains IDs
+    id_column = df.columns[0]
+    selections_map = {}
+
+    for _, row in df.iterrows():
+        structure_id = row[id_column]
+        selection_value = row[column_name]
+        selections_map[str(structure_id)] = str(selection_value)
+
+    print(f"Loaded protein selections for {len(selections_map)} structures from {datasheet_path}")
+
+    return selections_map
+
+
+def calculate_contact_metrics(structure_path: str, selections: str, ligand: str, threshold: float) -> Tuple[Optional[int], Optional[float]]:
+    """
+    Calculate protein-ligand contact metrics for a structure.
+
+    Args:
+        structure_path: Path to structure file
+        selections: Protein region selections (e.g., '10-20+30-40' or None for all protein)
+        ligand: Ligand residue name (3-letter code)
+        threshold: Distance threshold for counting contacts
+
+    Returns:
+        Tuple of (contact_count, normalized_distance) or (None, None) if calculation failed
+    """
+    try:
+        print(f"  - Loading structure: {structure_path}")
+        print(f"  - Protein selections: {selections if selections else 'All protein residues'}")
+        print(f"  - Ligand: {ligand}")
+        print(f"  - Threshold: {threshold} Å")
+
+        # Parse PDB file
+        atoms = parse_pdb_file(structure_path)
+        if not atoms:
+            print(f"  - Error: No atoms found in structure")
+            return None, None
+
+        print(f"  - Parsed {len(atoms)} atoms from structure")
+
+        # Calculate contact metrics
+        contact_count, normalized_distance = calculate_protein_ligand_contacts(atoms, selections, ligand, threshold)
+
+        print(f"  - Contact count: {contact_count}")
+        print(f"  - Normalized distance: {normalized_distance:.3f if normalized_distance is not None else 'None'}")
+
+        return contact_count, normalized_distance
+
+    except Exception as e:
+        print(f"  - Error calculating contact metrics: {e}")
+        return None, None
+
+
+def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
+    """
+    Analyze protein-ligand contacts in structures.
+
+    Args:
+        config_data: Configuration dictionary with analysis parameters
+    """
+    input_structures = config_data['input_structures']
+    selections_config = config_data['protein_selections']
+    ligand_name = config_data['ligand_name']
+    contact_threshold = config_data['contact_threshold']
+    contact_metric_name = config_data['contact_metric_name']
+    distance_metric_name = config_data['distance_metric_name']
+    output_csv = config_data['output_csv']
+
+    print(f"Analyzing protein-ligand contacts")
+    print(f"Structures: {len(input_structures)}")
+    print(f"Protein selections: {selections_config}")
+    print(f"Ligand: {ligand_name}")
+    print(f"Contact threshold: {contact_threshold} Å")
+    print(f"Contact metric: {contact_metric_name}")
+    print(f"Distance metric: {distance_metric_name}")
+
+    # Handle protein selections
+    selections_map = {}
+    if selections_config['type'] == 'all_protein':
+        # All protein residues for all structures
+        print(f"Using all protein residues for all structures")
+        for structure_path in input_structures:
+            structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+            selections_map[structure_id] = None  # None means all protein
+    elif selections_config['type'] == 'fixed':
+        # Fixed selection for all structures
+        fixed_selection = selections_config['value']
+        print(f"Using fixed protein selection: {fixed_selection}")
+        for structure_path in input_structures:
+            structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+            selections_map[structure_id] = fixed_selection
+    else:
+        # Load from datasheet
+        datasheet_path = selections_config['datasheet_path']
+        column_name = selections_config['column_name']
+        selections_map = load_selections_from_datasheet(datasheet_path, column_name)
+
+    # Process structures
+    results = []
+
+    for i, structure_path in enumerate(input_structures):
+        if not os.path.exists(structure_path):
+            print(f"Warning: Structure file not found: {structure_path}")
+            continue
+
+        print(f"\nProcessing structure {i+1}/{len(input_structures)}: {structure_path}")
+
+        # Extract structure ID from filename
+        structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+
+        # Get selection for this structure
+        selections = selections_map.get(structure_id)
+        if selections_config['type'] == 'datasheet' and selections is None:
+            print(f"  - Warning: No selection found for structure ID: {structure_id}")
+            continue
+
+        # Calculate contact metrics
+        contact_count, normalized_distance = calculate_contact_metrics(
+            structure_path, selections, ligand_name, contact_threshold
+        )
+
+        # Store result
+        result = {
+            'id': structure_id,
+            'source_structure': structure_path,
+            'selections': selections if selections else 'all_protein',
+            'ligand': ligand_name,
+            contact_metric_name: contact_count,
+            distance_metric_name: normalized_distance
+        }
+        results.append(result)
+
+        print(f"  - Result: {contact_metric_name} = {contact_count}, {distance_metric_name} = {normalized_distance}")
+
+    # Create DataFrame and save
+    if results:
+        df = pd.DataFrame(results)
+
+        # Create output directory
+        output_dir = os.path.dirname(output_csv)
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Save results
+        print(f"Writing results to: {output_csv}")
+        df.to_csv(output_csv, index=False)
+
+        print(f"\nProtein-ligand contact analysis completed successfully!")
+        print(f"Analyzed {len(results)} structures")
+        print(f"Results saved to: {output_csv}")
+        print(f"\nResults summary:")
+        print(df)
+
+        # Statistics
+        contacts = [r[contact_metric_name] for r in results if r[contact_metric_name] is not None]
+        distances = [r[distance_metric_name] for r in results if r[distance_metric_name] is not None]
+
+        if contacts:
+            print(f"\nContact count statistics:")
+            print(f"  Min: {min(contacts)}")
+            print(f"  Max: {max(contacts)}")
+            print(f"  Mean: {np.mean(contacts):.1f}")
+            print(f"  Std: {np.std(contacts):.1f}")
+
+        if distances:
+            print(f"\nNormalized distance statistics:")
+            print(f"  Min: {min(distances):.3f}")
+            print(f"  Max: {max(distances):.3f}")
+            print(f"  Mean: {np.mean(distances):.3f}")
+            print(f"  Std: {np.std(distances):.3f}")
+
+        if not contacts and not distances:
+            print(f"\nError: No valid contact measurements found!")
+            raise ValueError("No valid contact measurements - all results were None")
+    else:
+        raise ValueError("No valid results generated - check structure files and protein selections")
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Analyze protein-ligand contacts in structures')
+    parser.add_argument('--config', required=True, help='JSON config file with analysis parameters')
+
+    args = parser.parse_args()
+
+    # Load configuration
+    if not os.path.exists(args.config):
+        print(f"Error: Config file not found: {args.config}")
+        sys.exit(1)
+
+    try:
+        with open(args.config, 'r') as f:
+            config_data = json.load(f)
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        sys.exit(1)
+
+    # Validate required parameters
+    required_params = ['input_structures', 'protein_selections', 'ligand_name',
+                       'contact_threshold', 'contact_metric_name',
+                       'distance_metric_name', 'output_csv']
+    for param in required_params:
+        if param not in config_data:
+            print(f"Error: Missing required parameter: {param}")
+            sys.exit(1)
+
+    try:
+        analyze_protein_ligand_contacts(config_data)
+
+    except Exception as e:
+        print(f"Error analyzing protein-ligand contacts: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

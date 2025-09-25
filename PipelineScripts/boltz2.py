@@ -1177,7 +1177,7 @@ else
     echo "Boltz2 failed - some outputs missing"
     exit 1
 fi
-"""
+""" + self.generate_completion_check_footer()
         else:
             # No missing sequences, use standard completion check
             return self.generate_completion_check_footer()

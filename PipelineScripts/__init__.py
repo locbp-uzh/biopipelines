@@ -17,6 +17,9 @@ from .slice_datasheet import SliceDatasheet
 from .average_by_datasheet import AverageByDatasheet
 from .extract_metrics import ExtractMetrics
 from .folders import FolderManager
+from .mobile_distance import MobileDistance
+from .protein_ligand_contacts import ProteinLigandContacts
+from .stitch_sequences import StitchSequences
 from .converters import *
 
 __all__ = [
@@ -36,7 +39,10 @@ __all__ = [
     'SliceDatasheet',
     'AverageByDatasheet',
     'ExtractMetrics',
-    
+    'MobileDistance',
+    'ProteinLigandContacts',
+    'StitchSequences',
+
     # Utility functions
     'pdb_to_jsonl',
     'fasta_to_csv', 

@@ -32,26 +32,50 @@ class ProteinMPNN(BaseConfig):
     def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
                  structures: Union[str, List[str], ToolOutput] = "",
                  datasheets: Optional[List[str]] = None,
-                 num_sequences: int = 1, fixed_positions: str = "",
-                 designed_positions: str = "", fixed_chain: str = "A", 
-                 plddt_threshold: float = 100.0, sampling_temp: float = 0.1, 
-                 model_name: str = "v_48_020", soluble_model: bool = True, **kwargs):
+                 num_sequences: int = 1,
+                 fixed: str = "",
+                 redesigned: str = "",
+                 fixed_chain: str = "A",
+                 plddt_threshold: float = 100.0, sampling_temp: float = 0.1,
+                 model_name: str = "v_48_020", soluble_model: bool = True,
+                 # Legacy parameter support (deprecated)
+                 fixed_positions: str = "",
+                 designed_positions: str = "",
+                 **kwargs):
         """
         Initialize ProteinMPNN configuration.
-        
+
         Args:
             input: Complete standardized input dictionary with structures, datasheets, etc.
             structures: Input structures (PDB files, folder, or ToolOutput)
             datasheets: Input datasheet files for metadata
             num_sequences: Number of sequences to generate per structure
-            fixed_positions: PyMOL-style selection or datasheet reference (e.g., "structures.fixed")
-            designed_positions: PyMOL-style selection or datasheet reference (e.g., "structures.designed")
+            fixed: PyMOL-style selection or datasheet reference (e.g., "structures.fixed")
+            redesigned: PyMOL-style selection or datasheet reference (e.g., "structures.designed")
             fixed_chain: Chain to apply fixed positions to
             plddt_threshold: pLDDT threshold for automatic fixing (100 = no fixing)
             sampling_temp: Sampling temperature for sequence generation
             model_name: ProteinMPNN model variant to use
             soluble_model: Use soluble protein model
+            fixed_positions: DEPRECATED - use 'fixed' instead
+            designed_positions: DEPRECATED - use 'redesigned' instead
             **kwargs: Additional parameters
+
+        Examples:
+            # Basic usage with fixed/redesigned parameters
+            pmpnn = pipeline.add(ProteinMPNN(
+                structures=rfdaa,
+                num_sequences=10,
+                fixed="1-10+50-60",
+                redesigned="20-40"
+            ))
+
+            # Using datasheet references (like LigandMPNN)
+            pmpnn = pipeline.add(ProteinMPNN(
+                structures=rfdaa,
+                num_sequences=5,
+                redesigned=distances.datasheets.analysis.beyond
+            ))
         """
         # Handle standardized input format
         if input is not None:
@@ -88,8 +112,16 @@ class ProteinMPNN(BaseConfig):
         
         # Store ProteinMPNN-specific parameters
         self.num_sequences = num_sequences
-        self.fixed_positions = fixed_positions
-        self.designed_positions = designed_positions
+
+        # Handle both new and legacy parameter names
+        # Priority: new parameters > legacy parameters
+        self.fixed = fixed if fixed else fixed_positions
+        self.redesigned = redesigned if redesigned else designed_positions
+
+        # For backward compatibility, also store legacy names
+        self.fixed_positions = self.fixed
+        self.designed_positions = self.redesigned
+
         self.fixed_chain = fixed_chain
         self.plddt_threshold = plddt_threshold
         self.sampling_temp = sampling_temp
@@ -101,6 +133,14 @@ class ProteinMPNN(BaseConfig):
         self.input_is_folder = False
         self.input_pdb_files = []
         
+        # Set up dependencies for datasheet references
+        if hasattr(structures, 'config'):
+            self.dependencies.append(structures.config)
+        if hasattr(fixed, 'config'):
+            self.dependencies.append(fixed.config)
+        if hasattr(redesigned, 'config'):
+            self.dependencies.append(redesigned.config)
+
         # Initialize base class
         super().__init__(**kwargs)
 
@@ -122,10 +162,10 @@ class ProteinMPNN(BaseConfig):
             raise ValueError("plddt_threshold must be between 0 and 100")
         
         # Validate datasheet references if provided
-        if self.fixed_positions:
-            self.validate_datasheet_reference(self.fixed_positions)
-        if self.designed_positions:
-            self.validate_datasheet_reference(self.designed_positions)
+        if self.fixed:
+            self.validate_datasheet_reference(self.fixed)
+        if self.redesigned:
+            self.validate_datasheet_reference(self.redesigned)
         
         # Validate model name
         valid_models = ["v_48_002", "v_48_010", "v_48_020", "v_48_030"]
@@ -267,8 +307,8 @@ class ProteinMPNN(BaseConfig):
         
         config_lines.extend([
             f"NUM SEQUENCES PER TARGET: {self.num_sequences}",
-            f"FIXED: {self.fixed_positions or 'None'}",
-            f"DESIGNED: {self.designed_positions or 'None'}",
+            f"FIXED: {self.fixed or 'None'}",
+            f"REDESIGNED: {self.redesigned or 'None'}",
             f"FIXED CHAIN: {self.fixed_chain}",
             f"pLDDT THR: {self.plddt_threshold}",
             f"SAMPLING T: {self.sampling_temp}",
@@ -335,7 +375,7 @@ class ProteinMPNN(BaseConfig):
             else:
                 # Legacy format
                 input_datasheet = self.input_datasheets[0] if isinstance(self.input_datasheets, list) else str(self.input_datasheets)
-        elif self.fixed_positions and self.fixed_positions != "-":
+        elif self.fixed and self.fixed != "-":
             # Use direct fixed positions selection
             input_source = "selection"
             input_datasheet = "-"
@@ -345,8 +385,8 @@ class ProteinMPNN(BaseConfig):
             input_datasheet = "-"
         
         # Resolve datasheet references in fixed/designed positions
-        fixed_param = self.resolve_datasheet_reference(self.fixed_positions) if self.fixed_positions else "-"
-        designed_param = self.resolve_datasheet_reference(self.designed_positions) if self.designed_positions else "-"
+        fixed_param = self.resolve_datasheet_reference(self.fixed) if self.fixed else "-"
+        designed_param = self.resolve_datasheet_reference(self.redesigned) if self.redesigned else "-"
         
         return f"""echo "Determining fixed positions"
 python {self.fixed_py} {input_directory} {input_source} {input_datasheet} {self.plddt_threshold} {fixed_param} {designed_param} {self.fixed_chain} {self.fixed_jsonl} {self.sele_csv}
@@ -564,6 +604,9 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         base_dict.update({
             "mpnn_params": {
                 "num_sequences": self.num_sequences,
+                "fixed": self.fixed,
+                "redesigned": self.redesigned,
+                # Legacy compatibility
                 "fixed_positions": self.fixed_positions,
                 "designed_positions": self.designed_positions,
                 "fixed_chain": self.fixed_chain,
