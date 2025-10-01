@@ -217,7 +217,13 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
             # Load from datasheet
             datasheet_path = spec['datasheet_path']
             column_name = spec['column_name']
-            position_map = load_positions_from_datasheet(datasheet_path, column_name)
+
+            # Handle empty datasheet path (treat as no overlay)
+            if not datasheet_path or datasheet_path.strip() == '':
+                print(f"Warning: Empty datasheet path for sequence {spec['index']}, treating as no overlay")
+                position_map = {seq_id: [] for seq_id in all_sequence_ids}
+            else:
+                position_map = load_positions_from_datasheet(datasheet_path, column_name)
             position_maps.append(position_map)
         else:
             # Empty positions (no overlay)
