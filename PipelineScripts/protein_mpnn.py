@@ -581,7 +581,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         datasheets = {
             "sequences": DatasheetInfo(
                 name="sequences",
-                path=main_datasheet,
+                path=queries_csv,  # Use queries_csv instead of main_datasheet for correct StitchSequences integration
                 columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery", "rmsd"],
                 description="ProteinMPNN sequence generation results with scores and structure recovery metrics",
                 count=len(sequence_ids)  # Number of expected sequences
