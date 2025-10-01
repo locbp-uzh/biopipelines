@@ -48,7 +48,8 @@ rifampicin = pipeline.add(LoadOutput("/shares/locbp.chem.uzh/public/BioPipelines
 rfdaa = pipeline.add(RFdiffusionAllAtom(pdb=rifampicin, #can also be a path, preferentially to PDBs folder inside biopipelines folder
                                         ligand='LIG', #in rfdaa always specify the ligand name
                                         contigs='10-20,A6-140',
-                                        num_designs=2))
+                                        num_designs=2,
+                                        steps=20))
 
 distances = pipeline.add(DistanceSelector(structures=rfdaa,
                                           ligand="LIG",

@@ -293,13 +293,9 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
         atoms, reference_atoms, distance_cutoff
     )
 
-    # Format as PyMOL selections (with chain prefixes)
-    within_selection = format_pymol_selection(within_residues)
-    beyond_selection = format_pymol_selection(beyond_residues)
-
-    # Format as LigandMPNN selections (numbers only)
-    within_lmpnn = format_ligandmpnn_selection(within_residues)
-    beyond_lmpnn = format_ligandmpnn_selection(beyond_residues)
+    # Format as universal selections (numbers only) - works for all tools
+    within_selection = format_ligandmpnn_selection(within_residues)
+    beyond_selection = format_ligandmpnn_selection(beyond_residues)
 
     # Extract structure ID from filename
     structure_id = os.path.splitext(os.path.basename(pdb_file))[0]
@@ -307,10 +303,8 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
     return {
         "id": structure_id,
         "pdb": pdb_file,
-        "within": within_lmpnn,  # Use LigandMPNN format for compatibility
-        "beyond": beyond_lmpnn,  # Use LigandMPNN format for compatibility
-        "within_pymol": within_selection,  # Keep PyMOL format as separate column
-        "beyond_pymol": beyond_selection,  # Keep PyMOL format as separate column
+        "within": within_selection,
+        "beyond": beyond_selection,
         "distance_cutoff": distance_cutoff,
         "reference_ligand": reference_description
     }

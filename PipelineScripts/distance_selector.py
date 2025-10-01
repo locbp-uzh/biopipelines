@@ -279,8 +279,8 @@ echo "Selections saved to: {self.selections_csv}"
             "selections": DatasheetInfo(
                 name="selections",
                 path=self.selections_csv,
-                columns=["id", "pdb", "within", "beyond", "within_pymol", "beyond_pymol", "distance_cutoff", "reference_ligand"],
-                description="Residue selections based on distance to ligand (within/beyond for LigandMPNN, within_pymol/beyond_pymol for PyMOL)",
+                columns=["id", "pdb", "within", "beyond", "distance_cutoff", "reference_ligand"],
+                description="PyMOL-formatted residue selections based on distance to ligand",
                 count=len(structure_ids)
             )
         }

@@ -24,41 +24,42 @@ FIXED_CHAIN=args.FIXED_CHAIN
 fixed_jsonl_file=args.fixed_jsonl_file
 sele_csv_file=args.sele_csv_file
 
-#Converts a pymol selection into an array
+#Converts a selection string into an array
 def sele_to_list(s):
+    """Convert selection string to list of residue numbers."""
     a = []
-    if s == "": return a
-    elif '+' in s:
-        plus_parts = s.split('+')
-        for pp in plus_parts:
-            if '-' in pp:
-                min,max = pp.split('-')
-                for ri in range(int(min),int(max)+1):
-                    a.append(ri)
-            else:
-                a.append(int(pp))
+    if s == "":
+        return a
+
+    # Handle both '+' separated ranges and space-separated legacy format
+    if '+' in s:
+        parts = s.split('+')
     else:
-        if '-' in s:
-            # Handle cases where there might be multiple ranges without + separator
-            # Split by '-' but handle ranges properly
-            parts = s.split('-')
-            if len(parts) == 2:
-                # Simple range like "10-15"
-                min_val, max_val = parts
+        # Legacy space-separated format
+        parts = s.split()
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part and not part.startswith('-'):
+            # Range like "10-15"
+            range_parts = part.split('-')
+            if len(range_parts) == 2:
+                min_val, max_val = range_parts
                 for ri in range(int(min_val), int(max_val) + 1):
                     a.append(ri)
             else:
-                # Malformed range, try to handle it gracefully
-                print(f"Warning: Malformed range '{s}', treating as individual numbers")
-                for part in parts:
-                    if part.strip():
-                        try:
-                            a.append(int(part.strip()))
-                        except ValueError:
-                            print(f"Warning: Could not parse '{part}' as integer")
+                print(f"Warning: Malformed range '{part}', skipping")
         else:
-            a.append(int(s))     
-    return a
+            # Single residue
+            try:
+                a.append(int(part))
+            except ValueError:
+                print(f"Warning: Could not parse '{part}' as integer, skipping")
+
+    return sorted(a)
 
 def list_to_sele(a):
     s = ""

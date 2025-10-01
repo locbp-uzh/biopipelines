@@ -31,13 +31,13 @@ from pathlib import Path
 
 
 def sele_to_list(sele_str):
-    """Convert PyMOL selection string to list of residue numbers."""
+    """Convert selection string to list of residue numbers."""
     if not sele_str or sele_str == "-":
         return []
-    
+
     residues = []
     parts = sele_str.split('+')
-    
+
     for part in parts:
         if '-' in part and not part.startswith('-'):
             # Range like "10-20"
@@ -46,7 +46,7 @@ def sele_to_list(sele_str):
         else:
             # Single residue
             residues.append(int(part))
-    
+
     return sorted(residues)
 
 
