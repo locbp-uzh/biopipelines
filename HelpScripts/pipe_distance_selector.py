@@ -158,18 +158,54 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
 
 def format_pymol_selection(residue_list):
     """
-    Format residue list as PyMOL selection string.
+    Format residue list as PyMOL range selection string.
 
     Args:
         residue_list: List of residue identifiers (e.g., ["A10", "A11", "B15"])
 
     Returns:
-        PyMOL selection string (e.g., "A10 A11 B15")
+        PyMOL selection string with ranges (e.g., "A10-11+B15")
     """
     if not residue_list:
         return ""
 
-    return " ".join(residue_list)
+    # Group by chain and create ranges
+    chain_residues = {}
+    for res_id in residue_list:
+        chain = res_id[0]  # First character is chain
+        res_num = int(res_id[1:])  # Rest is residue number
+        if chain not in chain_residues:
+            chain_residues[chain] = []
+        chain_residues[chain].append(res_num)
+
+    # Create range strings for each chain
+    range_parts = []
+    for chain, res_nums in chain_residues.items():
+        res_nums.sort()
+        ranges = []
+        start = res_nums[0]
+        end = res_nums[0]
+
+        for i in range(1, len(res_nums)):
+            if res_nums[i] == end + 1:
+                end = res_nums[i]
+            else:
+                # Add completed range
+                if start == end:
+                    ranges.append(f"{chain}{start}")
+                else:
+                    ranges.append(f"{chain}{start}-{end}")
+                start = end = res_nums[i]
+
+        # Add final range
+        if start == end:
+            ranges.append(f"{chain}{start}")
+        else:
+            ranges.append(f"{chain}{start}-{end}")
+
+        range_parts.extend(ranges)
+
+    return "+".join(range_parts)
 
 
 def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float) -> Dict[str, any]:
@@ -199,7 +235,7 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
     # Get reference atoms based on type
     if reference_type == "ligand":
         reference_atoms = get_ligand_atoms(atoms, selection)
-        reference_description = f"ligand {selection}"
+        reference_description = selection
     else:
         # For atoms/residues, we'll need to implement native selection parsing
         # For now, only ligand selection is supported
