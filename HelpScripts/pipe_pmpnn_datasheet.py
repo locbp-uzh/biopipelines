@@ -38,7 +38,7 @@ def process_proteinmpnn_fasta(fasta_file, pipeline_name, allow_duplicates=False)
                     
                     # Parse header parameters (e.g., "T=0.1, sample=0, score=...")
                     seq_data = {
-                        'id': f"{pipeline_name}_{source_pdb}_seq_{seq_index}",
+                        'id': f"{source_pdb}_{seq_index + 1}",  # Use structure-based ID like rifampicin_012_1_1
                         'source_pdb': source_pdb,
                         'sequence': sequence,
                         'sample_index': seq_index

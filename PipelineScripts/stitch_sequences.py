@@ -216,12 +216,20 @@ class StitchSequences(BaseConfig):
                     "value": pos_spec
                 })
             else:
-                # Datasheet reference
+                # Datasheet reference - handle tuple format (DatasheetInfo_object, column_name)
+                if isinstance(pos_spec, tuple) and len(pos_spec) == 2:
+                    datasheet_obj, column_name = pos_spec
+                    datasheet_path = datasheet_obj.path if hasattr(datasheet_obj, 'path') else ''
+                else:
+                    # Fallback for other formats
+                    datasheet_path = getattr(pos_spec, 'path', '') if hasattr(pos_spec, 'path') else ''
+                    column_name = 'within'  # Default column for positions
+
                 config_data["position_specs"].append({
                     "index": i,
                     "type": "datasheet",
-                    "datasheet_path": getattr(pos_spec, 'datasheet_path', ''),
-                    "column_name": getattr(pos_spec, 'column_name', 'positions')
+                    "datasheet_path": datasheet_path,
+                    "column_name": column_name
                 })
 
         # Write config file
