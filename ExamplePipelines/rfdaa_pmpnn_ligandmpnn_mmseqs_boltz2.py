@@ -32,8 +32,7 @@ from PipelineScripts.boltz2 import Boltz2
 pipeline = Pipeline(
     pipeline_name="RFDAA-ProteinMPNN-LigandMPNN-MMseqs-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
     job_name="rifampicin", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
-    job_description="redesign of N terminus of rifampicin binding protein",
-    debug=True)
+    job_description="redesign of N terminus of rifampicin binding protein")
 
 pipeline.resources(
     gpu="80GB", #ask for A100-80GB or H100-80GB
