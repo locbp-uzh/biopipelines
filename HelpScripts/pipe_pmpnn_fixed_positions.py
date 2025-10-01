@@ -39,9 +39,23 @@ def sele_to_list(s):
                 a.append(int(pp))
     else:
         if '-' in s:
-            min,max = s.split('-')
-            for ri in range(int(min),int(max)+1):
-                a.append(ri)
+            # Handle cases where there might be multiple ranges without + separator
+            # Split by '-' but handle ranges properly
+            parts = s.split('-')
+            if len(parts) == 2:
+                # Simple range like "10-15"
+                min_val, max_val = parts
+                for ri in range(int(min_val), int(max_val) + 1):
+                    a.append(ri)
+            else:
+                # Malformed range, try to handle it gracefully
+                print(f"Warning: Malformed range '{s}', treating as individual numbers")
+                for part in parts:
+                    if part.strip():
+                        try:
+                            a.append(int(part.strip()))
+                        except ValueError:
+                            print(f"Warning: Could not parse '{part}' as integer")
         else:
             a.append(int(s))     
     return a
