@@ -221,6 +221,7 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
     return {
         "id": structure_id,
+        "pdb": pdb_file,
         "within": within_selection,
         "beyond": beyond_selection,
         "distance_cutoff": distance_cutoff,
