@@ -9,7 +9,6 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.load_output import LoadOutput
 from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
-from PipelineScripts.distance_selector import DistanceSelector
 from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.boltz2 import Boltz2
@@ -33,7 +32,7 @@ rfdaa = pipeline.add(RFdiffusionAllAtom(pdb=rifampicin, #can also be a path, pre
                                         ligand='LIG', #in rfdaa always specify the ligand name
                                         contigs='10-20,A6-140',
                                         num_designs=2,
-                                        steps=200))
+                                        steps=20))
 
 
 lmpnn = pipeline.add(LigandMPNN(structures=rfdaa,
@@ -43,6 +42,7 @@ lmpnn = pipeline.add(LigandMPNN(structures=rfdaa,
 
 msas = pipeline.add(MMseqs2(sequences=lmpnn))
 
+boltz_apo = pipeline.add(Boltz2(proteins=lmpnn))
 boltz_holo = pipeline.add(Boltz2(proteins=lmpnn,
                                 ligands=rifampicin,
                                 msas=msas))

@@ -61,6 +61,14 @@ pipeline.slurm()  # Submit to cluster
 - Inputs: `proteins/sequences`, `linker` (default: GGGGSGGGGSGGGGSGGGGS), `linker_lengths`
 - Outputs: `sequences` [id, sequence, lengths]
 
+**StitchSequences** - Combine sequences from multiple sequence generation tools
+- Inputs: `sequences` (list of ToolOutputs), `selections` (position specifications)
+- Outputs: `sequences` [id, sequence]
+
+**SiteDirectedMutagenesis** - Introduce specific mutations into sequences
+- Inputs: `sequences`, `mutations` (mutation specifications)
+- Outputs: `sequences` [id, sequence, mutations_applied]
+
 ### Folding/Cofolding
 
 **AlphaFold** - Structure prediction (ColabFold)
@@ -85,6 +93,22 @@ pipeline.slurm()  # Submit to cluster
 - Inputs: `structures`, `ligand`, `output_format`, `create_pymol` (default: True)
 - Outputs: `interactions` [id, ligand_id, interaction_type, residue, distance, angle, energy]
 
+**DistanceSelector** - Distance-based residue selection
+- Inputs: `structures`, `ligand`, `distance` (default: 5.0Å), `reference_type`
+- Outputs: `selections` [id, within, beyond, distance_cutoff, reference_ligand]
+
+**ProteinLigandContacts** - Analyze protein-ligand contact networks
+- Inputs: `structures`, `ligand`, `contact_distance` (default: 4.0Å)
+- Outputs: `contacts` [id, residue, ligand_atom, distance, contact_type]
+
+**MobileDistance** - Distance measurements with mobile references
+- Inputs: `structures`, `reference`, `target`, `method`
+- Outputs: `distances` [id, mobile_distance, reference_coords, target_coords]
+
+**Confidence** - Extract confidence scores from structures
+- Inputs: `structures`, `score_type`, `residue_range`
+- Outputs: `confidence` [id, residue, confidence_score, score_type]
+
 ### Data Management
 
 **Filter** - Expression-based result filtering
@@ -103,17 +127,47 @@ pipeline.slurm()  # Submit to cluster
 - Inputs: `pool`, `history`, `compare` (default: "sequence")
 - Outputs: Same as input (deduplicated), `missing` [id, structure, msa]
 
+**SelectBest** - Select top-performing structures/sequences
+- Inputs: `pool` (structures/sequences), `datasheets`, `metric`, `mode` ("min"/"max"), `max_items`
+- Outputs: Same as input pool (filtered to best items)
+
+**SliceDatasheet** - Extract subset of rows from datasheet
+- Inputs: `datasheet`, `start_row`, `end_row`, `max_rows`
+- Outputs: `sliced` [same columns as input, subset of rows]
+
+**AverageByDatasheet** - Calculate average metrics across datasheets
+- Inputs: `datasheets` (list), `group_by` (column), `metrics` (columns to average)
+- Outputs: `averaged` [group_column, {averaged_metrics}]
+
+**ExtractMetrics** - Extract specific metrics from multiple datasheets
+- Inputs: `datasheets` (list), `metrics` (column names)
+- Outputs: `metrics` [cycle, {extracted_metrics}]
+
 ### Visualization
 
 **PyMOL** - Automated molecular visualization sessions
 - Inputs: `structures`, `color_by`, `reference_structure`, `alignment`, `session_name`
 - Outputs: .pse session files
 
+### Sequence Analysis
+
+**MMseqs2** - Multiple sequence alignment and homology search
+- Inputs: `sequences`, `database`, `search_type`, `e_value`
+- Outputs: `msas` [id, sequence_id, sequence, msa_file]
+
 ### Utilities
 
 **LoadOutput** - Import results from previous pipelines
 - Inputs: `output_json` (path), `filter`, `validate_files` (default: True)
 - Outputs: Same as original tool
+
+**FetchStructure** - Download structures from databases
+- Inputs: `structure_ids`, `database` ("pdb"/"alphafold"), `format`
+- Outputs: `structures` [id, structure_file, source_database]
+
+**CompoundLibrary** - Generate compound libraries and properties
+- Inputs: `smiles` (list), `properties`, `filters`
+- Outputs: `compounds` [id, smiles, {calculated_properties}]
 
 ## Core Concepts
 

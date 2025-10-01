@@ -708,11 +708,11 @@ class StandardizedOutput:
                 else:
                     ids.append(filename)
         return ids
-    
+
     def _extract_sequence_ids(self) -> List[str]:
         """Extract sequence IDs from sequence files or datasheets."""
         ids = []
-        
+
         # Try to get IDs from datasheets first
         if hasattr(self.datasheets, '_datasheets'):
             for name, info in self.datasheets._datasheets.items():

@@ -19,6 +19,8 @@ from PipelineScripts.concatenate_datasheets import ConcatenateDatasheets
 from PipelineScripts.remove_duplicates import RemoveDuplicates
 from PipelineScripts.filter import Filter
 from PipelineScripts.select_best import SelectBest
+from PipelineScripts.average_by_datasheet import AverageByDatasheet
+from PipelineScripts.extract_metrics import ExtractMetrics
 
 pipeline = Pipeline(
     pipeline_name="LigandMPNN-MutationComposer-MMseqs-Cycle", #Will create a folder in /shares/USER/<pipeline_name>
@@ -34,8 +36,10 @@ pipeline.resources(
 """
 We load both open and close form so that we calculate the delta in affinity and use it as benchmark
 """
-best_open = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'))
-best_close = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'))
+original_open = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'))
+original_close = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'))
+
+best_open,best_close=original_open,original_close
 
 """
 Calculate baseline affinity delta for original structures
@@ -56,15 +60,16 @@ all_analyses = [original_analysis]  # Start with original baseline
 all_pools = [best_open]  # Start with original best structure
 
 for CYCLE in range(NUM_CYCLES):
-    pipeline.set_suffix(f"Cycle{CYCLE}")
+    pipeline.set_suffix(f"Cycle{CYCLE+1}")
     """
     Diversify with LigandMPNN
     """
+    mutation_range = "141+143+145+147-149+151-152+154+157+160-161+165+167-168+170-172+175-176+178+180+245+271"
     lmpnn = pipeline.add(LigandMPNN(structures=best_open, #this is equivalent to boltz2
                                     ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                                     num_sequences=1000,
                                     batch_size=25, 
-                                    redesigned="145-180", #similarly you can specify fixed=...
+                                    redesigned=mutation_range, #similarly you can specify fixed=...
                                     design_within=4))
     
     profiler = pipeline.add(MutationProfiler(original=best_open,
@@ -104,12 +109,12 @@ for CYCLE in range(NUM_CYCLES):
     #boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences))
     msas = pipeline.add(MMseqs2(sequences=unique_new_sequences))
     boltz_holo_open = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=best_open,
+                                    ligands=original_open,
                                     msas=msas,
                                     #msas=boltz_apo,
                                     affinity=True))
     boltz_holo_close = pipeline.add(Boltz2(proteins=unique_new_sequences,
-                                    ligands=best_close,
+                                    ligands=original_close,
                                     msas=msas,
                                     #msas=boltz_apo,
                                     affinity=True))
@@ -121,22 +126,22 @@ for CYCLE in range(NUM_CYCLES):
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='open_chlorine_distance'))
-    close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_close,
-                                                                        residue='D in IHDWG',
-                                                                        atom='LIG.Cl',
-                                                                        metric_name='close_chlorine_distance'))
+    open_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open,
+                                                                   residue='D in IHDWG',
+                                                                   atom='LIG.N88',
+                                                                   metric_name='open_cap_distance'))
     current_analysis = pipeline.add(MergeDatasheets(datasheets=[boltz_holo_open.datasheets.affinity,
                                                         boltz_holo_close.datasheets.affinity,
                                                         open_chlorine_aspartate_distance.datasheets.analysis,
-                                                        close_chlorine_aspartate_distance.datasheets.analysis],
+                                                        open_cap_aspartate_distance.datasheets.analysis],
                                             prefixes=["open_","close_","",""],
                                             calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"} ))
     current_filtered = pipeline.add(Filter(data=current_analysis,
-                                    expression="open_chlorine_distance < 5.0"))
+                                    expression="open_chlorine_distance < 5.0 and open_cap_distance > 10.0"))
     
     # Add current cycle results to the arrays
-    all_analyses.append(current_filtered)
     all_pools.append(boltz_holo_open)
+    all_analyses.append(current_filtered)
     
     """
     Select best across ALL cycles
@@ -144,12 +149,21 @@ for CYCLE in range(NUM_CYCLES):
     best_open = pipeline.add(SelectBest(
         pool=[pool for pool in all_pools],  # All pools from all cycles
         datasheets=[x.datasheets.merged for x in all_analyses],  # All analyses from all cycles
-        metric='affinity_delta',
+        metric='open_affinity_pred_value',
         mode='min',
         name=f'{CYCLE+1}_best'
     ))
 
-combined_datasheets = pipeline.add(ConcatenateDatasheets([x.datasheets.merged for x in all_analyses]))
+all_merged = [x.datasheets.merged for x in all_analyses]
+combined_datasheets = pipeline.add(ConcatenateDatasheets(all_merged))
+pipeline.add(AverageByDatasheet(all_merged))
+
+#extract metrics for column analysis on Prism
+metrics = ["affinity_delta",
+           "open_affinity_pred_value",
+           "close_affinity_pred_value"]
+pipeline.add(ExtractMetrics(datasheets=all_merged,
+                            metrics=metrics))
 
 #Prints
 pipeline.save()

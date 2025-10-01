@@ -1,5 +1,5 @@
 """
-This pipeline shows how predict the structure of the protein HaloTag7 bound to a ligand
+This pipeline shows how to extract metrics from a past run
 """
 
 #!/usr/bin/env python3
@@ -7,29 +7,34 @@ import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import Pipeline
-from PipelineScripts.boltz2 import Boltz2
+from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.extract_metrics import ExtractMetrics
 
 pipeline = Pipeline(
-    pipeline_name="Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="HT7_Cy7_C_S", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
-    job_description="Folding of HaloTag7 with Cy7 methyl amide open enantiomer S")
+    pipeline_name="Calculations", 
+    job_name="LigandMPNN-MutationComposer-MMseqs-Cycles", 
+    job_description="Average by datasheets and extract metrics")
 
 pipeline.resources(
-    gpu="V100",
     time="24:00:00",
     memory="16GB"
 )
 
-"""
-Importantly, when writing the ligand smiles as a string, use r prefix (raw string) to avoid misinterpreting any backslash \ character. 
-We set global_msas_cache to True to save the protein msa for any later use of it – or to retrieve it if it was already computed.
-We add pipeline=pipeline only so the tool can access the job name. This is not done when folding sequences from previous tools.
-"""
-boltz2 = pipeline.add(Boltz2(proteins="MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
-ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
-affinity=True,
-global_msas_cache=True,
-pipeline=pipeline))
+tool_outputs = [f'/shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/HT7_Cy7_C_R_{x}/ToolOutputs' for x in ['003','008','009','010','011']] + [f'//shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/HT7_Cy7_C_R_W2_00{i}/ToolOutputs' for i in [1,2,3,4,5]]
+
+original = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/HT7_Cy7_C_R_003/ToolOutputs/3_MergeDatasheets_output.json'))
+
+for folder in tool_outputs:
+    pipeline.set_suffix(os.path.basename(folder.replace('/ToolOutputs','')))
+    selected=[(x,pipeline.add(LoadOutput(os.path.join(folder,x)))) for x in os.listdir(folder) if "Select" in x]
+    selected_sorted = sorted(selected,key=lambda x: int(x[0].split('_')[0]))
+    all_merged = [original.datasheets.merged] + [x[1].datasheets.selected for x in selected_sorted]
+    metrics = ["affinity_delta",
+            "open_affinity_pred_value",
+            "close_affinity_pred_value"]
+    pipeline.add(ExtractMetrics(datasheets=all_merged,
+                                metrics=metrics))
+
 
 pipeline.save()
-pipeline.slurm(email="")
+pipeline.slurm()

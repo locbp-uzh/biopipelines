@@ -192,18 +192,18 @@ main() {
     fi
 
     # Check if pandas is available
-    echo "Checking environment dependencies..."
-    if ! python -c "import pandas" >/dev/null 2>&1; then
-        echo ""
-        echo "Error: BioPipelines requires pandas to run. It is usually enough to run:"
-        echo "   module load mamba"
-        echo "before running the submit script. Otherwise you might have to:"
-        echo "A. Install pandas first with pip install pandas, or"
-        echo "B. Activate a conda environment that contains pandas"
-        return 1
-    fi
-    echo "✓ pandas available"
-    echo ""
+    #echo "Checking environment dependencies..."
+    #if ! python -c "import pandas" >/dev/null 2>&1; then
+    #    echo ""
+    #    echo "Error: BioPipelines requires pandas to run. It is usually enough to run:"
+    #    echo "   module load mamba"
+    #    echo "before running the submit script. Otherwise you might have to:"
+    #    echo "A. Install pandas first with pip install pandas, or"
+    #    echo "B. Activate a conda environment that contains pandas"
+    #    return 1
+    #fi
+    #echo "✓ pandas available"
+    #echo ""
 
     # Default to pipeline.py if no script specified
     if [ -z "$pipeline_script" ]; then
