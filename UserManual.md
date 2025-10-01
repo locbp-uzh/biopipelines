@@ -13,8 +13,8 @@ jupyter notebook my_pipeline.ipynb
 ### Basic Pipeline Structure
 ```python
 from PipelineScripts.pipeline import Pipeline
-from PipelineScripts.ligand_mpnn import LigandMPNN
-from PipelineScripts.boltz2 import Boltz2
+from PipelineScripts.tool1 import Tool1
+from PipelineScripts.tool2 import Tool2
 
 # 1. Create pipeline
 pipeline = Pipeline("PipelineName", "JobName", "Description")
@@ -23,63 +23,97 @@ pipeline = Pipeline("PipelineName", "JobName", "Description")
 pipeline.resources(gpu="V100", time="24:00:00", memory="16GB")
 
 # 3. Add tools sequentially
-tool1 = pipeline.add(ToolClass(parameters))
-tool2 = pipeline.add(ToolClass(input=tool1.output, other_params))
+tool1_output = pipeline.add(Tool1(parameters))
+tool2_output = pipeline.add(Tool2(input=tool1_output, other_parameters))
 
 # 4. Execute
 pipeline.save()           # Generate scripts
-pipeline.slurm(email="")  # Submit to cluster
+pipeline.slurm()  # Submit to cluster
 ```
 
-## Tool Categories
+## Tool Reference
 
 ### Structure Generation
-Generate protein backbones and scaffolds from templates or de novo.
 
-- **[RFdiffusion](Docs/RFdiffusion.md)** - Backbone structure generation
-- **[RFdiffusionAllAtom](Docs/RFdiffusionAllAtom.md)** - All-atom generation with ligands
+**RFdiffusion** - Backbone structure generation
+- Inputs: `pdb` (template), `contigs` (design spec), `num_designs` (default: 1)
+- Outputs: `structures` [id, source_id, pdb, fixed, designed, contigs, time, status]
+
+**RFdiffusionAllAtom** - All-atom generation with ligands
+- Inputs: `ligand` (required), `pdb` (template), `contigs`, `num_designs` (default: 1)
+- Outputs: `structures` [id, source_id, pdb, fixed, designed, contigs, time, status]
 
 ### Sequence Generation
-Design amino acid sequences for generated or existing structures.
 
-- **[LigandMPNN](Docs/LigandMPNN.md)** - Ligand-aware sequence design
-- **[ProteinMPNN](Docs/ProteinMPNN.md)** - General protein sequence design  
-- **[MutationComposer](Docs/MutationComposer.md)** - Mutation-guided generation
-- **[Fuse](Docs/Fuse.md)** - Protein-protein fusion design
+**LigandMPNN** - Ligand-aware sequence design
+- Inputs: `structures`, `ligand` (required), `num_sequences` (default: 1), `design_within` (default: 5.0Å)
+- Outputs: `sequences` [id, sequence, sample, T, seed, overall_confidence, ligand_confidence, seq_rec]
+
+**ProteinMPNN** - General protein sequence design
+- Inputs: `structures`, `num_sequences` (default: 1), `fixed`, `redesigned`, `plddt_threshold` (default: 100.0)
+- Outputs: `sequences` [id, source_id, source_pdb, sequence, score, seq_recovery, rmsd]
+
+**MutationComposer** - Mutation-guided sequence generation
+- Inputs: `frequencies`, `num_sequences` (default: 10), `mode`, `combination_strategy`
+- Outputs: `sequences` [id, sequence, mutations, mutation_positions]
+
+**Fuse** - Protein-protein fusion design
+- Inputs: `proteins/sequences`, `linker` (default: GGGGSGGGGSGGGGSGGGGS), `linker_lengths`
+- Outputs: `sequences` [id, sequence, lengths]
 
 ### Folding/Cofolding
-Predict structures from sequences, with support for ligands and complexes.
 
-- **[AlphaFold](Docs/AlphaFold.md)** - Structure prediction (ColabFold)
-- **[Boltz](Docs/Boltz.md)** - Advanced prediction with noncovalent interactions
+**AlphaFold** - Structure prediction (ColabFold)
+- Inputs: `sequences`, `num_relax` (default: 0), `num_recycle` (default: 3)
+- Outputs: `structures` [id, source_id, sequence]
 
-### Analysis of MPNN Output
-Analyze and characterize sequence design results.
+**Boltz2** - Advanced prediction with noncovalent interactions
+- Inputs: `proteins`, `ligands`, `affinity` (default: True), `recycling_steps`, `diffusion_samples`
+- Outputs: `confidence` [id, input_file, confidence_score, ptm, iptm, complex_plddt, complex_iplddt], `affinity` [id, input_file, affinity_pred_value, affinity_probability_binary]
 
-- **[MutationProfiler](Docs/MutationProfiler.md)** - Statistical analysis of sequence variations
+### Analysis
 
-### Structure Analysis
-Analyze predicted structures for binding, stability, and other properties.
+**MutationProfiler** - Statistical analysis of sequence variations
+- Inputs: `original`, `mutants`, `include_original` (default: True)
+- Outputs: `profile` [position, original, count, frequency], `mutations` [position, original, A-Z], `absolute_frequencies`, `relative_frequencies`
 
-- **[ResidueAtomDistance](Docs/ResidueAtomDistance.md)** - Distance measurements and contacts
+**ResidueAtomDistance** - Distance measurements and contacts
+- Inputs: `input`, `atom` (e.g., 'LIG.Cl'), `residue` (e.g., 'D in IGDWG'), `method` (default: "min")
+- Outputs: `analysis` [id, source_structure, {metric_name}]
 
-### Filtering
-Process, filter, and combine results from multiple tools and cycles.
+**PLIP** - Protein-ligand interaction analysis
+- Inputs: `structures`, `ligand`, `output_format`, `create_pymol` (default: True)
+- Outputs: `interactions` [id, ligand_id, interaction_type, residue, distance, angle, energy]
 
-- **[Filter](Docs/Filter.md)** - Expression-based result filtering
-- **[MergeDatasheets](Docs/MergeDatasheets.md)** - Combine analysis results
-- **[ConcatenateDatasheets](Docs/ConcatenateDatasheets.md)** - Merge datasets across cycles  
-- **[RemoveDuplicates](Docs/RemoveDuplicates.md)** - Sequence deduplication
+### Data Management
+
+**Filter** - Expression-based result filtering
+- Inputs: `data` (required), `pool`, `expression` (required), `max_items`, `sort_by`
+- Outputs: `{input_name}` (filtered), `missing` [id, structure, msa]
+
+**MergeDatasheets** - Combine analysis results
+- Inputs: `datasheets` (list), `prefixes`, `key` (default: "id"), `calculate`, `id_map`
+- Outputs: `merged` [key, source_structure, {prefixed_metrics}, {calculated_columns}]
+
+**ConcatenateDatasheets** - Merge datasets across cycles
+- Inputs: `datasheets` (list), `fill` (missing value filler)
+- Outputs: `concatenated` [common columns, source_datasheet]
+
+**RemoveDuplicates** - Sequence deduplication
+- Inputs: `pool`, `history`, `compare` (default: "sequence")
+- Outputs: Same as input (deduplicated), `missing` [id, structure, msa]
 
 ### Visualization
-Create visual representations and analysis sessions.
 
-- **[PyMOL](Docs/PyMOL.md)** - Automated molecular visualization sessions
+**PyMOL** - Automated molecular visualization sessions
+- Inputs: `structures`, `color_by`, `reference_structure`, `alignment`, `session_name`
+- Outputs: .pse session files
 
-### Miscellaneous
-Utility tools for pipeline management and data handling.
+### Utilities
 
-- **[LoadOutput](Docs/LoadOutput.md)** - Import results from previous pipelines
+**LoadOutput** - Import results from previous pipelines
+- Inputs: `output_json` (path), `filter`, `validate_files` (default: True)
+- Outputs: Same as original tool
 
 ## Core Concepts
 
@@ -131,7 +165,7 @@ tool2 = pipeline.add(ToolB(input=tool1.output))  # Uses tool1's output
 Configure compute resources per pipeline:
 ```python
 pipeline.resources(
-    gpu="V100",        # GPU type: T4, V100, A100
+    gpu="V100",        # GPU type: T4, V100, A100, H100, 32GB, 80GB
     memory="16GB",     # RAM allocation
     time="24:00:00",   # Wall time limit
     nodes=1            # Number of compute nodes
@@ -154,10 +188,9 @@ analysis = ResidueAtomDistance(structures=boltz.output, residues="A50", atoms="B
 best_structure = initial_structure
 for cycle in range(5):
     sequences = LigandMPNN(structures=best_structure, num_sequences=20)
-    structures = Boltz2(proteins=sequences.output)
-    analysis = ResidueAtomDistance(structures=structures.output, ...)
-    filtered = Filter(data=analysis.output, expression="distance < 5.0")
-    best_structure = SelectBest(pool=structures.output, datasheets=filtered.output)
+    structures = Boltz2(proteins=sequences)
+    analysis = ResidueAtomDistance(structures=structures,...)
+    best_structure = SelectBest(pool=structures, datasheets=analysis.distance, metric="distance",mode="min")
 ```
 
 ### Multi-Target Analysis
@@ -224,21 +257,12 @@ Complete pipeline examples are available in [ExamplePipelines/](ExamplePipelines
 ### Custom Environments
 Specify custom conda environments:
 ```python
-tool = pipeline.add(ToolClass(env="custom_env", **params))
-```
-
-### Resource Optimization
-Fine-tune resource allocation:
-```python
-tool = pipeline.add(ToolClass(
-    resources={"gpu": "A100", "memory": "32GB", "time": "48:00:00"},
-    **params
-))
+tool = pipeline.add(SomeTool(env="custom_env", **params))
 ```
 
 ### Checkpoint Management
 Load previous results:
 ```python
-previous_run = LoadOutput("/path/to/previous/job/ToolOutputs/tool_output.json")
-next_tool = pipeline.add(ToolClass(input=previous_run.output))
+previous_run = pipeline.add(LoadOutput("/path/to/previous/job/ToolOutputs/<tool_output>.json"))
+next_tool = pipeline.add(SomeTool(input=previous_run.output))
 ```

@@ -25,15 +25,13 @@ Output:
 import sys
 import os
 import pandas as pd
-import numpy as np
+import math
 from pathlib import Path
 
-try:
-    import MDAnalysis as mda
-    from MDAnalysis.analysis import distances
-    HAS_MDANALYSIS = True
-except ImportError:
-    HAS_MDANALYSIS = False
+# Import our native PDB parser
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom
+from typing import List, Dict, Tuple
 
 
 def parse_reference_spec(reference_spec):
@@ -57,92 +55,98 @@ def parse_reference_spec(reference_spec):
     return reference_type, selection
 
 
-def get_ligand_selection(universe, ligand_name):
+def get_ligand_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
     """
-    Get MDAnalysis selection for a ligand by name.
+    Get atoms for a ligand by name using native PDB parser.
 
     Args:
-        universe: MDAnalysis Universe object
+        atoms: List of all atoms from PDB file
         ligand_name: Name of the ligand (e.g., "LIG", "ATP")
 
     Returns:
-        AtomGroup for the ligand
+        List of Atom objects for the ligand
     """
-    # Try different common ligand selection patterns
-    selection_patterns = [
-        f"resname {ligand_name}",
-        f"segid {ligand_name}",
-        f"resname {ligand_name.upper()}",
-        f"resname {ligand_name.lower()}"
-    ]
+    ligand_atoms = select_atoms_by_ligand(atoms, ligand_name)
 
-    for pattern in selection_patterns:
-        try:
-            ligand_atoms = universe.select_atoms(pattern)
-            if len(ligand_atoms) > 0:
-                print(f"Found ligand using selection: {pattern} ({len(ligand_atoms)} atoms)")
-                return ligand_atoms
-        except Exception as e:
-            continue
+    if not ligand_atoms:
+        # Get all unique residue names for error message
+        residue_names = set(atom.res_name for atom in atoms)
+        raise ValueError(f"Could not find ligand '{ligand_name}' in structure. Available residue names: {residue_names}")
 
-    raise ValueError(f"Could not find ligand '{ligand_name}' in structure. Available residue names: {set(universe.residues.resnames)}")
+    print(f"Found ligand '{ligand_name}': {len(ligand_atoms)} atoms")
+    return ligand_atoms
 
 
-def get_protein_residues(universe):
+def get_protein_residues(atoms: List[Atom]) -> Dict[int, List[Atom]]:
     """
-    Get protein residues from the universe.
+    Get protein residues organized by residue number.
 
     Args:
-        universe: MDAnalysis Universe object
+        atoms: List of all atoms from PDB file
 
     Returns:
-        ResidueGroup for protein residues
+        Dictionary mapping residue number to list of atoms in that residue
     """
-    # Standard protein residue selection
-    protein_selection = "protein"
+    # Standard amino acid names
+    standard_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
 
-    try:
-        protein_residues = universe.select_atoms(protein_selection).residues
-        if len(protein_residues) == 0:
-            raise ValueError("No protein residues found")
-        return protein_residues
-    except Exception as e:
-        raise ValueError(f"Could not select protein residues: {e}")
+    protein_residues = {}
+    for atom in atoms:
+        if atom.res_name in standard_residues:
+            res_key = (atom.chain, atom.res_num)  # Use chain+resnum as key to handle multiple chains
+            if res_key not in protein_residues:
+                protein_residues[res_key] = []
+            protein_residues[res_key].append(atom)
+
+    if not protein_residues:
+        raise ValueError("No protein residues found")
+
+    return protein_residues
 
 
-def calculate_residue_distances(universe, reference_atoms, distance_cutoff):
+def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     """
-    Calculate distances from protein residues to reference atoms.
+    Calculate Euclidean distance between two atoms.
+    """
+    dx = atom1.x - atom2.x
+    dy = atom1.y - atom2.y
+    dz = atom1.z - atom2.z
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+
+def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], distance_cutoff: float) -> Tuple[List[str], List[str]]:
+    """
+    Calculate distances from protein residues to reference atoms using native PDB parser.
 
     Args:
-        universe: MDAnalysis Universe object
-        reference_atoms: AtomGroup for reference atoms
+        atoms: List of all atoms from PDB file
+        reference_atoms: List of reference atoms
         distance_cutoff: Distance cutoff in Angstroms
 
     Returns:
-        Tuple of (within_residues, beyond_residues) as lists of residue numbers
+        Tuple of (within_residues, beyond_residues) as lists of residue identifiers
     """
-    protein_residues = get_protein_residues(universe)
+    protein_residues = get_protein_residues(atoms)
 
     within_residues = []
     beyond_residues = []
 
-    for residue in protein_residues:
-        # Get all atoms in this residue
-        residue_atoms = residue.atoms
+    for res_key, residue_atoms in protein_residues.items():
+        chain, res_num = res_key
 
         # Calculate minimum distance from any atom in this residue to any reference atom
-        distances_matrix = distances.distance_array(
-            residue_atoms.positions,
-            reference_atoms.positions,
-            box=universe.dimensions
-        )
+        min_distance = float('inf')
 
-        min_distance = np.min(distances_matrix)
+        for res_atom in residue_atoms:
+            for ref_atom in reference_atoms:
+                dist = calculate_distance(res_atom, ref_atom)
+                min_distance = min(min_distance, dist)
 
         # Format residue identifier (chain + residue number)
-        chain_id = residue.segment.segid if residue.segment.segid else "A"
-        residue_id = f"{chain_id}{residue.resid}"
+        chain_id = chain if chain else "A"
+        residue_id = f"{chain_id}{res_num}"
 
         if min_distance <= distance_cutoff:
             within_residues.append(residue_id)
@@ -168,9 +172,9 @@ def format_pymol_selection(residue_list):
     return " ".join(residue_list)
 
 
-def analyze_structure_distance(pdb_file, reference_spec, distance_cutoff):
+def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float) -> Dict[str, any]:
     """
-    Analyze a single structure for distance-based residue selection.
+    Analyze a single structure for distance-based residue selection using native PDB parser.
 
     Args:
         pdb_file: Path to PDB file
@@ -180,37 +184,32 @@ def analyze_structure_distance(pdb_file, reference_spec, distance_cutoff):
     Returns:
         Dictionary with analysis results
     """
-    if not HAS_MDANALYSIS:
-        raise ImportError("MDAnalysis is required for distance calculations. Install with: pip install MDAnalysis")
-
-    # Load structure
+    # Load structure using native PDB parser
     try:
-        universe = mda.Universe(pdb_file)
+        atoms = parse_pdb_file(pdb_file)
     except Exception as e:
         raise ValueError(f"Could not load PDB file {pdb_file}: {e}")
+
+    if not atoms:
+        raise ValueError(f"No atoms found in PDB file: {pdb_file}")
 
     # Parse reference specification
     reference_type, selection = parse_reference_spec(reference_spec)
 
     # Get reference atoms based on type
     if reference_type == "ligand":
-        reference_atoms = get_ligand_selection(universe, selection)
+        reference_atoms = get_ligand_atoms(atoms, selection)
         reference_description = f"ligand {selection}"
     else:
-        # For "atoms" or "residues", use the selection directly
-        try:
-            reference_atoms = universe.select_atoms(selection)
-            if len(reference_atoms) == 0:
-                raise ValueError(f"No atoms found for selection: {selection}")
-            reference_description = f"{reference_type} {selection}"
-        except Exception as e:
-            raise ValueError(f"Invalid {reference_type} selection '{selection}': {e}")
+        # For atoms/residues, we'll need to implement native selection parsing
+        # For now, only ligand selection is supported
+        raise ValueError(f"Reference type '{reference_type}' not yet supported with native PDB parser. Only 'ligand' is supported.")
 
     print(f"Using reference: {reference_description} ({len(reference_atoms)} atoms)")
 
     # Calculate distances
     within_residues, beyond_residues = calculate_residue_distances(
-        universe, reference_atoms, distance_cutoff
+        atoms, reference_atoms, distance_cutoff
     )
 
     # Format as PyMOL selections

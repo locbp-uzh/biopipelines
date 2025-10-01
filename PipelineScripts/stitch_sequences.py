@@ -239,9 +239,13 @@ class StitchSequences(BaseConfig):
 echo "Running sequence stitching"
 echo "Sequence sources: {len(self.input_sequences)}"
 echo "Base sequence: {self.input_sequences[0].__class__.__name__}"
-for i in range(1, len(self.input_sequences)):
-    echo "Overlay {i}: {self.input_sequences[i].__class__.__name__}"
-echo "Output: {stitched_sequences_csv}"
+"""
+
+        # Add overlay echo statements for each overlay tool
+        for i in range(1, len(self.input_sequences)):
+            script_content += f'echo "Overlay {i}: {self.input_sequences[i].__class__.__name__}"\n'
+
+        script_content += f"""echo "Output: {stitched_sequences_csv}"
 
 # Run Python stitching script
 python "{os.path.join(self.folders['HelpScripts'], 'pipe_stitch_sequences.py')}" \\

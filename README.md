@@ -6,6 +6,14 @@ A Python framework for automated computational protein design workflows that gen
 
 BioPipelines creates modular, reproducible workflows by connecting bioinformatics tools through standardized interfaces. The system **generates bash scripts** for cluster execution rather than running computations directly.
 
+## Installation
+
+```bash
+git clone https://gitlab.uzh.ch/locbp/public/biopipelines
+```
+
+**⚠️ Important**: Always run pipelines from the BioPipelines root directory for proper path resolution.
+
 ## Quick Start
 
 ```python
@@ -62,9 +70,10 @@ pipeline.slurm(email="user@domain.com")
 
 ## Documentation
 
-- **[User Manual](UserManual.md)** - Complete usage guide
-- **[Tool Documentation](Docs/)** - Detailed tool-specific guides
+- **[User Manual](UserManual.md)** - Complete usage guide with tool reference
 - **[Architecture](Docs/Architecture.md)** - System design and concepts
+- **[Tool Development](Docs/ToolDevelopment.md)** - Guide for developing new tools
+- **[Tool Data](Docs/ToolData.md)** - Data format specifications
 - **[Examples](ExamplePipelines/)** - Pipeline examples
 
 ## Key Features
@@ -76,16 +85,6 @@ pipeline.slurm(email="user@domain.com")
 - **Filesystem Prediction**: Pre-determines output structure before execution
 - **Cluster Optimization**: Designed for university HPC environments
 
-## Installation
-
-```bash
-git clone <repository-url>
-cd biopipelines
-# Run notebooks directly from this directory for optimal functionality
-jupyter notebook
-```
-
-**⚠️ Important**: Always run pipelines from the BioPipelines root directory for proper path resolution.
 
 ## Support
 
