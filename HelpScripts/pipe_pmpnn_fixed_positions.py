@@ -160,8 +160,8 @@ elif input_source == "plddt" or input_source == "datasheet":  # datasheet fallba
                     mobile_dict[name][FIXED_CHAIN] = []
             else:
                 fixed_dict[name][FIXED_CHAIN] = sele_to_list(FIXED)
-                mobile_dict[name][FIXED_CHAIN] = []
-                print(f"Design: {name}, Selection-based - Fixed: {FIXED}")
+                mobile_dict[name][FIXED_CHAIN] = sele_to_list(DESIGNED)
+                print(f"Design: {name}, Selection-based - Fixed: {FIXED}, Redesigned: {DESIGNED}")
 
 with open(fixed_jsonl_file,"w") as jsonl_file:
     #Python converts dictionaries to string having keys inside '', json only recognises ""

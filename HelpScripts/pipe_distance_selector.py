@@ -156,6 +156,51 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
     return within_residues, beyond_residues
 
 
+def format_ligandmpnn_selection(residue_list):
+    """
+    Format residue list as LigandMPNN selection string (numbers only).
+
+    Args:
+        residue_list: List of residue identifiers (e.g., ["A10", "A11", "B15"])
+
+    Returns:
+        LigandMPNN selection string with ranges (e.g., "10-11+15")
+    """
+    if not residue_list:
+        return ""
+
+    # Extract just the numbers, assuming all residues are from the same chain
+    res_nums = []
+    for res_id in residue_list:
+        res_num = int(res_id[1:])  # Remove chain prefix
+        res_nums.append(res_num)
+
+    # Create range strings
+    res_nums.sort()
+    ranges = []
+    start = res_nums[0]
+    end = res_nums[0]
+
+    for i in range(1, len(res_nums)):
+        if res_nums[i] == end + 1:
+            end = res_nums[i]
+        else:
+            # Add completed range
+            if start == end:
+                ranges.append(f"{start}")
+            else:
+                ranges.append(f"{start}-{end}")
+            start = end = res_nums[i]
+
+    # Add final range
+    if start == end:
+        ranges.append(f"{start}")
+    else:
+        ranges.append(f"{start}-{end}")
+
+    return "+".join(ranges)
+
+
 def format_pymol_selection(residue_list):
     """
     Format residue list as PyMOL range selection string.
@@ -248,9 +293,13 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
         atoms, reference_atoms, distance_cutoff
     )
 
-    # Format as PyMOL selections
+    # Format as PyMOL selections (with chain prefixes)
     within_selection = format_pymol_selection(within_residues)
     beyond_selection = format_pymol_selection(beyond_residues)
+
+    # Format as LigandMPNN selections (numbers only)
+    within_lmpnn = format_ligandmpnn_selection(within_residues)
+    beyond_lmpnn = format_ligandmpnn_selection(beyond_residues)
 
     # Extract structure ID from filename
     structure_id = os.path.splitext(os.path.basename(pdb_file))[0]
@@ -258,8 +307,10 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
     return {
         "id": structure_id,
         "pdb": pdb_file,
-        "within": within_selection,
-        "beyond": beyond_selection,
+        "within": within_lmpnn,  # Use LigandMPNN format for compatibility
+        "beyond": beyond_lmpnn,  # Use LigandMPNN format for compatibility
+        "within_pymol": within_selection,  # Keep PyMOL format as separate column
+        "beyond_pymol": beyond_selection,  # Keep PyMOL format as separate column
         "distance_cutoff": distance_cutoff,
         "reference_ligand": reference_description
     }
