@@ -481,7 +481,6 @@ class Pipeline:
         # Conditional GPU setup
         if gpu_spec is None or gpu_spec == "none":
             gpu_setup = ""
-            module_load = ""
         else:
             gpu_setup = """
 # Check if nvidia-smi is available
@@ -494,7 +493,7 @@ fi
 gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader)
 echo "GPU Type: $gpu_type"
 """
-            module_load = "module load mamba singularityce"
+        module_load = "module load mamba singularityce"
 
         # Generate SLURM script
         slurm_content = f"""#!/usr/bin/bash
