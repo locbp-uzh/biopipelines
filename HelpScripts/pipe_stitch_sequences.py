@@ -3,15 +3,18 @@
 Runtime helper script for StitchSequences tool.
 
 This script stitches sequences from multiple sequence generation tools by combining
-a base sequence with overlay sequences at specified positions.
+a base sequence with overlay sequences at specified positions, generating all
+Cartesian product combinations.
 """
 
 import os
 import sys
 import argparse
 import json
+import re
 import pandas as pd
 from typing import Dict, List, Any, Optional, Tuple
+from itertools import product
 
 
 def parse_position_string(position_str: str) -> List[int]:
@@ -92,33 +95,74 @@ def load_positions_from_datasheet(datasheet_path: str, column_name: str) -> Dict
     return positions_map
 
 
-def find_matching_position_spec(seq_id: str, position_map: Dict[str, List[int]]) -> Optional[List[int]]:
+def parse_id_map_pattern(id_map: Dict[str, str]) -> Tuple[str, str]:
     """
-    Find matching position specification for a sequence ID.
-
-    Handles ID mapping between structure IDs (e.g., 'rifampicin_014_1') and
-    sequence IDs (e.g., 'rifampicin_014_1_1').
+    Parse ID mapping pattern.
 
     Args:
-        seq_id: Sequence ID to match (e.g., 'rifampicin_014_1_1')
-        position_map: Dictionary mapping structure IDs to positions
+        id_map: Dictionary with pattern mapping (e.g., {"*": "*_<N>"})
 
     Returns:
-        List of positions if match found, None otherwise
+        Tuple of (pattern, replacement_template)
     """
-    # Direct match
-    if seq_id in position_map:
-        return position_map[seq_id]
+    if "*" not in id_map:
+        raise ValueError("ID map must contain '*' key")
 
-    # Try to match by removing the last underscore and number suffix
-    # e.g., 'rifampicin_014_1_1' -> 'rifampicin_014_1'
-    parts = seq_id.rsplit('_', 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        structure_id = parts[0]
-        if structure_id in position_map:
-            return position_map[structure_id]
+    pattern = id_map["*"]
 
-    return None
+    # Convert pattern "*_<N>" to regex pattern
+    # "*_<N>" means match anything followed by underscore and number
+    # Extract the base by removing "_<N>" suffix
+    if pattern == "*_<N>":
+        # Pattern to extract base ID: match everything up to last _<number>
+        regex_pattern = r'^(.+)_\d+$'
+        return regex_pattern, r'\1'
+    else:
+        raise ValueError(f"Unsupported ID map pattern: {pattern}")
+
+
+def extract_base_id(seq_id: str, id_map: Dict[str, str]) -> str:
+    """
+    Extract base structure ID from sequence ID using id_map pattern.
+
+    Args:
+        seq_id: Sequence ID (e.g., 'rifampicin_014_1_1')
+        id_map: ID mapping pattern
+
+    Returns:
+        Base structure ID (e.g., 'rifampicin_014_1')
+    """
+    regex_pattern, replacement = parse_id_map_pattern(id_map)
+
+    match = re.match(regex_pattern, seq_id)
+    if match:
+        return match.group(1)
+    else:
+        # No pattern match, return as-is
+        return seq_id
+
+
+def group_sequences_by_base_id(sequences: Dict[str, str], id_map: Dict[str, str]) -> Dict[str, List[str]]:
+    """
+    Group sequence IDs by their base structure ID.
+
+    Args:
+        sequences: Dictionary mapping sequence IDs to sequences
+        id_map: ID mapping pattern
+
+    Returns:
+        Dictionary mapping base IDs to lists of sequence IDs
+    """
+    grouped = {}
+
+    for seq_id in sequences.keys():
+        base_id = extract_base_id(seq_id, id_map)
+
+        if base_id not in grouped:
+            grouped[base_id] = []
+        grouped[base_id].append(seq_id)
+
+    return grouped
 
 
 def stitch_sequences(base_sequence: str, overlay_sequence: str, positions: List[int]) -> str:
@@ -196,16 +240,21 @@ def load_sequences_from_csv(csv_path: str) -> Dict[str, str]:
 
 def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
     """
-    Stitch sequences based on configuration.
+    Stitch sequences based on configuration using Cartesian product.
+
+    Generates all combinations of sequences from different sources that share
+    the same base structure ID, then stitches them together.
 
     Args:
         config_data: Configuration dictionary with stitching parameters
     """
     sequence_sources = config_data['sequence_sources']
     position_specs = config_data['position_specs']
+    id_map = config_data.get('id_map', {"*": "*_<N>"})
     output_csv = config_data['output_csv']
 
     print(f"Stitching sequences from {len(sequence_sources)} sources")
+    print(f"ID mapping pattern: {id_map}")
 
     # Load all sequences
     all_sequences = []
@@ -277,55 +326,83 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 
     print(f"\n=== DEBUG: Total position maps created: {len(position_maps)} ===\n")
 
-    # Perform stitching
+    # Group sequences by base structure ID for all sources
+    print("\n=== Grouping sequences by base structure ID ===")
+    grouped_sources = []
+    for i, sequences in enumerate(all_sequences):
+        grouped = group_sequences_by_base_id(sequences, id_map)
+        grouped_sources.append(grouped)
+        print(f"Source {i} ({sequence_sources[i]['tool_name']}): {len(grouped)} base structure groups")
+        for base_id, seq_ids in list(grouped.items())[:3]:
+            print(f"  {base_id}: {len(seq_ids)} sequences")
+
+    # Get all base structure IDs (from first source)
+    base_structure_ids = sorted(grouped_sources[0].keys())
+    print(f"\nFound {len(base_structure_ids)} base structure IDs to process")
+
+    # Perform stitching using Cartesian product
     stitched_results = []
 
-    for seq_id in base_sequences.keys():
-        print(f"\nProcessing sequence: {seq_id}")
+    for base_id in base_structure_ids:
+        print(f"\n{'='*60}")
+        print(f"Processing base structure: {base_id}")
+        print(f"{'='*60}")
 
-        # Start with base sequence
-        current_sequence = base_sequences[seq_id]
-        print(f"  Base sequence: {current_sequence[:50]}{'...' if len(current_sequence) > 50 else ''}")
+        # Get position specification for this base structure
+        # Position specs use base structure IDs from datasheets
+        if base_id not in position_maps[1]:
+            print(f"Warning: No position specification for base structure {base_id}")
+            continue
 
-        # Apply overlays from each source
-        for overlay_index in range(1, len(all_sequences)):
-            overlay_sequences = all_sequences[overlay_index]
-            position_map = position_maps[overlay_index]
-            source_name = sequence_sources[overlay_index]['tool_name']
+        base_positions = position_maps[1][base_id]
+        print(f"Position specification: {base_positions[:10] if len(base_positions) > 10 else base_positions}{'...' if len(base_positions) > 10 else ''}")
 
-            print(f"\n  DEBUG: Overlay {overlay_index} from {source_name}")
-            print(f"    Available sequence IDs in overlay: {list(overlay_sequences.keys())}")
-            print(f"    Available IDs in position map: {list(position_map.keys())}")
-            print(f"    Looking for seq_id: {seq_id}")
-
-            if seq_id not in overlay_sequences:
-                print(f"  Warning: No overlay sequence from {source_name} for {seq_id}")
-                continue
-
-            # Find matching position specification (handles ID mapping)
-            positions = find_matching_position_spec(seq_id, position_map)
-
-            if positions is None:
-                print(f"  Warning: No position specification for {seq_id}")
-                continue
-
-            overlay_sequence = overlay_sequences[seq_id]
-
-            print(f"    Found overlay sequence (length {len(overlay_sequence)})")
-            print(f"    Found positions: {positions[:10] if len(positions) > 10 else positions}{'...' if len(positions) > 10 else ''}")
-
-            if positions:
-                print(f"  Overlaying {source_name} at positions: {positions[:10]}{'...' if len(positions) > 10 else ''}")
-                current_sequence = stitch_sequences(current_sequence, overlay_sequence, positions)
+        # Get all sequence IDs for this base structure from each source
+        source_seq_ids = []
+        for i, grouped in enumerate(grouped_sources):
+            if base_id in grouped:
+                source_seq_ids.append(grouped[base_id])
+                print(f"Source {i}: {len(grouped[base_id])} sequences")
             else:
-                print(f"  No overlay positions for {source_name}")
+                print(f"Warning: Base ID {base_id} not found in source {i}")
+                source_seq_ids.append([])
 
-        print(f"  Final sequence: {current_sequence[:50]}{'...' if len(current_sequence) > 50 else ''}")
+        if any(len(ids) == 0 for ids in source_seq_ids):
+            print(f"Skipping {base_id}: missing sequences from one or more sources")
+            continue
 
-        stitched_results.append({
-            'id': seq_id,
-            'sequence': current_sequence
-        })
+        # Generate all Cartesian product combinations
+        combinations = list(product(*source_seq_ids))
+        print(f"\nGenerating {len(combinations)} combinations (Cartesian product)")
+
+        for combo_idx, combo in enumerate(combinations, 1):
+            output_id = f"{base_id}_{combo_idx}"
+
+            print(f"\n  Combination {combo_idx}/{len(combinations)}: {output_id}")
+            print(f"    Source sequence IDs: {combo}")
+
+            # Get base sequence (from first source)
+            base_seq_id = combo[0]
+            current_sequence = all_sequences[0][base_seq_id]
+            print(f"    Base sequence: {current_sequence[:30]}... (length {len(current_sequence)})")
+
+            # Apply overlays from remaining sources
+            for source_idx in range(1, len(combo)):
+                overlay_seq_id = combo[source_idx]
+                overlay_sequence = all_sequences[source_idx][overlay_seq_id]
+
+                if base_positions:
+                    print(f"    Overlaying source {source_idx} ({overlay_seq_id}) at {len(base_positions)} positions")
+                    current_sequence = stitch_sequences(current_sequence, overlay_sequence, base_positions)
+                else:
+                    print(f"    No positions to overlay for source {source_idx}")
+
+            print(f"    Final sequence: {current_sequence[:30]}... (length {len(current_sequence)})")
+
+            stitched_results.append({
+                'id': output_id,
+                'sequence': current_sequence
+            })
 
     # Save results
     if stitched_results:

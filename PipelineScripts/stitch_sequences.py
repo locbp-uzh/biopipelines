@@ -37,6 +37,7 @@ class StitchSequences(BaseConfig):
     def __init__(self,
                  sequences: List[Union[ToolOutput, StandardizedOutput]],
                  selections: Union[List[Union[str, ToolOutput]], str] = None,
+                 id_map: Dict[str, str] = None,
                  **kwargs):
         """
         Initialize StitchSequences configuration.
@@ -44,11 +45,15 @@ class StitchSequences(BaseConfig):
         Args:
             sequences: List of sequence tools/outputs to combine. First is base, others overlay.
                       e.g., [tool1, tool2] - tool1 provides base, tool2 overlays at positions
-            positions: Position specifications for each sequence (except first base sequence).
+            selections: Position specifications for each sequence (except first base sequence).
                       Can be:
                       - List of strings: ["", "10-20+30-40"] - empty string means base, string means overlay positions
                       - List of datasheet references: ["", distances.datasheets.analysis.within]
                       - Single string: "10-20+30-40" - applies to second sequence only
+            id_map: ID mapping pattern between datasheet and sequence IDs. Default: {"*": "*_<N>"}
+                   - Left side (*): Pattern for datasheet IDs (base structure IDs)
+                   - Right side (*_<N>): Pattern for sequence IDs where <N> is sequence number
+                   - Enables matching datasheet ID 'protein_1' to sequences 'protein_1_1', 'protein_1_2', etc.
             **kwargs: Additional parameters
 
         Position Syntax:
@@ -61,27 +66,39 @@ class StitchSequences(BaseConfig):
             Datasheet format:
             - datasheet_reference → use position values from datasheet column
 
+        ID Mapping:
+            The id_map parameter handles cases where datasheet IDs (from tools like DistanceSelector)
+            don't match sequence IDs (from ProteinMPNN/LigandMPNN). For example:
+            - Datasheet: 'rifampicin_014_1', 'rifampicin_014_2'
+            - Sequences: 'rifampicin_014_1_1', 'rifampicin_014_1_2', 'rifampicin_014_2_1', ...
+
+            With id_map={"*": "*_<N>"}, all sequences matching 'rifampicin_014_1_*' will use
+            positions from datasheet entry 'rifampicin_014_1'. All combinations are generated
+            using Cartesian product.
+
         Examples:
-            # Combine base sequence with overlay at specific positions
+            # Basic usage with default ID mapping
             sequences = pipeline.add(StitchSequences(
-                sequences=[base_tool, overlay_tool],
-                selections=["", "10-20+30-40"]  # overlay_tool at positions 10-20 and 30-40
+                sequences=[pmpnn, lmpnn],
+                selections=["", distances.datasheets.selections.within]
             ))
 
-            # Use datasheet to specify positions
+            # Explicit ID mapping (same as default)
             sequences = pipeline.add(StitchSequences(
-                sequences=[base_tool, overlay_tool],
-                selections=["", tool.datasheets.analysis.positions]
+                sequences=[pmpnn, lmpnn],
+                selections=["", distances.datasheets.selections.within],
+                id_map={"*": "*_<N>"}
             ))
 
-            # Single overlay (second sequence only)
+            # Fixed positions instead of datasheet
             sequences = pipeline.add(StitchSequences(
                 sequences=[base_tool, overlay_tool],
-                selections="10-20+30-40"  # applies to overlay_tool
+                selections=["", "10-20+30-40"]
             ))
         """
         self.input_sequences = sequences
         self.position_specs = selections
+        self.id_map = id_map if id_map is not None else {"*": "*_<N>"}
 
         # Validate input
         if not sequences or len(sequences) < 2:
@@ -196,6 +213,7 @@ class StitchSequences(BaseConfig):
         config_data = {
             "sequence_sources": [],
             "position_specs": [],
+            "id_map": self.id_map,
             "output_csv": stitched_sequences_csv
         }
 
@@ -276,24 +294,24 @@ fi
         """
         Get expected output files after sequence stitching.
 
+        Predicts output sequence IDs based on Cartesian product of all input sequences
+        grouped by base structure ID.
+
         Returns:
             Dictionary with output file paths
         """
         sequences_csv = os.path.join(self.output_folder, "sequences.csv")
 
-        # Get sequence IDs from base tool - no fallbacks
-        base_tool = self.input_sequences[0]
-        if not hasattr(base_tool, 'sequence_ids'):
-            raise ValueError("Base sequence tool must have sequence_ids")
-        base_sequence_ids = base_tool.sequence_ids
+        # Predict output sequence IDs using Cartesian product
+        predicted_ids = self._predict_output_sequence_ids()
 
         datasheets = {
             "sequences": DatasheetInfo(
                 name="sequences",
                 path=sequences_csv,
                 columns=["id", "sequence"],
-                description="Stitched sequences combining multiple MPNN tools",
-                count=len(base_sequence_ids)
+                description="Stitched sequences combining multiple MPNN tools via Cartesian product",
+                count=len(predicted_ids)
             )
         }
 
@@ -303,10 +321,90 @@ fi
             "compounds": [],
             "compound_ids": [],
             "sequences": [sequences_csv],
-            "sequence_ids": base_sequence_ids,
+            "sequence_ids": predicted_ids,
             "datasheets": datasheets,
             "output_folder": self.output_folder
         }
+
+    def _predict_output_sequence_ids(self) -> List[str]:
+        """
+        Predict output sequence IDs based on Cartesian product of input sequences.
+
+        Uses id_map pattern to group sequences by base structure ID, then generates
+        all combinations and numbers them sequentially.
+
+        Returns:
+            List of predicted output sequence IDs
+        """
+        import re
+
+        # Parse id_map pattern
+        if "*" not in self.id_map or "*_<N>" not in self.id_map.values():
+            # Fallback to simple base IDs if pattern doesn't match expected format
+            base_tool = self.input_sequences[0]
+            if not hasattr(base_tool, 'sequence_ids'):
+                raise ValueError("Base sequence tool must have sequence_ids")
+            return base_tool.sequence_ids
+
+        # Extract base structure IDs by stripping sequence numbers from first tool
+        base_tool = self.input_sequences[0]
+        if not hasattr(base_tool, 'sequence_ids'):
+            raise ValueError("Base sequence tool must have sequence_ids")
+
+        # Group sequence IDs by base structure ID (strip trailing _N)
+        base_structure_ids = {}
+        for seq_id in base_tool.sequence_ids:
+            # Match pattern: anything ending with _<number>
+            match = re.match(r'^(.+)_\d+$', seq_id)
+            if match:
+                base_id = match.group(1)
+                if base_id not in base_structure_ids:
+                    base_structure_ids[base_id] = []
+                base_structure_ids[base_id].append(seq_id)
+            else:
+                # No number suffix, use as-is
+                if seq_id not in base_structure_ids:
+                    base_structure_ids[seq_id] = []
+                base_structure_ids[seq_id].append(seq_id)
+
+        # Count sequences per source for each base structure
+        sequences_per_source = []
+        for tool in self.input_sequences:
+            if not hasattr(tool, 'sequence_ids'):
+                raise ValueError(f"Tool {tool.__class__.__name__} must have sequence_ids")
+
+            # Group this tool's sequences by base ID
+            tool_sequences_by_base = {}
+            for seq_id in tool.sequence_ids:
+                match = re.match(r'^(.+)_\d+$', seq_id)
+                if match:
+                    base_id = match.group(1)
+                    if base_id not in tool_sequences_by_base:
+                        tool_sequences_by_base[base_id] = 0
+                    tool_sequences_by_base[base_id] += 1
+                else:
+                    if seq_id not in tool_sequences_by_base:
+                        tool_sequences_by_base[seq_id] = 0
+                    tool_sequences_by_base[seq_id] += 1
+
+            sequences_per_source.append(tool_sequences_by_base)
+
+        # Generate predicted IDs using Cartesian product
+        predicted_ids = []
+
+        for base_id in sorted(base_structure_ids.keys()):
+            # Calculate total combinations for this base structure
+            # Cartesian product: multiply counts from each source
+            total_combinations = 1
+            for source_counts in sequences_per_source:
+                count = source_counts.get(base_id, 1)
+                total_combinations *= count
+
+            # Generate sequential IDs for all combinations
+            for n in range(1, total_combinations + 1):
+                predicted_ids.append(f"{base_id}_{n}")
+
+        return predicted_ids
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
