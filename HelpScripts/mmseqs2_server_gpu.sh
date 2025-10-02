@@ -26,9 +26,7 @@ GPU_TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp/gpu"
 
 # Database paths
 UNIREF_DB="uniref30_2302_db"
-COLABFOLD_ENVDB="colabfold_envdb_202108_db"
 UNIREF_PATH="$DB_DIR/$UNIREF_DB"
-ENVDB_PATH="$DB_DIR/$COLABFOLD_ENVDB"
 
 THREADS=32
 POLL_INTERVAL=10                     # seconds
@@ -133,10 +131,9 @@ convert_a3m_to_csv() {
     log "CSV file created with $((line_count - 1)) data rows"
 }
 
-# Start GPU server with UniRef30 only (can only load one database)
-log "Starting MMseqs2 GPU server for UniRef30"
+# Start GPU server
+log "Starting MMseqs2 GPU server"
 log "Database: $UNIREF_PATH"
-log "Note: envDB will be searched with GPU but without GPU server"
 CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$UNIREF_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
@@ -250,13 +247,11 @@ while true; do
     gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory before search: ${gpu_mem_before}MB"
 
-    ##############################################
-    # 1. Search UniRef30 database
-    ##############################################
-    log "Running MMseqs2 search against UniRef30 for job $job_id"
-    result_uniref="$tmp/resultDB_uniref"
+    # Run MMseqs2 search
+    log "Running MMseqs2 search for job $job_id"
+    result_db="$tmp/resultDB"
 
-    if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$UNIREF_PATH" "$result_uniref" "$tmp/uniref_tmp" \
+    if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$UNIREF_PATH" "$result_db" "$tmp/search_tmp" \
       --gpu 1 \
       --gpu-server 1 \
       --prefilter-mode 1 \
@@ -265,53 +260,20 @@ while true; do
       --alignment-mode 0 \
       --threads "$OMP_NUM_THREADS" \
       -s 7.5; then
-      log "UniRef30 search failed for job $job_id"
+      log "Search failed for job $job_id"
       gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
       log "GPU memory after failed search: ${gpu_mem_after}MB"
-      echo "FAILED: UniRef30 search failed" > "$RESULTS_DIR/$job_id.status"
+      echo "FAILED" > "$RESULTS_DIR/$job_id.status"
       continue
     fi
 
-    log "Converting UniRef30 results to A3M"
-    convert_to_a3m "$result_uniref" "$query_db" "$UNIREF_PATH" "$tmp/uniref.a3m" "$tmp/query.fasta" "$tmp"
-
-    ##############################################
-    # 2. Search ColabFold environmental database
-    ##############################################
-    log "Running MMseqs2 search against ColabFold envDB for job $job_id (without GPU server)"
-    result_envdb="$tmp/resultDB_envdb"
-
-    if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$ENVDB_PATH" "$result_envdb" "$tmp/envdb_tmp" \
-      --gpu 1 \
-      --prefilter-mode 1 \
-      --db-load-mode 0 \
-      -a 1 \
-      --alignment-mode 0 \
-      --threads "$OMP_NUM_THREADS" \
-      -s 7.5; then
-      log "ColabFold envDB search failed for job $job_id"
-      gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-      log "GPU memory after failed search: ${gpu_mem_after}MB"
-      echo "FAILED: ColabFold envDB search failed" > "$RESULTS_DIR/$job_id.status"
-      continue
-    fi
-
-    log "Converting ColabFold envDB results to A3M"
-    convert_to_a3m "$result_envdb" "$query_db" "$ENVDB_PATH" "$tmp/envdb.a3m" "$tmp/query.fasta" "$tmp"
-
-    # Log GPU memory after successful searches
+    # Log GPU memory after successful search
     gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-    log "GPU memory after successful searches: ${gpu_mem_after}MB"
+    log "GPU memory after search: ${gpu_mem_after}MB"
 
-    ##############################################
-    # 3. Merge A3M files
-    ##############################################
-    log "Merging A3M files from both databases"
-    cat "$tmp/uniref.a3m" "$tmp/envdb.a3m" > "$out_prefix.a3m"
-
-    # Count sequences in merged MSA
-    merged_seq_count=$(grep -c "^>" "$out_prefix.a3m" || echo "0")
-    log "Merged MSA contains $merged_seq_count sequences"
+    # Convert to A3M format
+    log "Converting results to A3M"
+    convert_to_a3m "$result_db" "$query_db" "$UNIREF_PATH" "$out_prefix.a3m" "$tmp/query.fasta" "$tmp"
     # Convert output based on format
     case $output_format in
       a3m)
