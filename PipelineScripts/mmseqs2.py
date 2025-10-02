@@ -211,7 +211,7 @@ echo "Output format: {self.output_format}"
 echo "Output MSA CSV: {self.output_msa_csv}"
 
 # Check if server is running, if not start it
-if ! squeue -u $USER -h | grep "^[0-9]" | awk '{{print $3}}' | grep -q "^MMseqs2Server"; then
+if ! squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server"; then
   echo "MMseqs2 server not running, starting it..."
   cd {self.folders["notebooks"]}
   server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \K[0-9]+')
