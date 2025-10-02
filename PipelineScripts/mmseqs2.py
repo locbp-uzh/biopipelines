@@ -214,7 +214,7 @@ echo "Output MSA CSV: {self.output_msa_csv}"
 if ! squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server"; then
   echo "MMseqs2 server not running, starting it..."
   cd {self.folders["notebooks"]}
-  server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \K[0-9]+')
+  server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \\K[0-9]+')
 
   if [ -n "$server_job_id" ]; then
     echo "MMseqs2 server submitted with job ID: $server_job_id"
