@@ -92,6 +92,35 @@ def load_positions_from_datasheet(datasheet_path: str, column_name: str) -> Dict
     return positions_map
 
 
+def find_matching_position_spec(seq_id: str, position_map: Dict[str, List[int]]) -> Optional[List[int]]:
+    """
+    Find matching position specification for a sequence ID.
+
+    Handles ID mapping between structure IDs (e.g., 'rifampicin_014_1') and
+    sequence IDs (e.g., 'rifampicin_014_1_1').
+
+    Args:
+        seq_id: Sequence ID to match (e.g., 'rifampicin_014_1_1')
+        position_map: Dictionary mapping structure IDs to positions
+
+    Returns:
+        List of positions if match found, None otherwise
+    """
+    # Direct match
+    if seq_id in position_map:
+        return position_map[seq_id]
+
+    # Try to match by removing the last underscore and number suffix
+    # e.g., 'rifampicin_014_1_1' -> 'rifampicin_014_1'
+    parts = seq_id.rsplit('_', 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        structure_id = parts[0]
+        if structure_id in position_map:
+            return position_map[structure_id]
+
+    return None
+
+
 def stitch_sequences(base_sequence: str, overlay_sequence: str, positions: List[int]) -> str:
     """
     Stitch overlay sequence into base sequence at specified positions.
@@ -273,12 +302,14 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
                 print(f"  Warning: No overlay sequence from {source_name} for {seq_id}")
                 continue
 
-            if seq_id not in position_map:
+            # Find matching position specification (handles ID mapping)
+            positions = find_matching_position_spec(seq_id, position_map)
+
+            if positions is None:
                 print(f"  Warning: No position specification for {seq_id}")
                 continue
 
             overlay_sequence = overlay_sequences[seq_id]
-            positions = position_map[seq_id]
 
             print(f"    Found overlay sequence (length {len(overlay_sequence)})")
             print(f"    Found positions: {positions[:10] if len(positions) > 10 else positions}{'...' if len(positions) > 10 else ''}")
