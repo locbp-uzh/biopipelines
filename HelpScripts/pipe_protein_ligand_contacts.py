@@ -321,7 +321,10 @@ def calculate_contact_metrics(structure_path: str, selections: str, ligand: str,
         contact_count, normalized_distance = calculate_protein_ligand_contacts(atoms, selections, ligand, threshold)
 
         print(f"  - Contact count: {contact_count}")
-        print(f"  - Normalized distance: {normalized_distance:.3f if normalized_distance is not None else 'None'}")
+        if normalized_distance is not None:
+            print(f"  - Normalized distance: {normalized_distance:.3f}")
+        else:
+            print(f"  - Normalized distance: None")
 
         return contact_count, normalized_distance
 
