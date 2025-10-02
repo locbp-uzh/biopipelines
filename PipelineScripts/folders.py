@@ -32,11 +32,9 @@ class FolderManager:
         """Setup base folder structure following notebook conventions."""
         # Get user info from current directory structure
         notebooks_folder = os.getcwd() if not debug else "biopipelines"
-        if shared:
-            user_name = "public"
-        else:
-            user_name = os.path.basename(os.path.dirname(notebooks_folder)) if not debug else "USER"
+        user_name = os.path.basename(os.path.dirname(notebooks_folder)) if not debug else "USER"
         self.user_name = user_name
+        user_code = user_name if not shared else "public"
         
         # Base system folders
         self._folders.update({
@@ -45,12 +43,13 @@ class FolderManager:
             "data": f"/data/{user_name}",
             "scratch": f"/scratch/{user_name}",
             "group": "/shares/locbp.chem.uzh",
-            "user": f"/shares/locbp.chem.uzh/{user_name}",
+            "user": f"/shares/locbp.chem.uzh/{user_code}",
             "PDBs": os.path.join(notebooks_folder, "PDBs"),
             "HelpScripts": os.path.join(notebooks_folder, "HelpScripts"),
             "MMseqs2": os.path.join(notebooks_folder, "MMseqs2")})
         self._folders.update({
-            "models": os.path.join(self._folders["group"], "models")})
+            "models": os.path.join(self._folders["group"], "models"),
+            "containers": os.path.join(self._folders["group"], "containers")})
         self._folders.update({
             "RFdiffusion": os.path.join(self._folders["data"], "RFdiffusion"),
             "RFdiffusionAllAtom": os.path.join(self._folders["data"], "rf_diffusion_all_atom"),

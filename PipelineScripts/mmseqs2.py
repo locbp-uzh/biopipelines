@@ -210,6 +210,45 @@ echo "Input sequences: {self.input_sequences_csv}"
 echo "Output format: {self.output_format}"
 echo "Output MSA CSV: {self.output_msa_csv}"
 
+# Check if server is running, if not start it
+if ! squeue -u $USER -h | grep "^[0-9]" | awk '{{print $3}}' | grep -q "^MMseqs2Server"; then
+  echo "MMseqs2 server not running, starting it..."
+  cd {self.folders["notebooks"]}
+  server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \K[0-9]+')
+
+  if [ -n "$server_job_id" ]; then
+    echo "MMseqs2 server submitted with job ID: $server_job_id"
+    echo "Waiting for server to start..."
+
+    # Wait for job to start running (max 5 minutes)
+    timeout=300
+    elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+      job_state=$(squeue -j $server_job_id -h -o "%T" 2>/dev/null || echo "NOTFOUND")
+
+      if [ "$job_state" = "RUNNING" ]; then
+        echo "Server is running"
+        sleep 10  # Give it a few more seconds to initialize
+        break
+      elif [ "$job_state" = "NOTFOUND" ]; then
+        echo "Error: Server job not found"
+        exit 1
+      fi
+
+      echo "Server state: $job_state (waiting...)"
+      sleep 5
+      elapsed=$((elapsed + 5))
+    done
+
+    if [ $elapsed -ge $timeout ]; then
+      echo "Error: Timeout waiting for server to start"
+      exit 1
+    fi
+  fi
+else
+  echo "MMseqs2 server already running"
+fi
+
 # Check server status
 echo "Checking MMseqs2 server status..."
 {self.client_script_path} --status

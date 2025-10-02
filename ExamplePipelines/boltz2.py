@@ -12,8 +12,7 @@ from PipelineScripts.boltz2 import Boltz2
 pipeline = Pipeline(
     pipeline_name="Boltz", #Will create a folder in /shares/USER/<pipeline_name>
     job_name="HT7_Cy7_C_SS", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
-    job_description="Folding of HaloTag7 with Cy7 methyl amide close enantiomer SS",
-    shared=True)
+    job_description="Folding of HaloTag7 with Cy7 methyl amide close enantiomer SS")
 
 pipeline.resources(
     gpu="V100",
