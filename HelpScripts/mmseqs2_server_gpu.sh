@@ -133,11 +133,11 @@ convert_a3m_to_csv() {
     log "CSV file created with $((line_count - 1)) data rows"
 }
 
-# Start GPU server with both databases loaded
-log "Starting MMseqs2 GPU server for both databases"
-log "Database 1: $UNIREF_PATH"
-log "Database 2: $ENVDB_PATH"
-CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$UNIREF_PATH" "$ENVDB_PATH" \
+# Start GPU server with UniRef30 only (can only load one database)
+log "Starting MMseqs2 GPU server for UniRef30"
+log "Database: $UNIREF_PATH"
+log "Note: envDB will be searched with GPU but without GPU server"
+CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$UNIREF_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
@@ -278,14 +278,13 @@ while true; do
     ##############################################
     # 2. Search ColabFold environmental database
     ##############################################
-    log "Running MMseqs2 search against ColabFold envDB for job $job_id"
+    log "Running MMseqs2 search against ColabFold envDB for job $job_id (without GPU server)"
     result_envdb="$tmp/resultDB_envdb"
 
     if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$ENVDB_PATH" "$result_envdb" "$tmp/envdb_tmp" \
       --gpu 1 \
-      --gpu-server 1 \
       --prefilter-mode 1 \
-      --db-load-mode 2 \
+      --db-load-mode 0 \
       -a 1 \
       --alignment-mode 0 \
       --threads "$OMP_NUM_THREADS" \
