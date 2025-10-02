@@ -210,9 +210,57 @@ echo "Input sequences: {self.input_sequences_csv}"
 echo "Output format: {self.output_format}"
 echo "Output MSA CSV: {self.output_msa_csv}"
 
-# Check if server is running, if not start it
-if ! squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server"; then
-  echo "MMseqs2 server not running, starting it..."
+# Check if server is running by checking timestamp files
+MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
+GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
+CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
+MAX_AGE_HOURS=12
+
+server_is_valid() {{
+  local timestamp_file=$1
+
+  if [[ ! -f "$timestamp_file" ]]; then
+    return 1
+  fi
+
+  # Read the timestamp from the file
+  local server_time=$(cat "$timestamp_file")
+
+  # Get current time and calculate the difference
+  local current_seconds=$(date +%s)
+  local server_seconds=$(date -d "today $server_time" +%s 2>/dev/null || echo "0")
+
+  # Handle case where server started yesterday (time wrapped around midnight)
+  local time_diff=$((current_seconds - server_seconds))
+  if [[ $time_diff -lt 0 ]]; then
+    # Server timestamp is from yesterday
+    time_diff=$((time_diff + 86400))
+  fi
+
+  local max_age_seconds=$((MAX_AGE_HOURS * 3600))
+
+  if [[ $time_diff -lt $max_age_seconds ]]; then
+    local hours_old=$((time_diff / 3600))
+    echo "Server started at $server_time ($(($hours_old))h ago)"
+    return 0
+  else
+    echo "Server timestamp too old (started at $server_time)"
+    return 1
+  fi
+}}
+
+# Check if GPU or CPU server is running and valid
+server_running=false
+if server_is_valid "$GPU_TIMESTAMP"; then
+  echo "MMseqs2 GPU server is running and valid"
+  server_running=true
+elif server_is_valid "$CPU_TIMESTAMP"; then
+  echo "MMseqs2 CPU server is running and valid"
+  server_running=true
+fi
+
+if [[ "$server_running" = false ]]; then
+  echo "No valid MMseqs2 server found, starting new server..."
   cd {self.folders["notebooks"]}
   server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \\K[0-9]+')
 
@@ -220,22 +268,17 @@ if ! squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server
     echo "MMseqs2 server submitted with job ID: $server_job_id"
     echo "Waiting for server to start..."
 
-    # Wait for job to start running (max 5 minutes)
+    # Wait for timestamp file to be created (max 5 minutes)
     timeout=300
     elapsed=0
     while [ $elapsed -lt $timeout ]; do
-      job_state=$(squeue -j $server_job_id -h -o "%T" 2>/dev/null || echo "NOTFOUND")
-
-      if [ "$job_state" = "RUNNING" ]; then
-        echo "Server is running"
-        sleep 10  # Give it a few more seconds to initialize
+      if server_is_valid "$GPU_TIMESTAMP" || server_is_valid "$CPU_TIMESTAMP"; then
+        echo "Server has started and is ready"
+        sleep 10  # Give it a few more seconds to fully initialize
         break
-      elif [ "$job_state" = "NOTFOUND" ]; then
-        echo "Error: Server job not found"
-        exit 1
       fi
 
-      echo "Server state: $job_state (waiting...)"
+      echo "Waiting for server to create timestamp file..."
       sleep 5
       elapsed=$((elapsed + 5))
     done
@@ -245,8 +288,6 @@ if ! squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server
       exit 1
     fi
   fi
-else
-  echo "MMseqs2 server already running"
 fi
 
 # Check server status

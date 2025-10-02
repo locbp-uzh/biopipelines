@@ -64,6 +64,13 @@ LOG_FILE="$RESULTS_DIR/server.log"
 PID_FILE="$RESULTS_DIR/server_gpu.pid"
 echo $$ > "$PID_FILE"   # record server PID
 
+# Create timestamp file for server detection
+MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
+mkdir -p "$MMSEQS_SERVER_DIR"
+SERVER_TIMESTAMP_FILE="$MMSEQS_SERVER_DIR/GPU_SERVER"
+date '+%H:%M:%S' > "$SERVER_TIMESTAMP_FILE"
+log "Created server timestamp file at $SERVER_TIMESTAMP_FILE"
+
 # Check and install MMseqs2 if needed
 check_mmseqs_installation
 
@@ -169,6 +176,9 @@ cleanup() {
   # Force kill if still running
   kill -9 $GPUSERVER_PID 2>/dev/null || true
   rm -f "$PID_FILE"
+  # Remove timestamp file on shutdown
+  rm -f "$SERVER_TIMESTAMP_FILE"
+  log "Removed server timestamp file"
   exit 0
 }
 trap cleanup SIGINT SIGTERM

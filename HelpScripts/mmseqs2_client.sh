@@ -32,43 +32,62 @@ done
 
 # -- status check --
 if [[ "$STATUS" -eq 1 ]]; then
-  # Check servers using squeue (more reliable than PID files)
-  if squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server: CPU"; then
-    cpu_running="yes"
-  else
-    cpu_running="no"
-  fi
+  # Check servers using timestamp files
+  MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
+  GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
+  CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
+  MAX_AGE_HOURS=12
 
-  if squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server: GPU"; then
-    gpu_running="yes"
-  else
-    gpu_running="no"
-  fi
+  check_server_timestamp() {
+    local timestamp_file=$1
+    local server_type=$2
 
-  if [[ "$cpu_running" == "yes" || "$gpu_running" == "yes" ]]; then
-    log "MMseqs2 server is running (CPU: $cpu_running, GPU: $gpu_running)"
-
-    # Check server activity using log timestamps
-    if [[ -f "$RESULTS_DIR/server.log" ]]; then
-      last_activity=$(tail -n 1 "$RESULTS_DIR/server.log" | grep -o '\[.*\]' | tr -d '[]' 2>/dev/null || echo "unknown")
-      if [[ "$last_activity" != "unknown" ]]; then
-        log "Last server activity: $last_activity"
-
-        # Check if server is actively processing (recent activity within 5 minutes)
-        if command -v date >/dev/null 2>&1; then
-          current_time=$(date +%s)
-          last_time=$(date -d "$last_activity" +%s 2>/dev/null || echo "0")
-          time_diff=$((current_time - last_time))
-          if [[ $time_diff -lt 300 ]]; then  # 5 minutes
-            log "Server is actively processing (last activity ${time_diff}s ago)"
-          else
-            log "Server may be idle (last activity ${time_diff}s ago)"
-          fi
-        fi
-      fi
+    if [[ ! -f "$timestamp_file" ]]; then
+      log "MMseqs2 $server_type server: NOT RUNNING (no timestamp file)"
+      return 1
     fi
-  else
-    log "MMseqs2 server is not running (CPU: $cpu_running, GPU: $gpu_running)"
+
+    # Read the timestamp from the file
+    local server_time=$(cat "$timestamp_file")
+
+    # Get current time and calculate the difference
+    local current_seconds=$(date +%s)
+    local server_seconds=$(date -d "today $server_time" +%s 2>/dev/null || echo "0")
+
+    # Handle case where server started yesterday (time wrapped around midnight)
+    local time_diff=$((current_seconds - server_seconds))
+    if [[ $time_diff -lt 0 ]]; then
+      # Server timestamp is from yesterday
+      time_diff=$((time_diff + 86400))
+    fi
+
+    local max_age_seconds=$((MAX_AGE_HOURS * 3600))
+    local hours_old=$((time_diff / 3600))
+    local minutes_old=$(((time_diff % 3600) / 60))
+
+    if [[ $time_diff -lt $max_age_seconds ]]; then
+      log "MMseqs2 $server_type server: RUNNING (started at $server_time, ${hours_old}h ${minutes_old}m ago)"
+      return 0
+    else
+      log "MMseqs2 $server_type server: EXPIRED (started at $server_time, ${hours_old}h ${minutes_old}m ago, max age: ${MAX_AGE_HOURS}h)"
+      return 1
+    fi
+  }
+
+  # Check both servers
+  gpu_running=false
+  cpu_running=false
+
+  if check_server_timestamp "$GPU_TIMESTAMP" "GPU"; then
+    gpu_running=true
+  fi
+
+  if check_server_timestamp "$CPU_TIMESTAMP" "CPU"; then
+    cpu_running=true
+  fi
+
+  if [[ "$gpu_running" = false && "$cpu_running" = false ]]; then
+    log "No valid MMseqs2 server is running"
   fi
 
   # Count pending jobs (.job files in queue)

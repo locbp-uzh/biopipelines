@@ -60,6 +60,13 @@ PID_FILE="$RESULTS_DIR/server_cpu.pid"
 echo $$ > "$PID_FILE"   # record server PID
 export OMP_NUM_THREADS=$(nproc)
 
+# Create timestamp file for server detection
+MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
+mkdir -p "$MMSEQS_SERVER_DIR"
+SERVER_TIMESTAMP_FILE="$MMSEQS_SERVER_DIR/CPU_SERVER"
+date '+%H:%M:%S' > "$SERVER_TIMESTAMP_FILE"
+log "Created server timestamp file at $SERVER_TIMESTAMP_FILE"
+
 # Check and install MMseqs2 if needed
 check_mmseqs_installation
 
@@ -70,6 +77,9 @@ echo # blank line
 cleanup() {
     log "MMseqs2 CPU server shutting down"
     rm -f "$PID_FILE"
+    # Remove timestamp file on shutdown
+    rm -f "$SERVER_TIMESTAMP_FILE"
+    log "Removed server timestamp file"
     exit
 }
 trap cleanup EXIT INT TERM
