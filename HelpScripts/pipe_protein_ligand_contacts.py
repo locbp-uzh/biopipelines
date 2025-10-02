@@ -235,6 +235,16 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
                 if dist < distances[residue_key]:
                     distances[residue_key] = dist
 
+        # Debug: Print first few residue details
+        if len(distances) > 0:
+            first_residues = list(distances.items())[:3]
+            print(f"[DEBUG] - First 3 residues: {first_residues}")
+            # Also print some sample protein and ligand atom coords
+            if len(protein_atoms) > 0:
+                print(f"[DEBUG] - Sample protein atom: {protein_atoms[0]}")
+            if len(ligand_atoms) > 0:
+                print(f"[DEBUG] - Sample ligand atom: {ligand_atoms[0]}")
+
         if not distances:
             print(f"[WARNING] - No distances calculated")
             return None, None
