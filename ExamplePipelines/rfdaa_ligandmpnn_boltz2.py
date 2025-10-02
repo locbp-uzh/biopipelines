@@ -16,7 +16,7 @@ from PipelineScripts.merge_datasheets import MergeDatasheets
 from PipelineScripts.filter import Filter
 
 pipeline = Pipeline(
-    pipeline_name="RFDAA-ProteinMPNN-LigandMPNN-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
+    pipeline_name="RFDAA-LigandMPNN-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
     job_name="rifampicin", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
     job_description="redesign of N terminus of rifampicin binding protein")
 

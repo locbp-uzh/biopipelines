@@ -17,7 +17,7 @@ from .slice_datasheet import SliceDatasheet
 from .average_by_datasheet import AverageByDatasheet
 from .extract_metrics import ExtractMetrics
 from .folders import FolderManager
-from .mobile_distance import MobileDistance
+from .conformational_change import ConformationalChange
 from .protein_ligand_contacts import ProteinLigandContacts
 from .stitch_sequences import StitchSequences
 from .converters import *
@@ -39,7 +39,7 @@ __all__ = [
     'SliceDatasheet',
     'AverageByDatasheet',
     'ExtractMetrics',
-    'MobileDistance',
+    'ConformationalChange',
     'ProteinLigandContacts',
     'StitchSequences',
 

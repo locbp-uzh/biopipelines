@@ -1,16 +1,3 @@
-###
-###
-###
-###
-###
-###
-####IN PROGRESS
-###
-###
-###
-###
-###
-###
 """
 This pipeline shows how to run RFdiffusion-AllAtom, generate sequences for the backbone with ProteinMPNN, add the top mutations from LigandMPNN, fold the sequences with Boltz2.
 """
