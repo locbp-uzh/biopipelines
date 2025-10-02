@@ -23,14 +23,11 @@ DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/gpu"
 
 TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp"
 GPU_TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp/gpu"
-
-# Database paths
 UNIREF_DB="uniref30_2302_db"
-UNIREF_PATH="$DB_DIR/$UNIREF_DB"
-
+DB_PATH="$DB_DIR/$UNIREF_DB"  # Use databases directly from shares
 THREADS=32
 POLL_INTERVAL=10                     # seconds
-MAX_SEQS=10000    # limit homologs per query (applied after merging)
+MAX_SEQS=10000    # limit homologs per query
 
 mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$GPU_TMP_DIR"
 
@@ -131,10 +128,9 @@ convert_a3m_to_csv() {
     log "CSV file created with $((line_count - 1)) data rows"
 }
 
-# Start GPU server
-log "Starting MMseqs2 GPU server"
-log "Database: $UNIREF_PATH"
-CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$UNIREF_PATH" \
+# Start GPU server with optimized settings
+log "Starting MMseqs2 GPU server for $DB_PATH"
+CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
@@ -240,18 +236,20 @@ while true; do
     /data/$USER/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db" \
      2>&1 | tee -a "$LOG_FILE"
 
+    # Result database (not m8 format)
+    result_db="$tmp/resultDB"
+
     # Set output prefix
     out_prefix="$RESULTS_DIR/$job_id"
+
+    # Run GPU-enabled search with optimized parameters
+    log "Running MMseqs2 search for job $job_id"
 
     # Check GPU memory before search
     gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory before search: ${gpu_mem_before}MB"
 
-    # Run MMseqs2 search
-    log "Running MMseqs2 search for job $job_id"
-    result_db="$tmp/resultDB"
-
-    if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$UNIREF_PATH" "$result_db" "$tmp/search_tmp" \
+    if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
       --gpu 1 \
       --gpu-server 1 \
       --prefilter-mode 1 \
@@ -259,21 +257,22 @@ while true; do
       -a 1 \
       --alignment-mode 0 \
       --threads "$OMP_NUM_THREADS" \
+      --max-seqs "$MAX_SEQS" \
       -s 7.5; then
       log "Search failed for job $job_id"
+      # Log GPU memory after failure
       gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
       log "GPU memory after failed search: ${gpu_mem_after}MB"
-      echo "FAILED" > "$RESULTS_DIR/$job_id.status"
+      echo "FAILED: Search failed" > "$RESULTS_DIR/$job_id.status"
       continue
     fi
 
     # Log GPU memory after successful search
     gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-    log "GPU memory after search: ${gpu_mem_after}MB"
+    log "GPU memory after successful search: ${gpu_mem_after}MB"
 
-    # Convert to A3M format
-    log "Converting results to A3M"
-    convert_to_a3m "$result_db" "$query_db" "$UNIREF_PATH" "$out_prefix.a3m" "$tmp/query.fasta" "$tmp"
+    log "Converting to A3M format"
+    convert_to_a3m "$result_db" "$query_db" "$DB_PATH" "$out_prefix.a3m" "$tmp/query.fasta" "$tmp"
     # Convert output based on format
     case $output_format in
       a3m)
