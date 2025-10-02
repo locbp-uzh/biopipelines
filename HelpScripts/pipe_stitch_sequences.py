@@ -205,11 +205,18 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
     # Process position specifications
     position_maps = []
 
+    print(f"\n=== DEBUG: Processing {len(position_specs)} position specifications ===")
     for spec in position_specs:
         index = spec['index']
+        spec_type = spec['type']
+        print(f"\nDEBUG: Position spec {index}:")
+        print(f"  Type: {spec_type}")
+        print(f"  Full spec: {spec}")
+
         if spec['type'] == 'fixed':
             # Fixed position string
             fixed_positions = parse_position_string(spec['value'])
+            print(f"  Fixed positions: {fixed_positions[:10]}{'...' if len(fixed_positions) > 10 else ''}")
             # Create map for all sequence IDs
             position_map = {seq_id: fixed_positions for seq_id in all_sequence_ids}
             position_maps.append(position_map)
@@ -218,17 +225,28 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
             datasheet_path = spec['datasheet_path']
             column_name = spec['column_name']
 
+            print(f"  Datasheet path: {datasheet_path}")
+            print(f"  Column name: {column_name}")
+            print(f"  Datasheet exists: {os.path.exists(datasheet_path) if datasheet_path else 'N/A'}")
+
             # Handle empty datasheet path (treat as no overlay)
             if not datasheet_path or datasheet_path.strip() == '':
-                print(f"Warning: Empty datasheet path for sequence {spec['index']}, treating as no overlay")
+                print(f"  WARNING: Empty datasheet path for sequence {spec['index']}, treating as no overlay")
                 position_map = {seq_id: [] for seq_id in all_sequence_ids}
             else:
                 position_map = load_positions_from_datasheet(datasheet_path, column_name)
+                print(f"  Position map loaded: {len(position_map)} entries")
+                # Show first few entries
+                for i, (k, v) in enumerate(list(position_map.items())[:3]):
+                    print(f"    {k}: {v[:10] if len(v) > 10 else v}{'...' if len(v) > 10 else ''}")
             position_maps.append(position_map)
         else:
             # Empty positions (no overlay)
+            print(f"  No overlay (type: {spec_type})")
             position_map = {seq_id: [] for seq_id in all_sequence_ids}
             position_maps.append(position_map)
+
+    print(f"\n=== DEBUG: Total position maps created: {len(position_maps)} ===\n")
 
     # Perform stitching
     stitched_results = []
@@ -246,6 +264,11 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
             position_map = position_maps[overlay_index]
             source_name = sequence_sources[overlay_index]['tool_name']
 
+            print(f"\n  DEBUG: Overlay {overlay_index} from {source_name}")
+            print(f"    Available sequence IDs in overlay: {list(overlay_sequences.keys())}")
+            print(f"    Available IDs in position map: {list(position_map.keys())}")
+            print(f"    Looking for seq_id: {seq_id}")
+
             if seq_id not in overlay_sequences:
                 print(f"  Warning: No overlay sequence from {source_name} for {seq_id}")
                 continue
@@ -256,6 +279,9 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 
             overlay_sequence = overlay_sequences[seq_id]
             positions = position_map[seq_id]
+
+            print(f"    Found overlay sequence (length {len(overlay_sequence)})")
+            print(f"    Found positions: {positions[:10] if len(positions) > 10 else positions}{'...' if len(positions) > 10 else ''}")
 
             if positions:
                 print(f"  Overlaying {source_name} at positions: {positions[:10]}{'...' if len(positions) > 10 else ''}")
