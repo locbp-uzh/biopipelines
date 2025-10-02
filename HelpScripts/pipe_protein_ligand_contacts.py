@@ -222,20 +222,23 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
 
         # Calculate minimum distances per residue
         distances = {}
+        closest_ligand_atoms = {}  # Track which ligand atom is closest to each residue
 
         for protein_atom in protein_atoms:
             residue_key = (protein_atom.chain_id, protein_atom.residue_number)
 
             if residue_key not in distances:
                 distances[residue_key] = float('inf')
+                closest_ligand_atoms[residue_key] = None
 
             # Find minimum distance to any ligand atom
             for ligand_atom in ligand_atoms:
                 dist = calculate_distance(protein_atom, ligand_atom)
                 if dist < distances[residue_key]:
                     distances[residue_key] = dist
+                    closest_ligand_atoms[residue_key] = ligand_atom.atom_name
 
-        # Debug: Print first few residue details
+        # Debug: Print first few residue details and identify which ligand atom is causing issues
         if len(distances) > 0:
             first_residues = list(distances.items())[:3]
             print(f"[DEBUG] - First 3 residues: {first_residues}")
@@ -244,6 +247,19 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
                 print(f"[DEBUG] - Sample protein atom: {protein_atoms[0]}")
             if len(ligand_atoms) > 0:
                 print(f"[DEBUG] - Sample ligand atom: {ligand_atoms[0]}")
+
+            # Check which ligand atoms are closest to residues with distance 1.419
+            suspicious_distance = 1.4191951944676249
+            suspicious_residues = {k: v for k, v in distances.items() if abs(v - suspicious_distance) < 0.001}
+            if len(suspicious_residues) > 5:
+                # Get the ligand atoms responsible
+                ligand_atom_counts = {}
+                for res_key in list(suspicious_residues.keys())[:10]:  # Sample first 10
+                    lig_atom = closest_ligand_atoms.get(res_key)
+                    if lig_atom:
+                        ligand_atom_counts[lig_atom] = ligand_atom_counts.get(lig_atom, 0) + 1
+                print(f"[DEBUG] - {len(suspicious_residues)} residues have distance ~1.419 Å")
+                print(f"[DEBUG] - Closest ligand atoms causing this: {ligand_atom_counts}")
 
         if not distances:
             print(f"[WARNING] - No distances calculated")

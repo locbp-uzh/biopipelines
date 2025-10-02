@@ -19,9 +19,8 @@ pipeline = Pipeline(
     job_description="Protein-ligand interaction analysis using PLIP on Boltz2 structures")
 
 pipeline.resources(
-    cpu=4,
-    time="4:00:00",
-    memory="8GB"
+    time="12:00:00",
+    memory="16GB"
 )
 
 # Load existing Boltz2 results
