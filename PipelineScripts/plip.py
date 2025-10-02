@@ -277,7 +277,8 @@ mkdir -p {self.output_folder}/raw_outputs
 mkdir -p {self.output_folder}/processed
 
 # Process each structure with PLIP
-for pdb_file in {structure_files_str//",", " "}; do
+IFS=',' read -ra PDB_FILES <<< "{structure_files_str}"
+for pdb_file in "${{PDB_FILES[@]}}"; do
     pdb_name=$(basename "$pdb_file" .pdb)
     echo "Analyzing structure: $pdb_name"
 
