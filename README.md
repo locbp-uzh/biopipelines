@@ -40,11 +40,13 @@ pipeline.slurm(email="user@domain.com")
 - **RFdiffusion** - Backbone structure generation
 - **RFdiffusionAllAtom** - All-atom structure generation with ligands
 
-### Sequence Generation  
+### Sequence Generation
 - **LigandMPNN** - Ligand-aware sequence design
-- **ProteinMPNN** - Protein sequence design
+- **ProteinMPNN** - Protein sequence design (0-based indexing: sample 0 = template)
 - **MutationComposer** - Mutation-guided sequence generation
 - **Fuse** - Protein-protein fusion design
+- **StitchSequences** - Combine sequences from multiple tools
+- **SiteDirectedMutagenesis** - Introduce specific mutations
 
 ### Folding/Cofolding
 - **AlphaFold** - Structure prediction (ColabFold backend)
@@ -55,18 +57,29 @@ pipeline.slurm(email="user@domain.com")
 
 ### Structure Analysis
 - **ResidueAtomDistance** - Distance measurements and contacts
+- **ProteinLigandContacts** - Protein-ligand contact analysis
+- **ConformationalChange** - Quantify structural changes with multiple metrics (RMSD, distances)
+- **DistanceSelector** - Distance-based residue selection
+- **PLIP** - Protein-ligand interaction profiling
 
-### Filtering
+### Data Management & Filtering
 - **Filter** - Expression-based result filtering
+- **SelectBest** - Select top-performing structures/sequences
 - **MergeDatasheets** - Combine multiple analysis results
 - **ConcatenateDatasheets** - Merge datasets across cycles
 - **RemoveDuplicates** - Sequence deduplication
+- **SliceDatasheet** - Extract subset of rows
+- **AverageByDatasheet** - Calculate average metrics
+- **ExtractMetrics** - Extract specific metrics from datasheets
 
 ### Visualization
 - **PyMOL** - Automated molecular visualization sessions
 
-### Miscellaneous
+### Utilities
 - **LoadOutput** - Import results from previous pipelines
+- **MMseqs2** - Multiple sequence alignment and homology search
+- **CompoundLibrary** - Generate compound libraries and properties
+- **FetchStructure** - Download structures from databases
 
 ## Documentation
 

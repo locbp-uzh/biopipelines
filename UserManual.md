@@ -54,6 +54,7 @@ Q: requirements for each tool/environments in shares
 **ProteinMPNN** - General protein sequence design
 - Inputs: `structures`, `num_sequences` (default: 1), `fixed`, `redesigned`, `plddt_threshold` (default: 100.0)
 - Outputs: `sequences` [id, source_id, source_pdb, sequence, score, seq_recovery, rmsd]
+- Note: Sample numbering is 0-based (sample=0 is original/template, sample=1+ are designs)
 
 **MutationComposer** - Mutation-guided sequence generation
 - Inputs: `frequencies`, `num_sequences` (default: 10), `mode`, `combination_strategy`
@@ -100,12 +101,12 @@ Q: requirements for each tool/environments in shares
 - Outputs: `selections` [id, within, beyond, distance_cutoff, reference_ligand]
 
 **ProteinLigandContacts** - Analyze protein-ligand contact networks
-- Inputs: `structures`, `ligand`, `contact_distance` (default: 4.0Å)
-- Outputs: `contacts` [id, residue, ligand_atom, distance, contact_type]
+- Inputs: `structures`, `selections` (protein regions), `ligand`, `contact_threshold` (default: 5.0Å)
+- Outputs: `contact_analysis` [id, source_structure, selections, ligand, contacts, protein_ligand_distance]
 
-**MobileDistance** - Distance measurements with mobile references
-- Inputs: `structures`, `reference`, `target`, `method`
-- Outputs: `distances` [id, mobile_distance, reference_coords, target_coords]
+**ConformationalChange** - Quantify structural changes between reference and target structures
+- Inputs: `reference_structures` (single PDB or list), `target_structures`, `selection` (regions to analyze), `alignment` (align/super/cealign)
+- Outputs: `conformational_analysis` [id, reference_structure, target_structure, selection, num_residues, RMSD, max_distance, mean_distance, sum_over_square_root]
 
 **Confidence** - Extract confidence scores from structures
 - Inputs: `structures`, `score_type`, `residue_range`
