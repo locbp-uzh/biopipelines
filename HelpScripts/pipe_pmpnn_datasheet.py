@@ -17,33 +17,57 @@ parser.add_argument('-d', '--duplicates', action='store_true',
 args = parser.parse_args()
 
 def process_proteinmpnn_fasta(fasta_file, pipeline_name, allow_duplicates=False):
-    """Process a single ProteinMPNN FASTA file and extract sequence data."""
+    """Process a single ProteinMPNN FASTA file and extract sequence data.
+
+    Note: ProteinMPNN writes the original sequence as sample=0, followed by designed sequences.
+    We skip sample=0 to only include designed sequences.
+    """
     sequences = []
-    
+
     try:
         with open(fasta_file, 'r') as f:
             lines = [line.strip() for line in f.readlines()]
-        
+
         # Parse FASTA file - ProteinMPNN format
         # Lines alternate between headers (>) and sequences
         i = 0
-        seq_index = 0
+        designed_seq_index = 0  # Counter for designed sequences only
         source_pdb = os.path.splitext(os.path.basename(fasta_file))[0]
-        
+
         while i < len(lines):
             if lines[i].startswith('>'):
                 if i + 1 < len(lines):
                     header = lines[i][1:]  # Remove '>'
                     sequence = lines[i + 1]
-                    
-                    # Parse header parameters (e.g., "T=0.1, sample=0, score=...")
+
+                    # Parse header to get sample index
+                    sample_index = None
+
+                    # Parse additional parameters from header
+                    if ', ' in header:
+                        params = header.split(', ')
+                        for param in params:
+                            if '=' in param:
+                                key, value = param.split('=', 1)
+                                key = key.strip()
+                                if key == 'sample':
+                                    sample_index = int(value.strip())
+                                    break
+
+                    # Skip sample=0 (original sequence) - only process designed sequences
+                    if sample_index == 0:
+                        print(f"  Skipping sample=0 (original sequence) from {os.path.basename(fasta_file)}")
+                        i += 2
+                        continue
+
+                    # Parse header parameters (e.g., "T=0.1, sample=1, score=...")
                     seq_data = {
-                        'id': f"{source_pdb}_{seq_index + 1}",  # Use structure-based ID like rifampicin_012_1_1
+                        'id': f"{source_pdb}_{designed_seq_index + 1}",  # Use structure-based ID like rifampicin_012_1_1
                         'source_pdb': source_pdb,
                         'sequence': sequence,
-                        'sample_index': seq_index
+                        'sample_index': sample_index if sample_index is not None else designed_seq_index
                     }
-                    
+
                     # Parse additional parameters from header
                     if ', ' in header:
                         params = header.split(', ')
@@ -52,22 +76,20 @@ def process_proteinmpnn_fasta(fasta_file, pipeline_name, allow_duplicates=False)
                                 key, value = param.split('=', 1)
                                 key = key.strip()
                                 value = value.strip()
-                                # Handle special keys
-                                if key == 'sample':
-                                    seq_data['sample_index'] = int(value)
-                                else:
+                                # Store all parameters except 'sample' (already handled)
+                                if key != 'sample':
                                     seq_data[key] = value
-                    
+
                     sequences.append(seq_data)
-                    seq_index += 1
-                    
+                    designed_seq_index += 1
+
                 i += 2
             else:
                 i += 1
-                
+
     except Exception as e:
         print(f"Error processing {fasta_file}: {e}")
-        
+
     return sequences
 
 def main():
