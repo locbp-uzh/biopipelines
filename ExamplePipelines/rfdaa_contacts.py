@@ -44,7 +44,9 @@ rfdaa = pipeline.add(RFdiffusionAllAtom(pdb=rifampicin, #can also be a path, pre
                                         num_designs=2,
                                         steps=20))
 
-contacts = pipeline.add(ProteinLigandContacts(structures=rfdaa))
+contacts = pipeline.add(ProteinLigandContacts(structures=rfdaa,
+                                              selections=rfdaa.datasheets.structures.designed,
+                                              ligand="LIG"))
 
 
 pipeline.save()

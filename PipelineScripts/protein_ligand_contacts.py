@@ -217,8 +217,16 @@ class ProteinLigandContacts(BaseConfig):
             selections_config = {"type": "all_protein"}
         elif isinstance(self.protein_selections, str):
             selections_config = {"type": "fixed", "value": self.protein_selections}
+        elif isinstance(self.protein_selections, tuple) and len(self.protein_selections) == 2:
+            # Tuple format: (DatasheetInfo, column_name)
+            datasheet_info, column_name = self.protein_selections
+            selections_config = {
+                "type": "datasheet",
+                "datasheet_path": datasheet_info.path if hasattr(datasheet_info, 'path') else '',
+                "column_name": column_name
+            }
         else:
-            # Datasheet reference
+            # Datasheet reference with attributes
             selections_config = {
                 "type": "datasheet",
                 "datasheet_path": getattr(self.protein_selections, 'datasheet_path', ''),

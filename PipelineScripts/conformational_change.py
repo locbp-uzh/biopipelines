@@ -215,8 +215,16 @@ class ConformationalChange(BaseConfig):
         selection_config = None
         if isinstance(self.selection_spec, str):
             selection_config = {"type": "fixed", "value": self.selection_spec}
+        elif isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
+            # Tuple format: (DatasheetInfo, column_name)
+            datasheet_info, column_name = self.selection_spec
+            selection_config = {
+                "type": "datasheet",
+                "datasheet_path": datasheet_info.path if hasattr(datasheet_info, 'path') else '',
+                "column_name": column_name
+            }
         else:
-            # Datasheet reference
+            # Datasheet reference with attributes
             selection_config = {
                 "type": "datasheet",
                 "datasheet_path": getattr(self.selection_spec, 'datasheet_path', ''),
