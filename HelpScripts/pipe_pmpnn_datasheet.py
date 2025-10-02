@@ -30,8 +30,10 @@ def process_proteinmpnn_fasta(fasta_file, pipeline_name, allow_duplicates=False)
 
         # Parse FASTA file - ProteinMPNN format
         # Lines alternate between headers (>) and sequences
+        # Note: ProteinMPNN writes sample=0 (original sequence) followed by designed sequences
+        # We include all sequences and number them starting from 0
         i = 0
-        designed_seq_index = 0  # Counter for designed sequences only
+        seq_index = 0  # Counter for all sequences (0-based to match ProteinMPNN sample numbers)
         source_pdb = os.path.splitext(os.path.basename(fasta_file))[0]
 
         while i < len(lines):
@@ -54,18 +56,13 @@ def process_proteinmpnn_fasta(fasta_file, pipeline_name, allow_duplicates=False)
                                     sample_index = int(value.strip())
                                     break
 
-                    # Skip sample=0 (original sequence) - only process designed sequences
-                    if sample_index == 0:
-                        print(f"  Skipping sample=0 (original sequence) from {os.path.basename(fasta_file)}")
-                        i += 2
-                        continue
-
-                    # Parse header parameters (e.g., "T=0.1, sample=1, score=...")
+                    # Include all sequences (both original sample=0 and designed sequences)
+                    # Use 0-based indexing to match ProteinMPNN's sample numbering
                     seq_data = {
-                        'id': f"{source_pdb}_{designed_seq_index + 1}",  # Use structure-based ID like rifampicin_012_1_1
+                        'id': f"{source_pdb}_{seq_index}",  # 0-based: rifampicin_012_1_0, rifampicin_012_1_1, etc.
                         'source_pdb': source_pdb,
                         'sequence': sequence,
-                        'sample_index': sample_index if sample_index is not None else designed_seq_index
+                        'sample_index': sample_index if sample_index is not None else seq_index
                     }
 
                     # Parse additional parameters from header
@@ -81,7 +78,7 @@ def process_proteinmpnn_fasta(fasta_file, pipeline_name, allow_duplicates=False)
                                     seq_data[key] = value
 
                     sequences.append(seq_data)
-                    designed_seq_index += 1
+                    seq_index += 1
 
                 i += 2
             else:

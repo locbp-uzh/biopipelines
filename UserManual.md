@@ -23,13 +23,15 @@ pipeline = Pipeline("PipelineName", "JobName", "Description")
 pipeline.resources(gpu="V100", time="24:00:00", memory="16GB")
 
 # 3. Add tools sequentially
-tool1_output = pipeline.add(Tool1(parameters))
+tool1_output = pipeline.add(Tool1(parameters),env="YourEnv")
 tool2_output = pipeline.add(Tool2(input=tool1_output, other_parameters))
 
 # 4. Execute
 pipeline.save()           # Generate scripts
 pipeline.slurm()  # Submit to cluster
 ```
+
+Q: requirements for each tool/environments in shares
 
 ## Tool Reference
 

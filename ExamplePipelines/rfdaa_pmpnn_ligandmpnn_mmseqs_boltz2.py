@@ -54,12 +54,12 @@ distances = pipeline.add(DistanceSelector(structures=rfdaa,
                                           distance=5))
 
 pmpnn = pipeline.add(ProteinMPNN(structures=rfdaa,
-                                 num_sequences=1,
+                                 num_sequences=2,
                                  redesigned=distances.datasheets.selections.beyond))
 
 lmpnn = pipeline.add(LigandMPNN(structures=rfdaa,
-                                ligand="RFP", #in ligand mpnn you should always specify the ligand name.
-                                num_sequences=1,
+                                ligand="LIG", #in ligand mpnn you should always specify the ligand name.
+                                num_sequences=2,
                                 redesigned=distances.datasheets.selections.within))
 
 sequences = pipeline.add(StitchSequences(sequences=[pmpnn,lmpnn],

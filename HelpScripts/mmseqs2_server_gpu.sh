@@ -175,6 +175,26 @@ trap cleanup SIGINT SIGTERM
 
 log "Entering job processing loop"
 
+cleanup_old_files() {
+    # Delete files older than 24 hours
+    log "Running cleanup of files older than 24 hours..."
+
+    # Clean old result files (.a3m, .csv, .status)
+    find "$RESULTS_DIR" -type f \( -name "*.a3m" -o -name "*.csv" -o -name "*.status" \) -mtime +1 -delete 2>/dev/null || true
+
+    # Clean old temporary directories
+    find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
+
+    # Clean old FASTA files in queue (orphaned submissions)
+    find "$JOB_QUEUE_DIR" -type f -name "*.fasta" -mtime +1 -delete 2>/dev/null || true
+
+    log "Cleanup completed"
+}
+
+# Track cleanup time
+LAST_CLEANUP=$(date +%s)
+CLEANUP_INTERVAL=3600  # Run cleanup every hour
+
 # Main processing loop
 while true; do
   for job_meta in "$JOB_QUEUE_DIR"/*.job; do
@@ -188,6 +208,9 @@ while true; do
 
     log "Picked up job $job_id"
     mv "$job_meta" "$tmp/params/"
+
+    # Store job file path for cleanup after completion
+    job_file_path="$tmp/params/$fname"
 
     # Parse params
     output_format="a3m"; fasta=""
@@ -267,6 +290,19 @@ while true; do
     esac
 
     log "Job $job_id completed successfully"
+
+    # Cleanup: delete job file and FASTA input (keep results and tmp for debugging)
+    rm -f "$job_file_path"
+    [[ -f "$fasta" ]] && rm -f "$fasta"
+    log "Cleaned up job files for $job_id"
   done
+
+  # Periodic cleanup of old files
+  CURRENT_TIME=$(date +%s)
+  if (( CURRENT_TIME - LAST_CLEANUP >= CLEANUP_INTERVAL )); then
+    cleanup_old_files
+    LAST_CLEANUP=$CURRENT_TIME
+  fi
+
   sleep 5
 done

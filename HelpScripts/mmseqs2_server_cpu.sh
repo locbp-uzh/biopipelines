@@ -131,6 +131,9 @@ handle_job() {
         return
     fi
 
+    # Store job file path for cleanup after completion
+    local job_file_path="$tmp/params/$fname"
+
     # parse params
     output_format="a3m"; fasta=""
     while IFS='=' read -r key val; do
@@ -190,7 +193,32 @@ handle_job() {
     esac
 
     log "Job $job_id completed successfully"
+
+    # Cleanup: delete job file and FASTA input (keep results and tmp for debugging)
+    rm -f "$job_file_path"
+    [[ -f "$fasta" ]] && rm -f "$fasta"
+    log "Cleaned up job files for $job_id"
 }
+
+cleanup_old_files() {
+    # Delete files older than 24 hours
+    log "Running cleanup of files older than 24 hours..."
+
+    # Clean old result files (.a3m, .csv, .status)
+    find "$RESULTS_DIR" -type f \( -name "*.a3m" -o -name "*.csv" -o -name "*.status" \) -mtime +1 -delete 2>/dev/null || true
+
+    # Clean old temporary directories
+    find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
+
+    # Clean old FASTA files in queue (orphaned submissions)
+    find "$JOB_QUEUE_DIR" -type f -name "*.fasta" -mtime +1 -delete 2>/dev/null || true
+
+    log "Cleanup completed"
+}
+
+# Track cleanup time
+LAST_CLEANUP=$(date +%s)
+CLEANUP_INTERVAL=3600  # Run cleanup every hour
 
 while true; do
   # (1) prioritize current user's jobs
@@ -208,6 +236,13 @@ while true; do
       handle_job "$job_meta"
     fi
   done
+
+  # (3) periodic cleanup of old files
+  CURRENT_TIME=$(date +%s)
+  if (( CURRENT_TIME - LAST_CLEANUP >= CLEANUP_INTERVAL )); then
+    cleanup_old_files
+    LAST_CLEANUP=$CURRENT_TIME
+  fi
 
   sleep $POLL_INTERVAL
 done

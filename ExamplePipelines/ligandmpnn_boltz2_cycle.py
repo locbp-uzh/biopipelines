@@ -66,8 +66,7 @@ for CYCLE in range(NUM_CYCLES):
     lmpnn = pipeline.add(LigandMPNN(structures=best_open, #this is equivalent to boltz2
                                     ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                                     num_sequences=10, 
-                                    redesigned="145-180", #similarly you can specify fixed=...
-                                    design_within=4))
+                                    redesigned="145-180")) #similarly you can specify fixed=...))
     
     """
     Filter NEW sequences only (remove duplicates against historical)
@@ -84,7 +83,7 @@ for CYCLE in range(NUM_CYCLES):
     if all_sequences_seen is None:
         # First cycle - initialize history with ConcatenateDatasheets (single input)
         all_sequences_seen = pipeline.add(ConcatenateDatasheets(
-            datasheets=[unique_new_sequences.datasheets.sequences]
+            datasheets=[unique_new_sequences.datasheets.sequencces]
         ))
     else:
         # Subsequent cycles - concatenate unique sequences with existing history
