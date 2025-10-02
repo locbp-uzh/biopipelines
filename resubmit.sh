@@ -1,5 +1,5 @@
 #!/bin/bash
-# Resubmit a SLURM job with correct output path
+# Resubmit a SLURM job with correct output path and incremental naming
 # Usage: resubmit.sh <path_to_slurm.sh>
 
 if [ $# -eq 0 ]; then
@@ -19,11 +19,28 @@ fi
 SCRIPT_DIR=$(dirname "$SLURM_SCRIPT")
 SCRIPT_DIR=$(cd "$SCRIPT_DIR" && pwd)  # Get absolute path
 
+# Extract job name from SLURM script (#SBATCH --job-name=...)
+JOB_NAME=$(grep "^#SBATCH.*--job-name=" "$SLURM_SCRIPT" | head -1 | sed 's/.*--job-name=\([^ ]*\).*/\1/')
+
+# If no job name found in script, use the parent folder name
+if [ -z "$JOB_NAME" ]; then
+    JOB_NAME=$(basename "$(dirname "$SCRIPT_DIR")")
+fi
+
+# Find next available slurm_N.out number
+N=1
+while [ -f "$SCRIPT_DIR/slurm_$N.out" ]; do
+    N=$((N + 1))
+done
+
+OUTPUT_FILE="$SCRIPT_DIR/slurm_$N.out"
+
 # Submit job with output redirected to the script's directory
 echo "Submitting job from: $SLURM_SCRIPT"
-echo "Output will be written to: $SCRIPT_DIR/job.out"
+echo "Job name: $JOB_NAME"
+echo "Output will be written to: $OUTPUT_FILE"
 
-sbatch --output="$SCRIPT_DIR/job.out" "$SLURM_SCRIPT"
+sbatch --job-name="$JOB_NAME" --output="$OUTPUT_FILE" "$SLURM_SCRIPT"
 
 if [ $? -eq 0 ]; then
     echo "Job submitted successfully"
