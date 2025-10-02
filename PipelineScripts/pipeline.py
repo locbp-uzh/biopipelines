@@ -533,6 +533,12 @@ umask 002
         for line in slurm_content.split('\n'):
             if line != "":
                 print(line)
+        print("="*30+"SBATCH"+"="*30)
+        output_path = os.path.join(
+            self.folders["runtime"],
+            f"slurm.out"
+        )
+        print(f"sbatch --job-name={self.job_name} --output {output_path} {slurm_path}")
     
     def resources(self, gpu: str = None, memory: str = None, time: str = None, **slurm_options):
         """
