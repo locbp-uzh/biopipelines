@@ -32,30 +32,15 @@ done
 
 # -- status check --
 if [[ "$STATUS" -eq 1 ]]; then
-  # Check CPU server using PID file
-  cpu_pid_file="$RESULTS_DIR/server_cpu.pid"
-  if [[ -f "$cpu_pid_file" ]]; then
-    cpu_pid=$(cat "$cpu_pid_file")
-    if kill -0 "$cpu_pid" 2>/dev/null; then
-      cpu_running="yes"
-    else
-      cpu_running="no (stale PID file)"
-      rm -f "$cpu_pid_file"  # cleanup stale PID file
-    fi
+  # Check servers using squeue (more reliable than PID files)
+  if squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server: CPU"; then
+    cpu_running="yes"
   else
     cpu_running="no"
   fi
 
-  # Check GPU server using PID file
-  gpu_pid_file="$RESULTS_DIR/server_gpu.pid"
-  if [[ -f "$gpu_pid_file" ]]; then
-    gpu_pid=$(cat "$gpu_pid_file")
-    if kill -0 "$gpu_pid" 2>/dev/null; then
-      gpu_running="yes"
-    else
-      gpu_running="no (stale PID file)"
-      rm -f "$gpu_pid_file"  # cleanup stale PID file
-    fi
+  if squeue -u $USER -h -o "%.18i %.9P %.50j %.8u %.2t" | grep -q "MMseqs2Server: GPU"; then
+    gpu_running="yes"
   else
     gpu_running="no"
   fi
