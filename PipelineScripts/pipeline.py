@@ -163,7 +163,7 @@ class Pipeline:
 
         return tool_output.output
     
-    def validate_pipeline(self) -> bool:
+    def validate_pipeline(self, debug) -> bool:
         """
         Validate entire pipeline for consistency and compatibility.
         
@@ -175,6 +175,7 @@ class Pipeline:
         """
         if not self.tools:
             raise ValueError("Pipeline is empty")
+        if not debug: return
         
         # Check tool dependencies
         for i, tool in enumerate(self.tools):
@@ -185,7 +186,6 @@ class Pipeline:
                             f"Tool {tool.TOOL_NAME} depends on {dep.TOOL_NAME} "
                             f"which hasn't been added yet"
                         )
-        
         # Check environment compatibility
         for env in self.environments_used:
             env_tools = [t.TOOL_NAME for t in self.environment_groups[env]]
@@ -193,7 +193,7 @@ class Pipeline:
         
         return True
     
-    def save(self) -> str:
+    def save(self, debug=False) -> str:
         """
         Generate and save pipeline execution script.
         
@@ -203,13 +203,14 @@ class Pipeline:
         if not self.tools:
             raise ValueError("Cannot save empty pipeline")
         
-        # Print tool outputs with execution order
-        for i, tool_output in enumerate(self.tool_outputs, 1):
-            print("="*30+f"{i}.{tool_output.config.TOOL_NAME}"+"="*30)
-            print(tool_output.output)
-        
-        print("="*30+"Pipeline"+"="*30)
-        self.validate_pipeline()
+        if debug:
+            # Print tool outputs with execution order
+            for i, tool_output in enumerate(self.tool_outputs, 1):
+                print("="*30+f"{i}.{tool_output.config.TOOL_NAME}"+"="*30)
+                print(tool_output.output)
+            
+            print("="*30+"Pipeline"+"="*30)
+        self.validate_pipeline(debug)
         
         # Generate pipeline script
         script_path = os.path.join(

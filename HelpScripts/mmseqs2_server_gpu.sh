@@ -133,10 +133,11 @@ convert_a3m_to_csv() {
     log "CSV file created with $((line_count - 1)) data rows"
 }
 
-# Start GPU server with optimized settings for UniRef30
-# Note: GPU server is used for UniRef30 only, envDB searches run without GPU server
-log "Starting MMseqs2 GPU server for $UNIREF_PATH"
-CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$UNIREF_PATH" \
+# Start GPU server with both databases loaded
+log "Starting MMseqs2 GPU server for both databases"
+log "Database 1: $UNIREF_PATH"
+log "Database 2: $ENVDB_PATH"
+CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$UNIREF_PATH" "$ENVDB_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
