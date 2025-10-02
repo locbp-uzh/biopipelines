@@ -494,7 +494,7 @@ fi
 gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader)
 echo "GPU Type: $gpu_type"
 """
-            module_load = "module load mamba"
+            module_load = "module load mamba singularityce"
 
         # Generate SLURM script
         slurm_content = f"""#!/usr/bin/bash
