@@ -30,7 +30,6 @@ class PyMOL(BaseConfig):
     # Tool identification
     TOOL_NAME = "Pymol"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "none", "memory": "8GB", "time": "2:00:00"}
     
     def __init__(self,
                  structures: Union[ToolOutput, List[Tuple[ToolOutput, str]]] = None,

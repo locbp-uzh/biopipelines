@@ -41,7 +41,6 @@ class ProteinLigandContacts(BaseConfig):
     # Tool identification
     TOOL_NAME = "ProteinLigandContacts"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
 
     def __init__(self,
                  structures: Union[ToolOutput, StandardizedOutput],

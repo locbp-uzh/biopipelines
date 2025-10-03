@@ -29,7 +29,6 @@ class MergeDatasheets(BaseConfig):
     
     TOOL_NAME = "MergeDatasheets"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
     
     def __init__(self,
                  datasheets: List[Any],

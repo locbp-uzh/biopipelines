@@ -39,10 +39,9 @@ class ResidueAtomDistance(BaseConfig):
     # Tool identification
     TOOL_NAME = "ResidueAtomDistance"
     DEFAULT_ENV = "ProteinEnv" 
-    DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
     
     def __init__(self,
-                 input: Union[ToolOutput, StandardizedOutput],
+                 structures: Union[ToolOutput, StandardizedOutput],
                  atom: str,
                  residue: str,
                  method: str = "min",
@@ -50,10 +49,10 @@ class ResidueAtomDistance(BaseConfig):
                  **kwargs):
         """
         Initialize atom-residue distance analysis tool.
-        
+
         Args:
-            input: Input structures from previous tool (ToolOutput or StandardizedOutput)
-            atom: Atom selection string (e.g., 'LIG.Cl', 'HAL.Cl', 'name CA')  
+            structures: Input structures from previous tool (ToolOutput or StandardizedOutput)
+            atom: Atom selection string (e.g., 'LIG.Cl', 'HAL.Cl', 'name CA')
             residue: Residue selection string (e.g., 'D in IGDWG', '145', '145-150')
             method: How to calculate distance ("min", "max", "mean", "closest")
             metric_name: Custom name for the distance column (default: "distance")

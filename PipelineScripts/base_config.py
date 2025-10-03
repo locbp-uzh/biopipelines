@@ -23,7 +23,6 @@ class BaseConfig(ABC):
     # Tool-specific defaults (override in subclasses)
     TOOL_NAME = "base"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "V100", "memory": "15GB", "time": "24:00:00"}
     
     def __init__(self, **kwargs):
         """Initialize base configuration with common parameters."""
@@ -36,7 +35,7 @@ class BaseConfig(ABC):
         
         # Environment and resources
         self.environment = kwargs.get('env', self.DEFAULT_ENV)
-        self.resources = {**self.DEFAULT_RESOURCES, **kwargs.get('resources', {})}
+        self.resources = kwargs.get('resources', {})
         
         # Pipeline integration
         self.dependencies = kwargs.get('dependencies', [])
@@ -606,11 +605,11 @@ class StandardizedOutput:
     def __init__(self, output_files: Dict[str, Any]):
         """Initialize with output files dictionary."""
         self._data = output_files.copy()
-        
+
         # Handle datasheets - convert to DatasheetInfo objects if needed
         datasheets_raw = output_files.get('datasheets', [])
         self.datasheets = self._process_datasheets(datasheets_raw)
-        
+
         # Set standard attributes for dot notation access
         self.structures = output_files.get('structures', [])
         self.compounds = output_files.get('compounds', [])

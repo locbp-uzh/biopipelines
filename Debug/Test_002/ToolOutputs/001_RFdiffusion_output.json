@@ -1,0 +1,98 @@
+{
+  "tool_name": "RFdiffusion",
+  "tool_class": "RFdiffusion",
+  "job_name": "",
+  "execution_order": 1,
+  "environment": "ProteinEnv",
+  "output_structure": {
+    "structures": [
+      "Debug/Test_002/001_RFdiffusion/Test_002_1.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_2.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_3.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_4.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_5.pdb"
+    ],
+    "structure_ids": [
+      "Test_002_1",
+      "Test_002_2",
+      "Test_002_3",
+      "Test_002_4",
+      "Test_002_5"
+    ],
+    "compounds": [],
+    "compound_ids": [],
+    "sequences": [],
+    "sequence_ids": [],
+    "datasheets": {
+      "structures": {
+        "name": "structures",
+        "path": "Debug/Test_002/001_RFdiffusion/rfdiffusion_results.csv",
+        "columns": [
+          "id",
+          "source_id",
+          "pdb",
+          "fixed",
+          "designed",
+          "contigs",
+          "time",
+          "status"
+        ],
+        "description": "RFdiffusion structure generation results with fixed/designed regions",
+        "count": 5
+      }
+    },
+    "output_folder": "Debug/Test_002/001_RFdiffusion",
+    "pdbs": [
+      "Debug/Test_002/001_RFdiffusion/Test_002_1.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_2.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_3.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_4.pdb",
+      "Debug/Test_002/001_RFdiffusion/Test_002_5.pdb"
+    ],
+    "main": "Debug/Test_002/001_RFdiffusion/rfdiffusion_results.csv"
+  },
+  "configuration": {
+    "tool_parameters": {
+      "tool_name": "RFdiffusion",
+      "job_name": "",
+      "environment": "ProteinEnv",
+      "resources": {
+        "memory": "16GB",
+        "time": "24:00:00"
+      },
+      "dependencies": 0,
+      "execution_order": 1,
+      "rfd_params": {
+        "pdb": "",
+        "contigs": "50-100",
+        "inpaint": "",
+        "num_designs": 5,
+        "active_site": false,
+        "steps": 50,
+        "partial_steps": 0,
+        "reproducible": false,
+        "design_startnum": 1
+      }
+    },
+    "resources": {
+      "memory": "16GB",
+      "time": "24:00:00"
+    },
+    "pipeline_context": {
+      "pipeline_name": "Pipeline",
+      "pipeline_job_name": "Test",
+      "pipeline_description": "Average by datasheets and extract metrics"
+    }
+  },
+  "export_metadata": {
+    "export_time": "2025-10-03T14:37:58.011037",
+    "pipeline_version": "1.0",
+    "exported_by": "pipeline.save()"
+  },
+  "execution_metadata": {
+    "completion_time": null,
+    "execution_success": null,
+    "log_files": [],
+    "runtime_notes": "Execution metadata will be available after pipeline execution"
+  }
+}

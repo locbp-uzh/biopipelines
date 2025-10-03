@@ -28,7 +28,6 @@ class LigandMPNN(BaseConfig):
     
     TOOL_NAME = "LigandMPNN"
     DEFAULT_ENV = "ligandmpnn_env"
-    DEFAULT_RESOURCES = {"gpu": "V100", "memory": "16GB", "time": "12:00:00"}
     
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput],
@@ -116,22 +115,30 @@ class LigandMPNN(BaseConfig):
         self.seqs_folder = None
         self.queries_csv = None
         self.queries_fasta = None
-        
+
         # Helper script paths
         self.fa_to_csv_fasta_py = None
         self.lmpnn_folder = None
         self.runtime_positions_py = None
+
+        # Generated script paths
+        self.commands_file = None
+        self.replacement_script = None
     
     def _setup_file_paths(self):
         """Set up all file paths after output_folder is known."""
         # Extract pipeline/job name for file naming
         job_base = self.name or self._extract_job_name()
-        
+
         # Core input/output files
         self.seqs_folder = os.path.join(self.output_folder, "seqs")
         self.queries_csv = os.path.join(self.output_folder, f"{job_base}_queries.csv")
         self.queries_fasta = os.path.join(self.output_folder, f"{job_base}_queries.fasta")
-        
+
+        # Generated script paths - defined once, used throughout
+        self.commands_file = os.path.join(self.output_folder, "lmpnn_commands.sh")
+        self.replacement_script = os.path.join(self.output_folder, "lmpnn_positions_replacement.sh")
+
         # Helper script paths (only set if folders are available)
         if hasattr(self, 'folders') and self.folders:
             self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py")
@@ -317,18 +324,10 @@ class LigandMPNN(BaseConfig):
         # Resolve datasheet references in fixed/designed positions
         resolved_fixed = self.resolve_datasheet_reference(self.fixed_positions) if self.fixed_positions else "-"
         resolved_designed = self.resolve_datasheet_reference(self.designed_positions) if self.designed_positions else "-"
-        
-        # Get runtime folder (parent of output folder) for the script output
-        runtime_folder = os.path.dirname(self.output_folder)
-        replacement_script = os.path.join(runtime_folder, "lmpnn_positions_replacement.sh")
-        
-        # Get runtime folder and create commands file path
-        runtime_folder = os.path.dirname(self.output_folder)
-        commands_file = os.path.join(runtime_folder, "lmpnn_commands.sh")
-        
+
         return f"""echo "Setting up LigandMPNN position constraints"
 # Create a separate commands file that will be modified instead of this script
-cat > {commands_file} << 'EOF'
+cat > {self.commands_file} << 'EOF'
 #!/bin/bash
 cd {self.lmpnn_folder}
 
@@ -394,12 +393,7 @@ cd {self.lmpnn_folder}
         base_options += f' --number_of_batches {self.num_batches}'
         base_options += f' --ligand_mpnn_cutoff_for_score "{self.design_within}"'
         base_options += f' --out_folder "{self.output_folder}"'
-        
-        # Get runtime folder and files
-        runtime_folder = os.path.dirname(self.output_folder)
-        commands_file = os.path.join(runtime_folder, "lmpnn_commands.sh")
-        replacement_script = os.path.join(runtime_folder, "lmpnn_positions_replacement.sh")
-        
+
         # Generate commands that will be written to the separate file
         commands = []
         
@@ -420,19 +414,19 @@ cd {self.lmpnn_folder}
 EOF
 
 # Make the commands file executable
-chmod +x {commands_file}
+chmod +x {self.commands_file}
 
 # Use existing HelpScript to create position replacement script
 echo "Creating position replacement script..."
-python {self.runtime_positions_py} "{structure_files_str}" {input_source} {input_datasheet} {resolved_fixed} {resolved_designed} {self.ligand} "{self.design_within}" {replacement_script}
+python {self.runtime_positions_py} "{structure_files_str}" {input_source} {input_datasheet} {resolved_fixed} {resolved_designed} {self.ligand} "{self.design_within}" {self.replacement_script}
 
 # Run the replacement script on the commands file (not this script)
-echo "Running position replacement script on commands file: {commands_file}"
-bash {replacement_script} {commands_file}
+echo "Running position replacement script on commands file: {self.commands_file}"
+bash {self.replacement_script} {self.commands_file}
 
 # Now execute the modified commands file
 echo "Executing LigandMPNN commands..."
-bash {commands_file}
+bash {self.commands_file}
 
 """
     

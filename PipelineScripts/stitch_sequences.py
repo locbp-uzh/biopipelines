@@ -32,7 +32,6 @@ class StitchSequences(BaseConfig):
     # Tool identification
     TOOL_NAME = "StitchSequences"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "0:30:00"}
 
     def __init__(self,
                  sequences: List[Union[ToolOutput, StandardizedOutput]],

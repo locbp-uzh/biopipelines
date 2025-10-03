@@ -31,10 +31,8 @@ class Fuse(BaseConfig):
     
     TOOL_NAME = "Fuse"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "T4", "memory": "8GB", "time": "2:00:00"}
     
-    def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
-                 proteins: Union[List[str], str] = None,
+    def __init__(self, proteins: Union[List[str], str, ToolOutput, Dict[str, Any]] = None,
                  sequences: Union[List[str], str] = None,
                  name: str = "",
                  linker: str = "GGGGSGGGGSGGGGSGGGGS",
@@ -42,42 +40,41 @@ class Fuse(BaseConfig):
                  **kwargs):
         """
         Initialize Fuse configuration.
-        
+
         Args:
-            input: Complete standardized input dictionary with sequences, etc.
-            proteins: List of protein sequences or PDB file paths
-            sequences: Alias for proteins (for consistency with other tools)  
+            proteins: List of protein sequences, PDB file paths, ToolOutput, or dict with sequences
+            sequences: Alias for proteins (for consistency with other tools)
             name: Job name for output files
             linker: Linker sequence to use (will be truncated to specified lengths)
             linker_lengths: List of length ranges for each junction (e.g., ["1-6", "1-6"])
             **kwargs: Additional parameters
         """
         # Handle different input formats
-        if input is not None:
-            if isinstance(input, StandardizedOutput):
+        if proteins is not None:
+            if isinstance(proteins, StandardizedOutput):
                 # StandardizedOutput object (e.g., from upstream tool)
-                self.input_proteins = self._extract_sequences_from_standardized(input)
+                self.input_proteins = self._extract_sequences_from_standardized(proteins)
                 self.input_is_tool_output = False
-                self.standardized_input = input
-            elif isinstance(input, ToolOutput):
+                self.standardized_input = proteins
+            elif isinstance(proteins, ToolOutput):
                 # Direct ToolOutput object
-                self.input_proteins = self._extract_sequences_from_tool_output(input)
+                self.input_proteins = self._extract_sequences_from_tool_output(proteins)
                 self.input_is_tool_output = True
                 self.standardized_input = None
-                self.dependencies.append(input.config)
-            elif isinstance(input, dict):
+                self.dependencies.append(proteins.config)
+            elif isinstance(proteins, dict):
                 # Dictionary format with standardized keys
-                self.input_proteins = input.get('sequences', [])
+                self.input_proteins = proteins.get('sequences', [])
                 self.input_is_tool_output = False
                 self.standardized_input = None
-            elif isinstance(input, list):
+            elif isinstance(proteins, list):
                 # Direct list of sequences
-                self.input_proteins = input
+                self.input_proteins = proteins
                 self.input_is_tool_output = False
                 self.standardized_input = None
             else:
                 # Single sequence string
-                self.input_proteins = [str(input)]
+                self.input_proteins = [str(proteins)]
                 self.input_is_tool_output = False
                 self.standardized_input = None
         else:

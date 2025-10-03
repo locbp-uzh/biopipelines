@@ -29,19 +29,13 @@ class Boltz2(BaseConfig):
     # Tool identification
     TOOL_NAME = "Boltz2"
     DEFAULT_ENV = "Boltz2Env"
-    DEFAULT_RESOURCES = {"gpu": "V100", "memory": "16GB", "time": "24:00:00"}
     
-    def __init__(self, 
-                 # Standardized input parameter (like other pipeline tools)
-                 input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
-                 # Primary input parameters (matching usage examples)
+    def __init__(self,
+                 # Primary input parameters
                  config: Optional[str] = None,
-                 proteins: Union[str, List[str], ToolOutput] = None,
+                 proteins: Union[str, List[str], ToolOutput, StandardizedOutput] = None,
                  ligands: Union[str, ToolOutput, StandardizedOutput, None] = None,
                  msas: Optional[Union[str, ToolOutput]] = None,
-                 # Legacy compatibility
-                 sequences: Union[str, List[str], ToolOutput] = None,
-                 ligand_smiles: Optional[str] = None,
                  # Library-based ligand inputs
                  ligand_library: Optional[str] = None,
                  primary_key: Optional[str] = None,
@@ -59,15 +53,12 @@ class Boltz2(BaseConfig):
                  **kwargs):
         """
         Initialize Boltz2 configuration.
-        
+
         Args:
-            input: Complete standardized input with sequences, datasheets, etc. (e.g., lmpnn)
             config: Direct YAML configuration string (Example 1: Boltz2(config=yaml))
-            proteins: Protein sequences - can be ToolOutput, file path, or direct sequence (Examples 2&3)
+            proteins: Protein sequences - can be ToolOutput, StandardizedOutput, file path, or direct sequence
             ligands: Single ligand SMILES string, ToolOutput with compounds, or datasheet reference
             msas: MSA files for recycling (e.g., boltz2_apo.datasheets.msas)
-            sequences: Legacy parameter, same as proteins (for backward compatibility)
-            ligand_smiles: Legacy parameter, same as ligands (for backward compatibility)
             ligand_library: Path to CSV file with ligand library
             primary_key: Key column in library to filter by
             library_repr: Ligand representation ("SMILES" or "CCD")
@@ -83,8 +74,8 @@ class Boltz2(BaseConfig):
         """
         # Initialize default values
         self.config = config
-        self.proteins = proteins or sequences  
-        self.ligands = ligands or ligand_smiles
+        self.proteins = proteins
+        self.ligands = ligands
         self.msas = msas
         self.input_sequences = None
         self.input_compounds = []
@@ -100,6 +91,13 @@ class Boltz2(BaseConfig):
             self.input_is_tool_output = False
             self.standardized_input = proteins
             # Keep proteins as StandardizedOutput reference
+        elif isinstance(proteins, ToolOutput):
+            # ToolOutput for proteins
+            self.input_sequences = proteins
+            self.input_datasheets = proteins.get_output_files("datasheets")
+            self.input_is_tool_output = True
+            self.standardized_input = None
+            self.dependencies.append(proteins.config)
         elif isinstance(ligands, (StandardizedOutput, ToolOutput)):
             # Explicit: ligands=compounds from previous tool
             if isinstance(ligands, StandardizedOutput):
@@ -114,59 +112,8 @@ class Boltz2(BaseConfig):
         elif isinstance(msas, StandardizedOutput):
             # Explicit: msas=previous_boltz
             self.input_datasheets = getattr(msas, 'datasheets', {})
-
-        # Handle legacy standardized input format (less preferred)
-        elif input is not None:
-            # Legacy format: input=lmpnn (ambiguous)
-            if isinstance(input, StandardizedOutput):
-                # StandardizedOutput object - try to infer what to use
-                self.input_sequences = getattr(input, 'sequences', [])
-                self.input_compounds = getattr(input, 'compounds', [])
-                self.input_datasheets = getattr(input, 'datasheets', {})
-                self.input_is_tool_output = False  # Direct file paths now
-                self.standardized_input = input  # Keep reference
-                
-                # Auto-assign based on what's available (proteins take priority)
-                if self.input_sequences and not proteins:
-                    self.proteins = self.input_sequences
-                if self.input_compounds and not ligands and not ligand_smiles:
-                    # Auto-use compounds as ligands if no explicit ligands provided
-                    self.ligands = self.input_compounds[0] if self.input_compounds else None
-            elif isinstance(input, ToolOutput):
-                # Direct ToolOutput object
-                self.input_sequences = input
-                self.input_compounds = input.get_output_files("compounds")
-                self.input_datasheets = input.get_output_files("datasheets")
-                self.input_is_tool_output = True
-                self.standardized_input = None
-            elif isinstance(input, dict):
-                # Dictionary format with standardized keys
-                self.input_sequences = input.get('sequences', [])
-                self.input_compounds = input.get('compounds', [])
-                self.input_datasheets = input.get('datasheets', {})
-                self.input_is_tool_output = False  # Direct file paths
-                self.standardized_input = None
-            else:
-                # Fallback to treating as protein sequences
-                self.input_sequences = input
-                self.input_compounds = []
-                self.input_datasheets = {}
-                self.input_is_tool_output = isinstance(input, ToolOutput)
-                self.standardized_input = None
-            
-            # When using input parameter, these should be None unless explicitly overridden
-            self.config = config
-            self.proteins = proteins or self.input_sequences
-            self.ligands = ligands or ligand_smiles
-            self.msas = msas
         else:
-            # Legacy format: individual parameters
-            self.config = config
-            self.proteins = proteins or sequences  # Use proteins if provided, fallback to sequences
-            self.ligands = ligands or ligand_smiles  # Use ligands if provided, fallback to ligand_smiles
-            self.msas = msas
-            
-            # No standardized input
+            # Direct inputs (strings, lists, etc.)
             self.input_sequences = self.proteins
             self.input_compounds = []
             self.input_datasheets = {}
@@ -283,13 +230,12 @@ class Boltz2(BaseConfig):
         """Validate Boltz2-specific parameters."""
         # Must have some form of input
         has_input = any([
-            hasattr(self, 'input') and getattr(self, 'input', None) is not None,
             getattr(self, 'config', None) is not None,
             getattr(self, 'proteins', None) is not None,
             getattr(self, 'input_sequences', None) is not None
         ])
         if not has_input:
-            raise ValueError("Either input, config, or proteins parameter is required")
+            raise ValueError("Either config or proteins parameter is required")
         
         # Cannot specify multiple primary input methods (only check if they exist)
         primary_inputs = []

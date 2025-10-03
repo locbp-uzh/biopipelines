@@ -30,7 +30,6 @@ class SliceDatasheet(BaseConfig):
 
     TOOL_NAME = "SliceDatasheet"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
 
     def __init__(self,
                  input: Union[ToolOutput, StandardizedOutput],

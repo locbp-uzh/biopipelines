@@ -29,7 +29,6 @@ class FetchStructure(BaseConfig):
     # Tool identification
     TOOL_NAME = "FetchStructure"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": None, "memory": "2GB", "time": "1:00:00"}
     
     def __init__(self,
                  pdbs: Union[str, List[str]],

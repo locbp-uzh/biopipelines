@@ -28,7 +28,6 @@ class DistanceSelector(BaseConfig):
 
     TOOL_NAME = "DistanceSelector"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "V100", "memory": "8GB", "time": "6:00:00"}
 
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput] = None,

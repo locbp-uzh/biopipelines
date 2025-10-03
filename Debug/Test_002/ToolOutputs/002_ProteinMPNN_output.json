@@ -1,0 +1,105 @@
+{
+  "tool_name": "ProteinMPNN",
+  "tool_class": "ProteinMPNN",
+  "job_name": "",
+  "execution_order": 2,
+  "environment": "ProteinEnv",
+  "output_structure": {
+    "structures": [],
+    "structure_ids": [],
+    "compounds": [],
+    "compound_ids": [],
+    "sequences": [
+      "Debug/Test_002/002_ProteinMPNN/Test_002_queries.csv"
+    ],
+    "sequence_ids": [
+      "Test_002_1_1",
+      "Test_002_1_2",
+      "Test_002_2_1",
+      "Test_002_2_2",
+      "Test_002_3_1",
+      "Test_002_3_2",
+      "Test_002_4_1",
+      "Test_002_4_2",
+      "Test_002_5_1",
+      "Test_002_5_2"
+    ],
+    "datasheets": {
+      "sequences": {
+        "name": "sequences",
+        "path": "Debug/Test_002/002_ProteinMPNN/Test_002_queries.csv",
+        "columns": [
+          "id",
+          "source_id",
+          "source_pdb",
+          "sequence",
+          "score",
+          "seq_recovery",
+          "rmsd"
+        ],
+        "description": "ProteinMPNN sequence generation results with scores and structure recovery metrics",
+        "count": 10
+      }
+    },
+    "output_folder": "Debug/Test_002/002_ProteinMPNN",
+    "main": "Debug/Test_002/002_ProteinMPNN/proteinmpnn_results.csv",
+    "fa_files": [
+      "Debug/Test_002/002_ProteinMPNN/seqs/Test_002_sequences.fa"
+    ],
+    "queries_csv": [
+      "Debug/Test_002/002_ProteinMPNN/Test_002_queries.csv"
+    ],
+    "queries_fasta": [
+      "Debug/Test_002/002_ProteinMPNN/Test_002_queries.fasta"
+    ],
+    "seqs_folder": [
+      "Debug/Test_002/002_ProteinMPNN/seqs"
+    ]
+  },
+  "configuration": {
+    "tool_parameters": {
+      "tool_name": "ProteinMPNN",
+      "job_name": "",
+      "environment": "ProteinEnv",
+      "resources": {
+        "memory": "16GB",
+        "time": "24:00:00"
+      },
+      "dependencies": 0,
+      "execution_order": 2,
+      "mpnn_params": {
+        "num_sequences": 2,
+        "fixed": "",
+        "redesigned": "",
+        "fixed_positions": "",
+        "designed_positions": "",
+        "fixed_chain": "A",
+        "plddt_threshold": 100.0,
+        "sampling_temp": 0.1,
+        "model_name": "v_48_020",
+        "soluble_model": true,
+        "input_type": "file/folder"
+      }
+    },
+    "resources": {
+      "memory": "16GB",
+      "time": "24:00:00"
+    },
+    "pipeline_context": {
+      "pipeline_name": "Pipeline",
+      "pipeline_job_name": "Test",
+      "pipeline_description": "Average by datasheets and extract metrics"
+    }
+  },
+  "export_metadata": {
+    "export_time": "2025-10-03T14:37:58.011551",
+    "pipeline_version": "1.0",
+    "exported_by": "pipeline.save()"
+  },
+  "execution_metadata": {
+    "completion_time": null,
+    "execution_success": null,
+    "log_files": [],
+    "runtime_notes": "Execution metadata will be available after pipeline execution"
+  }
+}

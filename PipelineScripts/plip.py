@@ -28,7 +28,6 @@ class PLIP(BaseConfig):
 
     TOOL_NAME = "PLIP"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"cpu": 4, "memory": "8GB", "time": "4:00:00"}
 
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput, StandardizedOutput],

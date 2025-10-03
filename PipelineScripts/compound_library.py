@@ -32,7 +32,6 @@ class CompoundLibrary(BaseConfig):
     # Tool identification
     TOOL_NAME = "CompoundLibrary"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "none", "memory": "8GB", "time": "02:00:00"}
     
     def __init__(self, 
                  library: Union[str, Dict[str, Union[str, List[str]]]],

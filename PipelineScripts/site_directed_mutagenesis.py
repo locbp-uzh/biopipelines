@@ -30,7 +30,6 @@ class SDM(BaseConfig):
     # Tool identification
     TOOL_NAME = "SDM"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "T4", "memory": "4GB", "time": "1:00:00"}
 
     # Amino acid classifications
     AMINO_ACID_CLASSES = {

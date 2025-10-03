@@ -404,7 +404,7 @@ class Pipeline:
             SLURM script content
         """
         if not self.scripts_generated:
-            raise ValueError("Must call save() before generating SLURM script")
+            self.save()
 
         # Handle auto email detection
         if email == "auto":

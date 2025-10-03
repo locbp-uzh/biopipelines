@@ -30,20 +30,17 @@ class AlphaFold(BaseConfig):
     
     TOOL_NAME = "AlphaFold"
     DEFAULT_ENV = "ProteinEnv"
-    DEFAULT_RESOURCES = {"gpu": "V100", "memory": "15GB", "time": "24:00:00"}
     
-    def __init__(self, input: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
-                 sequences: Union[str, List[str], ToolOutput] = "",
+    def __init__(self, sequences: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
                  datasheets: Optional[List[str]] = None,
                  name: str = "",
                  num_relax: int = 0, num_recycle: int = 3, rand_seed: int = 0,
                  **kwargs):
         """
         Initialize AlphaFold configuration.
-        
+
         Args:
-            input: Complete standardized input dictionary with sequences, datasheets, etc.
-            sequences: Input sequences (FASTA file, CSV file, list, or ToolOutput)
+            sequences: Input sequences - can be FASTA file, CSV file, list, ToolOutput, or dict with sequences
             datasheets: Input datasheet files for metadata
             name: Job name for output files
             rank: Rank structures by confidence metrics
@@ -53,39 +50,34 @@ class AlphaFold(BaseConfig):
             rand_seed: Random seed for reproducible results (0 = random)
             **kwargs: Additional parameters
         """
-        # Handle standardized input format
-        if input is not None:
-            # New standardized format: input=pmpnn
-            if isinstance(input, StandardizedOutput):
-                # StandardizedOutput object (pmpnn)
-                self.input_sequences = input.sequences
-                self.input_datasheets = input.datasheets
+        # Handle different input formats
+        if sequences is not None:
+            if isinstance(sequences, StandardizedOutput):
+                # StandardizedOutput object (e.g., from pmpnn)
+                self.input_sequences = sequences.sequences
+                self.input_datasheets = sequences.datasheets
                 self.input_is_tool_output = False  # Direct file paths now
-                self.standardized_input = input  # Keep reference to get sequence_ids later
-            elif isinstance(input, ToolOutput):
+                self.standardized_input = sequences  # Keep reference to get sequence_ids later
+            elif isinstance(sequences, ToolOutput):
                 # Direct ToolOutput object
-                self.input_sequences = input
-                self.input_datasheets = input.get_output_files("datasheets")
+                self.input_sequences = sequences
+                self.input_datasheets = sequences.get_output_files("datasheets")
                 self.input_is_tool_output = True
                 self.standardized_input = None
-            elif isinstance(input, dict):
+            elif isinstance(sequences, dict):
                 # Dictionary format with standardized keys
-                self.input_sequences = input.get('sequences', [])
-                self.input_datasheets = input.get('datasheets', {})
+                self.input_sequences = sequences.get('sequences', [])
+                self.input_datasheets = sequences.get('datasheets', {})
                 self.input_is_tool_output = False  # Direct file paths
                 self.standardized_input = None
             else:
-                # Fallback to treating as input_sequences
-                self.input_sequences = input
+                # Direct sequence(s) - string or list
+                self.input_sequences = sequences
                 self.input_datasheets = datasheets or {}
-                self.input_is_tool_output = isinstance(input, ToolOutput)
+                self.input_is_tool_output = isinstance(sequences, ToolOutput)
                 self.standardized_input = None
         else:
-            # Legacy format: sequences=pmpnn
-            self.input_sequences = sequences
-            self.input_datasheets = datasheets or {}
-            self.input_is_tool_output = isinstance(sequences, ToolOutput)
-            self.standardized_input = None
+            raise ValueError("sequences parameter is required")
         
         # Store AlphaFold-specific parameters
         self.name = name or kwargs.get('job_name', '')
