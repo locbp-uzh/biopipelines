@@ -28,7 +28,7 @@ class MergeDatasheets(BaseConfig):
     """
     
     TOOL_NAME = "MergeDatasheets"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
                  datasheets: List[Any],

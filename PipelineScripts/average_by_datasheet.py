@@ -35,7 +35,7 @@ class AverageByDatasheet(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "AverageByDatasheet"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
                  datasheets: List[Union[str, Dict, ToolOutput, StandardizedOutput]],

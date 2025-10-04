@@ -28,7 +28,7 @@ class ConcatenateDatasheets(BaseConfig):
     """
     
     TOOL_NAME = "ConcatenateDatasheets"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
                  datasheets: List[Any],

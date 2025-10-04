@@ -29,7 +29,7 @@ class PyMOL(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "Pymol"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
                  structures: Union[ToolOutput, List[Tuple[ToolOutput, str]]] = None,

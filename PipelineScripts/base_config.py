@@ -11,6 +11,13 @@ import json
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, Union
 
+try:
+    from .config_manager import ConfigManager
+except ImportError:
+    import sys
+    sys.path.append(os.path.dirname(__file__))
+    from config_manager import ConfigManager
+
 
 class BaseConfig(ABC):
     """
@@ -22,19 +29,20 @@ class BaseConfig(ABC):
     
     # Tool-specific defaults (override in subclasses)
     TOOL_NAME = "base"
-    DEFAULT_ENV = "ProteinEnv"
-    
+    DEFAULT_ENV = None  # Loaded from config.yaml
+
     def __init__(self, **kwargs):
         """Initialize base configuration with common parameters."""
         # Core identification
         self.tool_name = self.TOOL_NAME
         self.job_name = kwargs.get('name', '')
-        
+
         # Pipeline reference for getting job name
         self.pipeline = kwargs.get('pipeline', None)
-        
-        # Environment and resources
-        self.environment = kwargs.get('env', self.DEFAULT_ENV)
+
+        # Environment and resources - use config.yaml if available
+        default_env = self._get_default_environment()
+        self.environment = kwargs.get('env', default_env)
         self.resources = kwargs.get('resources', {})
         
         # Pipeline integration
@@ -58,11 +66,27 @@ class BaseConfig(ABC):
         self.validate_params()
     
     
+    def _get_default_environment(self) -> Optional[str]:
+        """
+        Get default environment from config.yaml, falling back to class DEFAULT_ENV.
+
+        Returns:
+            Environment name from config or class default
+        """
+        try:
+            config_manager = ConfigManager()
+            config_env = config_manager.get_environment(self.TOOL_NAME)
+            # Return config environment if it exists, otherwise use class default
+            return config_env if config_env is not None else self.DEFAULT_ENV
+        except Exception:
+            # If config loading fails, fall back to class default
+            return self.DEFAULT_ENV
+
     @abstractmethod
     def validate_params(self):
         """Validate tool-specific parameters. Override in subclasses."""
         pass
-    
+
     def get_effective_job_name(self) -> str:
         """
         Get the effective job name, preferring pipeline job name over tool name.

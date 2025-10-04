@@ -2,7 +2,6 @@
 This pipeline shows how to run RFdiffusion-AllAtom, generate sequences from LigandMPNN, fold the sequences with Boltz2.
 """
 
-#!/usr/bin/env python3
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 

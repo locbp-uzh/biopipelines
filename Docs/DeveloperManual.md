@@ -44,7 +44,7 @@ BioPipelines requires:
 biopipelines/
 ├── PipelineScripts/          # Tool implementations
 │   ├── base_config.py        # Base class for all tools
-│   ├── folders.py            # Folder management class (will be changed to a yaml config in the future, including default environments for tools)
+│   ├── folders.py            # Folder management class
 │   ├── pipeline.py           # Pipeline orchestration
 │   ├── <tool_name>.py        # Individual tool classes
 │   └── ...

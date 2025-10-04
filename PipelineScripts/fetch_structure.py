@@ -28,7 +28,7 @@ class FetchStructure(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "FetchStructure"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
                  pdbs: Union[str, List[str]],

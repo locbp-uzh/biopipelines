@@ -38,7 +38,7 @@ class LoadOutput(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "LoadOutput"
-    DEFAULT_ENV = "ProteinEnv"  # Can run in any environment since it just loads files
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self, output_json: str, filter = None, validate_files: bool = True, **kwargs):
         """

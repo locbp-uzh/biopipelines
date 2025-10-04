@@ -78,7 +78,7 @@ class Filter(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "Filter"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
                  data: Union[ToolOutput, StandardizedOutput] = None,

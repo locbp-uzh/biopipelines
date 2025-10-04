@@ -8,6 +8,13 @@ following the established conventions from the Jupyter notebooks.
 import os
 from typing import Dict
 
+try:
+    from .config_manager import ConfigManager
+except ImportError:
+    import sys
+    sys.path.append(os.path.dirname(__file__))
+    from config_manager import ConfigManager
+
 
 class FolderManager:
     """
@@ -20,7 +27,7 @@ class FolderManager:
     def __init__(self, pipeline_name: str, job_folder: str, debug: bool=False, shared: bool=False):
         """
         Initialize folder manager for a pipeline.
-        
+
         Args:
             pipeline_name: Name of the pipeline (used for output folders)
             job_folder: Name of the job (used for output folders)
@@ -29,35 +36,52 @@ class FolderManager:
         """
         self._folders = {}
 
+        # Load configuration
+        config_manager = ConfigManager()
+        folder_config = config_manager.get_folder_config()
+
         """Setup base folder structure following notebook conventions."""
         # Get user info from current directory structure
         notebooks_folder = os.getcwd() if not debug else "biopipelines"
         user_name = os.path.basename(os.path.dirname(notebooks_folder)) if not debug else "USER"
         self.user_name = user_name
         user_code = user_name if not shared else "public"
-        
+
+        # Get base paths from config
+        group_folder = folder_config.get('group', '/shares/locbp.chem.uzh')
+
         # Base system folders
         self._folders.update({
             "notebooks": notebooks_folder,
             "home": f"/home/{user_name}",
             "data": f"/data/{user_name}",
             "scratch": f"/scratch/{user_name}",
-            "group": "/shares/locbp.chem.uzh",
-            "user": f"/shares/locbp.chem.uzh/{user_code}",
+            "group": group_folder,
+            "user": f"{group_folder}/{user_code}",
             "PDBs": os.path.join(notebooks_folder, "PDBs"),
             "HelpScripts": os.path.join(notebooks_folder, "HelpScripts"),
             "MMseqs2": os.path.join(notebooks_folder, "MMseqs2")})
+
+        # Shared folders from config
+        shared_config = folder_config.get('shared', {})
+        models_path = shared_config.get('models', 'models')
+        containers_path = shared_config.get('containers', 'containers')
+        boltz_cache_path = shared_config.get('BoltzCache', 'models/Boltz')
+
         self._folders.update({
-            "models": os.path.join(self._folders["group"], "models"),
-            "containers": os.path.join(self._folders["group"], "containers")})
+            "models": os.path.join(self._folders["group"], models_path),
+            "containers": os.path.join(self._folders["group"], containers_path)})
+
+        # Tool-specific data folders from config
+        tool_data_config = folder_config.get('tool_data', {})
         self._folders.update({
-            "RFdiffusion": os.path.join(self._folders["data"], "RFdiffusion"),
-            "RFdiffusionAllAtom": os.path.join(self._folders["data"], "rf_diffusion_all_atom"),
-            "ProteinMPNN": os.path.join(self._folders["data"], "ProteinMPNN"),
-            "AlphaFold": os.path.join(self._folders["data"], "localcolabfold"),
-            "OmegaFold": os.path.join(self._folders["data"], "OmegaFold"),
-            "Boltz": os.path.join(self._folders["data"], "boltz"),
-            "BoltzCache": os.path.join(self._folders["models"], "Boltz"),
+            "RFdiffusion": os.path.join(self._folders["data"], tool_data_config.get('RFdiffusion', 'RFdiffusion')),
+            "RFdiffusionAllAtom": os.path.join(self._folders["data"], tool_data_config.get('RFdiffusionAllAtom', 'rf_diffusion_all_atom')),
+            "ProteinMPNN": os.path.join(self._folders["data"], tool_data_config.get('ProteinMPNN', 'ProteinMPNN')),
+            "AlphaFold": os.path.join(self._folders["data"], tool_data_config.get('AlphaFold', 'localcolabfold')),
+            "OmegaFold": os.path.join(self._folders["data"], tool_data_config.get('OmegaFold', 'OmegaFold')),
+            "Boltz": os.path.join(self._folders["data"], tool_data_config.get('Boltz', 'boltz')),
+            "BoltzCache": os.path.join(self._folders["group"], boltz_cache_path),
             "BioPipelines": os.path.join(self._folders["user"], "BioPipelines")})
         self._folders.update({
             "pipeline": os.path.join(self._folders["BioPipelines"],pipeline_name) if not debug else "Debug"})

@@ -1,0 +1,68 @@
+# BioPipelines Configuration
+# This file defines folder paths and default environments for pipeline execution
+# Users can customize this file to match their local setup
+
+# Folder Configuration
+folders:
+  # Base system folders
+  group: "/shares/locbp.chem.uzh"
+
+  # Tool-specific data folders (relative to /data/{username})
+  tool_data:
+    RFdiffusion: "RFdiffusion"
+    RFdiffusionAllAtom: "rf_diffusion_all_atom"
+    ProteinMPNN: "ProteinMPNN"
+    AlphaFold: "localcolabfold"
+    OmegaFold: "OmegaFold"
+    Boltz: "boltz"
+
+  # Shared model and container folders (relative to group folder)
+  shared:
+    models: "models"
+    containers: "containers"
+    BoltzCache: "models/Boltz"
+
+# Default Environments
+# Each tool can have a default conda environment specified here
+environments:
+  # Structure prediction and design tools
+  Boltz2: "Boltz2Env"
+  RFdiffusion: "ProteinEnv"
+  RFdiffusionAllAtom: "ProteinEnv"
+  ProteinMPNN: "ProteinEnv"
+  LigandMPNN: "ProteinEnv"
+  AlphaFold: "ProteinEnv"
+
+  # Analysis and utility tools
+  MMseqs2: "MMseqsEnv"
+  PLIP: "PlipEnv"
+  PyMOL: "ProteinEnv"
+
+  # Data manipulation tools (usually don't need special environments)
+  Filter: null
+  SelectBest: null
+  MergeDatasheets: null
+  ConcatenateDatasheets: null
+  RemoveDuplicates: null
+  SliceDatasheet: null
+  AverageByDatasheet: null
+  ExtractMetrics: null
+  LoadOutput: null
+
+  # Mutation and design tools
+  MutationComposer: "MutationEnv"
+  MutationProfiler: "MutationEnv"
+  SiteDirectedMutagenesis: "MutationEnv"
+  StitchSequences: null
+  Fuse: null
+
+  # Analysis tools
+  ProteinLigandContacts: "ProteinEnv"
+  ResidueAtomDistance: null
+  DistanceSelector: null
+  ConformationalChange: "ProteinEnv"
+  Confidence: null
+
+  # Library and compound tools
+  CompoundLibrary: null
+  FetchStructure: null

@@ -29,9 +29,7 @@ class SDM(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "SDM"
-    DEFAULT_ENV = "ProteinEnv"
-
-    # Amino acid classifications
+    DEFAULT_ENV = None  # Loaded from config.yaml
     AMINO_ACID_CLASSES = {
         "saturation": "ACDEFGHIKLMNPQRSTVWY",  # All 20 amino acids
         "hydrophobic": "AFILMVWY",

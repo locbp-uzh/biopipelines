@@ -7,7 +7,6 @@ Example: You clicked /1_best//B/LIG`1/N88 -> (pk1)
 2. Treatment of two enantiomers and composition of sequences from mutation profile of both
 """
 
-#!/usr/bin/env python3
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
@@ -37,9 +36,6 @@ pipeline.resources(
     memory="16GB"
 )
 
-"""
-We load both open and close form so that we calculate the delta in affinity and use it as benchmark
-"""
 best_R = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json'))
 best_RR = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json'))
 best_S = pipeline.add(LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_S_001/ToolOutputs/1_Boltz2_output.json'))
@@ -67,9 +63,7 @@ all_open_best = [{"R":best_R,"S":best_S}] #will be used to plot the cycle-evolut
 
 for CYCLE in range(NUM_CYCLES):
     pipeline.set_suffix(f"Cycle{CYCLE}")
-    """
-    Diversify with LigandMPNN
-    """
+
     mutation_range = "141+143+145+147-149+151-152+154+157+160-161+165+167-168+170-172+175-176+178+180+245+271"
     lmpnn_R = pipeline.add(LigandMPNN(structures=best_R, #this is equivalent to boltz2
                                     ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
@@ -88,6 +82,7 @@ for CYCLE in range(NUM_CYCLES):
                                              mutants=lmpnn_R))
     profiler_S = pipeline.add(MutationProfiler(original=best_S,
                                              mutants=lmpnn_S))
+    ### Here we generate sequencies based on both tables of frequencies ###
     composer = pipeline.add(MutationComposer(frequencies=[profiler_R.datasheets.absolute_frequencies,
                                                           profiler_S.datasheets.absolute_frequencies],
                                              num_sequences=12,
@@ -95,34 +90,21 @@ for CYCLE in range(NUM_CYCLES):
                                              combination_strategy="round_robin", #take one mutation from R one from S together
                                              prefix=f"HT_C{CYCLE+1}"))
     
-    """
-    Filter NEW sequences only (remove duplicates against historical)
-    """
     unique_new_sequences = pipeline.add(RemoveDuplicates(
-        pool=composer,           # Current cycle sequences  
+        pool=composer,           
         history=all_sequences_seen.datasheets.concatenated if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
-        compare="sequence"           # Compare protein sequences
+        compare="sequence"          
     ))
-    
-    """
-    Update history with unique sequences AFTER deduplication
-    """
     if all_sequences_seen is None:
-        # First cycle - initialize history with ConcatenateDatasheets (single input)
         all_sequences_seen = pipeline.add(ConcatenateDatasheets(
             datasheets=[unique_new_sequences.datasheets.sequences]
         ))
     else:
-        # Subsequent cycles - concatenate unique sequences with existing history
         all_sequences_seen = pipeline.add(ConcatenateDatasheets(
             datasheets=[unique_new_sequences.datasheets.sequences, 
                        all_sequences_seen.datasheets.concatenated]
         ))
     
-    """
-    Fold only the NEW unique structures
-    SMILES canonicized @ https://www.leskoff.com/s01812-0
-    """
     boltz_apo = pipeline.add(Boltz2(proteins=unique_new_sequences))
     boltz_holo_R = pipeline.add(Boltz2(proteins=unique_new_sequences,
                                     ligands=best_R,
@@ -141,9 +123,6 @@ for CYCLE in range(NUM_CYCLES):
                                     msas=boltz_apo,
                                     affinity=True))
     
-    """
-    Calculate distances and analysis 
-    """
     R_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_R,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
@@ -184,11 +163,8 @@ for CYCLE in range(NUM_CYCLES):
     # Add current cycle results to the arrays
     all_analyses.append(current_filtered)
     all_pools.append({"R":boltz_holo_R,"S":boltz_holo_S})
-    
-    """
-    Select best across ALL cycles
-    We select based on the same metric such that we end up with two proteins with the next sequence for the next round
-    """
+
+    # We select based on the same metric such that we end up with two proteins with the next sequence for the next round
     best_R = pipeline.add(SelectBest(
         pool=[pool["R"] for pool in all_pools],  # All pools from all cycles
         datasheets=[x.datasheets.merged for x in all_analyses],  # All analyses from all cycles

@@ -30,7 +30,7 @@ class Fuse(BaseConfig):
     """
     
     TOOL_NAME = "Fuse"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self, proteins: Union[List[str], str, ToolOutput, Dict[str, Any]] = None,
                  sequences: Union[List[str], str] = None,

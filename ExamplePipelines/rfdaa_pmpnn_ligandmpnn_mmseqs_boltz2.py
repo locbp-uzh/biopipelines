@@ -1,8 +1,7 @@
 """
-This pipeline shows how to run RFdiffusion-AllAtom, generate sequences for the backbone with ProteinMPNN, add the top mutations from LigandMPNN, fold the sequences with Boltz2.
+This pipeline shows how to run RFdiffusion-AllAtom, generate sequences far from the ligand with ProteinMPNN and close with LigandMPNN, obtain alignments with MMseqs2 and fold the sequences with Boltz2.
 """
 
-#!/usr/bin/env python3
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
@@ -35,7 +34,7 @@ rfdaa = pipeline.add(RFdiffusionAllAtom(pdb=rifampicin, #can also be a path, pre
                                         contigs='10-20,A6-140',
                                         num_designs=2,
                                         steps=20))
-
+#this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
 distances = pipeline.add(DistanceSelector(structures=rfdaa,
                                           ligand="LIG",
                                           distance=5))

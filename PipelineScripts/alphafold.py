@@ -29,7 +29,7 @@ class AlphaFold(BaseConfig):
     """
     
     TOOL_NAME = "AlphaFold"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self, sequences: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
                  datasheets: Optional[List[str]] = None,

@@ -20,42 +20,60 @@
 
 ### Tool Reference
 
-- [Structure Generation](#structure-generation)
-  - [RFdiffusion](#rfdiffusion)
-  - [RFdiffusionAllAtom](#rfdiffusionallatom)
-- [Sequence Design](#sequence-design)
-  - [ProteinMPNN](#proteinmpnn)
-  - [LigandMPNN](#ligandmpnn)
-  - [MutationComposer](#mutationcomposer)
-  - [SDM (SiteDirectedMutagenesis)](#sdm-sitedirectedmutagenesis)
-  - [Fuse](#fuse)
-  - [StitchSequences](#stitchsequences)
-- [Structure Prediction](#structure-prediction)
-  - [AlphaFold](#alphafold)
-  - [Boltz2](#boltz2)
-- [Analysis](#analysis)
-  - [ResidueAtomDistance](#residueatomdistance)
-  - [PLIP](#plip)
-  - [DistanceSelector](#distanceselector)
-  - [ConformationalChange](#conformationalchange)
-  - [MutationProfiler](#mutationprofiler)
-  - [ProteinLigandContacts](#proteinligandcontacts)
-- [Data Management](#data-management)
-  - [Filter](#filter)
-  - [SelectBest](#selectbest)
-  - [RemoveDuplicates](#removeduplicates)
-  - [MergeDatasheets](#mergedatasheets)
-  - [ConcatenateDatasheets](#concatenatedatasheets)
-  - [SliceDatasheet](#slicedatasheet)
-  - [ExtractMetrics](#extractmetrics)
-  - [AverageByDatasheet](#averagebydatasheet)
-- [Utilities](#utilities)
-  - [LoadOutput](#loadoutput)
-  - [MMseqs2](#mmseqs2)
-  - [MMseqs2Server](#mmseqs2server)
-  - [CompoundLibrary](#compoundlibrary)
-  - [FetchStructure](#fetchstructure)
-  - [PyMOL](#pymol)
+- [BioPipelines User Manual](#biopipelines-user-manual)
+  - [Index](#index)
+    - [BioPipelines](#biopipelines)
+    - [Tool Reference](#tool-reference)
+  - [Architecture Overview](#architecture-overview)
+    - [What is BioPipelines?](#what-is-biopipelines)
+    - [Core Concepts](#core-concepts)
+    - [Job submission](#job-submission)
+    - [Filesystem Structure](#filesystem-structure)
+    - [Environment Management](#environment-management)
+  - [Tool I/O Reference Guide](#tool-io-reference-guide)
+    - [Overview](#overview)
+    - [Datasheet Organization](#datasheet-organization)
+    - [Datasheet Column References](#datasheet-column-references)
+  - [Troubleshooting](#troubleshooting)
+    - [Common Issues](#common-issues)
+    - [Debug Mode](#debug-mode)
+- [Complete BioPipelines Tool Reference](#complete-biopipelines-tool-reference)
+  - [Structure Generation](#structure-generation)
+    - [RFdiffusion](#rfdiffusion)
+    - [RFdiffusionAllAtom](#rfdiffusionallatom)
+  - [Sequence Design](#sequence-design)
+    - [ProteinMPNN](#proteinmpnn)
+    - [LigandMPNN](#ligandmpnn)
+    - [MutationComposer](#mutationcomposer)
+    - [SDM (SiteDirectedMutagenesis)](#sdm-sitedirectedmutagenesis)
+    - [Fuse](#fuse)
+    - [StitchSequences](#stitchsequences)
+  - [Structure Prediction](#structure-prediction)
+    - [AlphaFold](#alphafold)
+    - [Boltz2](#boltz2)
+  - [Analysis](#analysis)
+    - [ResidueAtomDistance](#residueatomdistance)
+    - [PLIP (Protein-Ligand Interaction Profiler)](#plip-protein-ligand-interaction-profiler)
+    - [DistanceSelector](#distanceselector)
+    - [ConformationalChange](#conformationalchange)
+    - [MutationProfiler](#mutationprofiler)
+    - [ProteinLigandContacts](#proteinligandcontacts)
+  - [Data Management](#data-management)
+    - [Filter](#filter)
+    - [SelectBest](#selectbest)
+    - [RemoveDuplicates](#removeduplicates)
+    - [MergeDatasheets](#mergedatasheets)
+    - [ConcatenateDatasheets](#concatenatedatasheets)
+    - [SliceDatasheet](#slicedatasheet)
+    - [ExtractMetrics](#extractmetrics)
+    - [AverageByDatasheet](#averagebydatasheet)
+  - [Utilities](#utilities)
+    - [LoadOutput](#loadoutput)
+    - [MMseqs2](#mmseqs2)
+    - [MMseqs2Server](#mmseqs2server)
+    - [CompoundLibrary](#compoundlibrary)
+    - [FetchStructure](#fetchstructure)
+    - [PyMOL](#pymol)
 
 ## Architecture Overview
 
@@ -189,7 +207,7 @@ After the execution, the filesystem will look somewhat like this:
 │   └── 002_<tool 2>.sh
 │   ├── ...
 ├── ToolOutputs/                # Tool output predictions
-│   ├── 001_<tool 1>.json       
+│   ├── 001_<tool 1>.json
 │   └── 002_<tool 2>.json
 │   ├── ...
 ├── 001_<Tool 1>/               # Tool outputs only
@@ -207,16 +225,20 @@ After the execution, the filesystem will look somewhat like this:
 └── _002_ligandmpnn.log
 ```
 
+Base folder paths (like `/shares/<group>`, tool data folders, etc.) are configured in `config.yaml` at the repository root. Edit this file to match your cluster's filesystem layout.
+
 ### Environment Management
 
-Most tools require a conda environment to run. To specify something different from the default, one has to add the parameter `env` to the `pipeline.add(...)` method: 
+Most tools require a conda environment to run. Default environments are defined in `config.yaml` at the repository root. To change default environments system-wide, edit the `environments` section in `config.yaml`. To override for a specific tool, use the `env` parameter in `pipeline.add(...)`:
 
 ```python
-# Use default environment from tool definition
+# Use default environment from config.yaml
 tool1 = pipeline.add(Tool1(...))
 # Override with custom environment
 tool2 = pipeline.add(Tool2(...), env="CustomEnv")
 ```
+
+Edit `config.yaml` in the repository root to change which conda environment each tool uses by default. Tools with `null` environments don't require conda activation.
 
 ## Tool I/O Reference Guide
 

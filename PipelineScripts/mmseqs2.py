@@ -34,7 +34,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    DEFAULT_ENV = "ProteinEnv"  # Uses standard protein environment
+    DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self, sequences: Union[str, List[str], ToolOutput, StandardizedOutput],
                  output_format: str = "csv",
@@ -403,7 +403,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    DEFAULT_ENV = None  # MMseqs2Server doesn't require conda environment
+    DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self, mode: str = "cpu",
                  database: str = "uniref30_2302_db",

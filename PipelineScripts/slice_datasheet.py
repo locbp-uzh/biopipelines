@@ -29,7 +29,7 @@ class SliceDatasheet(BaseConfig):
     """
 
     TOOL_NAME = "SliceDatasheet"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
                  input: Union[ToolOutput, StandardizedOutput],

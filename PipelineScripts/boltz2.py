@@ -28,7 +28,7 @@ class Boltz2(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "Boltz2"
-    DEFAULT_ENV = "Boltz2Env"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
                  # Primary input parameters

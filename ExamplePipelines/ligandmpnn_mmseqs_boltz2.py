@@ -2,7 +2,6 @@
 This pipeline shows how to improve the difference in predicted binding affinity between open and close form of a carbocyanine 7 chloride and halotag7 starting from a Boltz model of the open form.
 """
 
-#!/usr/bin/env python3
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
@@ -17,7 +16,7 @@ from PipelineScripts.filter import Filter
 
 pipeline = Pipeline(
     pipeline_name="LigandMPNN-MSA-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="HT7_Cy7", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    job_name="Test", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
     job_description="Test of MMseqs2 local")
 
 pipeline.resources(
@@ -39,7 +38,5 @@ boltz_holo_open = pipeline.add(Boltz2(proteins=lmpnn,
                                 msas=msas))
 
 
-
-#Prints
 pipeline.save()
 pipeline.slurm() 

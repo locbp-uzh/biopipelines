@@ -15,7 +15,6 @@
 This pipeline shows how to run RFdiffusionAllAtom to redesign the N-terminus of a rifampicin-binding protein and then filter structures in based on the proximity of the newly generated structure towards the ligand.
 """
 
-#!/usr/bin/env python3
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 

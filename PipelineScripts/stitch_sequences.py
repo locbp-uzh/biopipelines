@@ -31,7 +31,7 @@ class StitchSequences(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "StitchSequences"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
                  sequences: List[Union[ToolOutput, StandardizedOutput]],

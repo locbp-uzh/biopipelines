@@ -28,7 +28,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
     
     TOOL_NAME = "RFdiffusionAllAtom"
-    DEFAULT_ENV = "ProteinEnv"
+    DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self, ligand: str, pdb: Union[str, ToolOutput, StandardizedOutput] = "", contigs: str = "", inpaint: str = "",
                  num_designs: int = 1, active_site: bool = False, 
