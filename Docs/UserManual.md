@@ -836,26 +836,54 @@ profiler = pipeline.add(MutationProfiler(
 ### ProteinLigandContacts
 **Environment**: `ProteinEnv`
 
-**Note**: This tool is not fully debugged yet and may require adjustments.
+Analyzes contacts between selected protein regions and ligands. For each selected residue, calculates the minimum distance to any ligand atom. Returns contact counts and distance statistics.
 
 **Parameters**:
-- `structures`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Input structures
-- `ligand`: str (required) - Ligand identifier
-- `contact_distance`: float = 4.5 - Distance cutoff for defining contacts (Angstroms)
-- `contact_types`: List[str] = None - Types of contacts to analyze (default: all)
+- `structures`: Union[ToolOutput, StandardizedOutput] (required) - Input structures
+- `selections`: Union[str, ToolOutput] = None - Protein region selections (string format: '10-20+30-40', datasheet reference, or None for all protein)
+- `ligand`: str (required) - Ligand residue name (3-letter code, e.g., 'LIG', 'ATP', 'GDP')
+- `contact_threshold`: float = 5.0 - Distance threshold for counting contacts (Angstroms)
+- `contact_metric_name`: str = None - Custom name for contact count column (default: "contacts")
 
 **Outputs**:
-- `datasheets.contacts`:
+- `datasheets.contact_analysis`:
 
-  | id | ligand_id | residue | contact_type | distance |
-  |----|-----------|---------|--------------|----------|
+  | id | source_structure | selections | ligand | contacts | min_distance | max_distance | mean_distance | sum_distances_sqrt_normalized |
+  |----|------------------|------------|--------|----------|--------------|--------------|---------------|-------------------------------|
+
+**Output Columns**:
+- `id`: Structure identifier
+- `source_structure`: Path to input structure file
+- `selections`: Protein residues analyzed (e.g., '10-20+30-40' or 'all_protein')
+- `ligand`: Ligand residue name
+- `contacts`: Number of residues within contact_threshold distance
+- `min_distance`: Minimum distance from any selected residue to ligand (Å)
+- `max_distance`: Maximum distance from any selected residue to ligand (Å)
+- `mean_distance`: Mean distance from selected residues to ligand (Å)
+- `sum_distances_sqrt_normalized`: Sum of distances divided by √(number of residues)
 
 **Example**:
 ```python
+# Analyze contacts with specific protein regions
+contacts = pipeline.add(ProteinLigandContacts(
+    structures=rfdaa,
+    selections=rfdaa.datasheets.structures.designed,
+    ligand="LIG",
+    contact_threshold=5.0
+))
+
+# Use fixed selection for all structures
 contacts = pipeline.add(ProteinLigandContacts(
     structures=boltz,
-    ligand="LIG",
-    contact_distance=4.0
+    selections='10-20+30-40',
+    ligand="ATP",
+    contact_threshold=4.0
+))
+
+# Analyze all protein residues
+contacts = pipeline.add(ProteinLigandContacts(
+    structures=boltz,
+    ligand="GDP"
 ))
 ```
 

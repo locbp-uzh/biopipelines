@@ -48,7 +48,6 @@ class ProteinLigandContacts(BaseConfig):
                  ligand: str = None,
                  contact_threshold: float = 5.0,
                  contact_metric_name: str = None,
-                 distance_metric_name: str = None,
                  **kwargs):
         """
         Initialize protein-ligand contact analysis tool.
@@ -62,7 +61,6 @@ class ProteinLigandContacts(BaseConfig):
             ligand: Ligand residue name (3-letter code, e.g., 'LIG', 'ATP', 'GDP')
             contact_threshold: Distance threshold for counting contacts (default: 5.0 Å)
             contact_metric_name: Custom name for contact count column (default: "contacts")
-            distance_metric_name: Custom name for distance column (default: "protein_ligand_distance")
             **kwargs: Additional parameters
 
         Selection Syntax:
@@ -82,8 +80,7 @@ class ProteinLigandContacts(BaseConfig):
                 selections='10-20+30-40',
                 ligand='LIG',
                 contact_threshold=4.0,
-                contact_metric_name='close_contacts',
-                distance_metric_name='binding_distance'
+                contact_metric_name='close_contacts'
             ))
 
             # Use selections from datasheet (e.g., designed residues)
@@ -105,7 +102,6 @@ class ProteinLigandContacts(BaseConfig):
         self.ligand_name = ligand
         self.contact_threshold = contact_threshold
         self.custom_contact_metric_name = contact_metric_name
-        self.custom_distance_metric_name = distance_metric_name
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -121,12 +117,6 @@ class ProteinLigandContacts(BaseConfig):
         if self.custom_contact_metric_name:
             return self.custom_contact_metric_name
         return "contacts"
-
-    def get_distance_metric_name(self) -> str:
-        """Get the distance metric name."""
-        if self.custom_distance_metric_name:
-            return self.custom_distance_metric_name
-        return "protein_ligand_distance"
 
     def get_analysis_csv_path(self) -> str:
         """Get the path for the analysis CSV file - defined once, used everywhere."""
@@ -184,8 +174,7 @@ class ProteinLigandContacts(BaseConfig):
             f"PROTEIN SELECTIONS: {selections_display}",
             f"LIGAND: {self.ligand_name}",
             f"CONTACT THRESHOLD: {self.contact_threshold} Å",
-            f"CONTACT METRIC: {self.get_contact_metric_name()}",
-            f"DISTANCE METRIC: {self.get_distance_metric_name()}"
+            f"CONTACT METRIC: {self.get_contact_metric_name()}"
         ])
 
         return config_lines
@@ -238,7 +227,6 @@ class ProteinLigandContacts(BaseConfig):
             "ligand_name": self.ligand_name,
             "contact_threshold": self.contact_threshold,
             "contact_metric_name": self.get_contact_metric_name(),
-            "distance_metric_name": self.get_distance_metric_name(),
             "output_csv": analysis_csv
         }
 
@@ -291,7 +279,8 @@ fi
                 name="contact_analysis",
                 path=analysis_csv,
                 columns=["id", "source_structure", "selections", "ligand",
-                        self.get_contact_metric_name(), self.get_distance_metric_name()],
+                        self.get_contact_metric_name(), "min_distance", "max_distance",
+                        "mean_distance", "sum_distances_sqrt_normalized"],
                 description=f"Protein-ligand contact analysis: {self.ligand_name} contacts with selected protein regions",
                 count=len(getattr(self, 'input_structures', []))
             )
@@ -316,8 +305,7 @@ fi
                 "protein_selections": str(self.protein_selections) if self.protein_selections is not None else "all_protein",
                 "ligand_name": self.ligand_name,
                 "contact_threshold": self.contact_threshold,
-                "contact_metric_name": self.get_contact_metric_name(),
-                "distance_metric_name": self.get_distance_metric_name()
+                "contact_metric_name": self.get_contact_metric_name()
             }
         })
         return base_dict

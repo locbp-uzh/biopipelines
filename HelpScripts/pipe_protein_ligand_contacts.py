@@ -193,7 +193,7 @@ def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
 
-def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float) -> Tuple[Optional[int], Optional[float]]:
+def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
     """
     Calculate protein-ligand contact metrics for a structure.
 
@@ -204,7 +204,8 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
         contact_threshold: Distance threshold for counting contacts
 
     Returns:
-        Tuple of (contact_count, normalized_distance) or (None, None) if calculation failed
+        Tuple of (contact_count, min_distance, max_distance, mean_distance, sum_distances_sqrt_normalized)
+        or (None, None, None, None, None) if calculation failed
     """
     try:
         # Get protein and ligand atoms
@@ -216,7 +217,7 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
 
         if not ligand_atoms:
             print(f"[WARNING] - No ligand atoms found for '{ligand_name}'")
-            return None, None
+            return None, None, None, None, None
 
         # Filter protein atoms by selection if specified
         if protein_selections and protein_selections.lower() not in ['all', 'none', 'null']:
@@ -227,7 +228,7 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
 
         if not protein_atoms:
             print(f"[WARNING] - No protein atoms found after selection filtering")
-            return None, None
+            return None, None, None, None, None
 
         # Calculate minimum distances per residue
         distances = {}
@@ -295,25 +296,34 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
 
         if not distances:
             print(f"[WARNING] - No distances calculated")
-            return None, None
+            return None, None, None, None, None
 
         # Count contacts below threshold
         contact_count = sum(1 for dist in distances.values() if dist < contact_threshold)
 
-        # Calculate normalized distance sum
+        # Calculate distance statistics
+        distance_values = list(distances.values())
+        min_distance = min(distance_values) if distance_values else None
+        max_distance = max(distance_values) if distance_values else None
+        mean_distance = sum(distance_values) / len(distance_values) if distance_values else None
+
+        # Calculate sum of distances normalized by sqrt(num_residues)
+        # This metric grows with sum of distances but is dampened by sqrt of number of residues
         num_residues = len(distances)
-        distance_sum = sum(distances.values())
-        normalized_distance = distance_sum / math.sqrt(num_residues) if num_residues > 0 else 0.0
+        sum_distances_sqrt_normalized = sum(distance_values) / math.sqrt(num_residues) if num_residues > 0 else None
 
         print(f"[DEBUG] - Residue distances: {dict(distances)}")
         print(f"[DEBUG] - Contact count: {contact_count}")
-        print(f"[DEBUG] - Normalized distance: {normalized_distance:.3f}")
+        print(f"[DEBUG] - Min distance: {min_distance:.3f} Å")
+        print(f"[DEBUG] - Max distance: {max_distance:.3f} Å")
+        print(f"[DEBUG] - Mean distance: {mean_distance:.3f} Å")
+        print(f"[DEBUG] - Sum/sqrt(N): {sum_distances_sqrt_normalized:.3f}")
 
-        return contact_count, normalized_distance
+        return contact_count, min_distance, max_distance, mean_distance, sum_distances_sqrt_normalized
 
     except Exception as e:
         print(f"[ERROR] - Error calculating contact metrics: {e}")
-        return None, None
+        return None, None, None, None, None
 
 
 def load_selections_from_datasheet(datasheet_path: str, column_name: str) -> Dict[str, str]:
@@ -348,7 +358,7 @@ def load_selections_from_datasheet(datasheet_path: str, column_name: str) -> Dic
     return selections_map
 
 
-def calculate_contact_metrics(structure_path: str, selections: str, ligand: str, threshold: float) -> Tuple[Optional[int], Optional[float]]:
+def calculate_contact_metrics(structure_path: str, selections: str, ligand: str, threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
     """
     Calculate protein-ligand contact metrics for a structure.
 
@@ -359,7 +369,8 @@ def calculate_contact_metrics(structure_path: str, selections: str, ligand: str,
         threshold: Distance threshold for counting contacts
 
     Returns:
-        Tuple of (contact_count, normalized_distance) or (None, None) if calculation failed
+        Tuple of (contact_count, min_distance, max_distance, mean_distance, sum_distances_sqrt_normalized)
+        or (None, None, None, None, None) if calculation failed
     """
     try:
         print(f"  - Loading structure: {structure_path}")
@@ -371,24 +382,26 @@ def calculate_contact_metrics(structure_path: str, selections: str, ligand: str,
         atoms = parse_pdb_file(structure_path)
         if not atoms:
             print(f"  - Error: No atoms found in structure")
-            return None, None
+            return None, None, None, None, None
 
         print(f"  - Parsed {len(atoms)} atoms from structure")
 
         # Calculate contact metrics
-        contact_count, normalized_distance = calculate_protein_ligand_contacts(atoms, selections, ligand, threshold)
+        contact_count, min_dist, max_dist, mean_dist, sum_sqrt_norm = calculate_protein_ligand_contacts(
+            atoms, selections, ligand, threshold
+        )
 
         print(f"  - Contact count: {contact_count}")
-        if normalized_distance is not None:
-            print(f"  - Normalized distance: {normalized_distance:.3f}")
-        else:
-            print(f"  - Normalized distance: None")
+        print(f"  - Min distance: {min_dist:.3f} Å" if min_dist is not None else "  - Min distance: None")
+        print(f"  - Max distance: {max_dist:.3f} Å" if max_dist is not None else "  - Max distance: None")
+        print(f"  - Mean distance: {mean_dist:.3f} Å" if mean_dist is not None else "  - Mean distance: None")
+        print(f"  - Sum/sqrt(N): {sum_sqrt_norm:.3f}" if sum_sqrt_norm is not None else "  - Sum/sqrt(N): None")
 
-        return contact_count, normalized_distance
+        return contact_count, min_dist, max_dist, mean_dist, sum_sqrt_norm
 
     except Exception as e:
         print(f"  - Error calculating contact metrics: {e}")
-        return None, None
+        return None, None, None, None, None
 
 
 def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
@@ -403,7 +416,6 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
     ligand_name = config_data['ligand_name']
     contact_threshold = config_data['contact_threshold']
     contact_metric_name = config_data['contact_metric_name']
-    distance_metric_name = config_data['distance_metric_name']
     output_csv = config_data['output_csv']
 
     print(f"Analyzing protein-ligand contacts")
@@ -412,7 +424,6 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
     print(f"Ligand: {ligand_name}")
     print(f"Contact threshold: {contact_threshold} Å")
     print(f"Contact metric: {contact_metric_name}")
-    print(f"Distance metric: {distance_metric_name}")
 
     # Handle protein selections
     selections_map = {}
@@ -455,7 +466,7 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             continue
 
         # Calculate contact metrics
-        contact_count, normalized_distance = calculate_contact_metrics(
+        contact_count, min_dist, max_dist, mean_dist, sum_sqrt_norm = calculate_contact_metrics(
             structure_path, selections, ligand_name, contact_threshold
         )
 
@@ -466,11 +477,14 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             'selections': selections if selections else 'all_protein',
             'ligand': ligand_name,
             contact_metric_name: contact_count,
-            distance_metric_name: normalized_distance
+            'min_distance': min_dist,
+            'max_distance': max_dist,
+            'mean_distance': mean_dist,
+            'sum_distances_sqrt_normalized': sum_sqrt_norm
         }
         results.append(result)
 
-        print(f"  - Result: {contact_metric_name} = {contact_count}, {distance_metric_name} = {normalized_distance}")
+        print(f"  - Result: {contact_metric_name} = {contact_count}, min_distance = {min_dist}, max_distance = {max_dist}, mean_distance = {mean_dist}")
 
     # Create DataFrame and save
     if results:
@@ -493,7 +507,9 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
 
         # Statistics
         contacts = [r[contact_metric_name] for r in results if r[contact_metric_name] is not None]
-        distances = [r[distance_metric_name] for r in results if r[distance_metric_name] is not None]
+        min_dists = [r['min_distance'] for r in results if r['min_distance'] is not None]
+        max_dists = [r['max_distance'] for r in results if r['max_distance'] is not None]
+        mean_dists = [r['mean_distance'] for r in results if r['mean_distance'] is not None]
 
         if contacts:
             print(f"\nContact count statistics:")
@@ -502,14 +518,21 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             print(f"  Mean: {np.mean(contacts):.1f}")
             print(f"  Std: {np.std(contacts):.1f}")
 
-        if distances:
-            print(f"\nNormalized distance statistics:")
-            print(f"  Min: {min(distances):.3f}")
-            print(f"  Max: {max(distances):.3f}")
-            print(f"  Mean: {np.mean(distances):.3f}")
-            print(f"  Std: {np.std(distances):.3f}")
+        if min_dists:
+            print(f"\nMinimum distance statistics:")
+            print(f"  Min: {min(min_dists):.3f} Å")
+            print(f"  Max: {max(min_dists):.3f} Å")
+            print(f"  Mean: {np.mean(min_dists):.3f} Å")
+            print(f"  Std: {np.std(min_dists):.3f} Å")
 
-        if not contacts and not distances:
+        if mean_dists:
+            print(f"\nMean distance statistics:")
+            print(f"  Min: {min(mean_dists):.3f} Å")
+            print(f"  Max: {max(mean_dists):.3f} Å")
+            print(f"  Mean: {np.mean(mean_dists):.3f} Å")
+            print(f"  Std: {np.std(mean_dists):.3f} Å")
+
+        if not contacts:
             print(f"\nError: No valid contact measurements found!")
             raise ValueError("No valid contact measurements - all results were None")
     else:
@@ -536,8 +559,7 @@ def main():
 
     # Validate required parameters
     required_params = ['input_structures', 'protein_selections', 'ligand_name',
-                       'contact_threshold', 'contact_metric_name',
-                       'distance_metric_name', 'output_csv']
+                       'contact_threshold', 'contact_metric_name', 'output_csv']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")
