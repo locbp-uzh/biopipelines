@@ -223,6 +223,8 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
         # Calculate minimum distances per residue
         distances = {}
         closest_ligand_atoms = {}  # Track which ligand atom is closest to each residue
+        closest_protein_atoms = {}  # Track which protein atom is closest for each residue
+        closest_coords = {}  # Track coordinates for debugging
 
         for protein_atom in protein_atoms:
             residue_key = (protein_atom.chain_id, protein_atom.residue_number)
@@ -230,6 +232,7 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
             if residue_key not in distances:
                 distances[residue_key] = float('inf')
                 closest_ligand_atoms[residue_key] = None
+                closest_protein_atoms[residue_key] = None
 
             # Find minimum distance to any ligand atom
             for ligand_atom in ligand_atoms:
@@ -237,6 +240,12 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
                 if dist < distances[residue_key]:
                     distances[residue_key] = dist
                     closest_ligand_atoms[residue_key] = ligand_atom.atom_name
+                    closest_protein_atoms[residue_key] = protein_atom.atom_name
+                    closest_coords[residue_key] = {
+                        'protein': (protein_atom.x, protein_atom.y, protein_atom.z),
+                        'ligand': (ligand_atom.x, ligand_atom.y, ligand_atom.z),
+                        'distance': dist
+                    }
 
         # Debug: Print first few residue details and identify which ligand atom is causing issues
         if len(distances) > 0:
@@ -260,6 +269,20 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
                         ligand_atom_counts[lig_atom] = ligand_atom_counts.get(lig_atom, 0) + 1
                 print(f"[DEBUG] - {len(suspicious_residues)} residues have distance ~1.419 Å")
                 print(f"[DEBUG] - Closest ligand atoms causing this: {ligand_atom_counts}")
+
+                # Print detailed coordinates for first suspicious case
+                first_suspicious = list(suspicious_residues.keys())[0]
+                if first_suspicious in closest_coords:
+                    coords = closest_coords[first_suspicious]
+                    print(f"[DEBUG] - Detailed coords for {first_suspicious}:")
+                    print(f"[DEBUG] -   Protein atom {closest_protein_atoms[first_suspicious]}: {coords['protein']}")
+                    print(f"[DEBUG] -   Ligand atom {closest_ligand_atoms[first_suspicious]}: {coords['ligand']}")
+                    print(f"[DEBUG] -   Calculated distance: {coords['distance']:.4f} Å")
+                    # Verify the distance calculation
+                    p = coords['protein']
+                    l = coords['ligand']
+                    manual_dist = math.sqrt((p[0]-l[0])**2 + (p[1]-l[1])**2 + (p[2]-l[2])**2)
+                    print(f"[DEBUG] -   Manual verification: {manual_dist:.4f} Å")
 
         if not distances:
             print(f"[WARNING] - No distances calculated")
