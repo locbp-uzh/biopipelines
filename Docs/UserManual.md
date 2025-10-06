@@ -69,7 +69,6 @@
     - [AverageByDatasheet](#averagebydatasheet)
   - [Utilities](#utilities)
     - [LoadOutput](#loadoutput)
-    - [MMseqs2](#mmseqs2)
     - [MMseqs2Server](#mmseqs2server)
     - [CompoundLibrary](#compoundlibrary)
     - [FetchStructure](#fetchstructure)
@@ -311,6 +310,9 @@ This document contains the complete, verified tool reference with all parameters
 ## Structure Generation
 
 ### RFdiffusion
+
+Generates novel protein backbone structures using diffusion models. Designs de novo proteins or scaffolds functional motifs into new contexts.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -342,6 +344,9 @@ rfd = pipeline.add(RFdiffusion(
 ---
 
 ### RFdiffusionAllAtom
+
+Generates protein structures with explicit modeling of ligands and small molecules. Diffusion model that handles all-atom representation including non-protein entities.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -391,6 +396,9 @@ rfdaa = pipeline.add(RFdiffusionAllAtom(
 ## Sequence Design
 
 ### ProteinMPNN
+
+Designs protein sequences for given backbone structures. Uses graph neural networks to optimize sequences for structure stability while respecting fixed/designed region constraints.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -427,6 +435,9 @@ pmpnn = pipeline.add(ProteinMPNN(
 ---
 
 ### LigandMPNN
+
+Designs protein sequences optimized for ligand binding. Specialized version of ProteinMPNN that considers protein-ligand interactions during sequence design.
+
 **Environment**: `ligandmpnn_env`
 
 **Parameters**:
@@ -461,6 +472,9 @@ lmpnn = pipeline.add(LigandMPNN(
 ---
 
 ### MutationComposer
+
+Generates new protein sequences by composing mutations based on frequency analysis. Creates combinatorial mutants from mutation profiles with different sampling strategies.
+
 **Environment**: `MutationEnv`
 
 **Parameters**:
@@ -499,6 +513,9 @@ composer = pipeline.add(MutationComposer(
 ---
 
 ### SDM (SiteDirectedMutagenesis)
+
+Performs site-directed mutagenesis at specified positions. Generates systematic amino acid substitutions for experimental library design or computational scanning.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -544,6 +561,9 @@ sdm = pipeline.add(SDM(
 ---
 
 ### Fuse
+
+Concatenates multiple protein sequences with flexible linkers. Creates fusion proteins with customizable linker lengths for domain engineering.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -571,6 +591,9 @@ fused = pipeline.add(Fuse(
 ---
 
 ### StitchSequences
+
+Combines different regions from multiple sequence sources into chimeric proteins. Useful for creating hybrid sequences from different design outputs.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -598,6 +621,9 @@ stitched = pipeline.add(StitchSequences(
 ## Structure Prediction
 
 ### AlphaFold
+
+Predicts protein structures from amino acid sequences using AlphaFold2. Generates high-confidence 3D models with optional relaxation.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -627,6 +653,9 @@ af = pipeline.add(AlphaFold(
 ---
 
 ### Boltz2
+
+Predicts biomolecular complexes including proteins, nucleic acids, and small molecules. State-of-the-art model for protein-ligand and protein-protein complex prediction.
+
 **Environment**: `Boltz2Env`
 
 **Parameters**:
@@ -676,6 +705,9 @@ boltz_holo = pipeline.add(Boltz2(
 ## Analysis
 
 ### ResidueAtomDistance
+
+Measures distances between specific atoms and residues in structures. Useful for tracking ligand-protein interactions or structural features.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -705,6 +737,9 @@ distances = pipeline.add(ResidueAtomDistance(
 ---
 
 ### PLIP (Protein-Ligand Interaction Profiler)
+
+Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydrophobic contacts, salt bridges, and other interaction types.
+
 **Environment**: `ProteinEnv`
 
 **Note**: This tool is not fully debugged yet and may require adjustments.
@@ -739,6 +774,9 @@ plip = pipeline.add(PLIP(
 ---
 
 ### DistanceSelector
+
+Selects protein residues based on proximity to ligands or other reference points. Generates position specifications for downstream design tools.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -766,6 +804,9 @@ selector = pipeline.add(DistanceSelector(
 ---
 
 ### ConformationalChange
+
+Quantifies structural changes between reference and target structures. Calculates RMSD and distance metrics for specified regions.
+
 **Environment**: `ProteinEnv`
 
 **Note**: This tool is not fully debugged yet and may require adjustments.
@@ -795,6 +836,9 @@ conf_change = pipeline.add(ConformationalChange(
 ---
 
 ### MutationProfiler
+
+Analyzes mutation patterns across sequence sets. Calculates position-specific amino acid frequencies for understanding sequence diversity.
+
 **Environment**: `MutationEnv`
 
 **Parameters**:
@@ -892,6 +936,9 @@ contacts = pipeline.add(ProteinLigandContacts(
 ## Data Management
 
 ### Filter
+
+Filters structures or sequences based on metric criteria. Uses pandas query expressions to select items meeting specified thresholds.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -904,6 +951,7 @@ contacts = pipeline.add(ProteinLigandContacts(
 
 **Outputs**:
 - Filtered pool with same structure as input
+- All the datasheets of the upstream tool given as input will be copied and fitered based on the expression, and maintain the same datasheet name. For example, after filtering an output of MergeDatasheets, you can access filtered.datasheets.merged.
 - `datasheets.missing`:
 
   | id | structure | msa |
@@ -923,6 +971,9 @@ filtered = pipeline.add(Filter(
 ---
 
 ### SelectBest
+
+Selects the single best structure or sequence based on optimization criteria. Supports single or multi-objective optimization with configurable weights.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -960,6 +1011,9 @@ best_multi = pipeline.add(SelectBest(
 ---
 
 ### RemoveDuplicates
+
+Removes duplicate structures or sequences from a pool. Supports deduplication by sequence, structure similarity, or ID matching.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -986,6 +1040,9 @@ unique = pipeline.add(RemoveDuplicates(
 ---
 
 ### MergeDatasheets
+
+Combines multiple datasheets by joining on a common key column. Enables integration of metrics from different analysis tools.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1012,6 +1069,9 @@ merged = pipeline.add(MergeDatasheets(
 ---
 
 ### ConcatenateDatasheets
+
+Stacks multiple datasheets vertically (row-wise). Useful for combining results from multiple cycles or parallel runs.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1033,6 +1093,9 @@ concat = pipeline.add(ConcatenateDatasheets(
 ---
 
 ### SliceDatasheet
+
+Extracts a subset of rows and/or columns from a datasheet. Enables data sampling and column selection.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1058,6 +1121,9 @@ sliced = pipeline.add(SliceDatasheet(
 ---
 
 ### ExtractMetrics
+
+Extracts and aggregates specific metrics from datasheets. Supports grouping and various aggregation functions for data summarization.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1083,6 +1149,9 @@ metrics = pipeline.add(ExtractMetrics(
 ---
 
 ### AverageByDatasheet
+
+Computes averages of metrics grouped by a specified column. Useful for summarizing results across multiple structures or cycles.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1108,6 +1177,9 @@ averaged = pipeline.add(AverageByDatasheet(
 ## Utilities
 
 ### LoadOutput
+
+Loads previously saved tool outputs for reuse in new pipelines. Enables incremental development and filtering of existing results at pipeline runtime.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1126,9 +1198,34 @@ previous_boltz = pipeline.add(LoadOutput(
 ))
 ```
 
+**PracticalTips**:
+- Instead of copy-pasting ligand SMILES across pipelines, you can create a compound library, and then load the smiles passing an id filter:
+```python
+# Pipeline 1 to store the library
+# imports, pipeline instantiation, ...
+pipeline.add(CompoundLibrary({
+  "Compound1": "CCNCNNCC(=O)C",
+  "Compound2": "CCNCNNCC(=O)C",
+  ...
+}))
+# submit
+
+# Pipeline 2 running calculatios with one of the compounds
+# imports, pipeline instantiation, ...
+compound1 = pipeline.add(LoadOutput(
+    output_json="/path/to/job/ToolOutputs/001_CompoundLibrary_output.json",
+    filter="id == Compound1"
+))
+boltz = pipeline.add(Boltz2(proteins=HaloTag,
+                            ligands=compound1))
+#submit
+
 ---
 
 ### MMseqs2
+
+Generates multiple sequence alignments (MSAs) for protein sequences. Used for improving structure prediction quality by providing evolutionary information.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1153,6 +1250,9 @@ msas = pipeline.add(MMseqs2(
 ---
 
 ### MMseqs2Server
+
+Runs an MMseqs2 server for local MSA generation. Automatically started by MMseqs2 client when needed; manual setup typically not required.
+
 **Environment**: None (doesn't require conda)
 
 **Parameters**:
@@ -1165,6 +1265,9 @@ msas = pipeline.add(MMseqs2(
 ---
 
 ### CompoundLibrary
+
+Creates and manages chemical compound libraries. Supports combinatorial SMILES expansion and optional generation of covalent binding files.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1204,6 +1307,9 @@ library = pipeline.add(CompoundLibrary(
 ---
 
 ### FetchStructure
+
+Downloads protein structures from public databases (PDB, AlphaFold). Enables working with experimentally determined or predicted structures.
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1229,6 +1335,9 @@ fetched = pipeline.add(FetchStructure(
 ---
 
 ### PyMOL
+
+Creates PyMOL visualizations and session files for structural analysis. Supports alignment, coloring schemes, and ray-traced image generation.
+
 **Environment**: `ProteinEnv`
 
 **Note**: This tool is not fully debugged yet and may require adjustments.
