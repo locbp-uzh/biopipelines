@@ -22,7 +22,7 @@ if conda env list | grep -q "^biopipelines "; then
     conda activate biopipelines
 else
     echo "biopipelines environment not found. Creating it..."
-    conda create -n biopipelines -y python yaml pandas
+    conda create -n biopipelines -y python pyyaml pandas
     echo "Activating newly created biopipelines environment..."
     conda activate biopipelines
 fi
