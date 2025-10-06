@@ -12,8 +12,21 @@
 #
 
 module load mamba
+source /apps/opt/spack/linux-ubuntu20.04-x86_64/gcc-9.3.0/mamba-23.11.0-0-334ztq7i4mzu762ew2x3kbbrrorhe6eg/etc/profile.d/conda.sh
 
 set -e  # Exit on any error
+
+# Activate or create biopipelines conda environment
+if conda env list | grep -q "^biopipelines "; then
+    echo "Activating biopipelines conda environment..."
+    conda activate biopipelines
+else
+    echo "biopipelines environment not found. Creating it..."
+    conda create -n biopipelines -y python yaml pandas
+    echo "Activating newly created biopipelines environment..."
+    conda activate biopipelines
+fi
+echo ""
 
 # Function to print usage
 usage() {
