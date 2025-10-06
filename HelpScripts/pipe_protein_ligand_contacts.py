@@ -36,9 +36,10 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
         pdb_path: Path to PDB file
 
     Returns:
-        List of Atom objects
+        List of Atom objects (excludes atoms at origin which are likely missing/placeholder atoms)
     """
     atoms = []
+    skipped_origin_atoms = 0
 
     with open(pdb_path, 'r') as f:
         for line in f:
@@ -51,6 +52,11 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
                     x = float(line[30:38].strip())
                     y = float(line[38:46].strip())
                     z = float(line[46:54].strip())
+
+                    # Skip atoms at or very near origin (0,0,0) - these are likely missing/placeholder atoms
+                    if abs(x) < 0.001 and abs(y) < 0.001 and abs(z) < 0.001:
+                        skipped_origin_atoms += 1
+                        continue
 
                     atom = Atom(
                         atom_name=atom_name,
@@ -66,6 +72,9 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
                 except (ValueError, IndexError) as e:
                     print(f"Warning: Could not parse line: {line.strip()}")
                     continue
+
+    if skipped_origin_atoms > 0:
+        print(f"  - Skipped {skipped_origin_atoms} atoms at origin (0,0,0) - likely missing/placeholder atoms")
 
     return atoms
 
