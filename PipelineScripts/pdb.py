@@ -112,18 +112,14 @@ class PDB(BaseConfig):
         # Validate format
         if self.format not in ["pdb", "cif"]:
             raise ValueError(f"Invalid format: {self.format}. Must be 'pdb' or 'cif'")
-        
-        # Validate PDB IDs (basic format check)
-        for pdb_id in self.pdb_ids:
-            if not self._is_valid_pdb_id(pdb_id):
-                raise ValueError(f"Invalid PDB ID format: {pdb_id}. Must be 4 characters (e.g., '1ABC')")
-        
+
+        # Note: PDB ID format validation is skipped at init time because:
+        # 1. local_folder may contain custom-named files
+        # 2. PDBs/ folder may contain custom-named files
+        # 3. Runtime script will validate RCSB format only if download is needed
+
         # Initialize base class
         super().__init__(**kwargs)
-    
-    def _is_valid_pdb_id(self, pdb_id: str) -> bool:
-        """Validate PDB ID format (4 characters, alphanumeric)."""
-        return len(pdb_id) == 4 and pdb_id.isalnum()
     
     def validate_params(self):
         """Validate PDB parameters."""

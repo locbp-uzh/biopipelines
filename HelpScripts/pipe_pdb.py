@@ -193,6 +193,17 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biologi
     """
     pdb_id = pdb_id.upper()
 
+    # Validate RCSB PDB ID format before attempting download
+    if len(pdb_id) != 4 or not pdb_id.isalnum():
+        error_msg = f"Invalid RCSB PDB ID format: {pdb_id}. RCSB IDs must be 4 alphanumeric characters (e.g., '4UFC'). File not found locally."
+        print(f"Error: {error_msg}")
+        metadata = {
+            "error_message": error_msg,
+            "source": "rcsb_invalid_id",
+            "attempted_path": "N/A"
+        }
+        return False, "", "", metadata
+
     # Determine URL based on format and assembly
     extension = ".pdb" if format == "pdb" else ".cif"
 
