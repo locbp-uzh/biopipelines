@@ -285,10 +285,13 @@ class LoadOutput(BaseConfig):
             original_compounds = output_structure['compounds']
             original_compound_ids = output_structure['compound_ids']
 
-            if len(original_compounds) == len(original_compound_ids):
-                filtered_compounds = []
-                filtered_compound_ids = []
+            # Filter compound_ids to only those in filtered set
+            filtered_compound_ids = [cid for cid in original_compound_ids if cid in self.filtered_ids]
 
+            # Handle compounds: update CSV paths to point to LoadOutput's filtered outputs
+            if len(original_compounds) == len(original_compound_ids):
+                # 1:1 mapping of files to IDs (e.g., one file per compound)
+                filtered_compounds = []
                 for compound_path, compound_id in zip(original_compounds, original_compound_ids):
                     if compound_id in self.filtered_ids:
                         # Update path to point to LoadOutput's output folder where filtered CSV will be
@@ -297,20 +300,33 @@ class LoadOutput(BaseConfig):
                             filtered_compounds.append(new_path)
                         else:
                             filtered_compounds.append(compound_path)
-                        filtered_compound_ids.append(compound_id)
+            else:
+                # Single CSV file containing multiple compounds (e.g., CompoundLibrary)
+                # Update path to point to LoadOutput's output folder where filtered CSV will be created
+                filtered_compounds = []
+                for compound_path in original_compounds:
+                    if isinstance(compound_path, str) and compound_path.endswith('.csv'):
+                        new_path = os.path.join(self.output_folder, os.path.basename(compound_path))
+                        filtered_compounds.append(new_path)
+                    else:
+                        filtered_compounds.append(compound_path)
 
-                filtered_structure['compounds'] = filtered_compounds
-                filtered_structure['compound_ids'] = filtered_compound_ids
+            filtered_structure['compounds'] = filtered_compounds
+            filtered_structure['compound_ids'] = filtered_compound_ids
+            print(f"  - Filtered compounds: {len(filtered_compound_ids)}/{len(original_compound_ids)} IDs, {len(filtered_compounds)} file(s)")
         
         # Filter sequences and sequence_ids
         if 'sequences' in output_structure and 'sequence_ids' in output_structure:
             original_sequences = output_structure['sequences']
             original_sequence_ids = output_structure['sequence_ids']
 
-            if len(original_sequences) == len(original_sequence_ids):
-                filtered_sequences = []
-                filtered_sequence_ids = []
+            # Filter sequence_ids to only those in filtered set
+            filtered_sequence_ids = [sid for sid in original_sequence_ids if sid in self.filtered_ids]
 
+            # Handle sequences: update CSV paths to point to LoadOutput's filtered outputs
+            if len(original_sequences) == len(original_sequence_ids):
+                # 1:1 mapping of files to IDs (e.g., one file per sequence)
+                filtered_sequences = []
                 for sequence_path, sequence_id in zip(original_sequences, original_sequence_ids):
                     if sequence_id in self.filtered_ids:
                         # Update path to point to LoadOutput's output folder where filtered CSV will be
@@ -319,10 +335,20 @@ class LoadOutput(BaseConfig):
                             filtered_sequences.append(new_path)
                         else:
                             filtered_sequences.append(sequence_path)
-                        filtered_sequence_ids.append(sequence_id)
+            else:
+                # Single CSV file containing multiple sequences
+                # Update path to point to LoadOutput's output folder where filtered CSV will be created
+                filtered_sequences = []
+                for sequence_path in original_sequences:
+                    if isinstance(sequence_path, str) and sequence_path.endswith('.csv'):
+                        new_path = os.path.join(self.output_folder, os.path.basename(sequence_path))
+                        filtered_sequences.append(new_path)
+                    else:
+                        filtered_sequences.append(sequence_path)
 
-                filtered_structure['sequences'] = filtered_sequences
-                filtered_structure['sequence_ids'] = filtered_sequence_ids
+            filtered_structure['sequences'] = filtered_sequences
+            filtered_structure['sequence_ids'] = filtered_sequence_ids
+            print(f"  - Filtered sequences: {len(filtered_sequence_ids)}/{len(original_sequence_ids)} IDs, {len(filtered_sequences)} file(s)")
 
         # Update datasheets paths to point to LoadOutput's output folder and update counts
         if 'datasheets' in filtered_structure:
