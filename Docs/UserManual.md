@@ -705,7 +705,13 @@ boltz_holo = pipeline.add(Boltz2(
 
 ### RF3
 
+⚠️ **UNDER DEVELOPMENT** - This tool is still being tested and refined.
+
 Predicts biomolecular structures using RoseTTAFold3. Supports protein-only and protein-ligand complex prediction with batch processing capabilities.
+
+**Important**: RF3 requires MSAs to be provided. You can obtain MSAs either by:
+1. Running Boltz2 first on your proteins (which uses public MMseqs2 server automatically)
+2. Using our MMseqs2 implementation to generate MSAs separately
 
 **Environment**: `modelforge`
 
@@ -766,6 +772,90 @@ compounds = pipeline.add(CompoundLibrary({
 rf3_batch = pipeline.add(RF3(
     proteins=protein_sequences,
     ligands=compounds
+))
+```
+
+---
+
+### OnionNet
+
+⚠️ **UNDER DEVELOPMENT** - This tool is still being tested and refined.
+
+Predicts protein-ligand binding affinities from complex structures using OnionNet CNN-based model with rotation-free element-pair-specific contacts.
+
+**Environment**: `OnionNetEnv`
+
+**Installation**:
+```bash
+cd /data/$USER
+git lfs clone https://github.com/zhenglz/onionnet.git
+cd onionnet
+conda env create -f onet_env.yaml
+```
+
+**Parameters**:
+- `structures`: Union[str, ToolOutput, StandardizedOutput] (required) - Protein-ligand complex structures
+- `model_weights`: Optional[str] = None - Path to model weights file (.h5)
+- `scaler_model`: Optional[str] = None - Path to scaler model file
+- `output_format`: str = "csv" - Output format ("csv" or "json")
+
+**Outputs**:
+- `datasheets.affinities`:
+
+  | id | structure_path | predicted_affinity_pKa |
+  |----|----------------|------------------------|
+
+**Example**:
+```python
+# Predict affinities from Boltz2 structures
+affinity = pipeline.add(OnionNet(
+    structures=boltz_output,
+    model_weights="/path/to/weights.h5",
+    scaler_model="/path/to/scaler.model"
+))
+```
+
+---
+
+### OnionNet2
+
+⚠️ **UNDER DEVELOPMENT** - This tool is still being tested and refined.
+
+Predicts protein-ligand binding affinities using OnionNet-2, an improved version with higher accuracy and lower computational cost. Uses residue-atom contacting shells in CNN architecture.
+
+**Environment**: `OnionNet2Env`
+
+**Installation**:
+```bash
+cd /data/$USER
+git clone https://github.com/zchwang/OnionNet-2.git
+cd OnionNet-2
+conda create -n OnionNet2Env python=3.8
+conda activate OnionNet2Env
+pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 scipy==1.4.1
+```
+
+**Parameters**:
+- `structures`: Union[str, ToolOutput, StandardizedOutput] (required) - Protein-ligand complex structures
+- `model_path`: Optional[str] = None - Path to trained model file
+- `scaler_path`: Optional[str] = None - Path to scaler file
+- `shells`: int = 62 - Number of contacting shells
+- `output_format`: str = "csv" - Output format ("csv" or "json")
+
+**Outputs**:
+- `datasheets.affinities`:
+
+  | id | structure_path | predicted_affinity_pKa |
+  |----|----------------|------------------------|
+
+**Example**:
+```python
+# Predict affinities with OnionNet-2
+affinity = pipeline.add(OnionNet2(
+    structures=boltz_output,
+    model_path="/path/to/model.h5",
+    scaler_path="/path/to/scaler.pkl",
+    shells=62
 ))
 ```
 

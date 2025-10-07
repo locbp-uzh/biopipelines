@@ -39,6 +39,8 @@ environments:
   MMseqs2: "MMseqsEnv"
   PLIP: "PlipEnv"
   PyMOL: "ProteinEnv"
+  OnionNet: "OnionNetEnv"
+  OnionNet2: "OnionNet2Env"
 
   # Data manipulation tools
   Filter: "biopipelines"
