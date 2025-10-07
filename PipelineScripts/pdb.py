@@ -173,8 +173,8 @@ class PDB(BaseConfig):
         sequences_datasheet = os.path.join(output_folder, "sequences.csv")
         failed_datasheet = os.path.join(output_folder, "failed_downloads.csv")
 
-        # Get PDBs folder path (repository root)
-        repo_pdbs_folder = os.path.join(self.folders['root'], "PDBs")
+        # Get PDBs folder path from folder manager
+        repo_pdbs_folder = self.folders['PDBs']
 
         # Create config file for fetching
         config_file = os.path.join(output_folder, "fetch_config.json")
