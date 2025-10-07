@@ -410,9 +410,12 @@ class LoadOutput(BaseConfig):
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:
             output_structure = self._apply_filter_to_output_structure(output_structure)
-
-        # Update compound_ids with actual IDs from CSV files
-        self._update_ids_from_csv(output_structure)
+            # Don't call _update_ids_from_csv when filtering - the filtered IDs are already
+            # correct from _apply_filter_to_output_structure, and the filtered CSV files
+            # don't exist yet at pipeline runtime (they're created at SLURM runtime)
+        else:
+            # Update compound_ids with actual IDs from CSV files (only when not filtering)
+            self._update_ids_from_csv(output_structure)
 
         # Ensure we have all expected keys for compatibility
         default_structure = {
