@@ -108,11 +108,11 @@ class RF3(BaseConfig):
             if isinstance(self.ligands, StandardizedOutput):
                 # Get compounds from StandardizedOutput
                 self.input_compounds = getattr(self.ligands, 'compounds', [])
-                self.input_datasheets.update(getattr(self.ligands, 'datasheets', {}))
+                self.input_datasheets = getattr(self.ligands, 'datasheets', {})
             elif isinstance(self.ligands, ToolOutput):
                 # Get compounds from ToolOutput
                 self.input_compounds = self.ligands.get_output_files("compounds")
-                self.input_datasheets.update(self.ligands.get_output_files("datasheets"))
+                self.input_datasheets = self.ligands.get_output_files("datasheets")
                 self.dependencies.append(self.ligands.config)
             elif isinstance(self.ligands, str):
                 # Single SMILES string or file path
