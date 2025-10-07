@@ -1,0 +1,11 @@
+name: biopipelines
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - pandas
+  - numpy
+  - pyyaml
+  - requests
+  - jupyter
