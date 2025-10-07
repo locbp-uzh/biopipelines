@@ -321,8 +321,8 @@ class LoadOutput(BaseConfig):
                         print(f"  Error filtering datasheet '{ds_name}': {e}")
                         continue
 
-        # Also handle special compound/sequence lists if they exist as CSV files
-        for list_name in ['compounds', 'sequences']:
+        # Also handle special compound/sequence/MSA lists if they exist as CSV files
+        for list_name in ['compounds', 'sequences', 'msas']:
             if list_name in output_structure:
                 file_list = output_structure[list_name]
                 if isinstance(file_list, list):
