@@ -136,13 +136,45 @@ class PDB(BaseConfig):
             raise ValueError("format must be 'pdb' or 'cif'")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input parameters (no inputs for PDB)."""
+        """Configure input parameters and check for local files."""
         self.folders = pipeline_folders
+
+        # Check which files exist locally and which will need to be downloaded
+        repo_pdbs_folder = pipeline_folders.get('PDBs', '')
+        self.found_locally = []
+        self.needs_download = []
+
+        for pdb_id in self.pdb_ids:
+            extension = ".pdb" if self.format == "pdb" else ".cif"
+            found = False
+
+            # Check local_folder if specified
+            if self.local_folder:
+                local_path = os.path.join(self.local_folder, f"{pdb_id}{extension}")
+                if os.path.exists(local_path):
+                    self.found_locally.append((pdb_id, local_path))
+                    found = True
+
+            # Check PDBs/ folder
+            if not found and repo_pdbs_folder:
+                pdbs_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{extension}")
+                if os.path.exists(pdbs_path):
+                    self.found_locally.append((pdb_id, pdbs_path))
+                    found = True
+
+            if not found:
+                self.needs_download.append(pdb_id)
+
+        # Print status
+        if self.found_locally:
+            print(f"  ✓ Found locally: {', '.join([pdb_id for pdb_id, _ in self.found_locally])}")
+        if self.needs_download:
+            print(f"  ⚠ Will download from RCSB: {', '.join(self.needs_download)}")
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
-        
+
         config_lines.extend([
             f"PDB_IDS: {', '.join(self.pdb_ids)} ({len(self.pdb_ids)} structures)",
             f"CUSTOM_IDS: {', '.join(self.custom_ids)}",
@@ -151,7 +183,13 @@ class PDB(BaseConfig):
             f"BIOLOGICAL_ASSEMBLY: {self.include_biological_assembly}",
             f"REMOVE_WATERS: {self.remove_waters}"
         ])
-        
+
+        # Add status of files found/not found
+        if hasattr(self, 'found_locally') and self.found_locally:
+            config_lines.append(f"FOUND_LOCALLY: {', '.join([pdb_id for pdb_id, _ in self.found_locally])}")
+        if hasattr(self, 'needs_download') and self.needs_download:
+            config_lines.append(f"NEEDS_DOWNLOAD: {', '.join(self.needs_download)}")
+
         return config_lines
     
     def generate_script(self, script_path: str) -> str:
