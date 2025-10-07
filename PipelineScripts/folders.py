@@ -51,6 +51,12 @@ class FolderManager:
         group_folder = folder_config.get('group', '/shares/locbp.chem.uzh')
 
         # Base system folders
+        # For shared pipelines, use a shared PDBs folder accessible to all users
+        if shared:
+            pdbs_folder = os.path.join(group_folder, user_code, "PDBs")
+        else:
+            pdbs_folder = os.path.join(notebooks_folder, "PDBs")
+
         self._folders.update({
             "notebooks": notebooks_folder,
             "home": f"/home/{user_name}",
@@ -58,7 +64,7 @@ class FolderManager:
             "scratch": f"/scratch/{user_name}",
             "group": group_folder,
             "user": f"{group_folder}/{user_code}",
-            "PDBs": os.path.join(notebooks_folder, "PDBs"),
+            "PDBs": pdbs_folder,
             "HelpScripts": os.path.join(notebooks_folder, "HelpScripts"),
             "MMseqs2": os.path.join(notebooks_folder, "MMseqs2")})
 
