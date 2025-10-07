@@ -71,7 +71,7 @@
     - [LoadOutput](#loadoutput)
     - [MMseqs2Server](#mmseqs2server)
     - [CompoundLibrary](#compoundlibrary)
-    - [FetchStructure](#fetchstructure)
+    - [PDB](#pdb)
     - [PyMOL](#pymol)
 
 ## Architecture Overview
@@ -1306,29 +1306,63 @@ library = pipeline.add(CompoundLibrary(
 
 ---
 
-### FetchStructure
+### PDB
 
-Downloads protein structures from public databases (PDB, AlphaFold). Enables working with experimentally determined or predicted structures.
+Fetches protein structures with automatic fallback: checks local folders first, then downloads from RCSB PDB if not found locally. Downloads are automatically cached in PDBs/ folder for reuse.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `structure_ids`: List[str] (required) - List of structure IDs to fetch
-- `database`: str = "pdb" - Database source (pdb, alphafold)
-- `format`: str = "pdb" - File format (pdb, cif, mmcif)
+- `pdbs`: Union[str, List[str]] (required) - PDB IDs to fetch (e.g., "4ufc" or ["4ufc","1abc"])
+- `ids`: Optional[Union[str, List[str]]] - Custom IDs for renaming (defaults to pdbs)
+- `format`: str = "pdb" - File format ("pdb" or "cif")
+- `local_folder`: Optional[str] = None - Custom local folder to check first (before PDBs/)
+- `include_biological_assembly`: bool = False - Download biological assembly from RCSB
+- `remove_waters`: bool = True - Remove water molecules
+
+**Fetch Priority**:
+For each PDB ID, searches in order:
+1. `local_folder` (if parameter provided)
+2. `./PDBs/` folder in repository
+3. Download from RCSB PDB (cached to PDBs/ for reuse)
 
 **Outputs**:
-- `structures`: Downloaded structure files
+- `structures`: List of structure files
 - `datasheets.structures`:
 
-  | id | structure_file | source_database |
-  |----|----------------|-----------------|
+  | id | pdb_id | file_path | format | file_size | source |
+  |----|--------|-----------|--------|-----------|--------|
 
-**Example**:
+- `datasheets.sequences`:
+
+  | id | sequence |
+  |----|----------|
+
+- `datasheets.failed`:
+
+  | pdb_id | error_message | source | attempted_path |
+  |--------|---------------|--------|----------------|
+
+**Examples**:
 ```python
-fetched = pipeline.add(FetchStructure(
-    structure_ids=["1ABC", "2XYZ"],
-    database="pdb"
+# Automatic fallback: checks PDBs/, then downloads
+pdb = pipeline.add(PDB(
+    pdbs=["4ufc", "1abc"],
+    ids=["POI1", "POI2"]
+))
+
+# Check custom folder first, then PDBs/, then download
+pdb = pipeline.add(PDB(
+    pdbs=["my_structure"],
+    local_folder="/path/to/my/pdbs"
+))
+
+# Download biological assembly
+pdb = pipeline.add(PDB(
+    pdbs="4ufc",
+    ids="MyProtein",
+    include_biological_assembly=True,
+    remove_waters=False
 ))
 ```
 

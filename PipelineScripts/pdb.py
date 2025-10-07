@@ -1,8 +1,8 @@
 """
-FetchStructure tool for downloading protein structures from RCSB PDB.
+PDB tool for fetching protein structures from local folders or RCSB PDB.
 
-Downloads protein structures by PDB ID in either PDB or CIF format,
-with support for batch downloading and proper error handling.
+Fetches structures with priority-based lookup: local_folder -> PDBs/ -> RCSB download.
+Downloads are saved both in PDBs/ folder and tool output folder for reuse.
 """
 
 import os
@@ -18,51 +18,66 @@ except ImportError:
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
 
 
-class FetchStructure(BaseConfig):
+class PDB(BaseConfig):
     """
-    Pipeline tool for downloading protein structures from RCSB PDB.
-    
-    Downloads structures by PDB ID in either PDB or CIF format, creating
-    structure files and metadata datasheets for downstream processing.
+    Pipeline tool for fetching protein structures from local folders or RCSB PDB.
+
+    Implements priority-based lookup: checks local_folder (if provided), then PDBs/
+    folder, then downloads from RCSB. Downloaded structures are saved to both PDBs/
+    folder (for reuse) and tool output folder.
     """
-    
+
     # Tool identification
-    TOOL_NAME = "FetchStructure"
+    TOOL_NAME = "PDB"
     DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
                  pdbs: Union[str, List[str]],
                  ids: Optional[Union[str, List[str]]] = None,
                  format: str = "pdb",
+                 local_folder: Optional[str] = None,
                  include_biological_assembly: bool = False,
                  remove_waters: bool = True,
                  **kwargs):
         """
-        Initialize FetchStructure tool.
+        Initialize PDB tool.
 
         Args:
-            pdbs: PDB ID(s) to download. Can be single string or list of strings (e.g. "4ufc" or ["4ufc","1abc"])
+            pdbs: PDB ID(s) to fetch. Can be single string or list of strings (e.g. "4ufc" or ["4ufc","1abc"])
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
             format: File format ("pdb" or "cif", default: "pdb")
-            include_biological_assembly: Whether to download biological assembly (default: False)
+            local_folder: Custom local folder to check first (before PDBs/). Default: None
+            include_biological_assembly: Whether to download biological assembly from RCSB (default: False)
             remove_waters: Whether to remove water molecules from structures (default: True)
             **kwargs: Additional parameters
 
+        Fetch Priority:
+            For each PDB ID, searches in order:
+            1. local_folder (if parameter provided)
+            2. ./PDBs/ folder in repository
+            3. Download from RCSB PDB (saved to both PDBs/ and output folder)
+
         Examples:
-            # Download single structure with default naming
-            fetch = pipeline.add(FetchStructure(
+            # Fetch with automatic fallback (checks PDBs/, then downloads)
+            pdb = pipeline.add(PDB(
                 pdbs="4ufc"
             ))
 
-            # Download multiple structures with custom IDs
-            fetch = pipeline.add(FetchStructure(
+            # Fetch multiple structures with custom IDs
+            pdb = pipeline.add(PDB(
                 pdbs=["4ufc", "1abc"],
                 ids=["POI1", "POI2"],
                 format="pdb"
             ))
 
+            # Check custom folder first, then PDBs/, then download
+            pdb = pipeline.add(PDB(
+                pdbs="my_structure",
+                local_folder="/path/to/my/pdbs"
+            ))
+
             # Download with biological assembly and custom naming, keep waters
-            fetch = pipeline.add(FetchStructure(
+            pdb = pipeline.add(PDB(
                 pdbs="4ufc",
                 ids="MyProtein",
                 format="pdb",
@@ -90,9 +105,10 @@ class FetchStructure(BaseConfig):
             raise ValueError(f"Length mismatch: pdbs has {len(self.pdb_ids)} items but ids has {len(self.custom_ids)} items")
 
         self.format = format.lower()
+        self.local_folder = local_folder
         self.include_biological_assembly = include_biological_assembly
         self.remove_waters = remove_waters
-        
+
         # Validate format
         if self.format not in ["pdb", "cif"]:
             raise ValueError(f"Invalid format: {self.format}. Must be 'pdb' or 'cif'")
@@ -110,7 +126,7 @@ class FetchStructure(BaseConfig):
         return len(pdb_id) == 4 and pdb_id.isalnum()
     
     def validate_params(self):
-        """Validate FetchStructure parameters."""
+        """Validate PDB parameters."""
         if not self.pdb_ids:
             raise ValueError("pdbs cannot be empty")
 
@@ -124,7 +140,7 @@ class FetchStructure(BaseConfig):
             raise ValueError("format must be 'pdb' or 'cif'")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input parameters (no inputs for FetchStructure)."""
+        """Configure input parameters (no inputs for PDB)."""
         self.folders = pipeline_folders
     
     def get_config_display(self) -> List[str]:
@@ -135,6 +151,7 @@ class FetchStructure(BaseConfig):
             f"PDB_IDS: {', '.join(self.pdb_ids)} ({len(self.pdb_ids)} structures)",
             f"CUSTOM_IDS: {', '.join(self.custom_ids)}",
             f"FORMAT: {self.format.upper()}",
+            f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses PDBs/)'}",
             f"BIOLOGICAL_ASSEMBLY: {self.include_biological_assembly}",
             f"REMOVE_WATERS: {self.remove_waters}"
         ])
@@ -143,29 +160,34 @@ class FetchStructure(BaseConfig):
     
     def generate_script(self, script_path: str) -> str:
         """
-        Generate script to fetch structures from RCSB PDB.
-        
+        Generate script to fetch structures from local folders or RCSB PDB.
+
         Args:
             script_path: Path where script should be written
-            
+
         Returns:
             Script content as string
         """
         runtime_folder = os.path.dirname(script_path)
         output_folder = self.output_folder
         os.makedirs(output_folder, exist_ok=True)
-        
+
         # Output files
         structures_datasheet = os.path.join(output_folder, "structures.csv")
         sequences_datasheet = os.path.join(output_folder, "sequences.csv")
         failed_datasheet = os.path.join(output_folder, "failed_downloads.csv")
-        
+
+        # Get PDBs folder path (repository root)
+        repo_pdbs_folder = os.path.join(self.folders['root'], "PDBs")
+
         # Create config file for fetching
         config_file = os.path.join(output_folder, "fetch_config.json")
         config_data = {
             "pdb_ids": self.pdb_ids,
             "custom_ids": self.custom_ids,
             "format": self.format,
+            "local_folder": self.local_folder,
+            "repo_pdbs_folder": repo_pdbs_folder,
             "include_biological_assembly": self.include_biological_assembly,
             "remove_waters": self.remove_waters,
             "output_folder": output_folder,
@@ -173,26 +195,27 @@ class FetchStructure(BaseConfig):
             "sequences_datasheet": sequences_datasheet,
             "failed_datasheet": failed_datasheet
         }
-        
+
         import json
         with open(config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
-        
+
         # Generate script content
         script_content = f"""#!/bin/bash
-# FetchStructure execution script
+# PDB execution script
 # Generated by BioPipelines pipeline system
 
 {self.generate_completion_check_header()}
 
-echo "Fetching {len(self.pdb_ids)} structures from RCSB PDB"
+echo "Fetching {len(self.pdb_ids)} structures"
 echo "Format: {self.format.upper()}"
 echo "PDB IDs: {', '.join(self.pdb_ids)}"
 echo "Custom IDs: {', '.join(self.custom_ids)}"
+echo "Priority: {'local_folder -> ' if self.local_folder else ''}PDBs/ -> RCSB download"
 echo "Output folder: {output_folder}"
 
 # Run Python structure fetching script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_fetch_structure.py')}" \\
+python "{os.path.join(self.folders['HelpScripts'], 'pipe_pdb.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
@@ -209,7 +232,7 @@ fi
 
 {self.generate_completion_check_footer()}
 """
-        
+
         return script_content
     
     def get_output_files(self) -> Dict[str, List[str]]:
@@ -241,8 +264,8 @@ fi
             "structures": DatasheetInfo(
                 name="structures",
                 path=structures_csv,
-                columns=["id", "pdb_id", "file_path", "format", "file_size", "download_date"],
-                description="Successfully downloaded structure files",
+                columns=["id", "pdb_id", "file_path", "format", "file_size", "source"],
+                description="Successfully fetched structure files",
                 count=len(self.pdb_ids)  # May be fewer if some downloads fail
             ),
             "sequences": DatasheetInfo(
@@ -255,8 +278,8 @@ fi
             "failed": DatasheetInfo(
                 name="failed",
                 path=failed_csv,
-                columns=["pdb_id", "error_message", "http_status", "attempted_url"],
-                description="Failed structure downloads with error details",
+                columns=["pdb_id", "error_message", "source", "attempted_path"],
+                description="Failed structure fetches with error details",
                 count="variable"
             )
         }
@@ -280,6 +303,7 @@ fi
                 "pdb_ids": self.pdb_ids,
                 "custom_ids": self.custom_ids,
                 "format": self.format,
+                "local_folder": self.local_folder,
                 "include_biological_assembly": self.include_biological_assembly,
                 "remove_waters": self.remove_waters
             }

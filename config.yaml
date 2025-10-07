@@ -24,6 +24,7 @@ folders:
 
 # Default Environments
 # Each tool can have a default conda environment specified here
+# If no specific model is used, the default is biopipelines containing pyyaml and pandas (it is automatically created when submitting via submit)
 environments:
   # Structure prediction and design tools
   Boltz2: "Boltz2Env"
@@ -39,30 +40,30 @@ environments:
   PyMOL: "ProteinEnv"
 
   # Data manipulation tools (usually don't need special environments)
-  Filter: null
-  SelectBest: null
-  MergeDatasheets: null
-  ConcatenateDatasheets: null
-  RemoveDuplicates: null
-  SliceDatasheet: null
-  AverageByDatasheet: null
-  ExtractMetrics: null
-  LoadOutput: null
+  Filter: "biopipelines"
+  SelectBest: "biopipelines"
+  MergeDatasheets: "biopipelines"
+  ConcatenateDatasheets: "biopipelines"
+  RemoveDuplicates: "biopipelines"
+  SliceDatasheet: "biopipelines"
+  AverageByDatasheet: "biopipelines"
+  ExtractMetrics: "biopipelines"
+  LoadOutput: "biopipelines"
 
   # Mutation and design tools
   MutationComposer: "MutationEnv"
   MutationProfiler: "MutationEnv"
   SiteDirectedMutagenesis: "MutationEnv"
-  StitchSequences: null
-  Fuse: null
+  StitchSequences: "biopipelines"
+  Fuse: "biopipelines"
 
   # Analysis tools
   ProteinLigandContacts: "ProteinEnv"
-  ResidueAtomDistance: null
-  DistanceSelector: null
+  ResidueAtomDistance: "biopipelines"
+  DistanceSelector: "biopipelines"
   ConformationalChange: "ProteinEnv"
-  Confidence: null
+  Confidence: "biopipelines"
 
   # Library and compound tools
-  CompoundLibrary: null
-  FetchStructure: null
+  CompoundLibrary: "biopipelines"
+  PDB: "biopipelines"

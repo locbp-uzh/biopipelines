@@ -56,7 +56,7 @@ Specific environments for using the tools have to be installed separately. Good 
 - **LoadOutput** - Import results from previous pipelines
 - **MMseqs2** - Multiple sequence alignment and homology search
 - **CompoundLibrary** - Generate compound libraries and properties
-- **FetchStructure** - Download structures from databases
+- **PDB** - Fetch structures from local folders or RCSB PDB
 
 ## Documentation
 

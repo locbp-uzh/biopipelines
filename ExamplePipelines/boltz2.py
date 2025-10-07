@@ -7,7 +7,7 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.fetch_structure import FetchStructure
+from PipelineScripts.pdb import PDB
 from PipelineScripts.compound_library import CompoundLibrary
 from PipelineScripts.mmseqs2 import MMseqs2
 
@@ -55,7 +55,7 @@ Boltz run with protein sequence fetched from pdb
 """
 
 # We load pdb id 6U32 with structure id HT
-HaloTag = pipeline.add(FetchStructure("6U32","HT"))
+HaloTag = pipeline.add(PDB("6U32","HT"))
 
 boltz_2 = pipeline.add(Boltz2(proteins=HaloTag,
 ligands=boltz_1, # output of Boltz contains a csv file with the smiles of the ligands used.
