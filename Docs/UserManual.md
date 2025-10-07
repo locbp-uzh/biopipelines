@@ -51,6 +51,7 @@
   - [Structure Prediction](#structure-prediction)
     - [AlphaFold](#alphafold)
     - [Boltz2](#boltz2)
+    - [RF3](#rf3)
   - [Analysis](#analysis)
     - [ResidueAtomDistance](#residueatomdistance)
     - [PLIP (Protein-Ligand Interaction Profiler)](#plip-protein-ligand-interaction-profiler)
@@ -702,6 +703,63 @@ boltz_holo = pipeline.add(Boltz2(
 
 ---
 
+### RF3
+
+Predicts biomolecular structures using RoseTTAFold3. Supports protein-only and protein-ligand complex prediction with batch processing capabilities.
+
+**Environment**: `RF3Env`
+
+**Parameters**:
+- `proteins`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Protein sequences
+- `ligands`: Union[str, ToolOutput, StandardizedOutput, None] = None - Ligand SMILES string or compound library ToolOutput
+- `msas`: Optional[Union[str, ToolOutput]] = None - Pre-computed MSA files (optional)
+- `num_models`: int = 5 - Number of models to generate
+- `output_format`: str = "pdb" - Output format ("pdb" or "cif")
+- `checkpoint_path`: Optional[str] = None - Path to RF3 checkpoint file
+- `early_stopping_plddt`: Optional[float] = None - pLDDT threshold for early stopping
+- `use_templates`: bool = False - Enable template-based prediction
+
+**Outputs**:
+- `structures`: List of predicted structure files
+- `datasheets.structures`:
+
+  | id | model_id | file_path | plddt_score |
+  |----|----------|-----------|-------------|
+
+- `datasheets.confidence`:
+
+  | id | model_id | plddt_score | ptm_score |
+  |----|----------|-------------|-----------|
+
+**Example**:
+```python
+# Apo prediction
+rf3_apo = pipeline.add(RF3(
+    proteins=sequences,
+    num_models=5
+))
+
+# Protein-ligand complex prediction
+rf3_holo = pipeline.add(RF3(
+    proteins=sequences,
+    ligands="CC(=O)OC1=CC=CC=C1C(=O)O",  # Aspirin SMILES
+    num_models=3,
+    early_stopping_plddt=85.0
+))
+
+# Batch prediction with compound library
+compounds = pipeline.add(CompoundLibrary({
+    "AspA": "CC(=O)OC1=CC=CC=C1C(=O)O",
+    "AspB": "CC(=O)OC1=CC=CC=C1C(=O)O"
+}))
+rf3_batch = pipeline.add(RF3(
+    proteins=protein_sequences,
+    ligands=compounds
+))
+```
+
+---
+
 ## Analysis
 
 ### ResidueAtomDistance
@@ -1214,7 +1272,7 @@ pipeline.add(CompoundLibrary({
 # imports, pipeline instantiation, ...
 compound1 = pipeline.add(LoadOutput(
     output_json="/path/to/job/ToolOutputs/001_CompoundLibrary.json",
-    filter="id == Compound1"
+    filter='id == "Compound1"' #quotes are important for proper pandas query here: x is a column name; "x" is a string.
 ))
 boltz = pipeline.add(Boltz2(proteins=HaloTag,
                             ligands=compound1))

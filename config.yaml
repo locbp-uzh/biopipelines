@@ -28,6 +28,7 @@ folders:
 environments:
   # Structure prediction and design tools
   Boltz2: "Boltz2Env"
+  RF3: "RF3Env"
   RFdiffusion: "ProteinEnv"
   RFdiffusionAllAtom: "ProteinEnv"
   ProteinMPNN: "ProteinEnv"
@@ -39,7 +40,7 @@ environments:
   PLIP: "PlipEnv"
   PyMOL: "ProteinEnv"
 
-  # Data manipulation tools (usually don't need special environments)
+  # Data manipulation tools
   Filter: "biopipelines"
   SelectBest: "biopipelines"
   MergeDatasheets: "biopipelines"
