@@ -707,7 +707,18 @@ boltz_holo = pipeline.add(Boltz2(
 
 Predicts biomolecular structures using RoseTTAFold3. Supports protein-only and protein-ligand complex prediction with batch processing capabilities.
 
-**Environment**: `RF3Env`
+**Environment**: `modelforge`
+
+**Installation**:
+The official RF3 repository uses `uv` for installation, but for consistency with BioPipelines we use conda. Run the following in your data folder:
+```bash
+cd /data/$USER
+git clone https://github.com/RosettaCommons/modelforge.git
+cd modelforge
+conda create -n modelforge python=3.12
+conda activate modelforge
+pip install -e .
+```
 
 **Parameters**:
 - `proteins`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Protein sequences

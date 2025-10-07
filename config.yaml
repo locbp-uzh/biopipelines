@@ -28,7 +28,7 @@ folders:
 environments:
   # Structure prediction and design tools
   Boltz2: "Boltz2Env"
-  RF3: "RF3Env"
+  RF3: "modelforge"
   RFdiffusion: "ProteinEnv"
   RFdiffusionAllAtom: "ProteinEnv"
   ProteinMPNN: "ProteinEnv"
