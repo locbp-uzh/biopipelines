@@ -255,102 +255,6 @@ class LoadOutput(BaseConfig):
 
         print(f"  - Filtered IDs: {sorted(list(self.filtered_ids)) if len(self.filtered_ids) <= 10 else f'{len(self.filtered_ids)} items'}")
 
-        # IMPORTANT: Create filtered copies of ALL datasheets in LoadOutput's output folder
-        # This is necessary so downstream tools receive the filtered data, not the original
-        self._create_filtered_datasheets(filtered_df)
-
-    def _create_filtered_datasheets(self, filtered_main_df):
-        """
-        Create filtered copies of all datasheets in LoadOutput's output folder.
-
-        This ensures downstream tools receive filtered data, not the original unfiltered files.
-        """
-        import pandas as pd
-
-        # Ensure output folder exists (it should be set during pipeline add)
-        if not hasattr(self, 'output_folder') or not self.output_folder:
-            raise ValueError("LoadOutput output_folder not set. Cannot create filtered datasheets.")
-
-        os.makedirs(self.output_folder, exist_ok=True)
-        print(f"LoadOutput: Creating filtered datasheets in {self.output_folder}")
-
-        output_structure = self.loaded_result['output_structure']
-
-        # Process all datasheets
-        if 'datasheets' in output_structure:
-            datasheets = output_structure['datasheets']
-            if isinstance(datasheets, dict):
-                for ds_name, ds_info in datasheets.items():
-                    # Get original datasheet path
-                    original_path = None
-                    if isinstance(ds_info, dict) and 'path' in ds_info:
-                        original_path = ds_info['path']
-                    elif isinstance(ds_info, str):
-                        original_path = ds_info
-
-                    if not original_path or not os.path.exists(original_path):
-                        print(f"  Warning: Skipping datasheet '{ds_name}' - file not found: {original_path}")
-                        continue
-
-                    try:
-                        # Load original datasheet
-                        df = pd.read_csv(original_path)
-
-                        # Filter by IDs
-                        if 'id' in df.columns:
-                            filtered_df = df[df['id'].isin(self.filtered_ids)]
-                        else:
-                            # If no 'id' column, skip filtering for this datasheet
-                            print(f"  Warning: Datasheet '{ds_name}' has no 'id' column, copying as-is")
-                            filtered_df = df
-
-                        # Save filtered datasheet to LoadOutput's output folder
-                        filtered_path = os.path.join(self.output_folder, f"{ds_name}.csv")
-                        filtered_df.to_csv(filtered_path, index=False)
-                        print(f"  ✓ {ds_name}.csv: {len(filtered_df)}/{len(df)} rows")
-
-                        # Update the datasheet info to point to the new filtered file
-                        if isinstance(ds_info, dict):
-                            ds_info['path'] = filtered_path
-                            ds_info['count'] = len(filtered_df)
-                        else:
-                            # If it was just a string, replace it with updated path
-                            datasheets[ds_name] = filtered_path
-
-                    except Exception as e:
-                        print(f"  Error filtering datasheet '{ds_name}': {e}")
-                        continue
-
-        # Also handle special compound/sequence/MSA lists if they exist as CSV files
-        for list_name in ['compounds', 'sequences', 'msas']:
-            if list_name in output_structure:
-                file_list = output_structure[list_name]
-                if isinstance(file_list, list):
-                    filtered_files = []
-                    for file_path in file_list:
-                        if isinstance(file_path, str) and file_path.endswith('.csv') and os.path.exists(file_path):
-                            try:
-                                df = pd.read_csv(file_path)
-                                if 'id' in df.columns:
-                                    filtered_df = df[df['id'].isin(self.filtered_ids)]
-                                    # Save filtered version
-                                    filtered_path = os.path.join(self.output_folder, os.path.basename(file_path))
-                                    filtered_df.to_csv(filtered_path, index=False)
-                                    filtered_files.append(filtered_path)
-                                    print(f"  ✓ {os.path.basename(file_path)}: {len(filtered_df)}/{len(df)} rows")
-                                else:
-                                    # No filtering possible, keep original
-                                    filtered_files.append(file_path)
-                            except Exception as e:
-                                print(f"  Error filtering {file_path}: {e}")
-                                filtered_files.append(file_path)
-                        else:
-                            # Not a CSV or doesn't exist, keep original
-                            filtered_files.append(file_path)
-
-                    # Update the list with filtered file paths
-                    output_structure[list_name] = filtered_files
-
     def _apply_filter_to_output_structure(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
         """Apply filtering to the output structure based on filtered IDs."""
         
@@ -376,20 +280,25 @@ class LoadOutput(BaseConfig):
                 filtered_structure['structure_ids'] = filtered_structure_ids
                 print(f"  - Filtered structures: {len(filtered_structures)}/{len(original_structures)}")
         
-        # Filter compounds and compound_ids  
+        # Filter compounds and compound_ids
         if 'compounds' in output_structure and 'compound_ids' in output_structure:
             original_compounds = output_structure['compounds']
             original_compound_ids = output_structure['compound_ids']
-            
+
             if len(original_compounds) == len(original_compound_ids):
                 filtered_compounds = []
                 filtered_compound_ids = []
-                
+
                 for compound_path, compound_id in zip(original_compounds, original_compound_ids):
                     if compound_id in self.filtered_ids:
-                        filtered_compounds.append(compound_path)
+                        # Update path to point to LoadOutput's output folder where filtered CSV will be
+                        if isinstance(compound_path, str) and compound_path.endswith('.csv'):
+                            new_path = os.path.join(self.output_folder, os.path.basename(compound_path))
+                            filtered_compounds.append(new_path)
+                        else:
+                            filtered_compounds.append(compound_path)
                         filtered_compound_ids.append(compound_id)
-                
+
                 filtered_structure['compounds'] = filtered_compounds
                 filtered_structure['compound_ids'] = filtered_compound_ids
         
@@ -397,27 +306,37 @@ class LoadOutput(BaseConfig):
         if 'sequences' in output_structure and 'sequence_ids' in output_structure:
             original_sequences = output_structure['sequences']
             original_sequence_ids = output_structure['sequence_ids']
-            
+
             if len(original_sequences) == len(original_sequence_ids):
                 filtered_sequences = []
                 filtered_sequence_ids = []
-                
+
                 for sequence_path, sequence_id in zip(original_sequences, original_sequence_ids):
                     if sequence_id in self.filtered_ids:
-                        filtered_sequences.append(sequence_path)
+                        # Update path to point to LoadOutput's output folder where filtered CSV will be
+                        if isinstance(sequence_path, str) and sequence_path.endswith('.csv'):
+                            new_path = os.path.join(self.output_folder, os.path.basename(sequence_path))
+                            filtered_sequences.append(new_path)
+                        else:
+                            filtered_sequences.append(sequence_path)
                         filtered_sequence_ids.append(sequence_id)
-                
+
                 filtered_structure['sequences'] = filtered_sequences
                 filtered_structure['sequence_ids'] = filtered_sequence_ids
-        
-        # Update datasheets count information
+
+        # Update datasheets paths to point to LoadOutput's output folder and update counts
         if 'datasheets' in filtered_structure:
             for ds_name, ds_info in filtered_structure['datasheets'].items():
-                if isinstance(ds_info, dict) and 'count' in ds_info:
+                if isinstance(ds_info, dict):
+                    # Update path to LoadOutput's output folder
+                    if 'path' in ds_info:
+                        original_path = ds_info['path']
+                        if isinstance(original_path, str) and original_path.endswith('.csv'):
+                            ds_info['path'] = os.path.join(self.output_folder, f"{ds_name}.csv")
+
                     # Update count to reflect filtering
-                    if isinstance(ds_info['count'], int):
-                        # Rough estimate - could be more precise if we tracked per-datasheet filtering
-                        filtered_structure['datasheets'][ds_name]['count'] = len(self.filtered_ids)
+                    if 'count' in ds_info and isinstance(ds_info['count'], int):
+                        ds_info['count'] = len(self.filtered_ids)
         
         return filtered_structure
 
@@ -573,14 +492,46 @@ if [ ! -f "{file_path}" ]; then
     echo "Warning: {file_type} file missing: {file_path}"
 fi"""
         
+        # Add filtering section if filter was applied
+        if self.filter_input and self.filtered_ids:
+            # Create filter configuration file
+            filter_config = {
+                "filtered_ids": list(self.filtered_ids),
+                "output_structure": self.loaded_result['output_structure'],
+                "output_folder": self.output_folder
+            }
+
+            filter_config_path = os.path.join(self.output_folder, "filter_config.json")
+            with open(filter_config_path, 'w') as f:
+                json.dump(filter_config, f, indent=2)
+
+            script_content += f"""
+
+# Apply filter and create filtered datasheets
+echo "Creating filtered copies of datasheets..."
+echo "Filter: {self.filter_input if isinstance(self.filter_input, str) else 'ToolOutput filter'}"
+echo "Filtered IDs: {len(self.filtered_ids)} items"
+echo "Output folder: {self.output_folder}"
+
+python "{os.path.join(self.folders.get('HelpScripts', 'HelpScripts'), 'pipe_load_output_filter.py')}" \\
+  --config "{filter_config_path}"
+
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to create filtered datasheets"
+    exit 1
+fi
+
+echo "Filtered datasheets created successfully"
+"""
+
         script_content += f"""
 
-echo "LoadOutput validation complete"
+echo "LoadOutput complete"
 echo "Files loaded from {original_tool} are ready for use"
 
 {self.generate_completion_check_footer()}
 """
-        
+
         return script_content
     
     def get_config_display(self) -> List[str]:
