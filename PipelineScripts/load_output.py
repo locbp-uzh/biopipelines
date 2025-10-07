@@ -245,16 +245,112 @@ class LoadOutput(BaseConfig):
             raise ValueError(f"Invalid filter input type: {type(self.filter_input)}")
         
         print(f"  - Result: {len(filtered_df)}/{len(df)} items kept")
-        
+
         # Store filtered IDs
         if 'id' in filtered_df.columns:
             self.filtered_ids = set(filtered_df['id'].tolist())
         else:
             # Fall back to row indices
             self.filtered_ids = set(filtered_df.index.tolist())
-        
+
         print(f"  - Filtered IDs: {sorted(list(self.filtered_ids)) if len(self.filtered_ids) <= 10 else f'{len(self.filtered_ids)} items'}")
-    
+
+        # IMPORTANT: Create filtered copies of ALL datasheets in LoadOutput's output folder
+        # This is necessary so downstream tools receive the filtered data, not the original
+        self._create_filtered_datasheets(filtered_df)
+
+    def _create_filtered_datasheets(self, filtered_main_df):
+        """
+        Create filtered copies of all datasheets in LoadOutput's output folder.
+
+        This ensures downstream tools receive filtered data, not the original unfiltered files.
+        """
+        import pandas as pd
+
+        # Ensure output folder exists (it should be set during pipeline add)
+        if not hasattr(self, 'output_folder') or not self.output_folder:
+            raise ValueError("LoadOutput output_folder not set. Cannot create filtered datasheets.")
+
+        os.makedirs(self.output_folder, exist_ok=True)
+        print(f"LoadOutput: Creating filtered datasheets in {self.output_folder}")
+
+        output_structure = self.loaded_result['output_structure']
+
+        # Process all datasheets
+        if 'datasheets' in output_structure:
+            datasheets = output_structure['datasheets']
+            if isinstance(datasheets, dict):
+                for ds_name, ds_info in datasheets.items():
+                    # Get original datasheet path
+                    original_path = None
+                    if isinstance(ds_info, dict) and 'path' in ds_info:
+                        original_path = ds_info['path']
+                    elif isinstance(ds_info, str):
+                        original_path = ds_info
+
+                    if not original_path or not os.path.exists(original_path):
+                        print(f"  Warning: Skipping datasheet '{ds_name}' - file not found: {original_path}")
+                        continue
+
+                    try:
+                        # Load original datasheet
+                        df = pd.read_csv(original_path)
+
+                        # Filter by IDs
+                        if 'id' in df.columns:
+                            filtered_df = df[df['id'].isin(self.filtered_ids)]
+                        else:
+                            # If no 'id' column, skip filtering for this datasheet
+                            print(f"  Warning: Datasheet '{ds_name}' has no 'id' column, copying as-is")
+                            filtered_df = df
+
+                        # Save filtered datasheet to LoadOutput's output folder
+                        filtered_path = os.path.join(self.output_folder, f"{ds_name}.csv")
+                        filtered_df.to_csv(filtered_path, index=False)
+                        print(f"  ✓ {ds_name}.csv: {len(filtered_df)}/{len(df)} rows")
+
+                        # Update the datasheet info to point to the new filtered file
+                        if isinstance(ds_info, dict):
+                            ds_info['path'] = filtered_path
+                            ds_info['count'] = len(filtered_df)
+                        else:
+                            # If it was just a string, replace it with updated path
+                            datasheets[ds_name] = filtered_path
+
+                    except Exception as e:
+                        print(f"  Error filtering datasheet '{ds_name}': {e}")
+                        continue
+
+        # Also handle special compound/sequence lists if they exist as CSV files
+        for list_name in ['compounds', 'sequences']:
+            if list_name in output_structure:
+                file_list = output_structure[list_name]
+                if isinstance(file_list, list):
+                    filtered_files = []
+                    for file_path in file_list:
+                        if isinstance(file_path, str) and file_path.endswith('.csv') and os.path.exists(file_path):
+                            try:
+                                df = pd.read_csv(file_path)
+                                if 'id' in df.columns:
+                                    filtered_df = df[df['id'].isin(self.filtered_ids)]
+                                    # Save filtered version
+                                    filtered_path = os.path.join(self.output_folder, os.path.basename(file_path))
+                                    filtered_df.to_csv(filtered_path, index=False)
+                                    filtered_files.append(filtered_path)
+                                    print(f"  ✓ {os.path.basename(file_path)}: {len(filtered_df)}/{len(df)} rows")
+                                else:
+                                    # No filtering possible, keep original
+                                    filtered_files.append(file_path)
+                            except Exception as e:
+                                print(f"  Error filtering {file_path}: {e}")
+                                filtered_files.append(file_path)
+                        else:
+                            # Not a CSV or doesn't exist, keep original
+                            filtered_files.append(file_path)
+
+                    # Update the list with filtered file paths
+                    output_structure[list_name] = filtered_files
+
     def _apply_filter_to_output_structure(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
         """Apply filtering to the output structure based on filtered IDs."""
         
