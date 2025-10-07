@@ -16,8 +16,8 @@ from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.boltz2 import Boltz2
 
 pipeline = Pipeline(
-    pipeline_name="RFDAA-ProteinMPNN-LigandMPNN-MMseqs-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="rifampicin", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="RFDAA-ProteinMPNN-LigandMPNN-MMseqs-Boltz",
     job_description="redesign of N terminus of rifampicin binding protein")
 
 pipeline.resources(

@@ -13,8 +13,8 @@ from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.boltz2 import Boltz2
 
 pipeline = Pipeline(
-    pipeline_name="RFDAA-LigandMPNN-MMseqs2-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="rifampicin", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="RFDAA-LigandMPNN-MMseqs2-Boltz",
     job_description="redesign of N terminus of rifampicin binding protein")
 
 pipeline.resources(

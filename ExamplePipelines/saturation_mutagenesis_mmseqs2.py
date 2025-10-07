@@ -12,8 +12,8 @@ from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.boltz2 import Boltz2
 
 pp = Pipeline(
-    pipeline_name="SDM-MMseqs-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="HT7_Cy7_C_R", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="SDM-MMseqs-Boltz",
     job_description="Saturation mutagenesis of HaloTag7 at position 175 with Cy7 methyl amide open enantiomer R")
 
 pp.resources(

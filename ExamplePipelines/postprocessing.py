@@ -12,8 +12,8 @@ from PipelineScripts.average_by_datasheet import AverageByDatasheet
 from PipelineScripts.extract_metrics import ExtractMetrics
 
 pipeline = Pipeline(
-    pipeline_name="PostProcessing", 
-    job_name="Cycle_HT7_Cy7_C_R_003", 
+    pipeline_name="Examples",
+    job_name="PostProcessing",
     job_description="Average by datasheets and extract metrics")
 
 pipeline.resources(

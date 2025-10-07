@@ -24,8 +24,8 @@ from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
 from PipelineScripts.protein_ligand_contacts import ProteinLigandContacts
 
 pipeline = Pipeline(
-    pipeline_name="RFDAA-Contacts", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="rifampicin", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="RFDAA-Contacts",
     job_description="redesign of N terminus of rifampicin binding protein")
 
 pipeline.resources(

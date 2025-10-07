@@ -11,8 +11,8 @@ from PipelineScripts.pdb import PDB
 from PipelineScripts.compound_library import CompoundLibrary
 
 pipeline = Pipeline(
-    pipeline_name="RF3_Examples",
-    job_name="HT7_Cy7_C_SS",
+    pipeline_name="Examples",
+    job_name="RF3",
     job_description="RF3 structure prediction examples")
 
 pipeline.resources(

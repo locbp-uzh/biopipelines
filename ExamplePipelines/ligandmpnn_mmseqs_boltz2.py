@@ -15,8 +15,8 @@ from PipelineScripts.merge_datasheets import MergeDatasheets
 from PipelineScripts.filter import Filter
 
 pipeline = Pipeline(
-    pipeline_name="LigandMPNN-MSA-Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="Test", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="LigandMPNN-MSA-Boltz",
     job_description="Test of MMseqs2 local")
 
 pipeline.resources(

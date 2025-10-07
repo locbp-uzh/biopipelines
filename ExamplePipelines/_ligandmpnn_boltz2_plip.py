@@ -28,8 +28,8 @@ from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.plip import PLIP
 
 pipeline = Pipeline(
-    pipeline_name="LigandMPNN-Boltz2-PLIP", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="rifampicin_design", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="LigandMPNN-Boltz2-PLIP",
     job_description="LigandMPNN sequence design followed by Boltz2 folding and PLIP interaction analysis")
 
 pipeline.resources(

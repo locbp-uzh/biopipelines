@@ -9,8 +9,8 @@ from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.mmseqs2 import MMseqs2
 
 pipeline = Pipeline(
-    pipeline_name="MMseqs2Server", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="CPU", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="MMseqs2-Client",
     job_description="Test of MMseqs2 local")
 
 pipeline.resources(

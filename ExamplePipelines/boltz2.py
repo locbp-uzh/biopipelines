@@ -12,8 +12,8 @@ from PipelineScripts.compound_library import CompoundLibrary
 from PipelineScripts.mmseqs2 import MMseqs2
 
 pipeline = Pipeline(
-    pipeline_name="Boltz", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="HT7_Cy7_C_SS", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="Boltz",
     job_description="Folding of HaloTag7 with Cy7 methyl amide close enantiomer SS")
 
 pipeline.resources(

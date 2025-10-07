@@ -26,8 +26,8 @@ from PipelineScripts.load_output import LoadOutput
 from PipelineScripts.plip import PLIP
 
 pipeline = Pipeline(
-    pipeline_name="Boltz2-PLIP-Analysis", #Will create a folder in /shares/USER/<pipeline_name>
-    job_name="rifampicin_interactions", #Unique job folder in /shares/USER/<pipeline_name>/job_name_NNN
+    pipeline_name="Examples",
+    job_name="Boltz2-PLIP-Analysis",
     job_description="Protein-ligand interaction analysis using PLIP on Boltz2 structures")
 
 pipeline.resources(
