@@ -144,6 +144,15 @@ class PDB(BaseConfig):
         self.found_locally = []
         self.needs_download = []
 
+        # Print search locations
+        print(f"  Searching for PDB structures:")
+        if self.local_folder:
+            print(f"    1. Custom folder: {self.local_folder}")
+            print(f"    2. PDBs folder: {repo_pdbs_folder}")
+        else:
+            print(f"    1. PDBs folder: {repo_pdbs_folder}")
+        print(f"    {'3' if self.local_folder else '2'}. RCSB download (if not found)")
+
         for pdb_id in self.pdb_ids:
             extension = ".pdb" if self.format == "pdb" else ".cif"
             found = False
@@ -165,9 +174,11 @@ class PDB(BaseConfig):
             if not found:
                 self.needs_download.append(pdb_id)
 
-        # Print status
+        # Print status with paths
         if self.found_locally:
-            print(f"  ✓ Found locally: {', '.join([pdb_id for pdb_id, _ in self.found_locally])}")
+            print(f"  ✓ Found locally:")
+            for pdb_id, path in self.found_locally:
+                print(f"      {pdb_id}: {path}")
         if self.needs_download:
             print(f"  ⚠ Will download from RCSB: {', '.join(self.needs_download)}")
     
