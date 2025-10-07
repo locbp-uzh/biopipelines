@@ -367,6 +367,13 @@ fi
 """
         
         # Generate summary
+        library_type = "Dictionary" if self.library_dict else "CSV file"
+        primary_key_str = self.primary_key if self.primary_key else "None"
+        covalent_str = str(self.covalent)
+        conformer_method_str = self.conformer_method
+        compounds_csv_basename = os.path.basename(self.compounds_csv)
+        is_covalent = self.covalent
+
         script_content += f"""
 echo "Generating library summary"
 python3 -c "
@@ -381,14 +388,14 @@ compound_count = len(df)
 with open('{self.summary_file}', 'w') as f:
     f.write('Compound Library Summary\\n')
     f.write('========================\\n')
-    f.write(f'Library type: {"Dictionary" if self.library_dict else "CSV file"}\\n')
-    if {f'"{self.primary_key}"' if self.primary_key else 'None'}:
-        f.write(f'Primary key: {self.primary_key if self.primary_key else "None"}\\n')
+    f.write(f'Library type: {library_type}\\n')
+    if '{primary_key_str}' != 'None':
+        f.write(f'Primary key: {primary_key_str}\\n')
     f.write(f'Total compounds: {{compound_count}}\\n')
-    f.write(f'Covalent ligands: {str(self.covalent)}\\n')
-    f.write(f'Conformer method: {self.conformer_method}\\n')
-    f.write(f'Output file: {os.path.basename(self.compounds_csv)}\\n')
-    if self.covalent:
+    f.write(f'Covalent ligands: {covalent_str}\\n')
+    f.write(f'Conformer method: {conformer_method_str}\\n')
+    f.write(f'Output file: {compounds_csv_basename}\\n')
+    if {is_covalent}:
         f.write(f'Covalent library folder: covalent_library/\\n')
 
 print(f'Library processed: {{compound_count}} compounds')
