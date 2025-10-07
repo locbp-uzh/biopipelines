@@ -22,7 +22,19 @@ if conda env list | grep -q "^biopipelines "; then
     conda activate biopipelines
 else
     echo "biopipelines environment not found. Creating it..."
-    conda create -n biopipelines -y python pyyaml pandas
+
+    # Get the directory where submit script is located (biopipelines root)
+    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    ENV_FILE="$SCRIPT_DIR/biopipelines.yaml"
+
+    if [ -f "$ENV_FILE" ]; then
+        echo "Using environment specification: $ENV_FILE"
+        conda env create -f "$ENV_FILE"
+    else
+        echo "Warning: biopipelines.yaml not found, creating minimal environment"
+        conda create -n biopipelines -y python pyyaml pandas requests numpy
+    fi
+
     echo "Activating newly created biopipelines environment..."
     conda activate biopipelines
 fi
