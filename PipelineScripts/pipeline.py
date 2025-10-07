@@ -131,10 +131,10 @@ class Pipeline:
             step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}"
         tool_output_folder = os.path.join(self.folders["output"], step_folder_name)
         os.makedirs(tool_output_folder, exist_ok=True)
-        
+
         # Set pipeline context with unified folder structure
         tool_config.set_pipeline_context(
-            self, self.execution_order, tool_output_folder
+            self, self.execution_order, tool_output_folder, self.current_suffix
         )
         
         # Configure inputs immediately so tool outputs are properly set
@@ -685,7 +685,10 @@ umask 002
                 }
                 
                 # Generate filename with 3-digit execution order
-                output_filename = f"{i:03d}_{tool.TOOL_NAME}_output.json" #{self.job_name}_
+                if hasattr(tool, 'suffix') and tool.suffix:
+                    output_filename = f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.json"
+                else:
+                    output_filename = f"{i:03d}_{tool.TOOL_NAME}.json"
                 output_path = os.path.join(tool_outputs_dir, output_filename)
                 
                 # Save to JSON file with custom serialization

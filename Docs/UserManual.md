@@ -1193,7 +1193,7 @@ Loads previously saved tool outputs for reuse in new pipelines. Enables incremen
 **Example**:
 ```python
 previous_boltz = pipeline.add(LoadOutput(
-    output_json="/path/to/job/ToolOutputs/003_Boltz2_output.json",
+    output_json="/path/to/job/ToolOutputs/003_Boltz2.json",
     filter="confidence_score > 0.8"
 ))
 ```
@@ -1213,7 +1213,7 @@ pipeline.add(CompoundLibrary({
 # Pipeline 2 running calculatios with one of the compounds
 # imports, pipeline instantiation, ...
 compound1 = pipeline.add(LoadOutput(
-    output_json="/path/to/job/ToolOutputs/001_CompoundLibrary_output.json",
+    output_json="/path/to/job/ToolOutputs/001_CompoundLibrary.json",
     filter="id == Compound1"
 ))
 boltz = pipeline.add(Boltz2(proteins=HaloTag,

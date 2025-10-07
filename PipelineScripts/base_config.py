@@ -143,11 +143,12 @@ class BaseConfig(ABC):
         """
         return self.get_output_files()
     
-    def set_pipeline_context(self, pipeline_ref, execution_order: int, output_folder: str):
+    def set_pipeline_context(self, pipeline_ref, execution_order: int, output_folder: str, suffix: str = ""):
         """Set context when added to pipeline."""
         self.pipeline_ref = pipeline_ref
         self.execution_order = execution_order
         self.output_folder = output_folder
+        self.suffix = suffix
         self.configured = True
     
     def resolve_dependency_outputs(self, dependency):
