@@ -10,10 +10,9 @@ import os
 import sys
 import argparse
 import json
-import requests
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
 
 # Import the local PDB parser
@@ -221,6 +220,19 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biologi
     try:
         print(f"Downloading {pdb_id} from RCSB: {url}")
 
+        # Import requests only when needed for download
+        try:
+            import requests
+        except ImportError:
+            error_msg = f"Cannot download from RCSB: 'requests' module not available. Please install with: pip install requests"
+            print(f"Error: {error_msg}")
+            metadata = {
+                "error_message": error_msg,
+                "source": "rcsb_missing_dependency",
+                "attempted_path": url
+            }
+            return False, "", "", metadata
+
         # Download with proper headers
         headers = {
             'User-Agent': 'BioPipelines-PDB/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
@@ -276,29 +288,28 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biologi
 
         print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes")
         return True, output_path, sequence, metadata
-        
-    except requests.exceptions.RequestException as e:
-        error_msg = f"HTTP error downloading {pdb_id}: {str(e)}"
-        print(f"Error: {error_msg}")
-
-        # Try to get HTTP status code
-        http_status = getattr(e.response, 'status_code', 'unknown') if hasattr(e, 'response') and e.response else 'network_error'
-
-        metadata = {
-            "error_message": error_msg,
-            "source": f"rcsb_download_failed_{http_status}",
-            "attempted_path": url
-        }
-
-        return False, "", "", metadata
 
     except Exception as e:
-        error_msg = f"Unexpected error downloading {pdb_id}: {str(e)}"
+        # Handle both requests exceptions and other errors
+        error_type = type(e).__name__
+
+        # Try to extract HTTP status if it's a requests exception
+        http_status = 'unknown'
+        if 'requests' in sys.modules and hasattr(e, 'response') and e.response:
+            http_status = getattr(e.response, 'status_code', 'unknown')
+
+        if 'RequestException' in error_type or 'HTTPError' in error_type:
+            error_msg = f"HTTP error downloading {pdb_id}: {str(e)}"
+            source = f"rcsb_download_failed_{http_status}"
+        else:
+            error_msg = f"Unexpected error downloading {pdb_id}: {str(e)}"
+            source = "rcsb_processing_error"
+
         print(f"Error: {error_msg}")
 
         metadata = {
             "error_message": error_msg,
-            "source": "rcsb_processing_error",
+            "source": source,
             "attempted_path": url
         }
 
