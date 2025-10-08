@@ -80,6 +80,7 @@ class FolderManager:
 
         # Tool-specific data folders from config
         tool_data_config = folder_config.get('tool_data', {})
+        dynamicbind_base = os.path.join(self._folders["data"], tool_data_config.get('DynamicBind', 'DynamicBind'))
         self._folders.update({
             "RFdiffusion": os.path.join(self._folders["data"], tool_data_config.get('RFdiffusion', 'RFdiffusion')),
             "RFdiffusionAllAtom": os.path.join(self._folders["data"], tool_data_config.get('RFdiffusionAllAtom', 'rf_diffusion_all_atom')),
@@ -88,6 +89,8 @@ class FolderManager:
             "OmegaFold": os.path.join(self._folders["data"], tool_data_config.get('OmegaFold', 'OmegaFold')),
             "Boltz": os.path.join(self._folders["data"], tool_data_config.get('Boltz', 'boltz')),
             "BoltzCache": os.path.join(self._folders["group"], boltz_cache_path),
+            "DynamicBind": dynamicbind_base,
+            "DynamicBindWeights": os.path.join(dynamicbind_base, "workdir"),
             "BioPipelines": os.path.join(self._folders["user"], "BioPipelines")})
         self._folders.update({
             "pipeline": os.path.join(self._folders["BioPipelines"],pipeline_name) if not debug else "Debug"})

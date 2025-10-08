@@ -20,6 +20,7 @@ from .folders import FolderManager
 from .conformational_change import ConformationalChange
 from .protein_ligand_contacts import ProteinLigandContacts
 from .stitch_sequences import StitchSequences
+from .dynamic_bind import DynamicBind
 from .converters import *
 
 __all__ = [
@@ -28,7 +29,7 @@ __all__ = [
     'BaseConfig',
     'ToolOutput',
     'FolderManager',
-    
+
     # Modeling tools
     'RFdiffusion',
     'ProteinMPNN',
@@ -42,10 +43,11 @@ __all__ = [
     'ConformationalChange',
     'ProteinLigandContacts',
     'StitchSequences',
+    'DynamicBind',
 
     # Utility functions
     'pdb_to_jsonl',
-    'fasta_to_csv', 
+    'fasta_to_csv',
     'validate_pdb',
     'validate_fasta',
     'combine_fasta_files'

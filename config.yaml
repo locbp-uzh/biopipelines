@@ -15,6 +15,7 @@ folders:
     AlphaFold: "localcolabfold"
     OmegaFold: "OmegaFold"
     Boltz: "boltz"
+    DynamicBind: "DynamicBind"
 
   # Shared model and container folders (relative to group folder)
   shared:
@@ -25,6 +26,7 @@ folders:
 # Default Environments
 # Each tool can have a default conda environment specified here
 # If no specific model is used, the default is biopipelines containing pyyaml and pandas (it is automatically created when submitting via submit)
+# If the tool itsef manages the change to an environment (e.g. when it needs more than one environment), set it to null
 environments:
   # Structure prediction and design tools
   Boltz2: "Boltz2Env"
@@ -33,7 +35,7 @@ environments:
   RFdiffusionAllAtom: "ProteinEnv"
   ProteinMPNN: "ProteinEnv"
   LigandMPNN: "ProteinEnv"
-  AlphaFold: "ProteinEnv"
+  AlphaFold: null
 
   # Analysis and utility tools
   MMseqs2: "MMseqsEnv"
@@ -41,6 +43,7 @@ environments:
   PyMOL: "ProteinEnv"
   OnionNet: "OnionNetEnv"
   OnionNet2: "OnionNet2Env"
+  DynamicBind: null
 
   # Data manipulation tools
   Filter: "biopipelines"

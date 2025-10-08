@@ -52,7 +52,10 @@
     - [AlphaFold](#alphafold)
     - [Boltz2](#boltz2)
     - [RF3](#rf3)
+    - [OnionNet](#onionnet)
+    - [OnionNet2](#onionnet2)
   - [Analysis](#analysis)
+    - [DynamicBind](#dynamicbind)
     - [ResidueAtomDistance](#residueatomdistance)
     - [PLIP (Protein-Ligand Interaction Profiler)](#plip-protein-ligand-interaction-profiler)
     - [DistanceSelector](#distanceselector)
@@ -862,6 +865,94 @@ affinity = pipeline.add(OnionNet2(
 ---
 
 ## Analysis
+
+### DynamicBind
+
+Predicts ligand-specific protein-ligand complex structures using equivariant diffusion models. Recovers ligand-specific conformations from unbound protein structures.
+
+**Key Features:**
+- Predicts protein-ligand binding conformations
+- Handles multiple ligands per protein
+- Generates multiple poses with affinity predictions
+- Outputs relaxed structures with confidence scores
+
+**Installation:**
+
+Requires two conda environments (`dynamicbind` and `relax`):
+
+```bash
+# You might need to create an interactive session with enough memory to solve the dependencies
+srun --pty -n 1 -c 2 --time=01:00:00 --mem=16G bash -l
+
+# Clone repository
+cd /data/$USER
+git clone https://github.com/luwei0917/DynamicBind.git
+cd DynamicBind
+
+# Download model checkpoints
+# Download workdir.zip from https://zenodo.org/records/10137507 (v1)
+# Or workdir.zip from https://zenodo.org/records/10183369 (v2 - recommended)
+wget https://zenodo.org/records/10183369/files/workdir.zip
+unzip workdir.zip
+# This creates a 'workdir' folder with model weights
+
+# Create main dynamicbind environment
+conda create -n dynamicbind python=3.10
+conda activate dynamicbind
+conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
+conda install -c conda-forge rdkit
+conda install pyg pyyaml biopython -c pyg
+pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu117.html
+pip install e3nn fair-esm spyrmsd
+
+# Create relax environment
+conda create --name relax python=3.8
+conda activate relax
+conda install -c conda-forge openmm pdbfixer biopython openmmforcefields openff-toolkit ambertools=22 compilers -y
+```
+
+Config: `DynamicBind: null` (tool manages environments)
+
+Model weights location: `/data/{username}/DynamicBind/workdir`
+
+**Parameters:**
+- `proteins`: Input protein(s) - PDB filename, list of PDBs, or tool output (all structures used)
+- `ligands`: SMILES string or tool output with compounds datasheet (must have 'smiles' column)
+- `samples_per_complex`: Number of samples per complex (default: 10)
+- `inference_steps`: Diffusion steps (default: 20)
+- `no_relax`: Skip OpenMM relaxation (default: False)
+- `hts`: High-throughput screening mode (default: False)
+- `seed`: Random seed (default: 42)
+
+**Example:**
+
+```python
+# Basic usage - single protein, SMILES string
+db = pipeline.add(DynamicBind(
+    proteins="target.pdb",
+    ligands="CCO",  # SMILES string
+    samples_per_complex=10
+))
+
+# Multiple proteins from PDBs folder
+db = pipeline.add(DynamicBind(
+    proteins=["protein1.pdb", "protein2.pdb"],
+    ligands="CC(=O)O"
+))
+
+# Chain with other tools - all structures from tool output
+rfdaa = pipeline.add(RFdiffusionAllAtom(ligand="ZIT", contigs="A1-100", num_designs=5))
+compounds = pipeline.add(CompoundLibrary(smiles_list=["CCO", "CC(=O)O"]))
+db = pipeline.add(DynamicBind(proteins=rfdaa, ligands=compounds))
+```
+
+**Outputs:**
+- Structures: SDF files with pattern `rank{N}_ligand_lddt{score}_affinity{score}_relaxed.sdf`
+- Datasheets:
+  - `dynamicbind_results.csv`: columns `id`, `ligand_id`, `structure`, `affinity`, `lddt`, `rank`
+  - `compounds.csv`: compounds used (available as `output.compounds`)
+
+---
 
 ### ResidueAtomDistance
 
