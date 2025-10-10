@@ -92,5 +92,4 @@ rf3_5 = pipeline.add(RF3(
     num_models=2
 ))
 
-pipeline.save()
 pipeline.slurm()

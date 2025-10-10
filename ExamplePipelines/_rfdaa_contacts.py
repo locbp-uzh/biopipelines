@@ -48,5 +48,4 @@ contacts = pipeline.add(ProteinLigandContacts(structures=rfdaa,
                                               ligand="LIG"))
 
 
-pipeline.save()
 pipeline.slurm() 

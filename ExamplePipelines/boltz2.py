@@ -108,5 +108,5 @@ Boltz with msas from MMseqs2
 msa = pipeline.add(MMseqs2(sequences=HaloTag))
 boltz_5 = pipeline.add(Boltz2(proteins=HaloTag,msas=msa))
 
-pipeline.save()
+
 pipeline.slurm()

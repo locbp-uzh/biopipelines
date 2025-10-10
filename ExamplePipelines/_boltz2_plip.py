@@ -53,5 +53,4 @@ plip_analysis = pipeline.add(PLIP(
 ))
 
 # Save pipeline configuration and generate execution scripts
-pipeline.save()
 pipeline.slurm()

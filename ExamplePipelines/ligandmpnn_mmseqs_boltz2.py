@@ -38,5 +38,4 @@ boltz_holo_open = pipeline.add(Boltz2(proteins=lmpnn,
                                 msas=msas))
 
 
-pipeline.save()
 pipeline.slurm() 

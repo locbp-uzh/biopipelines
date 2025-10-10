@@ -39,5 +39,4 @@ metrics = ["affinity_delta",
 pipeline.add(ExtractMetrics(datasheets=all_merged,
                             metrics=metrics))
 
-pipeline.save()
 pipeline.slurm()

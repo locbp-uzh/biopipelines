@@ -36,5 +36,4 @@ boltz2 = pp.add(Boltz2(proteins=single_point_mutants,
                         ligands=best_R,
                         msas=msas))
 
-pp.save()
 pp.slurm()

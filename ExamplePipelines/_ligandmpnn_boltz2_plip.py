@@ -65,17 +65,4 @@ plip_analysis = pipeline.add(PLIP(
     verbose=True
 ))
 
-print("Pipeline Overview:")
-print("==================")
-print("1. Load original rifampicin-protein complex")
-print("2. Generate 10 diverse sequences with LigandMPNN")
-print("3. Fold sequences with Boltz2 (holo state with rifampicin)")
-print("4. Analyze protein-ligand interactions with PLIP")
-print()
-print("Expected outputs:")
-print("- LigandMPNN: 10 designed sequences")
-print("- Boltz2: 10 folded structures with ligand")
-print("- PLIP: Interaction profiles, PyMOL sessions, and images")
-
-pipeline.save()
 pipeline.slurm()

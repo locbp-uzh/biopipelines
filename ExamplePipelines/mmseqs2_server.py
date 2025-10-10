@@ -23,5 +23,4 @@ pipeline.resources(
 pipeline.add(MMseqs2Server("gpu"))
 
 #Prints
-pipeline.save()
 pipeline.slurm() 

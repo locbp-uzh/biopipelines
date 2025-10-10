@@ -134,5 +134,4 @@ pipeline.add(ExtractMetrics(datasheets=[x.datasheets.merged for x in all_analysi
                                     "close_affinity_pred_value"]))
 
 #Prints
-pipeline.save()
 pipeline.slurm()

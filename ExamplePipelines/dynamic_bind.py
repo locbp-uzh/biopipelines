@@ -61,3 +61,5 @@ compound_library = pipeline.add(CompoundLibrary({"acetamide":"ClCCCCCCOCCOCCNC(=
 dynamicbind5=pipeline.add(DynamicBind(proteins=rfdaa,
                                       ligands=compound_library))
 print(dynamicbind5)
+
+pipeline.slurm()

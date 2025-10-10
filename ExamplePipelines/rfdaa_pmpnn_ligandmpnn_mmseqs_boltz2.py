@@ -57,5 +57,4 @@ boltz_holo = pipeline.add(Boltz2(proteins=sequences,
                                 msas=msas)) #MSAs are passed with <tool output>, not with <tool output>.msas
 
 
-pipeline.save()
 pipeline.slurm() 
