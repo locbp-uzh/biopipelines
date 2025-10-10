@@ -37,7 +37,11 @@ def main():
     ligands_df.to_csv(output_ligands_csv, index=False)
     print(f"Created ligands CSV with {len(ligands_df)} compounds: {output_ligands_csv}")
 
-    # Copy compounds datasheet to output folder
+    # Add 'ligand' column to compounds datasheet if not already present
+    if 'ligand' not in df.columns:
+        df['ligand'] = df['smiles']
+
+    # Save compounds datasheet to output folder
     df.to_csv(output_compounds_csv, index=False)
     print(f"Copied compounds datasheet to output: {output_compounds_csv}")
 

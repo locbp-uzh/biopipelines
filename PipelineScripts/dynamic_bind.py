@@ -350,8 +350,10 @@ class DynamicBind(BaseConfig):
             # Also create standardized compounds.csv
             compounds_df = pd.DataFrame({
                 'id': ['ligand'],
+                'code': [''],
                 'format': ['smiles'],
                 'smiles': [self.ligands],
+                'ligand': [self.ligands],
                 'ccd': ['']
             })
             compounds_df.to_csv(self.output_compounds_datasheet, index=False)
@@ -482,7 +484,7 @@ python {self.folders["HelpScripts"]}/pipe_dynamicbind_datasheet.py "{db_job_fold
             "compounds": DatasheetInfo(
                 name="compounds",
                 path=self.output_compounds_datasheet,
-                columns=["id", "format", "smiles", "ccd"],  # Standardized format
+                columns=["id", "code", "format", "smiles", "ligand", "ccd"],  # Standardized format
                 description="Compounds used for DynamicBind predictions",
                 count=None
             )
