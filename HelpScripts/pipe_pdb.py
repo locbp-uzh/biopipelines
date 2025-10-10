@@ -87,6 +87,93 @@ def extract_sequence_from_structure(content: str, format: str) -> str:
         return ""
 
 
+def extract_ligands_from_structure(content: str, format: str) -> List[str]:
+    """
+    Extract ligand identifiers (3-letter codes) from structure content.
+
+    Args:
+        content: Structure file content
+        format: File format ("pdb" or "cif")
+
+    Returns:
+        List of unique ligand 3-letter codes (e.g., ['ATP', 'GDP'])
+    """
+    if format != "pdb":
+        print("Warning: Ligand extraction not implemented for CIF format")
+        return []
+
+    ligands = set()
+    lines = content.split('\n')
+
+    # Common non-ligand residues to exclude
+    exclude_residues = {'HOH', 'WAT', 'H2O', 'SOL', 'TIP3', 'TIP4', 'SPC',
+                       'NA', 'CL', 'K', 'CA', 'MG', 'ZN', 'FE', 'CU', 'MN',
+                       'ACE', 'NME', 'NH2'}  # Caps and common modifications
+
+    for line in lines:
+        if line.startswith('HETATM'):
+            res_name = line[17:20].strip()
+            # Only include if not in exclusion list and is 3 characters
+            if res_name and len(res_name) <= 3 and res_name not in exclude_residues:
+                ligands.add(res_name)
+
+    return sorted(list(ligands))
+
+
+def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
+    """
+    Fetch SMILES string for a ligand from RCSB REST API.
+
+    Args:
+        ligand_code: 3-letter ligand code (e.g., 'ATP', 'PVY')
+
+    Returns:
+        SMILES string or None if not found
+    """
+    try:
+        import requests
+
+        # RCSB REST API endpoint for ligand info
+        url = f"https://data.rcsb.org/rest/v1/core/chemcomp/{ligand_code}"
+
+        headers = {
+            'User-Agent': 'BioPipelines-PDB/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Extract SMILES from the response
+        # RCSB provides SMILES in the 'chem_comp' section
+        if 'chem_comp' in data:
+            chem_comp = data['chem_comp']
+            # Try different possible fields for SMILES
+            for field in ['pdbx_smiles_canonical', 'smiles', 'smiles_canonical']:
+                if field in chem_comp and chem_comp[field]:
+                    print(f"  Found SMILES for {ligand_code}: {chem_comp[field][:50]}...")
+                    return chem_comp[field]
+
+        # Alternative location in descriptors
+        if 'rcsb_chem_comp_descriptor' in data:
+            descriptors = data['rcsb_chem_comp_descriptor']
+            if isinstance(descriptors, dict):
+                if 'smiles_canonical' in descriptors:
+                    print(f"  Found SMILES for {ligand_code}: {descriptors['smiles_canonical'][:50]}...")
+                    return descriptors['smiles_canonical']
+                elif 'smiles' in descriptors:
+                    print(f"  Found SMILES for {ligand_code}: {descriptors['smiles'][:50]}...")
+                    return descriptors['smiles']
+
+        print(f"  No SMILES found for {ligand_code} in RCSB response")
+        return None
+
+    except Exception as e:
+        print(f"  Warning: Could not fetch SMILES for {ligand_code}: {str(e)}")
+        return None
+
+
 def find_local_structure(pdb_id: str, format: str, local_folder: str,
                         repo_pdbs_folder: str) -> Optional[str]:
     """
@@ -121,7 +208,7 @@ def find_local_structure(pdb_id: str, format: str, local_folder: str,
 
 def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
                         format: str, remove_waters: bool,
-                        output_folder: str) -> Tuple[bool, str, str, Dict[str, Any]]:
+                        output_folder: str) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Copy local structure file to output folder.
 
@@ -134,7 +221,7 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         output_folder: Directory to save the structure
 
     Returns:
-        Tuple of (success: bool, file_path: str, sequence: str, metadata: dict)
+        Tuple of (success: bool, file_path: str, sequence: str, ligands: List[Dict], metadata: dict)
     """
     try:
         with open(source_path, 'r') as f:
@@ -153,6 +240,21 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         file_size = os.path.getsize(output_path)
         sequence = extract_sequence_from_structure(content, format)
 
+        # Extract ligands and fetch SMILES
+        ligand_codes = extract_ligands_from_structure(content, format)
+        ligands = []
+        if ligand_codes:
+            print(f"  Found {len(ligand_codes)} ligand(s) in structure: {', '.join(ligand_codes)}")
+            for ligand_code in ligand_codes:
+                smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
+                ligands.append({
+                    'id': f"{custom_id}_{ligand_code}",
+                    'code': ligand_code,
+                    'format': 'smiles' if smiles else '',
+                    'smiles': smiles if smiles else '',
+                    'ccd': ligand_code  # CCD code is the 3-letter code
+                })
+
         metadata = {
             "file_size": file_size,
             "source": "local",
@@ -160,7 +262,7 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         }
 
         print(f"Successfully copied {pdb_id} as {custom_id}: {file_size} bytes (from local)")
-        return True, output_path, sequence, metadata
+        return True, output_path, sequence, ligands, metadata
 
     except Exception as e:
         error_msg = f"Error copying local file {pdb_id}: {str(e)}"
@@ -170,11 +272,11 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
             "source": "local_copy_failed",
             "attempted_path": source_path
         }
-        return False, "", "", metadata
+        return False, "", "", [], metadata
 
 
-def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biological_assembly: bool,
-                   remove_waters: bool, output_folder: str, repo_pdbs_folder: str) -> Tuple[bool, str, str, Dict[str, Any]]:
+def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_assembly: bool,
+                   remove_waters: bool, output_folder: str, repo_pdbs_folder: str) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Download a single structure from RCSB PDB and save to both PDBs/ and output folder.
 
@@ -182,13 +284,13 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biologi
         pdb_id: PDB identifier (4 characters)
         custom_id: Custom ID for renaming the structure
         format: File format ("pdb" or "cif")
-        include_biological_assembly: Whether to download biological assembly
+        biological_assembly: Whether to download biological assembly
         remove_waters: Whether to remove water molecules
         output_folder: Directory to save the structure
         repo_pdbs_folder: Repository PDBs folder for caching
 
     Returns:
-        Tuple of (success: bool, file_path: str, sequence: str, metadata: dict)
+        Tuple of (success: bool, file_path: str, sequence: str, ligands: List[Dict], metadata: dict)
     """
     pdb_id = pdb_id.upper()
 
@@ -207,12 +309,12 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biologi
     extension = ".pdb" if format == "pdb" else ".cif"
 
     if format == "pdb":
-        if include_biological_assembly:
+        if biological_assembly:
             url = f"https://files.rcsb.org/download/{pdb_id}.pdb1.gz"
         else:
             url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
     else:  # cif
-        if include_biological_assembly:
+        if biological_assembly:
             url = f"https://files.rcsb.org/download/{pdb_id}-assembly1.cif.gz"
         else:
             url = f"https://files.rcsb.org/download/{pdb_id}.cif"
@@ -277,17 +379,32 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biologi
         # Get file size
         file_size = os.path.getsize(output_path)
 
+        # Extract sequence from structure
+        sequence = extract_sequence_from_structure(content, format)
+
+        # Extract ligands and fetch SMILES
+        ligand_codes = extract_ligands_from_structure(content, format)
+        ligands = []
+        if ligand_codes:
+            print(f"  Found {len(ligand_codes)} ligand(s) in structure: {', '.join(ligand_codes)}")
+            for ligand_code in ligand_codes:
+                smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
+                ligands.append({
+                    'id': f"{custom_id}_{ligand_code}",
+                    'code': ligand_code,
+                    'format': 'smiles' if smiles else '',
+                    'smiles': smiles if smiles else '',
+                    'ccd': ligand_code  # CCD code is the 3-letter code
+                })
+
         metadata = {
             "file_size": file_size,
             "source": "rcsb_download",
             "url": url
         }
 
-        # Extract sequence from structure
-        sequence = extract_sequence_from_structure(content, format)
-
         print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes")
-        return True, output_path, sequence, metadata
+        return True, output_path, sequence, ligands, metadata
 
     except Exception as e:
         # Handle both requests exceptions and other errors
@@ -313,7 +430,7 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, include_biologi
             "attempted_path": url
         }
 
-        return False, "", "", metadata
+        return False, "", "", [], metadata
 
 
 def fetch_structures(config_data: Dict[str, Any]) -> int:
@@ -331,16 +448,17 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     format = config_data['format']
     local_folder = config_data.get('local_folder')
     repo_pdbs_folder = config_data['repo_pdbs_folder']
-    include_biological_assembly = config_data.get('include_biological_assembly', False)
+    biological_assembly = config_data.get('biological_assembly', False)
     remove_waters = config_data.get('remove_waters', True)
     output_folder = config_data['output_folder']
     structures_datasheet = config_data['structures_datasheet']
     sequences_datasheet = config_data['sequences_datasheet']
     failed_datasheet = config_data['failed_datasheet']
+    compounds_datasheet = config_data.get('compounds_datasheet', os.path.join(output_folder, 'compounds.csv'))
 
     print(f"Fetching {len(pdb_ids)} structures in {format.upper()} format")
     print(f"Priority: {'local_folder -> ' if local_folder else ''}PDBs/ -> RCSB download")
-    if include_biological_assembly:
+    if biological_assembly:
         print("Including biological assemblies")
     if remove_waters:
         print("Water molecules will be removed")
@@ -351,6 +469,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     # Track results
     successful_downloads = []
     successful_sequences = []
+    all_ligands = []
     failed_downloads = []
 
     # Fetch each structure
@@ -362,14 +481,14 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
 
         if local_path:
             # Copy from local
-            success, file_path, sequence, metadata = copy_local_structure(
+            success, file_path, sequence, ligands, metadata = copy_local_structure(
                 pdb_id, custom_id, local_path, format, remove_waters, output_folder
             )
         else:
             # Download from RCSB
             print(f"{pdb_id} not found locally, downloading from RCSB")
-            success, file_path, sequence, metadata = download_from_rcsb(
-                pdb_id, custom_id, format, include_biological_assembly, remove_waters,
+            success, file_path, sequence, ligands, metadata = download_from_rcsb(
+                pdb_id, custom_id, format, biological_assembly, remove_waters,
                 output_folder, repo_pdbs_folder
             )
 
@@ -387,6 +506,8 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                     'id': custom_id,
                     'sequence': sequence
                 })
+            if ligands:  # Add ligands to the collection
+                all_ligands.extend(ligands)
         else:
             failed_downloads.append({
                 'pdb_id': pdb_id,
@@ -417,6 +538,17 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         empty_seq_df.to_csv(sequences_datasheet, index=False)
         print(f"No sequences extracted - created empty datasheet: {sequences_datasheet}")
 
+    # Save compounds datasheet
+    if all_ligands:
+        df_compounds = pd.DataFrame(all_ligands)
+        df_compounds.to_csv(compounds_datasheet, index=False)
+        print(f"Compounds saved: {compounds_datasheet} ({len(all_ligands)} ligands)")
+    else:
+        # Create empty compounds datasheet with proper columns
+        empty_compounds_df = pd.DataFrame(columns=["id", "code", "format", "smiles", "ccd"])
+        empty_compounds_df.to_csv(compounds_datasheet, index=False)
+        print(f"No ligands found - created empty datasheet: {compounds_datasheet}")
+
     # Save failed downloads datasheet (always create, even if empty)
     if failed_downloads:
         df_failed = pd.DataFrame(failed_downloads)
@@ -434,12 +566,13 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     print(f"Successful: {len(successful_downloads)}")
     print(f"Failed: {len(failed_downloads)}")
     print(f"Success rate: {len(successful_downloads)/len(pdb_ids)*100:.1f}%")
-    
+
     if successful_downloads:
         total_size = sum(item['file_size'] for item in successful_downloads)
         print(f"Total downloaded: {total_size:,} bytes ({total_size/1024/1024:.2f} MB)")
 
     print(f"Sequences extracted: {len(successful_sequences)}")
+    print(f"Ligands extracted: {len(all_ligands)}")
     
     # Log any failed fetches
     if failed_downloads:

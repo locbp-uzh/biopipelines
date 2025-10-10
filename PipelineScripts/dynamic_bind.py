@@ -115,20 +115,22 @@ class DynamicBind(BaseConfig):
         elif isinstance(ligands, (ToolOutput, StandardizedOutput)):
             self.ligands_is_tool_output = True
             if isinstance(ligands, StandardizedOutput):
-                # Get compounds datasheet from StandardizedOutput
-                if hasattr(ligands, 'datasheets') and 'compounds' in ligands.datasheets:
-                    self.ligands_source_file = ligands.datasheets['compounds'].path
+                # Get compounds CSV from StandardizedOutput
+                if hasattr(ligands, 'compounds') and ligands.compounds:
+                    # compounds is a list, take the first CSV file
+                    self.ligands_source_file = ligands.compounds[0] if isinstance(ligands.compounds, list) else ligands.compounds
                 else:
-                    raise ValueError("No compounds datasheet found in StandardizedOutput for ligands parameter")
+                    raise ValueError("No compounds found in StandardizedOutput for ligands parameter")
             else:  # ToolOutput
-                # Get compounds datasheet from ToolOutput
-                datasheets = ligands.get_output_files("datasheets")
-                if datasheets and 'compounds' in datasheets:
-                    self.ligands_source_file = datasheets['compounds'].path
+                # Get compounds CSV from ToolOutput
+                compounds = ligands.get_output_files("compounds")
+                if compounds:
+                    # compounds is a list, take the first CSV file
+                    self.ligands_source_file = compounds[0] if isinstance(compounds, list) else compounds
                     # Add dependency
                     self.dependencies.append(ligands.config)
                 else:
-                    raise ValueError("No compounds datasheet found in ToolOutput for ligands parameter")
+                    raise ValueError("No compounds found in ToolOutput for ligands parameter")
         else:
             raise ValueError("ligands must be a SMILES string, ToolOutput, or StandardizedOutput")
 
@@ -344,6 +346,15 @@ class DynamicBind(BaseConfig):
             import pandas as pd
             ligands_df = pd.DataFrame({'ligand': [self.ligands]})
             ligands_df.to_csv(self.input_ligands_file, index=False)
+
+            # Also create standardized compounds.csv
+            compounds_df = pd.DataFrame({
+                'id': ['ligand'],
+                'format': ['smiles'],
+                'smiles': [self.ligands],
+                'ccd': ['']
+            })
+            compounds_df.to_csv(self.output_compounds_datasheet, index=False)
         elif self.ligands_is_tool_output and "ligands" in self.input_sources:
             # Read tool output compounds datasheet and create new CSV with 'ligand' column
             # This will be done in the bash script using the helper script
@@ -469,7 +480,7 @@ python {self.folders["HelpScripts"]}/pipe_dynamicbind_datasheet.py "{db_job_fold
             "compounds": DatasheetInfo(
                 name="compounds",
                 path=self.output_compounds_datasheet,
-                columns=["smiles"],  # Plus any additional columns from input
+                columns=["id", "format", "smiles", "ccd"],  # Standardized format
                 description="Compounds used for DynamicBind predictions",
                 count=None
             )

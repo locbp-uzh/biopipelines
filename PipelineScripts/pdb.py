@@ -36,7 +36,7 @@ class PDB(BaseConfig):
                  ids: Optional[Union[str, List[str]]] = None,
                  format: str = "pdb",
                  local_folder: Optional[str] = None,
-                 include_biological_assembly: bool = False,
+                 biological_assembly: bool = False,
                  remove_waters: bool = True,
                  **kwargs):
         """
@@ -47,7 +47,7 @@ class PDB(BaseConfig):
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
             format: File format ("pdb" or "cif", default: "pdb")
             local_folder: Custom local folder to check first (before PDBs/). Default: None
-            include_biological_assembly: Whether to download biological assembly from RCSB (default: False)
+            biological_assembly: Whether to download biological assembly from RCSB (default: False)
             remove_waters: Whether to remove water molecules from structures (default: True)
             **kwargs: Additional parameters
 
@@ -81,7 +81,7 @@ class PDB(BaseConfig):
                 pdbs="4ufc",
                 ids="MyProtein",
                 format="pdb",
-                include_biological_assembly=True,
+                biological_assembly=True,
                 remove_waters=False
             ))
         """
@@ -106,7 +106,7 @@ class PDB(BaseConfig):
 
         self.format = format.lower()
         self.local_folder = local_folder
-        self.include_biological_assembly = include_biological_assembly
+        self.biological_assembly = biological_assembly
         self.remove_waters = remove_waters
 
         # Validate format
@@ -176,11 +176,11 @@ class PDB(BaseConfig):
 
         # Print status with paths
         if self.found_locally:
-            print(f"  ✓ Found locally:")
+            print(f"  Found locally:")
             for pdb_id, path in self.found_locally:
                 print(f"      {pdb_id}: {path}")
         if self.needs_download:
-            print(f"  ⚠ Will download from RCSB: {', '.join(self.needs_download)}")
+            print(f"  Will download from RCSB: {', '.join(self.needs_download)}")
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -191,7 +191,7 @@ class PDB(BaseConfig):
             f"CUSTOM_IDS: {', '.join(self.custom_ids)}",
             f"FORMAT: {self.format.upper()}",
             f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses PDBs/)'}",
-            f"BIOLOGICAL_ASSEMBLY: {self.include_biological_assembly}",
+            f"BIOLOGICAL_ASSEMBLY: {self.biological_assembly}",
             f"REMOVE_WATERS: {self.remove_waters}"
         ])
 
@@ -221,6 +221,7 @@ class PDB(BaseConfig):
         structures_datasheet = os.path.join(output_folder, "structures.csv")
         sequences_datasheet = os.path.join(output_folder, "sequences.csv")
         failed_datasheet = os.path.join(output_folder, "failed_downloads.csv")
+        compounds_datasheet = os.path.join(output_folder, "compounds.csv")
 
         # Get PDBs folder path from folder manager
         repo_pdbs_folder = self.folders['PDBs']
@@ -233,12 +234,13 @@ class PDB(BaseConfig):
             "format": self.format,
             "local_folder": self.local_folder,
             "repo_pdbs_folder": repo_pdbs_folder,
-            "include_biological_assembly": self.include_biological_assembly,
+            "biological_assembly": self.biological_assembly,
             "remove_waters": self.remove_waters,
             "output_folder": output_folder,
             "structures_datasheet": structures_datasheet,
             "sequences_datasheet": sequences_datasheet,
-            "failed_datasheet": failed_datasheet
+            "failed_datasheet": failed_datasheet,
+            "compounds_datasheet": compounds_datasheet
         }
 
         import json
@@ -303,7 +305,8 @@ fi
         structures_csv = os.path.join(self.output_folder, "structures.csv")
         sequences_csv = os.path.join(self.output_folder, "sequences.csv")
         failed_csv = os.path.join(self.output_folder, "failed_downloads.csv")
-        
+        compounds_csv = os.path.join(self.output_folder, "compounds.csv")
+
         # Define datasheets that will be created
         datasheets = {
             "structures": DatasheetInfo(
@@ -320,6 +323,13 @@ fi
                 description="Protein sequences extracted from structures",
                 count=len(self.pdb_ids)  # May be fewer if some downloads fail
             ),
+            "compounds": DatasheetInfo(
+                name="compounds",
+                path=compounds_csv,
+                columns=["id", "code", "format", "smiles", "ccd"],
+                description="Ligands extracted from PDB structures (SMILES from RCSB)",
+                count="variable"
+            ),
             "failed": DatasheetInfo(
                 name="failed",
                 path=failed_csv,
@@ -328,12 +338,12 @@ fi
                 count="variable"
             )
         }
-        
+
         return {
             "structures": structure_files,
             "structure_ids": structure_ids,
-            "compounds": [],
-            "compound_ids": [],
+            "compounds": [compounds_csv],
+            "compound_ids": [],  # Will be populated at runtime
             "sequences": [sequences_csv],
             "sequence_ids": sequence_ids,
             "datasheets": datasheets,
@@ -349,7 +359,7 @@ fi
                 "custom_ids": self.custom_ids,
                 "format": self.format,
                 "local_folder": self.local_folder,
-                "include_biological_assembly": self.include_biological_assembly,
+                "biological_assembly": self.biological_assembly,
                 "remove_waters": self.remove_waters
             }
         })

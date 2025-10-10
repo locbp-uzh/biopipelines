@@ -173,9 +173,9 @@ pmd = pipeline.add(ProteinMPNN(structures=rfd,num_sequences=2))
 ### Job submission
 
 Call to generate the validate the pipeline, generate the full scripts, and generate a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
-1. Run from console the sbatch printed at the end when running the pipeline python script;
-2. Copy-paste the job name and slurm content in the job composer form (https://apps.s3it.uzh.ch/pun/sys/myjobs);
-3. Instead of running the pipeline with `python /path/to/<pipeline>.py`, use `./submit /path/to/<pipeline.py>` to both run and submit. However, this requires pandas to be executable.
+1. Run from console the pipeline with python (requires packages pandas and yaml to be executable) and then run the sbatch command in output;
+2. Run from console the pipeline with python and then copy-paste the job name and slurm content in the job composer form (https://apps.s3it.uzh.ch/pun/sys/myjobs);
+3. Instead of running the pipeline with `python /path/to/<pipeline>.py`, use `./submit /path/to/<pipeline.py>` to both run and submit. If not available, this will install and activate a biopipelines environment with pandas and yaml.
 
 ```python
 pipeline.slurm()
@@ -317,7 +317,23 @@ This document contains the complete, verified tool reference with all parameters
 
 Generates novel protein backbone structures using diffusion models. Designs de novo proteins or scaffolds functional motifs into new contexts.
 
-**Environment**: `ProteinEnv`
+**References**: https://www.nature.com/articles/s41586-023-06415-8
+
+**Installation**: Go to the data directory, then clone the RFdiffusion git repository and download the weights as indicated in https://github.com/RosettaCommons/RFdiffusion. The environment they provide won't work on our cluster, so instead run this:
+```bash
+conda create -n ProteinEnv
+conda activate ProteinEnv
+conda install -c pytorch -c conda-forge -c dglteam python=3.9.19 pytorch=2.0.1 cudatoolkit=11.8 dgl-cuda11.7=0.9.1post1 scipy=1.13.0 pandas -y
+pip install biopython prody e3nn wandb
+```
+Followed by the original instructions:
+```bash
+cd env/SE3Transformer
+pip install --no-cache-dir -r requirements.txt
+python setup.py install
+cd ../.. # change into the root directory of the repository
+pip install -e . # install the rfdiffusion module from the root of the repository
+```
 
 **Parameters**:
 - `pdb`: Union[str, ToolOutput, StandardizedOutput] = "" - Input PDB template (optional)
@@ -351,7 +367,13 @@ rfd = pipeline.add(RFdiffusion(
 
 Generates protein structures with explicit modeling of ligands and small molecules. Diffusion model that handles all-atom representation including non-protein entities.
 
-**Environment**: `ProteinEnv`
+**References**: https://www.science.org/doi/10.1126/science.adl2528.
+
+**Installation**: From the ProteinEnv environment as installed in RFdiffusion, install the following packages:
+```bash
+conda install -c conda-forge openbabel -y
+pip install assertpy deepdiff fire
+```
 
 **Parameters**:
 - `ligand`: str (required) - Ligand identifier in PDB (e.g., 'LIG', 'ATP')
@@ -403,7 +425,12 @@ rfdaa = pipeline.add(RFdiffusionAllAtom(
 
 Designs protein sequences for given backbone structures. Uses graph neural networks to optimize sequences for structure stability while respecting fixed/designed region constraints.
 
-**Environment**: `ProteinEnv`
+**References**: https://www.science.org/doi/10.1126/science.add2187.
+
+**Installation**: Go to your data folder and clone the official repository (https://github.com/dauparas/ProteinMPNN). The model will then work in the same environment as RFdiffusion.
+```bash
+git clone https://github.com/dauparas/ProteinMPN
+```
 
 **Parameters**:
 - `structures`: Union[str, List[str], ToolOutput] (required) - Input structures
@@ -442,7 +469,16 @@ pmpnn = pipeline.add(ProteinMPNN(
 
 Designs protein sequences optimized for ligand binding. Specialized version of ProteinMPNN that considers protein-ligand interactions during sequence design.
 
-**Environment**: `ligandmpnn_env`
+**References**: https://www.nature.com/articles/s41592-025-02626-1.
+
+**Installation**: As from the official repository (https://github.com/dauparas/LigandMPNN), go to your data folder then run:
+```bash
+git clone https://github.com/dauparas/LigandMPNN.git
+cd LigandMPNN
+bash get_model_params.sh "./model_params"
+conda create -n ligandmpnn_env python=3.11
+pip3 install -r requirements.txt
+```
 
 **Parameters**:
 - `structures`: Union[str, List[str], ToolOutput] (required) - Input structures
@@ -479,7 +515,7 @@ lmpnn = pipeline.add(LigandMPNN(
 
 Generates new protein sequences by composing mutations based on frequency analysis. Creates combinatorial mutants from mutation profiles with different sampling strategies.
 
-**Environment**: `MutationEnv`
+**Installation**: Same environment as MutationProfiler.
 
 **Parameters**:
 - `frequencies`: Union[List, ToolOutput, StandardizedOutput, DatasheetInfo, str] (required) - Mutation frequency datasheet(s) from MutationProfiler
@@ -868,6 +904,8 @@ affinity = pipeline.add(OnionNet2(
 
 ### DynamicBind
 
+⚠️ **UNDER DEVELOPMENT** - This tool is still being tested and refined.
+
 Predicts ligand-specific protein-ligand complex structures using equivariant diffusion models. Recovers ligand-specific conformations from unbound protein structures.
 
 **Key Features:**
@@ -988,6 +1026,8 @@ distances = pipeline.add(ResidueAtomDistance(
 
 ### PLIP (Protein-Ligand Interaction Profiler)
 
+⚠️ **UNDER DEVELOPMENT** - This tool is still being tested and refined.
+
 Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydrophobic contacts, salt bridges, and other interaction types.
 
 **Environment**: `ProteinEnv`
@@ -1025,9 +1065,9 @@ plip = pipeline.add(PLIP(
 
 ### DistanceSelector
 
-Selects protein residues based on proximity to ligands or other reference points. Generates position specifications for downstream design tools.
+Selects protein residues based on proximity to ligands or other reference points. Generates position specifications for downstream design tools. 
 
-**Environment**: `ProteinEnv`
+**Installation**: It requires an environment containing pandas (e.g. biopipelines).
 
 **Parameters**:
 - `structures`: Union[str, List[str], ToolOutput] (required) - Input structures
@@ -1054,6 +1094,8 @@ selector = pipeline.add(DistanceSelector(
 ---
 
 ### ConformationalChange
+
+⚠️ **UNDER DEVELOPMENT** - This tool is still being tested and refined.
 
 Quantifies structural changes between reference and target structures. Calculates RMSD and distance metrics for specified regions.
 
@@ -1089,7 +1131,10 @@ conf_change = pipeline.add(ConformationalChange(
 
 Analyzes mutation patterns across sequence sets. Calculates position-specific amino acid frequencies for understanding sequence diversity.
 
-**Environment**: `MutationEnv`
+**Installation**: This tool only needs the a small environment:
+```bash
+conda create -n MutationEnv seaborn matplotlib pandas logomaker scipy
+```
 
 **Parameters**:
 - `original`: Union[ToolOutput, StandardizedOutput] (required) - Original/reference sequences
@@ -1567,7 +1612,7 @@ Fetches protein structures with automatic fallback: checks local folders first, 
 - `ids`: Optional[Union[str, List[str]]] - Custom IDs for renaming (defaults to pdbs)
 - `format`: str = "pdb" - File format ("pdb" or "cif")
 - `local_folder`: Optional[str] = None - Custom local folder to check first (before PDBs/)
-- `include_biological_assembly`: bool = False - Download biological assembly from RCSB
+- `biological_assembly`: bool = False - Download biological assembly from RCSB
 - `remove_waters`: bool = True - Remove water molecules
 
 **Fetch Priority**:
@@ -1611,7 +1656,7 @@ pdb = pipeline.add(PDB(
 pdb = pipeline.add(PDB(
     pdbs="4ufc",
     ids="MyProtein",
-    include_biological_assembly=True,
+    biological_assembly=True,
     remove_waters=False
 ))
 ```

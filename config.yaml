@@ -34,7 +34,7 @@ environments:
   RFdiffusion: "ProteinEnv"
   RFdiffusionAllAtom: "ProteinEnv"
   ProteinMPNN: "ProteinEnv"
-  LigandMPNN: "ProteinEnv"
+  LigandMPNN: "ligandmpnn_env"
   AlphaFold: null
 
   # Analysis and utility tools
