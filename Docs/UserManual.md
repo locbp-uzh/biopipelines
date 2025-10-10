@@ -916,7 +916,7 @@ Predicts ligand-specific protein-ligand complex structures using equivariant dif
 
 **Installation:**
 
-Requires two conda environments (`dynamicbind` and `relax`):
+Requires two conda environments. The first one will be the same as RFdiffusion (here `ProteinEnv`), but upgraded, and the other one has to be created `relax`):
 
 ```bash
 # You might need to create an interactive session with enough memory to solve the dependencies
@@ -935,13 +935,12 @@ unzip workdir.zip
 # This creates a 'workdir' folder with model weights
 
 # Create main dynamicbind environment
-conda create -n dynamicbind python=3.10
-conda activate dynamicbind
-conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
+conda activate ProteinEnv
+pip install fair-esm
 conda install -c conda-forge rdkit
-conda install pyg pyyaml biopython -c pyg
-pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu117.html
-pip install e3nn fair-esm spyrmsd
+pip install torch-geometric
+pip install torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
+pip install spyrmsd
 
 # Create relax environment
 conda create --name relax python=3.8
