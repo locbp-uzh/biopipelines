@@ -181,7 +181,59 @@ class PDB(BaseConfig):
                 print(f"      {pdb_id}: {path}")
         if self.needs_download:
             print(f"  Will download from RCSB: {', '.join(self.needs_download)}")
-    
+
+        # Query RCSB API to get ligand information for structures that will be downloaded
+        self._fetch_ligand_info_from_rcsb()
+
+    def _fetch_ligand_info_from_rcsb(self):
+        """Fetch ligand information from RCSB API at pipeline runtime."""
+        self.predicted_compound_ids = []
+
+        # Query for ALL structures (local and download) to get complete ligand list
+        if not self.pdb_ids:
+            return
+
+        print(f"  Querying RCSB API for ligand information...")
+
+        try:
+            import requests
+        except ImportError:
+            print("  Warning: 'requests' module not available, cannot query ligand info at pipeline runtime")
+            return
+
+        for pdb_id, custom_id in zip(self.pdb_ids, self.custom_ids):
+            try:
+                # Use RCSB REST API to get ligand list
+                url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+
+                data = response.json()
+                ligands = []
+
+                # Extract ligand codes from entry info
+                if 'rcsb_entry_info' in data:
+                    entry_info = data['rcsb_entry_info']
+                    # Get non-polymer bound molecules
+                    if 'nonpolymer_bound_components' in entry_info:
+                        ligands = entry_info['nonpolymer_bound_components']
+
+                # Filter out common non-ligands (water, ions, etc.)
+                exclude_residues = {'HOH', 'WAT', 'H2O', 'SOL', 'NA', 'CL', 'K', 'CA', 'MG', 'ZN', 'FE', 'CU', 'MN'}
+                ligands = [lig for lig in ligands if lig not in exclude_residues]
+
+                if ligands:
+                    print(f"    {pdb_id}: {', '.join(ligands)}")
+                    # Generate predicted compound IDs
+                    for ligand_code in ligands:
+                        self.predicted_compound_ids.append(f"{custom_id}_{ligand_code}")
+                else:
+                    print(f"    {pdb_id}: No ligands found")
+
+            except Exception as e:
+                print(f"    Warning: Could not fetch ligand info for {pdb_id}: {str(e)}")
+                continue
+
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
@@ -339,11 +391,14 @@ fi
             )
         }
 
+        # Get predicted compound IDs if available (set during configure_inputs)
+        compound_ids = getattr(self, 'predicted_compound_ids', [])
+
         return {
             "structures": structure_files,
             "structure_ids": structure_ids,
             "compounds": [compounds_csv],
-            "compound_ids": [],  # Will be populated at runtime
+            "compound_ids": compound_ids,  # Populated from RCSB API query at pipeline runtime
             "sequences": [sequences_csv],
             "sequence_ids": sequence_ids,
             "datasheets": datasheets,
