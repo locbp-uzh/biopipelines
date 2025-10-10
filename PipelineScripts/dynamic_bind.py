@@ -421,9 +421,11 @@ cd {self.folders["DynamicBind"]}
         # Generate commands for each protein
         for i, protein_file in enumerate(self.input_protein_files):
             protein_name = os.path.basename(protein_file).replace('.pdb', '')
+            # Replace the --header argument with protein name for this specific run
+            protein_args = [arg if not arg.startswith(f"--header {self.pipeline_name}") else f"--header {protein_name}" for arg in args]
             script += f"""
 echo "Processing protein {i+1}/{len(self.input_protein_files)}: {protein_name}"
-python {self.inference_py_file} {protein_file} {self.input_ligands_file} {' '.join(args)} --python $DYNAMICBIND_PYTHON --relax_python $RELAX_PYTHON
+python {self.inference_py_file} {protein_file} {self.input_ligands_file} {' '.join(protein_args)} --python $DYNAMICBIND_PYTHON --relax_python $RELAX_PYTHON
 """
 
         return script + "\n"
