@@ -19,7 +19,7 @@ from PipelineScripts.compound_library import CompoundLibrary
 from PipelineScripts.pdb import PDB
 
 # Create pipeline
-pipeline = Pipeline("Examples","DynamicBind","Test of several input formats for DynamicBind",debug=True)
+pipeline = Pipeline("Examples","DynamicBind","Test of several input formats for DynamicBind")
 
 pipeline.resources(gpu="V100", memory="16GB", time = "1:00:00")
 
