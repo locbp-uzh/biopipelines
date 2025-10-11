@@ -402,9 +402,9 @@ python {self.folders["HelpScripts"]}/pipe_dynamicbind_prepare_ligands.py "{self.
 
 """
 
-        script += f"""# Activate ProteinEnv for DynamicBind inference and get python path
+        script += f"""# Activate dynamicbind environment for DynamicBind inference and get python path
 source $(conda info --base)/etc/profile.d/conda.sh
-conda activate ProteinEnv
+conda activate dynamicbind
 DYNAMICBIND_PYTHON=$(which python)
 echo "DynamicBind Python: $DYNAMICBIND_PYTHON"
 
@@ -413,8 +413,8 @@ conda activate relax
 RELAX_PYTHON=$(which python)
 echo "Relax Python: $RELAX_PYTHON"
 
-# Switch back to ProteinEnv for main execution
-conda activate ProteinEnv
+# Switch back to dynamicbind for main execution
+conda activate dynamicbind
 
 # Run DynamicBind for each protein
 cd {self.folders["DynamicBind"]}
