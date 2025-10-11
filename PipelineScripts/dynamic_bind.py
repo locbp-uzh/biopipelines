@@ -258,15 +258,9 @@ class DynamicBind(BaseConfig):
                     pdb_temp = protein if protein.endswith(".pdb") else protein + ".pdb"
                     self.input_protein_files.append(os.path.join(self.folders["runtime"], pdb_temp))
 
-            # Input ligands file path
-            if self.ligands_is_smiles:
-                # Will create CSV from SMILES
-                self.input_ligands_file = os.path.join(self.folders["runtime"], "ligands.csv")
-            elif self.ligands_is_tool_output:
-                # Will create CSV with 'ligand' column from tool output
-                self.input_ligands_file = os.path.join(self.folders["runtime"], "ligands.csv")
-            else:
-                self.input_ligands_file = ""
+            # Input ligands file path - use compounds.csv in output folder
+            # DynamicBind will read from the compounds.csv file that has the 'ligand' column
+            self.input_ligands_file = self.output_compounds_datasheet
         else:
             # Temporary placeholders when folders aren't available yet
             self.inference_py_file = "run_single_protein_inference.py"
@@ -342,12 +336,8 @@ class DynamicBind(BaseConfig):
 
         # Handle ligands input
         if self.ligands_is_smiles:
-            # Create CSV with 'ligand' column from SMILES string
+            # Create compounds.csv with 'ligand' column from SMILES string
             import pandas as pd
-            ligands_df = pd.DataFrame({'ligand': [self.ligands]})
-            ligands_df.to_csv(self.input_ligands_file, index=False)
-
-            # Also create standardized compounds.csv
             compounds_df = pd.DataFrame({
                 'id': ['ligand'],
                 'code': [''],
@@ -397,24 +387,25 @@ echo "Output folder: {db_job_folder}"
 
         # Add ligands CSV creation if from tool output
         if self.ligands_is_tool_output and "ligands" in self.input_sources:
-            script += f"""# Create ligands CSV with 'ligand' column from tool output
-python {self.folders["HelpScripts"]}/pipe_dynamicbind_prepare_ligands.py "{self.input_sources["ligands"]}" "{self.input_ligands_file}" "{self.output_compounds_datasheet}"
+            script += f"""# Create compounds.csv with 'ligand' column from tool output
+python {self.folders["HelpScripts"]}/pipe_dynamicbind_prepare_ligands.py "{self.input_sources["ligands"]}" "{self.output_compounds_datasheet}"
 
 """
 
-        script += f"""# Activate dynamicbind environment for DynamicBind inference and get python path
+        script += f"""# Get Python paths from both environments
 source $(conda info --base)/etc/profile.d/conda.sh
+
+# Activate dynamicbind environment and get python path
+echo "Activating dynamicbind environment..."
 conda activate dynamicbind
 DYNAMICBIND_PYTHON=$(which python)
 echo "DynamicBind Python: $DYNAMICBIND_PYTHON"
 
 # Activate relax environment and get python path
+echo "Activating relax environment..."
 conda activate relax
 RELAX_PYTHON=$(which python)
 echo "Relax Python: $RELAX_PYTHON"
-
-# Switch back to dynamicbind for main execution
-conda activate dynamicbind
 
 # Run DynamicBind for each protein
 cd {self.folders["DynamicBind"]}
@@ -427,6 +418,8 @@ cd {self.folders["DynamicBind"]}
             protein_args = [arg if not arg.startswith(f"--header {self.pipeline_name}") else f"--header {protein_name}" for arg in args]
             script += f"""
 echo "Processing protein {i+1}/{len(self.input_protein_files)}: {protein_name}"
+echo "Activating dynamicbind environment for inference..."
+conda activate dynamicbind
 python {self.inference_py_file} {protein_file} {self.input_ligands_file} {' '.join(protein_args)} --python $DYNAMICBIND_PYTHON --relax_python $RELAX_PYTHON
 """
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Prepare ligands CSV with 'ligand' column from tool output compounds datasheet.
+Prepare compounds CSV with 'ligand' column from tool output compounds datasheet.
+DynamicBind reads from this file which contains both full compound info and the 'ligand' column.
 
-Usage: pipe_dynamicbind_prepare_ligands.py <input_compounds_csv> <output_ligands_csv> <output_compounds_csv>
+Usage: pipe_dynamicbind_prepare_ligands.py <input_compounds_csv> <output_compounds_csv>
 """
 
 import os
@@ -12,13 +13,12 @@ import pandas as pd
 
 def main():
     """Main execution function."""
-    if len(sys.argv) != 4:
-        print("Usage: pipe_dynamicbind_prepare_ligands.py <input_compounds_csv> <output_ligands_csv> <output_compounds_csv>")
+    if len(sys.argv) != 3:
+        print("Usage: pipe_dynamicbind_prepare_ligands.py <input_compounds_csv> <output_compounds_csv>")
         sys.exit(1)
 
     input_compounds_csv = sys.argv[1]
-    output_ligands_csv = sys.argv[2]
-    output_compounds_csv = sys.argv[3]
+    output_compounds_csv = sys.argv[2]
 
     # Read input compounds
     try:
@@ -32,18 +32,14 @@ def main():
         print(f"Error: Input compounds datasheet must have 'smiles' column. Found columns: {list(df.columns)}")
         sys.exit(1)
 
-    # Create ligands CSV with 'ligand' column (rename 'smiles' to 'ligand')
-    ligands_df = pd.DataFrame({'ligand': df['smiles']})
-    ligands_df.to_csv(output_ligands_csv, index=False)
-    print(f"Created ligands CSV with {len(ligands_df)} compounds: {output_ligands_csv}")
-
     # Add 'ligand' column to compounds datasheet if not already present
+    # DynamicBind expects a column named 'ligand' with SMILES strings
     if 'ligand' not in df.columns:
         df['ligand'] = df['smiles']
 
-    # Save compounds datasheet to output folder
+    # Save compounds datasheet to output folder with 'ligand' column
     df.to_csv(output_compounds_csv, index=False)
-    print(f"Copied compounds datasheet to output: {output_compounds_csv}")
+    print(f"Created compounds CSV with {len(df)} compounds and 'ligand' column: {output_compounds_csv}")
 
 
 if __name__ == "__main__":
