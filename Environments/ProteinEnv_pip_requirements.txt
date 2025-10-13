@@ -1,6 +1,7 @@
 antlr4-python3-runtime==4.9.3
 assertpy
 biopython<=1.79
+docutils<0.18
 click==8.1.7
 comm==0.2.2
 configparser==7.0.0
@@ -47,6 +48,7 @@ stack-data==0.6.3
 subprocess32==3.5.4
 tornado==6.4
 traitlets==5.14.2
+urllib3<2.0.0
 wandb==0.12.0
 wcwidth==0.2.13
 zipp==3.18.1
