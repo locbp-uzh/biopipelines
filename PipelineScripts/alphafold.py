@@ -265,9 +265,10 @@ EOF
 """
         elif "sequences" in self.input_sources:
             source_file = self.input_sources["sequences"]
-            
+
             # Check if we need to convert from FASTA folder to CSV
-            if source_file.endswith("seqs") or "seqs" in source_file:
+            # Only treat as ProteinMPNN seqs folder if it ends with /seqs or is a directory
+            if source_file.endswith("seqs") and not source_file.endswith(".csv"):
                 # ProteinMPNN output - convert .fa files to CSV
                 return f"""echo "Converting ProteinMPNN .fa files to queries CSV"
 python {self.fa_to_csv_fasta_py} {source_file} {self.queries_csv} {self.queries_fasta}
