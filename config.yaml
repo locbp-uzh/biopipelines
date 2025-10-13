@@ -38,7 +38,7 @@ environments:
   AlphaFold: null
 
   # Analysis and utility tools
-  MMseqs2: "MMseqsEnv"
+  MMseqs2: "biopipelines"
   PLIP: "PlipEnv"
   PyMOL: "ProteinEnv"
   OnionNet: "OnionNetEnv"
