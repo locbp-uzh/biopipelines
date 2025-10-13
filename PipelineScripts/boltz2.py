@@ -696,8 +696,8 @@ EOF
                     if compounds_files:
                         ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
-                    # Direct file path or datasheet reference
-                    ligand_param = self.resolve_datasheet_reference(self.ligands)
+                    # Direct SMILES string or file path
+                    ligand_param = self.ligands
             affinity_flag = "--affinity" if self.affinity else ""
             config_files_dir = os.path.join(self.output_folder, "config_files")
             proteins_csv = os.path.join(self.output_folder, "proteins.csv")
@@ -810,8 +810,8 @@ python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_
                     if compounds_files:
                         ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
-                    # Direct file path or datasheet reference
-                    ligand_param = self.resolve_datasheet_reference(self.ligands)
+                    # Direct SMILES string or file path
+                    ligand_param = self.ligands
             affinity_flag = "--affinity" if self.affinity else ""
             
             # Add MSA parameter if MSAs are provided  
@@ -853,8 +853,8 @@ python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_p
                     if compounds_files:
                         ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
-                    # Direct file path or datasheet reference
-                    ligand_param = self.resolve_datasheet_reference(self.ligands)
+                    # Direct SMILES string or file path
+                    ligand_param = self.ligands
             affinity_flag = "--affinity" if self.affinity else ""
             
             # Add MSA parameter if MSAs are provided  
@@ -895,8 +895,8 @@ python {self.boltz_protein_ligand_configs_py} "{fasta_files_str}" "{ligand_param
                     if compounds_files:
                         ligand_param = compounds_files[0]
                 elif isinstance(self.ligands, str):
-                    # Direct file path or datasheet reference
-                    ligand_param = self.resolve_datasheet_reference(self.ligands)
+                    # Direct SMILES string or file path
+                    ligand_param = self.ligands
             affinity_flag = "--affinity" if self.affinity else ""
             
             # Check if we have multiple ligands
