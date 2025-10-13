@@ -319,12 +319,11 @@ Generates novel protein backbone structures using diffusion models. Designs de n
 
 **References**: https://www.nature.com/articles/s41586-023-06415-8
 
-**Installation**: Go to the data directory, then clone the RFdiffusion git repository and download the weights as indicated in https://github.com/RosettaCommons/RFdiffusion. The environment they provide won't work on our cluster, so instead run this:
+**Installation**: Go to the data directory, then clone the RFdiffusion git repository and download the weights as indicated in https://github.com/RosettaCommons/RFdiffusion. The environment they provide won't work on our cluster, so instead go to the biopipelines directory and run this:
 ```bash
-conda create -n ProteinEnv
+conda env create -f Environments/ProteinEnv.yaml
 conda activate ProteinEnv
-conda install -c pytorch -c conda-forge -c dglteam python=3.9.19 pytorch=2.0.1 cudatoolkit=11.8 dgl-cuda11.7=0.9.1post1 scipy=1.13.0 pandas pymol-open-source -y
-pip install biopython prody e3nn wandb
+pip install -r Environments/ProteinEnv_pip_requirements.txt
 ```
 Followed by the original instructions:
 ```bash
@@ -369,11 +368,7 @@ Generates protein structures with explicit modeling of ligands and small molecul
 
 **References**: https://www.science.org/doi/10.1126/science.adl2528.
 
-**Installation**: From the ProteinEnv environment as installed in RFdiffusion, install the following packages:
-```bash
-conda install -c conda-forge openbabel -y
-pip install assertpy deepdiff fire omegaconf hydra-core icecream
-```
+**Installation**: Works in ProteinEnv environment as installed in RFdiffusion.
 
 **Parameters**:
 - `ligand`: str (required) - Ligand identifier in PDB (e.g., 'LIG', 'ATP')
