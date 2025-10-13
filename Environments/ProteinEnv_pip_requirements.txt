@@ -1,6 +1,6 @@
 antlr4-python3-runtime==4.9.3
 assertpy
-biopython==1.83
+biopython<=1.79
 click==8.1.7
 comm==0.2.2
 configparser==7.0.0
