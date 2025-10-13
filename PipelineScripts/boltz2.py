@@ -813,8 +813,25 @@ python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_
                     # Direct SMILES string or file path
                     ligand_param = self.ligands
             affinity_flag = "--affinity" if self.affinity else ""
-            
-            # Add MSA parameter if MSAs are provided  
+
+            # Create CSV if ligand_param is a SMILES string (not a CSV path)
+            if ligand_param != "None" and not ligand_param.endswith('.csv'):
+                ligands_csv = os.path.join(self.output_folder, "ligands.csv")
+                # Determine ligand ID from job name
+                effective_job_name = self.get_effective_job_name()
+                ligand_id = effective_job_name if effective_job_name else "ligand"
+
+                script_content += f"""
+# Create ligand CSV from direct SMILES string
+cat > {ligands_csv} << 'EOF'
+id,format,smiles,ccd
+{ligand_id},smiles,{ligand_param},
+EOF
+"""
+                # Update ligand_param to point to the CSV file
+                ligand_param = ligands_csv
+
+            # Add MSA parameter if MSAs are provided
             msa_datasheet_flag = ""
             if self.msas:
                 if hasattr(self.msas, 'datasheets'):
@@ -828,7 +845,7 @@ python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_
                 elif isinstance(self.msas, str) and self.msas.endswith('.csv'):
                     # Direct CSV path
                     msa_datasheet_flag = f'--msa-datasheet "{self.msas}"'
-            
+
             script_content += f"""
 echo "Converting CSV to YAML configuration"
 mkdir -p {config_files_dir}
@@ -856,8 +873,25 @@ python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_p
                     # Direct SMILES string or file path
                     ligand_param = self.ligands
             affinity_flag = "--affinity" if self.affinity else ""
-            
-            # Add MSA parameter if MSAs are provided  
+
+            # Create CSV if ligand_param is a SMILES string (not a CSV path)
+            if ligand_param != "None" and not ligand_param.endswith('.csv'):
+                ligands_csv = os.path.join(self.output_folder, "ligands.csv")
+                # Determine ligand ID from job name
+                effective_job_name = self.get_effective_job_name()
+                ligand_id = effective_job_name if effective_job_name else "ligand"
+
+                script_content += f"""
+# Create ligand CSV from direct SMILES string
+cat > {ligands_csv} << 'EOF'
+id,format,smiles,ccd
+{ligand_id},smiles,{ligand_param},
+EOF
+"""
+                # Update ligand_param to point to the CSV file
+                ligand_param = ligands_csv
+
+            # Add MSA parameter if MSAs are provided
             msa_datasheet_flag = ""
             if self.msas:
                 if hasattr(self.msas, 'datasheets'):
@@ -871,7 +905,7 @@ python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_p
                 elif isinstance(self.msas, str) and self.msas.endswith('.csv'):
                     # Direct CSV path
                     msa_datasheet_flag = f'--msa-datasheet "{self.msas}"'
-            
+
             script_content += f"""
 echo "Converting FASTA files to YAML configuration"
 mkdir -p {config_files_dir}
