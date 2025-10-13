@@ -16,7 +16,7 @@ pipeline = Pipeline(
     job_description="RF3 structure prediction examples")
 
 pipeline.resources(
-    gpu="A100",
+    gpu="gpu",
     time="24:00:00",
     memory="16GB"
 )

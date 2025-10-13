@@ -17,7 +17,7 @@ pipeline = Pipeline(
     job_description="Folding of HaloTag7 with Cy7 methyl amide close enantiomer SS")
 
 pipeline.resources(
-    gpu="V100",
+    gpu="gpu",
     time="24:00:00",
     memory="16GB"
 )
