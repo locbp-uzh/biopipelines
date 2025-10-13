@@ -97,7 +97,7 @@ run_pipeline_and_submit() {
             job_count=$((job_count + 1))
             echo "Job $job_count:"
             echo "$sbatch_cmd"
-            $sbatch_cmd || true
+            eval "$sbatch_cmd" || true
             echo ""
         fi
     done <<< "$sbatch_commands"
