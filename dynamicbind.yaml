@@ -25,7 +25,7 @@ dependencies:
       - torch-geometric==2.3.0
       - tqdm
       - reportlab
-      - sqlalchemypip
+      - sqlalchemy
       - https://data.pyg.org/whl/torch-2.0.0%2Bcu118/pyg_lib-0.2.0%2Bpt20cu118-cp39-cp39-linux_x86_64.whl
       - https://data.pyg.org/whl/torch-2.0.0%2Bcu118/torch_scatter-2.1.1%2Bpt20cu118-cp39-cp39-linux_x86_64.whl
       - https://data.pyg.org/whl/torch-2.0.0%2Bcu118/torch_sparse-0.6.17%2Bpt20cu118-cp39-cp39-linux_x86_64.whl
