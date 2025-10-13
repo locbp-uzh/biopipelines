@@ -111,7 +111,7 @@ def run_rf3_batch(input_jsons: List[str], output_folder: str, config: Dict[str, 
         cmd.append(f"early_stopping_plddt_threshold={config['early_stopping_plddt']}")
 
     if config.get("num_models"):
-        cmd.append(f"+inference.num_models={config['num_models']}")
+        cmd.append(f"num_models={config['num_models']}")
 
     # Set output directory via environment or parameter
     env = os.environ.copy()
