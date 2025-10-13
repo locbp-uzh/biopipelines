@@ -24,6 +24,7 @@ jupyter-client==8.6.1
 jupyter-core==5.7.2
 matplotlib-inline==0.1.7
 nest-asyncio==1.6.0
+numpy==1.23.5
 omegaconf==2.3.0
 opt-einsum==3.3.0
 opt-einsum-fx==0.1.4
