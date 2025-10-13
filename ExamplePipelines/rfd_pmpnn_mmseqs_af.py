@@ -36,7 +36,7 @@ pmpnn = pipeline.add(ProteinMPNN(structures=rfd,
                                  num_sequences=2))
 
 msas = pipeline.add(MMseqs2(sequences=pmpnn))
-af = pipeline.add(AlphaFold(proteins=pmpnn,
+af = pipeline.add(AlphaFold(sequences=pmpnn,
                             msas=msas))
 
 
