@@ -80,6 +80,10 @@ run_pipeline_and_submit() {
     # Extract sbatch commands from pipeline output
     local sbatch_commands=$(echo "$pipeline_output" | grep "^sbatch ")
 
+    echo "DEBUG: Number of lines in pipeline_output: $(echo "$pipeline_output" | wc -l)"
+    echo "DEBUG: Number of sbatch commands found: $(echo "$sbatch_commands" | wc -l)"
+    echo "DEBUG: First sbatch command: '$sbatch_commands'"
+
     if [ -z "$sbatch_commands" ]; then
         echo "No sbatch commands found in pipeline output"
         return 1
@@ -93,11 +97,17 @@ run_pipeline_and_submit() {
     # Execute each sbatch command
     local job_count=0
     while IFS= read -r sbatch_cmd; do
+        echo "DEBUG: In loop, sbatch_cmd='$sbatch_cmd'"
+        echo "DEBUG: sbatch_cmd length=${#sbatch_cmd}"
         if [ -n "$sbatch_cmd" ]; then
             ((job_count++))
             echo "Job $job_count: $sbatch_cmd"
+            echo "DEBUG: About to eval..."
             eval "$sbatch_cmd"
+            echo "DEBUG: eval returned $?"
             echo ""
+        else
+            echo "DEBUG: Empty command, skipping"
         fi
     done <<< "$sbatch_commands"
 
