@@ -34,7 +34,7 @@ for cy5 in Cy5s.keys():
     )
     HaloTag = pipeline.add(PDB("6U32","HT"))
     pipeline.add(Boltz2(proteins=HaloTag,
-    ligands=Cy5s[cy5],
+    ligand_smiles={cy5: Cy5s[cy5]},
     global_msas_cache=True,
     pipeline=pipeline))
 
