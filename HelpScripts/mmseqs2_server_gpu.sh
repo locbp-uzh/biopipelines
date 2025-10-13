@@ -31,7 +31,15 @@ MAX_SEQS=10000    # limit homologs per query
 
 mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$GPU_TMP_DIR"
 
-# Check and install MMseqs2 if needed
+# Logging setup
+LOG_FILE="$RESULTS_DIR/server.log"
+PID_FILE="$RESULTS_DIR/server_gpu.pid"
+
+# Logging function (defined early so it can be used everywhere)
+log() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
+}
+
 check_mmseqs_installation() {
     local mmseqs_dir="/data/$USER/mmseqs"
     local mmseqs_bin="$mmseqs_dir/bin/mmseqs"
@@ -59,9 +67,6 @@ check_mmseqs_installation() {
     fi
 }
 
-# Logging setup
-LOG_FILE="$RESULTS_DIR/server.log"
-PID_FILE="$RESULTS_DIR/server_gpu.pid"
 echo $$ > "$PID_FILE"   # record server PID
 
 # Create timestamp file for server detection
@@ -82,11 +87,6 @@ export CUDA_VISIBLE_DEVICES=0
 # GPU Memory optimization
 export CUDA_CACHE_MAXSIZE=2147483648  # 2GB CUDA cache
 export CUDA_CACHE_DISABLE=0
-
-# Logging function
-log() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
-}
 
 # Check available memory
 log "Memory settings: MMSEQS_MAX_MEMORY=$MMSEQS_MAX_MEMORY, OMP_NUM_THREADS=$OMP_NUM_THREADS"
