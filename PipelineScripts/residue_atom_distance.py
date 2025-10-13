@@ -73,22 +73,22 @@ class ResidueAtomDistance(BaseConfig):
         Examples:
             # Analyze ligand chlorine distance to specific aspartic acids
             distance_analysis = pipeline.add(ResidueAtomDistance(
-                input=boltz_results,
+                structures=boltz_results,
                 atom='LIG.Cl',
                 residue='D in IGDWG',
                 metric_name='chlorine_distance'
             ))
-            
-            # Analyze specific residue distance to ligand  
+
+            # Analyze specific residue distance to ligand
             ca_analysis = pipeline.add(ResidueAtomDistance(
-                input=structure_tool,
+                structures=structure_tool,
                 atom='LIG.Br',
                 residue='145-150',
                 method='mean',
                 metric_name='binding_site_distance'
             ))
         """
-        self.distance_input = input
+        self.distance_input = structures
         self.atom_selection = atom
         self.residue_selection = residue  
         self.distance_metric = method
@@ -102,8 +102,8 @@ class ResidueAtomDistance(BaseConfig):
         super().__init__(**kwargs)
 
         # Set up dependency
-        if hasattr(input, 'config'):
-            self.dependencies.append(input.config)
+        if hasattr(structures, 'config'):
+            self.dependencies.append(structures.config)
 
 
     def get_metric_name(self) -> str:
