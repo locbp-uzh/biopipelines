@@ -190,13 +190,33 @@ submit_job() {
                 while [ ! -f "$output_path" ] && [ $wait_count -lt $max_wait ]; do
                     sleep 1
                     ((wait_count++))
+
+                    # Check if job is still in queue/running
+                    if ! squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
+                        # Job is not in queue - might have completed or failed quickly
+                        echo ""
+                        echo "Job is no longer in queue. Checking for output..."
+                        sleep 2  # Give system time to write output file
+                        break
+                    fi
                 done
 
                 if [ -f "$output_path" ]; then
                     echo ""
-                    echo "Job started! Showing output:"
+                    echo "Job output:"
                     echo "----------------------------------------"
-                    tail -f "$output_path"
+
+                    # Check if job is still running
+                    if squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
+                        # Job is still running, use tail -f
+                        tail -f "$output_path"
+                    else
+                        # Job completed, just show the output
+                        cat "$output_path"
+                        echo ""
+                        echo "----------------------------------------"
+                        echo "Job has completed. Check output above for results."
+                    fi
                 else
                     echo ""
                     echo "Job has not started yet after ${max_wait}s. You can monitor it with:"
