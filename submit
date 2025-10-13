@@ -126,12 +126,12 @@ execute_sbatch_command() {
     local sbatch_cmd="$1"
 
     echo "Executing: $sbatch_cmd"
-    echo ""
 
     if command -v sbatch >/dev/null 2>&1; then
-        # Just run the command as-is
-        eval "$sbatch_cmd"
+        # Just run the command as-is, showing all output
+        eval "$sbatch_cmd" 2>&1
         local exit_code=$?
+        echo ""
 
         if [ $exit_code -eq 0 ]; then
             echo "✓ Job submitted successfully!"
