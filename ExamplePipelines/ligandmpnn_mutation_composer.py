@@ -70,11 +70,11 @@ boltz_holo_close_first10 = pipeline.add(Boltz2(proteins=first_10_sequences,
                                 ligands=original_close,
                                 msas=boltz_apo_first10,
                                 affinity=True))
-open_chlorine_aspartate_distance_first10 = pipeline.add(ResidueAtomDistance(input=boltz_holo_open_first10,
+open_chlorine_aspartate_distance_first10 = pipeline.add(ResidueAtomDistance(structures=boltz_holo_open_first10,
                                                                     residue='D in IHDWG',
                                                                     atom='LIG.Cl',
                                                                     metric_name='open_chlorine_distance'))
-close_chlorine_aspartate_distance_first10 = pipeline.add(ResidueAtomDistance(input=boltz_holo_close_first10,
+close_chlorine_aspartate_distance_first10 = pipeline.add(ResidueAtomDistance(structures=boltz_holo_close_first10,
                                                                     residue='D in IHDWG',
                                                                     atom='LIG.Cl',
                                                                     metric_name='close_chlorine_distance'))
@@ -108,11 +108,11 @@ for mode in ["single_point","weighted_random","hotspot_focused","top_mutations"]
                                     ligands=original_close,
                                     msas=boltz_apo,
                                     affinity=True))
-    open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open,
+    open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_open,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='open_chlorine_distance'))
-    close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_close,
+    close_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_close,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='close_chlorine_distance'))

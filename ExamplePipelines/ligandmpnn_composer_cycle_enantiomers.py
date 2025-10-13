@@ -123,19 +123,19 @@ for CYCLE in range(NUM_CYCLES):
                                     msas=boltz_apo,
                                     affinity=True))
     
-    R_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_R,
+    R_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_R,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='chlorine_distance'))
-    S_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_S,
+    S_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_S,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='chlorine_distance'))
-    R_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_R,
+    R_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_R,
                                                                    residue='D in IHDWG',
                                                                    atom='LIG.N88',
                                                                    metric_name='cap_distance'))
-    S_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_S,
+    S_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_S,
                                                                    residue='D in IHDWG',
                                                                    atom='LIG.N88',
                                                                    metric_name='cap_distance'))

@@ -98,11 +98,11 @@ for CYCLE in range(NUM_CYCLES):
                                     msas=msas,
                                     affinity=True))
     
-    open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open,
+    open_chlorine_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_open,
                                                                         residue='D in IHDWG',
                                                                         atom='LIG.Cl',
                                                                         metric_name='open_chlorine_distance'))
-    open_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(input=boltz_holo_open,
+    open_cap_aspartate_distance = pipeline.add(ResidueAtomDistance(structures=boltz_holo_open,
                                                                    residue='D in IHDWG',
                                                                    atom='LIG.N88',
                                                                    metric_name='open_cap_distance'))
