@@ -56,93 +56,52 @@ usage() {
     echo ""
 }
 
-# Function to run pipeline and extract sbatch commands
-run_pipeline_and_get_commands() {
+# Function to run pipeline and execute sbatch commands
+run_pipeline_and_submit() {
     local pipeline_script="$1"
 
-    echo "Running pipeline: $pipeline_script" >&2
-    echo "" >&2
+    echo "Running pipeline: $pipeline_script"
+    echo ""
 
     # Run the pipeline and capture output
     local pipeline_output=$(python "$pipeline_script" 2>&1)
     local exit_code=$?
 
-    # Show pipeline output to stderr so it doesn't interfere with return value
-    echo "$pipeline_output" >&2
-    echo "" >&2
+    # Show pipeline output
+    echo "$pipeline_output"
+    echo ""
 
     if [ $exit_code -ne 0 ]; then
-        echo "Pipeline execution completed with exit code $exit_code" >&2
-        echo "Note: This is expected for dummy/test pipelines" >&2
-        echo "" >&2
+        echo "Pipeline execution completed with exit code $exit_code"
+        echo "Note: This is expected for dummy/test pipelines"
+        echo ""
     fi
 
     # Extract sbatch commands from pipeline output
-    # Look for lines starting with "sbatch" (potentially after whitespace)
-    local sbatch_commands=$(echo "$pipeline_output" | grep -E "^\s*sbatch ")
+    local sbatch_commands=$(echo "$pipeline_output" | grep "^sbatch ")
 
-    if [ -n "$sbatch_commands" ]; then
-        echo "Found sbatch command(s):" >&2
-        echo "$sbatch_commands" >&2
-        # Output commands to stdout (this will be captured)
-        echo "$sbatch_commands"
-        return 0
-    else
-        echo "No sbatch commands found in pipeline output" >&2
+    if [ -z "$sbatch_commands" ]; then
+        echo "No sbatch commands found in pipeline output"
         return 1
     fi
-}
 
-# Function to extract job info from pipeline folder
-extract_job_info() {
-    local job_folder="$1"
-    local pipeline_name=""
-    local job_name=""
-    local job_id=""
+    echo ""
+    echo "Submitting jobs..."
+    echo "=========================================="
+    echo ""
 
-    # Extract from folder structure: /shares/USER/PipelineName/JobName_NNN/RunTime/
-    if [[ "$job_folder" =~ /([^/]+)/([^/]+)_([0-9]+)/RunTime$ ]]; then
-        pipeline_name="${BASH_REMATCH[1]}"
-        job_name="${BASH_REMATCH[2]}"
-        job_id="${BASH_REMATCH[3]}"
-    elif [[ "$job_folder" =~ /([^/]+)/([^/]+)/RunTime$ ]]; then
-        pipeline_name="${BASH_REMATCH[1]}"
-        job_name="${BASH_REMATCH[2]}"
-        job_id="001"
-    else
-        # Fallback: extract from parent directory names
-        local parent_dir=$(dirname "$job_folder")
-        local grandparent_dir=$(dirname "$parent_dir")
-        pipeline_name=$(basename "$grandparent_dir")
-        job_name=$(basename "$parent_dir")
-        job_id="001"
-    fi
-
-    echo "$pipeline_name:$job_name:$job_id"
-}
-
-# Function to execute sbatch command and monitor job
-execute_sbatch_command() {
-    local sbatch_cmd="$1"
-
-    echo "Executing: $sbatch_cmd"
-
-    if command -v sbatch >/dev/null 2>&1; then
-        # Just run the command as-is, showing all output
-        eval "$sbatch_cmd" 2>&1
-        local exit_code=$?
-        echo ""
-
-        if [ $exit_code -eq 0 ]; then
-            echo "✓ Job submitted successfully!"
-        else
-            echo "✗ Job submission failed with exit code $exit_code"
-            return $exit_code
+    # Execute each sbatch command
+    local job_count=0
+    while IFS= read -r sbatch_cmd; do
+        if [ -n "$sbatch_cmd" ]; then
+            ((job_count++))
+            echo "Job $job_count: $sbatch_cmd"
+            eval "$sbatch_cmd"
+            echo ""
         fi
-    else
-        echo "Warning: sbatch command not found. This might not be a SLURM system."
-        return 0
-    fi
+    done <<< "$sbatch_commands"
+
+    echo "All jobs submitted. Total: $job_count"
 }
 
 # Main execution
@@ -189,40 +148,8 @@ main() {
         return 1
     fi
 
-    # Run the pipeline and get sbatch commands
-    echo "Running pipeline to generate sbatch commands..."
-    local sbatch_commands=$(run_pipeline_and_get_commands "$pipeline_script")
-
-    if [ -z "$sbatch_commands" ]; then
-        echo "Error: Could not extract sbatch commands from pipeline output"
-        echo "This happens when:"
-        echo "1. The pipeline is a dummy/test pipeline (like pipeline.py)"
-        echo "2. The pipeline failed to generate SLURM scripts"
-        echo "3. The pipeline output format is different than expected"
-        echo ""
-        echo "To test with a real pipeline, try:"
-        echo "  ./submit.sh ExamplePipelines/ligandmpnn_boltz2.py"
-        return 1
-    fi
-
-    echo ""
-    echo "Submitting jobs..."
-    echo "=========================================="
-    echo ""
-
-    # Execute each sbatch command
-    local job_count=0
-    while IFS= read -r sbatch_cmd; do
-        if [ -n "$sbatch_cmd" ]; then
-            ((job_count++))
-            echo "Job $job_count:"
-            echo "$sbatch_cmd"
-            eval "$sbatch_cmd"
-            echo ""
-        fi
-    done <<< "$sbatch_commands"
-
-    echo "All jobs submitted. Total: $job_count"
+    # Run the pipeline and submit jobs
+    run_pipeline_and_submit "$pipeline_script"
 }
 
 # Run main function with all arguments
