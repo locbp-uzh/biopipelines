@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nFix DynamicBind compounds access and add ligand SMILES extraction to PDB tool\n\n- Fix DynamicBind to use correct compounds access notation (ligands.compounds not ligands.datasheets[''compounds''].path)\n- Update DynamicBind compounds datasheet to use standardized format (id, format, smiles, ccd)\n- Add ligand extraction to PDB tool: automatically detects ligands in structures and fetches SMILES from RCSB REST API\n- PDB tool now outputs compounds.csv with standardized format containing ligand information\n- Remove Unicode symbols from PDB tool output to fix Windows encoding issues\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git config:*)",
+      "Bash(git log:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

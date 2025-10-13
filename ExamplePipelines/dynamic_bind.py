@@ -23,43 +23,52 @@ pipeline = Pipeline("Examples","DynamicBind","Test of several input formats for 
 
 pipeline.resources(gpu="32GB", memory="16GB", time = "1:00:00")
 
-HaloTag = pipeline.add(PDB("6U32",)) #HT7 bound to rhodamine
-# Example 1: Single protein from PDBs folder, SMILES string
-dynamicbind1 = pipeline.add(DynamicBind(
-    proteins=HaloTag,          # Input protein PDB file (from PDBs folder)
+HaloTag_TMR = pipeline.add(PDB("6U32",)) #HT7 bound to rhodamine
+
+# Example 1: Single protein from PDB, SMILES string
+dynamicbind = pipeline.add(DynamicBind(
+    proteins=HaloTag_TMR,            # Input protein PDB file (from PDBs folder)
     ligands="ClCCCCCCOCCOCCNC(=O)C", # SMILES string (halotag linker acetamide)
 ))
-print(dynamicbind1)
+print(dynamicbind)
 
-# Example 2: Multiple proteins, SMILES string
+# Example 2: Single protein from PDBs folder, SMILES string
+dynamicbind = pipeline.add(DynamicBind(
+    proteins=HaloTag_TMR,# HaloTag
+    ligands=HaloTag_TMR, # Tetramethyl RHodamine
+))
+print(dynamicbind)
+
+# Example 3: Multiple proteins, SMILES string
 dehalogenases = pipeline.add(PDB(pdbs=["1BN6","4RAS"]))
-dynamicbind2 = pipeline.add(DynamicBind(
+dynamicbind = pipeline.add(DynamicBind(
      proteins=dehalogenases,
      ligands="ClCCCCCCOCCOCCNC(=O)C",  # Acetic acid
      samples_per_complex=10
 ))
-print(dynamicbind2)
+print(dynamicbind)
 
-# Example 3: Using tool outputs (chaining with other tools)
-rfdaa = pipeline.add(RFdiffusionAllAtom(protein=HaloTag, ligand="PVY", contigs="A6-140,100-140", num_designs=5))
+# Example 4: Using tool outputs (chaining with other tools)
+rfdaa = pipeline.add(RFdiffusionAllAtom(pdb=HaloTag_TMR, ligand="PVY", contigs="A6-140,100-140", num_designs=5))
 lmpnn = pipeline.add(LigandMPNN(structures=rfdaa,ligand="PVY",redesigned=rfdaa.datasheets.structures.designed))
-dynamicbind3 = DynamicBind(
+dynamicbind = DynamicBind(
     proteins=rfdaa,  # All structures from RFdiffusionAllAtom
     ligands="ClCCCCCCOCCOCCNC(=O)C"
 )
-print(dynamicbind3)
+print(dynamicbind)
 
-# Example 4: One protein, multiple ligands
+# Example 5: One protein, multiple ligands
 compound_library = pipeline.add(CompoundLibrary({"acetamide":"ClCCCCCCOCCOCCNC(=O)C",
                                                  "sulfonamide":"ClCCCCCCOCCOCCNS(=O)(=O)C"}))
-dynamicbind4=pipeline.add(DynamicBind(proteins=HaloTag,
+dynamicbind=pipeline.add(DynamicBind(proteins=HaloTag_TMR,
                                       ligands=compound_library))
+print(dynamicbind)
 
-# Example 5: Multiple proteins, multiple ligands
+# Example 6: Multiple proteins, multiple ligands
 compound_library = pipeline.add(CompoundLibrary({"acetamide":"ClCCCCCCOCCOCCNC(=O)C",
                                                  "sulfonamide":"ClCCCCCCOCCOCCNS(=O)(=O)C"}))
-dynamicbind5=pipeline.add(DynamicBind(proteins=rfdaa,
+dynamicbind=pipeline.add(DynamicBind(proteins=rfdaa,
                                       ligands=compound_library))
-print(dynamicbind5)
+print(dynamicbind)
 
 pipeline.slurm()

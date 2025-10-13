@@ -323,7 +323,7 @@ Generates novel protein backbone structures using diffusion models. Designs de n
 ```bash
 conda create -n ProteinEnv
 conda activate ProteinEnv
-conda install -c pytorch -c conda-forge -c dglteam python=3.9.19 pytorch=2.0.1 cudatoolkit=11.8 dgl-cuda11.7=0.9.1post1 scipy=1.13.0 pandas -y
+conda install -c pytorch -c conda-forge -c dglteam python=3.9.19 pytorch=2.0.1 cudatoolkit=11.8 dgl-cuda11.7=0.9.1post1 scipy=1.13.0 pandas pymol-open-source -y
 pip install biopython prody e3nn wandb
 ```
 Followed by the original instructions:
@@ -372,7 +372,7 @@ Generates protein structures with explicit modeling of ligands and small molecul
 **Installation**: From the ProteinEnv environment as installed in RFdiffusion, install the following packages:
 ```bash
 conda install -c conda-forge openbabel -y
-pip install assertpy deepdiff fire
+pip install assertpy deepdiff fire omegaconf hydra-core
 ```
 
 **Parameters**:
@@ -916,31 +916,18 @@ Predicts ligand-specific protein-ligand complex structures using equivariant dif
 
 **Installation:**
 
-Requires two conda environments. The first one will be the same as RFdiffusion (here `ProteinEnv`), but upgraded, and the other one has to be created `relax`):
+Requires two conda environments. 
 
 ```bash
-# You might need to create an interactive session with enough memory to solve the dependencies
-srun --pty -n 1 -c 2 --time=01:00:00 --mem=16G bash -l
-
-# Clone repository
 cd /data/$USER
 git clone https://github.com/luwei0917/DynamicBind.git
 cd DynamicBind
-
-# Download model checkpoints
-# Download workdir.zip from https://zenodo.org/records/10137507 (v1)
-# Or workdir.zip from https://zenodo.org/records/10183369 (v2 - recommended)
 wget https://zenodo.org/records/10183369/files/workdir.zip
 unzip workdir.zip
-# This creates a 'workdir' folder with model weights
 
-# Create main dynamicbind environment
-conda activate ProteinEnv
-pip install fair-esm
-conda install -c conda-forge rdkit
-pip install torch-geometric
-pip install torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
-pip install spyrmsd
+cd ../../biopipelines
+conda env create -f dynamicbind.yaml
+conda install numpy=1.26 --force-reinstall
 
 # Create relax environment
 conda create --name relax python=3.8
