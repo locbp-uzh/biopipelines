@@ -16,10 +16,10 @@ will result in 4 jobs
 """
 
 Cy5s = {
-    "Cy5_R":r"",
-    "Cy5_S":r"",
-    "Cy5_RR":r"",
-    "Cy5_SS":r""
+    "Cy5_R":r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
+    "Cy5_S":r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
+    "Cy5_RR":r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\[C@]34[C@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
+    "Cy5_SS":r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\[C@@]34[C@@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C"
 }
 
 for cy5 in Cy5s.keys():
