@@ -203,7 +203,8 @@ submit_job() {
 
                 if [ -f "$output_path" ]; then
                     echo ""
-                    echo "Job output:"
+                    echo "Following job output with:"
+                    echo "  tail -f $output_path"
                     echo "----------------------------------------"
 
                     # Check if job is still running
