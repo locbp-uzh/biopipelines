@@ -12,7 +12,7 @@ dependencies:
   - rdkit
   - scipy=1.13.0
   - pandas
-  - numpy
+  - numpy<2.0
   - scikit-learn
   - matplotlib
   - pymol-open-source
