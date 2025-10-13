@@ -162,9 +162,7 @@ dependencies:
   - pycollada=0.8=pyhd8ed1ab_0
   - pygments=2.17.2=pyhd8ed1ab_0
   - pykerberos=1.2.4=py39h47eb580_3
-  - pymol=3.0.2=py39h86f9e2f_0
-  - pymol-bundle=3.0.2=0
-  - pymol-web-examples=2.4=1
+  - pymol-open-source
   - pyparsing=3.1.2=pyhd8ed1ab_0
   - pyqt=5.15.4=py39h5a03fae_0
   - pyqt5-sip=12.9.0=py39h5a03fae_0
@@ -181,7 +179,6 @@ dependencies:
   - qt-main=5.15.2=h53bd1ea_10
   - readline=8.2=h8228510_1
   - requests=2.31.0=pyhd8ed1ab_0
-  - rigimol=1.3=2
   - scipy=1.13.0=py39h474f0d3_0
   - setuptools=69.5.1=pyhd8ed1ab_0
   - sip=6.5.1=py39he80948d_2
