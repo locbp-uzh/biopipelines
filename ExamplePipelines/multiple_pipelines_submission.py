@@ -24,8 +24,8 @@ Cy5s = {
 
 for cy5 in Cy5s.keys():
     pipeline = Pipeline(
-        pipeline_name="Examples",
-        job_name="Boltz",
+        pipeline_name="Boltz",
+        job_name=f"HT_{cy5}",
         job_description="Folding of HaloTag7 with Cy5 methyl amide close enantiomer SS")
     pipeline.resources(
         gpu="V100",
