@@ -102,9 +102,11 @@ run_pipeline_and_submit() {
         if [ -n "$sbatch_cmd" ]; then
             ((job_count++))
             echo "Job $job_count: $sbatch_cmd"
-            echo "DEBUG: About to eval..."
-            eval "$sbatch_cmd"
-            echo "DEBUG: eval returned $?"
+            echo "DEBUG: About to execute directly..."
+            # Execute directly without eval
+            $sbatch_cmd
+            local result=$?
+            echo "DEBUG: Command returned $result"
             echo ""
         else
             echo "DEBUG: Empty command, skipping"
