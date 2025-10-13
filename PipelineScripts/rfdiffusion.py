@@ -183,12 +183,16 @@ class RFdiffusion(BaseConfig):
         """Configure input files and dependencies."""
         self.folders = pipeline_folders
         self._setup_file_paths()  # Set up all file paths now that we have folders
-        
+
         # Handle PDB input if provided
-        if self.pdb:
+        if self.pdb_is_tool_output:
+            # Tool output - file already exists at pdb_source_file path
+            self.input_sources["pdb"] = self.pdb_source_file
+        elif self.pdb:
+            # String filename - look in PDBs folder
             pdb_temp = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
             pdb_source = os.path.join(pipeline_folders["PDBs"], pdb_temp)
-            
+
             if os.path.exists(pdb_source):
                 # Will be copied in script generation
                 self.input_sources["pdb"] = pdb_source
