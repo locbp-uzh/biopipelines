@@ -372,7 +372,7 @@ Generates protein structures with explicit modeling of ligands and small molecul
 **Installation**: From the ProteinEnv environment as installed in RFdiffusion, install the following packages:
 ```bash
 conda install -c conda-forge openbabel -y
-pip install assertpy deepdiff fire omegaconf hydra-core
+pip install assertpy deepdiff fire omegaconf hydra-core icecream
 ```
 
 **Parameters**:
@@ -904,7 +904,7 @@ affinity = pipeline.add(OnionNet2(
 
 ### DynamicBind
 
-⚠️ **UNDER DEVELOPMENT** - This tool is still being tested and refined.
+⚠️ **UNDER DEVELOPMENT** - Installation failed.
 
 Predicts ligand-specific protein-ligand complex structures using equivariant diffusion models. Recovers ligand-specific conformations from unbound protein structures.
 
