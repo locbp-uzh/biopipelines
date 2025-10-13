@@ -220,7 +220,7 @@ dependencies:
       - debugpy==1.8.1
       - decorator==5.1.0
       - deepdiff
-      - dllogger==1.0.0
+      - git+https://github.com/NVIDIA/dllogger.git
       - docker-pycreds==0.4.0
       - e3nn==0.3.3
       - exceptiongroup==1.2.0
