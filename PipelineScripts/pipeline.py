@@ -538,7 +538,9 @@ umask 002
             self.folders["runtime"],
             f"slurm.out"
         )
-        print(f"sbatch --job-name={self.job_name} --output {output_path} {slurm_path}")
+        # Format job name as "<pipeline>: <job> (<N>)"
+        formatted_job_name = f"{self.pipeline_name}: {self.job_name} ({self.folder_manager.job_id})"
+        print(f"sbatch --job-name=\"{formatted_job_name}\" --output {output_path} {slurm_path}")
     
     def resources(self, gpu: str = None, memory: str = None, time: str = None, **slurm_options):
         """
