@@ -25,7 +25,7 @@ else
 
     # Get the directory where submit script is located (biopipelines root)
     SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-    ENV_FILE="$SCRIPT_DIR/biopipelines.yaml"
+    ENV_FILE="$SCRIPT_DIR/Environments/biopipelines.yaml"
 
     if [ -f "$ENV_FILE" ]; then
         echo "Using environment specification: $ENV_FILE"
