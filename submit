@@ -56,8 +56,8 @@ usage() {
     echo ""
 }
 
-# Function to run pipeline and extract SLURM script path
-run_pipeline_and_get_script() {
+# Function to run pipeline and extract sbatch commands
+run_pipeline_and_get_commands() {
     local pipeline_script="$1"
 
     echo "Running pipeline: $pipeline_script" >&2
@@ -77,17 +77,18 @@ run_pipeline_and_get_script() {
         echo "" >&2
     fi
 
-    # Extract SLURM script path from pipeline output
-    # Look for "Slurm saved to: /path/to/slurm.sh" pattern
-    local slurm_script=$(echo "$pipeline_output" | grep "Slurm saved to:" | sed 's/Slurm saved to: //')
+    # Extract sbatch commands from pipeline output
+    # Look for lines starting with "sbatch" (potentially after whitespace)
+    local sbatch_commands=$(echo "$pipeline_output" | grep -E "^\s*sbatch ")
 
-    if [ -n "$slurm_script" ] && [ -f "$slurm_script" ]; then
-        echo "Found SLURM script: $slurm_script" >&2
-        # Only output the path to stdout (this will be captured)
-        echo "$slurm_script"
+    if [ -n "$sbatch_commands" ]; then
+        echo "Found sbatch command(s):" >&2
+        echo "$sbatch_commands" >&2
+        # Output commands to stdout (this will be captured)
+        echo "$sbatch_commands"
         return 0
     else
-        echo "Could not find SLURM script" >&2
+        echo "No sbatch commands found in pipeline output" >&2
         return 1
     fi
 }
@@ -120,56 +121,44 @@ extract_job_info() {
     echo "$pipeline_name:$job_name:$job_id"
 }
 
-# Function to submit job
-submit_job() {
-    local slurm_script="$1"
-    local job_name="$2"
-    local pipeline_name="$3"
-    local job_id="$4"
+# Function to execute sbatch command and monitor job
+execute_sbatch_command() {
+    local sbatch_cmd="$1"
+    local user_job_name="$2"
 
-    # Create SLURM job name following BioPipelines convention: "Pipeline: Job (ID)"
-    local slurm_job_name="${pipeline_name}: ${job_name} (${job_id})"
+    echo "Executing: $sbatch_cmd"
 
-    echo "Submitting job to SLURM..."
-    echo "  Pipeline: $pipeline_name"
-    echo "  Job: $job_name (ID: $job_id)"
-    echo "  SLURM job name: $slurm_job_name"
-    echo "  Script: $slurm_script"
-    echo ""
+    # Extract output path from sbatch command
+    local output_path=$(echo "$sbatch_cmd" | grep -oP '(?<=--output )\S+' || echo "$sbatch_cmd" | grep -oP '(?<=--output=)\S+')
 
-    # Check if slurm script exists
-    if [ ! -f "$slurm_script" ]; then
-        echo "Error: SLURM script not found: $slurm_script"
-        return 1
+    # Extract original job name from command
+    local original_job_name=$(echo "$sbatch_cmd" | grep -oP '(?<=--job-name=)\S+' || echo "$sbatch_cmd" | grep -oP '(?<=--job-name )\S+')
+
+    # Replace job name with user-provided one if given, otherwise use original
+    local final_job_name="${user_job_name:-$original_job_name}"
+
+    # Modify sbatch command to use final job name
+    local modified_cmd="$sbatch_cmd"
+    if [ -n "$final_job_name" ]; then
+        # Remove existing --job-name parameter and add new one
+        modified_cmd=$(echo "$sbatch_cmd" | sed -E 's/--job-name[= ][^ ]+ ?//')
+        modified_cmd="sbatch --job-name=\"$final_job_name\" ${modified_cmd#sbatch }"
     fi
 
-    # Make sure script is executable
-    chmod +x "$slurm_script"
-
-    # Fix output path to prevent conflicts between multiple jobs
-    local runtime_dir=$(dirname "$slurm_script")
-    local output_path="$runtime_dir/slurm.out"
-    echo "Updating SLURM output path to: $output_path"
-
-    # Create a temporary copy and modify the output line
-    local temp_script="$slurm_script.tmp"
-    sed "s|#SBATCH --output=job.out|#SBATCH --output=$output_path|" "$slurm_script" > "$temp_script"
-
-    # Submit with proper job name
-    echo "Running: sbatch --job-name=\"$slurm_job_name\" \"$temp_script\""
+    echo "Modified command: $modified_cmd"
+    echo ""
 
     if command -v sbatch >/dev/null 2>&1; then
-        local job_output=$(sbatch --job-name="$slurm_job_name" "$temp_script")
+        local job_output=$(eval "$modified_cmd")
         local exit_code=$?
-
-        # Clean up temporary script
-        rm -f "$temp_script"
 
         if [ $exit_code -eq 0 ]; then
             echo ""
             echo "✓ Job submitted successfully!"
             echo "$job_output"
-            echo "✓ Output will be saved to: $output_path"
+            if [ -n "$output_path" ]; then
+                echo "✓ Output will be saved to: $output_path"
+            fi
 
             # Extract job ID if available
             if [[ "$job_output" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
@@ -184,59 +173,55 @@ submit_job() {
                 echo ""
 
                 # Wait for the job to start and output file to be created
-                echo "Waiting for job to start (Ctrl+C to exit)..."
-                local wait_count=0
-                local max_wait=300  # Wait up to 5 minutes
-                while [ ! -f "$output_path" ] && [ $wait_count -lt $max_wait ]; do
-                    sleep 1
-                    ((wait_count++))
+                if [ -n "$output_path" ]; then
+                    echo "Waiting for job to start (Ctrl+C to exit)..."
+                    local wait_count=0
+                    local max_wait=300  # Wait up to 5 minutes
+                    while [ ! -f "$output_path" ] && [ $wait_count -lt $max_wait ]; do
+                        sleep 1
+                        ((wait_count++))
 
-                    # Check if job is still in queue/running
-                    if ! squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
-                        # Job is not in queue - might have completed or failed quickly
+                        # Check if job is still in queue/running
+                        if ! squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
+                            # Job is not in queue - might have completed or failed quickly
+                            echo ""
+                            echo "Job is no longer in queue. Checking for output..."
+                            sleep 2  # Give system time to write output file
+                            break
+                        fi
+                    done
+
+                    if [ -f "$output_path" ]; then
                         echo ""
-                        echo "Job is no longer in queue. Checking for output..."
-                        sleep 2  # Give system time to write output file
-                        break
-                    fi
-                done
-
-                if [ -f "$output_path" ]; then
-                    echo ""
-                    echo "Following job output with:"
-                    echo "  tail -f $output_path"
-                    echo "----------------------------------------"
-
-                    # Check if job is still running
-                    if squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
-                        # Job is still running, use tail -f
-                        tail -f "$output_path"
-                    else
-                        # Job completed, just show the output
-                        cat "$output_path"
-                        echo ""
+                        echo "Following job output with:"
+                        echo "  tail -f $output_path"
                         echo "----------------------------------------"
-                        echo "Job has completed. Check output above for results."
+
+                        # Check if job is still running
+                        if squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
+                            # Job is still running, use tail -f
+                            tail -f "$output_path"
+                        else
+                            # Job completed, just show the output
+                            cat "$output_path"
+                            echo ""
+                            echo "----------------------------------------"
+                            echo "Job has completed. Check output above for results."
+                        fi
+                    else
+                        echo ""
+                        echo "Job has not started yet after ${max_wait}s. You can monitor it with:"
+                        echo "  tail -f $output_path"
                     fi
-                else
-                    echo ""
-                    echo "Job has not started yet after ${max_wait}s. You can monitor it with:"
-                    echo "  tail -f $output_path"
                 fi
             fi
         else
             echo ""
-            echo "✗ Job submission failed with exit code $exit_code"
+            echo "✗ Job submission failed with exit_code $exit_code"
             return $exit_code
         fi
     else
-        # Clean up temporary script
-        rm -f "$temp_script"
-
         echo "Warning: sbatch command not found. This might not be a SLURM system."
-        echo "The SLURM script has been generated at: $slurm_script"
-        echo "You can submit it manually when on a SLURM system."
-        echo "Note: When submitting manually, output will go to job.out in current directory."
         return 0
     fi
 }
@@ -285,12 +270,12 @@ main() {
         return 1
     fi
 
-    # Run the pipeline and get SLURM script path
-    echo "Running pipeline once to generate SLURM script..."
-    local slurm_script=$(run_pipeline_and_get_script "$pipeline_script")
+    # Run the pipeline and get sbatch commands
+    echo "Running pipeline to generate sbatch commands..."
+    local sbatch_commands=$(run_pipeline_and_get_commands "$pipeline_script")
 
-    if [ -z "$slurm_script" ]; then
-        echo "Error: Could not extract SLURM script path from pipeline output"
+    if [ -z "$sbatch_commands" ]; then
+        echo "Error: Could not extract sbatch commands from pipeline output"
         echo "This happens when:"
         echo "1. The pipeline is a dummy/test pipeline (like pipeline.py)"
         echo "2. The pipeline failed to generate SLURM scripts"
@@ -301,22 +286,26 @@ main() {
         return 1
     fi
 
-    # Extract job information from SLURM script path
-    local job_folder=$(dirname "$slurm_script")
-    local job_info=$(extract_job_info "$job_folder")
-    IFS=':' read -r extracted_pipeline extracted_job extracted_id <<< "$job_info"
-
     echo ""
-    echo "Job Information:"
-    echo "  Pipeline script: $pipeline_script"
-    echo "  Pipeline: $extracted_pipeline"
-    echo "  Job: $extracted_job"
-    echo "  ID: $extracted_id"
-    echo "  SLURM script: $slurm_script"
+    echo "Submitting jobs..."
+    echo "=========================================="
     echo ""
 
-    # Submit the job
-    submit_job "$slurm_script" "$extracted_job" "$extracted_pipeline" "$extracted_id"
+    # Execute each sbatch command
+    local job_count=0
+    while IFS= read -r sbatch_cmd; do
+        if [ -n "$sbatch_cmd" ]; then
+            ((job_count++))
+            echo "Job $job_count:"
+            echo "----------"
+            execute_sbatch_command "$sbatch_cmd" ""
+            echo ""
+            echo "=========================================="
+            echo ""
+        fi
+    done <<< "$sbatch_commands"
+
+    echo "All jobs submitted. Total: $job_count"
 }
 
 # Run main function with all arguments
