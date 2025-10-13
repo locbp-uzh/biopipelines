@@ -216,10 +216,8 @@ main() {
         if [ -n "$sbatch_cmd" ]; then
             ((job_count++))
             echo "Job $job_count:"
-            echo "----------"
-            execute_sbatch_command "$sbatch_cmd"
-            echo ""
-            echo "=========================================="
+            echo "$sbatch_cmd"
+            eval "$sbatch_cmd"
             echo ""
         fi
     done <<< "$sbatch_commands"
