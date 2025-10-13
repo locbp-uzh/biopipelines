@@ -124,100 +124,19 @@ extract_job_info() {
 # Function to execute sbatch command and monitor job
 execute_sbatch_command() {
     local sbatch_cmd="$1"
-    local user_job_name="$2"
 
     echo "Executing: $sbatch_cmd"
-
-    # Extract output path from sbatch command
-    local output_path=$(echo "$sbatch_cmd" | grep -oP '(?<=--output )\S+' || echo "$sbatch_cmd" | grep -oP '(?<=--output=)\S+')
-
-    # Extract original job name from command
-    local original_job_name=$(echo "$sbatch_cmd" | grep -oP '(?<=--job-name=)\S+' || echo "$sbatch_cmd" | grep -oP '(?<=--job-name )\S+')
-
-    # Replace job name with user-provided one if given, otherwise use original
-    local final_job_name="${user_job_name:-$original_job_name}"
-
-    # Modify sbatch command to use final job name
-    local modified_cmd="$sbatch_cmd"
-    if [ -n "$final_job_name" ]; then
-        # Remove existing --job-name parameter and add new one
-        modified_cmd=$(echo "$sbatch_cmd" | sed -E 's/--job-name[= ][^ ]+ ?//')
-        modified_cmd="sbatch --job-name=\"$final_job_name\" ${modified_cmd#sbatch }"
-    fi
-
-    echo "Modified command: $modified_cmd"
     echo ""
 
     if command -v sbatch >/dev/null 2>&1; then
-        local job_output=$(eval "$modified_cmd")
+        # Just run the command as-is
+        eval "$sbatch_cmd"
         local exit_code=$?
 
         if [ $exit_code -eq 0 ]; then
-            echo ""
             echo "✓ Job submitted successfully!"
-            echo "$job_output"
-            if [ -n "$output_path" ]; then
-                echo "✓ Output will be saved to: $output_path"
-            fi
-
-            # Extract job ID if available
-            if [[ "$job_output" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
-                local submitted_job_id="${BASH_REMATCH[1]}"
-                echo ""
-                echo "Monitor job with:"
-                echo "  squeue -j $submitted_job_id"
-                echo "  sacct -j $submitted_job_id"
-                echo ""
-                echo "Cancel job with:"
-                echo "  scancel $submitted_job_id"
-                echo ""
-
-                # Wait for the job to start and output file to be created
-                if [ -n "$output_path" ]; then
-                    echo "Waiting for job to start (Ctrl+C to exit)..."
-                    local wait_count=0
-                    local max_wait=300  # Wait up to 5 minutes
-                    while [ ! -f "$output_path" ] && [ $wait_count -lt $max_wait ]; do
-                        sleep 1
-                        ((wait_count++))
-
-                        # Check if job is still in queue/running
-                        if ! squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
-                            # Job is not in queue - might have completed or failed quickly
-                            echo ""
-                            echo "Job is no longer in queue. Checking for output..."
-                            sleep 2  # Give system time to write output file
-                            break
-                        fi
-                    done
-
-                    if [ -f "$output_path" ]; then
-                        echo ""
-                        echo "Following job output with:"
-                        echo "  tail -f $output_path"
-                        echo "----------------------------------------"
-
-                        # Check if job is still running
-                        if squeue -j "$submitted_job_id" -h >/dev/null 2>&1; then
-                            # Job is still running, use tail -f
-                            tail -f "$output_path"
-                        else
-                            # Job completed, just show the output
-                            cat "$output_path"
-                            echo ""
-                            echo "----------------------------------------"
-                            echo "Job has completed. Check output above for results."
-                        fi
-                    else
-                        echo ""
-                        echo "Job has not started yet after ${max_wait}s. You can monitor it with:"
-                        echo "  tail -f $output_path"
-                    fi
-                fi
-            fi
         else
-            echo ""
-            echo "✗ Job submission failed with exit_code $exit_code"
+            echo "✗ Job submission failed with exit code $exit_code"
             return $exit_code
         fi
     else
@@ -298,7 +217,7 @@ main() {
             ((job_count++))
             echo "Job $job_count:"
             echo "----------"
-            execute_sbatch_command "$sbatch_cmd" ""
+            execute_sbatch_command "$sbatch_cmd"
             echo ""
             echo "=========================================="
             echo ""
