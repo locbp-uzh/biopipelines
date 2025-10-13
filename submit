@@ -182,8 +182,26 @@ submit_job() {
                 echo "Cancel job with:"
                 echo "  scancel $submitted_job_id"
                 echo ""
-                echo "View output log:"
-                echo "  tail -f $output_path"
+
+                # Wait for the job to start and output file to be created
+                echo "Waiting for job to start (Ctrl+C to exit)..."
+                local wait_count=0
+                local max_wait=300  # Wait up to 5 minutes
+                while [ ! -f "$output_path" ] && [ $wait_count -lt $max_wait ]; do
+                    sleep 1
+                    ((wait_count++))
+                done
+
+                if [ -f "$output_path" ]; then
+                    echo ""
+                    echo "Job started! Showing output:"
+                    echo "----------------------------------------"
+                    tail -f "$output_path"
+                else
+                    echo ""
+                    echo "Job has not started yet after ${max_wait}s. You can monitor it with:"
+                    echo "  tail -f $output_path"
+                fi
             fi
         else
             echo ""
