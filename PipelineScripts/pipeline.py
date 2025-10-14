@@ -438,8 +438,14 @@ class Pipeline:
             gpu_line = "#SBATCH --gpus=1"
         elif gpu_spec.startswith("!"):
             # Exclusion syntax (e.g., "!T4")
+            # Use multiple memory constraints to exclude T4 (16GB) by requesting 32GB or 80GB
             excluded_model = gpu_spec[1:]  # Remove the "!" prefix
-            gpu_line = f"#SBATCH --gpus=1\n#SBATCH --constraint=\"~GPU{excluded_model}\""
+            if excluded_model.upper() == "T4":
+                # T4 has 16GB, so request 32GB or 80GB to exclude it
+                gpu_line = "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB\""
+            else:
+                # For other exclusions, try the tilde constraint syntax
+                gpu_line = f"#SBATCH --gpus=1\n#SBATCH --constraint=\"~GPU{excluded_model}\""
         elif gpu_spec in ["32GB", "80GB"] or "|" in gpu_spec:
             # Memory-based GPU specification
             if "|" in gpu_spec:
