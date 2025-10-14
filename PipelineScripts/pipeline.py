@@ -436,6 +436,10 @@ class Pipeline:
             gpu_line = "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB\""
         elif gpu_spec == "gpu":
             gpu_line = "#SBATCH --gpus=1"
+        elif gpu_spec.startswith("!"):
+            # Exclusion syntax (e.g., "!T4")
+            excluded_model = gpu_spec[1:]  # Remove the "!" prefix
+            gpu_line = f"#SBATCH --gpus=1\n#SBATCH --constraint=\"~GPU{excluded_model}\""
         elif gpu_spec in ["32GB", "80GB"] or "|" in gpu_spec:
             # Memory-based GPU specification
             if "|" in gpu_spec:
@@ -552,6 +556,7 @@ umask 002
                 - Memory-based: "32GB", "80GB", "32GB|80GB" (uses --constraint)
                 - Generic: "gpu" (any available GPU)
                 - High-memory: "high-memory" (equivalent to "32GB|80GB")
+                - Exclusion: "!T4", "!V100", etc. (exclude specific model)
                 - "none": No GPU required
             memory: RAM allocation (e.g., "16GB", "32GB", "64GB")
             time: Wall time limit in HH:MM:SS format (e.g., "24:00:00", "48:00:00")
@@ -573,6 +578,9 @@ umask 002
 
             # High-memory GPUs
             pipeline.resources(gpu="high-memory", memory="64GB", time="24:00:00")
+
+            # Exclude T4 GPUs (get V100, A100, or H100)
+            pipeline.resources(gpu="!T4", memory="32GB", time="24:00:00")
 
             # CPU-only with multiple cores and nodes
             pipeline.resources(gpu="none", memory="128GB", time="24:00:00", cpus=32, nodes=1)

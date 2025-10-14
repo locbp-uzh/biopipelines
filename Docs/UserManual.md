@@ -172,7 +172,25 @@ pmd = pipeline.add(ProteinMPNN(structures=rfd,num_sequences=2))
 
 ### Job submission
 
-Call to generate the validate the pipeline, generate the full scripts, and generate a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
+Configure computational resources before submitting:
+
+```python
+# Examples
+pipeline.resources(gpu="A100", memory="32GB", time="24:00:00")      # Specific model
+pipeline.resources(gpu="32GB|80GB", memory="32GB", time="24:00:00") # V100 or A100/H100
+pipeline.resources(gpu="!T4", memory="32GB", time="24:00:00")       # Exclude T4
+pipeline.resources(memory="128GB", time="24:00:00", cpus=32)        # CPU-only
+```
+
+**GPU parameter options:**
+- `"T4"`, `"V100"`, `"A100"`, `"H100"` - Specific GPU models
+- `"32GB"`, `"80GB"`, `"32GB|80GB"` - Memory-based selection
+- `"!T4"`, `"!V100"` - Exclude specific models
+- `"gpu"` - Any available GPU
+- `"high-memory"` - Equivalent to `"32GB|80GB"`
+- Omit parameter for CPU-only jobs
+
+Call `pipeline.slurm()` to validate the pipeline, generate the full scripts, and generate a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
 1. Run from console the pipeline with python (requires packages pandas and yaml to be executable) and then run the sbatch command in output;
 2. Run from console the pipeline with python and then copy-paste the job name and slurm content in the job composer form (https://apps.s3it.uzh.ch/pun/sys/myjobs);
 3. Instead of running the pipeline with `python /path/to/<pipeline>.py`, use `./submit /path/to/<pipeline.py>` to both run and submit. If not available, this will install and activate a biopipelines environment with pandas and yaml.
