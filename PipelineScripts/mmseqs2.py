@@ -383,6 +383,22 @@ echo "MMseqs2 processing completed"
         if hasattr(self.sequences, 'config') and hasattr(self.sequences.config, '_predict_sequence_ids'):
             return self.sequences.config._predict_sequence_ids()
 
+        # Handle raw sequences (string or list) - predict IDs based on pattern used in configure_inputs
+        if not self.sequences_is_tool_output:
+            # Need pipeline name to generate IDs
+            if not hasattr(self, 'pipeline_name') or self.pipeline_name is None:
+                # Try to extract from output_folder if available
+                if hasattr(self, 'output_folder') and self.output_folder:
+                    self.pipeline_name = self._extract_pipeline_name()
+                else:
+                    # Can't predict yet - return empty list (will be populated later)
+                    return []
+
+            if isinstance(self.sequences, str):
+                return [f"{self.pipeline_name}_1"]
+            elif isinstance(self.sequences, list):
+                return [f"{self.pipeline_name}_{i+1}" for i in range(len(self.sequences))]
+
         # Must have sequence IDs from input sources
         raise ValueError("Could not determine sequence IDs - no valid input sequences found")
 
