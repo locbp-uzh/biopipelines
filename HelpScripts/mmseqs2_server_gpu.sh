@@ -73,6 +73,14 @@ echo $$ > "$PID_FILE"   # record server PID
 MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
 mkdir -p "$MMSEQS_SERVER_DIR"
 SERVER_TIMESTAMP_FILE="$MMSEQS_SERVER_DIR/GPU_SERVER"
+SUBMITTING_FILE="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
+
+# Clean up submission timestamp if it exists (server is now starting)
+if [[ -f "$SUBMITTING_FILE" ]]; then
+  log "Cleaning up submission timestamp"
+  rm -f "$SUBMITTING_FILE"
+fi
+
 date '+%H:%M:%S' > "$SERVER_TIMESTAMP_FILE"
 log "Created server timestamp file at $SERVER_TIMESTAMP_FILE"
 

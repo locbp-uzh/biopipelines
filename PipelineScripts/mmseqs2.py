@@ -214,6 +214,8 @@ echo "Output MSA CSV: {self.output_msa_csv}"
 MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
 GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
 CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
+GPU_SUBMITTING="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
+CPU_SUBMITTING="$MMSEQS_SERVER_DIR/CPU_SUBMITTING"
 MAX_AGE_HOURS=12
 
 server_is_valid() {{
@@ -249,6 +251,22 @@ server_is_valid() {{
   fi
 }}
 
+submission_in_progress() {{
+  local submit_file=$1
+
+  if [[ ! -f "$submit_file" ]]; then
+    return 1
+  fi
+
+  # Submission is in progress - no timeout check
+  local submit_time=$(stat -c %Y "$submit_file" 2>/dev/null || stat -f %m "$submit_file" 2>/dev/null || echo "0")
+  local current_time=$(date +%s)
+  local age=$((current_time - submit_time))
+
+  echo "Server submission in progress (submitted ${{age}}s ago)"
+  return 0
+}}
+
 # Check if GPU or CPU server is running and valid
 server_running=false
 if server_is_valid "$GPU_TIMESTAMP"; then
@@ -257,10 +275,22 @@ if server_is_valid "$GPU_TIMESTAMP"; then
 elif server_is_valid "$CPU_TIMESTAMP"; then
   echo "MMseqs2 CPU server is running and valid"
   server_running=true
+elif submission_in_progress "$GPU_SUBMITTING"; then
+  echo "GPU server submission in progress, waiting..."
+  server_running="waiting"
+elif submission_in_progress "$CPU_SUBMITTING"; then
+  echo "CPU server submission in progress, waiting..."
+  server_running="waiting"
 fi
 
 if [[ "$server_running" = false ]]; then
   echo "No valid MMseqs2 server found, starting new server..."
+
+  # Create submission timestamp to prevent other processes from also submitting
+  mkdir -p "$MMSEQS_SERVER_DIR"
+  touch "$GPU_SUBMITTING"
+  echo "Created submission timestamp at $GPU_SUBMITTING"
+
   cd {self.folders["notebooks"]}
   server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \\K[0-9]+')
 
@@ -285,9 +315,36 @@ if [[ "$server_running" = false ]]; then
 
     if [ $elapsed -ge $timeout ]; then
       echo "Error: Timeout waiting for server to start"
+      # Clean up submission timestamp on failure
+      rm -f "$GPU_SUBMITTING"
       exit 1
     fi
+  else
+    echo "Error: Failed to submit server job"
+    # Clean up submission timestamp on failure
+    rm -f "$GPU_SUBMITTING"
+    exit 1
   fi
+elif [[ "$server_running" = "waiting" ]]; then
+  echo "Waiting for another process to finish server submission..."
+  # Wait indefinitely for the server to start
+  while true; do
+    if server_is_valid "$GPU_TIMESTAMP" || server_is_valid "$CPU_TIMESTAMP"; then
+      echo "Server has started and is ready"
+      break
+    fi
+
+    # Check if submission timestamps are gone (indicating failure)
+    if [[ ! -f "$GPU_SUBMITTING" ]] && [[ ! -f "$CPU_SUBMITTING" ]]; then
+      echo "Submission appears to have failed, will retry..."
+      # Recursive call to try submitting ourselves
+      # This will check again and potentially submit
+      break
+    fi
+
+    echo "Still waiting for server submission to complete..."
+    sleep 5
+  done
 fi
 
 # Check server status
