@@ -782,11 +782,12 @@ pip install -e .
 - `proteins`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Protein sequences
 - `ligands`: Union[str, ToolOutput, StandardizedOutput, None] = None - Ligand SMILES string or compound library ToolOutput
 - `msas`: Optional[Union[str, ToolOutput]] = None - Pre-computed MSA files (optional)
-- `num_models`: int = 5 - Number of models to generate
 - `output_format`: str = "pdb" - Output format ("pdb" or "cif")
 - `checkpoint_path`: Optional[str] = None - Path to RF3 checkpoint file
 - `early_stopping_plddt`: Optional[float] = None - pLDDT threshold for early stopping
 - `use_templates`: bool = False - Enable template-based prediction
+
+**Note**: The `num_models` parameter is not currently supported due to configuration override limitations in RF3.
 
 **Outputs**:
 - `structures`: List of predicted structure files
@@ -804,15 +805,13 @@ pip install -e .
 ```python
 # Apo prediction
 rf3_apo = pipeline.add(RF3(
-    proteins=sequences,
-    num_models=5
+    proteins=sequences
 ))
 
 # Protein-ligand complex prediction
 rf3_holo = pipeline.add(RF3(
     proteins=sequences,
     ligands="CC(=O)OC1=CC=CC=C1C(=O)O",  # Aspirin SMILES
-    num_models=3,
     early_stopping_plddt=85.0
 ))
 

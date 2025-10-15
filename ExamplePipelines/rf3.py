@@ -16,7 +16,7 @@ pipeline = Pipeline(
     job_description="RF3 structure prediction examples")
 
 pipeline.resources(
-    gpu="gpu",
+    gpu="!T4",
     time="24:00:00",
     memory="16GB"
 )
@@ -26,8 +26,7 @@ RF3 run with direct protein sequence and ligand SMILES
 """
 rf3_1 = pipeline.add(RF3(
     proteins="MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
-    ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@@]34[C@@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
-    num_models=3
+    ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@@]34[C@@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C"
 ))
 
 """
@@ -37,8 +36,7 @@ RF3 apo prediction from PDB structure
 HaloTag = pipeline.add(PDB("6U32", "HT"))
 
 rf3_2 = pipeline.add(RF3(
-    proteins=HaloTag,
-    num_models=5
+    proteins=HaloTag
 ))
 
 """
@@ -46,8 +44,7 @@ RF3 holo prediction using compounds from previous RF3 run
 """
 rf3_3 = pipeline.add(RF3(
     proteins=HaloTag,
-    ligands=rf3_1,  # Output of RF3 contains CSV with ligand SMILES
-    num_models=3
+    ligands=rf3_1  # Output of RF3 contains CSV with ligand SMILES
 ))
 
 """
@@ -65,7 +62,6 @@ compounds = pipeline.add(CompoundLibrary(
 rf3_4 = pipeline.add(RF3(
     proteins=HaloTag,
     ligands=compounds,
-    num_models=3,
     early_stopping_plddt=85.0
 ))
 
@@ -88,8 +84,7 @@ expanded_library = pipeline.add(CompoundLibrary(
 
 rf3_5 = pipeline.add(RF3(
     proteins=HaloTag,
-    ligands=expanded_library,
-    num_models=2
+    ligands=expanded_library
 ))
 
 pipeline.slurm()

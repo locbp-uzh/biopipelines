@@ -9,8 +9,8 @@ from PipelineScripts.pipeline import Pipeline
 from PipelineScripts.mmseqs2 import MMseqs2Server
 
 pipeline = Pipeline(
-    pipeline_name="Examples",
-    job_name="MMseqs2-Server",
+    pipeline_name="MMseqs2Server",
+    job_name="GPU",
     job_description="Runs MMseqs2 server with GPU accelaration for 1 against many sequence alignment")
 
 pipeline.resources(
