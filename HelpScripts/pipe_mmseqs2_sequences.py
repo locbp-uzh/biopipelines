@@ -56,10 +56,8 @@ def submit_sequence_to_server(sequence, sequence_id, client_script, output_forma
         log(f"ERROR: Exception processing sequence {sequence_id}: {str(e)}")
         return None
 
-def convert_a3m_to_csv_format(a3m_file, sequence_id):
-    """Convert A3M file to CSV format compatible with Boltz2."""
-    msa_rows = []
-
+def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file):
+    """Convert A3M file to CSV format and return summary row."""
     try:
         with open(a3m_file, 'r') as f:
             sequences = []
@@ -78,39 +76,46 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id):
             if current_seq:
                 sequences.append(current_seq)
 
-        # Create MSA rows in Boltz2 format
-        for i, seq in enumerate(sequences):
-            msa_rows.append({
-                'id': f"{sequence_id}_msa_{i}",
-                'sequence_id': sequence_id,
-                'sequence': seq,
-                'msa_file': a3m_file  # Reference to source A3M file
-            })
+        # Create CSV file with all MSA sequences
+        msa_data = [{'sequence': seq} for seq in sequences]
+        msa_df = pd.DataFrame(msa_data)
+        msa_df.to_csv(output_csv_file, index=False)
+        log(f"Converted A3M to CSV: {output_csv_file}")
+
+        # Get query sequence (first sequence in A3M)
+        query_sequence = sequences[0] if sequences else ""
+
+        # Return single summary row pointing to the converted CSV file
+        return [{
+            'id': f"{sequence_id}_msa",
+            'sequence_id': sequence_id,
+            'sequence': query_sequence,
+            'msa_file': output_csv_file  # Reference to converted CSV file
+        }]
 
     except Exception as e:
         log(f"ERROR: Failed to process A3M file {a3m_file}: {str(e)}")
-
-    return msa_rows
+        return []
 
 def process_csv_output(csv_file, sequence_id):
-    """Process CSV output from MMseqs2 server."""
-    msa_rows = []
-
+    """Create summary row for CSV MSA file."""
     try:
         df = pd.read_csv(csv_file)
 
-        for i, row in df.iterrows():
-            msa_rows.append({
-                'id': f"{sequence_id}_msa_{i}",
-                'sequence_id': sequence_id,
-                'sequence': row['sequence'],
-                'msa_file': csv_file  # Reference to source CSV file
-            })
+        # Get query sequence (first row)
+        query_sequence = df.iloc[0]['sequence'] if len(df) > 0 else ""
+
+        # Return single summary row pointing to the MSA CSV file
+        return [{
+            'id': f"{sequence_id}_msa",
+            'sequence_id': sequence_id,
+            'sequence': query_sequence,
+            'msa_file': csv_file  # Reference to source CSV file
+        }]
 
     except Exception as e:
         log(f"ERROR: Failed to process CSV file {csv_file}: {str(e)}")
-
-    return msa_rows
+        return []
 
 def main():
     parser = argparse.ArgumentParser(description='Process sequences through MMseqs2 server')
@@ -159,25 +164,27 @@ def main():
 
         # Save individual MSA file with sequence ID name
         output_dir = os.path.dirname(args.output_msa_csv)
-        individual_msa_file = os.path.join(output_dir, f"{sequence_id}.{args.output_format}")
 
-        try:
-            # Copy the result file to the output directory with proper name
-            import shutil
-            shutil.copy2(result_file, individual_msa_file)
-            log(f"Saved individual MSA file: {individual_msa_file}")
-        except Exception as e:
-            log(f"WARNING: Failed to save individual MSA file: {e}")
-
-        # Process result based on format for combined CSV
+        # Process result based on format
         if args.output_format == 'a3m':
-            msa_rows = convert_a3m_to_csv_format(result_file, sequence_id)
+            # For A3M: convert to CSV format
+            individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
+            msa_rows = convert_a3m_to_csv_format(result_file, sequence_id, individual_msa_file)
         else:  # csv
+            # For CSV: just copy the file
+            individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
+            try:
+                import shutil
+                shutil.copy2(result_file, individual_msa_file)
+                log(f"Saved individual MSA file: {individual_msa_file}")
+            except Exception as e:
+                log(f"WARNING: Failed to save individual MSA file: {e}")
+
             msa_rows = process_csv_output(result_file, sequence_id)
 
-        # Update msa_file references to point to individual files
-        for row in msa_rows:
-            row['msa_file'] = individual_msa_file
+            # Update msa_file references to point to individual files
+            for row in msa_rows:
+                row['msa_file'] = individual_msa_file
 
         all_msa_rows.extend(msa_rows)
 
