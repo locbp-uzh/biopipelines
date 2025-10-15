@@ -36,7 +36,6 @@ class RF3(BaseConfig):
                  ligands: Union[str, ToolOutput, StandardizedOutput, None] = None,
                  msas: Optional[Union[str, ToolOutput]] = None,
                  # Core prediction parameters
-                 num_models: int = 5,
                  output_format: str = "pdb",
                  checkpoint_path: Optional[str] = None,
                  early_stopping_plddt: Optional[float] = None,
@@ -50,7 +49,6 @@ class RF3(BaseConfig):
             proteins: Protein sequences - can be ToolOutput, StandardizedOutput, file path, or direct sequence
             ligands: Single ligand SMILES string, ToolOutput with compounds, or datasheet reference
             msas: MSA files for recycling (optional)
-            num_models: Number of models to generate (default: 5)
             output_format: Output format ("pdb" or "cif")
             checkpoint_path: Path to RF3 checkpoint file
             early_stopping_plddt: pLDDT threshold for early stopping
@@ -61,7 +59,6 @@ class RF3(BaseConfig):
         self.proteins = proteins
         self.ligands = ligands
         self.msas = msas
-        self.num_models = num_models
         self.output_format = output_format.lower()
         self.checkpoint_path = checkpoint_path
         self.early_stopping_plddt = early_stopping_plddt
@@ -123,9 +120,6 @@ class RF3(BaseConfig):
         if not self.proteins:
             raise ValueError("proteins parameter is required")
 
-        if self.num_models < 1:
-            raise ValueError("num_models must be >= 1")
-
         if self.output_format not in ["pdb", "cif"]:
             raise ValueError("output_format must be 'pdb' or 'cif'")
 
@@ -140,7 +134,6 @@ class RF3(BaseConfig):
         config_lines.extend([
             f"PROTEINS: {self._format_input_display(self.proteins)}",
             f"LIGANDS: {self._format_input_display(self.ligands) if self.ligands else 'None (apo prediction)'}",
-            f"NUM_MODELS: {self.num_models}",
             f"OUTPUT_FORMAT: {self.output_format}",
             f"USE_TEMPLATES: {self.use_templates}"
         ])
@@ -180,7 +173,6 @@ class RF3(BaseConfig):
             "proteins": self._serialize_input(self.proteins),
             "ligands": self._serialize_input(self.ligands) if self.ligands else None,
             "msas": self._serialize_input(self.msas) if self.msas else None,
-            "num_models": self.num_models,
             "output_format": self.output_format,
             "checkpoint_path": self.checkpoint_path,
             "early_stopping_plddt": self.early_stopping_plddt,
@@ -202,7 +194,6 @@ class RF3(BaseConfig):
 
 echo "Running RF3 structure prediction"
 echo "Output folder: {output_folder}"
-echo "Number of models: {self.num_models}"
 
 # Run RF3 processing script
 python "{os.path.join(self.folders['HelpScripts'], 'pipe_rf3.py')}" \\
@@ -278,7 +269,6 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "rf3_params": {
-                "num_models": self.num_models,
                 "output_format": self.output_format,
                 "early_stopping_plddt": self.early_stopping_plddt,
                 "use_templates": self.use_templates
