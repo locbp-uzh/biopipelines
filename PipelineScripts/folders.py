@@ -108,8 +108,11 @@ class FolderManager:
             self.job_id = output_basename.split("_")[-1]
         else:
             raise ValueError(f"Could not extract job ID from output folder name: {output_basename}")
-        self._folders["runtime"] = os.path.join(self._folders["output"], "RunTime")    
+        self._folders["runtime"] = os.path.join(self._folders["output"], "RunTime")
         os.makedirs(self._folders["runtime"], exist_ok=True)
+
+        self._folders["logs"] = os.path.join(self._folders["output"], "Logs")
+        os.makedirs(self._folders["logs"], exist_ok=True)
         
     def get_folders(self) -> Dict[str, str]:
         """

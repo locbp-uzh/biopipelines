@@ -227,6 +227,10 @@ After the execution, the filesystem will look somewhat like this:
 │   ├── 001_<tool 1>.sh         # Tool-specific script
 │   └── 002_<tool 2>.sh
 │   ├── ...
+├── Logs/                       # Execution logs
+│   ├── 001_<tool 1>.log
+│   └── 002_<tool 2>.log
+│   ├── ...
 ├── ToolOutputs/                # Tool output predictions
 │   ├── 001_<tool 1>.json
 │   └── 002_<tool 2>.json
@@ -242,8 +246,6 @@ After the execution, the filesystem will look somewhat like this:
 │   ├── <sequence queries>.csv
 │   └── <sequence queries>.fasta
 │   ├── ...
-├── _001_rfdiffusion.log        # Execution logs
-└── _002_ligandmpnn.log
 ```
 
 Base folder paths (like `/shares/<group>`, tool data folders, etc.) are configured in `config.yaml` at the repository root. Edit this file to match your cluster's filesystem layout.
@@ -314,7 +316,7 @@ lmpnn = LigandMPNN(
 
 **Resource limits**: Adjust GPU/memory requirements in `pipeline.resources()`.
 
-**Missing files**: Check logs in `_<N>_<tool>.log` files.
+**Missing files**: Check logs in `Logs/<NNN>_<tool>.log` files.
 
 
 ### Debug Mode

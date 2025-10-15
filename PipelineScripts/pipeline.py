@@ -340,7 +340,7 @@ class Pipeline:
                 current_env = tool.environment
             
             # Generate tool-specific script
-            tool_script_path = os.path.join(self.folders["runtime"], f"{i}_{tool.TOOL_NAME.lower()}.sh")
+            tool_script_path = os.path.join(self.folders["runtime"], f"{i:03d}_{tool.TOOL_NAME.lower()}.sh")
             tool_script_content = tool.generate_script(tool_script_path)
             
             # Write tool script
@@ -362,7 +362,7 @@ class Pipeline:
                 print(f"Debug: Could not determine output files for {tool.TOOL_NAME} during script generation: {e}")
             
             # Add tool execution following notebook pattern
-            log_file = os.path.join(self.folders["output"], f"_{i:03d}_{tool.TOOL_NAME.lower()}.log")
+            log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME.lower()}.log")
             script_lines.extend([
                 f"echo {tool.TOOL_NAME}",
                 f"{tool_script_path} | tee {log_file}",

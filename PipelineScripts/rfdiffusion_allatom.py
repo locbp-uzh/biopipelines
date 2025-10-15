@@ -281,17 +281,18 @@ class RFdiffusionAllAtom(BaseConfig):
         # Core output files
         self.main_datasheet = os.path.join(self.output_folder, "rfdiffusionAA_results.csv")
         
-        # Log file is created by pipeline in the main pipeline folder with pattern _{index}_{toolname}.log
-        # Extract index from folder name (e.g., "1_RFdiffusionAllAtom" -> "1")
+        # Log file is created by pipeline in Logs folder with pattern NNN_{toolname}.log
+        # Extract index from folder name (e.g., "001_RFdiffusionAllAtom" -> "001")
         folder_name = os.path.basename(self.output_folder)
         pipeline_folder = os.path.dirname(self.output_folder)  # Get parent folder (DeNovoProtein_013)
-        
+        logs_folder = os.path.join(pipeline_folder, "Logs")
+
         if '_' in folder_name and folder_name.split('_')[0].isdigit():
             index = folder_name.split('_')[0]
             tool_name = folder_name.split('_', 1)[1].lower()  # Get everything after first underscore, lowercase
-            self.rfd_log_file = os.path.join(pipeline_folder, f"_{index:0>3}_{tool_name}.log")
+            self.rfd_log_file = os.path.join(logs_folder, f"{index}_{tool_name}.log")
         else:
-            raise ValueError(f"Invalid output folder naming pattern: {folder_name}. Expected 'N_RFdiffusionAllAtom' format.")
+            raise ValueError(f"Invalid output folder naming pattern: {folder_name}. Expected 'NNN_RFdiffusionAllAtom' format.")
         
         # Helper script paths (only set if folders are available)
         if hasattr(self, 'folders') and self.folders:
