@@ -172,8 +172,8 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_posit
             log(f"Applying mask to {len(sequences)} MSA sequences (positions: {mask_positions[:10]}...)")
             sequences = apply_mask_to_msa(sequences, mask_positions)
 
-        # Create CSV file with all MSA sequences
-        msa_data = [{'sequence': seq} for seq in sequences]
+        # Create CSV file with all MSA sequences (key=-1 for all rows)
+        msa_data = [{'key': -1, 'sequence': seq} for seq in sequences]
         msa_df = pd.DataFrame(msa_data)
         msa_df.to_csv(output_csv_file, index=False)
         log(f"Converted A3M to CSV: {output_csv_file}")
@@ -206,15 +206,21 @@ def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=No
             log(f"Applying mask to {len(sequences)} MSA sequences (positions: {mask_positions[:10]}...)")
             sequences = apply_mask_to_msa(sequences, mask_positions)
 
-            # Save masked sequences to output file
-            msa_data = [{'sequence': seq} for seq in sequences]
+            # Save masked sequences to output file (key=-1 for all rows)
+            msa_data = [{'key': -1, 'sequence': seq} for seq in sequences]
             msa_df = pd.DataFrame(msa_data)
             msa_df.to_csv(output_csv_file, index=False)
             log(f"Saved masked MSA to: {output_csv_file}")
         else:
-            # No masking - just copy the file
-            import shutil
-            shutil.copy2(csv_file, output_csv_file)
+            # No masking - need to ensure key column exists
+            df_original = pd.read_csv(csv_file)
+
+            # Add key column if it doesn't exist
+            if 'key' not in df_original.columns:
+                df_original.insert(0, 'key', -1)
+
+            df_original.to_csv(output_csv_file, index=False)
+            log(f"Saved MSA (with key column) to: {output_csv_file}")
 
         # Get query sequence (first row)
         query_sequence = sequences[0] if sequences else ""
