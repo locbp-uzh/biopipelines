@@ -48,6 +48,7 @@ class ProteinLigandContacts(BaseConfig):
                  ligand: str = None,
                  contact_threshold: float = 5.0,
                  contact_metric_name: str = None,
+                 id_map: Dict[str, str] = {"*": "*_<N>"},
                  **kwargs):
         """
         Initialize protein-ligand contact analysis tool.
@@ -61,6 +62,10 @@ class ProteinLigandContacts(BaseConfig):
             ligand: Ligand residue name (3-letter code, e.g., 'LIG', 'ATP', 'GDP')
             contact_threshold: Distance threshold for counting contacts (default: 5.0 Å)
             contact_metric_name: Custom name for contact count column (default: "contacts")
+            id_map: ID mapping pattern for matching structure IDs to datasheet IDs (default: {"*": "*_<N>"})
+                  - Used when datasheet IDs don't match structure IDs
+                  - Example: structure ID "rifampicin_1_2" maps to datasheet ID "rifampicin_1"
+                  - Pattern {"*": "*_<N>"} strips last "_<number>" from structure ID
             **kwargs: Additional parameters
 
         Selection Syntax:
@@ -102,6 +107,7 @@ class ProteinLigandContacts(BaseConfig):
         self.ligand_name = ligand
         self.contact_threshold = contact_threshold
         self.custom_contact_metric_name = contact_metric_name
+        self.id_map = id_map
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -227,6 +233,7 @@ class ProteinLigandContacts(BaseConfig):
             "ligand_name": self.ligand_name,
             "contact_threshold": self.contact_threshold,
             "contact_metric_name": self.get_contact_metric_name(),
+            "id_map": self.id_map,
             "output_csv": analysis_csv
         }
 

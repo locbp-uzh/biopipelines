@@ -326,13 +326,38 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
         return None, None, None, None, None
 
 
-def load_selections_from_datasheet(datasheet_path: str, column_name: str) -> Dict[str, str]:
+def map_structure_id_to_datasheet_id(structure_id: str, id_map: Dict[str, str]) -> str:
+    """
+    Map structure ID to datasheet ID using id_map pattern.
+
+    Args:
+        structure_id: Structure ID (e.g., "rifampicin_1_2")
+        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
+
+    Returns:
+        Mapped datasheet ID (e.g., "rifampicin_1")
+    """
+    import re
+
+    # Check if id_map uses the standard pattern
+    if "*" in id_map and "*_<N>" in id_map.values():
+        # Strip last _<number> from structure ID
+        match = re.match(r'^(.+)_\d+$', structure_id)
+        if match:
+            return match.group(1)
+
+    # No mapping or pattern doesn't match, use as-is
+    return structure_id
+
+
+def load_selections_from_datasheet(datasheet_path: str, column_name: str, id_map: Dict[str, str] = None) -> Dict[str, str]:
     """
     Load protein selections from datasheet CSV file.
 
     Args:
         datasheet_path: Path to CSV file
         column_name: Column containing selection specifications
+        id_map: ID mapping pattern for matching structure IDs to datasheet IDs
 
     Returns:
         Dictionary mapping structure IDs to selection strings
@@ -346,16 +371,18 @@ def load_selections_from_datasheet(datasheet_path: str, column_name: str) -> Dic
 
     # Assuming the first column contains IDs
     id_column = df.columns[0]
-    selections_map = {}
+    datasheet_selections = {}
 
+    # Load datasheet selections with datasheet IDs
     for _, row in df.iterrows():
-        structure_id = row[id_column]
+        datasheet_id = row[id_column]
         selection_value = row[column_name]
-        selections_map[str(structure_id)] = str(selection_value)
+        datasheet_selections[str(datasheet_id)] = str(selection_value)
 
-    print(f"Loaded protein selections for {len(selections_map)} structures from {datasheet_path}")
+    print(f"Loaded protein selections for {len(datasheet_selections)} datasheet IDs from {datasheet_path}")
 
-    return selections_map
+    # Return datasheet selections - they will be mapped to structure IDs in the caller
+    return datasheet_selections
 
 
 def calculate_contact_metrics(structure_path: str, selections: str, ligand: str, threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
@@ -416,6 +443,7 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
     ligand_name = config_data['ligand_name']
     contact_threshold = config_data['contact_threshold']
     contact_metric_name = config_data['contact_metric_name']
+    id_map = config_data.get('id_map', {"*": "*_<N>"})  # Default to standard pattern
     output_csv = config_data['output_csv']
 
     print(f"Analyzing protein-ligand contacts")
@@ -424,6 +452,7 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
     print(f"Ligand: {ligand_name}")
     print(f"Contact threshold: {contact_threshold} Å")
     print(f"Contact metric: {contact_metric_name}")
+    print(f"ID mapping pattern: {id_map}")
 
     # Handle protein selections
     selections_map = {}
@@ -441,10 +470,22 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             structure_id = os.path.splitext(os.path.basename(structure_path))[0]
             selections_map[structure_id] = fixed_selection
     else:
-        # Load from datasheet
+        # Load from datasheet with ID mapping
         datasheet_path = selections_config['datasheet_path']
         column_name = selections_config['column_name']
-        selections_map = load_selections_from_datasheet(datasheet_path, column_name)
+        datasheet_selections = load_selections_from_datasheet(datasheet_path, column_name, id_map)
+
+        # Map structure IDs to datasheet IDs and populate selections_map
+        for structure_path in input_structures:
+            structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+            datasheet_id = map_structure_id_to_datasheet_id(structure_id, id_map)
+
+            if datasheet_id in datasheet_selections:
+                selections_map[structure_id] = datasheet_selections[datasheet_id]
+                if datasheet_id != structure_id:
+                    print(f"Mapped structure ID '{structure_id}' -> datasheet ID '{datasheet_id}'")
+            else:
+                print(f"Warning: No datasheet entry for structure ID '{structure_id}' (mapped to '{datasheet_id}')")
 
     # Process structures
     results = []
