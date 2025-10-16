@@ -1,0 +1,13 @@
+resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_R_W3_001/RunTime/slurm.sh
+
+
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_R_W3_002/RunTime/slurm.sh
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_R_W3_003/RunTime/slurm.sh
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_R_W3_004/RunTime/slurm.sh
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_R_W3_005/RunTime/slurm.sh
+
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_S_W3_001/RunTime/slurm.sh
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_S_W3_002/RunTime/slurm.sh
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_S_W3_003/RunTime/slurm.sh
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_S_W3_004/RunTime/slurm.sh
+./resubmit /shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/Cy5_S_W3_005/RunTime/slurm.sh

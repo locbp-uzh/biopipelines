@@ -16,9 +16,9 @@ pipeline = Pipeline(
     job_description="RF3 structure prediction examples")
 
 pipeline.resources(
-    gpu="!T4",
+    gpu="A100",  # RF3 requires Ampere+ architecture for Flash Attention 2
     time="24:00:00",
-    memory="16GB"
+    memory="32GB"
 )
 
 """
