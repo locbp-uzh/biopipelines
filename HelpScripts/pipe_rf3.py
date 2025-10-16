@@ -58,21 +58,24 @@ def create_rf3_input_json(sequence_id: str, sequence: str, ligand_smiles: str = 
     Returns:
         Path to created JSON file
     """
-    input_data = {
-        "job": sequence_id,
-        "sequences": [
-            {
-                "protein": {
-                    "id": ["A"],
-                    "sequence": [sequence]
-                }
-            }
-        ]
-    }
+    # Create components array with protein
+    components = [
+        {
+            "seq": sequence,
+            "chain_id": "A"
+        }
+    ]
 
     # Add ligand if provided
     if ligand_smiles:
-        input_data["sequences"][0]["sm_string"] = [ligand_smiles]
+        components.append({
+            "smiles": ligand_smiles
+        })
+
+    input_data = {
+        "name": sequence_id,
+        "components": components
+    }
 
     if output_path is None:
         output_path = f"{sequence_id}.json"
