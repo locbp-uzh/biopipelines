@@ -114,6 +114,17 @@ def run_rf3_batch(input_jsons: List[str], output_folder: str, config: Dict[str, 
     env = os.environ.copy()
     env["RF3_OUTPUT_DIR"] = output_folder
 
+    # Ensure temp directory exists
+    # RF3 uses /sctmp/<user> on clusters, but we need to ensure it exists or use a fallback
+    temp_base_dirs = ["/sctmp", os.environ.get("TMPDIR"), "/tmp"]
+    for temp_base in temp_base_dirs:
+        if temp_base and os.path.exists(temp_base):
+            user_temp_dir = os.path.join(temp_base, os.environ.get("USER", "unknown"))
+            os.makedirs(user_temp_dir, exist_ok=True)
+            env["TMPDIR"] = user_temp_dir
+            print(f"Using temp directory: {user_temp_dir}")
+            break
+
     print(f"Running command: {' '.join(cmd)}")
     print(f"Output directory: {output_folder}")
 

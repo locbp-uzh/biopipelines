@@ -6,7 +6,14 @@
       "Bash(git config:*)",
       "Bash(git log:*)",
       "Bash(git push:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(oh-my-posh:*)",
+      "Bash(curl -o \"$HOME/light-theme.omp.json\" https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/jandedobbeleer.omp.json)",
+      "Read(//c/Users/gianl/**)",
+      "Bash(powershell:*)",
+      "Bash(curl -o \"$HOME/tokyo-light.omp.json\" https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/tokyo.omp.json)",
+      "Bash(curl -o \"$HOME/tokyo.omp.json\" https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/tokyo.omp.json)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []
