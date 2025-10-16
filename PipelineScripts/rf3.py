@@ -127,6 +127,10 @@ class RF3(BaseConfig):
         """Configure input parameters."""
         self.folders = pipeline_folders
 
+        # Set default checkpoint path if not provided
+        if self.checkpoint_path is None:
+            self.checkpoint_path = os.path.join(pipeline_folders["ModelForge"], "rf3_latest.pt")
+
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()

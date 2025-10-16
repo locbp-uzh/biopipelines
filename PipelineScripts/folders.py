@@ -91,6 +91,7 @@ class FolderManager:
             "BoltzCache": os.path.join(self._folders["group"], boltz_cache_path),
             "DynamicBind": dynamicbind_base,
             "DynamicBindWeights": os.path.join(dynamicbind_base, "workdir"),
+            "ModelForge": os.path.join(self._folders["data"], tool_data_config.get('ModelForge', 'modelforge')),
             "BioPipelines": os.path.join(self._folders["user"], "BioPipelines")})
         self._folders.update({
             "pipeline": os.path.join(self._folders["BioPipelines"],pipeline_name) if not debug else "Debug"})

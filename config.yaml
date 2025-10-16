@@ -16,6 +16,7 @@ folders:
     OmegaFold: "OmegaFold"
     Boltz: "boltz"
     DynamicBind: "DynamicBind"
+    ModelForge: "modelforge"
 
   # Shared model and container folders (relative to group folder)
   shared:
