@@ -40,6 +40,7 @@ class MMseqs2(BaseConfig):
                  output_format: str = "csv",
                  timeout: int = 3600,
                  mask: Union[str, tuple] = "",
+                 id_map: Dict[str, str] = {"*": "*_<N>"},
                  **kwargs):
         """
         Initialize MMseqs2 configuration.
@@ -52,6 +53,10 @@ class MMseqs2(BaseConfig):
                   - String format: "10-20+30-40" (PyMOL selection style)
                   - Tuple format: (DatasheetInfo, "column_name") for per-sequence masking
                   - Empty string: no masking (default)
+            id_map: ID mapping pattern for matching sequence IDs to datasheet IDs (default: {"*": "*_<N>"})
+                  - Used when mask datasheet IDs don't match sequence IDs
+                  - Example: sequence ID "rifampicin_1_2" maps to datasheet ID "rifampicin_1"
+                  - Pattern {"*": "*_<N>"} strips last "_<number>" from sequence ID
             **kwargs: Additional parameters
         """
         # Store MMseqs2-specific parameters
@@ -81,6 +86,7 @@ class MMseqs2(BaseConfig):
         self.output_format = output_format
         self.timeout = timeout
         self.mask_positions = mask
+        self.id_map = id_map
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -383,13 +389,17 @@ echo "MMseqs2 processing completed"
         if not self.mask_positions:
             return ""
 
+        # Convert id_map to JSON string for passing to script
+        import json
+        id_map_json = json.dumps(self.id_map).replace('"', '\\"')
+
         # Handle tuple format: (DatasheetInfo, "column_name")
         if isinstance(self.mask_positions, tuple):
             if len(self.mask_positions) == 2:
                 datasheet_info, column_name = self.mask_positions
                 if hasattr(datasheet_info, 'path'):
                     # Per-sequence masking from datasheet
-                    return f' \\\n    --mask_datasheet "{datasheet_info.path}" \\\n    --mask_column "{column_name}"'
+                    return f' \\\n    --mask_datasheet "{datasheet_info.path}" \\\n    --mask_column "{column_name}" \\\n    --id_map "{id_map_json}"'
                 else:
                     raise ValueError(f"Invalid datasheet reference in mask parameter: {self.mask_positions}")
             else:

@@ -19,6 +19,29 @@ def log(message):
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
 
+def map_sequence_id_to_datasheet_id(seq_id, id_map):
+    """
+    Map sequence ID to datasheet ID using id_map pattern.
+
+    Args:
+        seq_id: Sequence ID (e.g., "rifampicin_1_2")
+        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
+
+    Returns:
+        Mapped datasheet ID (e.g., "rifampicin_1")
+    """
+    import re
+
+    # Check if id_map uses the standard pattern
+    if "*" in id_map and "*_<N>" in id_map.values():
+        # Strip last _<number> from sequence ID
+        match = re.match(r'^(.+)_\d+$', seq_id)
+        if match:
+            return match.group(1)
+
+    # No mapping or pattern doesn't match, use as-is
+    return seq_id
+
 def sele_to_list(s):
     """
     Convert selection string to list of residue numbers (1-indexed).
@@ -221,6 +244,8 @@ def main():
                        help='Column name in mask_datasheet containing selection strings')
     parser.add_argument('--mask_selection', default=None,
                        help='Direct selection string to apply to all sequences (e.g., "10-20+30-40")')
+    parser.add_argument('--id_map', default='{"*": "*_<N>"}',
+                       help='JSON string for ID mapping pattern (default: {"*": "*_<N>"})')
 
     args = parser.parse_args()
 
@@ -241,8 +266,19 @@ def main():
         log("ERROR: Input CSV must have 'id' and 'sequence' columns")
         sys.exit(1)
 
+    # Parse id_map from JSON
+    import json
+    try:
+        id_map = json.loads(args.id_map)
+        log(f"ID mapping pattern: {id_map}")
+    except Exception as e:
+        log(f"ERROR: Failed to parse id_map JSON: {str(e)}")
+        sys.exit(1)
+
     # Load mask data if provided
     mask_data = {}  # Maps sequence_id -> list of positions to mask
+    datasheet_mask_data = {}  # Maps datasheet_id -> list of positions (from datasheet)
+
     if args.mask_datasheet and args.mask_column:
         # Per-sequence masking from datasheet
         try:
@@ -257,15 +293,23 @@ def main():
                 log(f"ERROR: Mask column '{args.mask_column}' not found in datasheet")
                 sys.exit(1)
 
-            # Parse mask selections for each sequence
+            # Parse mask selections for each datasheet entry
             for _, row in mask_df.iterrows():
-                seq_id = row['id']
+                datasheet_id = row['id']
                 mask_selection = row[args.mask_column]
                 if pd.notna(mask_selection) and str(mask_selection).strip():
                     mask_positions = sele_to_list(str(mask_selection))
                     if mask_positions:
-                        mask_data[seq_id] = mask_positions
-                        log(f"Mask for {seq_id}: {len(mask_positions)} positions")
+                        datasheet_mask_data[datasheet_id] = mask_positions
+                        log(f"Mask for datasheet ID '{datasheet_id}': {len(mask_positions)} positions")
+
+            # Now map sequence IDs to datasheet IDs and populate mask_data
+            for seq_id in sequences_df['id']:
+                datasheet_id = map_sequence_id_to_datasheet_id(seq_id, id_map)
+                if datasheet_id in datasheet_mask_data:
+                    mask_data[seq_id] = datasheet_mask_data[datasheet_id]
+                    if datasheet_id != seq_id:
+                        log(f"Mapped sequence ID '{seq_id}' -> datasheet ID '{datasheet_id}'")
 
         except Exception as e:
             log(f"ERROR: Failed to load mask datasheet: {str(e)}")

@@ -36,7 +36,7 @@ class StitchSequences(BaseConfig):
     def __init__(self,
                  sequences: List[Union[ToolOutput, StandardizedOutput]],
                  selections: Union[List[Union[str, ToolOutput]], str] = None,
-                 id_map: Dict[str, str] = None,
+                 id_map: Dict[str, str] = {"*": "*_<N>"},
                  **kwargs):
         """
         Initialize StitchSequences configuration.
@@ -97,7 +97,7 @@ class StitchSequences(BaseConfig):
         """
         self.input_sequences = sequences
         self.position_specs = selections
-        self.id_map = id_map if id_map is not None else {"*": "*_<N>"}
+        self.id_map = id_map
 
         # Validate input
         if not sequences or len(sequences) < 2:
