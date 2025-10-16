@@ -19,6 +19,74 @@ def log(message):
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
 
+def sele_to_list(s):
+    """
+    Convert selection string to list of residue numbers (1-indexed).
+    Format: "10-20+30-40" or "10 15 20"
+    """
+    a = []
+    if not s or s == "":
+        return a
+
+    # Handle both '+' separated ranges and space-separated legacy format
+    if '+' in s:
+        parts = s.split('+')
+    else:
+        # Legacy space-separated format
+        parts = s.split()
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part and not part.startswith('-'):
+            # Range like "10-15"
+            range_parts = part.split('-')
+            if len(range_parts) == 2:
+                min_val, max_val = range_parts
+                for ri in range(int(min_val), int(max_val) + 1):
+                    a.append(ri)
+            else:
+                log(f"Warning: Malformed range '{part}', skipping")
+        else:
+            # Single residue
+            try:
+                a.append(int(part))
+            except ValueError:
+                log(f"Warning: Could not parse '{part}' as integer, skipping")
+
+    return sorted(a)
+
+def apply_mask_to_msa(msa_sequences, mask_positions):
+    """
+    Apply mask to MSA sequences by replacing positions with '-'.
+
+    Args:
+        msa_sequences: List of sequences from MSA (first is query)
+        mask_positions: List of 1-indexed positions to mask
+
+    Returns:
+        List of masked sequences (query unchanged, others masked)
+    """
+    if not mask_positions or len(msa_sequences) == 0:
+        return msa_sequences
+
+    # First sequence is the query - keep it unchanged
+    masked_sequences = [msa_sequences[0]]
+
+    # Mask all other sequences
+    for seq in msa_sequences[1:]:
+        masked_seq = list(seq)
+        for pos in mask_positions:
+            # Convert 1-indexed to 0-indexed, check bounds
+            idx = pos - 1
+            if 0 <= idx < len(masked_seq):
+                masked_seq[idx] = '-'
+        masked_sequences.append(''.join(masked_seq))
+
+    return masked_sequences
+
 def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv"):
     """Submit a single sequence to MMseqs2 server and return the result file path."""
     # Create temporary output file
@@ -56,8 +124,8 @@ def submit_sequence_to_server(sequence, sequence_id, client_script, output_forma
         log(f"ERROR: Exception processing sequence {sequence_id}: {str(e)}")
         return None
 
-def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file):
-    """Convert A3M file to CSV format and return summary row."""
+def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_positions=None):
+    """Convert A3M file to CSV format with optional masking, and return summary row."""
     try:
         with open(a3m_file, 'r') as f:
             sequences = []
@@ -75,6 +143,11 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file):
             # Add last sequence
             if current_seq:
                 sequences.append(current_seq)
+
+        # Apply masking if specified
+        if mask_positions:
+            log(f"Applying mask to {len(sequences)} MSA sequences (positions: {mask_positions[:10]}...)")
+            sequences = apply_mask_to_msa(sequences, mask_positions)
 
         # Create CSV file with all MSA sequences
         msa_data = [{'sequence': seq} for seq in sequences]
@@ -97,20 +170,38 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file):
         log(f"ERROR: Failed to process A3M file {a3m_file}: {str(e)}")
         return []
 
-def process_csv_output(csv_file, sequence_id):
-    """Create summary row for CSV MSA file."""
+def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=None):
+    """Create summary row for CSV MSA file with optional masking."""
     try:
         df = pd.read_csv(csv_file)
 
+        # Get sequences
+        sequences = df['sequence'].tolist() if 'sequence' in df.columns else []
+
+        # Apply masking if specified
+        if mask_positions and sequences:
+            log(f"Applying mask to {len(sequences)} MSA sequences (positions: {mask_positions[:10]}...)")
+            sequences = apply_mask_to_msa(sequences, mask_positions)
+
+            # Save masked sequences to output file
+            msa_data = [{'sequence': seq} for seq in sequences]
+            msa_df = pd.DataFrame(msa_data)
+            msa_df.to_csv(output_csv_file, index=False)
+            log(f"Saved masked MSA to: {output_csv_file}")
+        else:
+            # No masking - just copy the file
+            import shutil
+            shutil.copy2(csv_file, output_csv_file)
+
         # Get query sequence (first row)
-        query_sequence = df.iloc[0]['sequence'] if len(df) > 0 else ""
+        query_sequence = sequences[0] if sequences else ""
 
         # Return single summary row pointing to the MSA CSV file
         return [{
             'id': f"{sequence_id}_msa",
             'sequence_id': sequence_id,
             'sequence': query_sequence,
-            'msa_file': csv_file  # Reference to source CSV file
+            'msa_file': output_csv_file  # Reference to output CSV file
         }]
 
     except Exception as e:
@@ -124,6 +215,12 @@ def main():
     parser.add_argument('client_script', help='Path to MMseqs2 client script')
     parser.add_argument('--output_format', default='csv', choices=['csv', 'a3m'],
                        help='Output format from server (default: csv)')
+    parser.add_argument('--mask_datasheet', default=None,
+                       help='Path to datasheet CSV with mask information per sequence')
+    parser.add_argument('--mask_column', default=None,
+                       help='Column name in mask_datasheet containing selection strings')
+    parser.add_argument('--mask_selection', default=None,
+                       help='Direct selection string to apply to all sequences (e.g., "10-20+30-40")')
 
     args = parser.parse_args()
 
@@ -144,6 +241,47 @@ def main():
         log("ERROR: Input CSV must have 'id' and 'sequence' columns")
         sys.exit(1)
 
+    # Load mask data if provided
+    mask_data = {}  # Maps sequence_id -> list of positions to mask
+    if args.mask_datasheet and args.mask_column:
+        # Per-sequence masking from datasheet
+        try:
+            mask_df = pd.read_csv(args.mask_datasheet)
+            log(f"Loaded mask datasheet from {args.mask_datasheet}")
+
+            if 'id' not in mask_df.columns:
+                log("ERROR: Mask datasheet must have 'id' column")
+                sys.exit(1)
+
+            if args.mask_column not in mask_df.columns:
+                log(f"ERROR: Mask column '{args.mask_column}' not found in datasheet")
+                sys.exit(1)
+
+            # Parse mask selections for each sequence
+            for _, row in mask_df.iterrows():
+                seq_id = row['id']
+                mask_selection = row[args.mask_column]
+                if pd.notna(mask_selection) and str(mask_selection).strip():
+                    mask_positions = sele_to_list(str(mask_selection))
+                    if mask_positions:
+                        mask_data[seq_id] = mask_positions
+                        log(f"Mask for {seq_id}: {len(mask_positions)} positions")
+
+        except Exception as e:
+            log(f"ERROR: Failed to load mask datasheet: {str(e)}")
+            sys.exit(1)
+
+    elif args.mask_selection:
+        # Same mask for all sequences
+        mask_positions = sele_to_list(args.mask_selection)
+        if mask_positions:
+            log(f"Using global mask: {len(mask_positions)} positions")
+            # Will apply to all sequences
+            for seq_id in sequences_df['id']:
+                mask_data[seq_id] = mask_positions
+        else:
+            log("WARNING: Empty mask selection provided")
+
     # Process each sequence
     all_msa_rows = []
 
@@ -162,29 +300,20 @@ def main():
             log(f"WARNING: Skipping sequence {sequence_id} due to server error")
             continue
 
+        # Get mask positions for this sequence
+        mask_positions = mask_data.get(sequence_id, None)
+
         # Save individual MSA file with sequence ID name
         output_dir = os.path.dirname(args.output_msa_csv)
+        individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
 
         # Process result based on format
         if args.output_format == 'a3m':
-            # For A3M: convert to CSV format
-            individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
-            msa_rows = convert_a3m_to_csv_format(result_file, sequence_id, individual_msa_file)
+            # For A3M: convert to CSV format with optional masking
+            msa_rows = convert_a3m_to_csv_format(result_file, sequence_id, individual_msa_file, mask_positions)
         else:  # csv
-            # For CSV: just copy the file
-            individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
-            try:
-                import shutil
-                shutil.copy2(result_file, individual_msa_file)
-                log(f"Saved individual MSA file: {individual_msa_file}")
-            except Exception as e:
-                log(f"WARNING: Failed to save individual MSA file: {e}")
-
-            msa_rows = process_csv_output(result_file, sequence_id)
-
-            # Update msa_file references to point to individual files
-            for row in msa_rows:
-                row['msa_file'] = individual_msa_file
+            # For CSV: process with optional masking
+            msa_rows = process_csv_output(result_file, sequence_id, individual_msa_file, mask_positions)
 
         all_msa_rows.extend(msa_rows)
 

@@ -39,6 +39,7 @@ class MMseqs2(BaseConfig):
     def __init__(self, sequences: Union[str, List[str], ToolOutput, StandardizedOutput],
                  output_format: str = "csv",
                  timeout: int = 3600,
+                 mask: Union[str, tuple] = "",
                  **kwargs):
         """
         Initialize MMseqs2 configuration.
@@ -47,6 +48,10 @@ class MMseqs2(BaseConfig):
             sequences: Input sequences - can be sequence string, list, or ToolOutput
             output_format: Output format ("csv" or "a3m", default: csv)
             timeout: Timeout in seconds for server response
+            mask: Positions to mask in MSA (excluding query sequence)
+                  - String format: "10-20+30-40" (PyMOL selection style)
+                  - Tuple format: (DatasheetInfo, "column_name") for per-sequence masking
+                  - Empty string: no masking (default)
             **kwargs: Additional parameters
         """
         # Store MMseqs2-specific parameters
@@ -75,6 +80,7 @@ class MMseqs2(BaseConfig):
 
         self.output_format = output_format
         self.timeout = timeout
+        self.mask_positions = mask
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -92,6 +98,10 @@ class MMseqs2(BaseConfig):
 
         if self.timeout <= 0:
             raise ValueError("timeout must be positive")
+
+        # Validate mask parameter if provided
+        if self.mask_positions:
+            self.validate_datasheet_reference(self.mask_positions)
 
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
@@ -357,11 +367,40 @@ python {self.helper_script_path} \\
     "{self.input_sequences_csv}" \\
     "{self.output_msa_csv}" \\
     "{self.client_script_path}" \\
-    --output_format {self.output_format}
+    --output_format {self.output_format}{self._generate_mask_arguments()}
 
 echo "MMseqs2 processing completed"
 
 """
+
+    def _generate_mask_arguments(self) -> str:
+        """
+        Generate mask-related command line arguments for the helper script.
+
+        Returns:
+            String with mask arguments to append to python command
+        """
+        if not self.mask_positions:
+            return ""
+
+        # Handle tuple format: (DatasheetInfo, "column_name")
+        if isinstance(self.mask_positions, tuple):
+            if len(self.mask_positions) == 2:
+                datasheet_info, column_name = self.mask_positions
+                if hasattr(datasheet_info, 'path'):
+                    # Per-sequence masking from datasheet
+                    return f' \\\n    --mask_datasheet "{datasheet_info.path}" \\\n    --mask_column "{column_name}"'
+                else:
+                    raise ValueError(f"Invalid datasheet reference in mask parameter: {self.mask_positions}")
+            else:
+                raise ValueError(f"Invalid tuple format for mask parameter: {self.mask_positions}")
+
+        # Handle string format: direct selection like "10-20+30-40"
+        elif isinstance(self.mask_positions, str):
+            return f' \\\n    --mask_selection "{self.mask_positions}"'
+
+        else:
+            raise ValueError(f"Unsupported mask parameter type: {type(self.mask_positions)}")
 
     def _predict_sequence_ids(self) -> List[str]:
         """
