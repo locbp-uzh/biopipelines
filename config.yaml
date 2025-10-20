@@ -32,6 +32,7 @@ environments:
   # Structure prediction and design tools
   Boltz2: "Boltz2Env"
   RF3: "modelforge"
+  ESMFold: "ProteinEnv"
   RFdiffusion: "ProteinEnv"
   RFdiffusionAllAtom: "ProteinEnv"
   ProteinMPNN: "ProteinEnv"

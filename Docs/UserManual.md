@@ -50,6 +50,7 @@
     - [StitchSequences](#stitchsequences)
   - [Structure Prediction](#structure-prediction)
     - [AlphaFold](#alphafold)
+    - [ESMFold](#esmfold)
     - [Boltz2](#boltz2)
     - [RF3](#rf3)
     - [OnionNet](#onionnet)
@@ -702,6 +703,46 @@ af = pipeline.add(AlphaFold(
     sequences=lmpnn,
     num_relax=1,
     num_recycle=5
+))
+```
+
+---
+
+### ESMFold
+
+Predicts protein structures using Meta's ESM-2 with ESMFold. Fast single-sequence prediction without requiring MSAs. Models are cached in shared folder for reuse.
+
+**References**: https://github.com/facebookresearch/esm
+
+**Installation**: ESMFold works in the ProteinEnv environment. Install requirements:
+```bash
+conda activate ProteinEnv
+pip install "fair-esm[esmfold]"
+pip install 'dllogger @ git+https://github.com/NVIDIA/dllogger.git'
+pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059694619831a7db195b7e0988fc4ff3a307'
+```
+
+**Environment**: `ProteinEnv`
+
+**Parameters**:
+- `sequences`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Input sequences
+- `datasheets`: Optional[List[str]] = None - Input datasheet files
+- `name`: str = "" - Job name
+- `num_recycle`: int = 4 - Number of recycling iterations
+- `chunk_size`: Optional[int] = None - Chunk size for long sequences (auto if None)
+
+**Outputs**:
+- `structures`: List of predicted PDB files
+- `datasheets.structures`:
+
+  | id | sequence |
+  |----|----------|
+
+**Example**:
+```python
+esm = pipeline.add(ESMFold(
+    sequences=lmpnn,
+    num_recycle=4
 ))
 ```
 
