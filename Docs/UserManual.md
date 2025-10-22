@@ -980,9 +980,32 @@ cd DynamicBind
 wget https://zenodo.org/records/10183369/files/workdir.zip
 unzip workdir.zip
 
-cd ../../biopipelines
-conda env create -f dynamicbind.yaml
-conda install numpy=1.26 --force-reinstall
+# Request additional resources during installation e.g.:
+srun --mem=32G --cpus-per-task=8 --time=04:00:00 --pty bash
+
+conda create -n dynamicbind python=3.9 -y
+conda activate dynamicbind
+pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 \
+    --extra-index-url https://download.pytorch.org/whl/cu117
+
+# Setup LD_LIBRARY_PATH inside the environment
+mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH' > \
+     $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+# Continue installation
+conda install -c conda-forge rdkit biopython scipy pandas pyyaml networkx -y
+pip install numpy==1.26.4 e3nn==0.4.4 spyrmsd fair-esm tqdm
+pip install \
+    torch-scatter==2.1.1+pt113cu117 \
+    torch-sparse==0.6.17+pt113cu117 \
+    torch-cluster==1.6.1+pt113cu117 \
+    torch-spline-conv \
+    pyg_lib \
+    -f https://data.pyg.org/whl/torch-1.13.1+cu117.html \
+    --no-cache-dir
+pip install torch-geometric
 
 # Create relax environment
 conda create --name relax python=3.8
