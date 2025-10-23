@@ -203,6 +203,9 @@ handle_job() {
             log "Converting A3M to CSV format"
             convert_a3m_to_csv "$out_prefix.a3m" "$out_prefix.csv"
             echo -e "SUCCESS\noutput_file=$out_prefix.csv" > "$RESULTS_DIR/$job_id.status"
+            # Delete intermediate A3M file since client only needs CSV
+            rm -f "$out_prefix.a3m"
+            log "Deleted intermediate A3M file"
             ;;
         *)
             log "Unknown format $output_format"
@@ -231,12 +234,23 @@ cleanup_old_files() {
     # Clean old FASTA files in queue (orphaned submissions)
     find "$JOB_QUEUE_DIR" -type f -name "*.fasta" -mtime +1 -delete 2>/dev/null || true
 
+    # Clean orphaned .job files (older than 24 hours, indicating stale/failed submissions)
+    local orphaned_count=$(find "$JOB_QUEUE_DIR" -type f -name "*.job" -mtime +1 -delete -print 2>/dev/null | wc -l)
+    if [ "$orphaned_count" -gt 0 ]; then
+        log "Removed $orphaned_count orphaned .job files"
+    fi
+
     log "Cleanup completed"
 }
 
 # Track cleanup time
 LAST_CLEANUP=$(date +%s)
 CLEANUP_INTERVAL=3600  # Run cleanup every hour
+
+# Run cleanup at startup to remove old files from previous runs
+log "Running startup cleanup to remove old files..."
+cleanup_old_files
+LAST_CLEANUP=$(date +%s)  # Reset cleanup timer after startup cleanup
 
 while true; do
   # (1) prioritize current user's jobs
