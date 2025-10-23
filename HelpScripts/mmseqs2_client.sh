@@ -90,15 +90,27 @@ if [[ "$STATUS" -eq 1 ]]; then
     log "No valid MMseqs2 server is running"
   fi
 
-  # Count pending jobs (.job files in queue)
-  job_count=$(ls -1 "$JOB_QUEUE_DIR"/*.job 2>/dev/null | wc -l)
-  log "Jobs in queue: $job_count"
+  # Count pending jobs (.job files in queue - not yet picked up by server)
+  pending_count=$(ls -1 "$JOB_QUEUE_DIR"/*.job 2>/dev/null | wc -l)
 
-  # Count processing jobs (check for .status files that are still being written)
-  processing_count=$(find "$RESULTS_DIR" -name "*.status" -type f -mmin -5 2>/dev/null | wc -l)
-  if [[ $processing_count -gt 0 ]]; then
-    log "Jobs being processed: $processing_count"
+  # Count processing jobs (temporary directories created when server picks up job)
+  # Jobs are being processed when they have tmp dirs but no .status file yet
+  processing_count=0
+  if [[ -d "$RESULTS_DIR/../tmp" ]]; then
+    for tmp_dir in "$RESULTS_DIR/../tmp"/msa_*; do
+      [[ -d "$tmp_dir" ]] || continue
+      job_id=$(basename "$tmp_dir")
+      # Check if this job doesn't have a status file yet (still processing)
+      if [[ ! -f "$RESULTS_DIR/$job_id.status" ]]; then
+        processing_count=$((processing_count + 1))
+      fi
+    done
   fi
+
+  # Total jobs in queue
+  total_jobs=$((pending_count + processing_count))
+
+  log "Jobs in queue: $total_jobs (pending: $pending_count, processing: $processing_count)"
 
   exit 0
 fi
