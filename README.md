@@ -35,6 +35,7 @@ Specific environments for using the tools have to be installed separately. Good 
 ### Structure Analysis
 - **ResidueAtomDistance** - Distance measurements and contacts
 - **ProteinLigandContacts** - Protein-ligand contact analysis
+- **PoseDistance** - Measure ligand pose RMSD between reference and designed structures
 - **ConformationalChange** - Quantify structural changes with multiple metrics (RMSD, distances)
 - **DistanceSelector** - Distance-based residue selection
 - **PLIP** - Protein-ligand interaction profiling
