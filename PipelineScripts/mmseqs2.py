@@ -312,55 +312,15 @@ if [[ "$server_running" = false ]]; then
 
   if [ -n "$server_job_id" ]; then
     echo "MMseqs2 server submitted with job ID: $server_job_id"
-    echo "Waiting for server to start..."
-
-    # Wait for timestamp file to be created (max 5 minutes)
-    timeout=300
-    elapsed=0
-    while [ $elapsed -lt $timeout ]; do
-      if server_is_valid "$GPU_TIMESTAMP" || server_is_valid "$CPU_TIMESTAMP"; then
-        echo "Server has started and is ready"
-        sleep 10  # Give it a few more seconds to fully initialize
-        break
-      fi
-
-      echo "Waiting for server to create timestamp file..."
-      sleep 5
-      elapsed=$((elapsed + 5))
-    done
-
-    if [ $elapsed -ge $timeout ]; then
-      echo "Error: Timeout waiting for server to start"
-      # Clean up submission timestamp on failure
-      rm -f "$GPU_SUBMITTING"
-      exit 1
-    fi
+    echo "Proceeding to submit queries - they will queue until server is ready"
   else
-    echo "Error: Failed to submit server job"
+    echo "Warning: Failed to submit server job, but will attempt to submit queries anyway"
     # Clean up submission timestamp on failure
     rm -f "$GPU_SUBMITTING"
-    exit 1
   fi
 elif [[ "$server_running" = "waiting" ]]; then
-  echo "Waiting for another process to finish server submission..."
-  # Wait indefinitely for the server to start
-  while true; do
-    if server_is_valid "$GPU_TIMESTAMP" || server_is_valid "$CPU_TIMESTAMP"; then
-      echo "Server has started and is ready"
-      break
-    fi
-
-    # Check if submission timestamps are gone (indicating failure)
-    if [[ ! -f "$GPU_SUBMITTING" ]] && [[ ! -f "$CPU_SUBMITTING" ]]; then
-      echo "Submission appears to have failed, will retry..."
-      # Recursive call to try submitting ourselves
-      # This will check again and potentially submit
-      break
-    fi
-
-    echo "Still waiting for server submission to complete..."
-    sleep 5
-  done
+  echo "Another process is starting the server"
+  echo "Proceeding to submit queries - they will queue until server is ready"
 fi
 
 # Check server status
