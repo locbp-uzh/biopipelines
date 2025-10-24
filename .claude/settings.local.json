@@ -17,7 +17,17 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(ls:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(dir:*)",
+      "Bash(git checkout:*)",
+      "Bash(mkdir:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m unittest:*)",
+      "Bash(python test_mixins.py:*)",
+      "Bash(git cherry-pick:*)",
+      "Bash(git branch:*)"
     ],
     "deny": [],
     "ask": []

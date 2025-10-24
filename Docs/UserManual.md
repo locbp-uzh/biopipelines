@@ -1292,6 +1292,57 @@ contacts = pipeline.add(ProteinLigandContacts(
 
 ---
 
+### PoseDistance
+
+Measures ligand pose distance between reference holo structure and target structures. Calculates RMSD and geometric metrics to quantify how well designed structures reproduce known binding poses.
+
+**Environment**: `ProteinEnv`
+
+**Parameters**:
+- `reference`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference holo structure (e.g., XRC structure)
+- `target_structures`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Designed/predicted structures to compare
+- `ligand`: str (required) - Ligand residue name in target structures (e.g., 'LIG', 'ATP')
+- `reference_ligand`: Optional[str] = None - Ligand residue name in reference (default: same as ligand)
+- `alignment_selection`: str = "protein" - PyMOL selection for protein alignment (e.g., "chain A", "backbone")
+- `calculate_centroid`: bool = True - Calculate ligand centroid distance
+- `calculate_orientation`: bool = False - Calculate orientation angle difference
+
+**Outputs**:
+- `datasheets.analysis`:
+
+  | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | alignment_rmsd | num_ligand_atoms | alignment_selection |
+  |----|------------------|---------------------|-------------|-------------------|----------------|------------------|---------------------|
+
+**Output Columns**:
+- `ligand_rmsd`: RMSD between ligand poses after protein alignment (Å)
+- `centroid_distance`: Distance between ligand centroids (Å)
+- `alignment_rmsd`: RMSD of protein alignment (Å)
+- `num_ligand_atoms`: Number of atoms in ligand
+
+**Example**:
+```python
+# Compare designed structures to XRC reference
+xrc = pipeline.add(PDB(pdbs="4ufc", ids="reference"))
+designed = pipeline.add(Boltz2(proteins=sequences, ligands="CCO"))
+
+pose_analysis = pipeline.add(PoseDistance(
+    reference=xrc,
+    target_structures=designed,
+    ligand="LIG",
+    reference_ligand="ATP",
+    alignment_selection="chain A and backbone"
+))
+
+# Filter structures with RMSD < 2.0 Å
+good_poses = pipeline.add(Filter(
+    data=pose_analysis.datasheets.analysis,
+    pool=designed,
+    expression="ligand_rmsd < 2.0"
+))
+```
+
+---
+
 ## Data Management
 
 ### Filter
