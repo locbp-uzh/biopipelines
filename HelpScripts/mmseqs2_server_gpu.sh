@@ -221,6 +221,7 @@ recover_orphaned_jobs() {
     local max_age_seconds=1800  # 30 minutes
     local current_time=$(date +%s)
     local recovered_count=0
+    local failed_count=0
 
     log "Scanning for orphaned jobs (older than 30 minutes)..."
 
@@ -243,11 +244,14 @@ recover_orphaned_jobs() {
             # Look for the .job file in the tmp/params directory
             local job_file="$tmp_job_dir/params/${job_id}.job"
             if [[ -f "$job_file" ]]; then
-                # Move .job file back to queue
+                # Move .job file back to queue for reprocessing
                 mv "$job_file" "$JOB_QUEUE_DIR/" && log "Requeued job file: ${job_id}.job"
                 recovered_count=$((recovered_count + 1))
             else
-                log "Warning: No .job file found for orphaned job $job_id"
+                # No .job file - cannot recover, mark as failed so client stops waiting
+                log "Warning: No .job file found for orphaned job $job_id - marking as failed"
+                echo -e "FAILED\nServer died during processing and job cannot be recovered" > "$status_file"
+                failed_count=$((failed_count + 1))
             fi
 
             # Clean up the tmp directory
@@ -257,6 +261,9 @@ recover_orphaned_jobs() {
 
     if [[ $recovered_count -gt 0 ]]; then
         log "Recovered $recovered_count orphaned jobs"
+    fi
+    if [[ $failed_count -gt 0 ]]; then
+        log "Marked $failed_count unrecoverable orphaned jobs as failed"
     fi
 }
 
