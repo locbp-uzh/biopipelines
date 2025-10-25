@@ -215,13 +215,60 @@ cleanup_old_files() {
     log "Cleanup completed"
 }
 
+recover_orphaned_jobs() {
+    # Recover jobs that were picked up by a dead server
+    # If a job has been in tmp for > 30 minutes without a status file, requeue it
+    local max_age_seconds=1800  # 30 minutes
+    local current_time=$(date +%s)
+    local recovered_count=0
+
+    log "Scanning for orphaned jobs (older than 30 minutes)..."
+
+    for tmp_job_dir in "$TMP_DIR"/msa_*; do
+        [[ -d "$tmp_job_dir" ]] || continue
+
+        local job_id=$(basename "$tmp_job_dir")
+        local status_file="$RESULTS_DIR/$job_id.status"
+
+        # Skip if status file exists (job completed)
+        [[ -f "$status_file" ]] && continue
+
+        # Check age of tmp directory
+        local dir_mtime=$(stat -c %Y "$tmp_job_dir" 2>/dev/null || stat -f %m "$tmp_job_dir" 2>/dev/null || echo "0")
+        local age=$((current_time - dir_mtime))
+
+        if [[ $age -gt $max_age_seconds ]]; then
+            log "Recovering orphaned job: $job_id (age: $((age / 60)) minutes)"
+
+            # Look for the .job file in the tmp/params directory
+            local job_file="$tmp_job_dir/params/${job_id}.job"
+            if [[ -f "$job_file" ]]; then
+                # Move .job file back to queue
+                mv "$job_file" "$JOB_QUEUE_DIR/" && log "Requeued job file: ${job_id}.job"
+                recovered_count=$((recovered_count + 1))
+            else
+                log "Warning: No .job file found for orphaned job $job_id"
+            fi
+
+            # Clean up the tmp directory
+            rm -rf "$tmp_job_dir"
+        fi
+    done
+
+    if [[ $recovered_count -gt 0 ]]; then
+        log "Recovered $recovered_count orphaned jobs"
+    fi
+}
+
 # Track cleanup time
 LAST_CLEANUP=$(date +%s)
 CLEANUP_INTERVAL=3600  # Run cleanup every hour
 
-# Run cleanup at startup to remove old files from previous runs
+# Run cleanup and recovery at startup
 log "Running startup cleanup to remove old files..."
 cleanup_old_files
+log "Running startup job recovery..."
+recover_orphaned_jobs
 LAST_CLEANUP=$(date +%s)  # Reset cleanup timer after startup cleanup
 
 # Main processing loop
@@ -329,10 +376,11 @@ while true; do
     log "Cleaned up job files for $job_id"
   done
 
-  # Periodic cleanup of old files
+  # Periodic cleanup and recovery
   CURRENT_TIME=$(date +%s)
   if (( CURRENT_TIME - LAST_CLEANUP >= CLEANUP_INTERVAL )); then
     cleanup_old_files
+    recover_orphaned_jobs
     LAST_CLEANUP=$CURRENT_TIME
   fi
 

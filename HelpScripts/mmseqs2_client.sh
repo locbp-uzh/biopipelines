@@ -9,7 +9,6 @@ log() { echo "[$(timestamp)] $*"; }
 USER=${USER:-$(whoami)}
 JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/job_queue"
 RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/results"
-TIMEOUT=3600
 
 usage() {
     echo "Usage: $0 -s <sequence> [-f <fasta_file>] [-t <a3m|csv>] [-o <output_file>]"
@@ -181,9 +180,7 @@ while true; do
       exit 1
     fi
   fi
-  if (( $(date +%s) - start_time > TIMEOUT )); then
-    log "Timed out waiting for job."
-    exit 1
-  fi
+  # No timeout - wait indefinitely for server to process
+  # SLURM job timeout will handle any issues
   sleep 5
 done
