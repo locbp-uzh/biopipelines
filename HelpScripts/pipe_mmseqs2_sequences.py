@@ -339,6 +339,35 @@ def main():
         sequence_id = row['id']
         sequence = row['sequence']
 
+        # Save individual MSA file with sequence ID name
+        output_dir = os.path.dirname(args.output_msa_csv)
+        individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
+
+        # Check if MSA already exists (for retry scenarios)
+        if os.path.exists(individual_msa_file):
+            log(f"MSA already exists for {sequence_id}, skipping submission")
+
+            # Read existing MSA file to get query sequence
+            try:
+                existing_df = pd.read_csv(individual_msa_file)
+                if 'sequence' in existing_df.columns and len(existing_df) > 0:
+                    query_sequence = existing_df['sequence'].iloc[0]
+                    msa_rows = [{
+                        'id': f"{sequence_id}_msa",
+                        'sequence_id': sequence_id,
+                        'sequence': query_sequence,
+                        'msa_file': individual_msa_file
+                    }]
+                    all_msa_rows.extend(msa_rows)
+                    log(f"Reused existing MSA for {sequence_id}")
+                    continue
+                else:
+                    log(f"WARNING: Existing MSA file is malformed, will reprocess")
+                    # Fall through to reprocess
+            except Exception as e:
+                log(f"WARNING: Could not read existing MSA file: {e}, will reprocess")
+                # Fall through to reprocess
+
         log(f"Processing sequence: {sequence_id}")
 
         # Submit to server
@@ -352,10 +381,6 @@ def main():
 
         # Get mask positions for this sequence
         mask_positions = mask_data.get(sequence_id, None)
-
-        # Save individual MSA file with sequence ID name
-        output_dir = os.path.dirname(args.output_msa_csv)
-        individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
 
         # Process result based on format
         if args.output_format == 'a3m':

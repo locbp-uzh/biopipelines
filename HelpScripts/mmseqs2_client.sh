@@ -135,52 +135,79 @@ if [[ -z "$job_id" ]]; then
   job_id="msa_$(date +%s)_$$"
 fi
 
-log "Submitting MSA job: $job_id (format: $OUTPUT_FORMAT)"
-job_file="$JOB_QUEUE_DIR/$job_id.job"
+MAX_RETRIES=3
+retry_count=0
 
-# Write out all needed params
-{
-  echo "job_id=$job_id"
-  echo "fasta=$fasta_file"
-  echo "output_format=$OUTPUT_FORMAT"
-  echo "submitted=$(date '+%Y-%m-%d %H:%M:%S')"
-} > "$job_file"
-
-log "Job submitted with ID: $job_id"
-log "Waiting for results..."
-
-start_time=$(date +%s)
-status_file="$RESULTS_DIR/$job_id.status"
-
-while true; do
-  if [[ -f "$status_file" ]]; then
-    status=$(sed -n '1p' "$status_file")
-    if [[ "$status" == "SUCCESS" ]]; then
-      # pick up output_file=…
-      result_file=$(sed -n '2p' "$status_file" | cut -d'=' -f2)
-      elapsed_time=$(($(date +%s) - start_time))
-      if [[ -n "$OUTPUT_PATH" ]]; then
-        cp "$result_file" "$OUTPUT_PATH"
-        log "Saved results to: $OUTPUT_PATH (completed in ${elapsed_time}s)"
-
-        # Cleanup: delete server files after successful copy
-        rm -f "$result_file" "$status_file"
-        log "Cleaned up server files for job $job_id"
-      else
-        log "Results ready: $result_file (completed in ${elapsed_time}s)"
-        # If no output path, still cleanup status file but keep result
-        rm -f "$status_file"
-      fi
-      exit 0
-    else
-      log "Job failed:"
-      sed -n '2p' "$status_file"
-      # Cleanup failed job status
-      rm -f "$status_file"
-      exit 1
-    fi
+while [[ $retry_count -lt $MAX_RETRIES ]]; do
+  if [[ $retry_count -gt 0 ]]; then
+    log "Retry attempt $retry_count/$MAX_RETRIES"
+    # Wait a bit before retrying
+    sleep 10
   fi
-  # No timeout - wait indefinitely for server to process
-  # SLURM job timeout will handle any issues
-  sleep 5
+
+  log "Submitting MSA job: $job_id (format: $OUTPUT_FORMAT)"
+  job_file="$JOB_QUEUE_DIR/$job_id.job"
+
+  # Write out all needed params
+  {
+    echo "job_id=$job_id"
+    echo "fasta=$fasta_file"
+    echo "output_format=$OUTPUT_FORMAT"
+    echo "submitted=$(date '+%Y-%m-%d %H:%M:%S')"
+  } > "$job_file"
+
+  log "Job submitted with ID: $job_id"
+  log "Waiting for results..."
+
+  start_time=$(date +%s)
+  status_file="$RESULTS_DIR/$job_id.status"
+
+  while true; do
+    if [[ -f "$status_file" ]]; then
+      status=$(sed -n '1p' "$status_file")
+      if [[ "$status" == "SUCCESS" ]]; then
+        # pick up output_file=…
+        result_file=$(sed -n '2p' "$status_file" | cut -d'=' -f2)
+        elapsed_time=$(($(date +%s) - start_time))
+        if [[ -n "$OUTPUT_PATH" ]]; then
+          cp "$result_file" "$OUTPUT_PATH"
+          log "Saved results to: $OUTPUT_PATH (completed in ${elapsed_time}s)"
+
+          # Cleanup: delete server files after successful copy
+          rm -f "$result_file" "$status_file"
+          log "Cleaned up server files for job $job_id"
+        else
+          log "Results ready: $result_file (completed in ${elapsed_time}s)"
+          # If no output path, still cleanup status file but keep result
+          rm -f "$status_file"
+        fi
+        exit 0
+      else
+        # Job failed - check if it's a recoverable failure
+        failure_msg=$(sed -n '2p' "$status_file")
+        log "Job failed: $failure_msg"
+
+        # Cleanup failed job status
+        rm -f "$status_file"
+
+        # Check if this is a server crash recovery (recoverable)
+        if [[ "$failure_msg" =~ "Server died" ]] || [[ "$failure_msg" =~ "cannot be recovered" ]]; then
+          log "Recoverable failure detected - will retry"
+          retry_count=$((retry_count + 1))
+          break  # Break inner loop to retry
+        else
+          # Permanent failure
+          log "Permanent failure - not retrying"
+          exit 1
+        fi
+      fi
+    fi
+    # No timeout - wait indefinitely for server to process
+    # SLURM job timeout will handle any issues
+    sleep 5
+  done
 done
+
+# Exhausted retries
+log "Exhausted all $MAX_RETRIES retry attempts"
+exit 1
