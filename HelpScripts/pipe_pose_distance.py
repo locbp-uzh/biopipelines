@@ -186,9 +186,10 @@ def main():
     # Process each target structure
     results = []
     failed = []
+    total = len(target_pdbs)
 
-    for target_pdb, target_id in zip(target_pdbs, target_ids):
-        print(f"Processing {target_id}...", end=" ")
+    for idx, (target_pdb, target_id) in enumerate(zip(target_pdbs, target_ids), 1):
+        print(f"[{idx}/{total}] Processing {target_id}...", end=" ")
         try:
             result = calculate_pose_distance(
                 reference_pdb=reference_pdb,
@@ -201,7 +202,7 @@ def main():
                 calculate_orientation=calculate_orientation
             )
             results.append(result)
-            print(f"OK (RMSD: {result['ligand_rmsd']:.2f} Å)")
+            print(f"OK (RMSD: {result['ligand_rmsd']:.2f} A)")
 
         except Exception as e:
             print(f"FAILED: {e}")
