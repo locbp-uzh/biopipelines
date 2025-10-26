@@ -11,15 +11,13 @@ from typing import Dict, List, Any, Union, Optional
 
 try:
     from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
-    from .mixins import InputHandlerMixin, DatasheetNavigatorMixin, FilePathDescriptor
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
-    from mixins import InputHandlerMixin, DatasheetNavigatorMixin, FilePathDescriptor
 
 
-class PoseDistance(InputHandlerMixin, DatasheetNavigatorMixin, BaseConfig):
+class PoseDistance(BaseConfig):
     """
     Measures ligand pose distance between reference and target structures.
 
@@ -35,11 +33,6 @@ class PoseDistance(InputHandlerMixin, DatasheetNavigatorMixin, BaseConfig):
 
     TOOL_NAME = "PoseDistance"
     DEFAULT_ENV = "ProteinEnv"
-
-    # Automatic file path management with descriptors
-    results_csv = FilePathDescriptor("pose_analysis.csv")
-    config_file = FilePathDescriptor("pose_config.json")
-    pose_script = FilePathDescriptor("pipe_pose_distance.py", folder_key="HelpScripts")
 
     def __init__(self,
                  reference: Union[str, ToolOutput, StandardizedOutput],
@@ -82,6 +75,10 @@ class PoseDistance(InputHandlerMixin, DatasheetNavigatorMixin, BaseConfig):
         if hasattr(target_structures, 'config'):
             self.dependencies.append(target_structures.config)
 
+    def get_analysis_csv_path(self) -> str:
+        """Get the path for the analysis CSV file - defined once, used everywhere."""
+        return os.path.join(self.output_folder, "pose_analysis.csv")
+
     def validate_params(self):
         """Validate tool parameters."""
         if not self.ligand:
@@ -101,33 +98,59 @@ class PoseDistance(InputHandlerMixin, DatasheetNavigatorMixin, BaseConfig):
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """
-        Configure inputs using mixins - demonstrates new elegant patterns.
+        Configure inputs from previous tools.
         """
         self.folders = pipeline_folders
 
-        # ========================================================================
-        # ELEGANT INPUT HANDLING - One line with resolve_input()!
-        # ========================================================================
         # Resolve reference structure
-        reference_resolved = self.resolve_input(self.reference_input, 'structures')
-        if not reference_resolved.files:
-            raise ValueError("No reference structure found")
-        if len(reference_resolved.files) > 1:
-            raise ValueError(
-                f"Expected single reference structure, got {len(reference_resolved.files)}. "
-                f"Please provide a single PDB file."
-            )
-        self.reference_pdb = reference_resolved.files[0]
+        self.reference_pdb = None
+        if isinstance(self.reference_input, str):
+            # Direct file path
+            self.reference_pdb = self.reference_input
+        elif hasattr(self.reference_input, 'structures'):
+            # From tool output
+            if isinstance(self.reference_input.structures, list):
+                if len(self.reference_input.structures) == 0:
+                    raise ValueError("No reference structure found in tool output")
+                if len(self.reference_input.structures) > 1:
+                    raise ValueError(
+                        f"Expected single reference structure, got {len(self.reference_input.structures)}. "
+                        f"Please provide a single PDB file."
+                    )
+                self.reference_pdb = self.reference_input.structures[0]
+            else:
+                self.reference_pdb = self.reference_input.structures
+
+        if not self.reference_pdb:
+            raise ValueError("Could not resolve reference structure path")
 
         # Resolve target structures
-        target_resolved = self.resolve_input(self.target_structures_input, 'structures')
-        if not target_resolved.files:
-            raise ValueError("No target structures found")
-        self.target_pdbs = target_resolved.files
-        self.target_ids = target_resolved.ids
+        self.target_pdbs = []
+        self.target_ids = []
 
-        # Store datasheets if available for merging results
-        self.target_datasheets = target_resolved.datasheets
+        if isinstance(self.target_structures_input, str):
+            # Direct file path
+            self.target_pdbs = [self.target_structures_input]
+            self.target_ids = [os.path.splitext(os.path.basename(self.target_structures_input))[0]]
+        elif isinstance(self.target_structures_input, list):
+            # List of file paths
+            self.target_pdbs = self.target_structures_input
+            self.target_ids = [os.path.splitext(os.path.basename(p))[0] for p in self.target_structures_input]
+        elif hasattr(self.target_structures_input, 'structures'):
+            # From tool output
+            if isinstance(self.target_structures_input.structures, list):
+                self.target_pdbs = self.target_structures_input.structures
+            else:
+                self.target_pdbs = [self.target_structures_input.structures]
+
+            # Get IDs if available
+            if hasattr(self.target_structures_input, 'structure_ids'):
+                self.target_ids = self.target_structures_input.structure_ids
+            else:
+                self.target_ids = [os.path.splitext(os.path.basename(p))[0] for p in self.target_pdbs]
+
+        if not self.target_pdbs:
+            raise ValueError("Could not resolve target structure paths")
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -146,7 +169,14 @@ class PoseDistance(InputHandlerMixin, DatasheetNavigatorMixin, BaseConfig):
 
     def generate_script(self, script_path: str) -> str:
         """Generate PoseDistance execution script."""
+        output_folder = self.output_folder
+        os.makedirs(output_folder, exist_ok=True)
+
+        # Output CSV path - defined once in get_analysis_csv_path()
+        analysis_csv = self.get_analysis_csv_path()
+
         # Create config for helper script
+        config_file = os.path.join(output_folder, "pose_config.json")
         config_data = {
             "reference_pdb": self.reference_pdb,
             "reference_ligand": self.reference_ligand,
@@ -156,12 +186,11 @@ class PoseDistance(InputHandlerMixin, DatasheetNavigatorMixin, BaseConfig):
             "alignment_selection": self.alignment_selection,
             "calculate_centroid": self.calculate_centroid,
             "calculate_orientation": self.calculate_orientation,
-            "output_csv": self.results_csv
+            "output_csv": analysis_csv
         }
 
         import json
-        os.makedirs(self.output_folder, exist_ok=True)
-        with open(self.config_file, 'w') as f:
+        with open(config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         # Generate bash script
@@ -171,24 +200,21 @@ class PoseDistance(InputHandlerMixin, DatasheetNavigatorMixin, BaseConfig):
 
 {self.generate_completion_check_header()}
 
-echo "=========================================="
-echo "Pose Distance Analysis"
-echo "=========================================="
+echo "Running pose distance analysis"
 echo "Reference: {os.path.basename(self.reference_pdb)}"
 echo "Reference ligand: {self.reference_ligand}"
 echo "Target structures: {len(self.target_pdbs)}"
 echo "Target ligand: {self.ligand}"
 echo "Alignment: {self.alignment_selection}"
-echo "Output: {self.results_csv}"
-echo "=========================================="
+echo "Output: {analysis_csv}"
 
 # Run pose distance analysis
-python "{self.pose_script}" \\
-  --config "{self.config_file}"
+python "{os.path.join(self.folders['HelpScripts'], 'pipe_pose_distance.py')}" \\
+  --config "{config_file}"
 
 if [ $? -eq 0 ]; then
     echo "Pose analysis completed successfully"
-    echo "Results written to: {self.results_csv}"
+    echo "Results written to: {analysis_csv}"
 else
     echo "Error: Pose analysis failed"
     exit 1
@@ -200,6 +226,8 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files."""
+        analysis_csv = self.get_analysis_csv_path()
+
         # Determine output columns based on metrics
         columns = [
             "id",
@@ -223,7 +251,7 @@ fi
         datasheets = {
             "analysis": DatasheetInfo(
                 name="analysis",
-                path=self.results_csv,
+                path=analysis_csv,
                 columns=columns,
                 description=f"Ligand pose distance analysis comparing {self.ligand} poses to reference",
                 count=len(self.target_pdbs) if hasattr(self, 'target_pdbs') else 0
@@ -233,6 +261,8 @@ fi
         return {
             "structures": [],
             "structure_ids": [],
+            "compounds": [],
+            "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
             "datasheets": datasheets,

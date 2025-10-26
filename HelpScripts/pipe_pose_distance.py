@@ -177,11 +177,11 @@ def main():
     calculate_orientation = config['calculate_orientation']
     output_csv = config['output_csv']
 
-    print(f"\nAnalyzing pose distances for {len(target_pdbs)} structures...")
+    print(f"Analyzing pose distances for {len(target_pdbs)} structures")
     print(f"Reference: {os.path.basename(reference_pdb)}")
     print(f"Reference ligand: {reference_ligand}")
     print(f"Target ligand: {ligand}")
-    print(f"Alignment: {alignment_selection}\n")
+    print(f"Alignment: {alignment_selection}")
 
     # Process each target structure
     results = []
@@ -211,31 +211,29 @@ def main():
     if results:
         df = pd.DataFrame(results)
         df.to_csv(output_csv, index=False)
-        print(f"\n✓ Successfully analyzed {len(results)} structures")
-        print(f"  Results saved to: {output_csv}")
+        print(f"Successfully analyzed {len(results)} structures")
+        print(f"Results saved to: {output_csv}")
 
         # Print summary statistics
-        print(f"\n  Ligand RMSD statistics:")
-        print(f"    Mean:   {df['ligand_rmsd'].mean():.3f} Å")
-        print(f"    Median: {df['ligand_rmsd'].median():.3f} Å")
-        print(f"    Min:    {df['ligand_rmsd'].min():.3f} Å")
-        print(f"    Max:    {df['ligand_rmsd'].max():.3f} Å")
+        print(f"Ligand RMSD statistics:")
+        print(f"  Mean:   {df['ligand_rmsd'].mean():.3f} A")
+        print(f"  Median: {df['ligand_rmsd'].median():.3f} A")
+        print(f"  Min:    {df['ligand_rmsd'].min():.3f} A")
+        print(f"  Max:    {df['ligand_rmsd'].max():.3f} A")
 
         if calculate_centroid and 'centroid_distance' in df.columns:
-            print(f"\n  Centroid distance statistics:")
-            print(f"    Mean:   {df['centroid_distance'].mean():.3f} Å")
-            print(f"    Median: {df['centroid_distance'].median():.3f} Å")
+            print(f"Centroid distance statistics:")
+            print(f"  Mean:   {df['centroid_distance'].mean():.3f} A")
+            print(f"  Median: {df['centroid_distance'].median():.3f} A")
 
     else:
-        print("\n✗ All structures failed analysis")
+        print("All structures failed analysis")
         sys.exit(1)
 
     if failed:
-        print(f"\n⚠ {len(failed)} structures failed:")
+        print(f"{len(failed)} structures failed:")
         for item in failed:
-            print(f"  - {item['id']}: {item['error']}")
-
-    print()
+            print(f"  {item['id']}: {item['error']}")
 
 
 if __name__ == "__main__":
