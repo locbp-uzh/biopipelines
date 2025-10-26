@@ -13,13 +13,14 @@ import sys
 import pandas as pd
 
 
-def calculate_pose_distance(reference_pdb, reference_ligand, target_pdb, target_id,
+def calculate_pose_distance(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
                             ligand, alignment_selection, calculate_centroid,
                             calculate_orientation):
     """
     Calculate pose distance metrics for a single target structure.
 
     Args:
+        cmd: PyMOL command object (already initialized)
         reference_pdb: Path to reference structure
         reference_ligand: Ligand residue name in reference
         target_pdb: Path to target structure
@@ -32,18 +33,6 @@ def calculate_pose_distance(reference_pdb, reference_ligand, target_pdb, target_
     Returns:
         Dictionary with pose distance metrics
     """
-    try:
-        import pymol
-        from pymol import cmd
-    except ImportError:
-        raise ImportError(
-            "PyMOL is required for PoseDistance. "
-            "Install with: conda install -c conda-forge pymol-open-source"
-        )
-
-    # Initialize PyMOL in quiet mode
-    pymol.finish_launching(['pymol', '-cq'])
-
     try:
         # Load structures
         cmd.load(reference_pdb, 'reference')
@@ -152,9 +141,8 @@ def calculate_pose_distance(reference_pdb, reference_ligand, target_pdb, target_
         return result
 
     finally:
-        # Clean up PyMOL session
+        # Clean up loaded structures for next iteration
         cmd.delete('all')
-        cmd.quit()
 
 
 def main():
@@ -177,6 +165,19 @@ def main():
     calculate_orientation = config['calculate_orientation']
     output_csv = config['output_csv']
 
+    # Initialize PyMOL once for all structures
+    try:
+        import pymol
+        from pymol import cmd
+    except ImportError:
+        print("Error: PyMOL is required for PoseDistance")
+        print("Install with: conda install -c conda-forge pymol-open-source")
+        sys.exit(1)
+
+    print("Initializing PyMOL...")
+    pymol.finish_launching(['pymol', '-cq'])
+    print("PyMOL initialized")
+
     print(f"Analyzing pose distances for {len(target_pdbs)} structures")
     print(f"Reference: {os.path.basename(reference_pdb)}")
     print(f"Reference ligand: {reference_ligand}")
@@ -192,6 +193,7 @@ def main():
         print(f"[{idx}/{total}] Processing {target_id}...", end=" ")
         try:
             result = calculate_pose_distance(
+                cmd=cmd,
                 reference_pdb=reference_pdb,
                 reference_ligand=reference_ligand,
                 target_pdb=target_pdb,
@@ -235,6 +237,10 @@ def main():
         print(f"{len(failed)} structures failed:")
         for item in failed:
             print(f"  {item['id']}: {item['error']}")
+
+    # Clean up PyMOL at the very end
+    print("Shutting down PyMOL...")
+    cmd.quit()
 
 
 if __name__ == "__main__":
