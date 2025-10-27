@@ -53,25 +53,9 @@ def calculate_pose_distance(cmd, reference_pdb, reference_ligand, target_pdb, ta
 
         # Align proteins (not ligands) first
         try:
-            # Align protein backbones
-            ref_selection = f'reference and {alignment_selection}'
-            tgt_selection = f'target and {alignment_selection}'
-
-            # Check selections are valid
-            ref_count = cmd.count_atoms(ref_selection)
-            tgt_count = cmd.count_atoms(tgt_selection)
-
-            if ref_count == 0:
-                raise ValueError(
-                    f"Alignment selection '{alignment_selection}' matches no atoms in reference"
-                )
-            if tgt_count == 0:
-                raise ValueError(
-                    f"Alignment selection '{alignment_selection}' matches no atoms in target"
-                )
-
-            # Perform alignment
-            alignment_result = cmd.align(tgt_selection, ref_selection)
+            # Align entire structures by their object names
+            # This is more robust than using selection keywords like "protein"
+            alignment_result = cmd.align('target', 'reference')
             alignment_rmsd = alignment_result[0]  # RMSD after alignment
 
         except Exception as e:
@@ -99,7 +83,7 @@ def calculate_pose_distance(cmd, reference_pdb, reference_ligand, target_pdb, ta
             'ligand_rmsd': round(ligand_rmsd, 3),
             'alignment_rmsd': round(alignment_rmsd, 3),
             'num_ligand_atoms': num_ligand_atoms,
-            'alignment_selection': alignment_selection
+            'alignment_method': 'whole_structure'
         }
 
         # Calculate centroid distance if requested

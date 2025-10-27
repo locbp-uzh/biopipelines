@@ -245,7 +245,7 @@ fi
         columns.extend([
             "alignment_rmsd",
             "num_ligand_atoms",
-            "alignment_selection"
+            "alignment_method"
         ])
 
         datasheets = {

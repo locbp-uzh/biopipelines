@@ -416,10 +416,60 @@ class LoadOutput(BaseConfig):
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure LoadOutput - no inputs needed since we're loading existing results."""
         self.folders = pipeline_folders
-        
+
         # No input configuration needed - we're loading pre-existing results
         pass
-    
+
+    def _exclude_missing_ids(self, output_structure: Dict[str, Any]) -> set:
+        """
+        Check for 'missing' datasheet and return set of IDs to exclude.
+
+        This handles cases where Filter tool has created a missing.csv listing
+        filtered-out IDs that don't have corresponding files.
+
+        Args:
+            output_structure: The output structure to check
+
+        Returns:
+            Set of IDs that should be excluded (empty set if no missing datasheet)
+        """
+        import pandas as pd
+
+        # Check if there's a 'missing' datasheet
+        if 'datasheets' not in output_structure:
+            return set()
+
+        datasheets = output_structure['datasheets']
+        if not isinstance(datasheets, dict) or 'missing' not in datasheets:
+            return set()
+
+        # Get the missing datasheet path
+        missing_info = datasheets['missing']
+        if isinstance(missing_info, dict) and 'path' in missing_info:
+            missing_path = missing_info['path']
+        elif isinstance(missing_info, str):
+            missing_path = missing_info
+        else:
+            return set()
+
+        # Read the missing.csv file
+        if not os.path.exists(missing_path):
+            print(f"Warning: missing datasheet referenced but file not found: {missing_path}")
+            return set()
+
+        try:
+            missing_df = pd.read_csv(missing_path)
+            if 'id' in missing_df.columns:
+                missing_ids = set(missing_df['id'].tolist())
+                print(f"LoadOutput: Excluding {len(missing_ids)} IDs from missing.csv")
+                return missing_ids
+            else:
+                print(f"Warning: missing.csv does not have 'id' column")
+                return set()
+        except Exception as e:
+            print(f"Warning: Could not read missing.csv: {e}")
+            return set()
+
     def get_output_files(self) -> Dict[str, Any]:
         """
         Return the loaded output structure, optionally filtered.
@@ -440,6 +490,50 @@ class LoadOutput(BaseConfig):
             # correct from _apply_filter_to_output_structure, and the filtered CSV files
             # don't exist yet at pipeline runtime (they're created at SLURM runtime)
         else:
+            # Check for missing datasheet and exclude those IDs
+            missing_ids = self._exclude_missing_ids(output_structure)
+            if missing_ids:
+                # Filter out missing IDs from structures, compounds, sequences
+                if 'structures' in output_structure and 'structure_ids' in output_structure:
+                    structures = output_structure['structures']
+                    structure_ids = output_structure['structure_ids']
+                    if len(structures) == len(structure_ids):
+                        filtered_structures = []
+                        filtered_structure_ids = []
+                        for struct, struct_id in zip(structures, structure_ids):
+                            if struct_id not in missing_ids:
+                                filtered_structures.append(struct)
+                                filtered_structure_ids.append(struct_id)
+                        output_structure['structures'] = filtered_structures
+                        output_structure['structure_ids'] = filtered_structure_ids
+                        print(f"  - Filtered structures: {len(filtered_structures)}/{len(structures)} kept")
+
+                if 'compounds' in output_structure and 'compound_ids' in output_structure:
+                    compounds = output_structure['compounds']
+                    compound_ids = output_structure['compound_ids']
+                    if len(compounds) == len(compound_ids):
+                        filtered_compounds = []
+                        filtered_compound_ids = []
+                        for comp, comp_id in zip(compounds, compound_ids):
+                            if comp_id not in missing_ids:
+                                filtered_compounds.append(comp)
+                                filtered_compound_ids.append(comp_id)
+                        output_structure['compounds'] = filtered_compounds
+                        output_structure['compound_ids'] = filtered_compound_ids
+
+                if 'sequences' in output_structure and 'sequence_ids' in output_structure:
+                    sequences = output_structure['sequences']
+                    sequence_ids = output_structure['sequence_ids']
+                    if len(sequences) == len(sequence_ids):
+                        filtered_sequences = []
+                        filtered_sequence_ids = []
+                        for seq, seq_id in zip(sequences, sequence_ids):
+                            if seq_id not in missing_ids:
+                                filtered_sequences.append(seq)
+                                filtered_sequence_ids.append(seq_id)
+                        output_structure['sequences'] = filtered_sequences
+                        output_structure['sequence_ids'] = filtered_sequence_ids
+
             # Update compound_ids with actual IDs from CSV files (only when not filtering)
             self._update_ids_from_csv(output_structure)
 
