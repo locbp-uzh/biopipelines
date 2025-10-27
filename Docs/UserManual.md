@@ -41,6 +41,7 @@
   - [Structure Generation](#structure-generation)
     - [RFdiffusion](#rfdiffusion)
     - [RFdiffusionAllAtom](#rfdiffusionallatom)
+    - [BoltzGen](#boltzgen)
   - [Sequence Design](#sequence-design)
     - [ProteinMPNN](#proteinmpnn)
     - [LigandMPNN](#ligandmpnn)
@@ -431,6 +432,118 @@ rfdaa = pipeline.add(RFdiffusionAllAtom(
     ligand='LIG',
     contigs='10-20,A6-140',
     num_designs=5
+))
+```
+
+---
+
+### BoltzGen
+
+Generates protein binders (proteins, peptides, or nanobodies) targeting specified molecules using an end-to-end pipeline that combines diffusion-based backbone generation, inverse folding, structure prediction, and multi-metric filtering.
+
+**References**: https://github.com/HannesStark/boltzgen
+
+**Installation**: Install BoltzGen via pip with Python ≥3.11:
+```bash
+conda create -n boltzgen python=3.11
+conda activate boltzgen
+pip install boltzgen
+```
+
+Models (~6GB) download automatically to `~/.cache` on first run, or specify custom cache with `cache_dir` parameter.
+
+**Parameters**:
+- `design_spec`: Union[str, Dict] (required) - YAML configuration string/dict or path to YAML file defining:
+  - Target entities (proteins, ligands from .cif/.pdb files)
+  - Binder specification (sequence ranges like "80..140")
+  - Binding site constraints (binding_types, not_binding)
+  - Secondary structure specifications (helix/sheet/loop)
+  - Structural constraints (disulfide bonds, covalent connections)
+- `protocol`: str = "protein-anything" - Design protocol:
+  - "protein-anything": General protein binder design
+  - "peptide-anything": Peptide binder design
+  - "protein-small_molecule": Protein-small molecule binder design
+  - "nanobody-anything": Nanobody design
+- `num_designs`: int = 10000 - Total designs to generate
+- `budget`: int = 100 - Final number after diversity filtering
+- `design_checkpoints`: Optional[List[str]] = None - Model checkpoint paths
+- `step_scale`: Optional[float] = None - Diffusion step scale
+- `noise_scale`: Optional[float] = None - Diffusion noise scale
+- `diffusion_batch_size`: Optional[int] = None - Samples per trunk run (auto if None)
+- `inverse_fold_num_sequences`: int = 1 - Sequences per backbone
+- `skip_inverse_folding`: bool = False - Skip sequence redesign
+- `alpha`: float = 0.5 - Quality/diversity trade-off (0.0=quality only, 1.0=diversity only)
+- `filter_biased`: bool = True - Remove amino acid composition outliers
+- `additional_filters`: Optional[List[str]] = None - Hard threshold expressions (e.g., ["design_ALA>0.3"])
+- `metrics_override`: Optional[Dict[str, float]] = None - Per-metric ranking weights
+- `devices`: Optional[int] = None - Number of GPUs (auto-detect if None)
+- `reuse`: bool = False - Resume interrupted runs
+- `steps`: Optional[List[str]] = None - Run only specific pipeline steps
+- `cache_dir`: Optional[str] = None - Model download location
+
+**Outputs**:
+- `structures`: Final designed structure files (in `final_ranked_designs/final_<budget>_designs/`)
+- `datasheets.all_metrics`:
+
+  | id | RMSD | hydrogen_bonds | packing_quality | interface_contacts | binding_energy | design_plddt |
+  |----|------|----------------|-----------------|-------------------|----------------|--------------|
+
+- `datasheets.final_metrics`:
+
+  | id | RMSD | hydrogen_bonds | packing_quality | interface_contacts | binding_energy | design_plddt | rank |
+  |----|------|----------------|-----------------|-------------------|----------------|--------------|------|
+
+- `datasheets.aggregate_metrics`:
+
+  | metric | mean | std | min | max |
+  |--------|------|-----|-----|-----|
+
+- `datasheets.per_target_metrics`:
+
+  | target_id | num_designs | avg_rmsd | avg_plddt |
+  |-----------|-------------|----------|-----------|
+
+**Important Notes**:
+- **Residue indexing**: All residue indices start at 1 and use canonical mmcif `label_asym_id`, not `auth_asym_id`
+- **Sequence specification**: Use ranges like "80..140" for random length, "15..20AAAA" for random prefix + fixed tail
+- **Output structure**: Pipeline generates intermediate designs, inverse-folded structures, and final ranked designs with comprehensive metrics
+
+**Example**:
+```python
+# YAML design specification
+design_yaml = """
+entities:
+  - protein:
+      id: C
+      sequence: 80..140
+  - file:
+      path: target.cif
+      include:
+        - chain:
+            id: A
+"""
+
+boltzgen = pipeline.add(BoltzGen(
+    design_spec=design_yaml,
+    protocol="protein-anything",
+    num_designs=10000,
+    budget=100,
+    alpha=0.5
+))
+
+# Access final designs
+best_designs = boltzgen.datasheets.final_metrics
+```
+
+**Example with File**:
+```python
+# Using external YAML file
+boltzgen = pipeline.add(BoltzGen(
+    design_spec="designs/my_binder.yaml",
+    protocol="peptide-anything",
+    num_designs=5000,
+    budget=50,
+    additional_filters=["design_ALA<0.3", "filter_rmsd_design<2.5"]
 ))
 ```
 

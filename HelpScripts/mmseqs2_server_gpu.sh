@@ -31,13 +31,12 @@ MAX_SEQS=10000    # limit homologs per query
 
 mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$GPU_TMP_DIR"
 
-# Logging setup
-LOG_FILE="$RESULTS_DIR/server.log"
+# Logging setup - no log file, just stdout (goes to slurm.out)
 PID_FILE="$RESULTS_DIR/server_gpu.pid"
 
-# Logging function (defined early so it can be used everywhere)
+# Logging function (output to stdout only)
 log() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $*"
 }
 
 check_mmseqs_installation() {
@@ -113,8 +112,7 @@ convert_to_a3m() {
 
     /data/$USER/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
         --msa-format-mode 5 \
-        --threads "$OMP_NUM_THREADS" \
-        2>&1 | tee -a "$LOG_FILE"
+        --threads "$OMP_NUM_THREADS"
 
     # Dropping the last byte which is a null character and makes boltz crash
     log "Removing last byte from $scratch_a3m"
@@ -195,14 +193,33 @@ cleanup_old_files() {
     # Delete files older than 24 hours
     log "Running cleanup of files older than 24 hours..."
 
-    # Clean old result files (.a3m, .csv, .status)
-    find "$RESULTS_DIR" -type f \( -name "*.a3m" -o -name "*.csv" -o -name "*.status" \) -mtime +1 -delete 2>/dev/null || true
+    # Clean old result files (.a3m, .csv, .status) - these are copied to client paths anyway
+    local status_count=$(find "$RESULTS_DIR" -type f -name "*.status" -mtime +1 -delete -print 2>/dev/null | wc -l)
+    local a3m_count=$(find "$RESULTS_DIR" -type f -name "*.a3m" -mtime +1 -delete -print 2>/dev/null | wc -l)
+    local csv_count=$(find "$RESULTS_DIR" -type f -name "*.csv" -mtime +1 -delete -print 2>/dev/null | wc -l)
 
-    # Clean old temporary directories
-    find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
+    if [ "$status_count" -gt 0 ]; then
+        log "Removed $status_count old status files"
+    fi
+    if [ "$a3m_count" -gt 0 ]; then
+        log "Removed $a3m_count old a3m files"
+    fi
+    if [ "$csv_count" -gt 0 ]; then
+        log "Removed $csv_count old csv files"
+    fi
+
+    # Clean old temporary directories (these accumulate and should be deleted)
+    local tmp_dir_count=$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime +1 -print 2>/dev/null | wc -l)
+    if [ "$tmp_dir_count" -gt 0 ]; then
+        find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
+        log "Removed $tmp_dir_count old tmp directories"
+    fi
 
     # Clean old FASTA files in queue (orphaned submissions)
-    find "$JOB_QUEUE_DIR" -type f -name "*.fasta" -mtime +1 -delete 2>/dev/null || true
+    local fasta_count=$(find "$JOB_QUEUE_DIR" -type f -name "*.fasta" -mtime +1 -delete -print 2>/dev/null | wc -l)
+    if [ "$fasta_count" -gt 0 ]; then
+        log "Removed $fasta_count old FASTA files"
+    fi
 
     # Clean orphaned .job files (older than 24 hours, indicating stale/failed submissions)
     local orphaned_count=$(find "$JOB_QUEUE_DIR" -type f -name "*.job" -mtime +1 -delete -print 2>/dev/null | wc -l)
@@ -315,8 +332,7 @@ while true; do
     cp "$fasta" "$tmp/query.fasta"
     query_db="$tmp/queryDB"
     log "Creating queryDB"
-    /data/$USER/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db" \
-     2>&1 | tee -a "$LOG_FILE"
+    /data/$USER/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
 
     # Result database (not m8 format)
     result_db="$tmp/resultDB"
