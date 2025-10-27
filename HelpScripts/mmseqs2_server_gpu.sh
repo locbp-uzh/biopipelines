@@ -157,18 +157,49 @@ fi
 
 # Wait until gpuserver has actually loaded the DB into GPU memory
 log "Waiting for gpuserver to finish preloading DB into GPU memory"
+log "Database should load to ~9-10GB of GPU memory"
+
+# Wait for GPU memory to actually increase (database loading)
+# Timeout after 10 minutes
+max_wait_seconds=600
+wait_start=$(date +%s)
 prev_mem=-1
+db_loaded=false
+
 while true; do
   curr_mem=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-  if [[ "$curr_mem" -eq "$prev_mem" ]]; then
-    log "GPU memory stabilized at ${curr_mem} MiB — assuming preload is done"
+  current_time=$(date +%s)
+  elapsed=$((current_time - wait_start))
+
+  # Check if database is loaded (GPU memory should be ~9000+ MiB)
+  if [[ "$curr_mem" -gt 9000 ]]; then
+    log "GPU memory at ${curr_mem} MiB - database loaded successfully"
+    db_loaded=true
     break
-  else
-    log "GPU memory at ${curr_mem} MiB (loading…)"
-    prev_mem=$curr_mem
-    sleep 5
   fi
+
+  # Check timeout
+  if [[ $elapsed -gt $max_wait_seconds ]]; then
+    log "WARNING: Timeout waiting for database to load after ${max_wait_seconds}s"
+    log "GPU memory only at ${curr_mem} MiB (expected >9000 MiB)"
+    log "Proceeding anyway, but searches may be slow or fail"
+    break
+  fi
+
+  # Log progress
+  if [[ "$curr_mem" -ne "$prev_mem" ]]; then
+    log "GPU memory at ${curr_mem} MiB (loading... ${elapsed}s elapsed)"
+    prev_mem=$curr_mem
+  fi
+
+  sleep 5
 done
+
+if [[ "$db_loaded" == "true" ]]; then
+  log "GPU server initialization complete and ready to process jobs"
+else
+  log "GPU server may not be fully initialized"
+fi
 
 # Cleanup on exit
 cleanup() {
@@ -186,8 +217,6 @@ cleanup() {
   exit 0
 }
 trap cleanup SIGINT SIGTERM
-
-log "Entering job processing loop"
 
 cleanup_old_files() {
     # Delete files older than 24 hours
@@ -286,12 +315,14 @@ recover_orphaned_jobs() {
 LAST_CLEANUP=$(date +%s)
 CLEANUP_INTERVAL=3600  # Run cleanup every hour
 
-# Run cleanup and recovery at startup
+# Run cleanup and recovery at startup (AFTER gpuserver is fully initialized)
 log "Running startup cleanup to remove old files..."
 cleanup_old_files
 log "Running startup job recovery..."
 recover_orphaned_jobs
 LAST_CLEANUP=$(date +%s)  # Reset cleanup timer after startup cleanup
+
+log "Entering job processing loop"
 
 # Main processing loop
 while true; do
