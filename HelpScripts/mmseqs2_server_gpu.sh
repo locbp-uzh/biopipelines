@@ -98,8 +98,6 @@ export CUDA_CACHE_DISABLE=0
 
 # Check available memory
 log "Memory settings: MMSEQS_MAX_MEMORY=$MMSEQS_MAX_MEMORY, OMP_NUM_THREADS=$OMP_NUM_THREADS"
-log "GPU Memory status:"
-nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits | log
 
 convert_to_a3m() {
     local result_db=$1
@@ -296,11 +294,12 @@ while true; do
     job_file_path="$tmp/params/$fname"
 
     # Parse params
-    output_format="a3m"; fasta=""
+    output_format="a3m"; fasta=""; output_path=""
     while IFS='=' read -r key val; do
       case $key in
         fasta)         fasta="$val"         ;;
         output_format) output_format="$val" ;;
+        output_path)   output_path="$val"   ;;
       esac
     done < "$tmp/params/$(basename "$job_meta")"
 
@@ -359,15 +358,37 @@ while true; do
     # Convert output based on format
     case $output_format in
       a3m)
-        echo -e "SUCCESS\noutput_file=$out_prefix.a3m" > "$RESULTS_DIR/$job_id.status"
+        if [[ -n "$output_path" ]]; then
+          # Copy to client-specified path
+          mkdir -p "$(dirname "$output_path")"
+          cp "$out_prefix.a3m" "$output_path"
+          log "Copied result to client path: $output_path"
+          # Cleanup server result file
+          rm -f "$out_prefix.a3m"
+          echo "SUCCESS" > "$RESULTS_DIR/$job_id.status"
+        else
+          # Legacy mode: keep result in server location
+          echo -e "SUCCESS\noutput_file=$out_prefix.a3m" > "$RESULTS_DIR/$job_id.status"
+        fi
         ;;
       csv)
         log "Converting A3M to CSV format"
         convert_a3m_to_csv "$out_prefix.a3m" "$out_prefix.csv"
-        echo -e "SUCCESS\noutput_file=$out_prefix.csv" > "$RESULTS_DIR/$job_id.status"
-        # Delete intermediate A3M file since client only needs CSV
-        rm -f "$out_prefix.a3m"
-        log "Deleted intermediate A3M file"
+        if [[ -n "$output_path" ]]; then
+          # Copy to client-specified path
+          mkdir -p "$(dirname "$output_path")"
+          cp "$out_prefix.csv" "$output_path"
+          log "Copied result to client path: $output_path"
+          # Cleanup server result files
+          rm -f "$out_prefix.a3m" "$out_prefix.csv"
+          echo "SUCCESS" > "$RESULTS_DIR/$job_id.status"
+        else
+          # Legacy mode: keep result in server location
+          echo -e "SUCCESS\noutput_file=$out_prefix.csv" > "$RESULTS_DIR/$job_id.status"
+          # Delete intermediate A3M file since client only needs CSV
+          rm -f "$out_prefix.a3m"
+          log "Deleted intermediate A3M file"
+        fi
         ;;
       *)
         log "Unknown format $output_format"
@@ -377,7 +398,7 @@ while true; do
 
     log "Job $job_id completed successfully"
 
-    # Cleanup: delete job file and FASTA input (keep results and tmp for debugging)
+    # Cleanup: delete job file and FASTA input
     rm -f "$job_file_path"
     [[ -f "$fasta" ]] && rm -f "$fasta"
     log "Cleaned up job files for $job_id"

@@ -110,22 +110,23 @@ def apply_mask_to_msa(msa_sequences, mask_positions):
 
     return masked_sequences
 
-def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv"):
-    """Submit a single sequence to MMseqs2 server and return the result file path."""
-    # Create temporary output file
-    with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{output_format}', delete=False) as temp_file:
-        temp_output = temp_file.name
-
+def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None):
+    """Submit a single sequence to MMseqs2 server with specified output path."""
     try:
-        # Submit to MMseqs2 server
+        # Build command
         cmd = [
             client_script,
             "--sequence", sequence,
-            "--type", output_format,
-            "--output", temp_output
+            "--type", output_format
         ]
 
-        log(f"Submitting sequence {sequence_id} to MMseqs2 server")
+        # Add output path if specified
+        if output_path:
+            cmd.extend(["--output", output_path])
+            log(f"Submitting sequence {sequence_id} to MMseqs2 server (output: {output_path})")
+        else:
+            log(f"Submitting sequence {sequence_id} to MMseqs2 server")
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
 
         if result.returncode != 0:
@@ -134,11 +135,11 @@ def submit_sequence_to_server(sequence, sequence_id, client_script, output_forma
             log(f"STDERR: {result.stderr}")
             return None
 
-        if not os.path.exists(temp_output):
-            log(f"ERROR: Output file not created for sequence {sequence_id}")
+        if output_path and not os.path.exists(output_path):
+            log(f"ERROR: Output file not created at {output_path} for sequence {sequence_id}")
             return None
 
-        return temp_output
+        return output_path if output_path else None
 
     except subprocess.TimeoutExpired:
         log(f"ERROR: Timeout waiting for sequence {sequence_id}")
@@ -370,33 +371,51 @@ def main():
 
         log(f"Processing sequence: {sequence_id}")
 
-        # Submit to server
-        result_file = submit_sequence_to_server(
-            sequence, sequence_id, args.client_script, args.output_format
-        )
-
-        if result_file is None:
-            log(f"WARNING: Skipping sequence {sequence_id} due to server error")
-            continue
-
         # Get mask positions for this sequence
         mask_positions = mask_data.get(sequence_id, None)
 
-        # Process result based on format
-        if args.output_format == 'a3m':
-            # For A3M: convert to CSV format with optional masking
-            msa_rows = convert_a3m_to_csv_format(result_file, sequence_id, individual_msa_file, mask_positions)
-        else:  # csv
-            # For CSV: process with optional masking
-            msa_rows = process_csv_output(result_file, sequence_id, individual_msa_file, mask_positions)
+        # If masking is needed, use temporary location; otherwise use final location
+        if mask_positions:
+            # Server writes to temp, we apply masking and save to final location
+            with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{args.output_format}', delete=False) as temp_file:
+                temp_output = temp_file.name
+
+            result_file = submit_sequence_to_server(
+                sequence, sequence_id, args.client_script, args.output_format, temp_output
+            )
+
+            if result_file is None:
+                log(f"WARNING: Skipping sequence {sequence_id} due to server error")
+                continue
+
+            # Process result with masking and save to final location
+            if args.output_format == 'a3m':
+                msa_rows = convert_a3m_to_csv_format(result_file, sequence_id, individual_msa_file, mask_positions)
+            else:  # csv
+                msa_rows = process_csv_output(result_file, sequence_id, individual_msa_file, mask_positions)
+
+            # Clean up temporary file
+            try:
+                os.remove(result_file)
+            except:
+                pass
+        else:
+            # No masking - server writes directly to final location
+            result_file = submit_sequence_to_server(
+                sequence, sequence_id, args.client_script, args.output_format, individual_msa_file
+            )
+
+            if result_file is None:
+                log(f"WARNING: Skipping sequence {sequence_id} due to server error")
+                continue
+
+            # Process result to create summary rows (no masking needed)
+            if args.output_format == 'a3m':
+                msa_rows = convert_a3m_to_csv_format(individual_msa_file, sequence_id, individual_msa_file, None)
+            else:  # csv
+                msa_rows = process_csv_output(individual_msa_file, sequence_id, individual_msa_file, None)
 
         all_msa_rows.extend(msa_rows)
-
-        # Clean up temporary file
-        try:
-            os.remove(result_file)
-        except:
-            pass
 
         log(f"Completed sequence {sequence_id}: {len(msa_rows)} MSA entries")
 

@@ -153,6 +153,7 @@ while [[ $retry_count -lt $MAX_RETRIES ]]; do
     echo "job_id=$job_id"
     echo "fasta=$fasta_file"
     echo "output_format=$OUTPUT_FORMAT"
+    echo "output_path=$OUTPUT_PATH"
     echo "submitted=$(date '+%Y-%m-%d %H:%M:%S')"
   } > "$job_file"
 
@@ -166,19 +167,19 @@ while [[ $retry_count -lt $MAX_RETRIES ]]; do
     if [[ -f "$status_file" ]]; then
       status=$(sed -n '1p' "$status_file")
       if [[ "$status" == "SUCCESS" ]]; then
-        # pick up output_file=…
-        result_file=$(sed -n '2p' "$status_file" | cut -d'=' -f2)
         elapsed_time=$(($(date +%s) - start_time))
         if [[ -n "$OUTPUT_PATH" ]]; then
-          cp "$result_file" "$OUTPUT_PATH"
-          log "Saved results to: $OUTPUT_PATH (completed in ${elapsed_time}s)"
+          # Server already copied the file to OUTPUT_PATH
+          log "Results saved to: $OUTPUT_PATH (completed in ${elapsed_time}s)"
 
-          # Cleanup: delete server files after successful copy
-          rm -f "$result_file" "$status_file"
-          log "Cleaned up server files for job $job_id"
+          # Cleanup: delete status file (server already cleaned up result file)
+          rm -f "$status_file"
+          log "Cleaned up server status file for job $job_id"
         else
+          # pick up output_file=… for backward compatibility (when no OUTPUT_PATH specified)
+          result_file=$(sed -n '2p' "$status_file" | cut -d'=' -f2)
           log "Results ready: $result_file (completed in ${elapsed_time}s)"
-          # If no output path, still cleanup status file but keep result
+          # Cleanup status file but keep result in server location
           rm -f "$status_file"
         fi
         exit 0
