@@ -110,6 +110,130 @@ def apply_mask_to_msa(msa_sequences, mask_positions):
 
     return masked_sequences
 
+def check_and_resubmit_server():
+    """Check if MMseqs2 server is running, and resubmit if not."""
+    MMSEQS_SERVER_DIR = "/shares/locbp.chem.uzh/models/mmseqs2_server"
+    GPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/GPU_SERVER"
+    CPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/CPU_SERVER"
+    GPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/GPU_SUBMITTING"
+    CPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/CPU_SUBMITTING"
+    MAX_AGE_HOURS = 2  # Match the client script MAX_AGE
+
+    def server_is_valid(timestamp_file):
+        """Check if server timestamp file is valid and not too old."""
+        if not os.path.exists(timestamp_file):
+            return False
+
+        try:
+            with open(timestamp_file, 'r') as f:
+                server_time_str = f.read().strip()
+
+            # Parse server timestamp (format: HH:MM:SS)
+            from datetime import datetime
+            current_time = datetime.now()
+            server_time = datetime.strptime(server_time_str, "%H:%M:%S").replace(
+                year=current_time.year,
+                month=current_time.month,
+                day=current_time.day
+            )
+
+            # Handle midnight wraparound
+            time_diff = (current_time - server_time).total_seconds()
+            if time_diff < 0:
+                # Server started yesterday
+                time_diff += 86400
+
+            max_age_seconds = MAX_AGE_HOURS * 3600
+            if time_diff < max_age_seconds:
+                hours_old = int(time_diff / 3600)
+                minutes_old = int((time_diff % 3600) / 60)
+                log(f"Server started at {server_time_str} ({hours_old}h {minutes_old}m ago)")
+                return True
+            else:
+                log(f"Server timestamp too old (started at {server_time_str})")
+                return False
+        except Exception as e:
+            log(f"Error checking timestamp {timestamp_file}: {e}")
+            return False
+
+    def submission_in_progress(submit_file):
+        """Check if server submission is in progress."""
+        if not os.path.exists(submit_file):
+            return False
+
+        try:
+            submit_time = os.path.getmtime(submit_file)
+            current_time = time.time()
+            age = int(current_time - submit_time)
+            log(f"Server submission in progress (submitted {age}s ago)")
+            return True
+        except Exception as e:
+            log(f"Error checking submission file {submit_file}: {e}")
+            return False
+
+    # Check if GPU or CPU server is running and valid
+    server_running = False
+    if server_is_valid(GPU_TIMESTAMP):
+        log("MMseqs2 GPU server is running and valid")
+        server_running = True
+    elif server_is_valid(CPU_TIMESTAMP):
+        log("MMseqs2 CPU server is running and valid")
+        server_running = True
+    elif submission_in_progress(GPU_SUBMITTING):
+        log("GPU server submission in progress, waiting...")
+        server_running = True  # Consider it running if submission in progress
+    elif submission_in_progress(CPU_SUBMITTING):
+        log("CPU server submission in progress, waiting...")
+        server_running = True  # Consider it running if submission in progress
+
+    if not server_running:
+        log("No valid MMseqs2 server found, resubmitting server...")
+
+        # Create submission timestamp to prevent other processes from also submitting
+        os.makedirs(MMSEQS_SERVER_DIR, exist_ok=True)
+        with open(GPU_SUBMITTING, 'w') as f:
+            f.write(time.strftime("%H:%M:%S"))
+        log(f"Created submission timestamp at {GPU_SUBMITTING}")
+
+        # Find notebooks directory (go up from HelpScripts to repo root)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.dirname(script_dir)
+        notebooks_dir = repo_root
+
+        try:
+            # Submit server job
+            result = subprocess.run(
+                ["./submit", "ExamplePipelines/mmseqs2_server.py"],
+                cwd=notebooks_dir,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+            # Extract job ID from output
+            import re
+            match = re.search(r'Submitted batch job (\d+)', result.stdout)
+            if match:
+                server_job_id = match.group(1)
+                log(f"MMseqs2 server submitted with job ID: {server_job_id}")
+                log("Proceeding to submit queries - they will queue until server is ready")
+            else:
+                log("Warning: Failed to submit server job, but will attempt to submit queries anyway")
+                log(f"Submit output: {result.stdout}")
+                log(f"Submit error: {result.stderr}")
+                # Clean up submission timestamp on failure
+                try:
+                    os.remove(GPU_SUBMITTING)
+                except:
+                    pass
+        except Exception as e:
+            log(f"Error submitting server: {e}")
+            # Clean up submission timestamp on failure
+            try:
+                os.remove(GPU_SUBMITTING)
+            except:
+                pass
+
 def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None):
     """Submit a single sequence to MMseqs2 server with specified output path."""
     try:
@@ -333,12 +457,22 @@ def main():
         else:
             log("WARNING: Empty mask selection provided")
 
+    # Check server status before starting
+    log("Checking server status before starting submissions...")
+    check_and_resubmit_server()
+
     # Process each sequence
     all_msa_rows = []
+    submission_counter = 0
 
     for _, row in sequences_df.iterrows():
         sequence_id = row['id']
         sequence = row['sequence']
+
+        # Check server status every 25 submissions
+        if submission_counter > 0 and submission_counter % 25 == 0:
+            log(f"Checking server status after {submission_counter} submissions...")
+            check_and_resubmit_server()
 
         # Save individual MSA file with sequence ID name
         output_dir = os.path.dirname(args.output_msa_csv)
@@ -416,6 +550,7 @@ def main():
                 msa_rows = process_csv_output(individual_msa_file, sequence_id, individual_msa_file, None)
 
         all_msa_rows.extend(msa_rows)
+        submission_counter += 1
 
         log(f"Completed sequence {sequence_id}: {len(msa_rows)} MSA entries")
 

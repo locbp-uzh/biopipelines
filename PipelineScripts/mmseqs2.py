@@ -226,108 +226,111 @@ echo "Input sequences: {self.input_sequences_csv}"
 echo "Output format: {self.output_format}"
 echo "Output MSA CSV: {self.output_msa_csv}"
 
-# Check if server is running by checking timestamp files
-MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
-GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
-CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
-GPU_SUBMITTING="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
-CPU_SUBMITTING="$MMSEQS_SERVER_DIR/CPU_SUBMITTING"
-MAX_AGE_HOURS=12
-
-server_is_valid() {{
-  local timestamp_file=$1
-
-  if [[ ! -f "$timestamp_file" ]]; then
-    return 1
-  fi
-
-  # Read the timestamp from the file
-  local server_time=$(cat "$timestamp_file")
-
-  # Get current time and calculate the difference
-  local current_seconds=$(date +%s)
-  local server_seconds=$(date -d "today $server_time" +%s 2>/dev/null || echo "0")
-
-  # Handle case where server started yesterday (time wrapped around midnight)
-  local time_diff=$((current_seconds - server_seconds))
-  if [[ $time_diff -lt 0 ]]; then
-    # Server timestamp is from yesterday
-    time_diff=$((time_diff + 86400))
-  fi
-
-  local max_age_seconds=$((MAX_AGE_HOURS * 3600))
-
-  if [[ $time_diff -lt $max_age_seconds ]]; then
-    local hours_old=$((time_diff / 3600))
-    echo "Server started at $server_time ($(($hours_old))h ago)"
-    return 0
-  else
-    echo "Server timestamp too old (started at $server_time)"
-    return 1
-  fi
-}}
-
-submission_in_progress() {{
-  local submit_file=$1
-
-  if [[ ! -f "$submit_file" ]]; then
-    return 1
-  fi
-
-  # Submission is in progress - no timeout check
-  local submit_time=$(stat -c %Y "$submit_file" 2>/dev/null || stat -f %m "$submit_file" 2>/dev/null || echo "0")
-  local current_time=$(date +%s)
-  local age=$((current_time - submit_time))
-
-  echo "Server submission in progress (submitted ${{age}}s ago)"
-  return 0
-}}
-
-# Check if GPU or CPU server is running and valid
-server_running=false
-if server_is_valid "$GPU_TIMESTAMP"; then
-  echo "MMseqs2 GPU server is running and valid"
-  server_running=true
-elif server_is_valid "$CPU_TIMESTAMP"; then
-  echo "MMseqs2 CPU server is running and valid"
-  server_running=true
-elif submission_in_progress "$GPU_SUBMITTING"; then
-  echo "GPU server submission in progress, waiting..."
-  server_running="waiting"
-elif submission_in_progress "$CPU_SUBMITTING"; then
-  echo "CPU server submission in progress, waiting..."
-  server_running="waiting"
-fi
-
-if [[ "$server_running" = false ]]; then
-  echo "No valid MMseqs2 server found, starting new server..."
-
-  # Create submission timestamp to prevent other processes from also submitting
-  mkdir -p "$MMSEQS_SERVER_DIR"
-  touch "$GPU_SUBMITTING"
-  echo "Created submission timestamp at $GPU_SUBMITTING"
-
-  cd {self.folders["notebooks"]}
-  server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \\K[0-9]+')
-
-  if [ -n "$server_job_id" ]; then
-    echo "MMseqs2 server submitted with job ID: $server_job_id"
-    echo "Proceeding to submit queries - they will queue until server is ready"
-  else
-    echo "Warning: Failed to submit server job, but will attempt to submit queries anyway"
-    # Clean up submission timestamp on failure
-    rm -f "$GPU_SUBMITTING"
-  fi
-elif [[ "$server_running" = "waiting" ]]; then
-  echo "Another process is starting the server"
-  echo "Proceeding to submit queries - they will queue until server is ready"
-fi
-
-# Check server status
-echo "Checking MMseqs2 server status..."
-{self.client_script_path} --status
+# COMMENTED OUT: Server checking logic moved to pipe_mmseqs2_sequences.py
+# This centralizes server checking with periodic resubmission every 25 sequences
+# # Check if server is running by checking timestamp files
+# MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
+# GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
+# CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
+# GPU_SUBMITTING="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
+# CPU_SUBMITTING="$MMSEQS_SERVER_DIR/CPU_SUBMITTING"
+# MAX_AGE_HOURS=12
+#
+# server_is_valid() {{
+#   local timestamp_file=$1
+#
+#   if [[ ! -f "$timestamp_file" ]]; then
+#     return 1
+#   fi
+#
+#   # Read the timestamp from the file
+#   local server_time=$(cat "$timestamp_file")
+#
+#   # Get current time and calculate the difference
+#   local current_seconds=$(date +%s)
+#   local server_seconds=$(date -d "today $server_time" +%s 2>/dev/null || echo "0")
+#
+#   # Handle case where server started yesterday (time wrapped around midnight)
+#   local time_diff=$((current_seconds - server_seconds))
+#   if [[ $time_diff -lt 0 ]]; then
+#     # Server timestamp is from yesterday
+#     time_diff=$((time_diff + 86400))
+#   fi
+#
+#   local max_age_seconds=$((MAX_AGE_HOURS * 3600))
+#
+#   if [[ $time_diff -lt $max_age_seconds ]]; then
+#     local hours_old=$((time_diff / 3600))
+#     echo "Server started at $server_time ($(($hours_old))h ago)"
+#     return 0
+#   else
+#     echo "Server timestamp too old (started at $server_time)"
+#     return 1
+#   fi
+# }}
+#
+# submission_in_progress() {{
+#   local submit_file=$1
+#
+#   if [[ ! -f "$submit_file" ]]; then
+#     return 1
+#   fi
+#
+#   # Submission is in progress - no timeout check
+#   local submit_time=$(stat -c %Y "$submit_file" 2>/dev/null || stat -f %m "$submit_file" 2>/dev/null || echo "0")
+#   local current_time=$(date +%s)
+#   local age=$((current_time - submit_time))
+#
+#   echo "Server submission in progress (submitted ${{age}}s ago)"
+#   return 0
+# }}
+#
+# # Check if GPU or CPU server is running and valid
+# server_running=false
+# if server_is_valid "$GPU_TIMESTAMP"; then
+#   echo "MMseqs2 GPU server is running and valid"
+#   server_running=true
+# elif server_is_valid "$CPU_TIMESTAMP"; then
+#   echo "MMseqs2 CPU server is running and valid"
+#   server_running=true
+# elif submission_in_progress "$GPU_SUBMITTING"; then
+#   echo "GPU server submission in progress, waiting..."
+#   server_running="waiting"
+# elif submission_in_progress "$CPU_SUBMITTING"; then
+#   echo "CPU server submission in progress, waiting..."
+#   server_running="waiting"
+# fi
+#
+# if [[ "$server_running" = false ]]; then
+#   echo "No valid MMseqs2 server found, starting new server..."
+#
+#   # Create submission timestamp to prevent other processes from also submitting
+#   mkdir -p "$MMSEQS_SERVER_DIR"
+#   touch "$GPU_SUBMITTING"
+#   echo "Created submission timestamp at $GPU_SUBMITTING"
+#
+#   cd {self.folders["notebooks"]}
+#   server_job_id=$(./submit ExamplePipelines/mmseqs2_server.py | grep -oP 'Submitted batch job \\K[0-9]+')
+#
+#   if [ -n "$server_job_id" ]; then
+#     echo "MMseqs2 server submitted with job ID: $server_job_id"
+#     echo "Proceeding to submit queries - they will queue until server is ready"
+#   else
+#     echo "Warning: Failed to submit server job, but will attempt to submit queries anyway"
+#     # Clean up submission timestamp on failure
+#     rm -f "$GPU_SUBMITTING"
+#   fi
+# elif [[ "$server_running" = "waiting" ]]; then
+#   echo "Another process is starting the server"
+#   echo "Proceeding to submit queries - they will queue until server is ready"
+# fi
+#
+# # Check server status
+# echo "Checking MMseqs2 server status..."
+# {self.client_script_path} --status
 
 # Process sequences through MMseqs2 server
+# Note: Server checking and submission is now handled by pipe_mmseqs2_sequences.py
 echo "Processing sequences through MMseqs2 server..."
 python {self.helper_script_path} \\
     "{self.input_sequences_csv}" \\
