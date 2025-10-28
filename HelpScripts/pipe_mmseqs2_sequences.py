@@ -17,7 +17,7 @@ import time
 def log(message):
     """Log with timestamp."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] {message}")
+    print(f"[{timestamp}] {message}", flush=True)
 
 def map_sequence_id_to_datasheet_id(seq_id, id_map):
     """
@@ -112,12 +112,14 @@ def apply_mask_to_msa(msa_sequences, mask_positions):
 
 def check_and_resubmit_server():
     """Check if MMseqs2 server is running, and resubmit if not."""
+    log("Entering check_and_resubmit_server()")
     MMSEQS_SERVER_DIR = "/shares/locbp.chem.uzh/models/mmseqs2_server"
     GPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/GPU_SERVER"
     CPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/CPU_SERVER"
     GPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/GPU_SUBMITTING"
     CPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/CPU_SUBMITTING"
-    MAX_AGE_HOURS = 3 
+    MAX_AGE_HOURS = 3
+    log(f"Server dir: {MMSEQS_SERVER_DIR}, MAX_AGE: {MAX_AGE_HOURS}h") 
 
     def server_is_valid(timestamp_file):
         """Check if server timestamp file is valid and not too old."""
@@ -172,6 +174,7 @@ def check_and_resubmit_server():
             return False
 
     # Check if GPU or CPU server is running and valid
+    log("Checking GPU server...")
     server_running = False
     if server_is_valid(GPU_TIMESTAMP):
         log("MMseqs2 GPU server is running and valid")
@@ -186,6 +189,8 @@ def check_and_resubmit_server():
         log("CPU server submission in progress, waiting...")
         server_running = True  # Consider it running if submission in progress
 
+    log(f"Server running status: {server_running}")
+
     if not server_running:
         log("No valid MMseqs2 server found, resubmitting server...")
 
@@ -199,9 +204,11 @@ def check_and_resubmit_server():
         script_dir = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(script_dir)
         notebooks_dir = repo_root
+        log(f"Repo root: {repo_root}")
 
         try:
             # Submit server job
+            log(f"Submitting server from: {notebooks_dir}")
             result = subprocess.run(
                 ["./submit", "ExamplePipelines/mmseqs2_server.py"],
                 cwd=notebooks_dir,
@@ -209,6 +216,7 @@ def check_and_resubmit_server():
                 text=True,
                 timeout=60
             )
+            log(f"Submit command completed with return code: {result.returncode}")
 
             # Extract job ID from output
             import re
@@ -233,6 +241,8 @@ def check_and_resubmit_server():
                 os.remove(GPU_SUBMITTING)
             except:
                 pass
+
+    log("Exiting check_and_resubmit_server()")
 
 def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None):
     """Submit a single sequence to MMseqs2 server with specified output path."""
