@@ -35,7 +35,7 @@ if [[ "$STATUS" -eq 1 ]]; then
   MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
   GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
   CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
-  MAX_AGE_HOURS=12
+  MAX_AGE_HOURS=3
 
   check_server_timestamp() {
     local timestamp_file=$1

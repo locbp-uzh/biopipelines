@@ -117,7 +117,7 @@ def check_and_resubmit_server():
     CPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/CPU_SERVER"
     GPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/GPU_SUBMITTING"
     CPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/CPU_SUBMITTING"
-    MAX_AGE_HOURS = 2  # Match the client script MAX_AGE
+    MAX_AGE_HOURS = 3 
 
     def server_is_valid(timestamp_file):
         """Check if server timestamp file is valid and not too old."""

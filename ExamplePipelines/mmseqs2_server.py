@@ -15,7 +15,7 @@ pipeline = Pipeline(
 
 pipeline.resources(
     gpu="80GB",
-    time="24:00:00",
+    time="4:00:00",
     memory="32GB",
     cpus=16
 )

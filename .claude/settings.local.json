@@ -27,7 +27,10 @@
       "Bash(python -m unittest:*)",
       "Bash(python test_mixins.py:*)",
       "Bash(git cherry-pick:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(git rm:*)",
+      "Bash(python -c:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
