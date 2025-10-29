@@ -9,7 +9,7 @@ import pandas as pd
 import os
 import json
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, TypeVar, overload, Type
 
 try:
     from .config_manager import ConfigManager
@@ -19,17 +19,77 @@ except ImportError:
     from config_manager import ConfigManager
 
 
+# TypeVar for preserving concrete tool types in type hints
+T = TypeVar('T', bound='BaseConfig')
+
+
 class BaseConfig(ABC):
     """
     Abstract base class for all tool configurations.
-    
+
     Provides common functionality for parameter validation,
     environment management, and integration with Pipeline.
     """
-    
+
     # Tool-specific defaults (override in subclasses)
     TOOL_NAME = "base"
     DEFAULT_ENV = None  # Loaded from config.yaml
+
+    @overload
+    def __new__(cls: Type[T], *args, **kwargs) -> T:
+        """
+        Type hint overload for IDE autocomplete support.
+
+        This tells type checkers that Boltz(...) returns a Boltz instance,
+        enabling IDE parameter suggestions for tool constructors even though
+        the actual runtime returns StandardizedOutput when in Pipeline context.
+        """
+        ...
+
+    def __new__(cls, *args, **kwargs):
+        """
+        Create a new tool instance with optional auto-registration.
+
+        If called within a Pipeline context manager, this automatically registers
+        the tool and returns a ToolOutput object instead of the tool instance itself.
+        This enables clean syntax like:
+
+            with Pipeline(...) as pipeline:
+                rfdaa = RFdiffusionAllAtom(...)  # Returns ToolOutput
+                distances = DistanceSelector(structures=rfdaa, ...)  # Also ToolOutput
+
+        Outside a Pipeline context, returns the tool instance normally for
+        backward compatibility with explicit pipeline.add() usage.
+
+        Args:
+            *args: Positional arguments for tool initialization
+            **kwargs: Keyword arguments for tool initialization
+
+        Returns:
+            ToolOutput if within Pipeline context, tool instance otherwise
+        """
+        # Create the tool instance normally
+        instance = super(BaseConfig, cls).__new__(cls)
+
+        # Check for active pipeline context
+        # Import here to avoid circular dependency
+        from .pipeline import Pipeline
+        active_pipeline = Pipeline.get_active_pipeline()
+
+        if active_pipeline is not None:
+            # We're in a Pipeline context - auto-register this tool
+            # Initialize the instance first so it's properly configured
+            instance.__init__(*args, **kwargs)
+
+            # Auto-register with the pipeline and get ToolOutput
+            tool_output = active_pipeline._auto_register(instance)
+
+            # Return the StandardizedOutput from ToolOutput for chaining
+            return tool_output.output
+        else:
+            # No active pipeline - return the tool instance normally
+            # (will be initialized by Python calling __init__ automatically)
+            return instance
 
     def __init__(self, **kwargs):
         """Initialize base configuration with common parameters."""

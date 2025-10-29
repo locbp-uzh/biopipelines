@@ -10,6 +10,7 @@ import json
 import getpass
 import inspect
 import shutil
+import contextvars
 from typing import Dict, List, Any, Optional, Union
 from collections import defaultdict
 from datetime import datetime
@@ -23,6 +24,9 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput
+
+# Module-level context variable to track active pipeline for auto-registration
+_active_pipeline: contextvars.ContextVar[Optional['Pipeline']] = contextvars.ContextVar('_active_pipeline', default=None)
 
 # Email mapping for auto email functionality
 EMAILS = {
@@ -89,7 +93,65 @@ class Pipeline:
             "memory": "15GB",
             "time": "24:00:00"
         }
-    
+
+        # Context manager state
+        self._explicit_save_called = False  # Track if Save() was explicitly called
+
+    def __enter__(self):
+        """
+        Enter context manager - set this pipeline as the active context.
+
+        Returns:
+            self (Pipeline instance)
+
+        Raises:
+            RuntimeError: If another pipeline context is already active (nested contexts not allowed)
+        """
+        current_pipeline = _active_pipeline.get()
+        if current_pipeline is not None:
+            raise RuntimeError(
+                f"Cannot nest Pipeline contexts. "
+                f"Pipeline '{current_pipeline.pipeline_name}' is already active."
+            )
+        _active_pipeline.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Exit context manager - clear the active pipeline context and auto-submit to SLURM.
+
+        Automatically calls self.slurm() on exit unless:
+        - An exception occurred during execution
+        - Save() was explicitly called (which saves without submitting)
+
+        Args:
+            exc_type: Exception type if an exception occurred
+            exc_val: Exception value if an exception occurred
+            exc_tb: Exception traceback if an exception occurred
+
+        Returns:
+            False (don't suppress exceptions)
+        """
+        try:
+            # Only auto-submit if no exception and Save() wasn't explicitly called
+            if exc_type is None and not self._explicit_save_called:
+                self.slurm()
+        finally:
+            # Always clear the active pipeline context
+            _active_pipeline.set(None)
+
+        return False  # Don't suppress exceptions
+
+    @staticmethod
+    def get_active_pipeline() -> Optional['Pipeline']:
+        """
+        Get the currently active pipeline context, if any.
+
+        Returns:
+            Pipeline instance if within a context manager, None otherwise
+        """
+        return _active_pipeline.get()
+
     def set_suffix(self, suffix: str = ""):
         """
         Set suffix for subsequent tool folder names.
@@ -162,7 +224,64 @@ class Pipeline:
         self.tool_outputs.append(tool_output)
 
         return tool_output.output
-    
+
+    def _auto_register(self, tool_config: BaseConfig) -> ToolOutput:
+        """
+        Internal method for auto-registering tools created within a Pipeline context.
+
+        This is called automatically when a tool is instantiated within a
+        'with Pipeline() as pipeline:' context. It performs the same operations
+        as add() but is designed to be called from BaseConfig.__new__.
+
+        Args:
+            tool_config: Configured tool instance
+
+        Returns:
+            ToolOutput object for the registered tool
+        """
+        # Merge pipeline resources with tool resources
+        for key, value in self.global_resources.items():
+            if value is not None:
+                tool_config.resources[key] = value
+
+        # Set execution order and create step-numbered folder
+        self.execution_order += 1
+        if self.current_suffix:
+            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}_{self.current_suffix}"
+        else:
+            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}"
+        tool_output_folder = os.path.join(self.folders["output"], step_folder_name)
+        os.makedirs(tool_output_folder, exist_ok=True)
+
+        # Set pipeline context
+        tool_config.set_pipeline_context(
+            self, self.execution_order, tool_output_folder, self.current_suffix
+        )
+
+        # Configure inputs immediately
+        tool_config.configure_inputs(self.folders)
+
+        # Track environment usage
+        self.environments_used.add(tool_config.environment)
+        self.environment_groups[tool_config.environment].append(tool_config)
+
+        # Add to pipeline
+        self.tools.append(tool_config)
+
+        # Create and configure output object
+        tool_output = ToolOutput(tool_config)
+
+        # Populate expected outputs
+        try:
+            expected_outputs = tool_config.get_output_files()
+            tool_output.update_outputs(expected_outputs)
+        except Exception as e:
+            print(f"Warning: Could not immediately populate outputs for {tool_config.TOOL_NAME}: {e}")
+
+        self.tool_outputs.append(tool_output)
+
+        return tool_output
+
     def validate_pipeline(self, debug) -> bool:
         """
         Validate entire pipeline for consistency and compatibility.
@@ -788,3 +907,90 @@ umask 002
             print(f"Warning: Could not save original pipeline script: {e}")
 
         return None
+
+
+# Module-level convenience functions for use within Pipeline context
+def Resources(**kwargs):
+    """
+    Set global resources for all tools in the active pipeline.
+
+    Must be called within a Pipeline context manager.
+
+    Args:
+        gpu: GPU memory (e.g., "32GB", "16GB", or None for no GPU)
+        memory: System RAM (e.g., "16GB", "32GB")
+        time: Wall time limit (e.g., "24:00:00", "2:00:00")
+
+    Example:
+        with Pipeline("Test", "Job", "Description"):
+            Resources(gpu="32GB", memory="16GB", time="24:00:00")
+            tool1 = SomeTool(...)
+
+    Raises:
+        RuntimeError: If called outside a Pipeline context
+    """
+    pipeline = Pipeline.get_active_pipeline()
+    if pipeline is None:
+        raise RuntimeError(
+            "Resources() must be called within a Pipeline context. "
+            "Use: with Pipeline(...): Resources(...)"
+        )
+    pipeline.resources(**kwargs)
+
+
+def Suffix(suffix: str = ""):
+    """
+    Set suffix for subsequent tool folder names in the active pipeline.
+
+    Must be called within a Pipeline context manager.
+
+    Args:
+        suffix: Suffix to append to tool folder names (e.g., "001", "batch1")
+               Empty string clears the suffix.
+
+    Example:
+        with Pipeline("Test", "Job", "Description"):
+            Suffix("001")
+            tool1 = SomeTool(...)  # Creates folder like: 001_SomeTool_001
+
+            Suffix("002")
+            tool2 = OtherTool(...)  # Creates folder like: 002_OtherTool_002
+
+    Raises:
+        RuntimeError: If called outside a Pipeline context
+    """
+    pipeline = Pipeline.get_active_pipeline()
+    if pipeline is None:
+        raise RuntimeError(
+            "Suffix() must be called within a Pipeline context. "
+            "Use: with Pipeline(...): Suffix('...')"
+        )
+    pipeline.set_suffix(suffix)
+
+
+def Save():
+    """
+    Save pipeline configuration without submitting to SLURM.
+
+    Must be called within a Pipeline context manager. Useful if you want
+    to save the pipeline but not submit it immediately.
+
+    Example:
+        with Pipeline("Test", "Job", "Description"):
+            tool1 = SomeTool(...)
+            Save()  # Saves but doesn't submit
+
+    Note: Calling Save() prevents auto-submission on context exit.
+
+    Raises:
+        RuntimeError: If called outside a Pipeline context
+    """
+    pipeline = Pipeline.get_active_pipeline()
+    if pipeline is None:
+        raise RuntimeError(
+            "Save() must be called within a Pipeline context. "
+            "Use: with Pipeline(...): Save()"
+        )
+    pipeline.save()
+    # Mark that save was explicitly called to prevent auto-submit
+    pipeline._explicit_save_called = True
