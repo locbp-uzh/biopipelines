@@ -1203,7 +1203,7 @@ class ToolOutput:
     def output(self) -> StandardizedOutput:
         """
         Get standardized output with dot notation access.
-        
+
         Allows usage like:
         - rfd.structures
         - rfd.datasheets
@@ -1214,10 +1214,16 @@ class ToolOutput:
             output_files = self.config.get_output_files()
         else:
             output_files = self._output_files
-        
+
         standardized_output = StandardizedOutput(output_files)
         # Add tool reference for user access
         standardized_output.tool = self.config
+
+        # Attach _tool_output reference to each DatasheetInfo for SelectionEditor compatibility
+        if hasattr(standardized_output.datasheets, '_datasheets'):
+            for datasheet_info in standardized_output.datasheets._datasheets.values():
+                datasheet_info._tool_output = self
+
         return standardized_output
 
     @property
