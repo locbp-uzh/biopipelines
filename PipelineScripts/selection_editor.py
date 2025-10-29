@@ -31,8 +31,8 @@ class SelectionEditor(BaseConfig):
     DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
+                 structures: Union[ToolOutput, StandardizedOutput, List[str]],
                  selection: tuple,
-                 structures: Optional[Union[ToolOutput, List[str]]] = None,
                  expand: int = 0,
                  shrink: int = 0,
                  shift: int = 0,
@@ -42,8 +42,8 @@ class SelectionEditor(BaseConfig):
         Initialize SelectionEditor configuration.
 
         Args:
+            structures: Input structures (ToolOutput/StandardizedOutput from previous tool or list of PDB files)
             selection: Datasheet column reference tuple (e.g., tool.datasheets.structures.designed)
-            structures: Optional structures (if not provided, extracted from selection source)
             expand: Number of residues to add on each side of intervals (default: 0)
             shrink: Number of residues to remove from each side of intervals (default: 0)
             shift: Number of residues to shift all intervals (+/-) (default: 0)
@@ -59,8 +59,7 @@ class SelectionEditor(BaseConfig):
         self.invert = invert
 
         # Track input types
-        self.structures_provided = structures is not None
-        self.structures_is_tool_output = isinstance(structures, ToolOutput)
+        self.structures_is_tool_output = isinstance(structures, (ToolOutput, StandardizedOutput))
 
         # Validate selection reference format
         if not isinstance(selection, tuple) or len(selection) != 2:
@@ -72,31 +71,26 @@ class SelectionEditor(BaseConfig):
         # Initialize base class
         super().__init__(**kwargs)
 
-        # Extract the source tool from the selection reference to get structures
+        # Extract the source tool from the selection reference
         self.selection_datasheet, self.selection_column = self.selection_ref
 
-        # Add dependency on the tool that provides the selection datasheet
-        # The DatasheetInfo has _tool_output attached which gives us the ToolOutput
-        if hasattr(self.selection_datasheet, '_tool_output'):
-            tool_output = self.selection_datasheet._tool_output
-            if hasattr(tool_output, 'config'):
-                self.dependencies.append(tool_output.config)
-
-        # If structures provided explicitly, handle dependency
-        if self.structures_provided:
-            if isinstance(structures, (ToolOutput, StandardizedOutput)):
-                # Get tool config from StandardizedOutput or ToolOutput
-                tool_config = structures.tool if hasattr(structures, 'tool') else (
-                    structures.config if hasattr(structures, 'config') else None
-                )
-                if tool_config and tool_config not in self.dependencies:
-                    self.dependencies.append(tool_config)
+        # Add dependency on the tool that provides the structures
+        if isinstance(structures, (ToolOutput, StandardizedOutput)):
+            # Get tool config from StandardizedOutput or ToolOutput
+            tool_config = structures.tool if hasattr(structures, 'tool') else (
+                structures.config if hasattr(structures, 'config') else None
+            )
+            if tool_config:
+                self.dependencies.append(tool_config)
 
         # Initialize file paths (will be set in configure_inputs)
         self._initialize_file_paths()
 
     def validate_params(self):
         """Validate SelectionEditor-specific parameters."""
+        if not self.structures_input:
+            raise ValueError("structures parameter is required")
+
         if not self.selection_ref:
             raise ValueError("selection parameter is required")
 
@@ -145,68 +139,32 @@ class SelectionEditor(BaseConfig):
         else:
             raise ValueError("Invalid selection datasheet reference")
 
-        # Get structures - either from explicit parameter or from selection source
-        if self.structures_provided:
-            # Use explicitly provided structures
-            if self.structures_is_tool_output:
-                # structures_input is a StandardizedOutput or ToolOutput
-                tool_output = self.structures_input
+        # Get structures from input parameter
+        if self.structures_is_tool_output:
+            # structures_input is a StandardizedOutput or ToolOutput
+            tool_output = self.structures_input
 
-                # Try to get structures
-                source_structures = []
-                if isinstance(tool_output, StandardizedOutput):
-                    source_structures = tool_output.structures
-                elif hasattr(tool_output, 'get_output_files'):
-                    for struct_type in ["structures", "pdbs"]:
-                        struct_files = tool_output.get_output_files(struct_type)
-                        if struct_files:
-                            source_structures = struct_files
-                            break
+            # Try to get structures
+            source_structures = []
+            if isinstance(tool_output, StandardizedOutput):
+                source_structures = tool_output.structures
+            elif hasattr(tool_output, 'get_output_files'):
+                for struct_type in ["structures", "pdbs"]:
+                    struct_files = tool_output.get_output_files(struct_type)
+                    if struct_files:
+                        source_structures = struct_files
+                        break
 
-                if not source_structures:
-                    raise ValueError(f"No structure outputs found from input")
+            if not source_structures:
+                raise ValueError(f"No structure outputs found from input")
 
-                self.input_sources = {"structures": source_structures}
+            self.input_sources = {"structures": source_structures}
 
-            elif isinstance(self.structures_input, list):
-                self.input_sources = {"structures": self.structures_input}
-
-            else:
-                raise ValueError(f"Unsupported structures input type: {type(self.structures_input)}")
+        elif isinstance(self.structures_input, list):
+            self.input_sources = {"structures": self.structures_input}
 
         else:
-            # Extract structures from the datasheet source tool
-            # The DatasheetInfo has _tool_output attached
-            if hasattr(self.selection_datasheet, '_tool_output'):
-                tool_output = self.selection_datasheet._tool_output
-
-                # Get structures from the source tool
-                source_structures = []
-                try:
-                    output_files = tool_output.get_output_files()
-                    for struct_type in ["structures", "pdbs"]:
-                        struct_files = output_files.get(struct_type, [])
-                        if struct_files:
-                            source_structures = struct_files
-                            break
-                except Exception as e:
-                    raise ValueError(
-                        f"Could not extract structures from source tool: {e}. "
-                        "Please provide structures parameter explicitly."
-                    )
-
-                if not source_structures:
-                    raise ValueError(
-                        "Could not auto-detect structures from selection source. "
-                        "Please provide structures parameter explicitly."
-                    )
-
-                self.input_sources = {"structures": source_structures}
-            else:
-                raise ValueError(
-                    "Could not auto-detect structures from selection source. "
-                    "Please provide structures parameter explicitly."
-                )
+            raise ValueError(f"Unsupported structures input type: {type(self.structures_input)}")
 
     def get_config_display(self) -> List[str]:
         """Get SelectionEditor configuration display lines."""

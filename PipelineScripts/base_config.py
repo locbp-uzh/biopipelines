@@ -1219,11 +1219,6 @@ class ToolOutput:
         # Add tool reference for user access
         standardized_output.tool = self.config
 
-        # Attach _tool_output reference to each DatasheetInfo for SelectionEditor compatibility
-        if hasattr(standardized_output.datasheets, '_datasheets'):
-            for datasheet_info in standardized_output.datasheets._datasheets.values():
-                datasheet_info._tool_output = self
-
         return standardized_output
 
     @property
