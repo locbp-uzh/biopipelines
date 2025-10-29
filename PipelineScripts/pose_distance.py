@@ -1,5 +1,5 @@
 """
-PoseDistance - Measure ligand pose distance between reference and target structures.
+PoseDistance - Measure ligand pose distance between reference and sample structures.
 
 Calculates RMSD and distance metrics for ligand poses between a reference
 holo structure (e.g., from X-ray crystallography) and designed holo structures.
@@ -19,7 +19,7 @@ except ImportError:
 
 class PoseDistance(BaseConfig):
     """
-    Measures ligand pose distance between reference and target structures.
+    Measures ligand pose distance between reference and sample structures.
 
     Compares ligand conformations between a reference holo structure (e.g., XRC)
     and designed/predicted holo structures. Calculates RMSD, centroid distance,
@@ -35,10 +35,10 @@ class PoseDistance(BaseConfig):
     DEFAULT_ENV = "ProteinEnv"
 
     def __init__(self,
-                 reference: Union[str, ToolOutput, StandardizedOutput],
-                 target_structures: Union[str, List[str], ToolOutput, StandardizedOutput],
-                 ligand: str,
-                 reference_ligand: Optional[str] = None,
+                 reference_structure: Union[str, ToolOutput, StandardizedOutput],
+                 sample_structures: Union[str, List[str], ToolOutput, StandardizedOutput],
+                 reference_ligand: str,
+                 sample_ligand: Optional[str] = None,
                  alignment_selection: str = "protein",
                  calculate_centroid: bool = True,
                  calculate_orientation: bool = False,
@@ -47,10 +47,10 @@ class PoseDistance(BaseConfig):
         Initialize PoseDistance tool.
 
         Args:
-            reference: Reference holo structure (XRC or designed reference)
-            target_structures: Target structures to compare against reference
-            ligand: Ligand residue name in target structures (e.g., 'LIG', 'ATP')
-            reference_ligand: Ligand residue name in reference (default: same as ligand)
+            reference_structure: Reference holo structure (XRC or designed reference)
+            sample_structures: Sample structures to compare against reference
+            reference_ligand: Ligand residue name in reference structure (e.g., 'LIG', 'ATP')
+            sample_ligand: Ligand residue name in sample structures (default: same as reference_ligand)
             alignment_selection: Selection for protein alignment before pose comparison
                                (default: "protein", can be PyMOL selection like "chain A")
             calculate_centroid: Calculate ligand centroid distance (default: True)
@@ -58,10 +58,10 @@ class PoseDistance(BaseConfig):
             **kwargs: Additional parameters passed to BaseConfig
         """
         # Store parameters
-        self.reference_input = reference
-        self.target_structures_input = target_structures
-        self.ligand = ligand
-        self.reference_ligand = reference_ligand or ligand
+        self.reference_structure_input = reference_structure
+        self.sample_structures_input = sample_structures
+        self.reference_ligand = reference_ligand
+        self.sample_ligand = sample_ligand or reference_ligand
         self.alignment_selection = alignment_selection
         self.calculate_centroid = calculate_centroid
         self.calculate_orientation = calculate_orientation
@@ -70,10 +70,10 @@ class PoseDistance(BaseConfig):
         super().__init__(**kwargs)
 
         # Set up dependencies
-        if hasattr(reference, 'config'):
-            self.dependencies.append(reference.config)
-        if hasattr(target_structures, 'config'):
-            self.dependencies.append(target_structures.config)
+        if hasattr(reference_structure, 'config'):
+            self.dependencies.append(reference_structure.config)
+        if hasattr(sample_structures, 'config'):
+            self.dependencies.append(sample_structures.config)
 
     def get_analysis_csv_path(self) -> str:
         """Get the path for the analysis CSV file - defined once, used everywhere."""
@@ -81,17 +81,17 @@ class PoseDistance(BaseConfig):
 
     def validate_params(self):
         """Validate tool parameters."""
-        if not self.ligand:
-            raise ValueError("ligand parameter is required")
+        if not self.reference_ligand:
+            raise ValueError("reference_ligand parameter is required")
 
-        if not isinstance(self.ligand, str):
-            raise ValueError(f"ligand must be a string, got {type(self.ligand)}")
+        if not isinstance(self.reference_ligand, str):
+            raise ValueError(f"reference_ligand must be a string, got {type(self.reference_ligand)}")
 
-        if len(self.ligand) < 1 or len(self.ligand) > 3:
-            raise ValueError(f"ligand must be 1-3 characters (residue name), got '{self.ligand}'")
+        if len(self.reference_ligand) < 1 or len(self.reference_ligand) > 3:
+            raise ValueError(f"reference_ligand must be 1-3 characters (residue name), got '{self.reference_ligand}'")
 
-        if self.reference_ligand and (len(self.reference_ligand) < 1 or len(self.reference_ligand) > 3):
-            raise ValueError(f"reference_ligand must be 1-3 characters, got '{self.reference_ligand}'")
+        if self.sample_ligand and (len(self.sample_ligand) < 1 or len(self.sample_ligand) > 3):
+            raise ValueError(f"sample_ligand must be 1-3 characters, got '{self.sample_ligand}'")
 
         if not self.alignment_selection:
             raise ValueError("alignment_selection cannot be empty")
@@ -103,64 +103,64 @@ class PoseDistance(BaseConfig):
         self.folders = pipeline_folders
 
         # Resolve reference structure
-        self.reference_pdb = None
-        if isinstance(self.reference_input, str):
+        self.reference_structure_path = None
+        if isinstance(self.reference_structure_input, str):
             # Direct file path
-            self.reference_pdb = self.reference_input
-        elif hasattr(self.reference_input, 'structures'):
+            self.reference_structure_path = self.reference_structure_input
+        elif hasattr(self.reference_structure_input, 'structures'):
             # From tool output
-            if isinstance(self.reference_input.structures, list):
-                if len(self.reference_input.structures) == 0:
+            if isinstance(self.reference_structure_input.structures, list):
+                if len(self.reference_structure_input.structures) == 0:
                     raise ValueError("No reference structure found in tool output")
-                if len(self.reference_input.structures) > 1:
+                if len(self.reference_structure_input.structures) > 1:
                     raise ValueError(
-                        f"Expected single reference structure, got {len(self.reference_input.structures)}. "
+                        f"Expected single reference structure, got {len(self.reference_structure_input.structures)}. "
                         f"Please provide a single PDB file."
                     )
-                self.reference_pdb = self.reference_input.structures[0]
+                self.reference_structure_path = self.reference_structure_input.structures[0]
             else:
-                self.reference_pdb = self.reference_input.structures
+                self.reference_structure_path = self.reference_structure_input.structures
 
-        if not self.reference_pdb:
+        if not self.reference_structure_path:
             raise ValueError("Could not resolve reference structure path")
 
-        # Resolve target structures
-        self.target_pdbs = []
-        self.target_ids = []
+        # Resolve sample structures
+        self.sample_structure_paths = []
+        self.sample_structure_ids = []
 
-        if isinstance(self.target_structures_input, str):
+        if isinstance(self.sample_structures_input, str):
             # Direct file path
-            self.target_pdbs = [self.target_structures_input]
-            self.target_ids = [os.path.splitext(os.path.basename(self.target_structures_input))[0]]
-        elif isinstance(self.target_structures_input, list):
+            self.sample_structure_paths = [self.sample_structures_input]
+            self.sample_structure_ids = [os.path.splitext(os.path.basename(self.sample_structures_input))[0]]
+        elif isinstance(self.sample_structures_input, list):
             # List of file paths
-            self.target_pdbs = self.target_structures_input
-            self.target_ids = [os.path.splitext(os.path.basename(p))[0] for p in self.target_structures_input]
-        elif hasattr(self.target_structures_input, 'structures'):
+            self.sample_structure_paths = self.sample_structures_input
+            self.sample_structure_ids = [os.path.splitext(os.path.basename(p))[0] for p in self.sample_structures_input]
+        elif hasattr(self.sample_structures_input, 'structures'):
             # From tool output
-            if isinstance(self.target_structures_input.structures, list):
-                self.target_pdbs = self.target_structures_input.structures
+            if isinstance(self.sample_structures_input.structures, list):
+                self.sample_structure_paths = self.sample_structures_input.structures
             else:
-                self.target_pdbs = [self.target_structures_input.structures]
+                self.sample_structure_paths = [self.sample_structures_input.structures]
 
             # Get IDs if available
-            if hasattr(self.target_structures_input, 'structure_ids'):
-                self.target_ids = self.target_structures_input.structure_ids
+            if hasattr(self.sample_structures_input, 'structure_ids'):
+                self.sample_structure_ids = self.sample_structures_input.structure_ids
             else:
-                self.target_ids = [os.path.splitext(os.path.basename(p))[0] for p in self.target_pdbs]
+                self.sample_structure_ids = [os.path.splitext(os.path.basename(p))[0] for p in self.sample_structure_paths]
 
-        if not self.target_pdbs:
-            raise ValueError("Could not resolve target structure paths")
+        if not self.sample_structure_paths:
+            raise ValueError("Could not resolve sample structure paths")
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
         config_lines.extend([
-            f"REFERENCE: {os.path.basename(self.reference_pdb) if hasattr(self, 'reference_pdb') else 'not configured'}",
-            f"TARGET STRUCTURES: {len(self.target_pdbs) if hasattr(self, 'target_pdbs') else 0}",
-            f"LIGAND: {self.ligand}",
+            f"REFERENCE: {os.path.basename(self.reference_structure_path) if hasattr(self, 'reference_structure_path') else 'not configured'}",
+            f"SAMPLE STRUCTURES: {len(self.sample_structure_paths) if hasattr(self, 'sample_structure_paths') else 0}",
             f"REFERENCE LIGAND: {self.reference_ligand}",
+            f"SAMPLE LIGAND: {self.sample_ligand}",
             f"ALIGNMENT: {self.alignment_selection}",
             f"METRICS: RMSD" + (", centroid" if self.calculate_centroid else "") + (", orientation" if self.calculate_orientation else "")
         ])
@@ -178,11 +178,11 @@ class PoseDistance(BaseConfig):
         # Create config for helper script
         config_file = os.path.join(output_folder, "pose_config.json")
         config_data = {
-            "reference_pdb": self.reference_pdb,
+            "reference_pdb": self.reference_structure_path,
             "reference_ligand": self.reference_ligand,
-            "target_pdbs": self.target_pdbs,
-            "target_ids": self.target_ids,
-            "ligand": self.ligand,
+            "target_pdbs": self.sample_structure_paths,
+            "target_ids": self.sample_structure_ids,
+            "ligand": self.sample_ligand,
             "alignment_selection": self.alignment_selection,
             "calculate_centroid": self.calculate_centroid,
             "calculate_orientation": self.calculate_orientation,
@@ -201,10 +201,10 @@ class PoseDistance(BaseConfig):
 {self.generate_completion_check_header()}
 
 echo "Running pose distance analysis"
-echo "Reference: {os.path.basename(self.reference_pdb)}"
+echo "Reference: {os.path.basename(self.reference_structure_path)}"
 echo "Reference ligand: {self.reference_ligand}"
-echo "Target structures: {len(self.target_pdbs)}"
-echo "Target ligand: {self.ligand}"
+echo "Sample structures: {len(self.sample_structure_paths)}"
+echo "Sample ligand: {self.sample_ligand}"
 echo "Alignment: {self.alignment_selection}"
 echo "Output: {analysis_csv}"
 
@@ -253,8 +253,8 @@ fi
                 name="analysis",
                 path=analysis_csv,
                 columns=columns,
-                description=f"Ligand pose distance analysis comparing {self.ligand} poses to reference",
-                count=len(self.target_pdbs) if hasattr(self, 'target_pdbs') else 0
+                description=f"Ligand pose distance analysis comparing {self.sample_ligand} poses to reference",
+                count=len(self.sample_structure_paths) if hasattr(self, 'sample_structure_paths') else 0
             )
         }
 
@@ -274,7 +274,7 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "ligand": self.ligand,
+                "sample_ligand": self.sample_ligand,
                 "reference_ligand": self.reference_ligand,
                 "alignment_selection": self.alignment_selection,
                 "calculate_centroid": self.calculate_centroid,

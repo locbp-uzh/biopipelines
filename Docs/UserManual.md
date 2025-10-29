@@ -1469,15 +1469,15 @@ contacts = pipeline.add(ProteinLigandContacts(
 
 ### PoseDistance
 
-Measures ligand pose distance between reference holo structure and target structures. Calculates RMSD and geometric metrics to quantify how well designed structures reproduce known binding poses.
+Measures ligand pose distance between reference holo structure and sample structures. Calculates RMSD and geometric metrics to quantify how well designed structures reproduce known binding poses.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `reference`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference holo structure (e.g., XRC structure)
-- `target_structures`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Designed/predicted structures to compare
-- `ligand`: str (required) - Ligand residue name in target structures (e.g., 'LIG', 'ATP')
-- `reference_ligand`: Optional[str] = None - Ligand residue name in reference (default: same as ligand)
+- `reference_structure`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference holo structure (e.g., XRC structure)
+- `sample_structures`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Designed/predicted structures to compare
+- `reference_ligand`: str (required) - Ligand residue name in reference structure (e.g., 'LIG', 'ATP')
+- `sample_ligand`: Optional[str] = None - Ligand residue name in sample structures (default: same as reference_ligand)
 - `alignment_selection`: str = "protein" - PyMOL selection for protein alignment (e.g., "chain A", "backbone")
 - `calculate_centroid`: bool = True - Calculate ligand centroid distance
 - `calculate_orientation`: bool = False - Calculate orientation angle difference
@@ -1501,10 +1501,10 @@ xrc = pipeline.add(PDB(pdbs="4ufc", ids="reference"))
 designed = pipeline.add(Boltz2(proteins=sequences, ligands="CCO"))
 
 pose_analysis = pipeline.add(PoseDistance(
-    reference=xrc,
-    target_structures=designed,
-    ligand="LIG",
+    reference_structure=xrc,
+    sample_structures=designed,
     reference_ligand="ATP",
+    sample_ligand="LIG",
     alignment_selection="chain A and backbone"
 ))
 
