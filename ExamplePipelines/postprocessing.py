@@ -6,37 +6,37 @@ The idea is to load tool outputs based on their name, order them based on the ex
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
-from PipelineScripts.pipeline import Pipeline
+from PipelineScripts.pipeline import *
 from PipelineScripts.load_output import LoadOutput
 from PipelineScripts.average_by_datasheet import AverageByDatasheet
 from PipelineScripts.extract_metrics import ExtractMetrics
 
-pipeline = Pipeline(
-    pipeline_name="Examples",
-    job_name="PostProcessing",
-    job_description="Average by datasheets and extract metrics")
+with Pipeline(pipeline_name="Examples",
+              job_name="PostProcessing",
+              job_description="Average by datasheets and extract metrics"):
 
-pipeline.resources(
-    time="24:00:00",
-    memory="16GB"
-)
+    Resources(time="24:00:00",
+              memory="16GB")
 
-tool_outputs = '/shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/HT7_Cy7_C_R_003/ToolOutputs'
+    tool_outputs = '/shares/locbp.chem.uzh/gquarg/BioPipelines/LigandMPNN-MutationComposer-MMseqs-Cycle/HT7_Cy7_C_R_003/ToolOutputs'
 
-original = pipeline.add(LoadOutput(tool_outputs+'/3_MergeDatasheets_output.json'))
-# a filter was applied at each cycle. we can load all the Filter outputs in the folder .../ToolOutputs
-# filtered now contains tuples (str,ToolOutput) e.g. (008_Filter.json, <output of 008_Filter>)
-filtered=[(x,pipeline.add(LoadOutput(os.path.join(tool_outputs,x)))) for x in os.listdir(tool_outputs) if "Filter" in x]
-# we order based on NNN extracted from the first element of the tuple
-filtered_sorted = sorted(filtered,key=lambda x: int(x[0].split('_')[0])) # we sort them base on NNN_... (they are not loaded in order)
-# we analyse based on 2nd element of the tuple
-all_merged = [original.datasheets.merged] + [x[1].datasheets.merged for x in filtered_sorted]
+    original = LoadOutput(tool_outputs+'/3_MergeDatasheets_output.json')
 
-pipeline.add(AverageByDatasheet(all_merged))
-metrics = ["affinity_delta",
-           "open_affinity_pred_value",
-           "close_affinity_pred_value"]
-pipeline.add(ExtractMetrics(datasheets=all_merged,
-                            metrics=metrics))
+    # a filter was applied at each cycle. we can load all the Filter outputs in the folder .../ToolOutputs
+    # filtered now contains tuples (str,ToolOutput) e.g. (008_Filter.json, <output of 008_Filter>)
+    filtered = [(x, LoadOutput(os.path.join(tool_outputs,x))) for x in os.listdir(tool_outputs) if "Filter" in x]
 
-pipeline.slurm()
+    # we order based on NNN extracted from the first element of the tuple
+    filtered_sorted = sorted(filtered, key=lambda x: int(x[0].split('_')[0])) # we sort them base on NNN_... (they are not loaded in order)
+
+    # we analyse based on 2nd element of the tuple
+    all_merged = [original.datasheets.merged] + [x[1].datasheets.merged for x in filtered_sorted]
+
+    AverageByDatasheet(all_merged)
+
+    metrics = ["affinity_delta",
+               "open_affinity_pred_value",
+               "close_affinity_pred_value"]
+
+    ExtractMetrics(datasheets=all_merged,
+                   metrics=metrics)

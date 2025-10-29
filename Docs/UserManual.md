@@ -89,14 +89,30 @@ BioPipelines is a Python framework that generates bash scripts for bioinformatic
 
 ### Core Concepts
 
-**Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. The following code generates a unique folder /shares/*USER*/MyPipeline/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the pipeline and job names. 
+**Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. Pipelines can be used with context manager syntax (preferred) or traditional syntax. Both generate a unique folder /shares/*USER*/MyPipeline/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the pipeline and job names.
 
 ```python
+# Context manager syntax (preferred)
+from PipelineScripts.pipeline import *
+
+with Pipeline("MyPipeline", "JobName", "Description"):
+    Resources(gpu="V100", time="24:00:00", memory="16GB")
+    tool1 = Tool1(param1=value1,
+                  param2=value2)
+    tool2 = Tool2(input=tool1)
+# Auto-submits to SLURM on exit
+
+# Traditional syntax (also supported)
 from PipelineScripts.pipeline import Pipeline
+
 pipeline = Pipeline("MyPipeline", "JobName", "Description")
+pipeline.resources(gpu="V100", time="24:00:00", memory="16GB")
+tool1 = pipeline.add(Tool1(param1=value1, param2=value2))
+tool2 = pipeline.add(Tool2(input=tool1))
+pipeline.slurm()
 ```
 
-**Tools**: Individual bioinformatics operations like running models (RFdiffusion, LigandMPNN, Boltz2, ...) or analyzing results (Filter, SelectBest, ...) that generate bash scripts and predict their outputs. They are added to the pipeline by calling `pipeline.add(<Tool>(<Parameters>))`, which returns an object containing predictions of the filesystem after SLURM execution. The prediction can be used as input in subsequent tools. One can access the prediction with the default `print(<prediction>)` method.
+**Tools**: Individual bioinformatics operations like running models (RFdiffusion, LigandMPNN, Boltz2, ...) or analyzing results (Filter, SelectBest, ...) that generate bash scripts and predict their outputs. Tools return an object containing predictions of the filesystem after SLURM execution. The prediction can be used as input in subsequent tools. One can access the prediction with the default `print(<prediction>)` method.
 
 ```python
 from PipelineScripts.pipeline import Pipeline
