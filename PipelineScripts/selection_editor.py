@@ -76,13 +76,21 @@ class SelectionEditor(BaseConfig):
         self.selection_datasheet, self.selection_column = self.selection_ref
 
         # Add dependency on the tool that provides the selection datasheet
-        if hasattr(self.selection_datasheet, '_tool_config'):
-            self.dependencies.append(self.selection_datasheet._tool_config)
+        # The DatasheetInfo has _tool_output attached which gives us the ToolOutput
+        if hasattr(self.selection_datasheet, '_tool_output'):
+            tool_output = self.selection_datasheet._tool_output
+            if hasattr(tool_output, 'config'):
+                self.dependencies.append(tool_output.config)
 
-        # If structures provided explicitly, add dependency
-        if self.structures_provided and hasattr(structures, 'config'):
-            if structures.config not in self.dependencies:
-                self.dependencies.append(structures.config)
+        # If structures provided explicitly, handle dependency
+        if self.structures_provided:
+            if isinstance(structures, (ToolOutput, StandardizedOutput)):
+                # Get tool config from StandardizedOutput or ToolOutput
+                tool_config = structures.tool if hasattr(structures, 'tool') else (
+                    structures.config if hasattr(structures, 'config') else None
+                )
+                if tool_config and tool_config not in self.dependencies:
+                    self.dependencies.append(tool_config)
 
         # Initialize file paths (will be set in configure_inputs)
         self._initialize_file_paths()
@@ -141,18 +149,22 @@ class SelectionEditor(BaseConfig):
         if self.structures_provided:
             # Use explicitly provided structures
             if self.structures_is_tool_output:
-                tool_output: ToolOutput = self.structures_input
+                # structures_input is a StandardizedOutput or ToolOutput
+                tool_output = self.structures_input
 
                 # Try to get structures
                 source_structures = []
-                for struct_type in ["structures", "pdbs"]:
-                    struct_files = tool_output.get_output_files(struct_type)
-                    if struct_files:
-                        source_structures = struct_files
-                        break
+                if isinstance(tool_output, StandardizedOutput):
+                    source_structures = tool_output.structures
+                elif hasattr(tool_output, 'get_output_files'):
+                    for struct_type in ["structures", "pdbs"]:
+                        struct_files = tool_output.get_output_files(struct_type)
+                        if struct_files:
+                            source_structures = struct_files
+                            break
 
                 if not source_structures:
-                    raise ValueError(f"No structure outputs found from {tool_output.tool_type}")
+                    raise ValueError(f"No structure outputs found from input")
 
                 self.input_sources = {"structures": source_structures}
 
@@ -163,18 +175,25 @@ class SelectionEditor(BaseConfig):
                 raise ValueError(f"Unsupported structures input type: {type(self.structures_input)}")
 
         else:
-            # Extract structures from the selection source tool
-            # The selection_datasheet has a reference to its source tool
+            # Extract structures from the datasheet source tool
+            # The DatasheetInfo has _tool_output attached
             if hasattr(self.selection_datasheet, '_tool_output'):
                 tool_output = self.selection_datasheet._tool_output
 
-                # Get structures from that tool
+                # Get structures from the source tool
                 source_structures = []
-                for struct_type in ["structures", "pdbs"]:
-                    struct_files = tool_output.get_output_files(struct_type)
-                    if struct_files:
-                        source_structures = struct_files
-                        break
+                try:
+                    output_files = tool_output.get_output_files()
+                    for struct_type in ["structures", "pdbs"]:
+                        struct_files = output_files.get(struct_type, [])
+                        if struct_files:
+                            source_structures = struct_files
+                            break
+                except Exception as e:
+                    raise ValueError(
+                        f"Could not extract structures from source tool: {e}. "
+                        "Please provide structures parameter explicitly."
+                    )
 
                 if not source_structures:
                     raise ValueError(
