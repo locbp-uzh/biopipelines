@@ -12,9 +12,9 @@ from PipelineScripts.protein_mpnn import ProteinMPNN
 from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.alphafold import AlphaFold
 
-with Pipeline(pipeline_name="Examples",
-              job_name="RFD-ProteinMPNN-MMseqs-AlphaFold",
-              job_description="redesign of N terminus of rifampicin binding protein"):
+with Pipeline(project="Examples",
+              job="RFD-ProteinMPNN-MMseqs-AlphaFold",
+              description="redesign of N terminus of rifampicin binding protein"):
 
     Resources(gpu="80GB", #ask for A100-80GB or H100-80GB
               time="24:00:00",

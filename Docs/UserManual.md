@@ -89,23 +89,23 @@ BioPipelines is a Python framework that generates bash scripts for bioinformatic
 
 ### Core Concepts
 
-**Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. Pipelines can be used with context manager syntax (preferred) or traditional syntax. Both generate a unique folder /shares/*USER*/MyPipeline/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the pipeline and job names.
+**Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. Pipelines can be used with context manager syntax (preferred) or traditional syntax. Both generate a unique folder /shares/*USER*/MyProject/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the pipeline and job names.
 
 ```python
 # Context manager syntax (preferred)
 from PipelineScripts.pipeline import *
 
-with Pipeline("MyPipeline", "JobName", "Description"):
+with Pipeline("MyProject", "JobName", "Description"):
     Resources(gpu="V100", time="24:00:00", memory="16GB")
     tool1 = Tool1(param1=value1,
                   param2=value2)
     tool2 = Tool2(input=tool1)
-# Auto-submits to SLURM on exit
+# Auto generates SLURM script on exit
 
-# Traditional syntax (also supported)
+# Traditional syntax (equivalent, also supported)
 from PipelineScripts.pipeline import Pipeline
 
-pipeline = Pipeline("MyPipeline", "JobName", "Description")
+pipeline = Pipeline("MyProject", "JobName", "Description")
 pipeline.resources(gpu="V100", time="24:00:00", memory="16GB")
 tool1 = pipeline.add(Tool1(param1=value1, param2=value2))
 tool2 = pipeline.add(Tool2(input=tool1))
@@ -115,11 +115,11 @@ pipeline.slurm()
 **Tools**: Individual bioinformatics operations like running models (RFdiffusion, LigandMPNN, Boltz2, ...) or analyzing results (Filter, SelectBest, ...) that generate bash scripts and predict their outputs. Tools return an object containing predictions of the filesystem after SLURM execution. The prediction can be used as input in subsequent tools. One can access the prediction with the default `print(<prediction>)` method.
 
 ```python
-from PipelineScripts.pipeline import Pipeline
+from PipelineScripts.pipeline import *
 from PipelineScripts.rfdiffusion import RFdiffusion
-pipeline = Pipeline("Pipeline","Test","Some test")
-rfd = pipeline.add(RFdiffusion(contigs="50-100", num_designs=5))
-print(rfd)
+with Pipeline("TestProject","Test","Some test"):
+  rfd = RFdiffusion(contigs="50-100", num_designs=5)
+  print(rfd)
 """
 structures:
     – '<output_folder>/Test_1.pdb'
@@ -142,13 +142,13 @@ structures=pdbs
 ```
 The predicted output can then be used by other tools as input, thus enabling further prediction prior to the actual generation of the files:
 ```python
-from PipelineScripts.pipeline import Pipeline
+from PipelineScripts.pipeline import *
 from PipelineScripts.rfdiffusion import RFdiffusion
 from PipelineScripts.protein_mpnn import ProteinMPNN
-pipeline = Pipeline("Pipeline","Test","Some test")
-rfd = pipeline.add(RFdiffusion(contigs="50-100", num_designs=5))
-pmd = pipeline.add(ProteinMPNN(structures=rfd,num_sequences=2))
-print(pmd)
+with Pipeline("TestProject","Test","Some test"):
+  rfd = RFdiffusion(contigs="50-100", num_designs=5)
+  pmd = ProteinMPNN(structures=rfd,num_sequences=2)
+  print(pmd)
 """
 sequences:
     – '<output_folder>/Test_queries.csv'
@@ -181,12 +181,12 @@ All the outputs are standardized such that the identity of the previous tool is 
 1. Verification of the success or failure of a given tool. At slurm runtime, after running a tool, the pipeline coordinator check for the presence of the predicted output and creates a file `<NNN>_<Tool>_COMPLETED` or `<NNN>_<Tool>_FAILED`. One can resubmit the same slurm bash script(for example, if the time ran out) and the completed steps will be skipped.
 2. Standardized saving and loading of tool outputs. All the predictions are saved in the folder `ToolOutputs` within the job folder, and can be loaded with the tool LoadOutput. In the following example, rfd behaves identically to the one in the previous snippet:
 ```python
-from PipelineScripts.pipeline import Pipeline
+from PipelineScripts.pipeline import *
 from PipelineScripts.load_output import LoadOutput
 from PipelineScripts.protein_mpnn import ProteinMPNN
-pipeline = Pipeline("Pipeline","Test","Some test")
-rfd = pipeline.add(LoadOutput('/path/to/ToolOutputs/001_RFdiffusion.json'))
-pmd = pipeline.add(ProteinMPNN(structures=rfd,num_sequences=2))
+with Pipeline("TestProject","Test","Some test"):
+  rfd = LoadOutput('/path/to/ToolOutputs/001_RFdiffusion.json')
+  pmd = ProteinMPNN(structures=rfd,num_sequences=2)
 ```
 
 ### Job submission
@@ -195,10 +195,10 @@ Configure computational resources before submitting:
 
 ```python
 # Examples
-pipeline.resources(gpu="A100", memory="32GB", time="24:00:00")      # Specific model
-pipeline.resources(gpu="32GB|80GB", memory="32GB", time="24:00:00") # V100 or A100/H100
-pipeline.resources(gpu="!T4", memory="32GB", time="24:00:00")       # Exclude T4
-pipeline.resources(memory="128GB", time="24:00:00", cpus=32)        # CPU-only
+Resources(gpu="A100", memory="32GB", time="24:00:00")      # Specific model
+Resources(gpu="32GB|80GB", memory="32GB", time="24:00:00") # V100 or A100/H100
+Resources(gpu="!T4", memory="32GB", time="24:00:00")       # Exclude T4, equivalent to above one
+Resources(memory="128GB", time="24:00:00", cpus=32)        # CPU-only
 ```
 
 **GPU parameter options:**
@@ -209,7 +209,7 @@ pipeline.resources(memory="128GB", time="24:00:00", cpus=32)        # CPU-only
 - `"high-memory"` - Equivalent to `"32GB|80GB"`
 - Omit parameter for CPU-only jobs
 
-Call `pipeline.slurm()` to validate the pipeline, generate the full scripts, and generate a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
+Calling `pipeline.slurm()` to validate the pipeline (done automatically with context manager), generates the full scripts, and generate a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
 1. Run from console the pipeline with python (requires packages pandas and yaml to be executable) and then run the sbatch command in output;
 2. Run from console the pipeline with python and then copy-paste the job name and slurm content in the job composer form (https://apps.s3it.uzh.ch/pun/sys/myjobs);
 3. Instead of running the pipeline with `python /path/to/<pipeline>.py`, use `./submit /path/to/<pipeline.py>` to both run and submit. If not available, this will install and activate a biopipelines environment with pandas and yaml.
@@ -240,7 +240,7 @@ sbatch --job-name=Test --output path/to/RunTime/slurm.out path/to/RunTime/slurm.
 After the execution, the filesystem will look somewhat like this:
 
 ```
-/shares/<user>/BioPipelines/<pipeline>/<job>_<NNN>/
+/shares/<user>/BioPipelines/<project>/<job>_<NNN>/
 ├── RunTime/                    # Execution scripts only
 │   ├── pipeline.sh             # Main orchestration script
 │   ├── 001_<tool 1>.sh         # Tool-specific script
@@ -271,13 +271,13 @@ Base folder paths (like `/shares/<group>`, tool data folders, etc.) are configur
 
 ### Environment Management
 
-Most tools require a conda environment to run. Default environments are defined in `config.yaml` at the repository root. To change default environments system-wide, edit the `environments` section in `config.yaml`. To override for a specific tool, use the `env` parameter in `pipeline.add(...)`:
+Most tools require a conda environment to run. Default environments are defined in `config.yaml` at the repository root. To change default environments edit the `environments` section in `config.yaml`. Overriding a specific tool in a given pipeline is not recommended, but can be done using the `env` parameter in `pipeline.add(...)`:
 
 ```python
 # Use default environment from config.yaml
-tool1 = pipeline.add(Tool1(...))
+tool1 =Tool1(...)
 # Override with custom environment
-tool2 = pipeline.add(Tool2(...), env="CustomEnv")
+tool2 = pipeline.add(Tool2(...), env="CustomEnv") #pipeline must be defined
 ```
 
 Edit `config.yaml` in the repository root to change which conda environment each tool uses by default. Tools with `null` environments don't require conda activation.
@@ -393,10 +393,10 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 
 **Example**:
 ```python
-rfd = pipeline.add(RFdiffusion(
+rfd = RFdiffusion(
     contigs="50-100",
     num_designs=10
-))
+
 ```
 
 ---
@@ -443,12 +443,12 @@ Generates protein structures with explicit modeling of ligands and small molecul
 
 **Example**:
 ```python
-rfdaa = pipeline.add(RFdiffusionAllAtom(
+rfdaa = RFdiffusionAllAtom(
     pdb=template,
     ligand='LIG',
     contigs='10-20,A6-140',
     num_designs=5
-))
+
 ```
 
 ---
@@ -539,13 +539,13 @@ entities:
             id: A
 """
 
-boltzgen = pipeline.add(BoltzGen(
+boltzgen = BoltzGen(
     design_spec=design_yaml,
     protocol="protein-anything",
     num_designs=10000,
     budget=100,
     alpha=0.5
-))
+
 
 # Access final designs
 best_designs = boltzgen.datasheets.final_metrics
@@ -554,13 +554,13 @@ best_designs = boltzgen.datasheets.final_metrics
 **Example with File**:
 ```python
 # Using external YAML file
-boltzgen = pipeline.add(BoltzGen(
+boltzgen = BoltzGen(
     design_spec="designs/my_binder.yaml",
     protocol="peptide-anything",
     num_designs=5000,
     budget=50,
     additional_filters=["design_ALA<0.3", "filter_rmsd_design<2.5"]
-))
+
 ```
 
 ---
@@ -601,12 +601,12 @@ git clone https://github.com/dauparas/ProteinMPN
 
 **Example**:
 ```python
-pmpnn = pipeline.add(ProteinMPNN(
+pmpnn = ProteinMPNN(
     structures=rfd,
     num_sequences=10,
     fixed="1-10+50-60",
     redesigned="20-40"
-))
+
 ```
 
 ---
@@ -647,12 +647,12 @@ pip3 install -r requirements.txt
 
 **Example**:
 ```python
-lmpnn = pipeline.add(LigandMPNN(
+lmpnn = LigandMPNN(
     structures=rfdaa,
     ligand="LIG",
     num_sequences=5,
     redesigned=rfdaa.datasheets.structures.designed
-))
+
 ```
 
 ---
@@ -687,13 +687,13 @@ Generates new protein sequences by composing mutations based on frequency analys
 
 **Example**:
 ```python
-profiler = pipeline.add(MutationProfiler(original=ref, mutants=variants))
-composer = pipeline.add(MutationComposer(
+profiler = MutationProfiler(original=ref, mutants=variants
+composer = MutationComposer(
     frequencies=profiler.datasheets.relative_frequencies,
     num_sequences=50,
     mode="weighted_random",
     max_mutations=5
-))
+
 ```
 
 ---
@@ -736,12 +736,12 @@ Performs site-directed mutagenesis at specified positions. Generates systematic 
 
 **Example**:
 ```python
-sdm = pipeline.add(SDM(
+sdm = SDM(
     original=template,
     position=42,
     mode="saturation",
     exclude="CP"
-))
+
 ```
 
 ---
@@ -768,10 +768,10 @@ Concatenates multiple protein sequences with flexible linkers. Creates fusion pr
 
 **Example**:
 ```python
-fused = pipeline.add(Fuse(
+fused = Fuse(
     proteins=[domain1, domain2, domain3],
     linker="GGGGS"
-))
+
 ```
 
 ---
@@ -796,10 +796,10 @@ Combines different regions from multiple sequence sources into chimeric proteins
 
 **Example**:
 ```python
-stitched = pipeline.add(StitchSequences(
+stitched = StitchSequences(
     sequences=[lmpnn1, lmpnn2],
     selections=["1-50", "51-100"]
-))
+
 ```
 
 ---
@@ -829,11 +829,11 @@ Predicts protein structures from amino acid sequences using AlphaFold2. Generate
 
 **Example**:
 ```python
-af = pipeline.add(AlphaFold(
+af = AlphaFold(
     sequences=lmpnn,
     num_relax=1,
     num_recycle=5
-))
+
 ```
 
 ---
@@ -870,10 +870,10 @@ pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059
 
 **Example**:
 ```python
-esm = pipeline.add(ESMFold(
+esm = ESMFold(
     sequences=lmpnn,
     num_recycle=4
-))
+
 ```
 
 ---
@@ -917,8 +917,8 @@ Predicts biomolecular complexes including proteins, nucleic acids, and small mol
 
 **Example**:
 ```python
-boltz_apo = pipeline.add(Boltz2(proteins=lmpnn))
-boltz_holo = pipeline.add(Boltz2(
+boltz_apo = Boltz2(proteins=lmpnn
+boltz_holo = Boltz2(
     proteins=lmpnn,
     ligands="CC(=O)OC1=CC=CC=C1C(=O)O",  # Aspirin SMILES
     msas=boltz_apo,  # Pass entire ToolOutput
@@ -977,26 +977,26 @@ pip install -e .
 **Example**:
 ```python
 # Apo prediction
-rf3_apo = pipeline.add(RF3(
+rf3_apo = RF3(
     proteins=sequences
-))
+
 
 # Protein-ligand complex prediction
-rf3_holo = pipeline.add(RF3(
+rf3_holo = RF3(
     proteins=sequences,
     ligands="CC(=O)OC1=CC=CC=C1C(=O)O",  # Aspirin SMILES
     early_stopping_plddt=85.0
-))
+
 
 # Batch prediction with compound library
-compounds = pipeline.add(CompoundLibrary({
+compounds = CompoundLibrary({
     "AspA": "CC(=O)OC1=CC=CC=C1C(=O)O",
     "AspB": "CC(=O)OC1=CC=CC=C1C(=O)O"
-}))
-rf3_batch = pipeline.add(RF3(
+}
+rf3_batch = RF3(
     proteins=protein_sequences,
     ligands=compounds
-))
+
 ```
 
 ---
@@ -1032,11 +1032,11 @@ conda env create -f onet_env.yaml
 **Example**:
 ```python
 # Predict affinities from Boltz2 structures
-affinity = pipeline.add(OnionNet(
+affinity = OnionNet(
     structures=boltz_output,
     model_weights="/path/to/weights.h5",
     scaler_model="/path/to/scaler.model"
-))
+
 ```
 
 ---
@@ -1075,12 +1075,12 @@ pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 sci
 **Example**:
 ```python
 # Predict affinities with OnionNet-2
-affinity = pipeline.add(OnionNet2(
+affinity = OnionNet2(
     structures=boltz_output,
     model_path="/path/to/model.h5",
     scaler_path="/path/to/scaler.pkl",
     shells=62
-))
+
 ```
 
 ---
@@ -1160,22 +1160,22 @@ Model weights location: `/data/{username}/DynamicBind/workdir`
 
 ```python
 # Basic usage - single protein, SMILES string
-db = pipeline.add(DynamicBind(
+db = DynamicBind(
     proteins="target.pdb",
     ligands="CCO",  # SMILES string
     samples_per_complex=10
-))
+
 
 # Multiple proteins from PDBs folder
-db = pipeline.add(DynamicBind(
+db = DynamicBind(
     proteins=["protein1.pdb", "protein2.pdb"],
     ligands="CC(=O)O"
-))
+
 
 # Chain with other tools - all structures from tool output
-rfdaa = pipeline.add(RFdiffusionAllAtom(ligand="ZIT", contigs="A1-100", num_designs=5))
-compounds = pipeline.add(CompoundLibrary(smiles_list=["CCO", "CC(=O)O"]))
-db = pipeline.add(DynamicBind(proteins=rfdaa, ligands=compounds))
+rfdaa = RFdiffusionAllAtom(ligand="ZIT", contigs="A1-100", num_designs=5
+compounds = CompoundLibrary(smiles_list=["CCO", "CC(=O)O"]
+db = DynamicBind(proteins=rfdaa, ligands=compounds
 ```
 
 **Outputs:**
@@ -1207,13 +1207,13 @@ Measures distances between specific atoms and residues in structures. Useful for
 
 **Example**:
 ```python
-distances = pipeline.add(ResidueAtomDistance(
+distances = ResidueAtomDistance(
     structures=boltz,
     atom="LIG.Cl",
     residue="D in IGDWG",
     method="min",
     metric_name="chlorine_distance"
-))
+
 ```
 
 ---
@@ -1248,11 +1248,11 @@ Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydr
 
 **Example**:
 ```python
-plip = pipeline.add(PLIP(
+plip = PLIP(
     structures=boltz,
     ligand="LIG",
     create_pymol=True
-))
+
 ```
 
 ---
@@ -1278,11 +1278,11 @@ Selects protein residues based on proximity to ligands or other reference points
 
 **Example**:
 ```python
-selector = pipeline.add(DistanceSelector(
+selector = DistanceSelector(
     structures=boltz,
     ligand="ATP",
     distance=8.0
-))
+
 ```
 
 ---
@@ -1310,35 +1310,35 @@ Modifies PyMOL-formatted selection strings (e.g., "3-45+58-60") with structure-a
 **Example**:
 ```python
 # Expand binding site selection by 2 residues
-distances = pipeline.add(DistanceSelector(
+distances = DistanceSelector(
     structures=rfdaa,
     ligand="LIG",
     distance=5
-))
 
-expanded = pipeline.add(SelectionEditor(
+
+expanded = SelectionEditor(
     selection=distances.datasheets.selections.within,
     expand=2
-))
+
 
 # Use expanded selection with LigandMPNN
-lmpnn = pipeline.add(LigandMPNN(
+lmpnn = LigandMPNN(
     structures=rfdaa,
     ligand="LIG",
     redesigned=expanded.datasheets.selections.within
-))
+
 
 # Invert selection to get everything except binding site
-fixed_region = pipeline.add(SelectionEditor(
+fixed_region = SelectionEditor(
     selection=distances.datasheets.selections.within,
     invert=True
-))
+
 
 # Shrink selection
-tighter = pipeline.add(SelectionEditor(
+tighter = SelectionEditor(
     selection=distances.datasheets.selections.within,
     shrink=1
-))
+
 ```
 
 **Key Features**:
@@ -1372,12 +1372,12 @@ Quantifies structural changes between reference and target structures. Calculate
 
 **Example**:
 ```python
-conf_change = pipeline.add(ConformationalChange(
+conf_change = ConformationalChange(
     reference_structures=apo_structures,
     target_structures=holo_structures,
     selection="resi 10-50",  # PyMOL selection
     alignment="super"
-))
+
 ```
 
 ---
@@ -1419,10 +1419,10 @@ conda create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 
 **Example**:
 ```python
-profiler = pipeline.add(MutationProfiler(
+profiler = MutationProfiler(
     original=template,
     mutants=lmpnn
-))
+
 ```
 
 ---
@@ -1459,26 +1459,26 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 **Example**:
 ```python
 # Analyze contacts with specific protein regions
-contacts = pipeline.add(ProteinLigandContacts(
+contacts = ProteinLigandContacts(
     structures=rfdaa,
     selections=rfdaa.datasheets.structures.designed,
     ligand="LIG",
     contact_threshold=5.0
-))
+
 
 # Use fixed selection for all structures
-contacts = pipeline.add(ProteinLigandContacts(
+contacts = ProteinLigandContacts(
     structures=boltz,
     selections='10-20+30-40',
     ligand="ATP",
     contact_threshold=4.0
-))
+
 
 # Analyze all protein residues
-contacts = pipeline.add(ProteinLigandContacts(
+contacts = ProteinLigandContacts(
     structures=boltz,
     ligand="GDP"
-))
+
 ```
 
 ---
@@ -1513,23 +1513,23 @@ Measures ligand pose distance between reference holo structure and sample struct
 **Example**:
 ```python
 # Compare designed structures to XRC reference
-xrc = pipeline.add(PDB(pdbs="4ufc", ids="reference"))
-designed = pipeline.add(Boltz2(proteins=sequences, ligands="CCO"))
+xrc = PDB(pdbs="4ufc", ids="reference"
+designed = Boltz2(proteins=sequences, ligands="CCO"
 
-pose_analysis = pipeline.add(PoseDistance(
+pose_analysis = PoseDistance(
     reference_structure=xrc,
     sample_structures=designed,
     reference_ligand="ATP",
     sample_ligand="LIG",
     alignment_selection="chain A and backbone"
-))
+
 
 # Filter structures with RMSD < 2.0 Å
-good_poses = pipeline.add(Filter(
+good_poses = Filter(
     data=pose_analysis.datasheets.analysis,
     pool=designed,
     expression="ligand_rmsd < 2.0"
-))
+
 ```
 
 ---
@@ -1560,13 +1560,13 @@ Filters structures or sequences based on metric criteria. Uses pandas query expr
 
 **Example**:
 ```python
-filtered = pipeline.add(Filter(
+filtered = Filter(
     data=distances.datasheets.analysis,
     pool=boltz,
     expression="distance < 3.5 and confidence_score > 0.85",
     max_items=10,
     sort_by="distance"
-))
+
 ```
 
 ---
@@ -1592,21 +1592,21 @@ Selects the single best structure or sequence based on optimization criteria. Su
 
 **Example**:
 ```python
-best = pipeline.add(SelectBest(
+best = SelectBest(
     pool=boltz,
     datasheets=[distances.datasheets.analysis],
     metric="distance",
     mode="min"
-))
+
 
 # Multi-objective selection
-best_multi = pipeline.add(SelectBest(
+best_multi = SelectBest(
     pool=boltz,
     datasheets=[analysis.datasheets.merged],
     metric="composite_score",
     weights={"binding_affinity": 0.6, "pLDDT": 0.4},
     mode="max"
-))
+
 ```
 
 ---
@@ -1632,10 +1632,10 @@ Removes duplicate structures or sequences from a pool. Supports deduplication by
 
 **Example**:
 ```python
-unique = pipeline.add(RemoveDuplicates(
+unique = RemoveDuplicates(
     pool=lmpnn,
     compare="sequence"
-))
+
 ```
 
 ---
@@ -1659,12 +1659,12 @@ Combines multiple datasheets by joining on a common key column. Enables integrat
 
 **Example**:
 ```python
-merged = pipeline.add(MergeDatasheets(
+merged = MergeDatasheets(
     datasheets=[distances.datasheets.analysis, plip.datasheets.interactions],
     prefixes=["dist_", "plip_"],
     key="id",
     calculate={"score": "dist_distance + plip_energy"}
-))
+
 ```
 
 ---
@@ -1685,10 +1685,10 @@ Stacks multiple datasheets vertically (row-wise). Useful for combining results f
 
 **Example**:
 ```python
-concat = pipeline.add(ConcatenateDatasheets(
+concat = ConcatenateDatasheets(
     datasheets=[cycle1_results, cycle2_results, cycle3_results],
     fill="N/A"
-))
+
 ```
 
 ---
@@ -1711,12 +1711,12 @@ Extracts a subset of rows and/or columns from a datasheet. Enables data sampling
 
 **Example**:
 ```python
-sliced = pipeline.add(SliceDatasheet(
+sliced = SliceDatasheet(
     datasheet=results.datasheets.analysis,
     start=0,
     end=100,
     columns=["id", "distance", "confidence"]
-))
+
 ```
 
 ---
@@ -1739,12 +1739,12 @@ Extracts and aggregates specific metrics from datasheets. Supports grouping and 
 
 **Example**:
 ```python
-metrics = pipeline.add(ExtractMetrics(
+metrics = ExtractMetrics(
     datasheets=[boltz.datasheets.confidence],
     metrics=["complex_plddt", "ptm"],
     group_by="input_file",
     aggregation="mean"
-))
+
 ```
 
 ---
@@ -1766,11 +1766,11 @@ Computes averages of metrics grouped by a specified column. Useful for summarizi
 
 **Example**:
 ```python
-averaged = pipeline.add(AverageByDatasheet(
+averaged = AverageByDatasheet(
     datasheets=[cycle1.datasheets.analysis, cycle2.datasheets.analysis],
     group_by="structure_id",
     metrics=["distance", "confidence"]
-))
+
 ```
 
 ---
@@ -1793,10 +1793,10 @@ Loads previously saved tool outputs for reuse in new pipelines. Enables incremen
 
 **Example**:
 ```python
-previous_boltz = pipeline.add(LoadOutput(
+previous_boltz = LoadOutput(
     output_json="/path/to/job/ToolOutputs/003_Boltz2.json",
     filter="confidence_score > 0.8"
-))
+
 ```
 
 **PracticalTips**:
@@ -1804,21 +1804,21 @@ previous_boltz = pipeline.add(LoadOutput(
 ```python
 # Pipeline 1 to store the library
 # imports, pipeline instantiation, ...
-pipeline.add(CompoundLibrary({
+CompoundLibrary({
   "Compound1": "CCNCNNCC(=O)C",
   "Compound2": "CCNCNNCC(=O)C",
   ...
-}))
+}
 # submit
 
 # Pipeline 2 running calculatios with one of the compounds
 # imports, pipeline instantiation, ...
-compound1 = pipeline.add(LoadOutput(
+compound1 = LoadOutput(
     output_json="/path/to/job/ToolOutputs/001_CompoundLibrary.json",
     filter='id == "Compound1"' #quotes are important for proper pandas query here: x is a column name; "x" is a string.
-))
-boltz = pipeline.add(Boltz2(proteins=HaloTag,
-                            ligands=compound1))
+
+boltz = Boltz2(proteins=HaloTag,
+                            ligands=compound1
 #submit
 
 ---
@@ -1842,10 +1842,10 @@ Generates multiple sequence alignments (MSAs) for protein sequences. Used for im
 
 **Example**:
 ```python
-msas = pipeline.add(MMseqs2(
+msas = MMseqs2(
     sequences=lmpnn,
     timeout=7200
-))
+
 ```
 
 ---
@@ -1888,21 +1888,21 @@ Creates and manages chemical compound libraries. Supports combinatorial SMILES e
 **Examples**:
 ```python
 # With primary_key for combinatorial expansion
-library = pipeline.add(CompoundLibrary(
+library = CompoundLibrary(
     library={
         "scaffold": "<linker><fluorophore>",
         "linker": ["CCOCC", "CCOCCOCC"],
         "fluorophore": ["c1ccc(N)cc1"]
     },
     primary_key="scaffold"
-))
+
 
 # Without primary_key - direct SMILES list
-library = pipeline.add(CompoundLibrary(
+library = CompoundLibrary(
     library={
         "compounds": ["CCO", "CCCO", "CCCCO", "c1ccccc1"]
     }
-))
+
 ```
 
 ---
@@ -1947,24 +1947,24 @@ For each PDB ID, searches in order:
 **Examples**:
 ```python
 # Automatic fallback: checks PDBs/, then downloads
-pdb = pipeline.add(PDB(
+pdb = PDB(
     pdbs=["4ufc", "1abc"],
     ids=["POI1", "POI2"]
-))
+
 
 # Check custom folder first, then PDBs/, then download
-pdb = pipeline.add(PDB(
+pdb = PDB(
     pdbs=["my_structure"],
     local_folder="/path/to/my/pdbs"
-))
+
 
 # Download biological assembly
-pdb = pipeline.add(PDB(
+pdb = PDB(
     pdbs="4ufc",
     ids="MyProtein",
     biological_assembly=True,
     remove_waters=False
-))
+
 ```
 
 ---
@@ -1991,12 +1991,12 @@ Creates PyMOL visualizations and session files for structural analysis. Supports
 
 **Example**:
 ```python
-pymol = pipeline.add(PyMOL(
+pymol = PyMOL(
     structures=best,
     reference_structure=template,
     color_by="b_factor",
     alignment="super"
-))
+
 ```
 
 ---

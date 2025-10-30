@@ -11,9 +11,9 @@ from PipelineScripts.load_output import LoadOutput
 from PipelineScripts.average_by_datasheet import AverageByDatasheet
 from PipelineScripts.extract_metrics import ExtractMetrics
 
-with Pipeline(pipeline_name="Examples",
-              job_name="PostProcessing",
-              job_description="Average by datasheets and extract metrics"):
+with Pipeline(project="Examples",
+              job="PostProcessing",
+              description="Average by datasheets and extract metrics"):
 
     Resources(time="24:00:00",
               memory="16GB")

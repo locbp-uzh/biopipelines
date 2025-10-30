@@ -11,9 +11,9 @@ from PipelineScripts.pdb import PDB
 from PipelineScripts.compound_library import CompoundLibrary
 from PipelineScripts.mmseqs2 import MMseqs2
 
-with Pipeline(pipeline_name="Examples",
-              job_name="Boltz",
-              job_description="Folding of HaloTag7 with Cy7 methyl amide close enantiomer SS"):
+with Pipeline(project="Examples",
+              job="Boltz",
+              description="Folding of HaloTag7 with Cy7 methyl amide close enantiomer SS"):
 
     Resources(gpu="gpu",
               time="23:59:00",

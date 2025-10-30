@@ -11,9 +11,9 @@ from PipelineScripts.site_directed_mutagenesis import SDM
 from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.boltz2 import Boltz2
 
-with Pipeline(pipeline_name="Examples",
-              job_name="SDM-MMseqs-Boltz",
-              job_description="Saturation mutagenesis of HaloTag7 at position 175 with Cy7 methyl amide open enantiomer R"):
+with Pipeline(project="Examples",
+              job="SDM-MMseqs-Boltz",
+              description="Saturation mutagenesis of HaloTag7 at position 175 with Cy7 methyl amide open enantiomer R"):
 
     Resources(gpu="32GB",
               time="24:00:00",

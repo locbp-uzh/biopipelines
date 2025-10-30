@@ -48,26 +48,26 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, pipeline_name: str, job_name: str, job_description: str="Description missing", debug: bool=False, shared: bool=False):
+    def __init__(self, project: str, job: str, description: str="Description missing", debug: bool=False, shared: bool=False):
         """
         Initialize a new pipeline instance.
 
         Args:
-            pipeline_name: Name of the pipeline (used for output folders)
-            job_name: Name of the specific job (used for output folders)
-            job_description: Optional description of what this job does
-            debug: If True, runs in debug mode without creating folders
+            tree: Name of the folder (used for output folders)
+            branch: Name of the specific job (a unique numeric id NNN will be appended to it) (used for output folders)
+            description: Optional description of what this job does
+            debug: If True, runs in debug mode without creating folders (to test locally)
             shared: If True, uses shared/public user for folder structure (default: False)
         """
-        if ' ' in job_name: job_name=job_name.replace(' ','_') #It will create issues at runtime otherwise
+        if ' ' in job: job=job.replace(' ','_') #It will create issues at runtime otherwise
         
-        self.pipeline_name = pipeline_name
-        self.job_name = job_name
-        self.job_description = job_description
+        self.project = project
+        self.job = job
+        self.description = description
         self.debug = debug
         self.shared = shared
 
-        self.folder_manager = FolderManager(pipeline_name, job_name, debug, shared)
+        self.folder_manager = FolderManager(project, job, debug, shared)
         self.folders = self.folder_manager.get_folders()
         
         # Tool management
@@ -111,7 +111,7 @@ class Pipeline:
         if current_pipeline is not None:
             raise RuntimeError(
                 f"Cannot nest Pipeline contexts. "
-                f"Pipeline '{current_pipeline.pipeline_name}' is already active."
+                f"Pipeline '{current_pipeline.project}' is already active."
             )
         _active_pipeline.set(self)
         return self
@@ -389,9 +389,9 @@ class Pipeline:
         
         # Generate configuration display
         config_lines = [
-            f'echo "Pipeline: {self.pipeline_name}"',
-            f'echo "Job name: {self.job_name}"',
-            f'echo "Description: {self.job_description}"',
+            f'echo "Pipeline: {self.project}"',
+            f'echo "Job name: {self.job}"',
+            f'echo "Description: {self.description}"',
             'echo'
         ]
         
@@ -419,7 +419,7 @@ class Pipeline:
         # Build main pipeline script
         script_lines = [
             "#!/bin/bash",
-            f"# Generated pipeline: {self.pipeline_name}",
+            f"# Generated pipeline: {self.project}",
             f"# Tools: {', '.join([t.TOOL_NAME for t in self.tools])}",
             "",
             "set -e  # Exit on any error",
@@ -442,7 +442,7 @@ class Pipeline:
 
         script_lines.extend([
             "echo Configuration",
-            f"{config_script} | tee {os.path.join(self.folders['output'], f'{self.pipeline_name}_config.txt')}",
+            f"{config_script} | tee {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
             "echo"
         ])
         
@@ -656,7 +656,7 @@ umask 002
         
         print(f"Slurm saved to: {slurm_path}")
         print("="*30+"Job"+"="*30)
-        print(f"{self.pipeline_name}: {self.job_name} ({self.folder_manager.job_id})")
+        print(f"{self.project}: {self.job} ({self.folder_manager.job_id})")
         print("="*30+"Slurm Script"+"="*30)
         # Print line by line to ensure proper formatting
         for line in slurm_content.split('\n'):
@@ -668,7 +668,7 @@ umask 002
             f"slurm.out"
         )
         # Format job name as "<pipeline>: <job> (<N>)"
-        formatted_job_name = f"{self.pipeline_name}: {self.job_name} ({self.folder_manager.job_id})"
+        formatted_job_name = f"{self.project}: {self.job} ({self.folder_manager.job_id})"
         print(f"sbatch --job-name=\"{formatted_job_name}\" --output {output_path} {slurm_path}")
     
     def resources(self, gpu: str = None, memory: str = None, time: str = None, **slurm_options):
@@ -743,7 +743,7 @@ umask 002
     def summary(self) -> str:
         """Get pipeline summary."""
         summary = [
-            f"Pipeline: {self.pipeline_name}",
+            f"Pipeline: {self.project}",
             f"Tools: {len(self.tools)}",
             f"Environments: {len(self.environments_used)}",
             ""
@@ -799,9 +799,9 @@ umask 002
                         "tool_parameters": tool.to_dict(),
                         "resources": tool.resources.copy(),
                         "pipeline_context": {
-                            "pipeline_name": self.pipeline_name,
-                            "pipeline_job_name": self.job_name,
-                            "pipeline_description": self.job_description
+                            "pipeline_name": self.project,
+                            "pipeline_job_name": self.job,
+                            "pipeline_description": self.description
                         }
                     },
                     "export_metadata": {

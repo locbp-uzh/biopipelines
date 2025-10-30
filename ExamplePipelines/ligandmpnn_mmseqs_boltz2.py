@@ -14,9 +14,9 @@ from PipelineScripts.residue_atom_distance import ResidueAtomDistance
 from PipelineScripts.merge_datasheets import MergeDatasheets
 from PipelineScripts.filter import Filter
 
-with Pipeline(pipeline_name="Examples",
-              job_name="LigandMPNN-MSA-Boltz",
-              job_description="Test of MMseqs2 local"):
+with Pipeline(project="Examples",
+              job="LigandMPNN-MSA-Boltz",
+              description="Test of MMseqs2 local"):
 
     Resources(gpu="V100",
               time="24:00:00",

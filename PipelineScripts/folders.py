@@ -24,13 +24,13 @@ class FolderManager:
     following conventions established in the Jupyter notebooks.
     """
     
-    def __init__(self, pipeline_name: str, job_folder: str, debug: bool=False, shared: bool=False):
+    def __init__(self, project: str, job: str, debug: bool=False, shared: bool=False):
         """
         Initialize folder manager for a pipeline.
 
         Args:
-            pipeline_name: Name of the pipeline (used for output folders)
-            job_folder: Name of the job (used for output folders)
+            tree: Name of the folder (used for output folders)
+            branch: Name of the specific job (a unique numeric id NNN will be appended to it) (used for output folders)
             debug: if True, it will not attempt to generate folder. Useful to check locally the expected input output of models
             shared: if True, uses 'public' as the user name for shared/public pipelines
         """
@@ -94,13 +94,13 @@ class FolderManager:
             "ModelForge": os.path.join(self._folders["data"], tool_data_config.get('ModelForge', 'modelforge')),
             "BioPipelines": os.path.join(self._folders["user"], "BioPipelines")})
         self._folders.update({
-            "pipeline": os.path.join(self._folders["BioPipelines"],pipeline_name) if not debug else "Debug"})
+            "project": os.path.join(self._folders["BioPipelines"],project) if not debug else "Debug"})
 
         for folder_key in ["user", "BioPipelines", "PDBs"]:
             if not debug: os.makedirs(self._folders[folder_key], exist_ok=True) #create directories
-        os.makedirs(self._folders["pipeline"], exist_ok=True)
+        os.makedirs(self._folders["project"], exist_ok=True)
 
-        self._folders["output"] = FolderManager.unique_name(self._folders["pipeline"],job_folder,full_path=True)
+        self._folders["output"] = FolderManager.unique_name(self._folders["project"],job,full_path=True)
         os.makedirs(self._folders["output"], exist_ok=True)
         
         # Extract job ID from the output folder name
