@@ -25,7 +25,7 @@ TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp"
 GPU_TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp/gpu"
 UNIREF_DB="uniref30_2302_db"
 DB_PATH="$DB_DIR/$UNIREF_DB"  # Use databases directly from shares
-THREADS=32
+THREADS=4
 POLL_INTERVAL=10                     # seconds
 MAX_SEQS=10000    # limit homologs per query
 
@@ -88,7 +88,7 @@ check_mmseqs_installation
 
 # Optimized Memory Settings
 export MMSEQS_MAX_MEMORY=${MMSEQS_MAX_MEMORY:-150G}  # Reduced from 200G
-export OMP_NUM_THREADS=${OMP_NUM_THREADS:-16}        # Reduced from 32
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}         # Reduced to 4 for GPU mode
 export CUDA_VISIBLE_DEVICES=0
 
 # GPU Memory optimization

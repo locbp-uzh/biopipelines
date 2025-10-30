@@ -1,26 +1,21 @@
 """
-This pipeline shows how to improve the difference in predicted binding affinity between open and close form of a carbocyanine 7 chloride and halotag7 starting from a Boltz model of the open form.
+This pipeline should not be modified as it is used by the gpu server
 """
 
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
-from PipelineScripts.pipeline import Pipeline
+from PipelineScripts.pipeline import *
 from PipelineScripts.mmseqs2 import MMseqs2Server
 
-pipeline = Pipeline(
-    pipeline_name="MMseqs2Server",
-    job_name="GPU",
-    job_description="Runs MMseqs2 server with GPU accelaration for 1 against many sequence alignment")
+with Pipeline(pipeline_name="MMseqs2Server",
+              job_name="GPU",
+              job_description="Runs MMseqs2 server with GPU accelaration for 1 against many sequence alignment"):
 
-pipeline.resources(
-    gpu="80GB",
-    time="4:00:00",
-    memory="32GB",
-    cpus=16
-)
+    Resources(gpu="80GB",
+              time="4:00:00",
+              memory="32GB",
+              cpus=4)
 
-pipeline.add(MMseqs2Server("gpu"))
+    MMseqs2Server("gpu")
 
-#Prints
-pipeline.slurm() 

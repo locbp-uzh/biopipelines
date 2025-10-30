@@ -706,7 +706,7 @@ bash {cpu_script_path}
         if self.threads:
             env_vars.append(f"export OMP_NUM_THREADS={self.threads}")
         else:
-            env_vars.append("export OMP_NUM_THREADS=16")
+            env_vars.append("export OMP_NUM_THREADS=4")
 
         env_vars.extend([
             f"export MMSEQS2_DATABASE={self.database}",
