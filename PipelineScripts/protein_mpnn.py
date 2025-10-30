@@ -350,7 +350,12 @@ class ProteinMPNN(BaseConfig):
             raise ValueError("No structure sources found")
         
         # Determine input source and parameters for fixed positions script
-        if (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
+        # Priority: explicit fixed/redesigned parameters > input datasheets > pLDDT
+        if self.fixed or self.redesigned:
+            # Use explicit fixed/redesigned positions (including DATASHEET_REFERENCE)
+            input_source = "selection"
+            input_datasheet = "-"
+        elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
            (hasattr(self, 'is_pipeline_input') and self.is_pipeline_input and hasattr(self, 'input_datasheets') and self.input_datasheets):
             # Use datasheet from previous tool (e.g., RFdiffusion)
             input_source = "datasheet"
@@ -377,10 +382,6 @@ class ProteinMPNN(BaseConfig):
             else:
                 # Legacy format
                 input_datasheet = self.input_datasheets[0] if isinstance(self.input_datasheets, list) else str(self.input_datasheets)
-        elif self.fixed and self.fixed != "-":
-            # Use direct fixed positions selection
-            input_source = "selection"
-            input_datasheet = "-"
         else:
             # Use pLDDT threshold method
             input_source = "plddt"
@@ -391,7 +392,7 @@ class ProteinMPNN(BaseConfig):
         designed_param = self.resolve_datasheet_reference(self.redesigned) if self.redesigned else "-"
         
         return f"""echo "Determining fixed positions"
-python {self.fixed_py} {input_directory} {input_source} {input_datasheet} {self.plddt_threshold} {fixed_param} {designed_param} {self.fixed_chain} {self.fixed_jsonl} {self.sele_csv}
+python {self.fixed_py} "{input_directory}" "{input_source}" "{input_datasheet}" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
 
 echo "Parsing multiple PDBs" 
 python {self.parse_py} --input_path {input_directory} --output_path {self.parsed_pdbs_jsonl}

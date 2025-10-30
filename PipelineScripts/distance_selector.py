@@ -263,12 +263,7 @@ echo "Distance cutoff: {self.distance}Å"
 {restrict_echo}
 
 # Run distance analysis
-python {self.distance_selector_py} \\
-    "{structure_files_str}" \\
-    "{reference_spec}" \\
-    {self.distance} \\
-    "{restrict_spec}" \\
-    "{self.selections_csv}"
+python {self.distance_selector_py} "{structure_files_str}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}"
 
 echo "Distance analysis completed"
 echo "Selections saved to: {self.selections_csv}"

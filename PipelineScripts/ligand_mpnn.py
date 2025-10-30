@@ -418,7 +418,7 @@ chmod +x {self.commands_file}
 
 # Use existing HelpScript to create position replacement script
 echo "Creating position replacement script..."
-python {self.runtime_positions_py} "{structure_files_str}" {input_source} {input_datasheet} {resolved_fixed} {resolved_designed} {self.ligand} "{self.design_within}" {self.replacement_script}
+python {self.runtime_positions_py} "{structure_files_str}" "{input_source}" "{input_datasheet}" "{resolved_fixed}" "{resolved_designed}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
 
 # Run the replacement script on the commands file (not this script)
 echo "Running position replacement script on commands file: {self.commands_file}"
