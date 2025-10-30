@@ -213,8 +213,7 @@ def check_and_resubmit_server():
                 ["./submit", "ExamplePipelines/mmseqs2_server.py"],
                 cwd=notebooks_dir,
                 capture_output=True,
-                text=True,
-                timeout=60
+                text=True
             )
             log(f"Submit command completed with return code: {result.returncode}")
 
@@ -350,12 +349,12 @@ def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=No
             # No masking - need to ensure key column exists
             df_original = pd.read_csv(csv_file)
 
-            # Add key column if it doesn't exist
+            # Add key column if it doesn't exist - we already know it exists but like to waste CPU and IO
             if 'key' not in df_original.columns:
                 df_original.insert(0, 'key', -1)
 
             df_original.to_csv(output_csv_file, index=False)
-            log(f"Saved MSA (with key column) to: {output_csv_file}")
+            log(f"Saved MSA to: {output_csv_file}")
 
         # Get query sequence (first row)
         query_sequence = sequences[0] if sequences else ""
