@@ -64,9 +64,9 @@ def sele_to_list(s):
 def list_to_sele(a):
     s = ""
     i = 0
-    while i < len(a):   
+    while i < len(a):
         if i > 0: s += "+"
-        s += f"{a[i]}"   
+        s += f"{a[i]}"
         #represent consecutive indeces with a dash
         if i < len(a) - 1:
             if int(a[i])+1 == int(a[i+1]):
@@ -76,9 +76,53 @@ def list_to_sele(a):
                     if int(a[j]) != int(a[j-1])+1: break
                     j += 1
                 i = j - 1
-                s += f"{a[i]}" 
-        i += 1        
+                s += f"{a[i]}"
+        i += 1
     return s
+
+def resolve_datasheet_reference(reference, design_names):
+    """
+    Resolve datasheet reference to per-design selections.
+
+    Args:
+        reference: Either a datasheet reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
+        design_names: List of design names (PDB base names without extension)
+
+    Returns:
+        Dictionary mapping design names to position lists
+    """
+    if not reference.startswith("DATASHEET_REFERENCE:"):
+        # Direct PyMOL selection - same for all designs
+        return {name: sele_to_list(reference) for name in design_names}
+
+    # Parse datasheet reference: DATASHEET_REFERENCE:path:column
+    _, datasheet_path, column_name = reference.split(":", 2)
+
+    if not os.path.exists(datasheet_path):
+        raise FileNotFoundError(f"Datasheet not found: {datasheet_path}")
+
+    df = pd.read_csv(datasheet_path)
+    positions_per_design = {}
+
+    for design_name in design_names:
+        # Find matching row in datasheet
+        matching_rows = df[df['pdb'] == design_name + '.pdb']
+        if matching_rows.empty:
+            # Try with base name in 'id' column
+            matching_rows = df[df['id'] == design_name]
+
+        if not matching_rows.empty:
+            row = matching_rows.iloc[0]
+            selection_value = row.get(column_name, '')
+            if pd.notna(selection_value) and selection_value != '':
+                positions_per_design[design_name] = sele_to_list(str(selection_value))
+            else:
+                positions_per_design[design_name] = []
+        else:
+            print(f"Warning: No datasheet entry found for {design_name} in column {column_name}")
+            positions_per_design[design_name] = []
+
+    return positions_per_design
 
 import os
 import pandas as pd
@@ -120,16 +164,24 @@ if input_source == "datasheet": #derive from datasheet
         input_source = "plddt"
 
 if input_source == "selection":
-    # Use direct selections provided
+    # Use direct selections or datasheet references
     FIXED = FIXED if FIXED != '-' else ''
     DESIGNED = DESIGNED if DESIGNED != '-' else ''
-    
+
+    # Resolve datasheet references if present
+    fixed_per_design = resolve_datasheet_reference(FIXED, design_names) if FIXED else {name: [] for name in design_names}
+    designed_per_design = resolve_datasheet_reference(DESIGNED, design_names) if DESIGNED else {name: [] for name in design_names}
+
     for name in design_names:
         fixed_dict[name] = dict()
         mobile_dict[name] = dict()
-        fixed_dict[name][FIXED_CHAIN] = sele_to_list(FIXED)
-        mobile_dict[name][FIXED_CHAIN] = sele_to_list(DESIGNED)
-        print(f"Design: {name}, Fixed: {FIXED}, Designed: {DESIGNED}")
+        fixed_dict[name][FIXED_CHAIN] = fixed_per_design[name]
+        mobile_dict[name][FIXED_CHAIN] = designed_per_design[name]
+
+        # Create readable output
+        fixed_str = list_to_sele(fixed_per_design[name]) if fixed_per_design[name] else ""
+        designed_str = list_to_sele(designed_per_design[name]) if designed_per_design[name] else ""
+        print(f"Design: {name}, Selection-based - Fixed: {fixed_str}, Redesigned: {designed_str}")
         
 elif input_source == "plddt" or input_source == "datasheet":  # datasheet fallback
     # Use pLDDT threshold method
