@@ -5,7 +5,7 @@ This pipeline shows how to use boltz2
 import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
-from PipelineScripts.pipeline import Pipeline
+from PipelineScripts.pipeline import *
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.pdb import PDB
 
@@ -23,19 +23,13 @@ Cy5s = {
 }
 
 for cy5 in Cy5s.keys():
-    pipeline = Pipeline(
-        pipeline_name="Boltz",
-        job_name=f"HT_{cy5}",
-        job_description="Folding of HaloTag7 with Cy5 methyl amide close enantiomer SS")
-    pipeline.resources(
-        gpu="V100",
-        time="24:00:00",
-        memory="16GB"
-    )
-    HaloTag = pipeline.add(PDB("6U32","HT"))
-    pipeline.add(Boltz2(proteins=HaloTag,
-    ligands=Cy5s[cy5],
-    global_msas_cache=True,
-    pipeline=pipeline))
-
-    pipeline.slurm()
+    with Pipeline(pipeline_name="Boltz",
+                  job_name=f"HT_{cy5}",
+                  job_description="Folding of HaloTag7 with Cy5 methyl amide close enantiomer SS"):
+        Resources(gpu="V100",
+                  time="24:00:00",
+                  memory="16GB")
+        HaloTag = PDB("6U32","HT")
+        Boltz2(proteins=HaloTag,
+        ligands=Cy5s[cy5],
+        global_msas_cache=True)

@@ -45,6 +45,8 @@ with Pipeline(pipeline_name="Examples",
                        num_sequences=2,
                        redesigned=distances.datasheets.selections.within)
 
+    #stitch sequences by replacing the pmpnn sequences generated for each rfd design with lmpnn sequences, in the within selection
+    #we'll get 2x2 = 4 sequences per design
     sequences = StitchSequences(sequences=[pmpnn,lmpnn],
                                 selections=["",distances.datasheets.selections.within])
 

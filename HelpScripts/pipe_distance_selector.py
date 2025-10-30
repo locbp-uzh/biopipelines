@@ -7,7 +7,7 @@ a specified distance from a reference (ligand, atoms, or residues), generating
 PyMOL-formatted selections for use in downstream tools like LigandMPNN.
 
 Usage:
-    python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <output_csv>
+    python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv>
 
 Arguments:
     structure_files: Comma-separated list of PDB file paths
@@ -16,10 +16,11 @@ Arguments:
                    - "atoms:resname ATP" - Use PyMOL atom selection
                    - "residues:resi 100-105" - Use PyMOL residue selection
     distance: Distance cutoff in Angstroms
+    restrict_spec: Restriction specification (datasheet reference, direct selection, or "" for no restriction)
     output_csv: Path to output CSV file with selections
 
 Output:
-    CSV file with columns: id, within, beyond, distance_cutoff, reference_ligand
+    CSV file with columns: id, pdb, within, beyond, distance_cutoff, reference_ligand
 """
 
 import sys
@@ -116,7 +117,122 @@ def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     dz = atom1.z - atom2.z
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
-def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], distance_cutoff: float) -> Tuple[List[str], List[str]]:
+
+def sele_to_list(sele_str: str) -> List[int]:
+    """
+    Convert selection string to list of residue numbers.
+
+    Args:
+        sele_str: PyMOL-style selection (e.g., "10-20+30-40")
+
+    Returns:
+        List of residue numbers
+    """
+    if not sele_str or sele_str == "-" or pd.isna(sele_str):
+        return []
+
+    residues = []
+    parts = str(sele_str).split('+')
+
+    for part in parts:
+        part = part.strip()
+        if '-' in part and not part.startswith('-'):
+            # Range like "10-20"
+            start, end = map(int, part.split('-', 1))
+            residues.extend(range(start, end + 1))
+        elif part:
+            # Single residue
+            residues.append(int(part))
+
+    return sorted(set(residues))  # Remove duplicates and sort
+
+
+def format_ligandmpnn_selection_from_list(res_nums: List[int]) -> str:
+    """
+    Format residue number list as LigandMPNN selection string.
+
+    Args:
+        res_nums: List of residue numbers
+
+    Returns:
+        Selection string with ranges (e.g., "10-11+15")
+    """
+    if not res_nums:
+        return ""
+
+    # Create range strings
+    res_nums = sorted(set(res_nums))
+    ranges = []
+    start = res_nums[0]
+    end = res_nums[0]
+
+    for i in range(1, len(res_nums)):
+        if res_nums[i] == end + 1:
+            end = res_nums[i]
+        else:
+            # Add completed range
+            if start == end:
+                ranges.append(f"{start}")
+            else:
+                ranges.append(f"{start}-{end}")
+            start = end = res_nums[i]
+
+    # Add final range
+    if start == end:
+        ranges.append(f"{start}")
+    else:
+        ranges.append(f"{start}-{end}")
+
+    return "+".join(ranges)
+
+
+def resolve_restriction_spec(restrict_spec: str, pdb_file: str) -> List[int]:
+    """
+    Resolve restriction specification to list of residue numbers.
+
+    Args:
+        restrict_spec: Either:
+                      - "" (empty): No restriction
+                      - "DATASHEET_REFERENCE:path:column": Datasheet reference
+                      - "10-20+30-40": Direct PyMOL selection
+        pdb_file: PDB file being analyzed
+
+    Returns:
+        List of residue numbers to restrict to (empty list = no restriction)
+    """
+    if not restrict_spec or restrict_spec == "":
+        return []  # No restriction
+
+    # Handle datasheet reference
+    if restrict_spec.startswith("DATASHEET_REFERENCE:"):
+        _, datasheet_path, column_name = restrict_spec.split(":", 2)
+
+        if not os.path.exists(datasheet_path):
+            print(f"Warning: Restriction datasheet not found: {datasheet_path}")
+            return []
+
+        df = pd.read_csv(datasheet_path)
+        pdb_name = os.path.basename(pdb_file)
+        pdb_base = os.path.splitext(pdb_name)[0]
+
+        # Find matching row
+        matching_rows = df[df['pdb'] == pdb_name]
+        if matching_rows.empty:
+            matching_rows = df[df['id'] == pdb_base]
+
+        if not matching_rows.empty:
+            row = matching_rows.iloc[0]
+            selection_str = row.get(column_name, '')
+            return sele_to_list(selection_str)
+        else:
+            print(f"Warning: No restriction datasheet entry found for {pdb_name}")
+            return []
+
+    # Handle direct selection
+    else:
+        return sele_to_list(restrict_spec)
+
+def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], distance_cutoff: float, restrict_to_residues: List[int] = None) -> Tuple[List[str], List[str]]:
     """
     Calculate distances from protein residues to reference atoms using native PDB parser.
 
@@ -124,6 +240,7 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
         atoms: List of all atoms from PDB file
         reference_atoms: List of reference atoms
         distance_cutoff: Distance cutoff in Angstroms
+        restrict_to_residues: Optional list of residue numbers to restrict search to
 
     Returns:
         Tuple of (within_residues, beyond_residues) as lists of residue identifiers
@@ -135,6 +252,11 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
 
     for res_key, residue_atoms in protein_residues.items():
         chain, res_num = res_key
+
+        # If restriction is specified, skip residues not in restriction
+        if restrict_to_residues is not None and len(restrict_to_residues) > 0:
+            if res_num not in restrict_to_residues:
+                continue  # Skip this residue - not in restriction set
 
         # Calculate minimum distance from any atom in this residue to any reference atom
         min_distance = float('inf')
@@ -253,7 +375,7 @@ def format_pymol_selection(residue_list):
     return "+".join(range_parts)
 
 
-def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float) -> Dict[str, any]:
+def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float, restrict_spec: str = "") -> Dict[str, any]:
     """
     Analyze a single structure for distance-based residue selection using native PDB parser.
 
@@ -261,6 +383,7 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
         pdb_file: Path to PDB file
         reference_spec: Reference specification string
         distance_cutoff: Distance cutoff in Angstroms
+        restrict_spec: Restriction specification (datasheet reference or direct selection)
 
     Returns:
         Dictionary with analysis results
@@ -288,9 +411,14 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
     print(f"Using reference: {reference_description} ({len(reference_atoms)} atoms)")
 
-    # Calculate distances
+    # Resolve restriction
+    restrict_to_residues = resolve_restriction_spec(restrict_spec, pdb_file)
+    if restrict_to_residues:
+        print(f"Restricting to {len(restrict_to_residues)} residues: {format_ligandmpnn_selection_from_list(restrict_to_residues)}")
+
+    # Calculate distances with restriction
     within_residues, beyond_residues = calculate_residue_distances(
-        atoms, reference_atoms, distance_cutoff
+        atoms, reference_atoms, distance_cutoff, restrict_to_residues
     )
 
     # Format as universal selections (numbers only) - works for all tools
@@ -311,20 +439,22 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
 
 def main():
-    if len(sys.argv) != 5:
-        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <output_csv>")
+    if len(sys.argv) != 6:
+        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv>")
         print("")
         print("Arguments:")
         print("  structure_files: Comma-separated list of PDB file paths")
         print("  reference_spec: Reference specification (e.g., 'ligand:LIG', 'atoms:resname ATP')")
         print("  distance: Distance cutoff in Angstroms")
+        print("  restrict_spec: Restriction specification (datasheet reference, direct selection, or empty string)")
         print("  output_csv: Path to output CSV file")
         sys.exit(1)
 
     structure_files_str = sys.argv[1]
     reference_spec = sys.argv[2]
     distance_cutoff = float(sys.argv[3])
-    output_csv = sys.argv[4]
+    restrict_spec = sys.argv[4]
+    output_csv = sys.argv[5]
 
     # Parse comma-separated list of structure files
     structure_files = [f.strip() for f in structure_files_str.split(",") if f.strip()]
@@ -333,6 +463,8 @@ def main():
 
     print(f"Analyzing {len(structure_files)} structures with distance cutoff {distance_cutoff}Å")
     print(f"Reference: {reference_spec}")
+    if restrict_spec:
+        print(f"Restriction: {restrict_spec}")
 
     # Analyze each structure
     results = []
@@ -343,11 +475,11 @@ def main():
 
         try:
             print(f"\nAnalyzing: {os.path.basename(pdb_file)}")
-            result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff)
+            result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff, restrict_spec)
             results.append(result)
 
-            print(f"  Within {distance_cutoff}Å: {len(result['within'].split()) if result['within'] else 0} residues")
-            print(f"  Beyond {distance_cutoff}Å: {len(result['beyond'].split()) if result['beyond'] else 0} residues")
+            print(f"  Within {distance_cutoff}Å: {len(result['within'].split('+')) if result['within'] else 0} residues")
+            print(f"  Beyond {distance_cutoff}Å: {len(result['beyond'].split('+')) if result['beyond'] else 0} residues")
 
         except Exception as e:
             print(f"Error analyzing {pdb_file}: {e}")

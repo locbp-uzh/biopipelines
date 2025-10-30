@@ -28,7 +28,7 @@ with Pipeline(pipeline_name="Examples",
                        ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                        num_sequences=3)
 
-    msas = MMseqs2(lmpnn) #you've got to run the server somewhere else
+    msas = MMseqs2(lmpnn)
 
     boltz_holo_open = Boltz2(proteins=lmpnn,
                              ligands=original,

@@ -35,6 +35,7 @@ class DistanceSelector(BaseConfig):
                  distance: float = 5.0,
                  reference_type: str = "ligand",
                  reference_selection: str = "",
+                 restrict_to_selection: Union[str, tuple, None] = None,
                  **kwargs):
         """
         Initialize DistanceSelector configuration.
@@ -47,6 +48,11 @@ class DistanceSelector(BaseConfig):
                           Options: "ligand", "atoms", "residues"
             reference_selection: Specific selection if not using ligand
                                (e.g., "resname ATP", "resi 100-105")
+            restrict_to_selection: Optional selection to restrict distance search to.
+                                  Accepts:
+                                  - Datasheet reference tuple: (datasheet, "column")
+                                  - Direct selection string: "10-20+30-40"
+                                  - None: Consider all protein residues (default)
             **kwargs: Additional parameters
         """
         # Store DistanceSelector-specific parameters
@@ -55,6 +61,7 @@ class DistanceSelector(BaseConfig):
         self.distance = distance
         self.reference_type = reference_type
         self.reference_selection = reference_selection
+        self.restrict_to_selection = restrict_to_selection
 
         # Track input source type
         self.input_is_tool_output = isinstance(structures, ToolOutput)
@@ -62,6 +69,12 @@ class DistanceSelector(BaseConfig):
 
         # Initialize base class
         super().__init__(**kwargs)
+
+        # Track dependency if restrict_to_selection is a datasheet reference
+        if isinstance(restrict_to_selection, tuple) and len(restrict_to_selection) == 2:
+            datasheet_obj, _ = restrict_to_selection
+            if hasattr(datasheet_obj, 'config'):
+                self.dependencies.append(datasheet_obj.config)
 
         # Initialize file paths (will be set in configure_inputs)
         self._initialize_file_paths()
@@ -82,6 +95,14 @@ class DistanceSelector(BaseConfig):
 
         if self.reference_type != "ligand" and not self.reference_selection:
             raise ValueError("reference_selection is required when reference_type is not 'ligand'")
+
+        # Validate restrict_to_selection if provided
+        if self.restrict_to_selection is not None:
+            if isinstance(self.restrict_to_selection, tuple):
+                if len(self.restrict_to_selection) != 2:
+                    raise ValueError("Datasheet reference must be a tuple of (datasheet, column_name)")
+            elif not isinstance(self.restrict_to_selection, str):
+                raise ValueError("restrict_to_selection must be a string, tuple, or None")
 
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
@@ -178,6 +199,13 @@ class DistanceSelector(BaseConfig):
         if self.reference_selection:
             config_lines.append(f"REFERENCE SELECTION: {self.reference_selection}")
 
+        if self.restrict_to_selection is not None:
+            if isinstance(self.restrict_to_selection, tuple):
+                datasheet_obj, column = self.restrict_to_selection
+                config_lines.append(f"RESTRICT TO: {column} from datasheet")
+            else:
+                config_lines.append(f"RESTRICT TO: {self.restrict_to_selection}")
+
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
@@ -210,15 +238,36 @@ class DistanceSelector(BaseConfig):
         else:
             reference_spec = f"{self.reference_type}:{self.reference_selection}"
 
+        # Resolve restrict_to_selection to placeholder or empty string
+        if self.restrict_to_selection is not None:
+            if isinstance(self.restrict_to_selection, tuple):
+                # Datasheet reference
+                datasheet_obj, column_name = self.restrict_to_selection
+                # Get datasheet path
+                if hasattr(datasheet_obj, 'path'):
+                    datasheet_path = datasheet_obj.path
+                else:
+                    raise ValueError("Datasheet object must have 'path' attribute")
+                restrict_spec = f"DATASHEET_REFERENCE:{datasheet_path}:{column_name}"
+            else:
+                # Direct selection string
+                restrict_spec = str(self.restrict_to_selection)
+        else:
+            restrict_spec = ""  # Empty means no restriction
+
+        restrict_echo = f'echo "Restricting to selection: {restrict_spec}"' if restrict_spec else ""
+
         script_content += f"""echo "Analyzing residue distances for {len(structure_files)} structures"
 echo "Reference: {reference_spec}"
 echo "Distance cutoff: {self.distance}Å"
+{restrict_echo}
 
 # Run distance analysis
 python {self.distance_selector_py} \\
     "{structure_files_str}" \\
     "{reference_spec}" \\
     {self.distance} \\
+    "{restrict_spec}" \\
     "{self.selections_csv}"
 
 echo "Distance analysis completed"
@@ -304,6 +353,7 @@ echo "Selections saved to: {self.selections_csv}"
                 "distance": self.distance,
                 "reference_type": self.reference_type,
                 "reference_selection": self.reference_selection,
+                "restrict_to_selection": str(self.restrict_to_selection) if self.restrict_to_selection else None,
                 "input_type": "tool_output" if self.input_is_tool_output else "direct"
             }
         })

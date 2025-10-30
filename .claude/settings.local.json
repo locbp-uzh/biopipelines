@@ -30,7 +30,10 @@
       "Bash(git branch:*)",
       "Bash(git rm:*)",
       "Bash(python -c:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(for:*)",
+      "Bash(do echo \"=== $file ===\" head -20 \"$file\")"
     ],
     "deny": [],
     "ask": []
