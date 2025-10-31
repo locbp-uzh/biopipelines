@@ -241,6 +241,11 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
         pdb_name = os.path.basename(pdb_file)
         pdb_base = os.path.splitext(pdb_name)[0]
 
+        # Debug: Show datasheet info
+        print(f"DEBUG: Datasheet has {len(df)} rows")
+        print(f"DEBUG: Available columns: {list(df.columns)}")
+        print(f"DEBUG: Sample IDs from datasheet: {list(df['id'].head(3)) if 'id' in df.columns else 'No id column'}")
+
         # Apply id_map to get datasheet ID from structure ID
         if id_map:
             datasheet_id = map_structure_id_to_datasheet_id(pdb_base, id_map)
@@ -249,13 +254,19 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
         else:
             datasheet_id = pdb_base
 
+        print(f"DEBUG: Looking for structure '{pdb_base}' -> mapped to '{datasheet_id}'")
+
         # Find matching row - try multiple lookup strategies in order:
         # 1. Try pdb filename match
         matching_rows = df[df['pdb'] == pdb_name]
+        if not matching_rows.empty:
+            print(f"DEBUG: Match found via pdb filename: {pdb_name}")
 
         # 2. Try mapped datasheet ID
         if matching_rows.empty:
             matching_rows = df[df['id'] == datasheet_id]
+            if not matching_rows.empty:
+                print(f"DEBUG: Match found via mapped ID: {datasheet_id}")
 
         # 3. If mapping was applied and failed, try original structure ID as fallback
         if matching_rows.empty and id_map and datasheet_id != pdb_base:
@@ -266,12 +277,16 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
         if not matching_rows.empty:
             row = matching_rows.iloc[0]
             selection_str = row.get(column_name, '')
-            return sele_to_list(selection_str)
+            print(f"DEBUG: Retrieved selection from column '{column_name}': {selection_str}")
+            residues = sele_to_list(selection_str)
+            print(f"DEBUG: Parsed {len(residues)} residues for restriction")
+            return residues
         else:
             attempted_ids = [pdb_name, datasheet_id]
             if id_map and datasheet_id != pdb_base:
                 attempted_ids.append(pdb_base)
-            print(f"Warning: No restriction datasheet entry found. Tried: {', '.join(attempted_ids)}")
+            print(f"ERROR: No restriction datasheet entry found. Tried: {', '.join(attempted_ids)}")
+            print(f"ERROR: This means the restriction cannot be applied!")
             return []
 
     # Handle direct selection
