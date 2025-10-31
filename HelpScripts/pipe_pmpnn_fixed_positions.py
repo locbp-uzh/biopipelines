@@ -1,6 +1,12 @@
 #Copyright © 2024 LOCBP @ University of Zürich
 #Distributed under MIT license
 import argparse
+import os
+import sys
+
+# Import PDB parser
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pdb_parser import parse_pdb_file
 
 parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion datasheet, use direct selections, or apply pLDDT threshold')
 parser.add_argument('JOB_FOLDER', type=str, help="Directory containing PDB files")
@@ -79,6 +85,47 @@ def list_to_sele(a):
                 s += f"{a[i]}"
         i += 1
     return s
+
+def get_protein_residues_from_pdb(pdb_path, chain):
+    """
+    Get all protein residue numbers for a specific chain from PDB file.
+
+    Args:
+        pdb_path: Path to PDB file
+        chain: Chain identifier (e.g., 'A')
+
+    Returns:
+        Sorted list of residue numbers for the specified chain
+    """
+    # Standard amino acid names
+    standard_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+
+    atoms = parse_pdb_file(pdb_path)
+    residues = set()
+
+    for atom in atoms:
+        if atom.chain == chain and atom.res_name in standard_residues:
+            residues.add(atom.res_num)
+
+    return sorted(list(residues))
+
+def compute_complement(all_residues, redesigned_residues):
+    """
+    Compute complement: all_residues - redesigned_residues.
+
+    Args:
+        all_residues: List of all protein residue numbers
+        redesigned_residues: List of residues to redesign
+
+    Returns:
+        Sorted list of residues NOT in redesigned_residues
+    """
+    redesigned_set = set(redesigned_residues)
+    complement = [res for res in all_residues if res not in redesigned_set]
+    return sorted(complement)
 
 def resolve_datasheet_reference(reference, design_names):
     """
@@ -175,13 +222,35 @@ if input_source == "selection":
     for name in design_names:
         fixed_dict[name] = dict()
         mobile_dict[name] = dict()
-        fixed_dict[name][FIXED_CHAIN] = fixed_per_design[name]
+
+        # Store original mobile/designed positions for documentation
         mobile_dict[name][FIXED_CHAIN] = designed_per_design[name]
 
-        # Create readable output
-        fixed_str = list_to_sele(fixed_per_design[name]) if fixed_per_design[name] else ""
-        designed_str = list_to_sele(designed_per_design[name]) if designed_per_design[name] else ""
-        print(f"Design: {name}, Selection-based - Fixed: {fixed_str}, Redesigned: {designed_str}")
+        # Compute what ProteinMPNN should keep fixed:
+        # Option C: Union of explicit fixed + complement of redesigned
+        pdb_path = os.path.join(JOB_FOLDER, name + ".pdb")
+
+        # Start with explicit fixed positions
+        final_fixed = list(fixed_per_design[name])
+
+        # If redesigned positions are specified, add their complement to fixed
+        if designed_per_design[name]:
+            # Get all protein residues from PDB
+            all_residues = get_protein_residues_from_pdb(pdb_path, FIXED_CHAIN)
+
+            # Compute complement of redesigned positions
+            complement = compute_complement(all_residues, designed_per_design[name])
+
+            # Union: fixed + complement
+            final_fixed = sorted(list(set(final_fixed + complement)))
+
+            print(f"Design: {name}, Selection-based - Explicit Fixed: {list_to_sele(fixed_per_design[name]) if fixed_per_design[name] else ''}, Redesigned: {list_to_sele(designed_per_design[name])}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
+        else:
+            # No redesigned specified, use fixed as-is
+            print(f"Design: {name}, Selection-based - Fixed: {list_to_sele(final_fixed) if final_fixed else ''}, Redesigned: ")
+
+        # Store final fixed positions (what ProteinMPNN will use)
+        fixed_dict[name][FIXED_CHAIN] = final_fixed
         
 elif input_source == "plddt" or input_source == "datasheet":  # datasheet fallback
     # Use pLDDT threshold method
