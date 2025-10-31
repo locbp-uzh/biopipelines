@@ -245,14 +245,20 @@ class DistanceSelector(BaseConfig):
         else:
             reference_spec = f"{self.reference_type}:{self.reference_selection}"
 
+        # Debug: Check what restrict_to_selection is
+        print(f"DEBUG: restrict_to_selection = {self.restrict_to_selection}")
+        print(f"DEBUG: restrict_to_selection type = {type(self.restrict_to_selection)}")
+
         # Resolve restrict_to_selection to placeholder or empty string
         if self.restrict_to_selection is not None:
             if isinstance(self.restrict_to_selection, tuple):
                 # Datasheet reference
                 datasheet_obj, column_name = self.restrict_to_selection
+                print(f"DEBUG: Datasheet reference - obj={datasheet_obj}, column={column_name}")
                 # Get datasheet path
                 if hasattr(datasheet_obj, 'path'):
                     datasheet_path = datasheet_obj.path
+                    print(f"DEBUG: Datasheet path = {datasheet_path}")
                 else:
                     raise ValueError("Datasheet object must have 'path' attribute")
                 restrict_spec = f"DATASHEET_REFERENCE:{datasheet_path}:{column_name}"
@@ -261,6 +267,7 @@ class DistanceSelector(BaseConfig):
                 restrict_spec = str(self.restrict_to_selection)
         else:
             restrict_spec = ""  # Empty means no restriction
+            print("DEBUG: No restriction specified (restrict_to_selection is None)")
 
         restrict_echo = f'echo "Restricting to selection: {restrict_spec}"' if restrict_spec else ""
 
