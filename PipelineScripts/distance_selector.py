@@ -245,17 +245,11 @@ class DistanceSelector(BaseConfig):
         else:
             reference_spec = f"{self.reference_type}:{self.reference_selection}"
 
-        # Debug: Check what restrict_to_selection is
-        print(f"DEBUG: restrict_to_selection = {self.restrict_to_selection}")
-        print(f"DEBUG: restrict_to_selection type = {type(self.restrict_to_selection)}")
-
         # Resolve restrict_to_selection using base class method
         if self.restrict_to_selection is not None:
             restrict_spec = self.resolve_datasheet_reference(self.restrict_to_selection)
-            print(f"DEBUG: Resolved restriction spec = {restrict_spec}")
         else:
             restrict_spec = ""  # Empty means no restriction
-            print("DEBUG: No restriction specified (restrict_to_selection is None)")
 
         restrict_echo = f'echo "Restricting to selection: {restrict_spec}"' if restrict_spec else ""
 
