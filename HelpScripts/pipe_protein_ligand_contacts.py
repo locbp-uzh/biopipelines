@@ -480,12 +480,20 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             structure_id = os.path.splitext(os.path.basename(structure_path))[0]
             datasheet_id = map_structure_id_to_datasheet_id(structure_id, id_map)
 
+            # Try mapped ID first
             if datasheet_id in datasheet_selections:
                 selections_map[structure_id] = datasheet_selections[datasheet_id]
                 if datasheet_id != structure_id:
                     print(f"Mapped structure ID '{structure_id}' -> datasheet ID '{datasheet_id}'")
+            # Fallback: try original structure ID if mapping was applied
+            elif datasheet_id != structure_id and structure_id in datasheet_selections:
+                selections_map[structure_id] = datasheet_selections[structure_id]
+                print(f"Found match using original structure ID '{structure_id}' (mapped ID '{datasheet_id}' not found)")
             else:
-                print(f"Warning: No datasheet entry for structure ID '{structure_id}' (mapped to '{datasheet_id}')")
+                attempted_ids = [datasheet_id]
+                if datasheet_id != structure_id:
+                    attempted_ids.append(structure_id)
+                print(f"Warning: No datasheet entry for structure ID '{structure_id}'. Tried: {', '.join(attempted_ids)}")
 
     # Process structures
     results = []

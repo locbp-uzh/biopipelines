@@ -7,7 +7,7 @@ a specified distance from a reference (ligand, atoms, or residues), generating
 PyMOL-formatted selections for use in downstream tools like LigandMPNN.
 
 Usage:
-    python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv>
+    python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map>
 
 Arguments:
     structure_files: Comma-separated list of PDB file paths
@@ -18,6 +18,7 @@ Arguments:
     distance: Distance cutoff in Angstroms
     restrict_spec: Restriction specification (datasheet reference, direct selection, or "" for no restriction)
     output_csv: Path to output CSV file with selections
+    id_map: JSON string with ID mapping pattern (e.g., '{"*": "*_<N>"}') for matching structure IDs to datasheet IDs
 
 Output:
     CSV file with columns: id, pdb, within, beyond, distance_cutoff, reference_ligand
@@ -186,7 +187,31 @@ def format_ligandmpnn_selection_from_list(res_nums: List[int]) -> str:
     return "+".join(ranges)
 
 
-def resolve_restriction_spec(restrict_spec: str, pdb_file: str) -> List[int]:
+def map_structure_id_to_datasheet_id(structure_id: str, id_map: Dict[str, str]) -> str:
+    """
+    Map structure ID to datasheet ID using id_map pattern.
+
+    Args:
+        structure_id: Structure ID (e.g., "rifampicin_1_2")
+        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
+
+    Returns:
+        Mapped datasheet ID (e.g., "rifampicin_1")
+    """
+    import re
+
+    # Check if id_map uses the standard pattern
+    if "*" in id_map and "*_<N>" in id_map.values():
+        # Strip last _<number> from structure ID
+        match = re.match(r'^(.+)_\d+$', structure_id)
+        if match:
+            return match.group(1)
+
+    # No mapping or pattern doesn't match, use as-is
+    return structure_id
+
+
+def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str, str] = None) -> List[int]:
     """
     Resolve restriction specification to list of residue numbers.
 
@@ -196,6 +221,7 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str) -> List[int]:
                       - "DATASHEET_REFERENCE:path:column": Datasheet reference
                       - "10-20+30-40": Direct PyMOL selection
         pdb_file: PDB file being analyzed
+        id_map: ID mapping dictionary for matching structure IDs to datasheet IDs
 
     Returns:
         List of residue numbers to restrict to (empty list = no restriction)
@@ -215,17 +241,37 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str) -> List[int]:
         pdb_name = os.path.basename(pdb_file)
         pdb_base = os.path.splitext(pdb_name)[0]
 
-        # Find matching row
+        # Apply id_map to get datasheet ID from structure ID
+        if id_map:
+            datasheet_id = map_structure_id_to_datasheet_id(pdb_base, id_map)
+            if datasheet_id != pdb_base:
+                print(f"Mapping structure ID '{pdb_base}' to datasheet ID '{datasheet_id}' using id_map")
+        else:
+            datasheet_id = pdb_base
+
+        # Find matching row - try multiple lookup strategies in order:
+        # 1. Try pdb filename match
         matching_rows = df[df['pdb'] == pdb_name]
+
+        # 2. Try mapped datasheet ID
         if matching_rows.empty:
+            matching_rows = df[df['id'] == datasheet_id]
+
+        # 3. If mapping was applied and failed, try original structure ID as fallback
+        if matching_rows.empty and id_map and datasheet_id != pdb_base:
             matching_rows = df[df['id'] == pdb_base]
+            if not matching_rows.empty:
+                print(f"Found match using original structure ID '{pdb_base}' (mapped ID '{datasheet_id}' not found)")
 
         if not matching_rows.empty:
             row = matching_rows.iloc[0]
             selection_str = row.get(column_name, '')
             return sele_to_list(selection_str)
         else:
-            print(f"Warning: No restriction datasheet entry found for {pdb_name}")
+            attempted_ids = [pdb_name, datasheet_id]
+            if id_map and datasheet_id != pdb_base:
+                attempted_ids.append(pdb_base)
+            print(f"Warning: No restriction datasheet entry found. Tried: {', '.join(attempted_ids)}")
             return []
 
     # Handle direct selection
@@ -375,7 +421,7 @@ def format_pymol_selection(residue_list):
     return "+".join(range_parts)
 
 
-def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float, restrict_spec: str = "") -> Dict[str, any]:
+def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float, restrict_spec: str = "", id_map: Dict[str, str] = None) -> Dict[str, any]:
     """
     Analyze a single structure for distance-based residue selection using native PDB parser.
 
@@ -384,6 +430,7 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
         reference_spec: Reference specification string
         distance_cutoff: Distance cutoff in Angstroms
         restrict_spec: Restriction specification (datasheet reference or direct selection)
+        id_map: ID mapping dictionary for matching structure IDs to datasheet IDs
 
     Returns:
         Dictionary with analysis results
@@ -411,8 +458,8 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
     print(f"Using reference: {reference_description} ({len(reference_atoms)} atoms)")
 
-    # Resolve restriction
-    restrict_to_residues = resolve_restriction_spec(restrict_spec, pdb_file)
+    # Resolve restriction with id_map
+    restrict_to_residues = resolve_restriction_spec(restrict_spec, pdb_file, id_map)
     if restrict_to_residues:
         print(f"Restricting to {len(restrict_to_residues)} residues: {format_ligandmpnn_selection_from_list(restrict_to_residues)}")
 
@@ -439,8 +486,8 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
 
 def main():
-    if len(sys.argv) != 6:
-        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv>")
+    if len(sys.argv) != 7:
+        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map>")
         print("")
         print("Arguments:")
         print("  structure_files: Comma-separated list of PDB file paths")
@@ -448,6 +495,7 @@ def main():
         print("  distance: Distance cutoff in Angstroms")
         print("  restrict_spec: Restriction specification (datasheet reference, direct selection, or empty string)")
         print("  output_csv: Path to output CSV file")
+        print("  id_map: JSON string with ID mapping pattern (e.g., '{\"*\": \"*_<N>\"}')")
         sys.exit(1)
 
     structure_files_str = sys.argv[1]
@@ -455,16 +503,25 @@ def main():
     distance_cutoff = float(sys.argv[3])
     restrict_spec = sys.argv[4]
     output_csv = sys.argv[5]
+    id_map_str = sys.argv[6]
 
     # Parse comma-separated list of structure files
     structure_files = [f.strip() for f in structure_files_str.split(",") if f.strip()]
     if not structure_files:
         raise ValueError(f"No structure files provided: {structure_files_str}")
 
+    # Parse id_map JSON string
+    import json
+    try:
+        id_map = json.loads(id_map_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid id_map JSON: {e}")
+
     print(f"Analyzing {len(structure_files)} structures with distance cutoff {distance_cutoff}Å")
     print(f"Reference: {reference_spec}")
     if restrict_spec:
         print(f"Restriction: {restrict_spec}")
+    print(f"ID mapping: {id_map}")
 
     # Analyze each structure
     results = []
@@ -475,7 +532,7 @@ def main():
 
         try:
             print(f"\nAnalyzing: {os.path.basename(pdb_file)}")
-            result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff, restrict_spec)
+            result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff, restrict_spec, id_map)
             results.append(result)
 
             print(f"  Within {distance_cutoff}Å: {len(result['within'].split('+')) if result['within'] else 0} residues")

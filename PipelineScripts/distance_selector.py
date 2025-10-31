@@ -35,7 +35,8 @@ class DistanceSelector(BaseConfig):
                  distance: float = 5.0,
                  reference_type: str = "ligand",
                  reference_selection: str = "",
-                 restrict_to_selection: Union[str, tuple, None] = None,
+                 restrict_to: Union[str, tuple, None] = None,
+                 id_map: Dict[str, str] = {"*": "*_<N>"},
                  **kwargs):
         """
         Initialize DistanceSelector configuration.
@@ -48,11 +49,16 @@ class DistanceSelector(BaseConfig):
                           Options: "ligand", "atoms", "residues"
             reference_selection: Specific selection if not using ligand
                                (e.g., "resname ATP", "resi 100-105")
-            restrict_to_selection: Optional selection to restrict distance search to.
+            restrict_to: Optional selection to restrict distance search to.
                                   Accepts:
                                   - Datasheet reference tuple: (datasheet, "column")
                                   - Direct selection string: "10-20+30-40"
                                   - None: Consider all protein residues (default)
+            id_map: ID mapping pattern for matching structure IDs to datasheet IDs (default: {"*": "*_<N>"})
+                   - Used when datasheet IDs don't match structure IDs
+                   - Example: structure ID "rifampicin_1_2" maps to datasheet ID "rifampicin_1"
+                   - Pattern {"*": "*_<N>"} strips last "_<number>" from structure ID
+                   - Set to {"*": "*"} for no mapping (1:1 ID match)
             **kwargs: Additional parameters
         """
         # Store DistanceSelector-specific parameters
@@ -61,7 +67,8 @@ class DistanceSelector(BaseConfig):
         self.distance = distance
         self.reference_type = reference_type
         self.reference_selection = reference_selection
-        self.restrict_to_selection = restrict_to_selection
+        self.restrict_to_selection = restrict_to
+        self.id_map = id_map
 
         # Track input source type
         self.input_is_tool_output = isinstance(structures, ToolOutput)
@@ -71,8 +78,8 @@ class DistanceSelector(BaseConfig):
         super().__init__(**kwargs)
 
         # Track dependency if restrict_to_selection is a datasheet reference
-        if isinstance(restrict_to_selection, tuple) and len(restrict_to_selection) == 2:
-            datasheet_obj, _ = restrict_to_selection
+        if isinstance(restrict_to, tuple) and len(restrict_to) == 2:
+            datasheet_obj, _ = restrict_to
             if hasattr(datasheet_obj, 'config'):
                 self.dependencies.append(datasheet_obj.config)
 
@@ -257,13 +264,17 @@ class DistanceSelector(BaseConfig):
 
         restrict_echo = f'echo "Restricting to selection: {restrict_spec}"' if restrict_spec else ""
 
+        # Serialize id_map as JSON string for passing to script
+        import json
+        id_map_json = json.dumps(self.id_map)
+
         script_content += f"""echo "Analyzing residue distances for {len(structure_files)} structures"
 echo "Reference: {reference_spec}"
 echo "Distance cutoff: {self.distance}Å"
 {restrict_echo}
 
 # Run distance analysis
-python {self.distance_selector_py} "{structure_files_str}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}"
+python {self.distance_selector_py} "{structure_files_str}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}'
 
 echo "Distance analysis completed"
 echo "Selections saved to: {self.selections_csv}"

@@ -34,7 +34,8 @@ with Pipeline(project="Examples",
     #this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
     distances = DistanceSelector(structures=rfdaa,
                                   ligand="LIG",
-                                  distance=5)
+                                  distance=5,
+                                  restrict_to=rfdaa.datasheets.structures.designed)
 
     pmpnn = ProteinMPNN(structures=rfdaa,
                         num_sequences=2,

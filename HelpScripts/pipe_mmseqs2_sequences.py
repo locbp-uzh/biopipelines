@@ -446,10 +446,15 @@ def main():
             # Now map sequence IDs to datasheet IDs and populate mask_data
             for seq_id in sequences_df['id']:
                 datasheet_id = map_sequence_id_to_datasheet_id(seq_id, id_map)
+                # Try mapped ID first
                 if datasheet_id in datasheet_mask_data:
                     mask_data[seq_id] = datasheet_mask_data[datasheet_id]
                     if datasheet_id != seq_id:
                         log(f"Mapped sequence ID '{seq_id}' -> datasheet ID '{datasheet_id}'")
+                # Fallback: try original sequence ID if mapping was applied
+                elif datasheet_id != seq_id and seq_id in datasheet_mask_data:
+                    mask_data[seq_id] = datasheet_mask_data[seq_id]
+                    log(f"Found match using original sequence ID '{seq_id}' (mapped ID '{datasheet_id}' not found)")
 
         except Exception as e:
             log(f"ERROR: Failed to load mask datasheet: {str(e)}")
