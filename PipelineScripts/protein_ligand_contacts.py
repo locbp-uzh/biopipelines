@@ -64,8 +64,11 @@ class ProteinLigandContacts(BaseConfig):
             contact_metric_name: Custom name for contact count column (default: "contacts")
             id_map: ID mapping pattern for matching structure IDs to datasheet IDs (default: {"*": "*_<N>"})
                   - Used when datasheet IDs don't match structure IDs
-                  - Example: structure ID "rifampicin_1_2" maps to datasheet ID "rifampicin_1"
-                  - Pattern {"*": "*_<N>"} strips last "_<number>" from structure ID
+                  - Pattern syntax: "*" represents base ID, "<N>" represents numeric suffix
+                  - Examples:
+                    * {"*": "*_<N>"} strips "_123" → "rifampicin_1" from "rifampicin_1_2"
+                    * {"*": "*_<N>_<N>"} strips "_1_2" → "rifampicin" from "rifampicin_1_2"
+                    * {"*": "*-seq-<N>"} strips "-seq-42" → "protein" from "protein-seq-42"
             **kwargs: Additional parameters
 
         Selection Syntax:

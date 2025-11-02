@@ -16,6 +16,9 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Tuple
 from itertools import product
 
+# Import unified ID mapping utilities
+from id_map_utils import map_structure_id_to_datasheet_id
+
 
 def parse_position_string(position_str: str) -> List[int]:
     """
@@ -95,32 +98,7 @@ def load_positions_from_datasheet(datasheet_path: str, column_name: str) -> Dict
     return positions_map
 
 
-def parse_id_map_pattern(id_map: Dict[str, str]) -> Tuple[str, str]:
-    """
-    Parse ID mapping pattern.
-
-    Args:
-        id_map: Dictionary with pattern mapping (e.g., {"*": "*_<N>"})
-
-    Returns:
-        Tuple of (pattern, replacement_template)
-    """
-    if "*" not in id_map:
-        raise ValueError("ID map must contain '*' key")
-
-    pattern = id_map["*"]
-
-    # Convert pattern "*_<N>" to regex pattern
-    # "*_<N>" means match anything followed by underscore and number
-    # Extract the base by removing "_<N>" suffix
-    if pattern == "*_<N>":
-        # Pattern to extract base ID: match everything up to last _<number>
-        regex_pattern = r'^(.+)_\d+$'
-        return regex_pattern, r'\1'
-    else:
-        raise ValueError(f"Unsupported ID map pattern: {pattern}")
-
-
+# Note: ID mapping functions are now imported from id_map_utils
 def extract_base_id(seq_id: str, id_map: Dict[str, str]) -> str:
     """
     Extract base structure ID from sequence ID using id_map pattern.
@@ -132,14 +110,7 @@ def extract_base_id(seq_id: str, id_map: Dict[str, str]) -> str:
     Returns:
         Base structure ID (e.g., 'rifampicin_014_1')
     """
-    regex_pattern, replacement = parse_id_map_pattern(id_map)
-
-    match = re.match(regex_pattern, seq_id)
-    if match:
-        return match.group(1)
-    else:
-        # No pattern match, return as-is
-        return seq_id
+    return map_structure_id_to_datasheet_id(seq_id, id_map)
 
 
 def group_sequences_by_base_id(sequences: Dict[str, str], id_map: Dict[str, str]) -> Dict[str, List[str]]:

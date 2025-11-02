@@ -14,33 +14,19 @@ import subprocess
 import tempfile
 import time
 
+# Import unified ID mapping utilities
+from id_map_utils import map_structure_id_to_datasheet_id
+
 def log(message):
     """Log with timestamp."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}", flush=True)
 
+# Note: map_structure_id_to_datasheet_id is imported from id_map_utils
+# Renamed wrapper for backward compatibility
 def map_sequence_id_to_datasheet_id(seq_id, id_map):
-    """
-    Map sequence ID to datasheet ID using id_map pattern.
-
-    Args:
-        seq_id: Sequence ID (e.g., "rifampicin_1_2")
-        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
-
-    Returns:
-        Mapped datasheet ID (e.g., "rifampicin_1")
-    """
-    import re
-
-    # Check if id_map uses the standard pattern
-    if "*" in id_map and "*_<N>" in id_map.values():
-        # Strip last _<number> from sequence ID
-        match = re.match(r'^(.+)_\d+$', seq_id)
-        if match:
-            return match.group(1)
-
-    # No mapping or pattern doesn't match, use as-is
-    return seq_id
+    """Map sequence ID to datasheet ID (wrapper for map_structure_id_to_datasheet_id)."""
+    return map_structure_id_to_datasheet_id(seq_id, id_map)
 
 def sele_to_list(s):
     """

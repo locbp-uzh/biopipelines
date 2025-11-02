@@ -16,6 +16,9 @@ import numpy as np
 import math
 from typing import Dict, List, Any, Optional, Tuple, NamedTuple
 
+# Import unified ID mapping utilities
+from id_map_utils import map_structure_id_to_datasheet_id
+
 
 class Atom(NamedTuple):
     """Simple atom representation."""
@@ -326,28 +329,7 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
         return None, None, None, None, None
 
 
-def map_structure_id_to_datasheet_id(structure_id: str, id_map: Dict[str, str]) -> str:
-    """
-    Map structure ID to datasheet ID using id_map pattern.
-
-    Args:
-        structure_id: Structure ID (e.g., "rifampicin_1_2")
-        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
-
-    Returns:
-        Mapped datasheet ID (e.g., "rifampicin_1")
-    """
-    import re
-
-    # Check if id_map uses the standard pattern
-    if "*" in id_map and "*_<N>" in id_map.values():
-        # Strip last _<number> from structure ID
-        match = re.match(r'^(.+)_\d+$', structure_id)
-        if match:
-            return match.group(1)
-
-    # No mapping or pattern doesn't match, use as-is
-    return structure_id
+# Note: map_structure_id_to_datasheet_id is now imported from id_map_utils
 
 
 def load_selections_from_datasheet(datasheet_path: str, column_name: str, id_map: Dict[str, str] = None) -> Dict[str, str]:
