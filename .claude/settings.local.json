@@ -33,7 +33,8 @@
       "Bash(find:*)",
       "Bash(python -m py_compile:*)",
       "Bash(for:*)",
-      "Bash(do echo \"=== $file ===\" head -20 \"$file\")"
+      "Bash(do echo \"=== $file ===\" head -20 \"$file\")",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

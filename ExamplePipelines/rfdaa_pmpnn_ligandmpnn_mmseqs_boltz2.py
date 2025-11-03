@@ -19,7 +19,7 @@ with Pipeline(project="Examples",
               job="RFDAA-ProteinMPNN-LigandMPNN-MMseqs-Boltz",
               description="redesign of N terminus of rifampicin binding protein"):
 
-    Resources(gpu="80GB", #ask for A100-80GB or H100-80GB
+    Resources(gpu="!T4", #ask for V100-32GB or A100-80GB or H100-80GB
               time="24:00:00",
               memory="16GB")
 
