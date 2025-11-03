@@ -365,7 +365,7 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
             - structures: Empty (no structures from Fuse)
             - compounds: Empty (no compounds from Fuse) 
             - sequences: Main CSV and FASTA files
-            - datasheets: CSV file with fusion metadata
+            - tables: CSV file with fusion metadata
             - output_folder: Tool's output directory
             - sequence_ids: Predicted sequence IDs for downstream tools
         """
@@ -379,8 +379,8 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
         # Predict sequence IDs for downstream tools
         sequence_ids = self._predict_sequence_ids()
         
-        # Organize datasheets by content type
-        datasheets = {
+        # Organize tables by content type
+        tables = {
             "sequences": {
                 "path": queries_csv,
                 "columns": ["id", "sequence", "lengths"],
@@ -396,7 +396,7 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
             "compound_ids": [],
             "sequences": [queries_csv, queries_fasta],
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder,
             # Keep legacy aliases for compatibility
             "queries_csv": [queries_csv],

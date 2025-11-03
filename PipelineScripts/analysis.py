@@ -1,7 +1,7 @@
 """
 Analysis base classes for protein design pipeline analysis.
 
-Defines the abstract interface for analysis tools that generate CSV datasheets
+Defines the abstract interface for analysis tools that generate CSV tables
 with metrics for structures, sequences, compounds, etc. Analysis tools preserve
 all information and don't filter - filtering is done by separate Filter tools.
 """
@@ -58,7 +58,7 @@ class Analysis(ABC):
     """
     Abstract base class for all analysis tools.
     
-    An Analysis tool generates CSV datasheets with metrics for items 
+    An Analysis tool generates CSV tables with metrics for items 
     (structures, sequences, compounds, etc.) without filtering them.
     All items are preserved and metrics are calculated for downstream filtering.
     """

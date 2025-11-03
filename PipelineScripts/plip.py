@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class PLIP(BaseConfig):
@@ -341,8 +341,8 @@ echo "PLIP output processing completed"
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": {
-                "interactions": DatasheetInfo(
+            "tables": {
+                "interactions": TableInfo(
                     name="interactions",
                     path=self.results_csv,
                     columns=["id", "ligand_id", "interaction_type", "residue", "distance", "angle", "energy"],

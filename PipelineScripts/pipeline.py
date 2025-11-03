@@ -776,16 +776,16 @@ umask 002
                 # Get current output structure
                 output_structure = tool.get_output_files()
                 
-                # Convert DatasheetInfo objects to dictionaries for JSON serialization
-                if 'datasheets' in output_structure:
-                    from .base_config import DatasheetInfo
-                    serializable_datasheets = {}
-                    for name, datasheet_info in output_structure['datasheets'].items():
-                        if isinstance(datasheet_info, DatasheetInfo):
-                            serializable_datasheets[name] = datasheet_info.to_dict()
+                # Convert TableInfo objects to dictionaries for JSON serialization
+                if 'tables' in output_structure:
+                    from .base_config import TableInfo
+                    serializable_tables = {}
+                    for name, table_info in output_structure['tables'].items():
+                        if isinstance(table_info, TableInfo):
+                            serializable_tables[name] = table_info.to_dict()
                         else:
-                            serializable_datasheets[name] = datasheet_info
-                    output_structure['datasheets'] = serializable_datasheets
+                            serializable_tables[name] = table_info
+                    output_structure['tables'] = serializable_tables
                 
                 # Build complete tool metadata
                 tool_metadata = {

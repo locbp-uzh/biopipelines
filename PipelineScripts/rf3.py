@@ -10,13 +10,13 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class RF3(BaseConfig):
@@ -47,7 +47,7 @@ class RF3(BaseConfig):
 
         Args:
             proteins: Protein sequences - can be ToolOutput, StandardizedOutput, file path, or direct sequence
-            ligands: Single ligand SMILES string, ToolOutput with compounds, or datasheet reference
+            ligands: Single ligand SMILES string, ToolOutput with compounds, or table reference
             msas: MSA files for recycling (optional)
             output_format: Output format ("pdb" or "cif")
             checkpoint_path: Path to RF3 checkpoint file
@@ -67,7 +67,7 @@ class RF3(BaseConfig):
         # Input tracking
         self.input_sequences = None
         self.input_compounds = []
-        self.input_datasheets = {}
+        self.input_tables = {}
         self.input_is_tool_output = False
         self.standardized_input = None
 
@@ -86,11 +86,11 @@ class RF3(BaseConfig):
         # Handle protein inputs
         if isinstance(self.proteins, StandardizedOutput):
             self.input_sequences = self.proteins.sequences
-            self.input_datasheets = getattr(self.proteins, 'datasheets', {})
+            self.input_tables = getattr(self.proteins, 'tables', {})
             self.standardized_input = self.proteins
         elif isinstance(self.proteins, ToolOutput):
             self.input_sequences = self.proteins
-            self.input_datasheets = self.proteins.get_output_files("datasheets")
+            self.input_tables = self.proteins.get_output_files("tables")
             self.input_is_tool_output = True
             self.dependencies.append(self.proteins.config)
         elif isinstance(self.proteins, str):
@@ -105,11 +105,11 @@ class RF3(BaseConfig):
             if isinstance(self.ligands, StandardizedOutput):
                 # Get compounds from StandardizedOutput
                 self.input_compounds = getattr(self.ligands, 'compounds', [])
-                self.input_datasheets = getattr(self.ligands, 'datasheets', {})
+                self.input_tables = getattr(self.ligands, 'tables', {})
             elif isinstance(self.ligands, ToolOutput):
                 # Get compounds from ToolOutput
                 self.input_compounds = self.ligands.get_output_files("compounds")
-                self.input_datasheets = self.ligands.get_output_files("datasheets")
+                self.input_tables = self.ligands.get_output_files("tables")
                 self.dependencies.append(self.ligands.config)
             elif isinstance(self.ligands, str):
                 # Single SMILES string or file path
@@ -182,8 +182,8 @@ class RF3(BaseConfig):
             "early_stopping_plddt": self.early_stopping_plddt,
             "use_templates": self.use_templates,
             "output_folder": output_folder,
-            "input_datasheets": {k: v.path if hasattr(v, 'path') else str(v)
-                                for k, v in self.input_datasheets.items()}
+            "input_tables": {k: v.path if hasattr(v, 'path') else str(v)
+                                for k, v in self.input_tables.items()}
         }
 
         with open(config_file, 'w') as f:
@@ -218,8 +218,8 @@ fi
     def _serialize_input(self, input_val):
         """Serialize input value for JSON."""
         if isinstance(input_val, (ToolOutput, StandardizedOutput)):
-            if hasattr(input_val, 'datasheets'):
-                return {"type": "tool_output", "datasheets": list(input_val.datasheets.keys())}
+            if hasattr(input_val, 'tables'):
+                return {"type": "tool_output", "tables": list(input_val.tables.keys())}
             return {"type": "tool_output"}
         elif isinstance(input_val, list):
             return {"type": "list", "values": input_val}
@@ -242,10 +242,10 @@ fi
         structures_csv = os.path.join(self.output_folder, "structures.csv")
         confidence_csv = os.path.join(self.output_folder, "confidence_scores.csv")
 
-        datasheets = {}
+        tables = {}
 
         if os.path.exists(structures_csv):
-            datasheets["structures"] = DatasheetInfo(
+            tables["structures"] = TableInfo(
                 name="structures",
                 path=structures_csv,
                 columns=["id", "model_id", "file_path", "plddt_score"],
@@ -253,7 +253,7 @@ fi
             )
 
         if os.path.exists(confidence_csv):
-            datasheets["confidence"] = DatasheetInfo(
+            tables["confidence"] = TableInfo(
                 name="confidence",
                 path=confidence_csv,
                 columns=["id", "model_id", "plddt_score", "ptm_score"],
@@ -262,7 +262,7 @@ fi
 
         outputs = {
             "structures": [structures_csv],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

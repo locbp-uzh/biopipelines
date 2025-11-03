@@ -55,7 +55,7 @@ def load_frequency_data(csv_path: str) -> pd.DataFrame:
 
 def load_and_combine_frequency_data(csv_paths: List[str], strategy: str = "average") -> pd.DataFrame:
     """
-    Load and combine multiple frequency datasheets using specified strategy.
+    Load and combine multiple frequency tables using specified strategy.
 
     Args:
         csv_paths: List of paths to CSV files with frequency data
@@ -67,16 +67,16 @@ def load_and_combine_frequency_data(csv_paths: List[str], strategy: str = "avera
     logger = logging.getLogger(__name__)
 
     if len(csv_paths) == 1:
-        # Single datasheet - just load it
+        # Single table - just load it
         return load_frequency_data(csv_paths[0])
 
-    logger.info(f"Loading {len(csv_paths)} frequency datasheets for combination")
+    logger.info(f"Loading {len(csv_paths)} frequency tables for combination")
 
-    # Load all datasheets
+    # Load all tables
     dfs = []
     for i, csv_path in enumerate(csv_paths):
         df = load_frequency_data(csv_path)
-        logger.info(f"Loaded datasheet {i+1}: {csv_path} with {len(df)} positions")
+        logger.info(f"Loaded table {i+1}: {csv_path} with {len(df)} positions")
         dfs.append(df)
 
     # Validate compatibility (same positions and reference sequence)
@@ -86,7 +86,7 @@ def load_and_combine_frequency_data(csv_paths: List[str], strategy: str = "avera
     for i, df in enumerate(dfs[1:], 1):
         positions = set(df['position'].tolist())
         if positions != base_positions:
-            raise ValueError(f"Position mismatch between datasheet 0 and {i}: {base_positions.symmetric_difference(positions)}")
+            raise ValueError(f"Position mismatch between table 0 and {i}: {base_positions.symmetric_difference(positions)}")
 
         # Check reference sequence compatibility if 'original' column exists
         if 'original' in base_df.columns and 'original' in df.columns:
@@ -94,9 +94,9 @@ def load_and_combine_frequency_data(csv_paths: List[str], strategy: str = "avera
             df_orig = df.set_index('position')['original']
             mismatches = (base_orig != df_orig).sum()
             if mismatches > 0:
-                raise ValueError(f"Reference sequence mismatch between datasheet 0 and {i}: {mismatches} positions differ")
+                raise ValueError(f"Reference sequence mismatch between table 0 and {i}: {mismatches} positions differ")
 
-    logger.info("All datasheets are compatible - proceeding with combination")
+    logger.info("All tables are compatible - proceeding with combination")
 
     if strategy in ["average", "maximum"]:
         # Combine frequencies by averaging or taking maximum
@@ -106,7 +106,7 @@ def load_and_combine_frequency_data(csv_paths: List[str], strategy: str = "avera
             if aa not in combined_df.columns:
                 continue
 
-            # Collect values for this amino acid across all datasheets
+            # Collect values for this amino acid across all tables
             aa_values = []
             for df in dfs:
                 if aa in df.columns:
@@ -115,7 +115,7 @@ def load_and_combine_frequency_data(csv_paths: List[str], strategy: str = "avera
                     aa_values.append(np.zeros(len(df)))
 
             # Combine based on strategy
-            aa_array = np.array(aa_values)  # Shape: (n_datasheets, n_positions)
+            aa_array = np.array(aa_values)  # Shape: (n_tables, n_positions)
 
             if strategy == "average":
                 combined_df[aa] = np.mean(aa_array, axis=0)
@@ -127,11 +127,11 @@ def load_and_combine_frequency_data(csv_paths: List[str], strategy: str = "avera
 
     else:
         # For "stack" and "round_robin", we'll handle combination during sequence generation
-        # Return the list of datasheets as a special combined format
+        # Return the list of tables as a special combined format
         combined_df = base_df.copy()
         combined_df.attrs['strategy'] = strategy
         combined_df.attrs['source_dfs'] = dfs
-        logger.info(f"Prepared datasheets for {strategy} strategy")
+        logger.info(f"Prepared tables for {strategy} strategy")
         return combined_df
 
 
@@ -235,7 +235,7 @@ def generate_single_point_mutations(freq_df: pd.DataFrame, num_sequences: int,
         num_sequences: Number of sequences to generate
         min_frequency: Minimum frequency threshold
         prefix: Prefix for sequence IDs
-        combination_strategy: Strategy used for multi-datasheet combination
+        combination_strategy: Strategy used for multi-table combination
 
     Returns:
         List of (sequence_id, sequence, mutations, mutation_positions) tuples
@@ -244,11 +244,11 @@ def generate_single_point_mutations(freq_df: pd.DataFrame, num_sequences: int,
 
     # Handle special combination strategies
     if combination_strategy in ["stack", "round_robin"] and hasattr(freq_df, 'attrs') and 'source_dfs' in freq_df.attrs:
-        return generate_multi_datasheet_single_point_mutations(
+        return generate_multi_table_single_point_mutations(
             freq_df.attrs['source_dfs'], num_sequences, min_frequency, prefix, combination_strategy
         )
 
-    # Standard single-datasheet or pre-combined datasheet processing
+    # Standard single-table or pre-combined table processing
     reference_seq = get_reference_sequence(freq_df)
 
     # Collect all mutations above threshold
@@ -292,10 +292,10 @@ def generate_single_point_mutations(freq_df: pd.DataFrame, num_sequences: int,
     return sequences
 
 
-def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFrame], num_sequences: int,
+def generate_multi_table_single_point_mutations(source_dfs: List[pd.DataFrame], num_sequences: int,
                                                    min_frequency: float, prefix: str, strategy: str) -> List[Tuple[str, str, str, List[int]]]:
     """
-    Generate single-point mutations using multiple datasheets with stack or round_robin strategies.
+    Generate single-point mutations using multiple tables with stack or round_robin strategies.
 
     Args:
         source_dfs: List of source DataFrames with frequency data
@@ -308,17 +308,17 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
         List of (sequence_id, sequence, mutations, mutation_positions) tuples
     """
     logger = logging.getLogger(__name__)
-    logger.info(f"Generating multi-datasheet single-point mutations using {strategy} strategy")
+    logger.info(f"Generating multi-table single-point mutations using {strategy} strategy")
 
-    # Get reference sequence (should be same across all datasheets)
+    # Get reference sequence (should be same across all tables)
     reference_seq = get_reference_sequence(source_dfs[0])
 
     if strategy == "stack":
-        # Each sequence gets one mutation from each datasheet
+        # Each sequence gets one mutation from each table
         logger.info(f"Stack strategy: each sequence will have {len(source_dfs)} mutations")
 
-        # Collect top mutations from each datasheet
-        datasheet_mutations = []
+        # Collect top mutations from each table
+        table_mutations = []
         for df_idx, freq_df in enumerate(source_dfs):
             mutations = []
             for _, row in freq_df.iterrows():
@@ -339,10 +339,10 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
 
             # Sort by frequency (highest first)
             mutations.sort(key=lambda x: x[3], reverse=True)
-            datasheet_mutations.append(mutations)
-            logger.info(f"Datasheet {df_idx+1}: found {len(mutations)} valid mutations")
+            table_mutations.append(mutations)
+            logger.info(f"Table {df_idx+1}: found {len(mutations)} valid mutations")
 
-        # Generate sequences with one mutation from each datasheet
+        # Generate sequences with one mutation from each table
         sequences = []
         for seq_idx in range(num_sequences):
             seq_list = list(reference_seq)
@@ -350,11 +350,11 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
             mutation_positions = []
             used_positions = set()  # Track positions already mutated
 
-            # Take mutations from each datasheet, handling conflicts
-            for df_idx, mutations in enumerate(datasheet_mutations):
+            # Take mutations from each table, handling conflicts
+            for df_idx, mutations in enumerate(table_mutations):
                 selected_mutation = None
 
-                # Try to find a non-conflicting mutation from this datasheet
+                # Try to find a non-conflicting mutation from this table
                 for mutation_idx in range(seq_idx, len(mutations)):
                     pos, orig_aa, mut_aa, freq = mutations[mutation_idx]
 
@@ -369,7 +369,7 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
                             if f"{pos+1}" in made_mut:
                                 existing_mut = made_mut
                                 break
-                        logger.info(f"Conflict at position {pos+1}: datasheet {df_idx+1} wants {orig_aa}->{mut_aa}, "
+                        logger.info(f"Conflict at position {pos+1}: table {df_idx+1} wants {orig_aa}->{mut_aa}, "
                                   f"but position already has {existing_mut}. Trying next best...")
 
                 # Apply the selected mutation if found
@@ -379,9 +379,9 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
                     mutations_made.append(f"{orig_aa}{pos+1}{mut_aa}")
                     mutation_positions.append(pos + 1)
                     used_positions.add(pos)
-                    logger.debug(f"Applied mutation from datasheet {df_idx+1}: {orig_aa}{pos+1}{mut_aa}")
+                    logger.debug(f"Applied mutation from table {df_idx+1}: {orig_aa}{pos+1}{mut_aa}")
                 else:
-                    logger.warning(f"No non-conflicting mutation found for datasheet {df_idx+1} in sequence {seq_idx+1}")
+                    logger.warning(f"No non-conflicting mutation found for table {df_idx+1} in sequence {seq_idx+1}")
 
             # Create sequence only if we have mutations
             if mutations_made:
@@ -397,10 +397,10 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
         return sequences
 
     elif strategy == "round_robin":
-        # Alternate between datasheets for single mutations
-        logger.info("Round-robin strategy: alternating between datasheets for single mutations")
+        # Alternate between tables for single mutations
+        logger.info("Round-robin strategy: alternating between tables for single mutations")
 
-        # Collect all mutations from all datasheets with source info
+        # Collect all mutations from all tables with source info
         all_mutations = []
         for df_idx, freq_df in enumerate(source_dfs):
             for _, row in freq_df.iterrows():
@@ -422,20 +422,20 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
         # Sort by frequency (highest first)
         all_mutations.sort(key=lambda x: x[3], reverse=True)
 
-        # Group by datasheet and maintain order
-        datasheet_mutations = [[] for _ in source_dfs]
+        # Group by table and maintain order
+        table_mutations = [[] for _ in source_dfs]
         for mutation in all_mutations:
             pos, orig_aa, mut_aa, freq, df_idx = mutation
-            datasheet_mutations[df_idx].append((pos, orig_aa, mut_aa, freq))
+            table_mutations[df_idx].append((pos, orig_aa, mut_aa, freq))
 
-        # Generate sequences by round-robin through datasheets
+        # Generate sequences by round-robin through tables
         sequences = []
         for seq_idx in range(num_sequences):
-            df_idx = seq_idx % len(source_dfs)  # Round-robin datasheet selection
-            mutation_idx = seq_idx // len(source_dfs)  # Which mutation within that datasheet
+            df_idx = seq_idx % len(source_dfs)  # Round-robin table selection
+            mutation_idx = seq_idx // len(source_dfs)  # Which mutation within that table
 
-            if mutation_idx < len(datasheet_mutations[df_idx]):
-                pos, orig_aa, mut_aa, freq = datasheet_mutations[df_idx][mutation_idx]
+            if mutation_idx < len(table_mutations[df_idx]):
+                pos, orig_aa, mut_aa, freq = table_mutations[df_idx][mutation_idx]
 
                 # Apply single mutation
                 seq_list = list(reference_seq)
@@ -452,13 +452,13 @@ def generate_multi_datasheet_single_point_mutations(source_dfs: List[pd.DataFram
         return sequences
 
     else:
-        raise ValueError(f"Unknown multi-datasheet strategy: {strategy}")
+        raise ValueError(f"Unknown multi-table strategy: {strategy}")
 
 
-def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_sequences: int,
+def generate_multi_table_top_mutations(source_dfs: List[pd.DataFrame], num_sequences: int,
                                          min_frequency: float, prefix: str, strategy: str) -> List[Tuple[str, str, str, List[int]]]:
     """
-    Generate sequences using top mutations from multiple datasheets with stack or round_robin strategies.
+    Generate sequences using top mutations from multiple tables with stack or round_robin strategies.
 
     Args:
         source_dfs: List of source DataFrames with frequency data
@@ -471,17 +471,17 @@ def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_s
         List of (sequence_id, sequence, mutations, mutation_positions) tuples
     """
     logger = logging.getLogger(__name__)
-    logger.info(f"Generating multi-datasheet top mutations using {strategy} strategy")
+    logger.info(f"Generating multi-table top mutations using {strategy} strategy")
 
-    # Get reference sequence (should be same across all datasheets)
+    # Get reference sequence (should be same across all tables)
     reference_seq = get_reference_sequence(source_dfs[0])
 
     if strategy == "stack":
-        # Each sequence gets top mutations from each datasheet stacked together
-        logger.info(f"Stack strategy: each sequence will combine top mutations from {len(source_dfs)} datasheets")
+        # Each sequence gets top mutations from each table stacked together
+        logger.info(f"Stack strategy: each sequence will combine top mutations from {len(source_dfs)} tables")
 
-        # For each datasheet, get top mutations per position
-        datasheet_top_mutations = []
+        # For each table, get top mutations per position
+        table_top_mutations = []
         for df_idx, freq_df in enumerate(source_dfs):
             position_mutations = {}
             for _, row in freq_df.iterrows():
@@ -502,10 +502,10 @@ def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_s
                 aa_freqs.sort(key=lambda x: x[1], reverse=True)
                 position_mutations[position] = aa_freqs[:3]
 
-            datasheet_top_mutations.append(position_mutations)
-            logger.info(f"Datasheet {df_idx+1}: found top mutations for {len(position_mutations)} positions")
+            table_top_mutations.append(position_mutations)
+            logger.info(f"Table {df_idx+1}: found top mutations for {len(position_mutations)} positions")
 
-        # Generate sequences by stacking mutations from all datasheets
+        # Generate sequences by stacking mutations from all tables
         sequences = []
         for seq_idx in range(num_sequences):
             seq_list = list(reference_seq)
@@ -513,11 +513,11 @@ def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_s
             mutation_positions = []
             used_positions = set()
 
-            # Apply top mutations from each datasheet
-            for df_idx, position_mutations in enumerate(datasheet_top_mutations):
+            # Apply top mutations from each table
+            for df_idx, position_mutations in enumerate(table_top_mutations):
                 for pos, mut_list in position_mutations.items():
                     if pos not in used_positions and mut_list:
-                        # Use the top mutation from this datasheet for this position
+                        # Use the top mutation from this table for this position
                         mut_idx = seq_idx % len(mut_list)
                         selected_aa, freq = mut_list[mut_idx]
 
@@ -526,7 +526,7 @@ def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_s
                         mutations_made.append(f"{original_aa}{pos+1}{selected_aa}")
                         mutation_positions.append(pos + 1)
                         used_positions.add(pos)
-                        break  # Only one mutation per datasheet per sequence
+                        break  # Only one mutation per table per sequence
 
             if mutations_made:
                 mutated_seq = ''.join(seq_list)
@@ -538,10 +538,10 @@ def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_s
         return sequences
 
     elif strategy == "round_robin":
-        # Alternate between datasheets, taking top mutations from each
-        logger.info("Round-robin strategy: alternating between datasheets for top mutations")
+        # Alternate between tables, taking top mutations from each
+        logger.info("Round-robin strategy: alternating between tables for top mutations")
 
-        # Collect top mutations from all datasheets with datasheet info
+        # Collect top mutations from all tables with table info
         all_top_mutations = []
         for df_idx, freq_df in enumerate(source_dfs):
             for _, row in freq_df.iterrows():
@@ -564,21 +564,21 @@ def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_s
                     top_aa, top_freq = aa_freqs[0]
                     all_top_mutations.append((position, original_aa, top_aa, top_freq, df_idx))
 
-        # Sort by frequency and group by datasheet
+        # Sort by frequency and group by table
         all_top_mutations.sort(key=lambda x: x[3], reverse=True)
-        datasheet_mutations = [[] for _ in source_dfs]
+        table_mutations = [[] for _ in source_dfs]
         for mutation in all_top_mutations:
             pos, orig_aa, mut_aa, freq, df_idx = mutation
-            datasheet_mutations[df_idx].append((pos, orig_aa, mut_aa, freq))
+            table_mutations[df_idx].append((pos, orig_aa, mut_aa, freq))
 
-        # Generate sequences by round-robin through datasheets
+        # Generate sequences by round-robin through tables
         sequences = []
         for seq_idx in range(num_sequences):
             df_idx = seq_idx % len(source_dfs)
             mutation_idx = seq_idx // len(source_dfs)
 
-            if mutation_idx < len(datasheet_mutations[df_idx]):
-                pos, orig_aa, mut_aa, freq = datasheet_mutations[df_idx][mutation_idx]
+            if mutation_idx < len(table_mutations[df_idx]):
+                pos, orig_aa, mut_aa, freq = table_mutations[df_idx][mutation_idx]
 
                 # Apply single mutation
                 seq_list = list(reference_seq)
@@ -593,14 +593,14 @@ def generate_multi_datasheet_top_mutations(source_dfs: List[pd.DataFrame], num_s
         return sequences
 
     else:
-        raise ValueError(f"Unknown multi-datasheet strategy: {strategy}")
+        raise ValueError(f"Unknown multi-table strategy: {strategy}")
 
 
-def generate_multi_datasheet_weighted_random(source_dfs: List[pd.DataFrame], num_sequences: int,
+def generate_multi_table_weighted_random(source_dfs: List[pd.DataFrame], num_sequences: int,
                                            min_frequency: float, max_mutations: Optional[int], random_seed: Optional[int],
                                            prefix: str, strategy: str) -> List[Tuple[str, str, str, List[int]]]:
     """
-    Generate weighted random sequences using multiple datasheets with stack or round_robin strategies.
+    Generate weighted random sequences using multiple tables with stack or round_robin strategies.
 
     Args:
         source_dfs: List of source DataFrames with frequency data
@@ -615,18 +615,18 @@ def generate_multi_datasheet_weighted_random(source_dfs: List[pd.DataFrame], num
         List of (sequence_id, sequence, mutations, mutation_positions) tuples
     """
     logger = logging.getLogger(__name__)
-    logger.info(f"Generating multi-datasheet weighted random mutations using {strategy} strategy")
+    logger.info(f"Generating multi-table weighted random mutations using {strategy} strategy")
 
     if random_seed is not None:
         random.seed(random_seed)
         np.random.seed(random_seed)
 
-    # Get reference sequence (should be same across all datasheets)
+    # Get reference sequence (should be same across all tables)
     reference_seq = get_reference_sequence(source_dfs[0])
 
     if strategy == "stack":
-        # Each sequence gets weighted random mutations from each datasheet combined
-        logger.info(f"Stack strategy: combining weighted mutations from {len(source_dfs)} datasheets")
+        # Each sequence gets weighted random mutations from each table combined
+        logger.info(f"Stack strategy: combining weighted mutations from {len(source_dfs)} tables")
 
         sequences = []
         for seq_idx in range(num_sequences):
@@ -635,9 +635,9 @@ def generate_multi_datasheet_weighted_random(source_dfs: List[pd.DataFrame], num
             mutation_positions = []
             used_positions = set()
 
-            # Apply weighted random mutations from each datasheet
+            # Apply weighted random mutations from each table
             for df_idx, freq_df in enumerate(source_dfs):
-                # Collect weighted mutations from this datasheet
+                # Collect weighted mutations from this table
                 weighted_mutations = []
                 for _, row in freq_df.iterrows():
                     position = int(row['position']) - 1
@@ -655,14 +655,14 @@ def generate_multi_datasheet_weighted_random(source_dfs: List[pd.DataFrame], num
                             if freq >= min_frequency:
                                 weighted_mutations.append((position, original_aa, aa, freq))
 
-                # Apply weighted random selection from this datasheet
+                # Apply weighted random selection from this table
                 if weighted_mutations:
                     # Calculate weights and select randomly
                     positions, orig_aas, mut_aas, weights = zip(*weighted_mutations)
                     total_weight = sum(weights)
 
                     if total_weight > 0:
-                        # Select one mutation per datasheet
+                        # Select one mutation per table
                         probs = [w/total_weight for w in weights]
                         selected_idx = np.random.choice(len(weighted_mutations), p=probs)
                         pos, orig_aa, mut_aa, freq = weighted_mutations[selected_idx]
@@ -682,11 +682,11 @@ def generate_multi_datasheet_weighted_random(source_dfs: List[pd.DataFrame], num
         return sequences
 
     elif strategy == "round_robin":
-        # Alternate between datasheets for weighted random mutations
-        logger.info("Round-robin strategy: alternating between datasheets for weighted random mutations")
+        # Alternate between tables for weighted random mutations
+        logger.info("Round-robin strategy: alternating between tables for weighted random mutations")
 
-        # Collect all weighted mutations from all datasheets
-        datasheet_mutations = []
+        # Collect all weighted mutations from all tables
+        table_mutations = []
         for df_idx, freq_df in enumerate(source_dfs):
             weighted_mutations = []
             for _, row in freq_df.iterrows():
@@ -702,17 +702,17 @@ def generate_multi_datasheet_weighted_random(source_dfs: List[pd.DataFrame], num
                         if freq >= min_frequency:
                             weighted_mutations.append((position, original_aa, aa, freq))
 
-            datasheet_mutations.append(weighted_mutations)
-            logger.info(f"Datasheet {df_idx+1}: found {len(weighted_mutations)} weighted mutations")
+            table_mutations.append(weighted_mutations)
+            logger.info(f"Table {df_idx+1}: found {len(weighted_mutations)} weighted mutations")
 
-        # Generate sequences by round-robin through datasheets
+        # Generate sequences by round-robin through tables
         sequences = []
         for seq_idx in range(num_sequences):
             df_idx = seq_idx % len(source_dfs)
-            weighted_mutations = datasheet_mutations[df_idx]
+            weighted_mutations = table_mutations[df_idx]
 
             if weighted_mutations:
-                # Apply weighted random selection from selected datasheet
+                # Apply weighted random selection from selected table
                 positions, orig_aas, mut_aas, weights = zip(*weighted_mutations)
                 total_weight = sum(weights)
 
@@ -734,7 +734,7 @@ def generate_multi_datasheet_weighted_random(source_dfs: List[pd.DataFrame], num
         return sequences
 
     else:
-        raise ValueError(f"Unknown multi-datasheet strategy: {strategy}")
+        raise ValueError(f"Unknown multi-table strategy: {strategy}")
 
 
 def generate_weighted_random_mutations(freq_df: pd.DataFrame, num_sequences: int,
@@ -755,9 +755,9 @@ def generate_weighted_random_mutations(freq_df: pd.DataFrame, num_sequences: int
     """
     logger = logging.getLogger(__name__)
 
-    # Handle multi-datasheet combination strategies
+    # Handle multi-table combination strategies
     if combination_strategy in ["stack", "round_robin"] and hasattr(freq_df, 'attrs') and 'source_dfs' in freq_df.attrs:
-        return generate_multi_datasheet_weighted_random(
+        return generate_multi_table_weighted_random(
             freq_df.attrs['source_dfs'], num_sequences, min_frequency, max_mutations, random_seed, prefix, combination_strategy
         )
 
@@ -878,11 +878,11 @@ def generate_weighted_random_mutations(freq_df: pd.DataFrame, num_sequences: int
     return sequences
 
 
-def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num_sequences: int,
+def generate_multi_table_hotspot_focused(source_dfs: List[pd.DataFrame], num_sequences: int,
                                            min_frequency: float, prefix: str, hotspot_count: int,
                                            strategy: str) -> List[Tuple[str, str, str, List[int]]]:
     """
-    Generate hotspot-focused sequences using multiple datasheets with stack or round_robin strategies.
+    Generate hotspot-focused sequences using multiple tables with stack or round_robin strategies.
 
     Args:
         source_dfs: List of source DataFrames with frequency data
@@ -896,17 +896,17 @@ def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num
         List of (sequence_id, sequence, mutations, mutation_positions) tuples
     """
     logger = logging.getLogger(__name__)
-    logger.info(f"Generating multi-datasheet hotspot-focused mutations using {strategy} strategy")
+    logger.info(f"Generating multi-table hotspot-focused mutations using {strategy} strategy")
 
-    # Get reference sequence (should be same across all datasheets)
+    # Get reference sequence (should be same across all tables)
     reference_seq = get_reference_sequence(source_dfs[0])
 
     if strategy == "stack":
-        # Identify hotspots from each datasheet and stack mutations from them
-        logger.info(f"Stack strategy: combining hotspots from {len(source_dfs)} datasheets")
+        # Identify hotspots from each table and stack mutations from them
+        logger.info(f"Stack strategy: combining hotspots from {len(source_dfs)} tables")
 
-        # For each datasheet, identify hotspots
-        datasheet_hotspots = []
+        # For each table, identify hotspots
+        table_hotspots = []
         for df_idx, freq_df in enumerate(source_dfs):
             # Convert to relative frequencies if needed for hotspot detection
             working_df = freq_df.copy()
@@ -921,7 +921,7 @@ def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num
                         break
 
             if is_absolute_freq:
-                logger.info(f"Datasheet {df_idx+1}: Converting absolute to relative frequencies for hotspot detection")
+                logger.info(f"Table {df_idx+1}: Converting absolute to relative frequencies for hotspot detection")
                 working_df = convert_absolute_to_relative_frequencies(working_df)
 
             # Calculate mutation rates per position
@@ -964,8 +964,8 @@ def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num
 
             # Sort by frequency
             hotspot_mutations.sort(key=lambda x: x[3], reverse=True)
-            datasheet_hotspots.append(hotspot_mutations)
-            logger.info(f"Datasheet {df_idx+1}: found {len(hotspot_mutations)} hotspot mutations from {len(hotspot_positions)} positions")
+            table_hotspots.append(hotspot_mutations)
+            logger.info(f"Table {df_idx+1}: found {len(hotspot_mutations)} hotspot mutations from {len(hotspot_positions)} positions")
 
         # Generate sequences by stacking hotspot mutations
         sequences = []
@@ -975,8 +975,8 @@ def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num
             mutation_positions = []
             used_positions = set()
 
-            # Apply mutations from each datasheet's hotspots
-            for df_idx, hotspot_mutations in enumerate(datasheet_hotspots):
+            # Apply mutations from each table's hotspots
+            for df_idx, hotspot_mutations in enumerate(table_hotspots):
                 if hotspot_mutations:
                     # Find a mutation that doesn't conflict
                     for mutation_idx in range(seq_idx, len(hotspot_mutations)):
@@ -998,11 +998,11 @@ def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num
         return sequences
 
     elif strategy == "round_robin":
-        # Alternate between datasheets for hotspot mutations
-        logger.info("Round-robin strategy: alternating between datasheets for hotspot mutations")
+        # Alternate between tables for hotspot mutations
+        logger.info("Round-robin strategy: alternating between tables for hotspot mutations")
 
-        # Collect hotspot mutations from all datasheets
-        datasheet_hotspots = []
+        # Collect hotspot mutations from all tables
+        table_hotspots = []
         for df_idx, freq_df in enumerate(source_dfs):
             # Convert to relative frequencies if needed
             working_df = freq_df.copy()
@@ -1051,13 +1051,13 @@ def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num
                                 hotspot_mutations.append((position, original_aa, aa, freq))
 
             hotspot_mutations.sort(key=lambda x: x[3], reverse=True)
-            datasheet_hotspots.append(hotspot_mutations)
+            table_hotspots.append(hotspot_mutations)
 
         # Generate sequences by round-robin
         sequences = []
         for seq_idx in range(num_sequences):
             df_idx = seq_idx % len(source_dfs)
-            hotspot_mutations = datasheet_hotspots[df_idx]
+            hotspot_mutations = table_hotspots[df_idx]
             mutation_idx = seq_idx // len(source_dfs)
 
             if mutation_idx < len(hotspot_mutations):
@@ -1076,7 +1076,7 @@ def generate_multi_datasheet_hotspot_focused(source_dfs: List[pd.DataFrame], num
         return sequences
 
     else:
-        raise ValueError(f"Unknown multi-datasheet strategy: {strategy}")
+        raise ValueError(f"Unknown multi-table strategy: {strategy}")
 
 
 def generate_hotspot_focused_mutations(freq_df: pd.DataFrame, num_sequences: int,
@@ -1096,9 +1096,9 @@ def generate_hotspot_focused_mutations(freq_df: pd.DataFrame, num_sequences: int
     """
     logger = logging.getLogger(__name__)
 
-    # Handle multi-datasheet combination strategies
+    # Handle multi-table combination strategies
     if combination_strategy in ["stack", "round_robin"] and hasattr(freq_df, 'attrs') and 'source_dfs' in freq_df.attrs:
-        return generate_multi_datasheet_hotspot_focused(
+        return generate_multi_table_hotspot_focused(
             freq_df.attrs['source_dfs'], num_sequences, min_frequency, prefix, hotspot_count, combination_strategy
         )
 
@@ -1300,9 +1300,9 @@ def generate_top_mutations(freq_df: pd.DataFrame, num_sequences: int,
     """
     logger = logging.getLogger(__name__)
 
-    # Handle multi-datasheet combination strategies
+    # Handle multi-table combination strategies
     if combination_strategy in ["stack", "round_robin"] and hasattr(freq_df, 'attrs') and 'source_dfs' in freq_df.attrs:
-        return generate_multi_datasheet_top_mutations(
+        return generate_multi_table_top_mutations(
             freq_df.attrs['source_dfs'], num_sequences, min_frequency, prefix, combination_strategy
         )
 
@@ -1413,18 +1413,18 @@ def main():
         with open(args.config, 'r') as f:
             config = json.load(f)
         
-        # Load frequency data (single or multiple datasheets)
-        frequency_datasheets = config['frequency_datasheets']
+        # Load frequency data (single or multiple tables)
+        frequency_tables = config['frequency_tables']
         combination_strategy = config.get('combination_strategy', 'average')
 
-        if isinstance(frequency_datasheets, str):
-            # Legacy single datasheet support
-            frequency_datasheets = [frequency_datasheets]
+        if isinstance(frequency_tables, str):
+            # Legacy single table support
+            frequency_tables = [frequency_tables]
 
-        logger.info(f"Loading frequency data from {len(frequency_datasheets)} datasheet(s)")
+        logger.info(f"Loading frequency data from {len(frequency_tables)} table(s)")
 
         # Load and combine frequency data
-        freq_df = load_and_combine_frequency_data(frequency_datasheets, combination_strategy)
+        freq_df = load_and_combine_frequency_data(frequency_tables, combination_strategy)
         logger.info(f"Loaded/combined frequency data for {len(freq_df)} positions")
         
         # Generate sequences based on mode

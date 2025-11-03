@@ -300,9 +300,9 @@ fi
         # Get expected outputs as JSON string
         expected_outputs = self.get_expected_output_paths()
         
-        # Convert DatasheetInfo objects to dictionaries for JSON serialization
+        # Convert TableInfo objects to dictionaries for JSON serialization
         def make_json_safe(obj, seen=None):
-            """Recursively convert DatasheetInfo objects to dictionaries."""
+            """Recursively convert TableInfo objects to dictionaries."""
             if seen is None:
                 seen = set()
 
@@ -311,8 +311,8 @@ fi
             if obj_id in seen:
                 return f"<circular reference to {type(obj).__name__}>"
 
-            if isinstance(obj, DatasheetInfo):
-                # Explicitly convert DatasheetInfo to plain dict, avoiding all attributes
+            if isinstance(obj, TableInfo):
+                # Explicitly convert TableInfo to plain dict, avoiding all attributes
                 return {
                     "name": obj.name,
                     "path": obj.path,
@@ -331,9 +331,9 @@ fi
                 seen.remove(obj_id)
                 return result
             elif hasattr(obj, '__dict__'):
-                # Handle custom objects - check for DatasheetInfo first
+                # Handle custom objects - check for TableInfo first
                 if hasattr(obj, 'name') and hasattr(obj, 'path') and hasattr(obj, 'columns'):
-                    # This looks like a DatasheetInfo object that wasn't caught above
+                    # This looks like a TableInfo object that wasn't caught above
                     return {
                         "name": getattr(obj, 'name', ''),
                         "path": getattr(obj, 'path', ''),
@@ -418,133 +418,133 @@ fi
     def __repr__(self) -> str:
         return self.__str__()
     
-    def resolve_datasheet_reference(self, reference) -> str:
+    def resolve_table_reference(self, reference) -> str:
         """
-        Resolve datasheet column references to actual values.
+        Resolve table column references to actual values.
 
         Supports two formats:
-        - String: 'datasheet_name.column_name' (e.g., "structures.fixed", "selections.within")
-        - Tuple: (datasheet_object, "column_name") (e.g., (tool.datasheets.selections, "within"))
+        - String: 'table_name.column_name' (e.g., "structures.fixed", "selections.within")
+        - Tuple: (table_object, "column_name") (e.g., (tool.tables.selections, "within"))
 
-        This provides a general way to reference any column from any input datasheet across all tools.
+        This provides a general way to reference any column from any input table across all tools.
 
         Args:
-            reference: Reference string or tuple (e.g., "structures.fixed" or (tool.datasheets.selections, "within"))
+            reference: Reference string or tuple (e.g., "structures.fixed" or (tool.tables.selections, "within"))
 
         Returns:
-            Resolved value from datasheet or original reference if not a datasheet reference
+            Resolved value from table or original reference if not a table reference
         """
         if not reference:
             return reference
 
-        # Handle tuple format: (datasheet_object, "column_name")
+        # Handle tuple format: (table_object, "column_name")
         if isinstance(reference, tuple) and len(reference) == 2:
-            datasheet_object, column_name = reference
+            table_object, column_name = reference
 
-            # Get the datasheet path from the object
-            if hasattr(datasheet_object, 'path'):
-                datasheet_path = datasheet_object.path
+            # Get the table path from the object
+            if hasattr(table_object, 'path'):
+                table_path = table_object.path
             else:
-                raise ValueError(f"Invalid datasheet object in tuple reference: {datasheet_object}")
+                raise ValueError(f"Invalid table object in tuple reference: {table_object}")
 
             # Read and resolve the column value
-            return self._resolve_column_from_datasheet(datasheet_path, column_name)
+            return self._resolve_column_from_table(table_path, column_name)
 
-        # Handle string format: "datasheet.column"
+        # Handle string format: "table.column"
         if isinstance(reference, str) and "." in reference:
             parts = reference.split(".")
             if len(parts) == 2:
-                # Datasheet reference format: "structures.fixed"
-                datasheet_name = parts[0]
+                # Table reference format: "structures.fixed"
+                table_name = parts[0]
                 column_name = parts[1]
 
-                # Get the datasheet path
-                datasheet_path = self._find_datasheet_path(datasheet_name)
+                # Get the table path
+                table_path = self._find_table_path(table_name)
 
-                if not datasheet_path:
-                    raise ValueError(f"Datasheet '{datasheet_name}' not found in input datasheets")
+                if not table_path:
+                    raise ValueError(f"Table '{table_name}' not found in input tables")
 
                 # Read and resolve the column value
-                return self._resolve_column_from_datasheet(datasheet_path, column_name)
+                return self._resolve_column_from_table(table_path, column_name)
             else:
-                # Not a datasheet reference
+                # Not a table reference
                 return reference
         else:
-            # Not a datasheet reference
+            # Not a table reference
             return reference
 
-    def _resolve_column_from_datasheet(self, datasheet_path: str, column_name: str) -> str:
+    def _resolve_column_from_table(self, table_path: str, column_name: str) -> str:
         """
-        Resolve a column value from a datasheet file.
+        Resolve a column value from a table file.
 
         Args:
-            datasheet_path: Path to the datasheet CSV file
+            table_path: Path to the table CSV file
             column_name: Name of the column to resolve
 
         Returns:
             Placeholder string for script generation
         """
-        # For script generation, return a placeholder that indicates this is a datasheet reference
+        # For script generation, return a placeholder that indicates this is a table reference
         # The actual resolution will happen in the script generation where we have access to pandas
-        return f"DATASHEET_REFERENCE:{datasheet_path}:{column_name}"
+        return f"DATASHEET_REFERENCE:{table_path}:{column_name}"
     
-    def _find_datasheet_path(self, datasheet_name: str) -> Optional[str]:
+    def _find_table_path(self, table_name: str) -> Optional[str]:
         """
-        Find the path to a named datasheet from various input sources.
+        Find the path to a named table from various input sources.
         
         Args:
-            datasheet_name: Name of the datasheet to find
+            table_name: Name of the table to find
             
         Returns:
-            Path to the datasheet file, or None if not found
+            Path to the table file, or None if not found
         """
         # Check StandardizedOutput format
-        if hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets'):
-            if hasattr(self.standardized_input.datasheets, '_datasheets') and datasheet_name in self.standardized_input.datasheets._datasheets:
-                return self.standardized_input.datasheets._datasheets[datasheet_name].path
+        if hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'tables'):
+            if hasattr(self.standardized_input.tables, '_tables') and table_name in self.standardized_input.tables._tables:
+                return self.standardized_input.tables._tables[table_name].path
         
         # Check dictionary format
-        if hasattr(self, 'input_datasheets') and isinstance(self.input_datasheets, dict) and datasheet_name in self.input_datasheets:
-            return self.input_datasheets[datasheet_name]["path"]
+        if hasattr(self, 'input_tables') and isinstance(self.input_tables, dict) and table_name in self.input_tables:
+            return self.input_tables[table_name]["path"]
         
-        # Check DatasheetContainer format  
-        if hasattr(self, 'input_datasheets') and hasattr(self.input_datasheets, '_datasheets') and datasheet_name in self.input_datasheets._datasheets:
-            return self.input_datasheets._datasheets[datasheet_name].path
+        # Check TableContainer format  
+        if hasattr(self, 'input_tables') and hasattr(self.input_tables, '_tables') and table_name in self.input_tables._tables:
+            return self.input_tables._tables[table_name].path
         
         return None
     
-    def validate_datasheet_reference(self, reference):
-        """Validate datasheet reference format."""
+    def validate_table_reference(self, reference):
+        """Validate table reference format."""
         if not reference:
             return
 
-        # Handle tuple format: (datasheet_object, "column_name")
+        # Handle tuple format: (table_object, "column_name")
         if isinstance(reference, tuple):
             if len(reference) == 2:
-                datasheet_object, column_name = reference
-                if hasattr(datasheet_object, 'path') and isinstance(column_name, str):
+                table_object, column_name = reference
+                if hasattr(table_object, 'path') and isinstance(column_name, str):
                     # Valid tuple format
                     return
                 else:
-                    raise ValueError(f"Invalid tuple format: expected (datasheet_object, 'column_name'), got {reference}")
+                    raise ValueError(f"Invalid tuple format: expected (table_object, 'column_name'), got {reference}")
             else:
-                raise ValueError(f"Invalid tuple format: expected (datasheet_object, 'column_name'), got {reference}")
+                raise ValueError(f"Invalid tuple format: expected (table_object, 'column_name'), got {reference}")
 
-        # Handle string format: datasheet.column
+        # Handle string format: table.column
         if isinstance(reference, str) and "." in reference:
             parts = reference.split(".")
             if len(parts) == 2:
-                # Valid datasheet reference format
+                # Valid table reference format
                 return
             else:
-                # Multiple dots - not a valid datasheet reference
+                # Multiple dots - not a valid table reference
                 return
 
-        # No dots - regular value, not a datasheet reference
+        # No dots - regular value, not a table reference
 
 
-class DatasheetInfo:
-    """Information about a datasheet including name, path, and expected columns."""
+class TableInfo:
+    """Information about a table including name, path, and expected columns."""
 
     def __init__(self, name: str, path: str, columns: List[str] = None,
                  description: str = "", count: int = 0):
@@ -562,7 +562,7 @@ class DatasheetInfo:
                 setattr(self, column, self._create_column_reference(column))
 
     def _create_column_reference(self, column_name: str):
-        """Create a column reference tuple for datasheet access."""
+        """Create a column reference tuple for table access."""
         return (self, column_name)
 
     def __getattr__(self, column_name: str):
@@ -581,10 +581,10 @@ class DatasheetInfo:
         return f"${self.name}"
 
     def __repr__(self) -> str:
-        return f"DatasheetInfo(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
+        return f"TableInfo(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert DatasheetInfo to dictionary for JSON serialization."""
+        """Convert TableInfo to dictionary for JSON serialization."""
         # Only return core data, not the dynamically set column attributes which contain circular references
         return {
             "name": self.name,
@@ -595,78 +595,78 @@ class DatasheetInfo:
         }
 
 
-class DatasheetContainer:
-    """Container for named datasheets with dot-notation access."""
+class TableContainer:
+    """Container for named tables with dot-notation access."""
     
-    def __init__(self, datasheets: Dict[str, DatasheetInfo]):
-        self._datasheets = datasheets
+    def __init__(self, tables: Dict[str, TableInfo]):
+        self._tables = tables
 
-        # Set attributes for dot notation access to DatasheetInfo objects (not just paths)
+        # Set attributes for dot notation access to TableInfo objects (not just paths)
         # Note: For IDE autocompletion, attributes should also be explicitly set in calling code
-        for name, info in datasheets.items():
+        for name, info in tables.items():
             setattr(self, name, info)
     
     def __getitem__(self, key: str) -> str:
-        """Get datasheet path by name with legacy 'main' support."""
-        if key in self._datasheets:
-            return self._datasheets[key].path
+        """Get table path by name with legacy 'main' support."""
+        if key in self._tables:
+            return self._tables[key].path
         
         # Legacy support: if asking for "main" and it doesn't exist,
-        # try to find the most appropriate datasheet
+        # try to find the most appropriate table
         if key == "main":
-            # Try common datasheet types in order of preference
+            # Try common table types in order of preference
             for fallback_key in ['sequences', 'structures', 'compounds']:
-                if fallback_key in self._datasheets:
-                    return self._datasheets[fallback_key].path
+                if fallback_key in self._tables:
+                    return self._tables[fallback_key].path
         
         return ""
     
-    def __getattr__(self, name: str) -> DatasheetInfo:
-        """Get DatasheetInfo object by name via dot notation."""
-        if name in self._datasheets:
-            return self._datasheets[name]
-        raise AttributeError(f"No datasheet named '{name}'")
+    def __getattr__(self, name: str) -> TableInfo:
+        """Get TableInfo object by name via dot notation."""
+        if name in self._tables:
+            return self._tables[name]
+        raise AttributeError(f"No table named '{name}'")
     
     def keys(self):
-        """Get all datasheet names."""
-        return self._datasheets.keys()
+        """Get all table names."""
+        return self._tables.keys()
 
-    def info(self, name: str) -> DatasheetInfo:
-        """Get DatasheetInfo object by name."""
-        if name in self._datasheets:
-            return self._datasheets[name]
-        raise ValueError(f"No datasheet named '{name}'")
+    def info(self, name: str) -> TableInfo:
+        """Get TableInfo object by name."""
+        if name in self._tables:
+            return self._tables[name]
+        raise ValueError(f"No table named '{name}'")
     
     def items(self):
         """Get all name, path pairs."""
-        return [(name, info.path) for name, info in self._datasheets.items()]
+        return [(name, info.path) for name, info in self._tables.items()]
     
-    def info(self, name: str) -> DatasheetInfo:
-        """Get full DatasheetInfo object."""
-        return self._datasheets.get(name)
+    def info(self, name: str) -> TableInfo:
+        """Get full TableInfo object."""
+        return self._tables.get(name)
     
     def __contains__(self, key: str) -> bool:
-        """Support 'in' operator: 'main' in datasheets"""
-        if key in self._datasheets:
+        """Support 'in' operator: 'main' in tables"""
+        if key in self._tables:
             return True
         
-        # Legacy support for "main" - consider it present if any datasheet exists
+        # Legacy support for "main" - consider it present if any table exists
         if key == "main":
-            return bool(self._datasheets)
+            return bool(self._tables)
         
         return False
     
     def get(self, key: str, default: str = "") -> str:
-        """Get datasheet path with default (like dict.get())."""
+        """Get table path with default (like dict.get())."""
         return self.__getitem__(key) or default
     
     def __str__(self) -> str:
-        if not self._datasheets:
+        if not self._tables:
             return "{}"
         
         lines = []
-        for name, info in self._datasheets.items():
-            # Format: datasheet name with columns, then indented file path
+        for name, info in self._tables.items():
+            # Format: table name with columns, then indented file path
             # Extract just the filename from the full path
             filename = info.path.split('/')[-1]
             path_display = f"<output_folder>/{filename}"
@@ -676,24 +676,24 @@ class DatasheetContainer:
         return "\n".join(lines)
     
     def __repr__(self) -> str:
-        return f"DatasheetContainer({list(self._datasheets.keys())})"
+        return f"TableContainer({list(self._tables.keys())})"
 
 
 class StandardizedOutput:
     """
     Provides dot-notation access to standardized output keys.
     
-    Allows usage like: rfd.structures, rfd.datasheets
-    Enhanced with better visualization and named datasheets support.
+    Allows usage like: rfd.structures, rfd.tables
+    Enhanced with better visualization and named tables support.
     """
     
     def __init__(self, output_files: Dict[str, Any]):
         """Initialize with output files dictionary."""
         self._data = output_files.copy()
 
-        # Handle datasheets - convert to DatasheetInfo objects if needed
-        datasheets_raw = output_files.get('datasheets', [])
-        self.datasheets = self._process_datasheets(datasheets_raw)
+        # Handle tables - convert to TableInfo objects if needed
+        tables_raw = output_files.get('tables', [])
+        self.tables = self._process_tables(tables_raw)
 
         # Set standard attributes for dot notation access
         self.structures = output_files.get('structures', [])
@@ -718,15 +718,15 @@ class StandardizedOutput:
         
         # Also store as attributes for compatibility
         for key, value in output_files.items():
-            if key != 'datasheets' and not hasattr(self, key):  # Don't override standard attributes
+            if key != 'tables' and not hasattr(self, key):  # Don't override standard attributes
                 setattr(self, key, value)
     
-    def _process_datasheets(self, datasheets_raw: Any) -> 'DatasheetContainer':
-        """Process datasheets into DatasheetContainer with named access."""
-        if isinstance(datasheets_raw, dict):
+    def _process_tables(self, tables_raw: Any) -> 'TableContainer':
+        """Process tables into TableContainer with named access."""
+        if isinstance(tables_raw, dict):
             # Already in named format
-            datasheet_infos = {}
-            for name, info in datasheets_raw.items():
+            table_infos = {}
+            for name, info in tables_raw.items():
                 if isinstance(info, dict):
                     # Handle columns - ensure it's always a list
                     columns = info.get('columns', [])
@@ -734,7 +734,7 @@ class StandardizedOutput:
                         # No placeholders - if it's a string, it should be an actual column name
                         columns = [columns]  # Single string becomes list
                     
-                    datasheet_infos[name] = DatasheetInfo(
+                    table_infos[name] = TableInfo(
                         name=name,
                         path=info.get('path', ''),
                         columns=columns,
@@ -742,26 +742,26 @@ class StandardizedOutput:
                         count=info.get('count', 0)
                     )
                 else:
-                    # Could be a DatasheetInfo object or just a path
-                    if isinstance(info, DatasheetInfo):
-                        datasheet_infos[name] = info
+                    # Could be a TableInfo object or just a path
+                    if isinstance(info, TableInfo):
+                        table_infos[name] = info
                     else:
                         # Legacy format - just a path
-                        datasheet_infos[name] = DatasheetInfo(name=name, path=str(info))
-            return DatasheetContainer(datasheet_infos)
-        elif isinstance(datasheets_raw, list):
+                        table_infos[name] = TableInfo(name=name, path=str(info))
+            return TableContainer(table_infos)
+        elif isinstance(tables_raw, list):
             # Legacy format - convert first item to "main"
-            datasheet_infos = {}
-            for i, path in enumerate(datasheets_raw):
+            table_infos = {}
+            for i, path in enumerate(tables_raw):
                 name = "main" if i == 0 else f"sheet_{i}"
                 if isinstance(path, str):
-                    datasheet_infos[name] = DatasheetInfo(name=name, path=path)
+                    table_infos[name] = TableInfo(name=name, path=path)
                 else:
-                    # Assume it's already a DatasheetInfo or dict
-                    datasheet_infos[name] = path
-            return DatasheetContainer(datasheet_infos)
+                    # Assume it's already a TableInfo or dict
+                    table_infos[name] = path
+            return TableContainer(table_infos)
         else:
-            return DatasheetContainer({})
+            return TableContainer({})
     
     def _extract_structure_ids(self) -> List[str]:
         """Extract structure IDs from structure file paths."""
@@ -794,19 +794,19 @@ class StandardizedOutput:
         return ids
 
     def _extract_sequence_ids(self) -> List[str]:
-        """Extract sequence IDs from sequence files or datasheets."""
+        """Extract sequence IDs from sequence files or tables."""
         ids = []
 
-        # Try to get IDs from datasheets first
-        if hasattr(self.datasheets, '_datasheets'):
-            for name, info in self.datasheets._datasheets.items():
+        # Try to get IDs from tables first
+        if hasattr(self.tables, '_tables'):
+            for name, info in self.tables._tables.items():
                 if name in ['sequences', 'main'] and info.path:
                     if os.path.exists(info.path):
                         df = pd.read_csv(info.path)
                         if 'id' in df.columns:
                             ids.extend(df['id'].tolist())
         
-        # If no IDs found from datasheets, extract from sequence file paths
+        # If no IDs found from tables, extract from sequence file paths
         if not ids:
             for seq_path in self.sequences:
                 if isinstance(seq_path, str):
@@ -850,35 +850,35 @@ class StandardizedOutput:
         """Support 'in' operator: 'structures' in output"""
         return key in self._data
     
-    def get_legacy_datasheet(self, name: str = "main") -> str:
+    def get_legacy_table(self, name: str = "main") -> str:
         """
-        Get datasheet path using legacy naming conventions.
+        Get table path using legacy naming conventions.
         
         Provides backward compatibility for code that expects:
-        - output.datasheets["main"]
-        - output.get_legacy_datasheet("main")
+        - output.tables["main"]
+        - output.get_legacy_table("main")
         
         Args:
-            name: Legacy datasheet name (default "main")
+            name: Legacy table name (default "main")
             
         Returns:
-            Path to datasheet file, or empty string if not found
+            Path to table file, or empty string if not found
         """
         # Check if legacy "main" alias exists in _data
         if name == "main" and "main" in self._data:
             return self._data["main"]
         
-        # Check in datasheets container
-        if hasattr(self.datasheets, name):
-            datasheet_info = getattr(self.datasheets, name)
-            return datasheet_info.path if hasattr(datasheet_info, 'path') else str(datasheet_info)
+        # Check in tables container
+        if hasattr(self.tables, name):
+            table_info = getattr(self.tables, name)
+            return table_info.path if hasattr(table_info, 'path') else str(table_info)
         
-        # For "main", try common datasheet types in order of preference
+        # For "main", try common table types in order of preference
         if name == "main":
             for fallback_name in ['sequences', 'structures', 'compounds']:
-                if hasattr(self.datasheets, fallback_name):
-                    datasheet_info = getattr(self.datasheets, fallback_name)
-                    return datasheet_info.path if hasattr(datasheet_info, 'path') else str(datasheet_info)
+                if hasattr(self.tables, fallback_name):
+                    table_info = getattr(self.tables, fallback_name)
+                    return table_info.path if hasattr(table_info, 'path') else str(table_info)
         
         return ""
     
@@ -948,16 +948,16 @@ class StandardizedOutput:
                         for id_value in id_list[-3:]:
                             lines.append(f"    – {id_value}")
         
-        # Special handling for datasheets
-        if 'datasheets' in self._data and hasattr(self.datasheets, '_datasheets'):
-            lines.append("datasheets:")
-            for name, info in self.datasheets._datasheets.items():
+        # Special handling for tables
+        if 'tables' in self._data and hasattr(self.tables, '_tables'):
+            lines.append("tables:")
+            for name, info in self.tables._tables.items():
                 # Format columns display
                 col_display = ', '.join(info.columns[:]) if info.columns else '' #:3
                 #if len(info.columns) > 3:
                 #    col_display += f', +{len(info.columns)-3} more'
                 
-                # Show datasheet info
+                # Show table info
                 lines.append(f"    ${name} ({col_display}):")
                 relative_path = make_relative_path(info.path)
                 lines.append(f"        – '{relative_path}'")
@@ -970,7 +970,7 @@ class StandardizedOutput:
         
         # Additional keys section (aliases and other attributes)
         processed_keys = {'structures', 'structure_ids', 'compounds', 'compound_ids', 
-                         'sequences', 'sequence_ids', 'datasheets', 'output_folder', 'filter_metadata'}
+                         'sequences', 'sequence_ids', 'tables', 'output_folder', 'filter_metadata'}
         other_keys = [k for k in self._data.keys() if k not in processed_keys]
         
         aliases = []
@@ -1162,32 +1162,32 @@ class ToolOutput:
         return self.output_pdbs
     
     @property
-    def output_datasheets(self) -> List[str]:
-        """Convenience property for datasheet outputs (JSON, CSV, etc.)."""
-        return self.get_output_files('datasheets')
+    def output_tables(self) -> List[str]:
+        """Convenience property for table outputs (JSON, CSV, etc.)."""
+        return self.get_output_files('tables')
 
     @property
-    def datasheets(self):
+    def tables(self):
         """
-        Access tool's datasheets for IDE autocompletion and column access.
+        Access tool's tables for IDE autocompletion and column access.
 
-        Enables usage like: tool_output.datasheets.structures.fixed
-        Returns the tool's datasheets container with full column access.
+        Enables usage like: tool_output.tables.structures.fixed
+        Returns the tool's tables container with full column access.
         """
-        if hasattr(self.config, 'datasheets'):
-            return self.config.datasheets
+        if hasattr(self.config, 'tables'):
+            return self.config.tables
 
-        # Fallback: create DatasheetContainer from get_output_files if available
+        # Fallback: create TableContainer from get_output_files if available
         try:
             output_files = self.config.get_output_files()
-            datasheets_dict = output_files.get('datasheets', {})
-            if datasheets_dict:
-                return DatasheetContainer(datasheets_dict)
+            tables_dict = output_files.get('tables', {})
+            if tables_dict:
+                return TableContainer(tables_dict)
         except:
             pass
 
         # Return empty container if nothing available
-        return DatasheetContainer({})
+        return TableContainer({})
     
     @property
     def job_name(self) -> str:
@@ -1206,7 +1206,7 @@ class ToolOutput:
 
         Allows usage like:
         - rfd.structures
-        - rfd.datasheets
+        - rfd.tables
         - rfd['structures'] (dict-style)
         """
         # Get current output files from the config
@@ -1228,8 +1228,8 @@ class ToolOutput:
 
         Allows usage like:
         - tool.o.structures
-        - tool.o.datasheets.sequences
-        - tool.o.datasheets.concatenated
+        - tool.o.tables.sequences
+        - tool.o.tables.concatenated
         """
         return self
 

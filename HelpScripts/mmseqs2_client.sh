@@ -31,8 +31,8 @@ done
 
 # -- status check --
 if [[ "$STATUS" -eq 1 ]]; then
-  # Check servers using timestamp files
-  MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/models/mmseqs2_server"
+  # Check servers using timestamp files (per-user)
+  MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server"
   GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
   CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
   MAX_AGE_HOURS=3

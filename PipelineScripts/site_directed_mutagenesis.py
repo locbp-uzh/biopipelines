@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class SDM(BaseConfig):
@@ -244,7 +244,7 @@ echo "Generated sequences saved to: {self.sequences_csv}"
         """Generate the missing sequences creation part of the script."""
         return f"""# Generate missing sequences CSV if original is excluded
 if [ "{str(self.include_original).lower()}" = "false" ]; then
-    echo "Creating missing sequences datasheet..."
+    echo "Creating missing sequences table..."
     python -c "
 import pandas as pd
 import sys
@@ -308,9 +308,9 @@ fi
             mutant_id = f"{base_id}_{self.position}{aa}"
             sequence_ids.append(mutant_id)
 
-        # Prepare datasheets
-        datasheets = {
-            "sequences": DatasheetInfo(
+        # Prepare tables
+        tables = {
+            "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "sequence", "mutation", "position", "original_aa", "new_aa"],
@@ -319,9 +319,9 @@ fi
             )
         }
 
-        # Add missing sequences datasheet if original is excluded
+        # Add missing sequences table if original is excluded
         if not self.include_original:
-            datasheets["missing_sequences"] = DatasheetInfo(
+            tables["missing_sequences"] = TableInfo(
                 name="missing_sequences",
                 path=self.missing_sequences_csv,
                 columns=["id", "sequence", "reason"],
@@ -336,7 +336,7 @@ fi
             "structure_ids": [],
             "compounds": [],
             "compound_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

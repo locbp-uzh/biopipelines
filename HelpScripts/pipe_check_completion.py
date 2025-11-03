@@ -81,14 +81,14 @@ def is_filter_output(expected_outputs: Dict[str, Any]) -> bool:
     Returns:
         True if this is Filter tool output
     """
-    # Check if datasheets contain missing AND there are structure files expected
+    # Check if tables contain missing AND there are structure files expected
     # This distinguishes Filter (works with structures) from RemoveDuplicates (sequences only)
-    if 'datasheets' in expected_outputs and isinstance(expected_outputs['datasheets'], dict):
-        has_missing_datasheet = 'missing' in expected_outputs['datasheets']
+    if 'tables' in expected_outputs and isinstance(expected_outputs['tables'], dict):
+        has_missing_table = 'missing' in expected_outputs['tables']
         has_structures = expected_outputs.get('structures', [])
         
-        # Only treat as filter output if it has missing datasheet AND expects structures
-        return has_missing_datasheet and bool(has_structures)
+        # Only treat as filter output if it has missing table AND expects structures
+        return has_missing_table and bool(has_structures)
     
     return False
 
@@ -102,7 +102,7 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
     Check expected outputs with filter-aware validation.
     
     For filter tools:
-    - Datasheets and manifests are required (critical)
+    - Tables and manifests are required (critical)
     - Content files (structures, sequences) can be partially missing (warning)
     
     Args:
@@ -128,17 +128,17 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
         critical_files = []
         content_files = []
         
-        # Datasheets are critical
-        if 'datasheets' in expected_outputs:
-            datasheets = expected_outputs['datasheets']
-            if isinstance(datasheets, dict):
-                for name, info in datasheets.items():
+        # Tables are critical
+        if 'tables' in expected_outputs:
+            tables = expected_outputs['tables']
+            if isinstance(tables, dict):
+                for name, info in tables.items():
                     if isinstance(info, dict) and 'path' in info:
                         critical_files.append(info['path'])
                     else:
                         critical_files.append(str(info))
-            elif isinstance(datasheets, list):
-                critical_files.extend(datasheets)
+            elif isinstance(tables, list):
+                critical_files.extend(tables)
         
         # Content files are non-critical for filters
         standard_categories = ['structures', 'compounds', 'sequences']
@@ -156,9 +156,9 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
         if content_files:
             # Find missing CSV path from expected outputs
             missing_csv_path = None
-            if 'datasheets' in expected_outputs and isinstance(expected_outputs['datasheets'], dict):
-                if 'missing' in expected_outputs['datasheets']:
-                    missing_info = expected_outputs['datasheets']['missing']
+            if 'tables' in expected_outputs and isinstance(expected_outputs['tables'], dict):
+                if 'missing' in expected_outputs['tables']:
+                    missing_info = expected_outputs['tables']['missing']
                     if isinstance(missing_info, dict) and 'path' in missing_info:
                         missing_csv_path = missing_info['path']
                     else:
@@ -224,27 +224,27 @@ def check_expected_outputs(expected_outputs: Dict[str, Any]) -> tuple[bool, Dict
                     missing_by_category[category] = missing
                     all_exist = False
     
-    # Check datasheets (handle both old and new format)
-    if 'datasheets' in expected_outputs:
-        datasheets = expected_outputs['datasheets']
-        datasheet_files = []
+    # Check tables (handle both old and new format)
+    if 'tables' in expected_outputs:
+        tables = expected_outputs['tables']
+        table_files = []
         
-        if isinstance(datasheets, dict):
-            # New format with named datasheets
-            for name, info in datasheets.items():
+        if isinstance(tables, dict):
+            # New format with named tables
+            for name, info in tables.items():
                 if isinstance(info, dict) and 'path' in info:
-                    datasheet_files.append(info['path'])
+                    table_files.append(info['path'])
                 else:
                     # Fallback - treat as path
-                    datasheet_files.append(str(info))
-        elif isinstance(datasheets, list):
+                    table_files.append(str(info))
+        elif isinstance(tables, list):
             # Old format - list of paths
-            datasheet_files = datasheets
+            table_files = tables
         
-        if datasheet_files:
-            exists, missing = check_files_exist(datasheet_files)
+        if table_files:
+            exists, missing = check_files_exist(table_files)
             if not exists:
-                missing_by_category['datasheets'] = missing
+                missing_by_category['tables'] = missing
                 all_exist = False
     
     return all_exist, missing_by_category

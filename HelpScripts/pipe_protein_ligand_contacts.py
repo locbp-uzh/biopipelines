@@ -17,7 +17,7 @@ import math
 from typing import Dict, List, Any, Optional, Tuple, NamedTuple
 
 # Import unified ID mapping utilities
-from id_map_utils import map_structure_id_to_datasheet_id
+from id_map_utils import map_table_ids_to_ids
 
 
 class Atom(NamedTuple):
@@ -329,42 +329,42 @@ def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str
         return None, None, None, None, None
 
 
-# Note: map_structure_id_to_datasheet_id is now imported from id_map_utils
+# Note: map_structure_id_to_table_id is now imported from id_map_utils
 
 
-def load_selections_from_datasheet(datasheet_path: str, column_name: str, id_map: Dict[str, str] = None) -> Dict[str, str]:
+def load_selections_from_table(table_path: str, column_name: str, id_map: Dict[str, str] = None) -> Dict[str, str]:
     """
-    Load protein selections from datasheet CSV file.
+    Load protein selections from table CSV file.
 
     Args:
-        datasheet_path: Path to CSV file
+        table_path: Path to CSV file
         column_name: Column containing selection specifications
-        id_map: ID mapping pattern for matching structure IDs to datasheet IDs
+        id_map: ID mapping pattern for matching structure IDs to table IDs
 
     Returns:
         Dictionary mapping structure IDs to selection strings
     """
-    if not os.path.exists(datasheet_path):
-        raise FileNotFoundError(f"Datasheet file not found: {datasheet_path}")
+    if not os.path.exists(table_path):
+        raise FileNotFoundError(f"Table file not found: {table_path}")
 
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     if column_name not in df.columns:
-        raise ValueError(f"Column '{column_name}' not found in datasheet. Available columns: {list(df.columns)}")
+        raise ValueError(f"Column '{column_name}' not found in table. Available columns: {list(df.columns)}")
 
     # Assuming the first column contains IDs
     id_column = df.columns[0]
-    datasheet_selections = {}
+    table_selections = {}
 
-    # Load datasheet selections with datasheet IDs
+    # Load table selections with table IDs
     for _, row in df.iterrows():
-        datasheet_id = row[id_column]
+        table_id = row[id_column]
         selection_value = row[column_name]
-        datasheet_selections[str(datasheet_id)] = str(selection_value)
+        table_selections[str(table_id)] = str(selection_value)
 
-    print(f"Loaded protein selections for {len(datasheet_selections)} datasheet IDs from {datasheet_path}")
+    print(f"Loaded protein selections for {len(table_selections)} table IDs from {table_path}")
 
-    # Return datasheet selections - they will be mapped to structure IDs in the caller
-    return datasheet_selections
+    # Return table selections - they will be mapped to structure IDs in the caller
+    return table_selections
 
 
 def calculate_contact_metrics(structure_path: str, selections: str, ligand: str, threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
@@ -452,30 +452,30 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             structure_id = os.path.splitext(os.path.basename(structure_path))[0]
             selections_map[structure_id] = fixed_selection
     else:
-        # Load from datasheet with ID mapping
-        datasheet_path = selections_config['datasheet_path']
+        # Load from table with ID mapping
+        table_path = selections_config['table_path']
         column_name = selections_config['column_name']
-        datasheet_selections = load_selections_from_datasheet(datasheet_path, column_name, id_map)
+        table_selections = load_selections_from_table(table_path, column_name, id_map)
 
-        # Map structure IDs to datasheet IDs and populate selections_map
+        # Map structure IDs to table IDs and populate selections_map
         for structure_path in input_structures:
             structure_id = os.path.splitext(os.path.basename(structure_path))[0]
-            datasheet_id = map_structure_id_to_datasheet_id(structure_id, id_map)
+            table_id = map_table_ids_to_ids(structure_id, id_map)
 
             # Try mapped ID first
-            if datasheet_id in datasheet_selections:
-                selections_map[structure_id] = datasheet_selections[datasheet_id]
-                if datasheet_id != structure_id:
-                    print(f"Mapped structure ID '{structure_id}' -> datasheet ID '{datasheet_id}'")
+            if table_id in table_selections:
+                selections_map[structure_id] = table_selections[table_id]
+                if table_id != structure_id:
+                    print(f"Mapped structure ID '{structure_id}' -> table ID '{table_id}'")
             # Fallback: try original structure ID if mapping was applied
-            elif datasheet_id != structure_id and structure_id in datasheet_selections:
-                selections_map[structure_id] = datasheet_selections[structure_id]
-                print(f"Found match using original structure ID '{structure_id}' (mapped ID '{datasheet_id}' not found)")
+            elif table_id != structure_id and structure_id in table_selections:
+                selections_map[structure_id] = table_selections[structure_id]
+                print(f"Found match using original structure ID '{structure_id}' (mapped ID '{table_id}' not found)")
             else:
-                attempted_ids = [datasheet_id]
-                if datasheet_id != structure_id:
+                attempted_ids = [table_id]
+                if table_id != structure_id:
                     attempted_ids.append(structure_id)
-                print(f"Warning: No datasheet entry for structure ID '{structure_id}'. Tried: {', '.join(attempted_ids)}")
+                print(f"Warning: No table entry for structure ID '{structure_id}'. Tried: {', '.join(attempted_ids)}")
 
     # Process structures
     results = []
@@ -492,7 +492,7 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
 
         # Get selection for this structure
         selections = selections_map.get(structure_id)
-        if selections_config['type'] == 'datasheet' and selections is None:
+        if selections_config['type'] == 'table' and selections is None:
             print(f"  - Warning: No selection found for structure ID: {structure_id}")
             continue
 

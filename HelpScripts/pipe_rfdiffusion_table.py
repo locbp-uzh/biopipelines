@@ -1,9 +1,9 @@
 # Copyright © 2024 LOCBP @ University of Zürich
 # Distributed under MIT license
 """
-Create RFdiffusion results datasheet with id, pdb, fixed, designed columns.
+Create RFdiffusion results table with id, pdb, fixed, designed columns.
 
-This script processes RFdiffusion output to create a standardized CSV datasheet
+This script processes RFdiffusion output to create a standardized CSV table
 that tracks design information for pipeline integration. Parses RFdiffusion log
 files the same way pmpnn_fixed_positions.py does.
 """
@@ -75,13 +75,13 @@ def parse_rfd_log(rfd_log_file, design_character='-'):
     return fixed_dict, mobile_dict
 
 def main():
-    parser = argparse.ArgumentParser(description='Create RFdiffusion results datasheet')
+    parser = argparse.ArgumentParser(description='Create RFdiffusion results table')
     parser.add_argument('output_folder', type=str, help="RFdiffusion output folder")
     parser.add_argument('rfd_log_file', type=str, help="Path to RFdiffusion log file")
     parser.add_argument('design_character', type=str, help="Design character: '-' for RFdiffusion, '?' for RFdiffusion-AllAtom")
     parser.add_argument('pipeline_name', type=str, help="Pipeline name for ID generation")
     parser.add_argument('num_designs', type=int, help="Number of designs generated")
-    parser.add_argument('datasheet_path', type=str, help="Output CSV datasheet path")
+    parser.add_argument('table_path', type=str, help="Output CSV table path")
     parser.add_argument('design_startnum', type=int, nargs='?', default=0, help="Starting number for design numbering (default: 0 for backward compatibility)")
     
     args = parser.parse_args()
@@ -125,12 +125,12 @@ def main():
     df = pd.DataFrame(designs)
     
     # Create output directory if it doesn't exist
-    os.makedirs(os.path.dirname(args.datasheet_path), exist_ok=True)
+    os.makedirs(os.path.dirname(args.table_path), exist_ok=True)
     
-    # Save datasheet
-    df.to_csv(args.datasheet_path, index=False)
+    # Save table
+    df.to_csv(args.table_path, index=False)
     
-    # Save datasheet silently
+    # Save table silently
     existing_pdbs = sum(1 for d in designs if d['exists'])
 
 if __name__ == "__main__":

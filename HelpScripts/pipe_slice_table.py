@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Runtime helper script for slicing datasheets to first N rows.
+Runtime helper script for slicing tables to first N rows.
 
-This script takes tool output datasheets and creates new output containing
-only the first N rows from each datasheet, along with associated files.
+This script takes tool output tables and creates new output containing
+only the first N rows from each table, along with associated files.
 """
 
 import os
@@ -16,30 +16,30 @@ import glob
 from typing import Dict, List, Any, Optional
 
 
-def slice_datasheet(datasheet_path: str, n_rows: int, output_path: str) -> List[str]:
+def slice_table(table_path: str, n_rows: int, output_path: str) -> List[str]:
     """
-    Slice a datasheet to first N rows and return the IDs.
+    Slice a table to first N rows and return the IDs.
 
     Args:
-        datasheet_path: Path to input CSV file
+        table_path: Path to input CSV file
         n_rows: Number of rows to keep from the beginning
         output_path: Path to save sliced CSV
 
     Returns:
-        List of IDs from the sliced datasheet
+        List of IDs from the sliced table
     """
-    print(f"Slicing datasheet: {datasheet_path}")
+    print(f"Slicing table: {table_path}")
 
-    if not os.path.exists(datasheet_path):
-        print(f"Warning: Datasheet not found: {datasheet_path}")
+    if not os.path.exists(table_path):
+        print(f"Warning: Table not found: {table_path}")
         return []
 
     try:
-        df = pd.read_csv(datasheet_path)
-        print(f"Loaded datasheet: {df.shape}")
+        df = pd.read_csv(table_path)
+        print(f"Loaded table: {df.shape}")
 
         if df.empty:
-            print("Warning: Datasheet is empty")
+            print("Warning: Table is empty")
             df.to_csv(output_path, index=False)
             return []
 
@@ -50,9 +50,9 @@ def slice_datasheet(datasheet_path: str, n_rows: int, output_path: str) -> List[
         # Create output directory if needed
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # Save sliced datasheet
+        # Save sliced table
         sliced_df.to_csv(output_path, index=False)
-        print(f"Saved sliced datasheet: {output_path}")
+        print(f"Saved sliced table: {output_path}")
 
         # Extract IDs if available
         sliced_ids = []
@@ -68,7 +68,7 @@ def slice_datasheet(datasheet_path: str, n_rows: int, output_path: str) -> List[
         return sliced_ids
 
     except Exception as e:
-        print(f"Error processing datasheet {datasheet_path}: {e}")
+        print(f"Error processing table {table_path}: {e}")
         return []
 
 
@@ -168,9 +168,9 @@ def copy_associated_files(sliced_ids: List[str], input_folder: str, output_folde
     return copied_files
 
 
-def slice_datasheets(config_data: Dict[str, Any]) -> None:
+def slice_tables(config_data: Dict[str, Any]) -> None:
     """
-    Slice all datasheets to first N rows and copy associated files.
+    Slice all tables to first N rows and copy associated files.
 
     Args:
         config_data: Configuration dictionary with slicing parameters
@@ -179,44 +179,44 @@ def slice_datasheets(config_data: Dict[str, Any]) -> None:
     n_rows = config_data['n_rows']
     output_folder = config_data['output_folder']
 
-    print(f"Slicing datasheets to first {n_rows} rows")
+    print(f"Slicing tables to first {n_rows} rows")
     print(f"Output folder: {output_folder}")
 
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
 
-    # Process each datasheet
+    # Process each table
     all_sliced_ids = []
 
-    datasheets = input_config.get('datasheets', {})
-    if not datasheets:
-        print("Warning: No datasheets found in input configuration")
+    tables = input_config.get('tables', {})
+    if not tables:
+        print("Warning: No tables found in input configuration")
         return
 
-    print(f"\nProcessing {len(datasheets)} datasheets:")
+    print(f"\nProcessing {len(tables)} tables:")
 
-    for name, datasheet_info in datasheets.items():
-        print(f"\n--- Processing datasheet: {name} ---")
+    for name, table_info in tables.items():
+        print(f"\n--- Processing table: {name} ---")
 
-        # Extract path from datasheet_info (handle both dict and object formats)
-        if isinstance(datasheet_info, dict):
-            datasheet_path = datasheet_info.get('path', '')
+        # Extract path from table_info (handle both dict and object formats)
+        if isinstance(table_info, dict):
+            table_path = table_info.get('path', '')
         else:
             # Assume it's a path string
-            datasheet_path = str(datasheet_info)
+            table_path = str(table_info)
 
-        if not datasheet_path:
-            print(f"Warning: No path found for datasheet {name}")
+        if not table_path:
+            print(f"Warning: No path found for table {name}")
             continue
 
         # Output path uses same filename
-        output_filename = os.path.basename(datasheet_path)
+        output_filename = os.path.basename(table_path)
         output_path = os.path.join(output_folder, output_filename)
 
-        # Slice the datasheet
-        sliced_ids = slice_datasheet(datasheet_path, n_rows, output_path)
+        # Slice the table
+        sliced_ids = slice_table(table_path, n_rows, output_path)
 
-        # Keep track of all IDs (use first datasheet's IDs for file copying)
+        # Keep track of all IDs (use first table's IDs for file copying)
         if not all_sliced_ids and sliced_ids:
             all_sliced_ids = sliced_ids
 
@@ -230,7 +230,7 @@ def slice_datasheets(config_data: Dict[str, Any]) -> None:
 
     # Summary
     print(f"\n=== Slicing Summary ===")
-    print(f"Sliced to first {n_rows} rows from {len(datasheets)} datasheets")
+    print(f"Sliced to first {n_rows} rows from {len(tables)} tables")
     print(f"Total IDs processed: {len(all_sliced_ids)}")
     for file_type, files in copied_files.items():
         print(f"Copied {len(files)} {file_type} files")
@@ -238,7 +238,7 @@ def slice_datasheets(config_data: Dict[str, Any]) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Slice datasheets to first N rows')
+    parser = argparse.ArgumentParser(description='Slice tables to first N rows')
     parser.add_argument('--config', required=True, help='JSON config file with slicing parameters')
 
     args = parser.parse_args()
@@ -263,11 +263,11 @@ def main():
             sys.exit(1)
 
     try:
-        slice_datasheets(config_data)
-        print("\nDatasheet slicing completed successfully!")
+        slice_tables(config_data)
+        print("\nTable slicing completed successfully!")
 
     except Exception as e:
-        print(f"Error slicing datasheets: {e}")
+        print(f"Error slicing tables: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

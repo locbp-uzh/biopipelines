@@ -1,7 +1,7 @@
 """
 SelectBest tool for choosing the single best item from analysis results.
 
-Takes analysis datasheets and applies selection criteria to pick exactly one
+Takes analysis tables and applies selection criteria to pick exactly one
 best structure/sequence/compound for use in iterative optimization cycles.
 """
 
@@ -10,20 +10,20 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class SelectBest(BaseConfig):
     """
     Tool for selecting the single best item from analysis results.
     
-    Takes analysis datasheets and applies selection criteria to return exactly
+    Takes analysis tables and applies selection criteria to return exactly
     one best structure/sequence/compound with its associated data.
     """
     
@@ -32,7 +32,7 @@ class SelectBest(BaseConfig):
     
     def __init__(self,
                  pool: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]],
-                 datasheets: Union[List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]], List[str]],
+                 tables: Union[List[Union[ToolOutput, StandardizedOutput, TableInfo, str]], List[str]],
                  metric: str,
                  mode: str = "max",
                  weights: Optional[Dict[str, float]] = None,
@@ -45,7 +45,7 @@ class SelectBest(BaseConfig):
         
         Args:
             pool: Single or list of tool outputs to select structures from
-            datasheets: Single or list of datasheets to evaluate for selection
+            tables: Single or list of tables to evaluate for selection
             metric: Primary metric to optimize for selection
             mode: "max" or "min" the metric
             weights: Dict of {metric_name: weight} for multi-metric selection
@@ -58,7 +58,7 @@ class SelectBest(BaseConfig):
             # Compare across multiple pools (e.g., engineered vs original)
             best = pipeline.add(SelectBest(
                 pool=[original, engineered],
-                datasheets=[original_analysis.datasheets.merged, engineered_analysis.datasheets.merged],
+                tables=[original_analysis.tables.merged, engineered_analysis.tables.merged],
                 metric="binding_affinity",
                 mode="max"
             ))
@@ -66,7 +66,7 @@ class SelectBest(BaseConfig):
             # Single pool selection
             best = pipeline.add(SelectBest(
                 pool=boltz,
-                datasheets=analysis.datasheets.merged,
+                tables=analysis.tables.merged,
                 metric="pLDDT",
                 mode="max"
             ))
@@ -74,7 +74,7 @@ class SelectBest(BaseConfig):
             # Multi-objective with weights
             best = pipeline.add(SelectBest(
                 pool=combined_results,
-                datasheets=analysis.datasheets.merged,
+                tables=analysis.tables.merged,
                 metric="composite_score",
                 weights={"binding_affinity": 0.6, "pLDDT": 0.4},
                 mode="max"
@@ -86,18 +86,18 @@ class SelectBest(BaseConfig):
         else:
             self.pool_outputs = [pool]
         
-        # Handle datasheets - always expect list, convert if single
-        if isinstance(datasheets, list):
-            self.datasheets = datasheets
+        # Handle tables - always expect list, convert if single
+        if isinstance(tables, list):
+            self.tables = tables
         else:
-            self.datasheets = [datasheets]
+            self.tables = [tables]
         
         # Set up dependencies
         dependencies = []
         for p in self.pool_outputs:
             if hasattr(p, 'config'):
                 dependencies.append(p.config)
-        for ds in self.datasheets:
+        for ds in self.tables:
             if hasattr(ds, 'config'):
                 dependencies.append(ds.config)
             
@@ -142,27 +142,27 @@ class SelectBest(BaseConfig):
             if not isinstance(pool_output, (ToolOutput, StandardizedOutput)):
                 raise ValueError(f"pool[{i}] is {type(pool_output)}, must be a ToolOutput or StandardizedOutput object. Value: {pool_output}")
         
-        # Validate datasheets
-        if not self.datasheets:
-            raise ValueError("datasheets must be provided")
+        # Validate tables
+        if not self.tables:
+            raise ValueError("tables must be provided")
         
-        if len(self.datasheets) != len(self.pool_outputs):
-            raise ValueError(f"Number of datasheets ({len(self.datasheets)}) must match number of pools ({len(self.pool_outputs)})")
+        if len(self.tables) != len(self.pool_outputs):
+            raise ValueError(f"Number of tables ({len(self.tables)}) must match number of pools ({len(self.pool_outputs)})")
         
-        for i, datasheet in enumerate(self.datasheets):
-            if not isinstance(datasheet, (ToolOutput, StandardizedOutput, DatasheetInfo, str)):
-                raise ValueError(f"datasheet[{i}] is {type(datasheet)}, must be a ToolOutput, StandardizedOutput, DatasheetInfo, or str object. Value: {datasheet}")
+        for i, table in enumerate(self.tables):
+            if not isinstance(table, (ToolOutput, StandardizedOutput, TableInfo, str)):
+                raise ValueError(f"table[{i}] is {type(table)}, must be a ToolOutput, StandardizedOutput, TableInfo, or str object. Value: {table}")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input datasheet from previous tool."""
+        """Configure input table from previous tool."""
         self.folders = pipeline_folders
         self._configure_pool_mode()
     
     def _configure_pool_mode(self):
-        """Configure inputs for pool + datasheets selection."""
-        # Extract pool folders and datasheet paths
+        """Configure inputs for pool + tables selection."""
+        # Extract pool folders and table paths
         self.pool_folders = []
-        self.datasheet_paths = []
+        self.table_paths = []
         
         for pool in self.pool_outputs:
             if hasattr(pool, 'output_folder'):
@@ -170,35 +170,35 @@ class SelectBest(BaseConfig):
             else:
                 raise ValueError(f"Pool {pool} must have output_folder")
         
-        for datasheet in self.datasheets:
-            # Handle different datasheet input types - check DatasheetInfo first
-            if hasattr(datasheet, 'path') and hasattr(datasheet, 'name') and hasattr(datasheet, 'columns'):
-                # DatasheetInfo object - use path directly
-                self.datasheet_paths.append(datasheet.path)
-            elif isinstance(datasheet, str):
+        for table in self.tables:
+            # Handle different table input types - check TableInfo first
+            if hasattr(table, 'path') and hasattr(table, 'name') and hasattr(table, 'columns'):
+                # TableInfo object - use path directly
+                self.table_paths.append(table.path)
+            elif isinstance(table, str):
                 # String path - use directly
-                self.datasheet_paths.append(datasheet)
-            elif hasattr(datasheet, 'datasheets'):
-                # ToolOutput object - extract datasheet path
-                ds_obj = datasheet.datasheets
-                datasheet_path = None
+                self.table_paths.append(table)
+            elif hasattr(table, 'tables'):
+                # ToolOutput object - extract table path
+                ds_obj = table.tables
+                table_path = None
 
                 if hasattr(ds_obj, 'merged'):
-                    datasheet_path = ds_obj.merged.path
+                    table_path = ds_obj.merged.path
                 elif hasattr(ds_obj, 'combined'):
-                    datasheet_path = ds_obj.combined.path
+                    table_path = ds_obj.combined.path
                 elif hasattr(ds_obj, 'filtered'):
-                    datasheet_path = ds_obj.filtered.path
-                elif hasattr(ds_obj, '_datasheets'):
-                    # Get first available datasheet
-                    first_ds = next(iter(ds_obj._datasheets.values()))
-                    datasheet_path = first_ds.path
+                    table_path = ds_obj.filtered.path
+                elif hasattr(ds_obj, '_tables'):
+                    # Get first available table
+                    first_ds = next(iter(ds_obj._tables.values()))
+                    table_path = first_ds.path
                 else:
-                    raise ValueError(f"Could not find datasheet in {datasheet}")
+                    raise ValueError(f"Could not find table in {table}")
 
-                self.datasheet_paths.append(datasheet_path)
+                self.table_paths.append(table_path)
             else:
-                raise ValueError(f"Unsupported datasheet type: {type(datasheet)}")
+                raise ValueError(f"Unsupported table type: {type(table)}")
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -206,7 +206,7 @@ class SelectBest(BaseConfig):
         
         config_lines.extend([
             f"POOLS: {len(self.pool_outputs)}",
-            f"DATASHEETS: {len(self.datasheets)}",
+            f"DATASHEETS: {len(self.tables)}",
             f"METRIC: {self.metric} ({self.mode})"
         ])
         
@@ -242,7 +242,7 @@ class SelectBest(BaseConfig):
             "output_structure": selected_structure,
             "output_sequences": os.path.join(output_folder, "sequences.csv"),
             "pool_folders": self.pool_folders,
-            "datasheet_paths": self.datasheet_paths
+            "table_paths": self.table_paths
         }
         
         import json
@@ -256,7 +256,7 @@ class SelectBest(BaseConfig):
 
 {self.generate_completion_check_header()}
 
-echo "Selecting best item from {len(self.datasheet_paths)} datasheets"
+echo "Selecting best item from {len(self.table_paths)} tables"
 echo "Selection metric: {self.metric} ({self.mode})"
 echo "Output: {selected_structure}"
 
@@ -293,8 +293,8 @@ fi
         # Use output name as the selected ID
         selected_id = self.output_name
         
-        # Define datasheets that will be created
-        datasheets = {
+        # Define tables that will be created
+        tables = {
             "selected": {
                 "path": selected_csv,
                 "columns": ["id", self.metric],  # Basic columns
@@ -319,7 +319,7 @@ fi
             "compound_ids": [],
             "sequences": [selected_sequence],  # Include sequences CSV  
             "sequence_ids": [selected_id],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
     

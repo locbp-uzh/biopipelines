@@ -12,13 +12,13 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 import os
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class ConformationalChange(BaseConfig):
@@ -55,9 +55,9 @@ class ConformationalChange(BaseConfig):
                                 - Single PDB file path (string)
                                 - ToolOutput/StandardizedOutput (single or multiple structures)
             target_structures: Target structures from previous tool (ToolOutput or StandardizedOutput)
-            selection: Region specification - string or datasheet column reference
+            selection: Region specification - string or table column reference
                       String format: '10-20+30-40' (residue ranges)
-                      Datasheet format: <tool_output>.datasheets.<datasheet_name>.<column_name>
+                      Table format: <tool_output>.tables.<table_name>.<column_name>
             alignment: Alignment method - "align", "super", or "cealign" (default: "align")
             **kwargs: Additional parameters
 
@@ -67,8 +67,8 @@ class ConformationalChange(BaseConfig):
             - '10-20+30-40' → residues 10-20 and 30-40
             - '145+147+150' → specific residues 145, 147, and 150
 
-            Datasheet format:
-            - boltz_results.datasheets.structures.designed → use 'designed' column values
+            Table format:
+            - boltz_results.tables.structures.designed → use 'designed' column values
 
         Alignment Methods:
             - "align": PyMOL align (sequence-dependent, fast)
@@ -84,11 +84,11 @@ class ConformationalChange(BaseConfig):
                 alignment='super'
             ))
 
-            # Use selection from datasheet
+            # Use selection from table
             conf_analysis = pipeline.add(ConformationalChange(
                 reference_structures=boltz_ref,
                 target_structures=boltz_targets,
-                selection=rfdaa.datasheets.structures.designed,
+                selection=rfdaa.tables.structures.designed,
                 alignment='cealign'
             ))
         """
@@ -177,8 +177,8 @@ class ConformationalChange(BaseConfig):
         config_lines = super().get_config_display()
 
         selection_display = str(self.selection_spec)
-        if hasattr(self.selection_spec, 'datasheet_path'):
-            selection_display = f"From datasheet: {self.selection_spec.datasheet_path}"
+        if hasattr(self.selection_spec, 'table_path'):
+            selection_display = f"From table: {self.selection_spec.table_path}"
 
         config_lines.extend([
             f"REFERENCE STRUCTURES: {len(getattr(self, 'reference_structures', []))} files",
@@ -215,18 +215,18 @@ class ConformationalChange(BaseConfig):
         if isinstance(self.selection_spec, str):
             selection_config = {"type": "fixed", "value": self.selection_spec}
         elif isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
-            # Tuple format: (DatasheetInfo, column_name)
-            datasheet_info, column_name = self.selection_spec
+            # Tuple format: (TableInfo, column_name)
+            table_info, column_name = self.selection_spec
             selection_config = {
-                "type": "datasheet",
-                "datasheet_path": datasheet_info.path if hasattr(datasheet_info, 'path') else '',
+                "type": "table",
+                "table_path": table_info.path if hasattr(table_info, 'path') else '',
                 "column_name": column_name
             }
         else:
-            # Datasheet reference with attributes
+            # Table reference with attributes
             selection_config = {
-                "type": "datasheet",
-                "datasheet_path": getattr(self.selection_spec, 'datasheet_path', ''),
+                "type": "table",
+                "table_path": getattr(self.selection_spec, 'table_path', ''),
                 "column_name": getattr(self.selection_spec, 'column_name', 'selection')
             }
 
@@ -282,8 +282,8 @@ fi
         """
         analysis_csv = self.get_analysis_csv_path()
 
-        datasheets = {
-            "conformational_analysis": DatasheetInfo(
+        tables = {
+            "conformational_analysis": TableInfo(
                 name="conformational_analysis",
                 path=analysis_csv,
                 columns=["id", "reference_structure", "target_structure", "selection",
@@ -300,7 +300,7 @@ fi
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

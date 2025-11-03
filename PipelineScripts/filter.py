@@ -1,7 +1,7 @@
 """
-Filter tool for expression-based filtering of unified analysis datasheets.
+Filter tool for expression-based filtering of unified analysis tables.
 
-Takes unified datasheets from CombineDatasheets and applies pandas query-style
+Takes unified tables from CombineTables and applies pandas query-style
 expressions to filter rows while preserving all column information.
 """
 
@@ -10,13 +10,13 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class FilterResult:
@@ -70,9 +70,9 @@ class FilterResult:
 
 class Filter(BaseConfig):
     """
-    Expression-based filter tool for unified analysis datasheets.
+    Expression-based filter tool for unified analysis tables.
     
-    Takes a unified datasheet (typically from CombineDatasheets) and applies
+    Takes a unified table (typically from CombineTables) and applies
     pandas query-style expressions to filter rows while preserving all columns.
     """
     
@@ -92,7 +92,7 @@ class Filter(BaseConfig):
         Initialize Filter tool.
         
         Args:
-            data: Datasheet input to filter (required)
+            data: Table input to filter (required)
             pool: Structure pool for copying filtered structures (optional)
             expression: Pandas query-style expression (e.g., "pLDDT>80 and distance < 5.0") (required)
             max_items: Maximum number of items to keep after filtering
@@ -101,13 +101,13 @@ class Filter(BaseConfig):
             **kwargs: Additional parameters
             
         Examples:
-            # Data mode - filter datasheet only
+            # Data mode - filter table only
             filtered = pipeline.add(Filter(
                 data=combined_analysis,
                 expression="pLDDT > 80"
             ))
             
-            # Pool mode - filter datasheet and copy structures
+            # Pool mode - filter table and copy structures
             filtered = pipeline.add(Filter(
                 pool=boltz_results,
                 data=combined_analysis,
@@ -182,41 +182,41 @@ class Filter(BaseConfig):
             raise ValueError("max_items must be positive")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input datasheet and pool from previous tools."""
+        """Configure input table and pool from previous tools."""
         self.folders = pipeline_folders
         
         # Configure data input (required)
         self.input_csv_path = None
-        self.input_datasheet_name = "filtered"  # Default name
-        self.input_datasheet_info = None
+        self.input_table_name = "filtered"  # Default name
+        self.input_table_info = None
         
-        if hasattr(self.data_input, 'datasheets'):
-            datasheets = self.data_input.datasheets
+        if hasattr(self.data_input, 'tables'):
+            tables = self.data_input.tables
             
-            # Handle DatasheetContainer objects
-            if hasattr(datasheets, '_datasheets'):
-                # Get the first available DatasheetInfo object and its name
-                first_name, ds_info = next(iter(datasheets._datasheets.items()))
+            # Handle TableContainer objects
+            if hasattr(tables, '_tables'):
+                # Get the first available TableInfo object and its name
+                first_name, ds_info = next(iter(tables._tables.items()))
                 self.input_csv_path = ds_info.path
-                self.input_datasheet_name = first_name
-                self.input_datasheet_info = ds_info
-            elif isinstance(datasheets, dict):
+                self.input_table_name = first_name
+                self.input_table_info = ds_info
+            elif isinstance(tables, dict):
                 # Handle raw dict (legacy format)
-                first_name, ds_info = next(iter(datasheets.items()))
-                self.input_datasheet_name = first_name
+                first_name, ds_info = next(iter(tables.items()))
+                self.input_table_name = first_name
                 
                 if isinstance(ds_info, dict) and 'path' in ds_info:
                     self.input_csv_path = ds_info['path']
                 elif hasattr(ds_info, 'path'):
-                    # Handle DatasheetInfo objects
+                    # Handle TableInfo objects
                     self.input_csv_path = ds_info.path
-                    self.input_datasheet_info = ds_info
+                    self.input_table_info = ds_info
                 else:
                     self.input_csv_path = str(ds_info)
         
         if not self.input_csv_path:
             raise ValueError(f"Could not predict input CSV path from data tool: {self.data_input}. "
-                           f"The data tool must provide proper datasheet path predictions.")
+                           f"The data tool must provide proper table path predictions.")
         
         # Configure pool input (optional)
         if self.use_pool_mode:
@@ -229,11 +229,11 @@ class Filter(BaseConfig):
                                f"The pool tool must provide output_folder.")
     
     def _get_input_columns(self) -> List[str]:
-        """Get column names from the input datasheet."""
-        # Try to get columns from data tool's datasheet info
-        if hasattr(self.data_input, 'datasheets') and hasattr(self.data_input.datasheets, '_datasheets'):
-            # Look through the datasheets to find one with column info
-            for name, info in self.data_input.datasheets._datasheets.items():
+        """Get column names from the input table."""
+        # Try to get columns from data tool's table info
+        if hasattr(self.data_input, 'tables') and hasattr(self.data_input.tables, '_tables'):
+            # Look through the tables to find one with column info
+            for name, info in self.data_input.tables._tables.items():
                 if hasattr(info, 'columns') and info.columns:
                     return info.columns
         
@@ -270,9 +270,9 @@ class Filter(BaseConfig):
         output_folder = self.output_folder
         os.makedirs(output_folder, exist_ok=True)
         
-        # Output CSV path - use same name as input datasheet to preserve structure
-        output_datasheet_name = getattr(self, 'input_datasheet_name', 'filtered')
-        filtered_csv_name = f"{output_datasheet_name}.csv"
+        # Output CSV path - use same name as input table to preserve structure
+        output_table_name = getattr(self, 'input_table_name', 'filtered')
+        filtered_csv_name = f"{output_table_name}.csv"
         filtered_csv = os.path.join(output_folder, filtered_csv_name)
         
         # Create config file for the filter
@@ -334,20 +334,20 @@ fi
         
         missing_csv = os.path.join(self.output_folder, "missing.csv")
         
-        # Use the same datasheet name as the input to preserve structure
-        output_datasheet_name = getattr(self, 'input_datasheet_name', 'filtered')
-        filtered_csv_name = f"{output_datasheet_name}.csv"
+        # Use the same table name as the input to preserve structure
+        output_table_name = getattr(self, 'input_table_name', 'filtered')
+        filtered_csv_name = f"{output_table_name}.csv"
         filtered_csv = os.path.join(self.output_folder, filtered_csv_name)
         
-        datasheets = {
-            output_datasheet_name: DatasheetInfo(
-                name=output_datasheet_name,
+        tables = {
+            output_table_name: TableInfo(
+                name=output_table_name,
                 path=filtered_csv,
                 columns=input_columns,
                 description=f"Filtered results using expression: {self.expression}",
                 count="variable"
             ),
-            "missing": DatasheetInfo(
+            "missing": TableInfo(
                 name="missing",
                 path=missing_csv,
                 columns=["id", "structure", "msa"],
@@ -358,7 +358,7 @@ fi
         
         if self.use_pool_mode:
             # Pool mode: predict copying ALL pool files (runtime will filter)
-            # Copy the entire pool output structure and add filtered datasheet
+            # Copy the entire pool output structure and add filtered table
             pool_output_dict = self.pool_output._data.copy() if hasattr(self.pool_output, '_data') else {}
             
             # Update paths to point to our output folder
@@ -384,12 +384,12 @@ fi
                     filename = os.path.basename(seq_path)
                     updated_sequences.append(os.path.join(self.output_folder, filename))
             
-            # Combine pool datasheets with filtered datasheet
-            combined_datasheets = datasheets.copy()
-            if hasattr(self.pool_output, 'datasheets') and hasattr(self.pool_output.datasheets, '_datasheets'):
-                for name, info in self.pool_output.datasheets._datasheets.items():
+            # Combine pool tables with filtered table
+            combined_tables = tables.copy()
+            if hasattr(self.pool_output, 'tables') and hasattr(self.pool_output.tables, '_tables'):
+                for name, info in self.pool_output.tables._tables.items():
                     filename = os.path.basename(info.path)
-                    combined_datasheets[name] = DatasheetInfo(
+                    combined_tables[name] = TableInfo(
                         name=name,
                         path=os.path.join(self.output_folder, filename),
                         columns=info.columns,
@@ -404,7 +404,7 @@ fi
                 "compound_ids": self.pool_output.compound_ids if hasattr(self.pool_output, 'compound_ids') else [],
                 "sequences": updated_sequences,
                 "sequence_ids": self.pool_output.sequence_ids if hasattr(self.pool_output, 'sequence_ids') else [],
-                "datasheets": combined_datasheets,
+                "tables": combined_tables,
                 "output_folder": self.output_folder
             }
         else:
@@ -416,7 +416,7 @@ fi
                 "compound_ids": [],
                 "sequences": [],
                 "sequence_ids": [],
-                "datasheets": datasheets,
+                "tables": tables,
                 "output_folder": self.output_folder
             }
     

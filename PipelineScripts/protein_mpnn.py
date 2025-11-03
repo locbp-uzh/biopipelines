@@ -31,7 +31,7 @@ class ProteinMPNN(BaseConfig):
     
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput],
-                 datasheets: Optional[List[str]] = None,
+                 tables: Optional[List[str]] = None,
                  num_sequences: int = 1,
                  fixed: str = "",
                  redesigned: str = "",
@@ -47,10 +47,10 @@ class ProteinMPNN(BaseConfig):
 
         Args:
             structures: Input structures (PDB files, folder, or ToolOutput from previous tool)
-            datasheets: Input datasheet files for metadata (optional)
+            tables: Input table files for metadata (optional)
             num_sequences: Number of sequences to generate per structure
-            fixed: PyMOL-style selection or datasheet reference (e.g., "structures.fixed")
-            redesigned: PyMOL-style selection or datasheet reference (e.g., "structures.designed")
+            fixed: PyMOL-style selection or table reference (e.g., "structures.fixed")
+            redesigned: PyMOL-style selection or table reference (e.g., "structures.designed")
             fixed_chain: Chain to apply fixed positions to
             plddt_threshold: pLDDT threshold for automatic fixing (100 = no fixing)
             sampling_temp: Sampling temperature for sequence generation
@@ -69,16 +69,16 @@ class ProteinMPNN(BaseConfig):
                 redesigned="20-40"
             ))
 
-            # Using datasheet references
+            # Using table references
             pmpnn = pipeline.add(ProteinMPNN(
                 structures=rfdaa,
                 num_sequences=5,
-                redesigned=distances.datasheets.selections.beyond
+                redesigned=distances.tables.selections.beyond
             ))
         """
         # Store input parameters
         self.input_structures = structures
-        self.input_datasheets = datasheets or {}
+        self.input_tables = tables or {}
         self.input_is_tool_output = isinstance(structures, ToolOutput)
         
         # Store ProteinMPNN-specific parameters
@@ -104,7 +104,7 @@ class ProteinMPNN(BaseConfig):
         self.input_is_folder = False
         self.input_pdb_files = []
         
-        # Set up dependencies for datasheet references
+        # Set up dependencies for table references
         if hasattr(structures, 'config'):
             self.dependencies.append(structures.config)
         if hasattr(fixed, 'config'):
@@ -132,11 +132,11 @@ class ProteinMPNN(BaseConfig):
         if self.plddt_threshold < 0 or self.plddt_threshold > 100:
             raise ValueError("plddt_threshold must be between 0 and 100")
         
-        # Validate datasheet references if provided
+        # Validate table references if provided
         if self.fixed:
-            self.validate_datasheet_reference(self.fixed)
+            self.validate_table_reference(self.fixed)
         if self.redesigned:
-            self.validate_datasheet_reference(self.redesigned)
+            self.validate_table_reference(self.redesigned)
         
         # Validate model name
         valid_models = ["v_48_002", "v_48_010", "v_48_020", "v_48_030"]
@@ -149,7 +149,7 @@ class ProteinMPNN(BaseConfig):
         self.fixed_jsonl = None
         self.sele_csv = None
         self.seqs_folder = None
-        self.main_datasheet = None
+        self.main_table = None
         self.queries_csv = None
         self.queries_fasta = None
         
@@ -157,7 +157,7 @@ class ProteinMPNN(BaseConfig):
         self.parse_py = None
         self.fixed_py = None
         self.pmpnn_py = None
-        self.datasheet_py = None
+        self.table_py = None
     
     def _setup_file_paths(self):
         """Set up all file paths after output_folder is known."""
@@ -166,7 +166,7 @@ class ProteinMPNN(BaseConfig):
         self.fixed_jsonl = os.path.join(self.output_folder, "fixed_pos.jsonl")
         self.sele_csv = os.path.join(self.output_folder, "fixed_designed.csv")
         self.seqs_folder = os.path.join(self.output_folder, "seqs")
-        self.main_datasheet = os.path.join(self.output_folder, "proteinmpnn_results.csv")
+        self.main_table = os.path.join(self.output_folder, "proteinmpnn_results.csv")
         
         # Pipeline-based files
         pipeline_name = self._extract_pipeline_name()
@@ -178,14 +178,14 @@ class ProteinMPNN(BaseConfig):
             self.parse_py = os.path.join(self.folders["ProteinMPNN"], "helper_scripts", "parse_multiple_chains.py")
             self.fixed_py = os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_fixed_positions.py")
             self.pmpnn_py = os.path.join(self.folders["ProteinMPNN"], "protein_mpnn_run.py")
-            self.datasheet_py = os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_datasheet.py")
+            self.table_py = os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_table.py")
             self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py")
         else:
             # Temporary placeholders when folders aren't available yet
             self.parse_py = None
             self.fixed_py = None
             self.pmpnn_py = None
-            self.datasheet_py = None
+            self.table_py = None
             self.fa_to_csv_fasta_py = None
     
     def _extract_pipeline_name(self) -> str:
@@ -334,7 +334,7 @@ class ProteinMPNN(BaseConfig):
         script_content += self.generate_completion_check_header()
         script_content += self.generate_script_prepare_inputs()
         script_content += self.generate_script_run_proteinmpnn()
-        script_content += self.generate_script_create_datasheet()
+        script_content += self.generate_script_create_table()
         script_content += self.generate_completion_check_footer()
         
         return script_content
@@ -350,49 +350,49 @@ class ProteinMPNN(BaseConfig):
             raise ValueError("No structure sources found")
         
         # Determine input source and parameters for fixed positions script
-        # Priority: explicit fixed/redesigned parameters > input datasheets > pLDDT
+        # Priority: explicit fixed/redesigned parameters > input tables > pLDDT
         if self.fixed or self.redesigned:
             # Use explicit fixed/redesigned positions (including DATASHEET_REFERENCE)
             input_source = "selection"
-            input_datasheet = "-"
-        elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
-           (hasattr(self, 'is_pipeline_input') and self.is_pipeline_input and hasattr(self, 'input_datasheets') and self.input_datasheets):
-            # Use datasheet from previous tool (e.g., RFdiffusion)
-            input_source = "datasheet"
-            if isinstance(self.input_datasheets, dict):
-                # New named datasheet format - look for structures first (RFdiffusion), then main (legacy)
-                if "structures" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["structures"]["path"]
-                elif "main" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["main"]["path"]
+            input_table = "-"
+        elif (self.input_is_tool_output and hasattr(self, 'input_tables') and self.input_tables) or \
+           (hasattr(self, 'is_pipeline_input') and self.is_pipeline_input and hasattr(self, 'input_tables') and self.input_tables):
+            # Use table from previous tool (e.g., RFdiffusion)
+            input_source = "table"
+            if isinstance(self.input_tables, dict):
+                # New named table format - look for structures first (RFdiffusion), then main (legacy)
+                if "structures" in self.input_tables:
+                    input_table = self.input_tables["structures"]["path"]
+                elif "main" in self.input_tables:
+                    input_table = self.input_tables["main"]["path"]
                 else:
-                    # Use first available datasheet
-                    first_key = next(iter(self.input_datasheets))
-                    input_datasheet = self.input_datasheets[first_key]["path"]
-            elif hasattr(self.input_datasheets, '_datasheets'):
-                # DatasheetContainer object - get the path properly
-                if 'structures' in self.input_datasheets._datasheets:
-                    input_datasheet = self.input_datasheets._datasheets['structures'].path
-                elif 'main' in self.input_datasheets._datasheets:
-                    input_datasheet = self.input_datasheets._datasheets['main'].path
+                    # Use first available table
+                    first_key = next(iter(self.input_tables))
+                    input_table = self.input_tables[first_key]["path"]
+            elif hasattr(self.input_tables, '_tables'):
+                # TableContainer object - get the path properly
+                if 'structures' in self.input_tables._tables:
+                    input_table = self.input_tables._tables['structures'].path
+                elif 'main' in self.input_tables._tables:
+                    input_table = self.input_tables._tables['main'].path
                 else:
-                    # Fallback to first available datasheet
-                    first_name = list(self.input_datasheets._datasheets.keys())[0]
-                    input_datasheet = self.input_datasheets._datasheets[first_name].path
+                    # Fallback to first available table
+                    first_name = list(self.input_tables._tables.keys())[0]
+                    input_table = self.input_tables._tables[first_name].path
             else:
                 # Legacy format
-                input_datasheet = self.input_datasheets[0] if isinstance(self.input_datasheets, list) else str(self.input_datasheets)
+                input_table = self.input_tables[0] if isinstance(self.input_tables, list) else str(self.input_tables)
         else:
             # Use pLDDT threshold method
             input_source = "plddt"
-            input_datasheet = "-"
+            input_table = "-"
         
-        # Resolve datasheet references in fixed/designed positions
-        fixed_param = self.resolve_datasheet_reference(self.fixed) if self.fixed else "-"
-        designed_param = self.resolve_datasheet_reference(self.redesigned) if self.redesigned else "-"
+        # Resolve table references in fixed/designed positions
+        fixed_param = self.resolve_table_reference(self.fixed) if self.fixed else "-"
+        designed_param = self.resolve_table_reference(self.redesigned) if self.redesigned else "-"
         
         return f"""echo "Determining fixed positions"
-python {self.fixed_py} "{input_directory}" "{input_source}" "{input_datasheet}" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
+python {self.fixed_py} "{input_directory}" "{input_source}" "{input_table}" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
 
 echo "Parsing multiple PDBs" 
 python {self.parse_py} --input_path {input_directory} --output_path {self.parsed_pdbs_jsonl}
@@ -420,44 +420,44 @@ python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_j
 
 """
 
-    def generate_script_create_datasheet(self) -> str:
-        """Generate the datasheet creation part of the script."""
+    def generate_script_create_table(self) -> str:
+        """Generate the table creation part of the script."""
         pipeline_name = self._extract_pipeline_name()
         
-        # Determine input datasheet to inherit columns from
-        input_datasheet = "-"  # Default: no input datasheet
-        if self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets:
-            if isinstance(self.input_datasheets, dict):
-                # New named datasheet format - look for structures first (RFdiffusion), then main (legacy)
-                if "structures" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["structures"]["path"]
-                elif "main" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["main"]["path"]
+        # Determine input table to inherit columns from
+        input_table = "-"  # Default: no input table
+        if self.input_is_tool_output and hasattr(self, 'input_tables') and self.input_tables:
+            if isinstance(self.input_tables, dict):
+                # New named table format - look for structures first (RFdiffusion), then main (legacy)
+                if "structures" in self.input_tables:
+                    input_table = self.input_tables["structures"]["path"]
+                elif "main" in self.input_tables:
+                    input_table = self.input_tables["main"]["path"]
                 else:
-                    # Use first available datasheet
-                    first_key = next(iter(self.input_datasheets))
-                    input_datasheet = self.input_datasheets[first_key]["path"]
-            elif hasattr(self.input_datasheets, '_datasheets'):
-                # DatasheetContainer object - get the path properly
-                if 'structures' in self.input_datasheets._datasheets:
-                    input_datasheet = self.input_datasheets._datasheets['structures'].path
-                elif 'main' in self.input_datasheets._datasheets:
-                    input_datasheet = self.input_datasheets._datasheets['main'].path
+                    # Use first available table
+                    first_key = next(iter(self.input_tables))
+                    input_table = self.input_tables[first_key]["path"]
+            elif hasattr(self.input_tables, '_tables'):
+                # TableContainer object - get the path properly
+                if 'structures' in self.input_tables._tables:
+                    input_table = self.input_tables._tables['structures'].path
+                elif 'main' in self.input_tables._tables:
+                    input_table = self.input_tables._tables['main'].path
                 else:
-                    # Fallback to first available datasheet
-                    first_name = list(self.input_datasheets._datasheets.keys())[0]
-                    input_datasheet = self.input_datasheets._datasheets[first_name].path
-            elif isinstance(self.input_datasheets, list):
-                input_datasheet = self.input_datasheets[0]
+                    # Fallback to first available table
+                    first_name = list(self.input_tables._tables.keys())[0]
+                    input_table = self.input_tables._tables[first_name].path
+            elif isinstance(self.input_tables, list):
+                input_table = self.input_tables[0]
             else:
-                input_datasheet = str(self.input_datasheets)
+                input_table = str(self.input_tables)
         
-        return f"""echo "Creating results datasheet and queries files"
-# Create main datasheet with id, source_pdb, sequence and inherited columns
-python {self.datasheet_py} {self.seqs_folder} {pipeline_name} {input_datasheet} {self.main_datasheet}
+        return f"""echo "Creating results table and queries files"
+# Create main table with id, source_pdb, sequence and inherited columns
+python {self.table_py} {self.seqs_folder} {pipeline_name} {input_table} {self.main_table}
 
-# Create queries CSV and FASTA from the main datasheet (needed for AlphaFold)
-echo "Creating queries CSV and FASTA from results datasheet"
+# Create queries CSV and FASTA from the main table (needed for AlphaFold)
+echo "Creating queries CSV and FASTA from results table"
 python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}
 
 """
@@ -542,7 +542,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             - structures: Empty (no structures from ProteinMPNN)
             - compounds: Empty (no compounds from ProteinMPNN)
             - sequences: FASTA files
-            - datasheets: Main datasheet CSV
+            - tables: Main table CSV
             - output_folder: Tool's output directory
         """
         # Ensure file paths are set up
@@ -551,7 +551,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             self._setup_file_paths()
         
         seqs_folder = self.seqs_folder
-        main_datasheet = self.main_datasheet
+        main_table = self.main_table
         queries_csv = self.queries_csv
         queries_fasta = self.queries_fasta
         
@@ -575,14 +575,14 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         # Predict sequence IDs for downstream tools
         sequence_ids = self._predict_sequence_ids()
         
-        # Organize datasheets by content type with detailed metadata
-        # Import DatasheetInfo
-        from .base_config import DatasheetInfo
+        # Organize tables by content type with detailed metadata
+        # Import TableInfo
+        from .base_config import TableInfo
 
-        datasheets = {
-            "sequences": DatasheetInfo(
+        tables = {
+            "sequences": TableInfo(
                 name="sequences",
-                path=queries_csv,  # Use queries_csv instead of main_datasheet for correct StitchSequences integration
+                path=queries_csv,  # Use queries_csv instead of main_table for correct StitchSequences integration
                 columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery", "rmsd"],
                 description="ProteinMPNN sequence generation results with scores and structure recovery metrics",
                 count=len(sequence_ids)  # Number of expected sequences
@@ -594,12 +594,12 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "structure_ids": [],
             "compounds": [],
             "compound_ids": [],
-            "sequences": [queries_csv],  # Main output is the datasheet with sequences and scores
+            "sequences": [queries_csv],  # Main output is the table with sequences and scores
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder,
             # Keep legacy aliases for compatibility
-            "main": main_datasheet,  # Legacy alias for backward compatibility
+            "main": main_table,  # Legacy alias for backward compatibility
             "fa_files": fasta_files,  # Individual .fa files
             "queries_csv": [queries_csv],
             "queries_fasta": [queries_fasta],

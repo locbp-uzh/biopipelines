@@ -35,21 +35,21 @@ with Pipeline(project="Examples",
     distances = DistanceSelector(structures=rfdaa,
                                   ligand="LIG",
                                   distance=5,
-                                  restrict_to=rfdaa.datasheets.structures.designed)
+                                  restrict_to=rfdaa.tables.structures.designed)
 
     pmpnn = ProteinMPNN(structures=rfdaa,
                         num_sequences=2,
-                        redesigned=distances.datasheets.selections.beyond)
+                        redesigned=distances.tables.selections.beyond)
 
     lmpnn = LigandMPNN(structures=rfdaa,
                        ligand="LIG", #in ligand mpnn you should always specify the ligand name.
                        num_sequences=2,
-                       redesigned=distances.datasheets.selections.within)
+                       redesigned=distances.tables.selections.within)
 
     #stitch sequences by replacing the pmpnn sequences generated for each rfd design with lmpnn sequences, in the within selection
     #we'll get 2x2 = 4 sequences per design
     sequences = StitchSequences(sequences=[pmpnn,lmpnn],
-                                selections=["",distances.datasheets.selections.within])
+                                selections=["",distances.tables.selections.within])
 
     msas = MMseqs2(sequences=sequences)
 

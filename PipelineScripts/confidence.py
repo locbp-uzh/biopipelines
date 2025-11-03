@@ -52,7 +52,7 @@ class Confidence(Analysis):
         Args:
             selection: Region selection for scoring:
                 - None: Use all residues
-                - str: Datasheet reference like "sequences.designed_residues"
+                - str: Table reference like "sequences.designed_residues"
                 - List[int]: Residue numbers like [45, 46, 47, 48]
                 - List[str]: Residue identifiers like ["A45", "A46", "B12"]
             score_metric: How to aggregate pLDDT scores ("mean", "min", "max", "median")

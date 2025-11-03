@@ -10,11 +10,11 @@ import os
 from typing import Dict, List, Any, Union, Optional
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class PoseDistance(BaseConfig):
@@ -248,8 +248,8 @@ fi
             "alignment_method"
         ])
 
-        datasheets = {
-            "analysis": DatasheetInfo(
+        tables = {
+            "analysis": TableInfo(
                 name="analysis",
                 path=analysis_csv,
                 columns=columns,
@@ -265,7 +265,7 @@ fi
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

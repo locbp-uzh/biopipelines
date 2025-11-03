@@ -5,11 +5,11 @@ import os
 import pandas as pd
 import glob
 
-parser = argparse.ArgumentParser(description='Create datasheet from ProteinMPNN FASTA output files')
+parser = argparse.ArgumentParser(description='Create table from ProteinMPNN FASTA output files')
 parser.add_argument('seqs_folder', type=str, help='Path to ProteinMPNN seqs folder containing FASTA files')
 parser.add_argument('pipeline_name', type=str, help='Pipeline name for generating sequence IDs')
-parser.add_argument('input_datasheet', type=str, help='Input datasheet to inherit columns from, or "-" if none')
-parser.add_argument('output_datasheet', type=str, help='Output CSV datasheet path')
+parser.add_argument('input_table', type=str, help='Input table to inherit columns from, or "-" if none')
+parser.add_argument('output_table', type=str, help='Output CSV table path')
 parser.add_argument('-d', '--duplicates', action='store_true',
                     help='Allow duplicate sequences in output')
 
@@ -92,14 +92,14 @@ def process_proteinmpnn_fasta(fasta_file, pipeline_name, allow_duplicates=False)
 def main():
     print(f"Processing ProteinMPNN sequences from: {args.seqs_folder}")
     
-    # Load input datasheet if provided
+    # Load input table if provided
     input_df = None
-    if args.input_datasheet != "-" and os.path.exists(args.input_datasheet):
+    if args.input_table != "-" and os.path.exists(args.input_table):
         try:
-            input_df = pd.read_csv(args.input_datasheet)
-            print(f"Loaded input datasheet: {args.input_datasheet} ({len(input_df)} rows)")
+            input_df = pd.read_csv(args.input_table)
+            print(f"Loaded input table: {args.input_table} ({len(input_df)} rows)")
         except Exception as e:
-            print(f"Error loading input datasheet: {e}")
+            print(f"Error loading input table: {e}")
             input_df = None
     
     # Find all FASTA files in seqs folder
@@ -108,14 +108,14 @@ def main():
     
     if not fasta_files:
         print("No FASTA files found in seqs folder")
-        # Create empty datasheet with expected columns
+        # Create empty table with expected columns
         columns = ['id', 'source_pdb', 'sequence']
         if input_df is not None:
-            # Include columns from input datasheet (excluding 'id' and 'pdb')
+            # Include columns from input table (excluding 'id' and 'pdb')
             inherit_cols = [col for col in input_df.columns if col not in ['id', 'pdb']]
             columns.extend(inherit_cols)
         df = pd.DataFrame(columns=columns)
-        df.to_csv(args.output_datasheet, index=False)
+        df.to_csv(args.output_table, index=False)
         return
     
     print(f"Found {len(fasta_files)} FASTA files")
@@ -134,11 +134,11 @@ def main():
                     continue
                 seen_sequences.add(seq_data['sequence'])
             
-            # Inherit columns from input datasheet if available
+            # Inherit columns from input table if available
             if input_df is not None:
                 source_pdb = seq_data['source_pdb']
                 
-                # Try to find matching row in input datasheet by PDB name
+                # Try to find matching row in input table by PDB name
                 matching_rows = input_df[input_df['pdb'].str.contains(source_pdb, na=False)]
                 
                 if not matching_rows.empty:
@@ -150,7 +150,7 @@ def main():
                         if col not in ['id', 'pdb'] and col not in seq_data:
                             seq_data[col] = input_row[col]
                 else:
-                    print(f"Warning: No matching input datasheet row found for {source_pdb}")
+                    print(f"Warning: No matching input table row found for {source_pdb}")
             
             all_sequences.append(seq_data)
     
@@ -169,16 +169,16 @@ def main():
                 print(f"Inherited columns: {', '.join(inherited_cols)}")
     else:
         print("No sequences found")
-        # Create empty datasheet with expected columns
+        # Create empty table with expected columns
         columns = ['id', 'source_pdb', 'sequence']
         if input_df is not None:
             inherit_cols = [col for col in input_df.columns if col not in ['id', 'pdb']]
             columns.extend(inherit_cols)
         df = pd.DataFrame(columns=columns)
     
-    # Save datasheet
-    df.to_csv(args.output_datasheet, index=False)
-    print(f"Datasheet saved to: {args.output_datasheet}")
+    # Save table
+    df.to_csv(args.output_table, index=False)
+    print(f"Table saved to: {args.output_table}")
     
     # Print sample of first few entries
     if not df.empty:

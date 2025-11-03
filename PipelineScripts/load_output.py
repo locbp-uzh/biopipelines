@@ -11,13 +11,13 @@ from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class LoadOutput(BaseConfig):
@@ -131,17 +131,17 @@ class LoadOutput(BaseConfig):
                     if isinstance(file_path, str) and not os.path.exists(file_path):
                         self.missing_files.append(file_path)
         
-        # Check datasheet files
-        if 'datasheets' in output_structure:
-            datasheets = output_structure['datasheets']
-            if isinstance(datasheets, dict):
-                for datasheet_name, datasheet_info in datasheets.items():
-                    if isinstance(datasheet_info, dict) and 'path' in datasheet_info:
-                        path = datasheet_info['path']
+        # Check table files
+        if 'tables' in output_structure:
+            tables = output_structure['tables']
+            if isinstance(tables, dict):
+                for table_name, table_info in tables.items():
+                    if isinstance(table_info, dict) and 'path' in table_info:
+                        path = table_info['path']
                         if not os.path.exists(path):
                             self.missing_files.append(path)
-                    elif isinstance(datasheet_info, str) and not os.path.exists(datasheet_info):
-                        self.missing_files.append(datasheet_info)
+                    elif isinstance(table_info, str) and not os.path.exists(table_info):
+                        self.missing_files.append(table_info)
         
         # Check output folder
         if 'output_folder' in output_structure:
@@ -161,44 +161,44 @@ class LoadOutput(BaseConfig):
         """Process filter input to determine which IDs to keep."""
         import pandas as pd
         
-        # Find the main datasheet to filter
+        # Find the main table to filter
         output_structure = self.loaded_result['output_structure']
-        main_datasheet_path = None
+        main_table_path = None
         
-        if 'datasheets' in output_structure:
-            datasheets = output_structure['datasheets']
-            if isinstance(datasheets, dict):
-                # Look for main datasheet (priority order)
+        if 'tables' in output_structure:
+            tables = output_structure['tables']
+            if isinstance(tables, dict):
+                # Look for main table (priority order)
                 priority_names = ['structures', 'analysis', 'combined', 'results']
                 for name in priority_names:
-                    if name in datasheets:
-                        ds_info = datasheets[name]
+                    if name in tables:
+                        ds_info = tables[name]
                         if isinstance(ds_info, dict) and 'path' in ds_info:
-                            main_datasheet_path = ds_info['path']
+                            main_table_path = ds_info['path']
                             break
                         elif isinstance(ds_info, str):
-                            main_datasheet_path = ds_info
+                            main_table_path = ds_info
                             break
                 
                 # If no priority match, take first available
-                if not main_datasheet_path:
-                    first_ds = next(iter(datasheets.values()))
+                if not main_table_path:
+                    first_ds = next(iter(tables.values()))
                     if isinstance(first_ds, dict) and 'path' in first_ds:
-                        main_datasheet_path = first_ds['path']
+                        main_table_path = first_ds['path']
                     elif isinstance(first_ds, str):
-                        main_datasheet_path = first_ds
+                        main_table_path = first_ds
         
-        if not main_datasheet_path or not os.path.exists(main_datasheet_path):
-            raise ValueError(f"Cannot find main datasheet to filter in loaded output: {main_datasheet_path}")
+        if not main_table_path or not os.path.exists(main_table_path):
+            raise ValueError(f"Cannot find main table to filter in loaded output: {main_table_path}")
         
-        print(f"LoadOutput: Applying filter to datasheet: {main_datasheet_path}")
+        print(f"LoadOutput: Applying filter to table: {main_table_path}")
         
-        # Load the datasheet
+        # Load the table
         try:
-            df = pd.read_csv(main_datasheet_path)
+            df = pd.read_csv(main_table_path)
             print(f"  - Loaded {len(df)} rows")
         except Exception as e:
-            raise ValueError(f"Error loading datasheet for filtering: {e}")
+            raise ValueError(f"Error loading table for filtering: {e}")
         
         # Apply filter
         if isinstance(self.filter_input, str):
@@ -209,15 +209,15 @@ class LoadOutput(BaseConfig):
             except Exception as e:
                 raise ValueError(f"Error applying filter expression '{self.filter_input}': {e}")
         
-        elif hasattr(self.filter_input, 'datasheets'):
+        elif hasattr(self.filter_input, 'tables'):
             # Precomputed filter result - load the filtered IDs
-            filter_datasheets = self.filter_input.datasheets
-            if isinstance(filter_datasheets, dict):
+            filter_tables = self.filter_input.tables
+            if isinstance(filter_tables, dict):
                 # Find filtered results
-                if 'filtered' in filter_datasheets:
-                    filter_ds_info = filter_datasheets['filtered']
+                if 'filtered' in filter_tables:
+                    filter_ds_info = filter_tables['filtered']
                 else:
-                    filter_ds_info = next(iter(filter_datasheets.values()))
+                    filter_ds_info = next(iter(filter_tables.values()))
                 
                 if isinstance(filter_ds_info, dict) and 'path' in filter_ds_info:
                     filter_csv_path = filter_ds_info['path']
@@ -350,9 +350,9 @@ class LoadOutput(BaseConfig):
             filtered_structure['sequence_ids'] = filtered_sequence_ids
             print(f"  - Filtered sequences: {len(filtered_sequence_ids)}/{len(original_sequence_ids)} IDs, {len(filtered_sequences)} file(s)")
 
-        # Update datasheets paths to point to LoadOutput's output folder and update counts
-        if 'datasheets' in filtered_structure:
-            for ds_name, ds_info in filtered_structure['datasheets'].items():
+        # Update tables paths to point to LoadOutput's output folder and update counts
+        if 'tables' in filtered_structure:
+            for ds_name, ds_info in filtered_structure['tables'].items():
                 if isinstance(ds_info, dict):
                     # Update path to LoadOutput's output folder
                     if 'path' in ds_info:
@@ -422,7 +422,7 @@ class LoadOutput(BaseConfig):
 
     def _exclude_missing_ids(self, output_structure: Dict[str, Any]) -> set:
         """
-        Check for 'missing' datasheet and return set of IDs to exclude.
+        Check for 'missing' table and return set of IDs to exclude.
 
         This handles cases where Filter tool has created a missing.csv listing
         filtered-out IDs that don't have corresponding files.
@@ -431,20 +431,20 @@ class LoadOutput(BaseConfig):
             output_structure: The output structure to check
 
         Returns:
-            Set of IDs that should be excluded (empty set if no missing datasheet)
+            Set of IDs that should be excluded (empty set if no missing table)
         """
         import pandas as pd
 
-        # Check if there's a 'missing' datasheet
-        if 'datasheets' not in output_structure:
+        # Check if there's a 'missing' table
+        if 'tables' not in output_structure:
             return set()
 
-        datasheets = output_structure['datasheets']
-        if not isinstance(datasheets, dict) or 'missing' not in datasheets:
+        tables = output_structure['tables']
+        if not isinstance(tables, dict) or 'missing' not in tables:
             return set()
 
-        # Get the missing datasheet path
-        missing_info = datasheets['missing']
+        # Get the missing table path
+        missing_info = tables['missing']
         if isinstance(missing_info, dict) and 'path' in missing_info:
             missing_path = missing_info['path']
         elif isinstance(missing_info, str):
@@ -454,7 +454,7 @@ class LoadOutput(BaseConfig):
 
         # Read the missing.csv file
         if not os.path.exists(missing_path):
-            print(f"Warning: missing datasheet referenced but file not found: {missing_path}")
+            print(f"Warning: missing table referenced but file not found: {missing_path}")
             return set()
 
         try:
@@ -490,7 +490,7 @@ class LoadOutput(BaseConfig):
             # correct from _apply_filter_to_output_structure, and the filtered CSV files
             # don't exist yet at pipeline runtime (they're created at SLURM runtime)
         else:
-            # Check for missing datasheet and exclude those IDs
+            # Check for missing table and exclude those IDs
             missing_ids = self._exclude_missing_ids(output_structure)
             if missing_ids:
                 # Filter out missing IDs from structures, compounds, sequences
@@ -545,7 +545,7 @@ class LoadOutput(BaseConfig):
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": {},
+            "tables": {},
             "output_folder": ""
         }
 
@@ -630,8 +630,8 @@ fi"""
 
             script_content += f"""
 
-# Apply filter and create filtered datasheets
-echo "Creating filtered copies of datasheets..."
+# Apply filter and create filtered tables
+echo "Creating filtered copies of tables..."
 echo "Filter: {self.filter_input if isinstance(self.filter_input, str) else 'ToolOutput filter'}"
 echo "Filtered IDs: {len(self.filtered_ids)} items"
 echo "Output folder: {self.output_folder}"
@@ -640,11 +640,11 @@ python "{os.path.join(self.folders.get('HelpScripts', 'HelpScripts'), 'pipe_load
   --config "{filter_config_path}"
 
 if [ $? -ne 0 ]; then
-    echo "Error: Failed to create filtered datasheets"
+    echo "Error: Failed to create filtered tables"
     exit 1
 fi
 
-echo "Filtered datasheets created successfully"
+echo "Filtered tables created successfully"
 """
 
         script_content += f"""
@@ -692,9 +692,9 @@ echo "Files loaded from {original_tool} are ready for use"
                     count = len(output_structure[data_type])
                     config_lines.append(f"Loaded {data_type}: {count}")
             
-            if 'datasheets' in output_structure:
-                datasheet_count = len(output_structure['datasheets'])
-                config_lines.append(f"Loaded datasheets: {datasheet_count}")
+            if 'tables' in output_structure:
+                table_count = len(output_structure['tables'])
+                config_lines.append(f"Loaded tables: {table_count}")
             
             # Warn about missing files
             if self.missing_files:

@@ -9,12 +9,12 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class ESMFold(BaseConfig):
@@ -30,7 +30,7 @@ class ESMFold(BaseConfig):
 
     def __init__(self,
                  sequences: Union[str, List[str], ToolOutput, StandardizedOutput],
-                 datasheets: Optional[List[str]] = None,
+                 tables: Optional[List[str]] = None,
                  name: str = "",
                  num_recycle: int = 4,
                  chunk_size: Optional[int] = None,
@@ -40,7 +40,7 @@ class ESMFold(BaseConfig):
 
         Args:
             sequences: Input sequences - can be CSV file, list, ToolOutput, or StandardizedOutput
-            datasheets: Input datasheet files for metadata
+            tables: Input table files for metadata
             name: Job name for output files
             num_recycle: Number of recycling iterations (default: 4)
             chunk_size: Chunk size for long sequences (default: None = auto)
@@ -51,19 +51,19 @@ class ESMFold(BaseConfig):
             if isinstance(sequences, StandardizedOutput):
                 # StandardizedOutput object
                 self.input_sequences = sequences.sequences
-                self.input_datasheets = sequences.datasheets
+                self.input_tables = sequences.tables
                 self.input_is_tool_output = False
                 self.standardized_input = sequences
             elif isinstance(sequences, ToolOutput):
                 # Direct ToolOutput object
                 self.input_sequences = sequences
-                self.input_datasheets = sequences.get_output_files("datasheets")
+                self.input_tables = sequences.get_output_files("tables")
                 self.input_is_tool_output = True
                 self.standardized_input = None
             else:
                 # Direct sequence(s) - string or list
                 self.input_sequences = sequences
-                self.input_datasheets = datasheets or {}
+                self.input_tables = tables or {}
                 self.input_is_tool_output = isinstance(sequences, ToolOutput)
                 self.standardized_input = None
         else:
@@ -349,9 +349,9 @@ fi
             if hasattr(self.standardized_input, 'sequence_ids'):
                 sequence_ids = self.standardized_input.sequence_ids
 
-        # Organize datasheets
-        datasheets = {
-            "structures": DatasheetInfo(
+        # Organize tables
+        tables = {
+            "structures": TableInfo(
                 name="structures",
                 path=queries_csv,
                 columns=["id", "sequence"],
@@ -367,7 +367,7 @@ fi
             "compound_ids": [],
             "sequences": [queries_csv],
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder,
             "pdbs": structure_files,
             "queries_csv": [queries_csv]

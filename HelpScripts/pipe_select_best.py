@@ -147,14 +147,14 @@ def extract_pool_data_for_id(selected_id: str, pool_folder: str, output_folder: 
             except Exception as e:
                 print(f"Warning: Could not copy compound {source}: {e}")
     
-    # 3. Extract sequences from datasheets
-    sequence_datasheets = [
+    # 3. Extract sequences from tables
+    sequence_tables = [
         os.path.join(pool_folder, "*sequences*.csv"),
         os.path.join(pool_folder, "*sequence*.csv"),
         os.path.join(pool_folder, "**", "*sequences*.csv"),
     ]
     
-    for pattern in sequence_datasheets:
+    for pattern in sequence_tables:
         matches = glob.glob(pattern, recursive=True)
         if matches:
             source_csv = matches[0]
@@ -171,49 +171,49 @@ def extract_pool_data_for_id(selected_id: str, pool_folder: str, output_folder: 
                         print(f"Extracted sequences: {len(matching_rows)} rows -> {dest}")
                         break
             except Exception as e:
-                print(f"Warning: Could not process sequence datasheet {source_csv}: {e}")
+                print(f"Warning: Could not process sequence table {source_csv}: {e}")
     
     return extracted_files
 
 
 def select_best_from_arrays(config_data: Dict[str, Any]) -> None:
     """
-    Select best item from multiple datasheets and extract from corresponding pools.
+    Select best item from multiple tables and extract from corresponding pools.
     
     Args:
-        config_data: Configuration with pool_folders and datasheet_paths arrays
+        config_data: Configuration with pool_folders and table_paths arrays
     """
     pool_folders = config_data['pool_folders']
-    datasheet_paths = config_data['datasheet_paths']
+    table_paths = config_data['table_paths']
     selection_metric = config_data['selection_metric']
     selection_mode = config_data['selection_mode']
     output_csv = config_data['output_csv']
     output_structure = config_data['output_structure']
     
-    print(f"Array mode: Selecting best from {len(datasheet_paths)} datasheets")
+    print(f"Array mode: Selecting best from {len(table_paths)} tables")
     print(f"Selection metric: {selection_metric} ({selection_mode})")
     
-    # Load and concatenate all datasheets
+    # Load and concatenate all tables
     all_dfs = []
     pool_indices = []  # Track which pool each row comes from
     
-    for i, datasheet_path in enumerate(datasheet_paths):
-        if not os.path.exists(datasheet_path):
-            print(f"Warning: Datasheet not found: {datasheet_path}")
+    for i, table_path in enumerate(table_paths):
+        if not os.path.exists(table_path):
+            print(f"Warning: Table not found: {table_path}")
             continue
             
         try:
-            df = pd.read_csv(datasheet_path)
+            df = pd.read_csv(table_path)
             df['_pool_index'] = i  # Add pool index to each row
             all_dfs.append(df)
             pool_indices.extend([i] * len(df))
-            print(f"Loaded datasheet {i}: {datasheet_path} ({len(df)} rows)")
+            print(f"Loaded table {i}: {table_path} ({len(df)} rows)")
         except Exception as e:
-            print(f"Error loading {datasheet_path}: {e}")
+            print(f"Error loading {table_path}: {e}")
             continue
     
     if not all_dfs:
-        raise ValueError("No valid datasheets found")
+        raise ValueError("No valid tables found")
     
     # Concatenate all dataframes
     combined_df = pd.concat(all_dfs, ignore_index=True)
@@ -326,7 +326,7 @@ def select_best_from_arrays(config_data: Dict[str, Any]) -> None:
     
     print(f"Selection completed successfully!")
     print(f"Selected metric value: {selected_row[selection_metric]}")
-    print(f"Output datasheet: {output_csv}")
+    print(f"Output table: {output_csv}")
     print(f"Output structure: {output_structure}")
 
 
@@ -360,7 +360,7 @@ def main():
         sys.exit(1)
     
     # Validate required parameters - only support array format
-    required_params = ['datasheet_paths', 'pool_folders', 'selection_metric', 'selection_mode', 'output_csv']
+    required_params = ['table_paths', 'pool_folders', 'selection_metric', 'selection_mode', 'output_csv']
     
     for param in required_params:
         if param not in config_data:

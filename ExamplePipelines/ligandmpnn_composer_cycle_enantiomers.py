@@ -17,12 +17,12 @@ from PipelineScripts.mutation_profiler import MutationProfiler
 from PipelineScripts.mutation_composer import MutationComposer
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.residue_atom_distance import ResidueAtomDistance
-from PipelineScripts.merge_datasheets import MergeDatasheets
-from PipelineScripts.concatenate_datasheets import ConcatenateDatasheets
+from PipelineScripts.merge_tables import MergeTables
+from PipelineScripts.concatenate_tables import ConcatenateTables
 from PipelineScripts.remove_duplicates import RemoveDuplicates
 from PipelineScripts.filter import Filter
 from PipelineScripts.select_best import SelectBest
-from PipelineScripts.average_by_datasheet import AverageByDatasheet
+from PipelineScripts.average_by_table import AverageByTable
 from PipelineScripts.extract_metrics import ExtractMetrics
 
 with Pipeline(project="Examples",
@@ -38,11 +38,11 @@ with Pipeline(project="Examples",
     best_S = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_S_001/ToolOutputs/1_Boltz2_output.json')
     best_SS = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_SS_001/ToolOutputs/1_Boltz2_output.json')
 
-    original_analysis = MergeDatasheets(
-        datasheets=[best_R.datasheets.affinity,
-                best_RR.datasheets.affinity,
-                best_S.datasheets.affinity,
-                best_SS.datasheets.affinity],
+    original_analysis = MergeTables(
+        tables=[best_R.tables.affinity,
+                best_RR.tables.affinity,
+                best_S.tables.affinity,
+                best_SS.tables.affinity],
         prefixes=["R_", "RR_","S_","SS_"],
         id_map={"original":["HT7_Cy7_C_R","HT7_Cy7_C_RR","HT7_Cy7_C_S","HT7_Cy7_C_SS"]},
         calculate={"affinity_delta_R": "R_affinity_pred_value - RR_affinity_pred_value",
@@ -80,8 +80,8 @@ with Pipeline(project="Examples",
         profiler_S = MutationProfiler(original=best_S,
                                                 mutants=lmpnn_S)
         ### Here we generate sequencies based on both tables of frequencies ###
-        composer = MutationComposer(frequencies=[profiler_R.datasheets.absolute_frequencies,
-                                                            profiler_S.datasheets.absolute_frequencies],
+        composer = MutationComposer(frequencies=[profiler_R.tables.absolute_frequencies,
+                                                            profiler_S.tables.absolute_frequencies],
                                                 num_sequences=12,
                                                 mode="single_point",
                                                 combination_strategy="round_robin", #take one mutation from R one from S together
@@ -89,17 +89,17 @@ with Pipeline(project="Examples",
         
         unique_new_sequences = RemoveDuplicates(
             pool=composer,           
-            history=all_sequences_seen.datasheets.concatenated if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
+            history=all_sequences_seen.tables.concatenated if all_sequences_seen else None,  # History from previous cycles (None for first cycle)
             compare="sequence"          
         )
         if all_sequences_seen is None:
-            all_sequences_seen = ConcatenateDatasheets(
-                datasheets=[unique_new_sequences.datasheets.sequences]
+            all_sequences_seen = ConcatenateTables(
+                tables=[unique_new_sequences.tables.sequences]
             )
         else:
-            all_sequences_seen = ConcatenateDatasheets(
-                datasheets=[unique_new_sequences.datasheets.sequences, 
-                        all_sequences_seen.datasheets.concatenated]
+            all_sequences_seen = ConcatenateTables(
+                tables=[unique_new_sequences.tables.sequences, 
+                        all_sequences_seen.tables.concatenated]
             )
         
         boltz_apo = Boltz2(proteins=unique_new_sequences)
@@ -137,15 +137,15 @@ with Pipeline(project="Examples",
                                                                     atom='LIG.N88',
                                                                     metric_name='cap_distance')
         
-        ##analysis datasheets are merged 
-        current_analysis = MergeDatasheets(datasheets=[boltz_holo_R.datasheets.affinity,
-                                                            boltz_holo_RR.datasheets.affinity,
-                                                            boltz_holo_S.datasheets.affinity,
-                                                            boltz_holo_SS.datasheets.affinity,
-                                                            R_chlorine_aspartate_distance.datasheets.analysis,
-                                                            S_chlorine_aspartate_distance.datasheets.analysis,
-                                                            R_cap_aspartate_distance.datasheets.analysis,
-                                                            S_cap_aspartate_distance.datasheets.analysis],
+        ##analysis tables are merged 
+        current_analysis = MergeTables(tables=[boltz_holo_R.tables.affinity,
+                                                            boltz_holo_RR.tables.affinity,
+                                                            boltz_holo_S.tables.affinity,
+                                                            boltz_holo_SS.tables.affinity,
+                                                            R_chlorine_aspartate_distance.tables.analysis,
+                                                            S_chlorine_aspartate_distance.tables.analysis,
+                                                            R_cap_aspartate_distance.tables.analysis,
+                                                            S_cap_aspartate_distance.tables.analysis],
                                                 prefixes=["R_","RR_","S_","SS_","R_","S_","R_","S_"],
                                                 calculate = {
                                                     "affinity_delta_R": "R_affinity_pred_value - RR_affinity_pred_value",
@@ -164,14 +164,14 @@ with Pipeline(project="Examples",
         # We select based on the same metric such that we end up with two proteins with the next sequence for the next round
         best_R = SelectBest(
             pool=[pool["R"] for pool in all_pools],  # All pools from all cycles
-            datasheets=[x.datasheets.merged for x in all_analyses],  # All analyses from all cycles
+            tables=[x.tables.merged for x in all_analyses],  # All analyses from all cycles
             metric='affinity_open_sum',
             mode='min',
             name=f'{CYCLE+1}_best'
         )
         best_S = SelectBest(
             pool=[pool["S"] for pool in all_pools],  # All pools from all cycles
-            datasheets=[x.datasheets.merged for x in all_analyses],  # All analyses from all cycles
+            tables=[x.tables.merged for x in all_analyses],  # All analyses from all cycles
             metric='affinity_open_sum',
             mode='min',
             name=f'{CYCLE+1}_best'
@@ -179,15 +179,15 @@ with Pipeline(project="Examples",
         all_open_best.append({"R":best_R,"S":best_S})
 
 
-    trajectories = {k: [all_analyses[0].datasheets.merged]+[x[k].datasheets.selected for x in all_open_best[1:]] for k in ["R","S"]}
+    trajectories = {k: [all_analyses[0].tables.merged]+[x[k].tables.selected for x in all_open_best[1:]] for k in ["R","S"]}
 
     Suffix("TRAJECTORIES")
-    ConcatenateDatasheets(trajectories["R"]) #we only need R because all the data is there anyways
+    ConcatenateTables(trajectories["R"]) #we only need R because all the data is there anyways
 
     Suffix("ALL_ANALYSIS")
-    all_merged = [x.datasheets.merged for x in all_analyses]
-    ConcatenateDatasheets(all_merged)
-    AverageByDatasheet(all_merged)
+    all_merged = [x.tables.merged for x in all_analyses]
+    ConcatenateTables(all_merged)
+    AverageByTable(all_merged)
 
     #extract metrics for column analysis on Prism
     metrics = ["affinity_delta",
@@ -199,5 +199,5 @@ with Pipeline(project="Examples",
             "S_affinity_pred_value",
             "RR_affinity_pred_value",
             "SS_affinity_pred_value"]
-    ExtractMetrics(datasheets=all_merged,
+    ExtractMetrics(tables=all_merged,
                                 metrics=metrics)

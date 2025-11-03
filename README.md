@@ -43,12 +43,12 @@ Specific environments for using the tools have to be installed separately. Good 
 ### Data Management & Filtering
 - **Filter** - Expression-based result filtering
 - **SelectBest** - Select top-performing structures/sequences
-- **MergeDatasheets** - Combine multiple analysis results
-- **ConcatenateDatasheets** - Merge datasets across cycles
+- **MergeTables** - Combine multiple analysis results
+- **ConcatenateTables** - Merge datasets across cycles
 - **RemoveDuplicates** - Sequence deduplication
-- **SliceDatasheet** - Extract subset of rows
-- **AverageByDatasheet** - Calculate average metrics
-- **ExtractMetrics** - Extract specific metrics from datasheets
+- **SliceTable** - Extract subset of rows
+- **AverageByTable** - Calculate average metrics
+- **ExtractMetrics** - Extract specific metrics from tables
 
 ### Visualization
 - **PyMOL** - Automated molecular visualization sessions
@@ -69,7 +69,7 @@ Specific environments for using the tools have to be installed separately. Good 
 
 - **SLURM Integration**: Automatic job submission and resource management
 - **Modular Design**: Mix and match tools for custom workflows  
-- **Standardized Interfaces**: CSV datasheets for seamless tool chaining
+- **Standardized Interfaces**: CSV tables for seamless tool chaining
 - **Environment Management**: Automatic conda environment switching
 - **Filesystem Prediction**: Pre-determines output structure before execution
 - **Cluster Optimization**: Designed for university HPC environments

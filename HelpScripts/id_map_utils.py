@@ -4,7 +4,7 @@ Utility functions for ID mapping pattern matching.
 
 This module provides a unified approach to parsing and applying ID mapping patterns
 across different tools. The pattern format is {"*": "<pattern>"} where <pattern>
-describes how to map structure IDs to datasheet IDs.
+describes how to map structure IDs to table IDs.
 
 Pattern syntax:
 - "*" in both key and value represents the base ID
@@ -101,9 +101,9 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
         raise ValueError(f"Invalid ID map pattern '{pattern_str}': {e}")
 
 
-def map_structure_id_to_datasheet_id(structure_id: str, id_map: Dict[str, str]) -> str:
+def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> str:
     """
-    Map structure ID to datasheet ID using id_map pattern, applying recursively.
+    Map structure ID to table ID using id_map pattern, applying recursively.
 
     This function extracts the base ID from a structure ID by repeatedly removing
     numeric suffixes specified in the id_map pattern. This allows a single pattern
@@ -115,26 +115,26 @@ def map_structure_id_to_datasheet_id(structure_id: str, id_map: Dict[str, str]) 
         id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
 
     Returns:
-        Mapped datasheet ID (e.g., "rifampicin", "protein")
+        Mapped table ID (e.g., "rifampicin", "protein")
         If pattern doesn't match, returns structure_id unchanged
 
     Examples:
-        >>> map_structure_id_to_datasheet_id("rifampicin_1", {"*": "*_<N>"})
+        >>> map_structure_id_to_table_id("rifampicin_1", {"*": "*_<N>"})
         'rifampicin'
 
-        >>> map_structure_id_to_datasheet_id("rifampicin_1_2", {"*": "*_<N>"})
+        >>> map_structure_id_to_table_id("rifampicin_1_2", {"*": "*_<N>"})
         'rifampicin'
 
-        >>> map_structure_id_to_datasheet_id("rifampicin_1_2_3", {"*": "*_<N>"})
+        >>> map_structure_id_to_table_id("rifampicin_1_2_3", {"*": "*_<N>"})
         'rifampicin'
 
-        >>> map_structure_id_to_datasheet_id("protein-seq-42", {"*": "*-seq-<N>"})
+        >>> map_structure_id_to_table_id("protein-seq-42", {"*": "*-seq-<N>"})
         'protein'
 
-        >>> map_structure_id_to_datasheet_id("no_change", {"*": "*"})
+        >>> map_structure_id_to_table_id("no_change", {"*": "*"})
         'no_change'
 
-        >>> map_structure_id_to_datasheet_id("no_match", {"*": "*_<N>"})
+        >>> map_structure_id_to_table_id("no_match", {"*": "*_<N>"})
         'no_match'
     """
     if not id_map or "*" not in id_map:
@@ -252,7 +252,7 @@ if __name__ == "__main__":
     all_passed = True
 
     for structure_id, id_map, expected in test_cases:
-        result = map_structure_id_to_datasheet_id(structure_id, id_map)
+        result = map_table_ids_to_ids(structure_id, id_map)
         passed = result == expected
         all_passed = all_passed and passed
 

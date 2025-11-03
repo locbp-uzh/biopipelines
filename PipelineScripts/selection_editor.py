@@ -9,20 +9,20 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class SelectionEditor(BaseConfig):
     """
     SelectionEditor configuration for structure-aware selection modification.
 
-    Takes PyMOL-formatted selection strings from a datasheet column and modifies them
+    Takes PyMOL-formatted selection strings from a table column and modifies them
     using expand, shrink, shift, or invert operations while validating against actual
     PDB residue numbers.
     """
@@ -43,7 +43,7 @@ class SelectionEditor(BaseConfig):
 
         Args:
             structures: Input structures (ToolOutput/StandardizedOutput from previous tool or list of PDB files)
-            selection: Datasheet column reference tuple (e.g., tool.datasheets.structures.designed)
+            selection: Table column reference tuple (e.g., tool.tables.structures.designed)
             expand: Number of residues to add on each side of intervals (default: 0)
             shrink: Number of residues to remove from each side of intervals (default: 0)
             shift: Number of residues to shift all intervals (+/-) (default: 0)
@@ -64,15 +64,15 @@ class SelectionEditor(BaseConfig):
         # Validate selection reference format
         if not isinstance(selection, tuple) or len(selection) != 2:
             raise ValueError(
-                "selection must be a datasheet column reference tuple. "
-                "Example: tool.datasheets.structures.designed"
+                "selection must be a table column reference tuple. "
+                "Example: tool.tables.structures.designed"
             )
 
         # Initialize base class
         super().__init__(**kwargs)
 
         # Extract the source tool from the selection reference
-        self.selection_datasheet, self.selection_column = self.selection_ref
+        self.selection_table, self.selection_column = self.selection_ref
 
         # Add dependency on the tool that provides the structures
         if isinstance(structures, (ToolOutput, StandardizedOutput)):
@@ -129,15 +129,15 @@ class SelectionEditor(BaseConfig):
             self.selection_editor_py = None
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input sources from selection datasheet and structures."""
+        """Configure input sources from selection table and structures."""
         self.folders = pipeline_folders
         self._setup_file_paths()
 
-        # Get the selection datasheet path
-        if hasattr(self.selection_datasheet, 'path'):
-            self.selection_datasheet_path = self.selection_datasheet.path
+        # Get the selection table path
+        if hasattr(self.selection_table, 'path'):
+            self.selection_table_path = self.selection_table.path
         else:
-            raise ValueError("Invalid selection datasheet reference")
+            raise ValueError("Invalid selection table reference")
 
         # Get structures from input parameter
         if self.structures_is_tool_output:
@@ -172,7 +172,7 @@ class SelectionEditor(BaseConfig):
 
         # Selection information
         config_lines.append(f"SELECTION COLUMN: {self.selection_column}")
-        config_lines.append(f"SELECTION SOURCE: {self.selection_datasheet.name}")
+        config_lines.append(f"SELECTION SOURCE: {self.selection_table.name}")
 
         # Operations
         operations = []
@@ -210,7 +210,7 @@ class SelectionEditor(BaseConfig):
         # Create config file for helper script
         import json
         config_data = {
-            "selection_datasheet": self.selection_datasheet_path,
+            "selection_table": self.selection_table_path,
             "selection_column": self.selection_column,
             "structures": self.input_sources["structures"],
             "expand": self.expand,
@@ -291,9 +291,9 @@ echo "Modified selections saved to: {self.selections_csv}"
         modified_col = self.selection_column
         original_col = f"original_{self.selection_column}"
 
-        # Organize datasheets
-        datasheets = {
-            "selections": DatasheetInfo(
+        # Organize tables
+        tables = {
+            "selections": TableInfo(
                 name="selections",
                 path=self.selections_csv,
                 columns=["id", "pdb", modified_col, original_col],
@@ -309,7 +309,7 @@ echo "Modified selections saved to: {self.selections_csv}"
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 
@@ -319,7 +319,7 @@ echo "Modified selections saved to: {self.selections_csv}"
         base_dict.update({
             "selection_editor_params": {
                 "selection_column": self.selection_column,
-                "selection_datasheet": self.selection_datasheet.name,
+                "selection_table": self.selection_table.name,
                 "expand": self.expand,
                 "shrink": self.shrink,
                 "shift": self.shift,

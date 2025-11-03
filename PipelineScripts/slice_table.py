@@ -1,8 +1,8 @@
 """
-SliceDatasheet tool for extracting a subset of rows from tool output datasheets.
+SliceTable tool for extracting a subset of rows from tool output tables.
 
 Takes tool output and creates a new output containing only the first N rows
-from each datasheet, useful for sampling or testing subsets.
+from each table, useful for sampling or testing subsets.
 """
 
 import os
@@ -10,25 +10,25 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
-class SliceDatasheet(BaseConfig):
+class SliceTable(BaseConfig):
     """
-    Tool for extracting first N rows from tool output datasheets.
+    Tool for extracting first N rows from tool output tables.
 
-    Takes any tool output with datasheets and returns a new output containing
-    only the first N rows from each datasheet. Also copies associated structure
+    Takes any tool output with tables and returns a new output containing
+    only the first N rows from each table. Also copies associated structure
     files if they exist.
     """
 
-    TOOL_NAME = "SliceDatasheet"
+    TOOL_NAME = "SliceTable"
     DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
@@ -36,22 +36,22 @@ class SliceDatasheet(BaseConfig):
                  n_rows: int = 10,
                  **kwargs):
         """
-        Initialize SliceDatasheet tool.
+        Initialize SliceTable tool.
 
         Args:
-            input: Tool output containing datasheets to slice
-            n_rows: Number of rows to keep from the beginning of each datasheet
+            input: Tool output containing tables to slice
+            n_rows: Number of rows to keep from the beginning of each table
             **kwargs: Additional parameters
 
         Examples:
             # Take first 10 sequences from LigandMPNN output
-            first_ten = pipeline.add(SliceDatasheet(
+            first_ten = pipeline.add(SliceTable(
                 input=lmpnn,
                 n_rows=10
             ))
 
             # Take first 5 structures for quick testing
-            sample = pipeline.add(SliceDatasheet(
+            sample = pipeline.add(SliceTable(
                 input=boltz,
                 n_rows=5
             ))
@@ -73,7 +73,7 @@ class SliceDatasheet(BaseConfig):
             self.dependencies.append(input.config)
 
     def validate_params(self):
-        """Validate SliceDatasheet parameters."""
+        """Validate SliceTable parameters."""
         if not isinstance(self.input, (ToolOutput, StandardizedOutput)):
             raise ValueError("input must be a ToolOutput or StandardizedOutput object")
 
@@ -87,8 +87,8 @@ class SliceDatasheet(BaseConfig):
         # Extract input configuration
         self.input_config = self._extract_input_config()
 
-        if not self.input_config["datasheets"]:
-            raise ValueError(f"Input tool must provide datasheets to slice")
+        if not self.input_config["tables"]:
+            raise ValueError(f"Input tool must provide tables to slice")
 
     def _extract_input_config(self) -> Dict[str, Any]:
         """Extract configuration from input tool output."""
@@ -100,7 +100,7 @@ class SliceDatasheet(BaseConfig):
             "compounds": [],
             "compound_ids": [],
             "output_folder": None,
-            "datasheets": {}
+            "tables": {}
         }
 
         # Extract basic attributes
@@ -109,18 +109,18 @@ class SliceDatasheet(BaseConfig):
             if hasattr(self.input, attr):
                 config[attr] = getattr(self.input, attr) or []
 
-        # Extract datasheets
-        if hasattr(self.input, 'datasheets'):
-            datasheets = self.input.datasheets
+        # Extract tables
+        if hasattr(self.input, 'tables'):
+            tables = self.input.tables
 
-            if hasattr(datasheets, '_datasheets'):
+            if hasattr(tables, '_tables'):
                 # Standard BioPipelines format
-                config["datasheets"] = datasheets._datasheets
-            elif isinstance(datasheets, dict):
-                # Dict format - convert to DatasheetInfo objects
-                for name, info in datasheets.items():
+                config["tables"] = tables._tables
+            elif isinstance(tables, dict):
+                # Dict format - convert to TableInfo objects
+                for name, info in tables.items():
                     if isinstance(info, dict) and 'path' in info:
-                        config["datasheets"][name] = DatasheetInfo(
+                        config["tables"][name] = TableInfo(
                             name=name,
                             path=info['path'],
                             columns=info.get('columns', []),
@@ -128,9 +128,9 @@ class SliceDatasheet(BaseConfig):
                             count=info.get('count', 0)
                         )
                     elif hasattr(info, 'path'):
-                        config["datasheets"][name] = info
+                        config["tables"][name] = info
                     else:
-                        config["datasheets"][name] = DatasheetInfo(name=name, path=str(info))
+                        config["tables"][name] = TableInfo(name=name, path=str(info))
 
         return config
 
@@ -140,14 +140,14 @@ class SliceDatasheet(BaseConfig):
 
         config_lines.extend([
             f"N_ROWS: {self.n_rows}",
-            f"INPUT DATASHEETS: {len(self.input_config['datasheets'])}"
+            f"INPUT DATASHEETS: {len(self.input_config['tables'])}"
         ])
 
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
         """
-        Generate script to slice datasheets.
+        Generate script to slice tables.
 
         Args:
             script_path: Path where script should be written
@@ -163,10 +163,10 @@ class SliceDatasheet(BaseConfig):
         config_file = os.path.join(output_folder, "slice_config.json")
         config_data = {
             "input_config": {
-                # Convert DatasheetInfo objects to dicts for JSON serialization
-                "datasheets": {
+                # Convert TableInfo objects to dicts for JSON serialization
+                "tables": {
                     name: info.to_dict() if hasattr(info, 'to_dict') else str(info)
-                    for name, info in self.input_config["datasheets"].items()
+                    for name, info in self.input_config["tables"].items()
                 },
                 "structures": self.input_config["structures"],
                 "structure_ids": self.input_config["structure_ids"],
@@ -186,24 +186,24 @@ class SliceDatasheet(BaseConfig):
 
         # Generate script content
         script_content = f"""#!/bin/bash
-# SliceDatasheet execution script
+# SliceTable execution script
 # Generated by BioPipelines pipeline system
 
 {self.generate_completion_check_header()}
 
-echo "Slicing datasheets to first {self.n_rows} rows"
+echo "Slicing tables to first {self.n_rows} rows"
 echo "Input folder: {self.input_config['output_folder']}"
 echo "Output folder: {output_folder}"
 
 # Run Python slicing script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_slice_datasheet.py')}" \\
+python "{os.path.join(self.folders['HelpScripts'], 'pipe_slice_table.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
-    echo "Successfully sliced datasheets"
+    echo "Successfully sliced tables"
     echo "Results written to: {output_folder}"
 else
-    echo "Error: Failed to slice datasheets"
+    echo "Error: Failed to slice tables"
     exit 1
 fi
 
@@ -226,7 +226,7 @@ fi
             "sequence_ids": [],
             "compounds": [],
             "compound_ids": [],
-            "datasheets": {},
+            "tables": {},
             "output_folder": self.output_folder
         }
 
@@ -253,13 +253,13 @@ fi
         output_config["sequence_ids"] = self.input_config["sequence_ids"][:self.n_rows]
         output_config["compound_ids"] = self.input_config["compound_ids"][:self.n_rows]
 
-        # Process datasheets
-        for name, info in self.input_config["datasheets"].items():
+        # Process tables
+        for name, info in self.input_config["tables"].items():
             output_filename = os.path.basename(info.path if hasattr(info, 'path') else str(info))
             output_path = os.path.join(self.output_folder, output_filename)
 
-            # Create new DatasheetInfo with sliced description
-            output_config["datasheets"][name] = DatasheetInfo(
+            # Create new TableInfo with sliced description
+            output_config["tables"][name] = TableInfo(
                 name=name,
                 path=output_path,
                 columns=info.columns if hasattr(info, 'columns') else [],

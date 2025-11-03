@@ -1,8 +1,8 @@
 """
-ExtractMetrics tool for extracting multiple metrics from multiple datasheets.
+ExtractMetrics tool for extracting multiple metrics from multiple tables.
 
-Takes a list of datasheets and multiple metric names, then extracts all values
-for each metric from each datasheet. Creates separate CSV files for each metric,
+Takes a list of tables and multiple metric names, then extracts all values
+for each metric from each table. Creates separate CSV files for each metric,
 perfect for copying into Prism for column graph analysis.
 """
 
@@ -10,20 +10,20 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class ExtractMetrics(BaseConfig):
     """
-    Pipeline tool for extracting multiple metrics from multiple datasheets.
+    Pipeline tool for extracting multiple metrics from multiple tables.
 
-    Takes a list of datasheets and extracts all values for specified metrics.
+    Takes a list of tables and extracts all values for specified metrics.
     Creates separate CSV files for each metric, with output format optimized
     for statistical analysis tools like Prism.
 
@@ -39,48 +39,48 @@ class ExtractMetrics(BaseConfig):
     DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
-                 datasheets: List[Union[str, Dict, ToolOutput, StandardizedOutput]],
+                 tables: List[Union[str, Dict, ToolOutput, StandardizedOutput]],
                  metrics: List[str],
-                 datasheet_names: Optional[List[str]] = None,
+                 table_names: Optional[List[str]] = None,
                  **kwargs):
         """
         Initialize ExtractMetrics tool.
 
         Args:
-            datasheets: List of datasheets to extract metrics from
+            tables: List of tables to extract metrics from
             metrics: List of metric column names to extract
-            datasheet_names: Optional custom names for columns (defaults to datasheet indices)
+            table_names: Optional custom names for columns (defaults to table indices)
             **kwargs: Additional parameters
 
         Examples:
             # Extract multiple metrics across cycles
             metrics_extract = pipeline.add(ExtractMetrics(
-                datasheets=[cycle0.datasheets.merged,
-                           cycle1.datasheets.merged,
-                           cycle2.datasheets.merged],
+                tables=[cycle0.tables.merged,
+                           cycle1.tables.merged,
+                           cycle2.tables.merged],
                 metrics=["affinity_delta", "affinity_delta_R", "affinity_delta_S"],
-                datasheet_names=["Cycle0", "Cycle1", "Cycle2"]
+                table_names=["Cycle0", "Cycle1", "Cycle2"]
             ))
         """
-        self.datasheets_input = datasheets
+        self.tables_input = tables
         self.metrics = metrics
-        self.datasheet_names = datasheet_names
+        self.table_names = table_names
 
         # Initialize base class
         super().__init__(**kwargs)
 
         # Set up dependencies
-        for ds in datasheets:
+        for ds in tables:
             if hasattr(ds, 'config'):
                 self.dependencies.append(ds.config)
 
     def validate_params(self):
         """Validate ExtractMetrics parameters."""
-        if not self.datasheets_input:
-            raise ValueError("datasheets parameter is required and cannot be empty")
+        if not self.tables_input:
+            raise ValueError("tables parameter is required and cannot be empty")
 
-        if not isinstance(self.datasheets_input, list):
-            raise ValueError("datasheets must be a list")
+        if not isinstance(self.tables_input, list):
+            raise ValueError("tables must be a list")
 
         if not self.metrics:
             raise ValueError("metrics parameter is required and cannot be empty")
@@ -88,25 +88,25 @@ class ExtractMetrics(BaseConfig):
         if not isinstance(self.metrics, list):
             raise ValueError("metrics must be a list")
 
-        if self.datasheet_names and len(self.datasheet_names) != len(self.datasheets_input):
-            raise ValueError("datasheet_names length must match datasheets length")
+        if self.table_names and len(self.table_names) != len(self.tables_input):
+            raise ValueError("table_names length must match tables length")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input datasheets from previous tools."""
+        """Configure input tables from previous tools."""
         self.folders = pipeline_folders
 
-        # Extract datasheet paths
-        self.datasheet_paths = []
-        for i, ds in enumerate(self.datasheets_input):
-            path = self._extract_datasheet_path(ds, f"datasheet_{i}")
-            self.datasheet_paths.append(path)
+        # Extract table paths
+        self.table_paths = []
+        for i, ds in enumerate(self.tables_input):
+            path = self._extract_table_path(ds, f"table_{i}")
+            self.table_paths.append(path)
 
         # Set default column names if not provided
-        if not self.datasheet_names:
-            self.datasheet_names = [f"Datasheet_{i}" for i in range(len(self.datasheets_input))]
+        if not self.table_names:
+            self.table_names = [f"Table_{i}" for i in range(len(self.tables_input))]
 
-    def _extract_datasheet_path(self, input_obj: Union[str, Dict, ToolOutput, StandardizedOutput], input_type: str) -> str:
-        """Extract datasheet path from various input formats."""
+    def _extract_table_path(self, input_obj: Union[str, Dict, ToolOutput, StandardizedOutput], input_type: str) -> str:
+        """Extract table path from various input formats."""
         if isinstance(input_obj, str):
             # Direct file path
             return input_obj
@@ -117,7 +117,7 @@ class ExtractMetrics(BaseConfig):
             else:
                 raise ValueError(f"Dictionary input for {input_type} must have 'path' key")
         elif hasattr(input_obj, 'path'):
-            # DatasheetInfo object
+            # TableInfo object
             return input_obj.path
         else:
             raise ValueError(f"Could not extract path from {input_type}: {type(input_obj)}")
@@ -128,15 +128,15 @@ class ExtractMetrics(BaseConfig):
 
         config_lines.extend([
             f"METRICS: {', '.join(self.metrics[:3])}{'...' if len(self.metrics) > 3 else ''} ({len(self.metrics)} total)",
-            f"NUM_DATASHEETS: {len(self.datasheets_input)}",
-            f"COLUMN_NAMES: {', '.join(self.datasheet_names[:3])}{'...' if len(self.datasheet_names) > 3 else ''}"
+            f"NUM_DATASHEETS: {len(self.tables_input)}",
+            f"COLUMN_NAMES: {', '.join(self.table_names[:3])}{'...' if len(self.table_names) > 3 else ''}"
         ])
 
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
         """
-        Generate script to extract metrics from datasheets.
+        Generate script to extract metrics from tables.
 
         Args:
             script_path: Path where script should be written
@@ -151,9 +151,9 @@ class ExtractMetrics(BaseConfig):
         # Create config file for the helper script
         config_file = os.path.join(output_folder, "extract_metrics_config.json")
         config_data = {
-            "datasheets": self.datasheet_paths,
+            "tables": self.table_paths,
             "metrics": self.metrics,
-            "datasheet_names": self.datasheet_names,
+            "table_names": self.table_names,
             "output_folder": output_folder
         }
 
@@ -168,7 +168,7 @@ class ExtractMetrics(BaseConfig):
 
 {self.generate_completion_check_header()}
 
-echo "Extracting {len(self.metrics)} metrics from {len(self.datasheet_paths)} datasheets"
+echo "Extracting {len(self.metrics)} metrics from {len(self.table_paths)} tables"
 echo "Metrics: {', '.join(self.metrics)}"
 echo "Output folder: {output_folder}"
 
@@ -195,19 +195,19 @@ fi
         Get expected output files after metric extraction.
 
         Returns:
-            Dictionary with output file paths and datasheet information
+            Dictionary with output file paths and table information
         """
         # Create separate CSV file for each metric
-        datasheets = {}
+        tables = {}
 
         for metric in self.metrics:
             csv_path = os.path.join(self.output_folder, f"{metric}.csv")
 
-            datasheets[metric] = DatasheetInfo(
+            tables[metric] = TableInfo(
                 name=metric,
                 path=csv_path,
-                columns=self.datasheet_names,  # Column names from datasheet names
-                description=f"Extracted '{metric}' values from all datasheets, formatted for statistical analysis",
+                columns=self.table_names,  # Column names from table names
+                description=f"Extracted '{metric}' values from all tables, formatted for statistical analysis",
                 count=None  # Will be determined at runtime based on data
             )
 
@@ -218,7 +218,7 @@ fi
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 
@@ -228,8 +228,8 @@ fi
         base_dict.update({
             "tool_params": {
                 "metrics": self.metrics,
-                "num_datasheets": len(self.datasheets_input),
-                "datasheet_names": self.datasheet_names
+                "num_tables": len(self.tables_input),
+                "table_names": self.table_names
             }
         })
         return base_dict

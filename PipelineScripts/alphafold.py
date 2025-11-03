@@ -32,7 +32,7 @@ class AlphaFold(BaseConfig):
     DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self, sequences: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
-                 datasheets: Optional[List[str]] = None,
+                 tables: Optional[List[str]] = None,
                  name: str = "",
                  num_relax: int = 0, num_recycle: int = 3, rand_seed: int = 0,
                  **kwargs):
@@ -41,7 +41,7 @@ class AlphaFold(BaseConfig):
 
         Args:
             sequences: Input sequences - can be FASTA file, CSV file, list, ToolOutput, or dict with sequences
-            datasheets: Input datasheet files for metadata
+            tables: Input table files for metadata
             name: Job name for output files
             rank: Rank structures by confidence metrics
             only_first: Only use first model for ranking comparisons
@@ -55,25 +55,25 @@ class AlphaFold(BaseConfig):
             if isinstance(sequences, StandardizedOutput):
                 # StandardizedOutput object (e.g., from pmpnn)
                 self.input_sequences = sequences.sequences
-                self.input_datasheets = sequences.datasheets
+                self.input_tables = sequences.tables
                 self.input_is_tool_output = False  # Direct file paths now
                 self.standardized_input = sequences  # Keep reference to get sequence_ids later
             elif isinstance(sequences, ToolOutput):
                 # Direct ToolOutput object
                 self.input_sequences = sequences
-                self.input_datasheets = sequences.get_output_files("datasheets")
+                self.input_tables = sequences.get_output_files("tables")
                 self.input_is_tool_output = True
                 self.standardized_input = None
             elif isinstance(sequences, dict):
                 # Dictionary format with standardized keys
                 self.input_sequences = sequences.get('sequences', [])
-                self.input_datasheets = sequences.get('datasheets', {})
+                self.input_tables = sequences.get('tables', {})
                 self.input_is_tool_output = False  # Direct file paths
                 self.standardized_input = None
             else:
                 # Direct sequence(s) - string or list
                 self.input_sequences = sequences
-                self.input_datasheets = datasheets or {}
+                self.input_tables = tables or {}
                 self.input_is_tool_output = isinstance(sequences, ToolOutput)
                 self.standardized_input = None
         else:
@@ -413,7 +413,7 @@ cd - > /dev/null
             - structures: PDB structure files
             - compounds: Empty (no compounds from AlphaFold)
             - sequences: Input queries CSV file (main sequence source)
-            - datasheets: Empty for now (ranking will be added later)
+            - tables: Empty for now (ranking will be added later)
             - output_folder: Tool's output directory
         """
         # Ensure file paths are set up
@@ -438,8 +438,8 @@ cd - > /dev/null
             if hasattr(self.standardized_input, 'sequence_ids'):
                 sequence_ids = self.standardized_input.sequence_ids
         
-        # Organize datasheets by content type (empty for now - ranking could be added later)
-        datasheets = {
+        # Organize tables by content type (empty for now - ranking could be added later)
+        tables = {
             "structures": {
                 "path": queries_csv,  # Input sequences that generated the structures
                 "columns": ["id", "source_id", "sequence"],
@@ -455,7 +455,7 @@ cd - > /dev/null
             "compound_ids": [],
             "sequences": [queries_csv],  # Main sequence input/output
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder,
             # Keep legacy aliases for compatibility
             "main": queries_csv,  # Legacy alias for backward compatibility

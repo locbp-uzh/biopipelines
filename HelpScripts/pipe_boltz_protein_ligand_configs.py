@@ -20,7 +20,7 @@ def parse_arguments():
     parser.add_argument('ligands_csv', help='Path to ligands CSV file or "None" if no ligands')
     parser.add_argument('output_dir', help='Directory to write config files')
     parser.add_argument('--affinity', action='store_true', help='Enable affinity calculation')
-    parser.add_argument('--msa-datasheet', help='Path to MSA datasheet CSV file')
+    parser.add_argument('--msa-table', help='Path to MSA table CSV file')
     parser.add_argument('--global-msa-cache', action='store_true', help='Use global MSA cache lookup')
     parser.add_argument('--msa-folder', help='Path to MSAs folder for global cache lookup')
     parser.add_argument('--job-name', help='Pipeline job name to use for single protein-ligand configs')
@@ -55,21 +55,21 @@ def load_ligands(ligands_csv):
         print(f"Error loading ligands CSV {ligands_csv}: {e}")
         sys.exit(1)
 
-def load_msa_mappings(msa_datasheet, use_global_cache=False):
-    """Load MSA mappings from datasheet CSV or check global cache."""
+def load_msa_mappings(msa_table, use_global_cache=False):
+    """Load MSA mappings from table CSV or check global cache."""
     if use_global_cache:
         # For global cache, we'll check if MSA files exist in the MSA cache folder
         # This will be handled during config creation
         return {}
     
-    if not msa_datasheet:
+    if not msa_table:
         return {}
     
     try:
-        df = pd.read_csv(msa_datasheet)
+        df = pd.read_csv(msa_table)
         # Expected columns: id, sequence_id, msa_file
         if 'id' not in df.columns or 'msa_file' not in df.columns:
-            print(f"Warning: MSA datasheet {msa_datasheet} missing required columns")
+            print(f"Warning: MSA table {msa_table} missing required columns")
             return {}
         
         # Create mapping from protein id to MSA file
@@ -80,7 +80,7 @@ def load_msa_mappings(msa_datasheet, use_global_cache=False):
         
         return msa_map
     except Exception as e:
-        print(f"Error loading MSA datasheet {msa_datasheet}: {e}")
+        print(f"Error loading MSA table {msa_table}: {e}")
         return {}
 
 def create_config(protein, ligand, msa_file, enable_affinity, use_global_cache=False, msa_folder=None):
@@ -177,8 +177,8 @@ def main():
     # Load MSA mappings if provided
     msa_mappings = {}
     use_global_cache = args.global_msa_cache
-    if args.msa_datasheet:
-        msa_mappings = load_msa_mappings(args.msa_datasheet, use_global_cache)
+    if args.msa_table:
+        msa_mappings = load_msa_mappings(args.msa_table, use_global_cache)
         print(f"Loaded MSA mappings for {len(msa_mappings)} proteins")
     elif use_global_cache:
         print("Using global MSA cache - will check for MSA files during config creation")

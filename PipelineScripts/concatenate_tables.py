@@ -1,8 +1,8 @@
 """
-ConcatenateDatasheets tool for combining multiple tool outputs.
+ConcatenateTables tool for combining multiple tool outputs.
 
 Concatenates tool outputs from multiple sources, preserving all structures,
-compounds, sequences, and datasheets for cyclic pipeline operations.
+compounds, sequences, and tables for cyclic pipeline operations.
 """
 
 import os
@@ -10,111 +10,111 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
-class ConcatenateDatasheets(BaseConfig):
+class ConcatenateTables(BaseConfig):
     """
     Tool for concatenating multiple tool outputs into a unified result.
     
-    Combines structures, sequences, compounds and datasheets from multiple tool outputs,
+    Combines structures, sequences, compounds and tables from multiple tool outputs,
     useful for iterative optimization cycles where previous results need to be carried forward.
     """
     
-    TOOL_NAME = "ConcatenateDatasheets"
+    TOOL_NAME = "ConcatenateTables"
     DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
-                 datasheets: List[Any],
+                 tables: List[Any],
                  fill: Optional[str] = None,
                  **kwargs):
         """
-        Initialize ConcatenateDatasheets tool.
+        Initialize ConcatenateTables tool.
         
         Args:
-            datasheets: List of datasheets to concatenate vertically (like SQL UNION)
+            tables: List of tables to concatenate vertically (like SQL UNION)
             fill: How to handle missing columns - None removes non-common columns, 
                   string value fills missing columns with that value
             **kwargs: Additional parameters
             
         Examples:
             # Simple concatenation removing non-common columns
-            combined = pipeline.add(ConcatenateDatasheets(
-                datasheets=[cycle0_sequences.datasheets.sequences,
-                           cycle1_sequences.datasheets.sequences]
+            combined = pipeline.add(ConcatenateTables(
+                tables=[cycle0_sequences.tables.sequences,
+                           cycle1_sequences.tables.sequences]
             ))
             
             # Fill missing columns with empty string
-            all_results = pipeline.add(ConcatenateDatasheets(
-                datasheets=[tool1.datasheets.analysis,
-                           tool2.datasheets.analysis],
+            all_results = pipeline.add(ConcatenateTables(
+                tables=[tool1.tables.analysis,
+                           tool2.tables.analysis],
                 fill=""
             ))
         """
-        self.datasheets = datasheets
+        self.tables = tables
         self.fill = fill
         
         # Validate inputs
-        if not self.datasheets:
-            raise ValueError("At least one datasheet must be provided")
+        if not self.tables:
+            raise ValueError("At least one table must be provided")
         
         # Initialize base class
         super().__init__(**kwargs)
         
-        # Set up dependencies - datasheets can be tool outputs or direct datasheet references
-        for datasheet in self.datasheets:
-            if hasattr(datasheet, 'config'):
-                self.dependencies.append(datasheet.config)
+        # Set up dependencies - tables can be tool outputs or direct table references
+        for table in self.tables:
+            if hasattr(table, 'config'):
+                self.dependencies.append(table.config)
     
     def validate_params(self):
-        """Validate ConcatenateDatasheets parameters."""
-        if not self.datasheets:
-            raise ValueError("At least one datasheet is required")
+        """Validate ConcatenateTables parameters."""
+        if not self.tables:
+            raise ValueError("At least one table is required")
         
         # fill parameter can be any string or None - no validation needed
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure inputs from datasheets."""
+        """Configure inputs from tables."""
         self.folders = pipeline_folders
         
-        # Extract information from each datasheet
-        self.datasheet_configs = []
+        # Extract information from each table
+        self.table_configs = []
         
-        for i, datasheet in enumerate(self.datasheets):
-            datasheet_config = self._extract_datasheet_config(datasheet, f"datasheet_{i}")
-            self.datasheet_configs.append(datasheet_config)
+        for i, table in enumerate(self.tables):
+            table_config = self._extract_table_config(table, f"table_{i}")
+            self.table_configs.append(table_config)
     
-    def _extract_datasheet_config(self, datasheet: Any, prefix: str) -> Dict[str, Any]:
-        """Extract configuration from a datasheet reference."""
+    def _extract_table_config(self, table: Any, prefix: str) -> Dict[str, Any]:
+        """Extract configuration from a table reference."""
         config = {
             "prefix": prefix,
-            "datasheet_path": None
+            "table_path": None
         }
         
-        # Handle different datasheet input formats
-        if isinstance(datasheet, str):
+        # Handle different table input formats
+        if isinstance(table, str):
             # Direct file path
-            config["datasheet_path"] = datasheet
-        elif hasattr(datasheet, 'path'):
-            # DatasheetInfo object
-            config["datasheet_path"] = datasheet.path
-        elif hasattr(datasheet, '_datasheets'):
-            # Tool output datasheets collection - get first one
-            for name, info in datasheet._datasheets.items():
+            config["table_path"] = table
+        elif hasattr(table, 'path'):
+            # TableInfo object
+            config["table_path"] = table.path
+        elif hasattr(table, '_tables'):
+            # Tool output tables collection - get first one
+            for name, info in table._tables.items():
                 if hasattr(info, 'path'):
-                    config["datasheet_path"] = info.path
+                    config["table_path"] = info.path
                 else:
-                    config["datasheet_path"] = str(info)
+                    config["table_path"] = str(info)
                 break
         else:
             # Try to convert to string as fallback
-            config["datasheet_path"] = str(datasheet)
+            config["table_path"] = str(table)
         
         return config
     
@@ -123,7 +123,7 @@ class ConcatenateDatasheets(BaseConfig):
         config_lines = super().get_config_display()
         
         config_lines.extend([
-            f"DATASHEETS: {len(self.datasheets)} inputs",
+            f"DATASHEETS: {len(self.tables)} inputs",
             f"FILL: {self.fill if self.fill is not None else 'remove non-common columns'}",
         ])
         
@@ -149,7 +149,7 @@ class ConcatenateDatasheets(BaseConfig):
         # Create config file for concatenation
         config_file = os.path.join(output_folder, "concatenate_config.json")
         config_data = {
-            "datasheet_configs": self.datasheet_configs,
+            "table_configs": self.table_configs,
             "fill": self.fill,
             "output_csv": concatenated_csv,
             "output_folder": output_folder
@@ -161,25 +161,25 @@ class ConcatenateDatasheets(BaseConfig):
         
         # Generate script content
         script_content = f"""#!/bin/bash
-# ConcatenateDatasheets execution script
+# ConcatenateTables execution script
 # Generated by BioPipelines pipeline system
 
 {self.generate_completion_check_header()}
 
-echo "Concatenating datasheets"
-echo "Input datasheets: {len(self.datasheets)}"
+echo "Concatenating tables"
+echo "Input tables: {len(self.tables)}"
 echo "Fill strategy: {self.fill if self.fill is not None else 'remove non-common columns'}"
 echo "Output: {output_folder}"
 
 # Run Python concatenation script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_concatenate_datasheets.py')}" \\
+python "{os.path.join(self.folders['HelpScripts'], 'pipe_concatenate_tables.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
-    echo "Successfully concatenated {len(self.datasheets)} datasheets"
+    echo "Successfully concatenated {len(self.tables)} tables"
     echo "Output written to: {output_folder}"
 else
-    echo "Error: Failed to concatenate datasheets"
+    echo "Error: Failed to concatenate tables"
     exit 1
 fi
 
@@ -195,23 +195,23 @@ fi
         Returns:
             Dictionary with output file paths
         """
-        # ConcatenateDatasheets is a datasheet-only operation like MergeDatasheets
-        # It combines datasheets from multiple tools but doesn't handle structures/compounds
+        # ConcatenateTables is a table-only operation like MergeTables
+        # It combines tables from multiple tools but doesn't handle structures/compounds
         
         concatenated_csv = os.path.join(self.output_folder, "concatenated.csv")
         
-        # Try to determine output columns from input datasheets
-        expected_columns = ["id", "source_datasheet"]
-        if self.datasheets and hasattr(self.datasheets[0], 'columns'):
-            # Try to get columns from first datasheet if available
+        # Try to determine output columns from input tables
+        expected_columns = ["id", "source_table"]
+        if self.tables and hasattr(self.tables[0], 'columns'):
+            # Try to get columns from first table if available
             try:
-                expected_columns = list(self.datasheets[0].columns) + ["source_datasheet"]
+                expected_columns = list(self.tables[0].columns) + ["source_table"]
             except:
                 # Fallback to default columns
-                expected_columns = ["id", "source_datasheet"]
+                expected_columns = ["id", "source_table"]
         
-        datasheets = {
-            "concatenated": DatasheetInfo(
+        tables = {
+            "concatenated": TableInfo(
                 name="concatenated", 
                 path=concatenated_csv,
                 columns=expected_columns,
@@ -220,7 +220,7 @@ fi
             )
         }
         
-        # ConcatenateDatasheets operates only on datasheets - return empty lists like MergeDatasheets
+        # ConcatenateTables operates only on tables - return empty lists like MergeTables
         return {
             "structures": [],
             "structure_ids": [],
@@ -228,7 +228,7 @@ fi
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
     
@@ -237,7 +237,7 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "num_datasheets": len(self.datasheets),
+                "num_tables": len(self.tables),
                 "fill": self.fill
             }
         })

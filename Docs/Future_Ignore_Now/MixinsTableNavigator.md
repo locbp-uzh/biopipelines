@@ -8,14 +8,14 @@ This guide shows how to migrate existing BioPipelines tools to use the new mixin
 
 ```python
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
-    from .mixins import InputHandlerMixin, DatasheetNavigatorMixin, FilePathDescriptor
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .mixins import InputHandlerMixin, TableNavigatorMixin, FilePathDescriptor
 except ImportError:
     # Fallback for direct execution
     import sys, os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
-    from mixins import InputHandlerMixin, DatasheetNavigatorMixin, FilePathDescriptor
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from mixins import InputHandlerMixin, TableNavigatorMixin, FilePathDescriptor
 ```
 
 ### 2. Add mixins to your class
@@ -26,7 +26,7 @@ class MyTool(BaseConfig):
     pass
 
 # After
-class MyTool(DatasheetNavigatorMixin, BaseConfig):
+class MyTool(TableNavigatorMixin, BaseConfig):
     pass
 ```
 
@@ -44,7 +44,7 @@ class MyTool(BaseConfig):
         self.config_file = os.path.join(self.output_folder, "config.json")
 
 # After
-class MyTool(DatasheetNavigatorMixin, BaseConfig):
+class MyTool(TableNavigatorMixin, BaseConfig):
     output_csv = FilePathDescriptor("output.csv")
     config_file = FilePathDescriptor("config.json")
     # No _initialize_file_paths() or _setup_file_paths() needed!
@@ -60,7 +60,7 @@ class AlphaFold(BaseConfig):
     def _initialize_file_paths(self):
         self.queries_csv = None
         self.queries_fasta = None
-        self.main_datasheet = None
+        self.main_table = None
         self.colabfold_batch = None
         self.fa_to_csv_fasta_py = None
 
@@ -91,41 +91,41 @@ class AlphaFold(BaseConfig):
 
 ---
 
-### Pattern 2: Datasheet Navigation
+### Pattern 2: Table Navigation
 
 **Before (nested if-else chains):**
 ```python
 def configure_inputs(self, pipeline_folders):
-    self.input_datasheet_path = None
+    self.input_table_path = None
 
-    if hasattr(self.data_input, 'datasheets'):
-        datasheets = self.data_input.datasheets
+    if hasattr(self.data_input, 'tables'):
+        tables = self.data_input.tables
 
-        if hasattr(datasheets, '_datasheets'):
-            # DatasheetContainer format
-            if 'filtered' in datasheets._datasheets:
-                self.input_datasheet_path = datasheets._datasheets['filtered'].path
-            elif 'structures' in datasheets._datasheets:
-                self.input_datasheet_path = datasheets._datasheets['structures'].path
-            elif 'main' in datasheets._datasheets:
-                self.input_datasheet_path = datasheets._datasheets['main'].path
-        elif isinstance(datasheets, dict):
+        if hasattr(tables, '_tables'):
+            # TableContainer format
+            if 'filtered' in tables._tables:
+                self.input_table_path = tables._tables['filtered'].path
+            elif 'structures' in tables._tables:
+                self.input_table_path = tables._tables['structures'].path
+            elif 'main' in tables._tables:
+                self.input_table_path = tables._tables['main'].path
+        elif isinstance(tables, dict):
             # Dict format
-            if 'filtered' in datasheets:
-                ds_info = datasheets['filtered']
+            if 'filtered' in tables:
+                ds_info = tables['filtered']
                 if isinstance(ds_info, dict) and 'path' in ds_info:
-                    self.input_datasheet_path = ds_info['path']
+                    self.input_table_path = ds_info['path']
                 elif hasattr(ds_info, 'path'):
-                    self.input_datasheet_path = ds_info.path
+                    self.input_table_path = ds_info.path
             # ... 20+ more lines for other cases
 ```
 
 **After (elegant mixin usage):**
 ```python
-class MyTool(DatasheetNavigatorMixin, BaseConfig):
+class MyTool(TableNavigatorMixin, BaseConfig):
     def configure_inputs(self, pipeline_folders):
         # One line! Handles all formats automatically
-        self.input_datasheet_path = self.get_datasheet_path(
+        self.input_table_path = self.get_table_path(
             self.data_input,
             name='filtered',
             fallback_names=['structures', 'sequences', 'main']
@@ -212,39 +212,39 @@ class MyTool(InputHandlerMixin, BaseConfig):
         resolved = self.resolve_input(self.input_param, 'structures')
         # resolved.files - list of file paths
         # resolved.ids - list of IDs
-        # resolved.datasheets - associated datasheets
+        # resolved.tables - associated tables
         # resolved.is_tool_output - boolean flag
 ```
 
 ---
 
-### DatasheetNavigatorMixin
+### TableNavigatorMixin
 
-Provides elegant datasheet navigation across all formats.
+Provides elegant table navigation across all formats.
 
 **Methods:**
-- `get_datasheet(source, name, fallback_names)` - Get datasheet (DatasheetInfo or dict)
-- `get_datasheet_path(source, name, fallback_names)` - Get datasheet path (string)
-- `get_all_datasheets(source)` - Get all datasheets as dict
-- `datasheet_exists(source, name)` - Check if datasheet exists
+- `get_table(source, name, fallback_names)` - Get table (TableInfo or dict)
+- `get_table_path(source, name, fallback_names)` - Get table path (string)
+- `get_all_tables(source)` - Get all tables as dict
+- `table_exists(source, name)` - Check if table exists
 
 **Usage:**
 ```python
-class MyTool(DatasheetNavigatorMixin, BaseConfig):
+class MyTool(TableNavigatorMixin, BaseConfig):
     def configure_inputs(self, pipeline_folders):
-        # Get datasheet with fallbacks
-        ds = self.get_datasheet(
+        # Get table with fallbacks
+        ds = self.get_table(
             tool_output,
             name='structures',
             fallback_names=['main']
         )
 
         # Get just the path
-        path = self.get_datasheet_path(tool_output, 'structures')
+        path = self.get_table_path(tool_output, 'structures')
 
         # Check if exists
-        if self.datasheet_exists(tool_output, 'filtered'):
-            # Use filtered datasheet
+        if self.table_exists(tool_output, 'filtered'):
+            # Use filtered table
             pass
 ```
 
@@ -295,7 +295,7 @@ When migrating a tool:
 - [ ] Add mixins to class inheritance
 - [ ] Replace `_initialize_file_paths()` with `FilePathDescriptor` declarations
 - [ ] Remove `_setup_file_paths()` method
-- [ ] Replace datasheet navigation with `get_datasheet()` or `get_datasheet_path()`
+- [ ] Replace table navigation with `get_table()` or `get_table_path()`
 - [ ] Replace input type checking with `resolve_input()`
 - [ ] Test the refactored tool
 - [ ] Compare line counts (should see 15-40% reduction)
@@ -305,23 +305,23 @@ When migrating a tool:
 
 ## Common Patterns
 
-### Pattern: Get datasheet from tool output with fallbacks
+### Pattern: Get table from tool output with fallbacks
 ```python
-path = self.get_datasheet_path(
+path = self.get_table_path(
     tool_output,
     name='primary_name',
     fallback_names=['backup1', 'backup2', 'main']
 )
 ```
 
-### Pattern: Check multiple possible datasheet names
+### Pattern: Check multiple possible table names
 ```python
-if self.datasheet_exists(tool_output, 'filtered'):
-    ds = self.get_datasheet(tool_output, 'filtered')
-elif self.datasheet_exists(tool_output, 'merged'):
-    ds = self.get_datasheet(tool_output, 'merged')
+if self.table_exists(tool_output, 'filtered'):
+    ds = self.get_table(tool_output, 'filtered')
+elif self.table_exists(tool_output, 'merged'):
+    ds = self.get_table(tool_output, 'merged')
 else:
-    ds = self.get_datasheet(tool_output, 'main')
+    ds = self.get_table(tool_output, 'main')
 ```
 
 ### Pattern: Resolve multiple inputs
@@ -354,14 +354,14 @@ def configure_inputs(self, pipeline_folders):
     path = self.my_file  # Now works correctly
 ```
 
-### Issue: Datasheet not found
+### Issue: Table not found
 
-**Solution:** Use `datasheet_exists()` to check first:
+**Solution:** Use `table_exists()` to check first:
 ```python
-if self.datasheet_exists(source, 'myds'):
-    ds = self.get_datasheet(source, 'myds')
+if self.table_exists(source, 'myds'):
+    ds = self.get_table(source, 'myds')
 else:
-    # Handle missing datasheet
+    # Handle missing table
     pass
 ```
 
@@ -378,8 +378,8 @@ self.my_file = "/custom/path/file.csv"
 ## Examples
 
 See these refactored tools for complete examples:
-- `filter_refactored.py` - DatasheetNavigatorMixin + FilePathDescriptor
-- `select_best_refactored.py` - DatasheetNavigatorMixin + FilePathDescriptor
+- `filter_refactored.py` - TableNavigatorMixin + FilePathDescriptor
+- `select_best_refactored.py` - TableNavigatorMixin + FilePathDescriptor
 - `EXAMPLE_REFACTORED_TOOL.py` - Complete demonstration of all patterns
 
 ---
@@ -388,7 +388,7 @@ See these refactored tools for complete examples:
 
 - **50-70% reduction** in initialization code
 - **30-40% reduction** in overall tool file sizes
-- **90% reduction** in datasheet navigation code
+- **90% reduction** in table navigation code
 - **Consistent patterns** across all tools
 - **Better maintainability** with centralized logic
 - **Easier testing** with isolated mixin components

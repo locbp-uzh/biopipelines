@@ -2,7 +2,7 @@
 PyMOL visualization configuration for creating molecular sessions.
 
 Creates PyMOL session files (.pse) from structure outputs with alignment,
-coloring based on datasheet metrics, and multi-tool structure combination.
+coloring based on table metrics, and multi-tool structure combination.
 """
 
 import os
@@ -10,13 +10,13 @@ import json
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class PyMOL(BaseConfig):
@@ -24,7 +24,7 @@ class PyMOL(BaseConfig):
     PyMOL visualization configuration for creating molecular sessions.
     
     Creates PyMOL session files from structure outputs with proper alignment,
-    coloring based on datasheet columns, and support for multi-tool combinations.
+    coloring based on table columns, and support for multi-tool combinations.
     """
     
     # Tool identification
@@ -45,7 +45,7 @@ class PyMOL(BaseConfig):
             structures: Structure source(s). Either:
                 - Single ToolOutput for simple visualization
                 - List of (ToolOutput, prefix) tuples for multi-tool combination
-            color_by: Datasheet column reference for coloring (e.g., "tool.datasheets.analysis.plddt")
+            color_by: Table column reference for coloring (e.g., "tool.tables.analysis.plddt")
             reference_structure: Structure prefix to use as alignment reference (default: first structure)
             alignment: Alignment method - "align", "cealign", "super", "alignto", or "none"
             session_name: Name for output PyMOL session file (default: auto-generated)
@@ -99,9 +99,9 @@ class PyMOL(BaseConfig):
         # Validate color_by format if provided
         if self.color_by:
             parts = self.color_by.split('.')
-            if len(parts) < 4 or parts[1] != "output" or parts[2] != "datasheets":
+            if len(parts) < 4 or parts[1] != "output" or parts[2] != "tables":
                 raise ValueError(
-                    "color_by must follow format 'tool.datasheets.sheet.column', "
+                    "color_by must follow format 'tool.tables.sheet.column', "
                     f"got '{self.color_by}'"
                 )
         
@@ -154,7 +154,7 @@ class PyMOL(BaseConfig):
         return StandardizedOutput(
             structures_folder=self.output_folder,
             structures_count=1,  # One PSE session file
-            datasheets=[],  # PyMOL doesn't generate datasheets
+            tables=[],  # PyMOL doesn't generate tables
             output_info={
                 'session_file': session_file,
                 'structure_sources': len(self.structure_sources),

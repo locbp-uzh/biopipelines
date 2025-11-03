@@ -129,23 +129,23 @@ def calculate_metrics(ref_obj: str, target_obj: str, selection: str) -> Dict[str
     }
 
 
-def load_selection_from_datasheet(datasheet_path: str, column_name: str) -> Dict[str, str]:
+def load_selection_from_table(table_path: str, column_name: str) -> Dict[str, str]:
     """
-    Load selection specifications from datasheet CSV file.
+    Load selection specifications from table CSV file.
 
     Args:
-        datasheet_path: Path to CSV file
+        table_path: Path to CSV file
         column_name: Column containing selection specifications
 
     Returns:
         Dictionary mapping structure IDs to selection strings
     """
-    if not os.path.exists(datasheet_path):
-        raise FileNotFoundError(f"Datasheet file not found: {datasheet_path}")
+    if not os.path.exists(table_path):
+        raise FileNotFoundError(f"Table file not found: {table_path}")
 
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     if column_name not in df.columns:
-        raise ValueError(f"Column '{column_name}' not found in datasheet. Available columns: {list(df.columns)}")
+        raise ValueError(f"Column '{column_name}' not found in table. Available columns: {list(df.columns)}")
 
     # Assuming the first column contains IDs
     id_column = df.columns[0]
@@ -156,7 +156,7 @@ def load_selection_from_datasheet(datasheet_path: str, column_name: str) -> Dict
         selection_value = row[column_name]
         selection_map[str(structure_id)] = str(selection_value)
 
-    print(f"Loaded selections for {len(selection_map)} structures from {datasheet_path}")
+    print(f"Loaded selections for {len(selection_map)} structures from {table_path}")
 
     return selection_map
 
@@ -251,10 +251,10 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
             structure_id = os.path.splitext(os.path.basename(target_path))[0]
             selection_map[structure_id] = fixed_selection
     else:
-        # Load from datasheet
-        datasheet_path = selection_config['datasheet_path']
+        # Load from table
+        table_path = selection_config['table_path']
         column_name = selection_config['column_name']
-        selection_map = load_selection_from_datasheet(datasheet_path, column_name)
+        selection_map = load_selection_from_table(table_path, column_name)
 
     # Determine if reference is single or multiple
     use_single_reference = len(reference_structures) == 1

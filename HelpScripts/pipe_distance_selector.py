@@ -16,9 +16,9 @@ Arguments:
                    - "atoms:resname ATP" - Use PyMOL atom selection
                    - "residues:resi 100-105" - Use PyMOL residue selection
     distance: Distance cutoff in Angstroms
-    restrict_spec: Restriction specification (datasheet reference, direct selection, or "" for no restriction)
+    restrict_spec: Restriction specification (table reference, direct selection, or "" for no restriction)
     output_csv: Path to output CSV file with selections
-    id_map: JSON string with ID mapping pattern (e.g., '{"*": "*_<N>"}') for matching structure IDs to datasheet IDs
+    id_map: JSON string with ID mapping pattern (e.g., '{"*": "*_<N>"}') for matching structure IDs to table IDs
 
 Output:
     CSV file with columns: id, pdb, within, beyond, distance_cutoff, reference_ligand
@@ -36,7 +36,7 @@ from pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom
 from typing import List, Dict, Tuple
 
 # Import unified ID mapping utilities
-from id_map_utils import map_structure_id_to_datasheet_id
+from id_map_utils import map_table_ids_to_ids
 
 
 def parse_reference_spec(reference_spec):
@@ -190,7 +190,7 @@ def format_ligandmpnn_selection_from_list(res_nums: List[int]) -> str:
     return "+".join(ranges)
 
 
-# Note: map_structure_id_to_datasheet_id is now imported from id_map_utils
+# Note: map_structure_id_to_table_id is now imported from id_map_utils
 
 
 def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str, str] = None) -> List[int]:
@@ -200,10 +200,10 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
     Args:
         restrict_spec: Either:
                       - "" (empty): No restriction
-                      - "DATASHEET_REFERENCE:path:column": Datasheet reference
+                      - "DATASHEET_REFERENCE:path:column": Table reference
                       - "10-20+30-40": Direct PyMOL selection
         pdb_file: PDB file being analyzed
-        id_map: ID mapping dictionary for matching structure IDs to datasheet IDs
+        id_map: ID mapping dictionary for matching structure IDs to table IDs
 
     Returns:
         List of residue numbers to restrict to (empty list = no restriction)
@@ -211,39 +211,39 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
     if not restrict_spec or restrict_spec == "":
         return []  # No restriction
 
-    # Handle datasheet reference
+    # Handle table reference
     if restrict_spec.startswith("DATASHEET_REFERENCE:"):
-        _, datasheet_path, column_name = restrict_spec.split(":", 2)
+        _, table_path, column_name = restrict_spec.split(":", 2)
 
-        if not os.path.exists(datasheet_path):
-            print(f"Warning: Restriction datasheet not found: {datasheet_path}")
+        if not os.path.exists(table_path):
+            print(f"Warning: Restriction table not found: {table_path}")
             return []
 
-        df = pd.read_csv(datasheet_path)
+        df = pd.read_csv(table_path)
         pdb_name = os.path.basename(pdb_file)
         pdb_base = os.path.splitext(pdb_name)[0]
 
-        # Apply id_map to get datasheet ID from structure ID
+        # Apply id_map to get table ID from structure ID
         if id_map:
-            datasheet_id = map_structure_id_to_datasheet_id(pdb_base, id_map)
-            if datasheet_id != pdb_base:
-                print(f"Mapping structure ID '{pdb_base}' to datasheet ID '{datasheet_id}' using id_map")
+            table_id = map_table_ids_to_ids(pdb_base, id_map)
+            if table_id != pdb_base:
+                print(f"Mapping structure ID '{pdb_base}' to table ID '{table_id}' using id_map")
         else:
-            datasheet_id = pdb_base
+            table_id = pdb_base
 
         # Find matching row - try multiple lookup strategies in order:
         # 1. Try pdb filename match
         matching_rows = df[df['pdb'] == pdb_name]
 
-        # 2. Try mapped datasheet ID
+        # 2. Try mapped table ID
         if matching_rows.empty:
-            matching_rows = df[df['id'] == datasheet_id]
+            matching_rows = df[df['id'] == table_id]
 
         # 3. If mapping was applied and failed, try original structure ID as fallback
-        if matching_rows.empty and id_map and datasheet_id != pdb_base:
+        if matching_rows.empty and id_map and table_id != pdb_base:
             matching_rows = df[df['id'] == pdb_base]
             if not matching_rows.empty:
-                print(f"Found match using original structure ID '{pdb_base}' (mapped ID '{datasheet_id}' not found)")
+                print(f"Found match using original structure ID '{pdb_base}' (mapped ID '{table_id}' not found)")
 
         if not matching_rows.empty:
             row = matching_rows.iloc[0]
@@ -252,10 +252,10 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
             print(f"Restricting to {len(residues)} residues: {format_ligandmpnn_selection_from_list(residues)}")
             return residues
         else:
-            attempted_ids = [pdb_name, datasheet_id]
-            if id_map and datasheet_id != pdb_base:
+            attempted_ids = [pdb_name, table_id]
+            if id_map and table_id != pdb_base:
                 attempted_ids.append(pdb_base)
-            print(f"ERROR: No restriction datasheet entry found. Tried: {', '.join(attempted_ids)}")
+            print(f"ERROR: No restriction table entry found. Tried: {', '.join(attempted_ids)}")
             print(f"ERROR: This means the restriction cannot be applied!")
             return []
 
@@ -414,8 +414,8 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
         pdb_file: Path to PDB file
         reference_spec: Reference specification string
         distance_cutoff: Distance cutoff in Angstroms
-        restrict_spec: Restriction specification (datasheet reference or direct selection)
-        id_map: ID mapping dictionary for matching structure IDs to datasheet IDs
+        restrict_spec: Restriction specification (table reference or direct selection)
+        id_map: ID mapping dictionary for matching structure IDs to table IDs
 
     Returns:
         Dictionary with analysis results
@@ -478,7 +478,7 @@ def main():
         print("  structure_files: Comma-separated list of PDB file paths")
         print("  reference_spec: Reference specification (e.g., 'ligand:LIG', 'atoms:resname ATP')")
         print("  distance: Distance cutoff in Angstroms")
-        print("  restrict_spec: Restriction specification (datasheet reference, direct selection, or empty string)")
+        print("  restrict_spec: Restriction specification (table reference, direct selection, or empty string)")
         print("  output_csv: Path to output CSV file")
         print("  id_map: JSON string with ID mapping pattern (e.g., '{\"*\": \"*_<N>\"}')")
         sys.exit(1)

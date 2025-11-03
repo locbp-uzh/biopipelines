@@ -2,7 +2,7 @@
 """
 Helper script for ExtractMetrics tool.
 
-Extracts multiple specific metrics from multiple datasheets and creates
+Extracts multiple specific metrics from multiple tables and creates
 separate CSV files for each metric, formatted for easy import into
 statistical analysis software like Prism.
 """
@@ -15,54 +15,54 @@ import sys
 import os
 
 
-def load_datasheet(path):
-    """Load a datasheet CSV file."""
+def load_table(path):
+    """Load a table CSV file."""
     try:
         return pd.read_csv(path)
     except Exception as e:
-        print(f"Error loading datasheet {path}: {e}")
+        print(f"Error loading table {path}: {e}")
         return None
 
 
-def extract_single_metric(datasheets, datasheet_paths, datasheet_names, metric):
+def extract_single_metric(tables, table_paths, table_names, metric):
     """
-    Extract a single metric from multiple datasheets.
+    Extract a single metric from multiple tables.
 
     Args:
-        datasheets: List of pandas DataFrames
-        datasheet_paths: List of file paths
-        datasheet_names: List of column names for output
+        tables: List of pandas DataFrames
+        table_paths: List of file paths
+        table_names: List of column names for output
         metric: Name of metric column to extract
 
     Returns:
         pandas DataFrame with extracted metric values
     """
-    # Check which datasheets have the metric
-    valid_datasheets = []
+    # Check which tables have the metric
+    valid_tables = []
     valid_names = []
 
-    for df, path, name in zip(datasheets, datasheet_paths, datasheet_names):
+    for df, path, name in zip(tables, table_paths, table_names):
         if df is None:
-            print(f"  Skipping invalid datasheet: {path}")
+            print(f"  Skipping invalid table: {path}")
             continue
 
         if metric not in df.columns:
             print(f"  Warning: Metric '{metric}' not found in {path}")
             continue
 
-        valid_datasheets.append(df)
+        valid_tables.append(df)
         valid_names.append(name)
 
-    if not valid_datasheets:
-        print(f"  Error: Metric '{metric}' not found in any datasheet")
-        return pd.DataFrame(columns=datasheet_names)
+    if not valid_tables:
+        print(f"  Error: Metric '{metric}' not found in any table")
+        return pd.DataFrame(columns=table_names)
 
-    print(f"  Found metric '{metric}' in {len(valid_datasheets)} datasheets")
+    print(f"  Found metric '{metric}' in {len(valid_tables)} tables")
 
-    # Extract metric values from each datasheet
+    # Extract metric values from each table
     extracted_data = {}
 
-    for df, name in zip(valid_datasheets, valid_names):
+    for df, name in zip(valid_tables, valid_names):
         # Extract metric values, converting to numeric and removing NaN
         metric_values = pd.to_numeric(df[metric], errors='coerce').dropna()
         extracted_data[name] = list(metric_values)
@@ -77,29 +77,29 @@ def extract_single_metric(datasheets, datasheet_paths, datasheet_names, metric):
         while len(extracted_data[name]) < max_length:
             extracted_data[name].append(np.nan)
 
-    # Add empty columns for datasheets that didn't have this metric
-    for name in datasheet_names:
+    # Add empty columns for tables that didn't have this metric
+    for name in table_names:
         if name not in extracted_data:
             extracted_data[name] = [np.nan] * max_length
 
     # Create DataFrame with consistent column order
     if max_length > 0:
-        result_df = pd.DataFrame({name: extracted_data[name] for name in datasheet_names})
+        result_df = pd.DataFrame({name: extracted_data[name] for name in table_names})
     else:
         # Create empty DataFrame with correct column names
-        result_df = pd.DataFrame(columns=datasheet_names)
+        result_df = pd.DataFrame(columns=table_names)
 
     return result_df
 
 
-def extract_multiple_metrics(datasheets, datasheet_paths, datasheet_names, metrics, output_folder):
+def extract_multiple_metrics(tables, table_paths, table_names, metrics, output_folder):
     """
-    Extract multiple metrics from multiple datasheets.
+    Extract multiple metrics from multiple tables.
 
     Args:
-        datasheets: List of pandas DataFrames
-        datasheet_paths: List of file paths
-        datasheet_names: List of column names for output
+        tables: List of pandas DataFrames
+        table_paths: List of file paths
+        table_names: List of column names for output
         metrics: List of metric names to extract
         output_folder: Directory to save output files
 
@@ -112,7 +112,7 @@ def extract_multiple_metrics(datasheets, datasheet_paths, datasheet_names, metri
         print(f"Extracting metric: {metric}")
 
         # Extract this metric
-        extracted_df = extract_single_metric(datasheets, datasheet_paths, datasheet_names, metric)
+        extracted_df = extract_single_metric(tables, table_paths, table_names, metric)
 
         # Save to separate CSV file
         output_path = os.path.join(output_folder, f"{metric}.csv")
@@ -134,7 +134,7 @@ def extract_multiple_metrics(datasheets, datasheet_paths, datasheet_names, metri
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Extract multiple metrics from multiple datasheets')
+    parser = argparse.ArgumentParser(description='Extract multiple metrics from multiple tables')
     parser.add_argument('--config', required=True, help='Configuration file path')
     args = parser.parse_args()
 
@@ -146,22 +146,22 @@ def main():
         print(f"Error loading configuration: {e}")
         sys.exit(1)
 
-    datasheet_paths = config['datasheets']
+    table_paths = config['tables']
     metrics = config['metrics']
-    datasheet_names = config['datasheet_names']
+    table_names = config['table_names']
     output_folder = config['output_folder']
 
-    print(f"Extracting {len(metrics)} metrics from {len(datasheet_paths)} datasheets")
+    print(f"Extracting {len(metrics)} metrics from {len(table_paths)} tables")
     print(f"Metrics: {', '.join(metrics)}")
     print(f"Output folder: {output_folder}")
     print()
 
-    # Load all datasheets
-    datasheets = []
-    for path in datasheet_paths:
+    # Load all tables
+    tables = []
+    for path in table_paths:
         print(f"Loading: {path}")
-        df = load_datasheet(path)
-        datasheets.append(df)
+        df = load_table(path)
+        tables.append(df)
         if df is not None:
             print(f"  Shape: {df.shape}")
             print(f"  Columns: {list(df.columns)}")
@@ -171,7 +171,7 @@ def main():
 
     # Extract metrics
     try:
-        output_files = extract_multiple_metrics(datasheets, datasheet_paths, datasheet_names, metrics, output_folder)
+        output_files = extract_multiple_metrics(tables, table_paths, table_names, metrics, output_folder)
 
         print(f"Successfully extracted {len(output_files)} metrics:")
         for metric, filepath in output_files.items():

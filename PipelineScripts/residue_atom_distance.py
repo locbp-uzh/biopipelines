@@ -12,13 +12,13 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 import os
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class ResidueAtomDistance(BaseConfig):
@@ -236,8 +236,8 @@ fi
         """
         analysis_csv = self.get_analysis_csv_path()
         
-        datasheets = {
-            "analysis": DatasheetInfo(
+        tables = {
+            "analysis": TableInfo(
                 name="analysis", 
                 path=analysis_csv,
                 columns=["id", "source_structure", self.get_metric_name()],
@@ -253,7 +253,7 @@ fi
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
     

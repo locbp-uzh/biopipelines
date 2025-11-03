@@ -11,7 +11,7 @@ from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.residue_atom_distance import ResidueAtomDistance
-from PipelineScripts.merge_datasheets import MergeDatasheets
+from PipelineScripts.merge_tables import MergeTables
 from PipelineScripts.filter import Filter
 
 with Pipeline(project="Examples",

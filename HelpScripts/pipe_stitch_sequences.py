@@ -17,7 +17,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from itertools import product
 
 # Import unified ID mapping utilities
-from id_map_utils import map_structure_id_to_datasheet_id
+from id_map_utils import map_table_ids_to_ids
 
 
 def parse_position_string(position_str: str) -> List[int]:
@@ -59,23 +59,23 @@ def parse_position_string(position_str: str) -> List[int]:
     return sorted(list(set(positions)))  # Remove duplicates and sort
 
 
-def load_positions_from_datasheet(datasheet_path: str, column_name: str) -> Dict[str, List[int]]:
+def load_positions_from_table(table_path: str, column_name: str) -> Dict[str, List[int]]:
     """
-    Load position specifications from datasheet CSV file.
+    Load position specifications from table CSV file.
 
     Args:
-        datasheet_path: Path to CSV file
+        table_path: Path to CSV file
         column_name: Column containing position specifications
 
     Returns:
         Dictionary mapping sequence IDs to position lists
     """
-    if not os.path.exists(datasheet_path):
-        raise FileNotFoundError(f"Datasheet file not found: {datasheet_path}")
+    if not os.path.exists(table_path):
+        raise FileNotFoundError(f"Table file not found: {table_path}")
 
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     if column_name not in df.columns:
-        raise ValueError(f"Column '{column_name}' not found in datasheet. Available columns: {list(df.columns)}")
+        raise ValueError(f"Column '{column_name}' not found in table. Available columns: {list(df.columns)}")
 
     # Assuming the first column contains IDs
     id_column = df.columns[0]
@@ -93,7 +93,7 @@ def load_positions_from_datasheet(datasheet_path: str, column_name: str) -> Dict
 
         positions_map[str(sequence_id)] = positions
 
-    print(f"Loaded positions for {len(positions_map)} sequences from {datasheet_path}")
+    print(f"Loaded positions for {len(positions_map)} sequences from {table_path}")
 
     return positions_map
 
@@ -110,7 +110,7 @@ def extract_base_id(seq_id: str, id_map: Dict[str, str]) -> str:
     Returns:
         Base structure ID (e.g., 'rifampicin_014_1')
     """
-    return map_structure_id_to_datasheet_id(seq_id, id_map)
+    return map_table_ids_to_ids(seq_id, id_map)
 
 
 def group_sequences_by_base_id(sequences: Dict[str, str], id_map: Dict[str, str]) -> Dict[str, List[str]]:
@@ -269,21 +269,21 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
             # Create map for all sequence IDs
             position_map = {seq_id: fixed_positions for seq_id in all_sequence_ids}
             position_maps.append(position_map)
-        elif spec['type'] == 'datasheet':
-            # Load from datasheet
-            datasheet_path = spec['datasheet_path']
+        elif spec['type'] == 'table':
+            # Load from table
+            table_path = spec['table_path']
             column_name = spec['column_name']
 
-            print(f"  Datasheet path: {datasheet_path}")
+            print(f"  Table path: {table_path}")
             print(f"  Column name: {column_name}")
-            print(f"  Datasheet exists: {os.path.exists(datasheet_path) if datasheet_path else 'N/A'}")
+            print(f"  Table exists: {os.path.exists(table_path) if table_path else 'N/A'}")
 
-            # Handle empty datasheet path (treat as no overlay)
-            if not datasheet_path or datasheet_path.strip() == '':
-                print(f"  WARNING: Empty datasheet path for sequence {spec['index']}, treating as no overlay")
+            # Handle empty table path (treat as no overlay)
+            if not table_path or table_path.strip() == '':
+                print(f"  WARNING: Empty table path for sequence {spec['index']}, treating as no overlay")
                 position_map = {seq_id: [] for seq_id in all_sequence_ids}
             else:
-                position_map = load_positions_from_datasheet(datasheet_path, column_name)
+                position_map = load_positions_from_table(table_path, column_name)
                 print(f"  Position map loaded: {len(position_map)} entries")
                 # Show first few entries
                 for i, (k, v) in enumerate(list(position_map.items())[:3]):
@@ -320,7 +320,7 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         print(f"{'='*60}")
 
         # Get position specification for this base structure
-        # Position specs use base structure IDs from datasheets
+        # Position specs use base structure IDs from tables
         if base_id not in position_maps[1]:
             print(f"Warning: No position specification for base structure {base_id}")
             continue

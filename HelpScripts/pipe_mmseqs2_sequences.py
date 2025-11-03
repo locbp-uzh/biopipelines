@@ -15,18 +15,12 @@ import tempfile
 import time
 
 # Import unified ID mapping utilities
-from id_map_utils import map_structure_id_to_datasheet_id
+from id_map_utils import map_table_ids_to_ids
 
 def log(message):
     """Log with timestamp."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}", flush=True)
-
-# Note: map_structure_id_to_datasheet_id is imported from id_map_utils
-# Renamed wrapper for backward compatibility
-def map_sequence_id_to_datasheet_id(seq_id, id_map):
-    """Map sequence ID to datasheet ID (wrapper for map_structure_id_to_datasheet_id)."""
-    return map_structure_id_to_datasheet_id(seq_id, id_map)
 
 def sele_to_list(s):
     """
@@ -99,7 +93,9 @@ def apply_mask_to_msa(msa_sequences, mask_positions):
 def check_and_resubmit_server():
     """Check if MMseqs2 server is running, and resubmit if not."""
     log("Entering check_and_resubmit_server()")
-    MMSEQS_SERVER_DIR = "/shares/locbp.chem.uzh/models/mmseqs2_server"
+    # Use per-user server directory
+    user = os.environ.get('USER', os.getlogin())
+    MMSEQS_SERVER_DIR = f"/shares/locbp.chem.uzh/{user}/BioPipelines/MMseqs2Server"
     GPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/GPU_SERVER"
     CPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/CPU_SERVER"
     GPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/GPU_SUBMITTING"
@@ -229,7 +225,7 @@ def check_and_resubmit_server():
 
     log("Exiting check_and_resubmit_server()")
 
-def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None):
+def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None, timeout=3600):
     """Submit a single sequence to MMseqs2 server with specified output path."""
     try:
         # Build command
@@ -246,7 +242,7 @@ def submit_sequence_to_server(sequence, sequence_id, client_script, output_forma
         else:
             log(f"Submitting sequence {sequence_id} to MMseqs2 server")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
         if result.returncode != 0:
             log(f"ERROR: MMseqs2 server failed for sequence {sequence_id}")
@@ -364,10 +360,10 @@ def main():
     parser.add_argument('client_script', help='Path to MMseqs2 client script')
     parser.add_argument('--output_format', default='csv', choices=['csv', 'a3m'],
                        help='Output format from server (default: csv)')
-    parser.add_argument('--mask_datasheet', default=None,
-                       help='Path to datasheet CSV with mask information per sequence')
+    parser.add_argument('--mask_table', default=None,
+                       help='Path to table CSV with mask information per sequence')
     parser.add_argument('--mask_column', default=None,
-                       help='Column name in mask_datasheet containing selection strings')
+                       help='Column name in mask_table containing selection strings')
     parser.add_argument('--mask_selection', default=None,
                        help='Direct selection string to apply to all sequences (e.g., "10-20+30-40")')
     parser.add_argument('--id_map', default='{"*": "*_<N>"}',
@@ -403,47 +399,47 @@ def main():
 
     # Load mask data if provided
     mask_data = {}  # Maps sequence_id -> list of positions to mask
-    datasheet_mask_data = {}  # Maps datasheet_id -> list of positions (from datasheet)
+    table_mask_data = {}  # Maps table_id -> list of positions (from table)
 
-    if args.mask_datasheet and args.mask_column:
-        # Per-sequence masking from datasheet
+    if args.mask_table and args.mask_column:
+        # Per-sequence masking from table
         try:
-            mask_df = pd.read_csv(args.mask_datasheet)
-            log(f"Loaded mask datasheet from {args.mask_datasheet}")
+            mask_df = pd.read_csv(args.mask_table)
+            log(f"Loaded mask table from {args.mask_table}")
 
             if 'id' not in mask_df.columns:
-                log("ERROR: Mask datasheet must have 'id' column")
+                log("ERROR: Mask table must have 'id' column")
                 sys.exit(1)
 
             if args.mask_column not in mask_df.columns:
-                log(f"ERROR: Mask column '{args.mask_column}' not found in datasheet")
+                log(f"ERROR: Mask column '{args.mask_column}' not found in table")
                 sys.exit(1)
 
-            # Parse mask selections for each datasheet entry
+            # Parse mask selections for each table entry
             for _, row in mask_df.iterrows():
-                datasheet_id = row['id']
+                table_id = row['id']
                 mask_selection = row[args.mask_column]
                 if pd.notna(mask_selection) and str(mask_selection).strip():
                     mask_positions = sele_to_list(str(mask_selection))
                     if mask_positions:
-                        datasheet_mask_data[datasheet_id] = mask_positions
-                        log(f"Mask for datasheet ID '{datasheet_id}': {len(mask_positions)} positions")
+                        table_mask_data[table_id] = mask_positions
+                        log(f"Mask for table ID '{table_id}': {len(mask_positions)} positions")
 
-            # Now map sequence IDs to datasheet IDs and populate mask_data
+            # Now map sequence IDs to table IDs and populate mask_data
             for seq_id in sequences_df['id']:
-                datasheet_id = map_sequence_id_to_datasheet_id(seq_id, id_map)
+                table_id = map_table_ids_to_ids(seq_id, id_map)
                 # Try mapped ID first
-                if datasheet_id in datasheet_mask_data:
-                    mask_data[seq_id] = datasheet_mask_data[datasheet_id]
-                    if datasheet_id != seq_id:
-                        log(f"Mapped sequence ID '{seq_id}' -> datasheet ID '{datasheet_id}'")
+                if table_id in table_mask_data:
+                    mask_data[seq_id] = table_mask_data[table_id]
+                    if table_id != seq_id:
+                        log(f"Mapped sequence ID '{seq_id}' -> table ID '{table_id}'")
                 # Fallback: try original sequence ID if mapping was applied
-                elif datasheet_id != seq_id and seq_id in datasheet_mask_data:
-                    mask_data[seq_id] = datasheet_mask_data[seq_id]
-                    log(f"Found match using original sequence ID '{seq_id}' (mapped ID '{datasheet_id}' not found)")
+                elif table_id != seq_id and seq_id in table_mask_data:
+                    mask_data[seq_id] = table_mask_data[seq_id]
+                    log(f"Found match using original sequence ID '{seq_id}' (mapped ID '{table_id}' not found)")
 
         except Exception as e:
-            log(f"ERROR: Failed to load mask datasheet: {str(e)}")
+            log(f"ERROR: Failed to load mask table: {str(e)}")
             sys.exit(1)
 
     elif args.mask_selection:

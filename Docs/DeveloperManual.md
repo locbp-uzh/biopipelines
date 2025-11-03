@@ -371,7 +371,7 @@ def generate_script(self):
 ```
 "Update Boltz2 tool to:
 1. Accept msas parameter of type Union[str, ToolOutput]
-2. If ToolOutput, extract MSA files from datasheets.msas
+2. If ToolOutput, extract MSA files from tables.msas
 3. Copy MSA files to self.msa_cache_folder
 4. Pass MSA folder path to boltz predict command with --msa-cache flag
 5. Do NOT create fallback MSA generation"
@@ -384,7 +384,7 @@ def generate_script(self):
 "Create a new tool following the same pattern as ResidueAtomDistance:
 - Accept structures parameter (not input)
 - Use StandardizedOutput interface
-- Generate analysis CSV with DatasheetInfo
+- Generate analysis CSV with TableInfo
 - Use _setup_file_paths() pattern from ligand_mpnn.py"
 ```
 
@@ -402,7 +402,7 @@ Create a new tool called ProteinAnalyzer in PipelineScripts/protein_analyzer.py:
 6. Follow the pattern from residue_atom_distance.py for:
    - Parameter validation
    - File path setup (_setup_file_paths method)
-   - Output definition with DatasheetInfo
+   - Output definition with TableInfo
 7. Do NOT implement fallbacks - crash if structures are invalid
 ```
 
@@ -415,8 +415,8 @@ Update Docs/UserManual.md to add ProteinAnalyzer tool:
    - Parameters with proper types
    - Outputs with table format (not brackets)
    - Example code block
-3. For datasheets, use this format:
-   - `datasheets.analysis`:
+3. For tables, use this format:
+   - `tables.analysis`:
 
      | id | source_structure | {analysis_type}_value |
      |----|------------------|----------------------|
@@ -482,7 +482,7 @@ git diff pipeline.py
 claude "Check that MyTool follows the same patterns as ResidueAtomDistance for:
 1. Parameter validation
 2. File path setup
-3. DatasheetInfo usage
+3. TableInfo usage
 4. Error messages"
 ```
 
@@ -542,7 +542,7 @@ class ToolA(BaseConfig):
     def get_output_files(self):
         return {
             "structures": [self.output_folder + "/structure.pdb"],
-            "datasheets": {"analysis": DatasheetInfo(...)},
+            "tables": {"analysis": TableInfo(...)},
             ...
         }
 
@@ -552,8 +552,8 @@ class ToolB(BaseConfig):
         if isinstance(self.structures, StandardizedOutput):
             # Access predicted structure paths
             structure_files = self.structures.structures
-            # Access datasheet paths
-            analysis_csv = self.structures.datasheets.analysis
+            # Access table paths
+            analysis_csv = self.structures.tables.analysis
 ```
 
 ---
@@ -621,7 +621,7 @@ def get_output_files(self) -> Dict[str, List[str]]:
     - structure_ids: List[str]
     - sequences: List[str]
     - sequence_ids: List[str]
-    - datasheets: Dict[str, DatasheetInfo]
+    - tables: Dict[str, TableInfo]
     - output_folder: str
 
     Do NOT check file existence - predict paths only.
@@ -662,20 +662,20 @@ Provides unified interface to tool outputs:
 structures = tool_output.structures           # List[str]
 structure_ids = tool_output.structure_ids     # List[str]
 sequences = tool_output.sequences             # List[str]
-datasheets = tool_output.datasheets           # DatasheetContainer
+tables = tool_output.tables           # TableContainer
 
-# Datasheet access
-csv_path = tool_output.datasheets.analysis              # str (path)
-info = tool_output.datasheets.info("analysis")          # DatasheetInfo
-column_ref = tool_output.datasheets.analysis.distance   # (DatasheetInfo, str)
+# Table access
+csv_path = tool_output.tables.analysis              # str (path)
+info = tool_output.tables.info("analysis")          # TableInfo
+column_ref = tool_output.tables.analysis.distance   # (TableInfo, str)
 ```
 
-### DatasheetInfo
+### TableInfo
 
-Metadata for CSV/datasheet files:
+Metadata for CSV/table files:
 
 ```python
-DatasheetInfo(
+TableInfo(
     name="analysis",
     path="/path/to/analysis.csv",
     columns=["id", "distance", "energy"],
@@ -701,11 +701,11 @@ import os
 from typing import Dict, List, Any, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class MyTool(BaseConfig):
@@ -814,8 +814,8 @@ fi
 
     def get_output_files(self) -> Dict[str, List[str]]:
         """Get expected output files."""
-        datasheets = {
-            "results": DatasheetInfo(
+        tables = {
+            "results": TableInfo(
                 name="results",
                 path=self.results_csv,
                 columns=["id", "param1_value", "param2_value"],
@@ -829,7 +829,7 @@ fi
             "structure_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 
@@ -859,7 +859,7 @@ Add to `Docs/UserManual.md` under appropriate section:
 - `param2`: int = 10 - Description
 
 **Outputs**:
-- `datasheets.results`:
+- `tables.results`:
 
   | id | param1_value | param2_value |
   |----|--------------|--------------|
@@ -951,17 +951,17 @@ def __init__(self, proteins: Union[str, List[str], ToolOutput, StandardizedOutpu
         self.input_sequences = [str(proteins)]
 ```
 
-#### Pattern 3: Datasheet References
+#### Pattern 3: Table References
 
 ```python
 def __init__(self, metric: Union[str, tuple], ...):
     # Can accept direct column reference
-    # tool.datasheets.analysis.distance -> (DatasheetInfo, "distance")
+    # tool.tables.analysis.distance -> (TableInfo, "distance")
 
 def configure_inputs(self, pipeline_folders):
     if isinstance(self.metric, tuple):
-        datasheet_info, column_name = self.metric
-        self.metric_datasheet = datasheet_info.path
+        table_info, column_name = self.metric
+        self.metric_table = table_info.path
         self.metric_column = column_name
 ```
 
@@ -984,10 +984,10 @@ def get_output_files(self) -> Dict[str, List[str]]:
         "compounds": [list of compound CSV paths],
         "compound_ids": [list of IDs],
 
-        # Datasheets with metadata
-        "datasheets": {
-            "analysis": DatasheetInfo(...),
-            "results": DatasheetInfo(...)
+        # Tables with metadata
+        "tables": {
+            "analysis": TableInfo(...),
+            "results": TableInfo(...)
         },
 
         # Tool folder
@@ -995,11 +995,11 @@ def get_output_files(self) -> Dict[str, List[str]]:
     }
 ```
 
-#### DatasheetInfo Pattern
+#### TableInfo Pattern
 
 ```python
-datasheets = {
-    "analysis": DatasheetInfo(
+tables = {
+    "analysis": TableInfo(
         name="analysis",
         path=os.path.join(self.output_folder, "analysis.csv"),
         columns=["id", "metric1", "metric2"],
@@ -1117,7 +1117,7 @@ def test_mytool_in_pipeline():
 
     # Check outputs are predicted correctly
     outputs = result.get_output_files()
-    assert "datasheets" in outputs
+    assert "tables" in outputs
     assert outputs["output_folder"]
 ```
 
@@ -1136,7 +1136,7 @@ def test_tool_chain():
     assert tool1.config in tool2.dependencies
 
     # Check outputs are accessible
-    assert tool2.get_output_files()["datasheets"]
+    assert tool2.get_output_files()["tables"]
 ```
 
 ---
@@ -1352,7 +1352,7 @@ def configure_inputs(self, pipeline_folders: Dict[str, str]):
 **File paths**: Define once in `_setup_file_paths()`, use everywhere
 **Validation**: Raise `ValueError` with specific messages, no fallbacks
 **Dependencies**: Append to `self.dependencies` for tool inputs
-**Outputs**: Use `DatasheetInfo` for all CSV outputs
+**Outputs**: Use `TableInfo` for all CSV outputs
 **Errors**: Crash explicitly with helpful error messages
 
 ### Key Commands

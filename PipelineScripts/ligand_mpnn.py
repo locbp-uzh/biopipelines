@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class LigandMPNN(BaseConfig):
@@ -32,7 +32,7 @@ class LigandMPNN(BaseConfig):
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput],
                  ligand: str = "",
-                 datasheets: Optional[List[str]] = None,
+                 tables: Optional[List[str]] = None,
                  name: str = "",
                  num_sequences: int = 1,
                  fixed: str = "",
@@ -47,11 +47,11 @@ class LigandMPNN(BaseConfig):
         Args:
             structures: Input structures (PDB files or ToolOutput from previous tool)
             ligand: Ligand identifier for binding site focus
-            datasheets: Input datasheet files for metadata (from previous tool)
+            tables: Input table files for metadata (from previous tool)
             name: Job name for output files
             num_sequences: Number of sequences to generate (batch_size * num_batches)
-            fixed: Fixed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., (tool.datasheets.structures, "fixed"))
-            redesigned: Designed positions (LigandMPNN format: "A3 A4 A5") or datasheet reference (e.g., (distance_analysis.datasheets.selections, "within"))  
+            fixed: Fixed positions (LigandMPNN format: "A3 A4 A5") or table reference (e.g., (tool.tables.structures, "fixed"))
+            redesigned: Designed positions (LigandMPNN format: "A3 A4 A5") or table reference (e.g., (distance_analysis.tables.selections, "within"))  
             design_within: Distance in Å from ligand to redesign (fallback if positions not specified)
             model: LigandMPNN model version to use
             batch_size: Batch size for processing
@@ -59,7 +59,7 @@ class LigandMPNN(BaseConfig):
         """
         # Store input parameters
         self.input_structures = structures
-        self.input_datasheets = datasheets or {}
+        self.input_tables = tables or {}
         self.input_is_tool_output = isinstance(structures, ToolOutput)
         
         # Store LigandMPNN-specific parameters
@@ -98,11 +98,11 @@ class LigandMPNN(BaseConfig):
         if self.design_within <= 0:
             raise ValueError("design_within must be positive")
         
-        # Validate datasheet references if provided
+        # Validate table references if provided
         if self.fixed_positions:
-            self.validate_datasheet_reference(self.fixed_positions)
+            self.validate_table_reference(self.fixed_positions)
         if self.designed_positions:
-            self.validate_datasheet_reference(self.designed_positions)
+            self.validate_table_reference(self.designed_positions)
         
         # Validate model name
         valid_models = ["v_32_005", "v_32_010", "v_32_020", "v_32_025"]
@@ -206,8 +206,8 @@ class LigandMPNN(BaseConfig):
                 # Also store structure IDs for proper tracking
                 if self.input_structures.structure_ids:
                     self.input_sources["structure_ids"] = self.input_structures.structure_ids
-                # Store datasheets for position references
-                self.input_datasheets = self.input_structures.datasheets
+                # Store tables for position references
+                self.input_tables = self.input_structures.tables
                 self.standardized_input = self.input_structures
             else:
                 raise ValueError("No structures found in StandardizedOutput")
@@ -241,8 +241,8 @@ class LigandMPNN(BaseConfig):
         
         config_lines.extend([
             f"LIGAND: {self.ligand}",
-            f"FIXED: {self.fixed_positions or 'Auto (from datasheet or ligand-based)'}",
-            f"DESIGNED: {self.designed_positions or 'Auto (from datasheet or ligand-based)'}",
+            f"FIXED: {self.fixed_positions or 'Auto (from table or ligand-based)'}",
+            f"DESIGNED: {self.designed_positions or 'Auto (from table or ligand-based)'}",
             f"DESIGN WITHIN: {self.design_within}Å",
             f"NUM SEQUENCES: {self.num_sequences}",
             f"BATCH SIZE: {self.batch_size}",
@@ -283,47 +283,47 @@ class LigandMPNN(BaseConfig):
         else:
             raise ValueError("No structure sources found")
         
-        # Determine fixed positions approach - prioritize explicit positions over datasheets
+        # Determine fixed positions approach - prioritize explicit positions over tables
         if self.fixed_positions is not None or self.designed_positions is not None:
             # Use directly specified positions (highest priority) - includes empty strings
             input_source = "selection"  
-            input_datasheet = "-"
-        elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
-             (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets')):
-            # Use datasheet from previous tool (e.g., RFdiffusion)
-            input_source = "datasheet"
-            if hasattr(self.standardized_input, 'datasheets') and self.standardized_input.datasheets:
+            input_table = "-"
+        elif (self.input_is_tool_output and hasattr(self, 'input_tables') and self.input_tables) or \
+             (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'tables')):
+            # Use table from previous tool (e.g., RFdiffusion)
+            input_source = "table"
+            if hasattr(self.standardized_input, 'tables') and self.standardized_input.tables:
                 # StandardizedOutput format
-                if hasattr(self.standardized_input.datasheets, '_datasheets') and 'structures' in self.standardized_input.datasheets._datasheets:
-                    input_datasheet = self.standardized_input.datasheets._datasheets['structures'].path
+                if hasattr(self.standardized_input.tables, '_tables') and 'structures' in self.standardized_input.tables._tables:
+                    input_table = self.standardized_input.tables._tables['structures'].path
                 else:
-                    input_datasheet = "-"
-            elif isinstance(self.input_datasheets, dict):
+                    input_table = "-"
+            elif isinstance(self.input_tables, dict):
                 # Dictionary format
-                if "structures" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["structures"]["path"]
-                elif "main" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["main"]["path"]
+                if "structures" in self.input_tables:
+                    input_table = self.input_tables["structures"]["path"]
+                elif "main" in self.input_tables:
+                    input_table = self.input_tables["main"]["path"]
                 else:
-                    first_key = next(iter(self.input_datasheets))
-                    input_datasheet = self.input_datasheets[first_key]["path"]
-            elif hasattr(self.input_datasheets, '_datasheets'):
-                # DatasheetContainer format
-                if 'structures' in self.input_datasheets._datasheets:
-                    input_datasheet = self.input_datasheets._datasheets['structures'].path
+                    first_key = next(iter(self.input_tables))
+                    input_table = self.input_tables[first_key]["path"]
+            elif hasattr(self.input_tables, '_tables'):
+                # TableContainer format
+                if 'structures' in self.input_tables._tables:
+                    input_table = self.input_tables._tables['structures'].path
                 else:
-                    first_name = list(self.input_datasheets._datasheets.keys())[0]
-                    input_datasheet = self.input_datasheets._datasheets[first_name].path
+                    first_name = list(self.input_tables._tables.keys())[0]
+                    input_table = self.input_tables._tables[first_name].path
             else:
-                input_datasheet = "-"
+                input_table = "-"
         else:
             # Use ligand-based design with design_within cutoff
             input_source = "ligand"
-            input_datasheet = "-"
+            input_table = "-"
         
-        # Resolve datasheet references in fixed/designed positions
-        resolved_fixed = self.resolve_datasheet_reference(self.fixed_positions) if self.fixed_positions else "-"
-        resolved_designed = self.resolve_datasheet_reference(self.designed_positions) if self.designed_positions else "-"
+        # Resolve table references in fixed/designed positions
+        resolved_fixed = self.resolve_table_reference(self.fixed_positions) if self.fixed_positions else "-"
+        resolved_designed = self.resolve_table_reference(self.designed_positions) if self.designed_positions else "-"
 
         return f"""echo "Setting up LigandMPNN position constraints"
 # Create a separate commands file that will be modified instead of this script
@@ -344,47 +344,47 @@ cd {self.lmpnn_folder}
         else:
             raise ValueError("No structure sources found")
             
-        # Determine fixed positions approach - prioritize explicit positions over datasheets
+        # Determine fixed positions approach - prioritize explicit positions over tables
         if self.fixed_positions is not None or self.designed_positions is not None:
             # Use directly specified positions (highest priority) - includes empty strings
             input_source = "selection"  
-            input_datasheet = "-"
-        elif (self.input_is_tool_output and hasattr(self, 'input_datasheets') and self.input_datasheets) or \
-             (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'datasheets')):
-            # Use datasheet from previous tool (e.g., RFdiffusion)
-            input_source = "datasheet"
-            if hasattr(self.standardized_input, 'datasheets') and self.standardized_input.datasheets:
+            input_table = "-"
+        elif (self.input_is_tool_output and hasattr(self, 'input_tables') and self.input_tables) or \
+             (hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'tables')):
+            # Use table from previous tool (e.g., RFdiffusion)
+            input_source = "table"
+            if hasattr(self.standardized_input, 'tables') and self.standardized_input.tables:
                 # StandardizedOutput format
-                if hasattr(self.standardized_input.datasheets, '_datasheets') and 'structures' in self.standardized_input.datasheets._datasheets:
-                    input_datasheet = self.standardized_input.datasheets._datasheets['structures'].path
+                if hasattr(self.standardized_input.tables, '_tables') and 'structures' in self.standardized_input.tables._tables:
+                    input_table = self.standardized_input.tables._tables['structures'].path
                 else:
-                    input_datasheet = "-"
-            elif isinstance(self.input_datasheets, dict):
+                    input_table = "-"
+            elif isinstance(self.input_tables, dict):
                 # Dictionary format
-                if "structures" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["structures"]["path"]
-                elif "main" in self.input_datasheets:
-                    input_datasheet = self.input_datasheets["main"]["path"]
+                if "structures" in self.input_tables:
+                    input_table = self.input_tables["structures"]["path"]
+                elif "main" in self.input_tables:
+                    input_table = self.input_tables["main"]["path"]
                 else:
-                    first_key = next(iter(self.input_datasheets))
-                    input_datasheet = self.input_datasheets[first_key]["path"]
-            elif hasattr(self.input_datasheets, '_datasheets'):
-                # DatasheetContainer format
-                if 'structures' in self.input_datasheets._datasheets:
-                    input_datasheet = self.input_datasheets._datasheets['structures'].path
+                    first_key = next(iter(self.input_tables))
+                    input_table = self.input_tables[first_key]["path"]
+            elif hasattr(self.input_tables, '_tables'):
+                # TableContainer format
+                if 'structures' in self.input_tables._tables:
+                    input_table = self.input_tables._tables['structures'].path
                 else:
-                    first_name = list(self.input_datasheets._datasheets.keys())[0]
-                    input_datasheet = self.input_datasheets._datasheets[first_name].path
+                    first_name = list(self.input_tables._tables.keys())[0]
+                    input_table = self.input_tables._tables[first_name].path
             else:
-                input_datasheet = "-"
+                input_table = "-"
         else:
             # Use ligand-based design with design_within cutoff
             input_source = "ligand"
-            input_datasheet = "-"
+            input_table = "-"
         
-        # Resolve datasheet references in fixed/designed positions
-        resolved_fixed = self.resolve_datasheet_reference(self.fixed_positions) if self.fixed_positions else "-"
-        resolved_designed = self.resolve_datasheet_reference(self.designed_positions) if self.designed_positions else "-"
+        # Resolve table references in fixed/designed positions
+        resolved_fixed = self.resolve_table_reference(self.fixed_positions) if self.fixed_positions else "-"
+        resolved_designed = self.resolve_table_reference(self.designed_positions) if self.designed_positions else "-"
         
         # Build base LigandMPNN options
         base_options = f'--model_type "ligand_mpnn"'
@@ -418,7 +418,7 @@ chmod +x {self.commands_file}
 
 # Use existing HelpScript to create position replacement script
 echo "Creating position replacement script..."
-python {self.runtime_positions_py} "{structure_files_str}" "{input_source}" "{input_datasheet}" "{resolved_fixed}" "{resolved_designed}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
+python {self.runtime_positions_py} "{structure_files_str}" "{input_source}" "{input_table}" "{resolved_fixed}" "{resolved_designed}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
 
 # Run the replacement script on the commands file (not this script)
 echo "Running position replacement script on commands file: {self.commands_file}"
@@ -526,7 +526,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             - structures: Empty (no structures from LigandMPNN)
             - compounds: Empty (no compounds from LigandMPNN) 
             - sequences: FASTA files and converted CSV
-            - datasheets: Main datasheet CSV
+            - tables: Main table CSV
             - output_folder: Tool's output directory
         """
         # Ensure file paths are set up
@@ -544,9 +544,9 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         # Predict sequence IDs for downstream tools
         sequence_ids = self._predict_sequence_ids()
         
-        # Organize datasheets by content type with detailed metadata
-        datasheets = {
-            "sequences": DatasheetInfo(
+        # Organize tables by content type with detailed metadata
+        tables = {
+            "sequences": TableInfo(
                 name="sequences",
                 path=queries_csv,
                 columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec"],
@@ -560,9 +560,9 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "structure_ids": [],
             "compounds": [],
             "compound_ids": [],
-            "sequences": [queries_csv],  # Main output is the datasheet with sequences and scores
+            "sequences": [queries_csv],  # Main output is the table with sequences and scores
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder,
             # Keep legacy aliases for compatibility
             "main": queries_csv,  # Legacy alias for backward compatibility

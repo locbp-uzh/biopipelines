@@ -3,7 +3,7 @@
 Helper scripts for DynamicBind pipeline processing.
 
 1. pipe_dynamicbind_prepare_ligands.py: Prepares ligands CSV with 'ligand' column from tool output
-2. pipe_dynamicbind_datasheet.py: Creates standardized datasheet from DynamicBind outputs
+2. pipe_dynamicbind_table.py: Creates standardized table from DynamicBind outputs
 """
 
 import os
@@ -15,10 +15,10 @@ import re
 
 def prepare_ligands_csv(input_compounds_csv, output_ligands_csv, output_compounds_csv):
     """
-    Prepare ligands CSV with 'ligand' column from tool output compounds datasheet.
+    Prepare ligands CSV with 'ligand' column from tool output compounds table.
 
     Args:
-        input_compounds_csv: Path to input compounds datasheet (must have 'smiles' column)
+        input_compounds_csv: Path to input compounds table (must have 'smiles' column)
         output_ligands_csv: Path to output ligands CSV for DynamicBind (with 'ligand' column)
         output_compounds_csv: Path to copy of input compounds for output reference
     """
@@ -26,12 +26,12 @@ def prepare_ligands_csv(input_compounds_csv, output_ligands_csv, output_compound
     try:
         df = pd.read_csv(input_compounds_csv)
     except Exception as e:
-        print(f"Error reading compounds datasheet: {e}")
+        print(f"Error reading compounds table: {e}")
         sys.exit(1)
 
     # Check for 'smiles' column
     if 'smiles' not in df.columns:
-        print(f"Error: Input compounds datasheet must have 'smiles' column. Found columns: {list(df.columns)}")
+        print(f"Error: Input compounds table must have 'smiles' column. Found columns: {list(df.columns)}")
         sys.exit(1)
 
     # Create ligands CSV with 'ligand' column (rename 'smiles' to 'ligand')
@@ -39,14 +39,14 @@ def prepare_ligands_csv(input_compounds_csv, output_ligands_csv, output_compound
     ligands_df.to_csv(output_ligands_csv, index=False)
     print(f"Created ligands CSV with {len(ligands_df)} compounds: {output_ligands_csv}")
 
-    # Copy compounds datasheet to output folder
+    # Copy compounds table to output folder
     df.to_csv(output_compounds_csv, index=False)
-    print(f"Copied compounds datasheet to output: {output_compounds_csv}")
+    print(f"Copied compounds table to output: {output_compounds_csv}")
 
 
 def parse_dynamicbind_outputs(output_folder):
     """
-    Parse DynamicBind output folder to create standardized datasheet.
+    Parse DynamicBind output folder to create standardized table.
 
     Args:
         output_folder: Path to DynamicBind output folder
@@ -108,7 +108,7 @@ def parse_dynamicbind_outputs(output_folder):
 def main():
     """Main execution function."""
     if len(sys.argv) != 3:
-        print("Usage: pipe_dynamicbind_datasheet.py <output_folder> <output_csv>")
+        print("Usage: pipe_dynamicbind_table.py <output_folder> <output_csv>")
         sys.exit(1)
 
     output_folder = sys.argv[1]
@@ -119,7 +119,7 @@ def main():
 
     # Save to CSV
     df.to_csv(output_csv, index=False)
-    print(f"Created datasheet with {len(df)} structures: {output_csv}")
+    print(f"Created table with {len(df)} structures: {output_csv}")
 
 
 if __name__ == "__main__":

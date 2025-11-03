@@ -10,13 +10,13 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class BoltzGen(BaseConfig):
@@ -443,7 +443,7 @@ fi
         Returns:
             Dictionary mapping output types to file paths with standard keys:
             - structures: List of final designed structure files
-            - datasheets: Analysis metrics and results
+            - tables: Analysis metrics and results
             - output_folder: Tool's output directory
         """
         # Ensure file paths are set up
@@ -458,9 +458,9 @@ fi
         structures = []
         structure_ids = []
 
-        # Organize datasheets by content type
-        datasheets = {
-            "all_metrics": DatasheetInfo(
+        # Organize tables by content type
+        tables = {
+            "all_metrics": TableInfo(
                 name="all_metrics",
                 path=self.all_designs_metrics_csv,
                 columns=[
@@ -470,7 +470,7 @@ fi
                 description="Comprehensive metrics for all generated designs",
                 count=None  # Unknown until execution
             ),
-            "final_metrics": DatasheetInfo(
+            "final_metrics": TableInfo(
                 name="final_metrics",
                 path=self.final_designs_metrics_csv,
                 columns=[
@@ -480,14 +480,14 @@ fi
                 description=f"Metrics for top {self.budget} designs after filtering",
                 count=self.budget
             ),
-            "aggregate_metrics": DatasheetInfo(
+            "aggregate_metrics": TableInfo(
                 name="aggregate_metrics",
                 path=self.aggregate_metrics_csv,
                 columns=["metric", "mean", "std", "min", "max"],
                 description="Aggregate statistics across all designs",
                 count=None
             ),
-            "per_target_metrics": DatasheetInfo(
+            "per_target_metrics": TableInfo(
                 name="per_target_metrics",
                 path=self.per_target_metrics_csv,
                 columns=["target_id", "num_designs", "avg_rmsd", "avg_plddt"],
@@ -501,7 +501,7 @@ fi
             "structure_ids": structure_ids,
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder,
             "final_designs_folder": final_designs_folder,
             "main": self.final_designs_metrics_csv

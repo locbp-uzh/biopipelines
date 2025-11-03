@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Position determination for LigandMPNN from datasheets or direct specifications.
+Position determination for LigandMPNN from tables or direct specifications.
 
-This script processes a datasheet containing columns id, fixed, designed, direct position specifications, or
+This script processes a table containing columns id, fixed, designed, direct position specifications, or
 ligand-based design to create a bash script with LigandMPNN position arguments.
 
 Usage:
-    python pipe_lmpnn_runtime_positions.py <input_dir> <input_source> <input_datasheet> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>
+    python pipe_lmpnn_runtime_positions.py <input_dir> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>
 
 Arguments:
     input_dir: Directory containing PDB files
-    input_source: "datasheet" (e.g. RFdiffusion datasheet), "selection" (use direct positions), or "ligand" (ligand-based)
-    input_datasheet: Path to datasheet file (or "-" if not using datasheet)
+    input_source: "table" (e.g. RFdiffusion table), "selection" (use direct positions), or "ligand" (ligand-based)
+    input_table: Path to table file (or "-" if not using table)
     fixed_positions: PyMOL selection for fixed positions (or "-")  
     designed_positions: PyMOL selection for designed positions (or "-")
     ligand: Ligand identifier
@@ -50,19 +50,19 @@ def sele_to_list(sele_str):
     return sorted(residues)
 
 
-def process_datasheet_source(input_datasheet, pdb_files):
-    """Process input datasheet to get fixed/designed positions."""
-    if not os.path.exists(input_datasheet):
-        raise FileNotFoundError(f"Datasheet not found: {input_datasheet}")
+def process_table_source(input_table, pdb_files):
+    """Process input table to get fixed/designed positions."""
+    if not os.path.exists(input_table):
+        raise FileNotFoundError(f"Table not found: {input_table}")
     
-    df = pd.read_csv(input_datasheet)
+    df = pd.read_csv(input_table)
     positions_data = {}
     
     for pdb_file in pdb_files:
         pdb_name = os.path.basename(pdb_file)
         pdb_base = os.path.splitext(pdb_name)[0]
         
-        # Find matching row in datasheet
+        # Find matching row in table
         matching_rows = df[df['pdb'] == pdb_name]
         if matching_rows.empty:
             # Try with base name
@@ -78,7 +78,7 @@ def process_datasheet_source(input_datasheet, pdb_files):
                 'designed_positions': designed_positions
             }
         else:
-            print(f"Warning: No datasheet entry found for {pdb_name}")
+            print(f"Warning: No table entry found for {pdb_name}")
             positions_data[pdb_file] = {
                 'fixed_positions': [],
                 'designed_positions': []
@@ -87,12 +87,12 @@ def process_datasheet_source(input_datasheet, pdb_files):
     return positions_data
 
 
-def resolve_datasheet_reference(reference, pdb_files):
+def resolve_table_reference(reference, pdb_files):
     """
-    Resolve datasheet reference to per-PDB selections.
+    Resolve table reference to per-PDB selections.
     
     Args:
-        reference: Either a datasheet reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
+        reference: Either a table reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
         pdb_files: List of PDB files to process
         
     Returns:
@@ -102,20 +102,20 @@ def resolve_datasheet_reference(reference, pdb_files):
         # Direct PyMOL selection
         return {pdb_file: sele_to_list(reference) for pdb_file in pdb_files}
     
-    # Parse datasheet reference: DATASHEET_REFERENCE:path:column
-    _, datasheet_path, column_name = reference.split(":", 2)
+    # Parse table reference: DATASHEET_REFERENCE:path:column
+    _, table_path, column_name = reference.split(":", 2)
     
-    if not os.path.exists(datasheet_path):
-        raise FileNotFoundError(f"Datasheet not found: {datasheet_path}")
+    if not os.path.exists(table_path):
+        raise FileNotFoundError(f"Table not found: {table_path}")
     
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     positions_per_pdb = {}
     
     for pdb_file in pdb_files:
         pdb_name = os.path.basename(pdb_file)
         pdb_base = os.path.splitext(pdb_name)[0]
         
-        # Find matching row in datasheet
+        # Find matching row in table
         matching_rows = df[df['pdb'] == pdb_name]
         if matching_rows.empty:
             # Try with base name
@@ -126,16 +126,16 @@ def resolve_datasheet_reference(reference, pdb_files):
             selection_value = row.get(column_name, '')
             positions_per_pdb[pdb_file] = sele_to_list(selection_value)
         else:
-            print(f"Warning: No datasheet entry found for {pdb_name} in column {column_name}")
+            print(f"Warning: No table entry found for {pdb_name} in column {column_name}")
             positions_per_pdb[pdb_file] = []
     
     return positions_per_pdb
 
 
 def process_selection_source(fixed_positions, designed_positions, pdb_files):
-    """Process direct PyMOL selections or datasheet references for fixed/designed positions.""" 
-    fixed_per_pdb = resolve_datasheet_reference(fixed_positions, pdb_files)
-    designed_per_pdb = resolve_datasheet_reference(designed_positions, pdb_files)
+    """Process direct PyMOL selections or table references for fixed/designed positions.""" 
+    fixed_per_pdb = resolve_table_reference(fixed_positions, pdb_files)
+    designed_per_pdb = resolve_table_reference(designed_positions, pdb_files)
     
     positions_data = {}
     for pdb_file in pdb_files:
@@ -223,12 +223,12 @@ def create_ligandmpnn_bash_script(positions_data, output_file):
 
 def main():
     if len(sys.argv) != 9:
-        print("Usage: python pipe_lmpnn_runtime_positions.py <structure_files> <input_source> <input_datasheet> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>")
+        print("Usage: python pipe_lmpnn_runtime_positions.py <structure_files> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>")
         sys.exit(1)
     
     structure_files_str = sys.argv[1]
     input_source = sys.argv[2]
-    input_datasheet = sys.argv[3]
+    input_table = sys.argv[3]
     fixed_positions = sys.argv[4]
     designed_positions = sys.argv[5] 
     ligand = sys.argv[6]
@@ -243,8 +243,8 @@ def main():
     print(f"Processing {len(pdb_files)} PDB files with input_source='{input_source}'")
     
     # Process based on input source
-    if input_source == "datasheet" and input_datasheet != "-":
-        positions_data = process_datasheet_source(input_datasheet, pdb_files)
+    if input_source == "table" and input_table != "-":
+        positions_data = process_table_source(input_table, pdb_files)
     elif input_source == "selection":
         positions_data = process_selection_source(fixed_positions, designed_positions, pdb_files)
     elif input_source == "ligand":

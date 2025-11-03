@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class MutationComposer(BaseConfig):
@@ -37,8 +37,8 @@ class MutationComposer(BaseConfig):
     DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
-                 frequencies: Union[List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]],
-                                  Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]],
+                 frequencies: Union[List[Union[ToolOutput, StandardizedOutput, TableInfo, str]],
+                                  Union[ToolOutput, StandardizedOutput, TableInfo, str]],
                  num_sequences: int = 10,
                  mode: str = "single_point",
                  min_frequency: float = 0.01,
@@ -52,9 +52,9 @@ class MutationComposer(BaseConfig):
         Initialize mutation composer tool.
 
         Args:
-            frequencies: Input datasheet(s) with mutation frequencies. Can be:
-                - Single datasheet: ToolOutput, StandardizedOutput, DatasheetInfo, or str
-                - Multiple datasheets: List of the above types
+            frequencies: Input table(s) with mutation frequencies. Can be:
+                - Single table: ToolOutput, StandardizedOutput, TableInfo, or str
+                - Multiple tables: List of the above types
             num_sequences: Number of sequences to generate
             mode: Generation strategy:
                 - "single_point": One mutation per sequence, ordered by frequency
@@ -66,25 +66,25 @@ class MutationComposer(BaseConfig):
             random_seed: Random seed for reproducible generation (None = random)
             prefix: Prefix for sequence IDs (e.g., "single_point" -> "single_point_001")
             hotspot_count: Number of top hotspot positions to consider for hotspot_focused mode (default: 10)
-            combination_strategy: Strategy for combining multiple frequency datasheets:
-                - "average": Average frequencies across datasheets, then single mutations
-                - "maximum": Take max frequencies across datasheets, then single mutations
-                - "stack": One mutation from each datasheet per sequence (multi-point)
-                - "round_robin": Alternate datasheets for single mutations
+            combination_strategy: Strategy for combining multiple frequency tables:
+                - "average": Average frequencies across tables, then single mutations
+                - "maximum": Take max frequencies across tables, then single mutations
+                - "stack": One mutation from each table per sequence (multi-point)
+                - "round_robin": Alternate tables for single mutations
             **kwargs: Additional parameters
 
         Examples:
-            # Generate single-point mutations from single datasheet
+            # Generate single-point mutations from single table
             composer = pipeline.add(MutationComposer(
-                frequencies=profiler.datasheets.absolute_frequencies,
+                frequencies=profiler.tables.absolute_frequencies,
                 num_sequences=20,
                 mode="single_point"
             ))
 
             # Generate sequences with one mutation from each enantiomer
             composer = pipeline.add(MutationComposer(
-                frequencies=[profiler_R.datasheets.absolute_frequencies,
-                           profiler_S.datasheets.absolute_frequencies],
+                frequencies=[profiler_R.tables.absolute_frequencies,
+                           profiler_S.tables.absolute_frequencies],
                 num_sequences=50,
                 mode="single_point",
                 combination_strategy="stack"
@@ -127,8 +127,8 @@ class MutationComposer(BaseConfig):
         """Validate MutationComposer parameters."""
         # Validate each mutation input
         for i, mutation_input in enumerate(self.mutation_inputs):
-            if not isinstance(mutation_input, (ToolOutput, StandardizedOutput, DatasheetInfo, str)):
-                raise ValueError(f"frequencies[{i}] must be a ToolOutput, StandardizedOutput, DatasheetInfo, or str object")
+            if not isinstance(mutation_input, (ToolOutput, StandardizedOutput, TableInfo, str)):
+                raise ValueError(f"frequencies[{i}] must be a ToolOutput, StandardizedOutput, TableInfo, or str object")
         
         if self.num_sequences <= 0:
             raise ValueError("num_sequences must be positive")
@@ -140,49 +140,49 @@ class MutationComposer(BaseConfig):
             raise ValueError("max_mutations must be positive or None")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input datasheets from MutationProfiler(s)."""
+        """Configure input tables from MutationProfiler(s)."""
         self.folders = pipeline_folders
 
-        # Extract mutation frequency datasheet paths
-        self.frequency_datasheet_paths = []
+        # Extract mutation frequency table paths
+        self.frequency_table_paths = []
 
         for i, mutation_input in enumerate(self.mutation_inputs):
             if hasattr(mutation_input, 'path'):
-                # DatasheetInfo object
+                # TableInfo object
                 frequency_path = mutation_input.path
             elif isinstance(mutation_input, str):
                 # Direct file path
                 frequency_path = mutation_input
-            elif hasattr(mutation_input, 'datasheets'):
+            elif hasattr(mutation_input, 'tables'):
                 # ToolOutput - look for absolute_frequencies or similar
-                datasheets = mutation_input.datasheets
+                tables = mutation_input.tables
 
-                if hasattr(datasheets, 'absolute_frequencies'):
-                    frequency_path = datasheets.absolute_frequencies.path
-                elif hasattr(datasheets, 'frequencies'):
-                    frequency_path = datasheets.frequencies.path
-                elif hasattr(datasheets, '_datasheets'):
-                    # Look for frequency-related datasheet
+                if hasattr(tables, 'absolute_frequencies'):
+                    frequency_path = tables.absolute_frequencies.path
+                elif hasattr(tables, 'frequencies'):
+                    frequency_path = tables.frequencies.path
+                elif hasattr(tables, '_tables'):
+                    # Look for frequency-related table
                     frequency_path = None
-                    for name, info in datasheets._datasheets.items():
+                    for name, info in tables._tables.items():
                         if 'frequenc' in name.lower() or 'mutation' in name.lower():
                             frequency_path = info.path
                             break
                     if frequency_path is None:
-                        raise ValueError(f"No frequency datasheet found in frequencies[{i}]")
+                        raise ValueError(f"No frequency table found in frequencies[{i}]")
                 else:
-                    raise ValueError(f"Could not find frequency datasheet in frequencies[{i}]")
+                    raise ValueError(f"Could not find frequency table in frequencies[{i}]")
             else:
                 raise ValueError(f"Unsupported input type for frequencies[{i}]: {type(mutation_input)}")
 
-            self.frequency_datasheet_paths.append(frequency_path)
+            self.frequency_table_paths.append(frequency_path)
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
         
         config_lines.extend([
-            f"INPUTS: {len(self.mutation_inputs)} frequency datasheet(s)",
+            f"INPUTS: {len(self.mutation_inputs)} frequency table(s)",
             f"COMBINATION_STRATEGY: {self.combination_strategy}",
             f"NUM_SEQUENCES: {self.num_sequences}",
             f"MODE: {self.mode}",
@@ -215,7 +215,7 @@ class MutationComposer(BaseConfig):
         # Create config file for mutation composer
         config_file = os.path.join(output_folder, "mutation_composer_config.json")
         config_data = {
-            "frequency_datasheets": self.frequency_datasheet_paths,
+            "frequency_tables": self.frequency_table_paths,
             "combination_strategy": self.combination_strategy,
             "num_sequences": self.num_sequences,
             "mode": self.mode,
@@ -240,7 +240,7 @@ class MutationComposer(BaseConfig):
 {self.generate_completion_check_header()}
 
 echo "Generating sequences from mutation profiles"
-echo "Input frequencies: {len(self.frequency_datasheet_paths)} datasheet(s)"
+echo "Input frequencies: {len(self.frequency_table_paths)} table(s)"
 echo "Combination strategy: {self.combination_strategy}"
 echo "Mode: {self.mode}"
 echo "Sequences to generate: {self.num_sequences}"
@@ -269,7 +269,7 @@ fi
         Get expected output files after sequence generation.
         
         Returns:
-            Dictionary with output file paths and datasheet information
+            Dictionary with output file paths and table information
         """
         sequences_csv = os.path.join(self.output_folder, "sequences.csv")
         sequences_fasta = os.path.join(self.output_folder, "sequences.fasta")
@@ -289,9 +289,9 @@ fi
             else:  # top_mutations
                 sequence_ids = [f"top_{i:03d}" for i in range(1, self.num_sequences + 1)]
         
-        # Define datasheets that will be created
-        datasheets = {
-            "sequences": DatasheetInfo(
+        # Define tables that will be created
+        tables = {
+            "sequences": TableInfo(
                 name="sequences",
                 path=sequences_csv,
                 columns=["id", "sequence", "mutations", "mutation_positions"],
@@ -307,7 +307,7 @@ fi
             "compound_ids": [],
             "sequences": [sequences_csv, sequences_fasta],
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
     

@@ -12,8 +12,8 @@
   - [Environment Management](#environment-management)
 - [Tool I/O Reference Guide](#tool-io-reference-guide)
   - [Overview](#overview)
-  - [Datasheet Organization](#datasheet-organization)
-  - [Datasheet Column References](#datasheet-column-references)
+  - [Table Organization](#table-organization)
+  - [Table Column References](#table-column-references)
 - [Troubleshooting](#troubleshooting)
   - [Common Issues](#common-issues)
   - [Debug Mode](#debug-mode)
@@ -32,8 +32,8 @@
     - [Environment Management](#environment-management)
   - [Tool I/O Reference Guide](#tool-io-reference-guide)
     - [Overview](#overview)
-    - [Datasheet Organization](#datasheet-organization)
-    - [Datasheet Column References](#datasheet-column-references)
+    - [Table Organization](#table-organization)
+    - [Table Column References](#table-column-references)
   - [Troubleshooting](#troubleshooting)
     - [Common Issues](#common-issues)
     - [Debug Mode](#debug-mode)
@@ -69,11 +69,11 @@
     - [Filter](#filter)
     - [SelectBest](#selectbest)
     - [RemoveDuplicates](#removeduplicates)
-    - [MergeDatasheets](#mergedatasheets)
-    - [ConcatenateDatasheets](#concatenatedatasheets)
-    - [SliceDatasheet](#slicedatasheet)
+    - [MergeTables](#mergetables)
+    - [ConcatenateTables](#concatenatetables)
+    - [SliceTable](#slicetable)
     - [ExtractMetrics](#extractmetrics)
-    - [AverageByDatasheet](#averagebydatasheet)
+    - [AverageByTable](#averagebytable)
   - [Utilities](#utilities)
     - [LoadOutput](#loadoutput)
     - [MMseqs2Server](#mmseqs2server)
@@ -129,7 +129,7 @@ structure_ids:
     – Test_1
     – ...
     – Test_5
-datasheets:
+tables:
     $structures (id, source_id, pdb, fixed, designed, contigs, time, status):
         – '<output_folder>/rfdiffusion_results.csv'
 output_folder:
@@ -158,7 +158,7 @@ sequence_ids:
     – ...
     – Test_5_1
     – Test_5_2
-datasheets:
+tables:
     $sequences (id, source_id, source_pdb, sequence, score, seq_recovery, rmsd):
         – '<output_folder>/Test_queries.csv'
 output_folder:
@@ -295,33 +295,33 @@ sequences         # [str]     - Path to csv file with columns id, sequence, ...
 sequence_ids      # List[str] - Sequence identifiers
 msas              # [str]     - Path to csv file with columns id, sequence, msa, ...
 msa_ids           # List[str] - MSA identifiers
-datasheets        # List[DI]  – Contains objects of class DatasheetInfo
+tables        # List[DI]  – Contains objects of class TableInfo
 tool_folder       # [str]     – Path to output directory
 ```
 
-### Datasheet Organization
-Datasheet names are tool-dependent. Accessing a datasheet with dot notation will return the path to the csv file. For accessing the metadata, use the info function.
+### Table Organization
+Table names are tool-dependent. Accessing a table with dot notation will return the path to the csv file. For accessing the metadata, use the info function.
 
 ```python
 # Simple path
-path = <tool output>.datasheets.analysis  # path/to/analysis.csv
+path = <tool output>.tables.analysis  # path/to/analysis.csv
 
 # Rich metadata access
-info = <tool output>.datasheets.info("analysis")
+info = <tool output>.tables.info("analysis")
 print(info.path)         # path/to/analysis.csv
 print(info.columns)      # ["id", ...]
 print(info.description)  # "Results from ..."
 print(info.count)        # Number of entries
 ```
 
-### Datasheet Column References
-Tools can explicitly reference specific columns from upstream datasheets using dot notation <tool output>.datasheets.<datasheet name>.<column name>, which returns the tuple (DatasheetInfo,str). 
+### Table Column References
+Tools can explicitly reference specific columns from upstream tables using dot notation <tool output>.tables.<table name>.<column name>, which returns the tuple (TableInfo,str). 
 
 ```python
 lmpnn = LigandMPNN(
     structures=rfdaa, #output from RFdiffusionAllAtom
     ligand='LIG',
-    redesigned=rfdaa.datasheets.structures.designed     #structures has columns id, fixed, designed, ... 
+    redesigned=rfdaa.tables.structures.designed     #structures has columns id, fixed, designed, ... 
 )
 ```
 
@@ -386,7 +386,7 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 
 **Outputs**:
 - `structures`: List of generated PDB files
-- `datasheets.structures`:
+- `tables.structures`:
 
   | id | source_id | pdb | fixed | designed | contigs | time | status |
   |----|-----------|-----|-------|----------|---------|------|--------|
@@ -436,7 +436,7 @@ Generates protein structures with explicit modeling of ligands and small molecul
 
 **Outputs**:
 - `structures`: List of generated PDB files
-- `datasheets.structures`:
+- `tables.structures`:
 
   | id | source_id | pdb | fixed | designed | contigs | time | status |
   |----|-----------|-----|-------|----------|---------|------|--------|
@@ -499,22 +499,22 @@ Models (~6GB) download automatically to `~/.cache` on first run, or specify cust
 
 **Outputs**:
 - `structures`: Final designed structure files (in `final_ranked_designs/final_<budget>_designs/`)
-- `datasheets.all_metrics`:
+- `tables.all_metrics`:
 
   | id | RMSD | hydrogen_bonds | packing_quality | interface_contacts | binding_energy | design_plddt |
   |----|------|----------------|-----------------|-------------------|----------------|--------------|
 
-- `datasheets.final_metrics`:
+- `tables.final_metrics`:
 
   | id | RMSD | hydrogen_bonds | packing_quality | interface_contacts | binding_energy | design_plddt | rank |
   |----|------|----------------|-----------------|-------------------|----------------|--------------|------|
 
-- `datasheets.aggregate_metrics`:
+- `tables.aggregate_metrics`:
 
   | metric | mean | std | min | max |
   |--------|------|-----|-----|-----|
 
-- `datasheets.per_target_metrics`:
+- `tables.per_target_metrics`:
 
   | target_id | num_designs | avg_rmsd | avg_plddt |
   |-----------|-------------|----------|-----------|
@@ -548,7 +548,7 @@ boltzgen = BoltzGen(
 
 
 # Access final designs
-best_designs = boltzgen.datasheets.final_metrics
+best_designs = boltzgen.tables.final_metrics
 ```
 
 **Example with File**:
@@ -580,10 +580,10 @@ git clone https://github.com/dauparas/ProteinMPN
 
 **Parameters**:
 - `structures`: Union[str, List[str], ToolOutput] (required) - Input structures
-- `datasheets`: Optional[List[str]] = None - Input datasheet files
+- `tables`: Optional[List[str]] = None - Input table files
 - `num_sequences`: int = 1 - Number of sequences per structure
-- `fixed`: str = "" - Fixed positions (PyMOL selection or datasheet reference)
-- `redesigned`: str = "" - Redesigned positions (PyMOL selection or datasheet reference)
+- `fixed`: str = "" - Fixed positions (PyMOL selection or table reference)
+- `redesigned`: str = "" - Redesigned positions (PyMOL selection or table reference)
 - `fixed_chain`: str = "A" - Chain to apply fixed positions
 - `plddt_threshold`: float = 100.0 - pLDDT threshold for automatic fixing (residues above threshold are fixed)
 - `sampling_temp`: float = 0.1 - Sampling temperature
@@ -592,7 +592,7 @@ git clone https://github.com/dauparas/ProteinMPN
 
 **Outputs**:
 - `sequences`: CSV file with generated sequences
-- `datasheets.sequences`:
+- `tables.sequences`:
 
   | id | source_id | source_pdb | sequence | score | seq_recovery | rmsd |
   |----|-----------|------------|----------|-------|--------------|------|
@@ -629,18 +629,18 @@ pip3 install -r requirements.txt
 **Parameters**:
 - `structures`: Union[str, List[str], ToolOutput] (required) - Input structures
 - `ligand`: str (required) - Ligand identifier for binding site focus
-- `datasheets`: Optional[List[str]] = None - Input datasheet files
+- `tables`: Optional[List[str]] = None - Input table files
 - `name`: str = "" - Job name for output files
 - `num_sequences`: int = 1 - Number of sequences to generate per structure
-- `fixed`: str = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or datasheet reference)
-- `redesigned`: str = "" - Designed positions (LigandMPNN format or datasheet reference)
+- `fixed`: str = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or table reference)
+- `redesigned`: str = "" - Designed positions (LigandMPNN format or table reference)
 - `design_within`: float = 5.0 - Distance in Angstroms from ligand for post-generation analysis only (does not control design). For actually designing residues within a distance, use [DistanceSelector](#distanceselector) to select positions first.
 - `model`: str = "v_32_010" - LigandMPNN model version (v_32_005, v_32_010, v_32_020, v_32_025)
 - `batch_size`: int = 1 - Batch size for processing
 
 **Outputs**:
 - `sequences`: CSV file with generated sequences
-- `datasheets.sequences`:
+- `tables.sequences`:
 
   | id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec |
   |----|----------|--------|---|------|-------------------|-------------------|---------|
@@ -651,7 +651,7 @@ lmpnn = LigandMPNN(
     structures=rfdaa,
     ligand="LIG",
     num_sequences=5,
-    redesigned=rfdaa.datasheets.structures.designed
+    redesigned=rfdaa.tables.structures.designed
 
 ```
 
@@ -664,7 +664,7 @@ Generates new protein sequences by composing mutations based on frequency analys
 **Installation**: Same environment as MutationProfiler.
 
 **Parameters**:
-- `frequencies`: Union[List, ToolOutput, StandardizedOutput, DatasheetInfo, str] (required) - Mutation frequency datasheet(s) from MutationProfiler
+- `frequencies`: Union[List, ToolOutput, StandardizedOutput, TableInfo, str] (required) - Mutation frequency table(s) from MutationProfiler
 - `num_sequences`: int = 10 - Number of sequences to generate
 - `mode`: str = "single_point" - Generation strategy:
   - "single_point": One mutation per sequence
@@ -676,11 +676,11 @@ Generates new protein sequences by composing mutations based on frequency analys
 - `random_seed`: int = None - Random seed for reproducibility
 - `prefix`: str = "" - Prefix for sequence IDs
 - `hotspot_count`: int = 10 - Number of top hotspot positions (for hotspot_focused mode)
-- `combination_strategy`: str = "average" - Strategy for combining multiple datasheets (average, maximum, stack, round_robin)
+- `combination_strategy`: str = "average" - Strategy for combining multiple tables (average, maximum, stack, round_robin)
 
 **Outputs**:
 - `sequences`: CSV file with composed sequences
-- `datasheets.sequences`:
+- `tables.sequences`:
 
   | id | sequence | mutations | mutation_positions |
   |----|----------|-----------|-------------------|
@@ -689,7 +689,7 @@ Generates new protein sequences by composing mutations based on frequency analys
 ```python
 profiler = MutationProfiler(original=ref, mutants=variants
 composer = MutationComposer(
-    frequencies=profiler.datasheets.relative_frequencies,
+    frequencies=profiler.tables.relative_frequencies,
     num_sequences=50,
     mode="weighted_random",
     max_mutations=5
@@ -724,12 +724,12 @@ Performs site-directed mutagenesis at specified positions. Generates systematic 
 
 **Outputs**:
 - `sequences`: CSV file with mutant sequences
-- `datasheets.sequences`:
+- `tables.sequences`:
 
   | id | sequence | mutation | position | original_aa | new_aa |
   |----|----------|----------|----------|-------------|--------|
 
-- `datasheets.missing_sequences`:
+- `tables.missing_sequences`:
 
   | id | sequence | reason |
   |----|----------|--------|
@@ -761,7 +761,7 @@ Concatenates multiple protein sequences with flexible linkers. Creates fusion pr
 
 **Outputs**:
 - `sequences`: CSV file with fused sequences
-- `datasheets.sequences`:
+- `tables.sequences`:
 
   | id | sequence | lengths |
   |----|----------|---------|
@@ -789,7 +789,7 @@ Combines different regions from multiple sequence sources into chimeric proteins
 
 **Outputs**:
 - `sequences`: CSV file with stitched sequences
-- `datasheets.sequences`:
+- `tables.sequences`:
 
   | id | sequence |
   |----|----------|
@@ -814,7 +814,7 @@ Predicts protein structures from amino acid sequences using AlphaFold2. Generate
 
 **Parameters**:
 - `sequences`: Union[str, List[str], ToolOutput, Dict[str, Any]] (required) - Input sequences or dict with sequences
-- `datasheets`: Optional[List[str]] = None - Input datasheet files
+- `tables`: Optional[List[str]] = None - Input table files
 - `name`: str = "" - Job name
 - `num_relax`: int = 0 - Number of best models to relax with AMBER
 - `num_recycle`: int = 3 - Number of recycling iterations
@@ -822,7 +822,7 @@ Predicts protein structures from amino acid sequences using AlphaFold2. Generate
 
 **Outputs**:
 - `structures`: List of predicted PDB files
-- `datasheets.structures`:
+- `tables.structures`:
 
   | id | source_id | sequence |
   |----|-----------|----------|
@@ -856,14 +856,14 @@ pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059
 
 **Parameters**:
 - `sequences`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Input sequences
-- `datasheets`: Optional[List[str]] = None - Input datasheet files
+- `tables`: Optional[List[str]] = None - Input table files
 - `name`: str = "" - Job name
 - `num_recycle`: int = 4 - Number of recycling iterations
 - `chunk_size`: Optional[int] = None - Chunk size for long sequences (auto if None)
 
 **Outputs**:
 - `structures`: List of predicted PDB files
-- `datasheets.structures`:
+- `tables.structures`:
 
   | id | sequence |
   |----|----------|
@@ -905,12 +905,12 @@ Predicts biomolecular complexes including proteins, nucleic acids, and small mol
 
 **Outputs**:
 - `structures`: List of predicted complex PDB files
-- `datasheets.confidence`:
+- `tables.confidence`:
 
   | id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt |
   |----|------------|------------------|-----|------|---------------|----------------|
 
-- `datasheets.affinity`:
+- `tables.affinity`:
 
   | id | input_file | affinity_pred_value | affinity_probability_binary |
   |----|------------|---------------------|----------------------------|
@@ -964,12 +964,12 @@ pip install -e .
 
 **Outputs**:
 - `structures`: List of predicted structure files
-- `datasheets.structures`:
+- `tables.structures`:
 
   | id | model_id | file_path | plddt_score |
   |----|----------|-----------|-------------|
 
-- `datasheets.confidence`:
+- `tables.confidence`:
 
   | id | model_id | plddt_score | ptm_score |
   |----|----------|-------------|-----------|
@@ -1024,7 +1024,7 @@ conda env create -f onet_env.yaml
 - `output_format`: str = "csv" - Output format ("csv" or "json")
 
 **Outputs**:
-- `datasheets.affinities`:
+- `tables.affinities`:
 
   | id | structure_path | predicted_affinity_pKa |
   |----|----------------|------------------------|
@@ -1067,7 +1067,7 @@ pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 sci
 - `output_format`: str = "csv" - Output format ("csv" or "json")
 
 **Outputs**:
-- `datasheets.affinities`:
+- `tables.affinities`:
 
   | id | structure_path | predicted_affinity_pKa |
   |----|----------------|------------------------|
@@ -1149,7 +1149,7 @@ Model weights location: `/data/{username}/DynamicBind/workdir`
 
 **Parameters:**
 - `proteins`: Input protein(s) - PDB filename, list of PDBs, or tool output (all structures used)
-- `ligands`: SMILES string or tool output with compounds datasheet (must have 'smiles' column)
+- `ligands`: SMILES string or tool output with compounds table (must have 'smiles' column)
 - `samples_per_complex`: Number of samples per complex (default: 10)
 - `inference_steps`: Diffusion steps (default: 20)
 - `no_relax`: Skip OpenMM relaxation (default: False)
@@ -1180,7 +1180,7 @@ db = DynamicBind(proteins=rfdaa, ligands=compounds
 
 **Outputs:**
 - Structures: SDF files with pattern `rank{N}_ligand_lddt{score}_affinity{score}_relaxed.sdf`
-- Datasheets:
+- Tables:
   - `dynamicbind_results.csv`: columns `id`, `ligand_id`, `structure`, `affinity`, `lddt`, `rank`
   - `compounds.csv`: compounds used (available as `output.compounds`)
 
@@ -1200,7 +1200,7 @@ Measures distances between specific atoms and residues in structures. Useful for
 - `metric_name`: str = None - Custom name for distance column in output (default: "distance")
 
 **Outputs**:
-- `datasheets.analysis`:
+- `tables.analysis`:
 
   | id | source_structure | {metric_name} |
   |----|------------------|---------------|
@@ -1241,7 +1241,7 @@ Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydr
 - `verbose`: bool = True - Enable verbose output
 
 **Outputs**:
-- `datasheets.interactions`:
+- `tables.interactions`:
 
   | id | ligand_id | interaction_type | residue | distance | angle | energy |
   |----|-----------|------------------|---------|----------|-------|--------|
@@ -1271,7 +1271,7 @@ Selects protein residues based on proximity to ligands or other reference points
 - `reference_selection`: str = "" - Specific PyMOL selection if not using ligand
 
 **Outputs**:
-- `datasheets.selections`:
+- `tables.selections`:
 
   | id | pdb | within | beyond | distance_cutoff | reference_ligand |
   |----|-----|--------|--------|-----------------|------------------|
@@ -1294,7 +1294,7 @@ Modifies PyMOL-formatted selection strings (e.g., "3-45+58-60") with structure-a
 **Installation**: Requires an environment containing pandas (e.g. biopipelines).
 
 **Parameters**:
-- `selection`: tuple (required) - Datasheet column reference (e.g., `tool.datasheets.structures.designed`)
+- `selection`: tuple (required) - Table column reference (e.g., `tool.tables.structures.designed`)
 - `structures`: Optional[Union[ToolOutput, List[str]]] = None - Input structures (auto-detected from selection source if not provided)
 - `expand`: int = 0 - Number of residues to add on each side of intervals
 - `shrink`: int = 0 - Number of residues to remove from each side of intervals
@@ -1302,7 +1302,7 @@ Modifies PyMOL-formatted selection strings (e.g., "3-45+58-60") with structure-a
 - `invert`: bool = False - Whether to invert the selection (select complement)
 
 **Outputs**:
-- `datasheets.selections`:
+- `tables.selections`:
 
   | id | pdb | {column_name} | original_{column_name} |
   |----|-----|---------------|------------------------|
@@ -1317,7 +1317,7 @@ distances = DistanceSelector(
 
 
 expanded = SelectionEditor(
-    selection=distances.datasheets.selections.within,
+    selection=distances.tables.selections.within,
     expand=2
 
 
@@ -1325,18 +1325,18 @@ expanded = SelectionEditor(
 lmpnn = LigandMPNN(
     structures=rfdaa,
     ligand="LIG",
-    redesigned=expanded.datasheets.selections.within
+    redesigned=expanded.tables.selections.within
 
 
 # Invert selection to get everything except binding site
 fixed_region = SelectionEditor(
-    selection=distances.datasheets.selections.within,
+    selection=distances.tables.selections.within,
     invert=True
 
 
 # Shrink selection
 tighter = SelectionEditor(
-    selection=distances.datasheets.selections.within,
+    selection=distances.tables.selections.within,
     shrink=1
 
 ```
@@ -1361,11 +1361,11 @@ Quantifies structural changes between reference and target structures. Calculate
 **Parameters**:
 - `reference_structures`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference structures
 - `target_structures`: Union[ToolOutput, StandardizedOutput] (required) - Target structures to compare
-- `selection`: Union[str, ToolOutput] (required) - Region specification (PyMOL selection or datasheet reference)
+- `selection`: Union[str, ToolOutput] (required) - Region specification (PyMOL selection or table reference)
 - `alignment`: str = "align" - Alignment method (align, super, cealign)
 
 **Outputs**:
-- `datasheets.conformational_analysis`:
+- `tables.conformational_analysis`:
 
   | id | reference_structure | target_structure | selection | num_residues | RMSD | max_distance | mean_distance | sum_over_square_root |
   |----|---------------------|------------------|-----------|--------------|------|--------------|---------------|---------------------|
@@ -1397,22 +1397,22 @@ conda create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 - `include_original`: bool = True - Include original sequence in frequency analysis
 
 **Outputs**:
-- `datasheets.profile`:
+- `tables.profile`:
 
   | position | original | count | frequency |
   |----------|----------|-------|-----------|
 
-- `datasheets.mutations`:
+- `tables.mutations`:
 
   | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
   |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
-- `datasheets.absolute_frequencies`:
+- `tables.absolute_frequencies`:
 
   | position | original | A | C | ... | Y |
   |----------|----------|---|---|-----|---|
 
-- `datasheets.relative_frequencies`:
+- `tables.relative_frequencies`:
 
   | position | original | A | C | ... | Y |
   |----------|----------|---|---|-----|---|
@@ -1434,13 +1434,13 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 
 **Parameters**:
 - `structures`: Union[ToolOutput, StandardizedOutput] (required) - Input structures
-- `selections`: Union[str, ToolOutput] = None - Protein region selections (string format: '10-20+30-40', datasheet reference, or None for all protein)
+- `selections`: Union[str, ToolOutput] = None - Protein region selections (string format: '10-20+30-40', table reference, or None for all protein)
 - `ligand`: str (required) - Ligand residue name (3-letter code, e.g., 'LIG', 'ATP', 'GDP')
 - `contact_threshold`: float = 5.0 - Distance threshold for counting contacts (Angstroms)
 - `contact_metric_name`: str = None - Custom name for contact count column (default: "contacts")
 
 **Outputs**:
-- `datasheets.contact_analysis`:
+- `tables.contact_analysis`:
 
   | id | source_structure | selections | ligand | contacts | min_distance | max_distance | mean_distance | sum_distances_sqrt_normalized |
   |----|------------------|------------|--------|----------|--------------|--------------|---------------|-------------------------------|
@@ -1461,7 +1461,7 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 # Analyze contacts with specific protein regions
 contacts = ProteinLigandContacts(
     structures=rfdaa,
-    selections=rfdaa.datasheets.structures.designed,
+    selections=rfdaa.tables.structures.designed,
     ligand="LIG",
     contact_threshold=5.0
 
@@ -1499,7 +1499,7 @@ Measures ligand pose distance between reference holo structure and sample struct
 - `calculate_orientation`: bool = False - Calculate orientation angle difference
 
 **Outputs**:
-- `datasheets.analysis`:
+- `tables.analysis`:
 
   | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | alignment_rmsd | num_ligand_atoms | alignment_selection |
   |----|------------------|---------------------|-------------|-------------------|----------------|------------------|---------------------|
@@ -1526,7 +1526,7 @@ pose_analysis = PoseDistance(
 
 # Filter structures with RMSD < 2.0 Å
 good_poses = Filter(
-    data=pose_analysis.datasheets.analysis,
+    data=pose_analysis.tables.analysis,
     pool=designed,
     expression="ligand_rmsd < 2.0"
 
@@ -1543,7 +1543,7 @@ Filters structures or sequences based on metric criteria. Uses pandas query expr
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `data`: Union[ToolOutput, StandardizedOutput] (required) - Datasheet input to filter
+- `data`: Union[ToolOutput, StandardizedOutput] (required) - Table input to filter
 - `pool`: Union[ToolOutput, StandardizedOutput] = None - Structure/sequence pool for copying filtered items
 - `expression`: str (required) - Pandas query-style filter expression (e.g., "distance < 3.5 and confidence > 0.8")
 - `max_items`: Optional[int] = None - Maximum items to keep after filtering
@@ -1552,8 +1552,8 @@ Filters structures or sequences based on metric criteria. Uses pandas query expr
 
 **Outputs**:
 - Filtered pool with same structure as input
-- All the datasheets of the upstream tool given as input will be copied and fitered based on the expression, and maintain the same datasheet name. For example, after filtering an output of MergeDatasheets, you can access filtered.datasheets.merged.
-- `datasheets.missing`:
+- All the tables of the upstream tool given as input will be copied and fitered based on the expression, and maintain the same table name. For example, after filtering an output of MergeTables, you can access filtered.tables.merged.
+- `tables.missing`:
 
   | id | structure | msa |
   |----|-----------|-----|
@@ -1561,7 +1561,7 @@ Filters structures or sequences based on metric criteria. Uses pandas query expr
 **Example**:
 ```python
 filtered = Filter(
-    data=distances.datasheets.analysis,
+    data=distances.tables.analysis,
     pool=boltz,
     expression="distance < 3.5 and confidence_score > 0.85",
     max_items=10,
@@ -1579,7 +1579,7 @@ Selects the single best structure or sequence based on optimization criteria. Su
 
 **Parameters**:
 - `pool`: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]] (required) - Single or list of tool outputs to select from
-- `datasheets`: Union[List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]], List[str]] (required) - Datasheets to evaluate for selection
+- `tables`: Union[List[Union[ToolOutput, StandardizedOutput, TableInfo, str]], List[str]] (required) - Tables to evaluate for selection
 - `metric`: str (required) - Primary metric to optimize
 - `mode`: str = "max" - Optimization direction ("max" or "min")
 - `weights`: Optional[Dict[str, float]] = None - Dictionary of {metric_name: weight} for multi-metric selection
@@ -1594,7 +1594,7 @@ Selects the single best structure or sequence based on optimization criteria. Su
 ```python
 best = SelectBest(
     pool=boltz,
-    datasheets=[distances.datasheets.analysis],
+    tables=[distances.tables.analysis],
     metric="distance",
     mode="min"
 
@@ -1602,7 +1602,7 @@ best = SelectBest(
 # Multi-objective selection
 best_multi = SelectBest(
     pool=boltz,
-    datasheets=[analysis.datasheets.merged],
+    tables=[analysis.tables.merged],
     metric="composite_score",
     weights={"binding_affinity": 0.6, "pLDDT": 0.4},
     mode="max"
@@ -1619,13 +1619,13 @@ Removes duplicate structures or sequences from a pool. Supports deduplication by
 
 **Parameters**:
 - `pool`: Union[ToolOutput, StandardizedOutput] (required) - Items to deduplicate
-- `history`: Optional[Union[ToolOutput, StandardizedOutput, List]] = None - Previous datasheets for cross-cycle deduplication
+- `history`: Optional[Union[ToolOutput, StandardizedOutput, List]] = None - Previous tables for cross-cycle deduplication
 - `compare`: str = "sequence" - Comparison method (sequence, structure, id)
 - `similarity_threshold`: float = 1.0 - Similarity threshold for structure comparison (1.0 = exact match)
 
 **Outputs**:
 - Deduplicated pool with same structure as input
-- `datasheets.removed`:
+- `tables.removed`:
 
   | id | reason |
   |----|--------|
@@ -1640,27 +1640,27 @@ unique = RemoveDuplicates(
 
 ---
 
-### MergeDatasheets
+### MergeTables
 
-Combines multiple datasheets by joining on a common key column. Enables integration of metrics from different analysis tools.
+Combines multiple tables by joining on a common key column. Enables integration of metrics from different analysis tools.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `datasheets`: List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]] (required) - List of datasheets to merge
+- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - List of tables to merge
 - `key`: str = "id" - Join column name
-- `prefixes`: Optional[List[str]] = None - Prefixes for columns from each datasheet
-- `suffixes`: Optional[List[str]] = None - Suffixes for columns from each datasheet
+- `prefixes`: Optional[List[str]] = None - Prefixes for columns from each table
+- `suffixes`: Optional[List[str]] = None - Suffixes for columns from each table
 - `how`: str = "inner" - Join type (inner, outer, left, right)
 - `calculate`: Optional[Dict[str, str]] = None - Derived column expressions {new_col: expression}
 
 **Outputs**:
-- `datasheets.merged`: Combined datasheet with columns from all inputs
+- `tables.merged`: Combined table with columns from all inputs
 
 **Example**:
 ```python
-merged = MergeDatasheets(
-    datasheets=[distances.datasheets.analysis, plip.datasheets.interactions],
+merged = MergeTables(
+    tables=[distances.tables.analysis, plip.tables.interactions],
     prefixes=["dist_", "plip_"],
     key="id",
     calculate={"score": "dist_distance + plip_energy"}
@@ -1669,50 +1669,50 @@ merged = MergeDatasheets(
 
 ---
 
-### ConcatenateDatasheets
+### ConcatenateTables
 
-Stacks multiple datasheets vertically (row-wise). Useful for combining results from multiple cycles or parallel runs.
+Stacks multiple tables vertically (row-wise). Useful for combining results from multiple cycles or parallel runs.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `datasheets`: List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]] (required) - List of datasheets to concatenate
+- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - List of tables to concatenate
 - `fill`: str = "N/A" - Value for missing columns
 - `ignore_index`: bool = True - Reset index in concatenated output
 
 **Outputs**:
-- `datasheets.concatenated`: Row-wise concatenation of all input datasheets
+- `tables.concatenated`: Row-wise concatenation of all input tables
 
 **Example**:
 ```python
-concat = ConcatenateDatasheets(
-    datasheets=[cycle1_results, cycle2_results, cycle3_results],
+concat = ConcatenateTables(
+    tables=[cycle1_results, cycle2_results, cycle3_results],
     fill="N/A"
 
 ```
 
 ---
 
-### SliceDatasheet
+### SliceTable
 
-Extracts a subset of rows and/or columns from a datasheet. Enables data sampling and column selection.
+Extracts a subset of rows and/or columns from a table. Enables data sampling and column selection.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `datasheet`: Union[ToolOutput, StandardizedOutput, DatasheetInfo, str] (required) - Input datasheet to slice
+- `table`: Union[ToolOutput, StandardizedOutput, TableInfo, str] (required) - Input table to slice
 - `start`: int = 0 - Starting row index
 - `end`: Optional[int] = None - Ending row index (None = to end)
 - `step`: int = 1 - Step size for slicing
 - `columns`: Optional[List[str]] = None - Specific columns to keep (None = all columns)
 
 **Outputs**:
-- `datasheets.sliced`: Sliced datasheet
+- `tables.sliced`: Sliced table
 
 **Example**:
 ```python
-sliced = SliceDatasheet(
-    datasheet=results.datasheets.analysis,
+sliced = SliceTable(
+    table=results.tables.analysis,
     start=0,
     end=100,
     columns=["id", "distance", "confidence"]
@@ -1723,24 +1723,24 @@ sliced = SliceDatasheet(
 
 ### ExtractMetrics
 
-Extracts and aggregates specific metrics from datasheets. Supports grouping and various aggregation functions for data summarization.
+Extracts and aggregates specific metrics from tables. Supports grouping and various aggregation functions for data summarization.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `datasheets`: List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]] (required) - Input datasheets
+- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - Input tables
 - `metrics`: List[str] (required) - Metric column names to extract
 - `group_by`: Optional[str] = None - Column to group by for aggregation
 - `aggregation`: str = "mean" - Aggregation function (mean, median, min, max, sum, std)
 - `pivot`: bool = False - Pivot metrics to columns
 
 **Outputs**:
-- `datasheets.extracted`: Extracted metrics datasheet
+- `tables.extracted`: Extracted metrics table
 
 **Example**:
 ```python
 metrics = ExtractMetrics(
-    datasheets=[boltz.datasheets.confidence],
+    tables=[boltz.tables.confidence],
     metrics=["complex_plddt", "ptm"],
     group_by="input_file",
     aggregation="mean"
@@ -1749,25 +1749,25 @@ metrics = ExtractMetrics(
 
 ---
 
-### AverageByDatasheet
+### AverageByTable
 
 Computes averages of metrics grouped by a specified column. Useful for summarizing results across multiple structures or cycles.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `datasheets`: List[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]] (required) - Input datasheets
+- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - Input tables
 - `group_by`: str (required) - Column to group by
 - `metrics`: List[str] (required) - Metric columns to average
 - `weights`: Optional[Dict[str, float]] = None - Weights for each metric
 
 **Outputs**:
-- `datasheets.averaged`: Averaged metrics by group
+- `tables.averaged`: Averaged metrics by group
 
 **Example**:
 ```python
-averaged = AverageByDatasheet(
-    datasheets=[cycle1.datasheets.analysis, cycle2.datasheets.analysis],
+averaged = AverageByTable(
+    tables=[cycle1.tables.analysis, cycle2.tables.analysis],
     group_by="structure_id",
     metrics=["distance", "confidence"]
 
@@ -1835,7 +1835,7 @@ Generates multiple sequence alignments (MSAs) for protein sequences. Used for im
 - `timeout`: int = 3600 - Timeout in seconds for server response
 
 **Outputs**:
-- `datasheets.msas`:
+- `tables.msas`:
 
   | id | sequence_id | sequence | msa_file |
   |----|-------------|----------|----------|
@@ -1880,7 +1880,7 @@ Creates and manages chemical compound libraries. Supports combinatorial SMILES e
 
 **Outputs**:
 - `compounds`: CSV file with compound library
-- `datasheets.compounds`:
+- `tables.compounds`:
 
   | id | format | smiles | ccd | {branching_keys} |
   |----|--------|--------|-----|------------------|
@@ -1929,17 +1929,17 @@ For each PDB ID, searches in order:
 
 **Outputs**:
 - `structures`: List of structure files
-- `datasheets.structures`:
+- `tables.structures`:
 
   | id | pdb_id | file_path | format | file_size | source |
   |----|--------|-----------|--------|-----------|--------|
 
-- `datasheets.sequences`:
+- `tables.sequences`:
 
   | id | sequence |
   |----|----------|
 
-- `datasheets.failed`:
+- `tables.failed`:
 
   | pdb_id | error_message | source | attempted_path |
   |--------|---------------|--------|----------------|

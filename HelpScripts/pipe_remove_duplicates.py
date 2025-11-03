@@ -106,10 +106,10 @@ def get_unique_sequences(new_df: pd.DataFrame, reference_df: pd.DataFrame, compa
     return unique_df
 
 
-def save_missing_datasheet(new_df: pd.DataFrame, unique_df: pd.DataFrame, 
+def save_missing_table(new_df: pd.DataFrame, unique_df: pd.DataFrame, 
                           output_folder: str) -> None:
     """
-    Save datasheet of missing/duplicate sequences that were filtered out.
+    Save table of missing/duplicate sequences that were filtered out.
     
     Args:
         new_df: Original DataFrame with all new sequences
@@ -117,7 +117,7 @@ def save_missing_datasheet(new_df: pd.DataFrame, unique_df: pd.DataFrame,
         output_folder: Output directory
     """
     if 'id' not in new_df.columns:
-        print("Warning: No 'id' column found - cannot generate missing datasheet")
+        print("Warning: No 'id' column found - cannot generate missing table")
         print(f"Available columns in new_df: {list(new_df.columns) if not new_df.empty else 'DataFrame is empty'}")
         return
     
@@ -142,7 +142,7 @@ def save_missing_datasheet(new_df: pd.DataFrame, unique_df: pd.DataFrame,
             })
         missing_df = pd.DataFrame(missing_data)
         missing_df.to_csv(missing_csv, index=False)
-        print(f"Missing sequences datasheet saved: {missing_csv} ({len(missing_ids)} entries)")
+        print(f"Missing sequences table saved: {missing_csv} ({len(missing_ids)} entries)")
     else:
         # Create empty missing.csv file - pipeline expects it to exist
         empty_df = pd.DataFrame({
@@ -186,8 +186,8 @@ def remove_duplicates(config_data: Dict[str, Any]) -> None:
     unique_df.to_csv(output_csv, index=False)
     print(f"\nUnique sequences saved: {output_csv}")
     
-    # Generate missing datasheet for filtered sequences
-    save_missing_datasheet(pool_df, unique_df, output_folder)
+    # Generate missing table for filtered sequences
+    save_missing_table(pool_df, unique_df, output_folder)
     
     # Verify missing.csv was created
     missing_csv_path = os.path.join(output_folder, "missing.csv")

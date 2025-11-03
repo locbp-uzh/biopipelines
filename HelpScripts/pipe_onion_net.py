@@ -16,16 +16,16 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple
 
 
-def load_structures_from_datasheet(datasheet_path: str) -> List[Tuple[str, str]]:
+def load_structures_from_table(table_path: str) -> List[Tuple[str, str]]:
     """
-    Load structures from datasheet.
+    Load structures from table.
 
     Returns:
         List of (id, file_path) tuples
     """
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     if 'id' not in df.columns or 'file_path' not in df.columns:
-        raise ValueError(f"Datasheet must have 'id' and 'file_path' columns: {datasheet_path}")
+        raise ValueError(f"Table must have 'id' and 'file_path' columns: {table_path}")
 
     return list(zip(df['id'], df['file_path']))
 
@@ -243,12 +243,12 @@ def process_onionnet_predictions(config_data: Dict[str, Any], version: int) -> i
 
     if structure_input:
         if structure_input.get('type') == 'tool_output':
-            # Load from datasheets
-            datasheets = config_data.get('input_datasheets', {})
-            if 'structures' in datasheets:
-                structures = load_structures_from_datasheet(datasheets['structures'])
+            # Load from tables
+            tables = config_data.get('input_tables', {})
+            if 'structures' in tables:
+                structures = load_structures_from_table(tables['structures'])
             else:
-                print("Error: No structures datasheet found in input", file=sys.stderr)
+                print("Error: No structures table found in input", file=sys.stderr)
                 return 1
         elif structure_input.get('type') == 'string':
             # Single structure file

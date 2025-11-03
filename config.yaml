@@ -50,11 +50,11 @@ environments:
   # Data manipulation tools
   Filter: "biopipelines"
   SelectBest: "biopipelines"
-  MergeDatasheets: "biopipelines"
-  ConcatenateDatasheets: "biopipelines"
+  MergeTables: "biopipelines"
+  ConcatenateTables: "biopipelines"
   RemoveDuplicates: "biopipelines"
-  SliceDatasheet: "biopipelines"
-  AverageByDatasheet: "biopipelines"
+  SliceTable: "biopipelines"
+  AverageByTable: "biopipelines"
   ExtractMetrics: "biopipelines"
   LoadOutput: "biopipelines"
 

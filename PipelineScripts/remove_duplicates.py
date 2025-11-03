@@ -10,13 +10,13 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class RemoveDuplicates(BaseConfig):
@@ -31,16 +31,16 @@ class RemoveDuplicates(BaseConfig):
     DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
-                 pool: Union[ToolOutput, StandardizedOutput, DatasheetInfo, str],
-                 history: Optional[Union[ToolOutput, StandardizedOutput, DatasheetInfo, str]] = None,
+                 pool: Union[ToolOutput, StandardizedOutput, TableInfo, str],
+                 history: Optional[Union[ToolOutput, StandardizedOutput, TableInfo, str]] = None,
                  compare: str = "sequence",
                  **kwargs):
         """
         Initialize RemoveDuplicates tool.
 
         Args:
-            pool: Tool output, direct datasheet, or file path containing sequences to check for duplicates
-            history: Tool output, direct datasheet, or file path containing historical sequences to compare against (None for first cycle)
+            pool: Tool output, direct table, or file path containing sequences to check for duplicates
+            history: Tool output, direct table, or file path containing historical sequences to compare against (None for first cycle)
             compare: Column name to compare for duplicates (e.g. "sequence")
             **kwargs: Additional parameters
 
@@ -59,17 +59,17 @@ class RemoveDuplicates(BaseConfig):
                 compare="sequence"
             ))
 
-            # Elegant direct datasheet access (DatasheetInfo objects)
+            # Elegant direct table access (TableInfo objects)
             unique_sequences = pipeline.add(RemoveDuplicates(
-                pool=composer.o.datasheets.sequences,
-                history=all_sequences_seen.o.datasheets.concatenated,
+                pool=composer.o.tables.sequences,
+                history=all_sequences_seen.o.tables.concatenated,
                 compare="sequence"
             ))
 
             # Direct file path access (most elegant)
             unique_sequences = pipeline.add(RemoveDuplicates(
-                pool=composer.datasheets.sequences,
-                history=all_sequences_seen.datasheets.concatenated,
+                pool=composer.tables.sequences,
+                history=all_sequences_seen.tables.concatenated,
                 compare="sequence"
             ))
         """
@@ -78,11 +78,11 @@ class RemoveDuplicates(BaseConfig):
         self.compare = compare
         
         # Validate inputs
-        if not isinstance(pool, (ToolOutput, StandardizedOutput, DatasheetInfo, str)):
-            raise ValueError("pool must be a ToolOutput, StandardizedOutput, DatasheetInfo object, or file path string")
+        if not isinstance(pool, (ToolOutput, StandardizedOutput, TableInfo, str)):
+            raise ValueError("pool must be a ToolOutput, StandardizedOutput, TableInfo object, or file path string")
 
-        if history is not None and not isinstance(history, (ToolOutput, StandardizedOutput, DatasheetInfo, str)):
-            raise ValueError("history must be a ToolOutput, StandardizedOutput, DatasheetInfo object, file path string, or None")
+        if history is not None and not isinstance(history, (ToolOutput, StandardizedOutput, TableInfo, str)):
+            raise ValueError("history must be a ToolOutput, StandardizedOutput, TableInfo object, file path string, or None")
 
         # compare can be any column name - no validation needed for specific values
 
@@ -97,11 +97,11 @@ class RemoveDuplicates(BaseConfig):
     
     def validate_params(self):
         """Validate RemoveDuplicates parameters."""
-        if not isinstance(self.pool, (ToolOutput, StandardizedOutput, DatasheetInfo, str)):
-            raise ValueError("pool must be a ToolOutput, StandardizedOutput, DatasheetInfo object, or file path string")
+        if not isinstance(self.pool, (ToolOutput, StandardizedOutput, TableInfo, str)):
+            raise ValueError("pool must be a ToolOutput, StandardizedOutput, TableInfo object, or file path string")
 
-        if self.history is not None and not isinstance(self.history, (ToolOutput, StandardizedOutput, DatasheetInfo, str)):
-            raise ValueError("history must be a ToolOutput, StandardizedOutput, DatasheetInfo object, file path string, or None")
+        if self.history is not None and not isinstance(self.history, (ToolOutput, StandardizedOutput, TableInfo, str)):
+            raise ValueError("history must be a ToolOutput, StandardizedOutput, TableInfo object, file path string, or None")
         
         # compare can be any column name - no validation needed for specific values
     
@@ -127,8 +127,8 @@ class RemoveDuplicates(BaseConfig):
                 "sequence_csv": None
             }
     
-    def _extract_pool_config(self, pool: Union[ToolOutput, StandardizedOutput, DatasheetInfo, str], prefix: str) -> Dict[str, Any]:
-        """Extract configuration from a pool tool output, direct datasheet, or file path."""
+    def _extract_pool_config(self, pool: Union[ToolOutput, StandardizedOutput, TableInfo, str], prefix: str) -> Dict[str, Any]:
+        """Extract configuration from a pool tool output, direct table, or file path."""
         config = {
             "prefix": prefix,
             "structures": [],
@@ -145,8 +145,8 @@ class RemoveDuplicates(BaseConfig):
             config["output_folder"] = os.path.dirname(pool)
             return config
 
-        # Handle direct DatasheetInfo objects
-        if isinstance(pool, DatasheetInfo):
+        # Handle direct TableInfo objects
+        if isinstance(pool, TableInfo):
             config["sequence_csv"] = pool.path
             config["output_folder"] = os.path.dirname(pool.path)
             return config
@@ -165,46 +165,46 @@ class RemoveDuplicates(BaseConfig):
             # Predict sequence CSV location
             sequence_files = [
                 os.path.join(pool.output_folder, 'sequences.csv'),
-                os.path.join(pool.output_folder, 'datasheet.csv'),
+                os.path.join(pool.output_folder, 'table.csv'),
                 os.path.join(pool.output_folder, 'results.csv')
             ]
             config["sequence_files"] = sequence_files
         
-        # Extract datasheets if available
-        if hasattr(pool, 'datasheets'):
-            datasheets = pool.datasheets
+        # Extract tables if available
+        if hasattr(pool, 'tables'):
+            tables = pool.tables
             
-            if hasattr(datasheets, '_datasheets'):
-                # Standard BioPipelines format - look for sequences/concatenated datasheet
-                for name, info in datasheets._datasheets.items():
-                    if 'sequence' in name.lower() or 'concatenated' in name.lower() or name == 'datasheet':
+            if hasattr(tables, '_tables'):
+                # Standard BioPipelines format - look for sequences/concatenated table
+                for name, info in tables._tables.items():
+                    if 'sequence' in name.lower() or 'concatenated' in name.lower() or name == 'table':
                         if hasattr(info, 'path'):
                             config["sequence_csv"] = info.path
                         else:
                             config["sequence_csv"] = str(info)
                         break
 
-                # Fallback: if no specific pattern found, use first available datasheet
-                if config["sequence_csv"] is None and datasheets._datasheets:
-                    first_name, first_info = next(iter(datasheets._datasheets.items()))
+                # Fallback: if no specific pattern found, use first available table
+                if config["sequence_csv"] is None and tables._tables:
+                    first_name, first_info = next(iter(tables._tables.items()))
                     if hasattr(first_info, 'path'):
                         config["sequence_csv"] = first_info.path
                     else:
                         config["sequence_csv"] = str(first_info)
 
-            elif isinstance(datasheets, dict):
+            elif isinstance(tables, dict):
                 # Dict format - look for sequences/concatenated
-                for name, info in datasheets.items():
-                    if 'sequence' in name.lower() or 'concatenated' in name.lower() or name == 'datasheet':
+                for name, info in tables.items():
+                    if 'sequence' in name.lower() or 'concatenated' in name.lower() or name == 'table':
                         if isinstance(info, dict) and 'path' in info:
                             config["sequence_csv"] = info['path']
                         else:
                             config["sequence_csv"] = str(info)
                         break
 
-                # Fallback: if no specific pattern found, use first available datasheet
-                if config["sequence_csv"] is None and datasheets:
-                    first_name, first_info = next(iter(datasheets.items()))
+                # Fallback: if no specific pattern found, use first available table
+                if config["sequence_csv"] is None and tables:
+                    first_name, first_info = next(iter(tables.items()))
                     if isinstance(first_info, dict) and 'path' in first_info:
                         config["sequence_csv"] = first_info['path']
                     else:
@@ -291,45 +291,45 @@ fi
         Returns:
             Dictionary with output file paths
         """
-        # RemoveDuplicates operates on datasheets only - it filters sequences
+        # RemoveDuplicates operates on tables only - it filters sequences
         # We cannot predict exact outputs until runtime, so use the same structure as input
         # but indicate potentially filtered results
         
-        # Output files - only sequences datasheet since this is a datasheet operation
+        # Output files - only sequences table since this is a table operation
         sequences_csv = None
         sequence_ids = []
         sequences_files = []
         
-        # Preserve input filename - must have sequences or valid datasheets
+        # Preserve input filename - must have sequences or valid tables
         if hasattr(self.pool, 'sequences') and self.pool.sequences:
             input_filename = os.path.basename(self.pool.sequences[0])
             sequences_csv = os.path.join(self.output_folder, input_filename)
             sequences_files = [sequences_csv]
-        elif hasattr(self.pool, 'datasheets') and hasattr(self.pool.datasheets, '_datasheets'):
-            # Find the sequences datasheet from input
-            for name, info in self.pool.datasheets._datasheets.items():
+        elif hasattr(self.pool, 'tables') and hasattr(self.pool.tables, '_tables'):
+            # Find the sequences table from input
+            for name, info in self.pool.tables._tables.items():
                 if 'sequence' in name.lower():
                     if hasattr(info, 'path'):
                         sequences_csv = os.path.join(self.output_folder, os.path.basename(info.path))
                         sequences_files = [sequences_csv]
                         break
             else:
-                raise ValueError("No sequences datasheet found in pool.datasheets")
+                raise ValueError("No sequences table found in pool.tables")
         else:
-            raise ValueError("Pool must have either sequences attribute or valid datasheets with sequences")
+            raise ValueError("Pool must have either sequences attribute or valid tables with sequences")
         
         # Extract sequence IDs from input (we don't know which will remain after filtering)
         if hasattr(self.pool, 'sequence_ids'):
             sequence_ids = self.pool.sequence_ids.copy() if self.pool.sequence_ids else []
         
-        # Create datasheets matching input structure
-        datasheets = {}
-        if hasattr(self.pool, 'datasheets') and hasattr(self.pool.datasheets, '_datasheets'):
-            for name, info in self.pool.datasheets._datasheets.items():
+        # Create tables matching input structure
+        tables = {}
+        if hasattr(self.pool, 'tables') and hasattr(self.pool.tables, '_tables'):
+            for name, info in self.pool.tables._tables.items():
                 if 'sequence' in name.lower():
-                    # Copy the datasheet structure but point to output location
+                    # Copy the table structure but point to output location
                     output_path = os.path.join(self.output_folder, os.path.basename(info.path if hasattr(info, 'path') else str(info)))
-                    datasheets[name] = DatasheetInfo(
+                    tables[name] = TableInfo(
                         name=name,
                         path=output_path,
                         columns=info.columns if hasattr(info, 'columns') else ["id", "sequence"],
@@ -338,9 +338,9 @@ fi
                     )
                     break
         
-        # If no sequences datasheet found in input, create default
-        if not datasheets:
-            datasheets["sequences"] = DatasheetInfo(
+        # If no sequences table found in input, create default
+        if not tables:
+            tables["sequences"] = TableInfo(
                 name="sequences",
                 path=sequences_csv,
                 columns=["id", "sequence"],
@@ -348,9 +348,9 @@ fi
                 count="variable"
             )
         
-        # Add missing datasheet for filtered out sequences (consistent with Filter)
+        # Add missing table for filtered out sequences (consistent with Filter)
         missing_csv = os.path.join(self.output_folder, "missing.csv")
-        datasheets["missing"] = DatasheetInfo(
+        tables["missing"] = TableInfo(
             name="missing",
             path=missing_csv,
             columns=["id", "structure", "msa"],
@@ -358,11 +358,11 @@ fi
             count="variable"
         )
         
-        # RemoveDuplicates only works with datasheets, no structures or compounds
+        # RemoveDuplicates only works with tables, no structures or compounds
         return {
             "sequences": sequences_files,
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
     

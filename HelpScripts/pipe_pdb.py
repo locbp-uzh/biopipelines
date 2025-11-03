@@ -451,10 +451,10 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     biological_assembly = config_data.get('biological_assembly', False)
     remove_waters = config_data.get('remove_waters', True)
     output_folder = config_data['output_folder']
-    structures_datasheet = config_data['structures_datasheet']
-    sequences_datasheet = config_data['sequences_datasheet']
-    failed_datasheet = config_data['failed_datasheet']
-    compounds_datasheet = config_data.get('compounds_datasheet', os.path.join(output_folder, 'compounds.csv'))
+    structures_table = config_data['structures_table']
+    sequences_table = config_data['sequences_table']
+    failed_table = config_data['failed_table']
+    compounds_table = config_data.get('compounds_table', os.path.join(output_folder, 'compounds.csv'))
 
     print(f"Fetching {len(pdb_ids)} structures in {format.upper()} format")
     print(f"Priority: {'local_folder -> ' if local_folder else ''}PDBs/ -> RCSB download")
@@ -516,48 +516,48 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 'attempted_path': metadata['attempted_path']
             })
     
-    # Save successful downloads datasheet
+    # Save successful downloads table
     if successful_downloads:
         df_success = pd.DataFrame(successful_downloads)
-        df_success.to_csv(structures_datasheet, index=False)
-        print(f"\nSuccessful fetches saved: {structures_datasheet} ({len(successful_downloads)} structures)")
+        df_success.to_csv(structures_table, index=False)
+        print(f"\nSuccessful fetches saved: {structures_table} ({len(successful_downloads)} structures)")
     else:
-        # Create empty datasheet with proper columns
+        # Create empty table with proper columns
         empty_df = pd.DataFrame(columns=["id", "pdb_id", "file_path", "format", "file_size", "source"])
-        empty_df.to_csv(structures_datasheet, index=False)
-        print(f"No successful fetches - created empty datasheet: {structures_datasheet}")
+        empty_df.to_csv(structures_table, index=False)
+        print(f"No successful fetches - created empty table: {structures_table}")
 
-    # Save sequences datasheet
+    # Save sequences table
     if successful_sequences:
         df_sequences = pd.DataFrame(successful_sequences)
-        df_sequences.to_csv(sequences_datasheet, index=False)
-        print(f"Sequences saved: {sequences_datasheet} ({len(successful_sequences)} sequences)")
+        df_sequences.to_csv(sequences_table, index=False)
+        print(f"Sequences saved: {sequences_table} ({len(successful_sequences)} sequences)")
     else:
-        # Create empty sequences datasheet with proper columns
+        # Create empty sequences table with proper columns
         empty_seq_df = pd.DataFrame(columns=["id", "sequence"])
-        empty_seq_df.to_csv(sequences_datasheet, index=False)
-        print(f"No sequences extracted - created empty datasheet: {sequences_datasheet}")
+        empty_seq_df.to_csv(sequences_table, index=False)
+        print(f"No sequences extracted - created empty table: {sequences_table}")
 
-    # Save compounds datasheet
+    # Save compounds table
     if all_ligands:
         df_compounds = pd.DataFrame(all_ligands)
-        df_compounds.to_csv(compounds_datasheet, index=False)
-        print(f"Compounds saved: {compounds_datasheet} ({len(all_ligands)} ligands)")
+        df_compounds.to_csv(compounds_table, index=False)
+        print(f"Compounds saved: {compounds_table} ({len(all_ligands)} ligands)")
     else:
-        # Create empty compounds datasheet with proper columns
+        # Create empty compounds table with proper columns
         empty_compounds_df = pd.DataFrame(columns=["id", "code", "format", "smiles", "ccd"])
-        empty_compounds_df.to_csv(compounds_datasheet, index=False)
-        print(f"No ligands found - created empty datasheet: {compounds_datasheet}")
+        empty_compounds_df.to_csv(compounds_table, index=False)
+        print(f"No ligands found - created empty table: {compounds_table}")
 
-    # Save failed downloads datasheet (always create, even if empty)
+    # Save failed downloads table (always create, even if empty)
     if failed_downloads:
         df_failed = pd.DataFrame(failed_downloads)
-        df_failed.to_csv(failed_datasheet, index=False)
-        print(f"Failed fetches saved: {failed_datasheet} ({len(failed_downloads)} failures)")
+        df_failed.to_csv(failed_table, index=False)
+        print(f"Failed fetches saved: {failed_table} ({len(failed_downloads)} failures)")
     else:
-        # Create empty failed downloads datasheet
+        # Create empty failed downloads table
         empty_failed_df = pd.DataFrame(columns=["pdb_id", "error_message", "source", "attempted_path"])
-        empty_failed_df.to_csv(failed_datasheet, index=False)
+        empty_failed_df.to_csv(failed_table, index=False)
         print("No failed fetches")
     
     # Summary
@@ -603,7 +603,7 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['pdb_ids', 'format', 'repo_pdbs_folder', 'output_folder', 'structures_datasheet', 'sequences_datasheet', 'failed_datasheet']
+    required_params = ['pdb_ids', 'format', 'repo_pdbs_folder', 'output_folder', 'structures_table', 'sequences_table', 'failed_table']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")

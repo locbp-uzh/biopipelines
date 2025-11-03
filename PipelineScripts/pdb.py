@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class PDB(BaseConfig):
@@ -270,10 +270,10 @@ class PDB(BaseConfig):
         os.makedirs(output_folder, exist_ok=True)
 
         # Output files
-        structures_datasheet = os.path.join(output_folder, "structures.csv")
-        sequences_datasheet = os.path.join(output_folder, "sequences.csv")
-        failed_datasheet = os.path.join(output_folder, "failed_downloads.csv")
-        compounds_datasheet = os.path.join(output_folder, "compounds.csv")
+        structures_table = os.path.join(output_folder, "structures.csv")
+        sequences_table = os.path.join(output_folder, "sequences.csv")
+        failed_table = os.path.join(output_folder, "failed_downloads.csv")
+        compounds_table = os.path.join(output_folder, "compounds.csv")
 
         # Get PDBs folder path from folder manager
         repo_pdbs_folder = self.folders['PDBs']
@@ -289,10 +289,10 @@ class PDB(BaseConfig):
             "biological_assembly": self.biological_assembly,
             "remove_waters": self.remove_waters,
             "output_folder": output_folder,
-            "structures_datasheet": structures_datasheet,
-            "sequences_datasheet": sequences_datasheet,
-            "failed_datasheet": failed_datasheet,
-            "compounds_datasheet": compounds_datasheet
+            "structures_table": structures_table,
+            "sequences_table": sequences_table,
+            "failed_table": failed_table,
+            "compounds_table": compounds_table
         }
 
         import json
@@ -319,10 +319,10 @@ python "{os.path.join(self.folders['HelpScripts'], 'pipe_pdb.py')}" \\
 
 if [ $? -eq 0 ]; then
     echo "Successfully fetched structures"
-    echo "Structures datasheet: {structures_datasheet}"
-    echo "Sequences datasheet: {sequences_datasheet}"
-    if [ -f "{failed_datasheet}" ]; then
-        echo "Failed downloads logged: {failed_datasheet}"
+    echo "Structures table: {structures_table}"
+    echo "Sequences table: {sequences_table}"
+    if [ -f "{failed_table}" ]; then
+        echo "Failed downloads logged: {failed_table}"
     fi
 else
     echo "Error: Failed to fetch structures"
@@ -339,7 +339,7 @@ fi
         Get expected output files after structure fetching.
         
         Returns:
-            Dictionary with output file paths and datasheet information
+            Dictionary with output file paths and table information
         """
         # Generate structure file paths using custom IDs
         extension = ".pdb" if self.format == "pdb" else ".cif"
@@ -353,36 +353,36 @@ fi
         # Sequence IDs are also the custom IDs
         sequence_ids = self.custom_ids.copy()
         
-        # Output datasheets
+        # Output tables
         structures_csv = os.path.join(self.output_folder, "structures.csv")
         sequences_csv = os.path.join(self.output_folder, "sequences.csv")
         failed_csv = os.path.join(self.output_folder, "failed_downloads.csv")
         compounds_csv = os.path.join(self.output_folder, "compounds.csv")
 
-        # Define datasheets that will be created
-        datasheets = {
-            "structures": DatasheetInfo(
+        # Define tables that will be created
+        tables = {
+            "structures": TableInfo(
                 name="structures",
                 path=structures_csv,
                 columns=["id", "pdb_id", "file_path", "format", "file_size", "source"],
                 description="Successfully fetched structure files",
                 count=len(self.pdb_ids)  # May be fewer if some downloads fail
             ),
-            "sequences": DatasheetInfo(
+            "sequences": TableInfo(
                 name="sequences",
                 path=sequences_csv,
                 columns=["id", "sequence"],
                 description="Protein sequences extracted from structures",
                 count=len(self.pdb_ids)  # May be fewer if some downloads fail
             ),
-            "compounds": DatasheetInfo(
+            "compounds": TableInfo(
                 name="compounds",
                 path=compounds_csv,
                 columns=["id", "code", "format", "smiles", "ccd"],
                 description="Ligands extracted from PDB structures (SMILES from RCSB)",
                 count="variable"
             ),
-            "failed": DatasheetInfo(
+            "failed": TableInfo(
                 name="failed",
                 path=failed_csv,
                 columns=["pdb_id", "error_message", "source", "attempted_path"],
@@ -401,7 +401,7 @@ fi
             "compound_ids": compound_ids,  # Populated from RCSB API query at pipeline runtime
             "sequences": [sequences_csv],
             "sequence_ids": sequence_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
     

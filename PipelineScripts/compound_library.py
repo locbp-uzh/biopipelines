@@ -11,13 +11,13 @@ import csv
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo, DatasheetContainer
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo, TableContainer
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo, DatasheetContainer
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo, TableContainer
 
 
 class CompoundLibrary(BaseConfig):
@@ -430,8 +430,8 @@ print(f'Output: {self.compounds_csv}')
                 # For simple library: use library keys as-is
                 self.compound_ids = list(self.library_dict.keys())
         
-        # Build datasheets with rich metadata
-        datasheets = {}
+        # Build tables with rich metadata
+        tables = {}
         if self.compounds_csv:
             columns = ["id", "format", "smiles", "ccd"]
             if self.library_dict:
@@ -441,7 +441,7 @@ print(f'Output: {self.compounds_csv}')
                     all_branch_keys.update(comp['branching'].keys())
                 columns.extend(sorted(list(all_branch_keys)))
             
-            datasheets["compounds"] = DatasheetInfo(
+            tables["compounds"] = TableInfo(
                 name="compounds",
                 path=self.compounds_csv,
                 columns=columns,
@@ -452,14 +452,14 @@ print(f'Output: {self.compounds_csv}')
         outputs = {
             "compounds": compounds_list,
             "compound_ids": self.compound_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
         
         
         if self.covalent and self.covalent_compounds_csv:
             outputs["covalent_compounds"] = [self.covalent_compounds_csv]
-            datasheets["covalent_compounds"] = DatasheetInfo(
+            tables["covalent_compounds"] = TableInfo(
                 name="covalent_compounds",
                 path=self.covalent_compounds_csv,
                 columns=["id", "format", "smiles", "ccd"],
@@ -483,8 +483,8 @@ print(f'Output: {self.compounds_csv}')
         # Convert to JSON-serializable format
         serializable_outputs = {}
         for key, value in outputs.items():
-            if key == "datasheets" and isinstance(value, dict):
-                # Convert DatasheetInfo objects to paths
+            if key == "tables" and isinstance(value, dict):
+                # Convert TableInfo objects to paths
                 serializable_outputs[key] = [info.path if hasattr(info, 'path') else str(info) 
                                            for info in value.values()]
             elif isinstance(value, list):

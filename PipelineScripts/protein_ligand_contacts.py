@@ -12,13 +12,13 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 import os
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class ProteinLigandContacts(BaseConfig):
@@ -55,15 +55,15 @@ class ProteinLigandContacts(BaseConfig):
 
         Args:
             structures: Input structures from previous tool (ToolOutput or StandardizedOutput)
-            selections: Protein region selections - string, datasheet reference, or None for all protein
+            selections: Protein region selections - string, table reference, or None for all protein
                        String format: '10-20+30-40' (residue ranges)
-                       Datasheet format: <tool_output>.datasheets.<datasheet_name>.<column_name>
+                       Table format: <tool_output>.tables.<table_name>.<column_name>
                        None: analyze all protein residues (default)
             ligand: Ligand residue name (3-letter code, e.g., 'LIG', 'ATP', 'GDP')
             contact_threshold: Distance threshold for counting contacts (default: 5.0 Å)
             contact_metric_name: Custom name for contact count column (default: "contacts")
-            id_map: ID mapping pattern for matching structure IDs to datasheet IDs (default: {"*": "*_<N>"})
-                  - Used when datasheet IDs don't match structure IDs
+            id_map: ID mapping pattern for matching structure IDs to table IDs (default: {"*": "*_<N>"})
+                  - Used when table IDs don't match structure IDs
                   - Pattern syntax: "*" represents base ID, "<N>" represents numeric suffix
                   - Examples:
                     * {"*": "*_<N>"} strips "_123" → "rifampicin_1" from "rifampicin_1_2"
@@ -77,8 +77,8 @@ class ProteinLigandContacts(BaseConfig):
             - '10-20+30-40' → residues 10-20 and 30-40
             - '145+147+150' → specific residues 145, 147, and 150
 
-            Datasheet format:
-            - rfdaa.datasheets.results.designed → use 'designed' column values
+            Table format:
+            - rfdaa.tables.results.designed → use 'designed' column values
             - None → all protein residues (excluding ligands)
 
         Examples:
@@ -91,10 +91,10 @@ class ProteinLigandContacts(BaseConfig):
                 contact_metric_name='close_contacts'
             ))
 
-            # Use selections from datasheet (e.g., designed residues)
+            # Use selections from table (e.g., designed residues)
             contact_analysis = pipeline.add(ProteinLigandContacts(
                 structures=boltz_holo,
-                selections=rfdaa.datasheets.results.designed,
+                selections=rfdaa.tables.results.designed,
                 ligand='ATP',
                 contact_threshold=5.0
             ))
@@ -175,8 +175,8 @@ class ProteinLigandContacts(BaseConfig):
         config_lines = super().get_config_display()
 
         selections_display = "All protein residues" if self.protein_selections is None else str(self.protein_selections)
-        if hasattr(self.protein_selections, 'datasheet_path'):
-            selections_display = f"From datasheet: {self.protein_selections.datasheet_path}"
+        if hasattr(self.protein_selections, 'table_path'):
+            selections_display = f"From table: {self.protein_selections.table_path}"
 
         config_lines.extend([
             f"STRUCTURES: {len(getattr(self, 'input_structures', []))} files",
@@ -215,18 +215,18 @@ class ProteinLigandContacts(BaseConfig):
         elif isinstance(self.protein_selections, str):
             selections_config = {"type": "fixed", "value": self.protein_selections}
         elif isinstance(self.protein_selections, tuple) and len(self.protein_selections) == 2:
-            # Tuple format: (DatasheetInfo, column_name)
-            datasheet_info, column_name = self.protein_selections
+            # Tuple format: (TableInfo, column_name)
+            table_info, column_name = self.protein_selections
             selections_config = {
-                "type": "datasheet",
-                "datasheet_path": datasheet_info.path if hasattr(datasheet_info, 'path') else '',
+                "type": "table",
+                "table_path": table_info.path if hasattr(table_info, 'path') else '',
                 "column_name": column_name
             }
         else:
-            # Datasheet reference with attributes
+            # Table reference with attributes
             selections_config = {
-                "type": "datasheet",
-                "datasheet_path": getattr(self.protein_selections, 'datasheet_path', ''),
+                "type": "table",
+                "table_path": getattr(self.protein_selections, 'table_path', ''),
                 "column_name": getattr(self.protein_selections, 'column_name', 'selections')
             }
 
@@ -284,8 +284,8 @@ fi
         """
         analysis_csv = self.get_analysis_csv_path()
 
-        datasheets = {
-            "contact_analysis": DatasheetInfo(
+        tables = {
+            "contact_analysis": TableInfo(
                 name="contact_analysis",
                 path=analysis_csv,
                 columns=["id", "source_structure", "selections", "ligand",
@@ -303,7 +303,7 @@ fi
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

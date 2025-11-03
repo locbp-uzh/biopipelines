@@ -9,13 +9,13 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class OnionNet(BaseConfig):
@@ -56,7 +56,7 @@ class OnionNet(BaseConfig):
 
         # Input tracking
         self.input_structures = []
-        self.input_datasheets = {}
+        self.input_tables = {}
         self.input_is_tool_output = False
         self.standardized_input = None
 
@@ -70,11 +70,11 @@ class OnionNet(BaseConfig):
         """Process structure inputs."""
         if isinstance(self.structures, StandardizedOutput):
             self.input_structures = getattr(self.structures, 'structures', [])
-            self.input_datasheets = getattr(self.structures, 'datasheets', {})
+            self.input_tables = getattr(self.structures, 'tables', {})
             self.standardized_input = self.structures
         elif isinstance(self.structures, ToolOutput):
             self.input_structures = self.structures.get_output_files("structures")
-            self.input_datasheets = self.structures.get_output_files("datasheets")
+            self.input_tables = self.structures.get_output_files("tables")
             self.input_is_tool_output = True
             self.dependencies.append(self.structures.config)
         elif isinstance(self.structures, str):
@@ -140,8 +140,8 @@ class OnionNet(BaseConfig):
             "scaler_model": self.scaler_model,
             "output_format": self.output_format,
             "output_folder": output_folder,
-            "input_datasheets": {k: v.path if hasattr(v, 'path') else str(v)
-                                for k, v in self.input_datasheets.items()}
+            "input_tables": {k: v.path if hasattr(v, 'path') else str(v)
+                                for k, v in self.input_tables.items()}
         }
 
         with open(config_file, 'w') as f:
@@ -177,8 +177,8 @@ fi
     def _serialize_input(self, input_val):
         """Serialize input value for JSON."""
         if isinstance(input_val, (ToolOutput, StandardizedOutput)):
-            if hasattr(input_val, 'datasheets'):
-                return {"type": "tool_output", "datasheets": list(input_val.datasheets.keys())}
+            if hasattr(input_val, 'tables'):
+                return {"type": "tool_output", "tables": list(input_val.tables.keys())}
             return {"type": "tool_output"}
         elif isinstance(input_val, list):
             return {"type": "list", "values": input_val}
@@ -195,10 +195,10 @@ fi
         """
         predictions_csv = os.path.join(self.output_folder, "affinity_predictions.csv")
 
-        datasheets = {}
+        tables = {}
 
         if os.path.exists(predictions_csv):
-            datasheets["affinities"] = DatasheetInfo(
+            tables["affinities"] = TableInfo(
                 name="affinities",
                 path=predictions_csv,
                 columns=["id", "structure_path", "predicted_affinity_pKa"],
@@ -207,7 +207,7 @@ fi
 
         outputs = {
             "predictions": [predictions_csv],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 
@@ -268,7 +268,7 @@ class OnionNet2(BaseConfig):
 
         # Input tracking
         self.input_structures = []
-        self.input_datasheets = {}
+        self.input_tables = {}
         self.input_is_tool_output = False
         self.standardized_input = None
 
@@ -282,11 +282,11 @@ class OnionNet2(BaseConfig):
         """Process structure inputs."""
         if isinstance(self.structures, StandardizedOutput):
             self.input_structures = getattr(self.structures, 'structures', [])
-            self.input_datasheets = getattr(self.structures, 'datasheets', {})
+            self.input_tables = getattr(self.structures, 'tables', {})
             self.standardized_input = self.structures
         elif isinstance(self.structures, ToolOutput):
             self.input_structures = self.structures.get_output_files("structures")
-            self.input_datasheets = self.structures.get_output_files("datasheets")
+            self.input_tables = self.structures.get_output_files("tables")
             self.input_is_tool_output = True
             self.dependencies.append(self.structures.config)
         elif isinstance(self.structures, str):
@@ -357,8 +357,8 @@ class OnionNet2(BaseConfig):
             "shells": self.shells,
             "output_format": self.output_format,
             "output_folder": output_folder,
-            "input_datasheets": {k: v.path if hasattr(v, 'path') else str(v)
-                                for k, v in self.input_datasheets.items()}
+            "input_tables": {k: v.path if hasattr(v, 'path') else str(v)
+                                for k, v in self.input_tables.items()}
         }
 
         with open(config_file, 'w') as f:
@@ -395,8 +395,8 @@ fi
     def _serialize_input(self, input_val):
         """Serialize input value for JSON."""
         if isinstance(input_val, (ToolOutput, StandardizedOutput)):
-            if hasattr(input_val, 'datasheets'):
-                return {"type": "tool_output", "datasheets": list(input_val.datasheets.keys())}
+            if hasattr(input_val, 'tables'):
+                return {"type": "tool_output", "tables": list(input_val.tables.keys())}
             return {"type": "tool_output"}
         elif isinstance(input_val, list):
             return {"type": "list", "values": input_val}
@@ -413,10 +413,10 @@ fi
         """
         predictions_csv = os.path.join(self.output_folder, "affinity_predictions.csv")
 
-        datasheets = {}
+        tables = {}
 
         if os.path.exists(predictions_csv):
-            datasheets["affinities"] = DatasheetInfo(
+            tables["affinities"] = TableInfo(
                 name="affinities",
                 path=predictions_csv,
                 columns=["id", "structure_path", "predicted_affinity_pKa"],
@@ -425,7 +425,7 @@ fi
 
         outputs = {
             "predictions": [predictions_csv],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

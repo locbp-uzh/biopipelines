@@ -12,14 +12,14 @@ import argparse
 import pandas as pd
 import yaml
 
-def build_config_with_msas_from_csv(sequences_csv: str, msa_datasheet: str, 
+def build_config_with_msas_from_csv(sequences_csv: str, msa_table: str, 
                                    ligand_smiles: str = None, affinity: bool = False) -> str:
     """
     Build Boltz2 YAML configuration with MSA paths from CSV files.
     
     Args:
         sequences_csv: Path to CSV with id,sequence columns 
-        msa_datasheet: Path to CSV with id,sequence_id,sequence,msa_file columns
+        msa_table: Path to CSV with id,sequence_id,sequence,msa_file columns
         ligand_smiles: Ligand SMILES string (optional)
         affinity: Whether to calculate binding affinity
         
@@ -34,12 +34,12 @@ def build_config_with_msas_from_csv(sequences_csv: str, msa_datasheet: str,
         print(f"Error reading sequences CSV: {e}")
         return None
     
-    # Read MSA datasheet to create sequence_id -> msa_file mapping
+    # Read MSA table to create sequence_id -> msa_file mapping
     msa_lookup = {}
-    if msa_datasheet and os.path.exists(msa_datasheet):
+    if msa_table and os.path.exists(msa_table):
         try:
-            msa_df = pd.read_csv(msa_datasheet)
-            print(f"Read {len(msa_df)} MSA entries from {msa_datasheet}")
+            msa_df = pd.read_csv(msa_table)
+            print(f"Read {len(msa_df)} MSA entries from {msa_table}")
             
             # Create lookup by sequence_id
             for _, row in msa_df.iterrows():
@@ -51,7 +51,7 @@ def build_config_with_msas_from_csv(sequences_csv: str, msa_datasheet: str,
                 else:
                     print(f"Warning: MSA file not found for {sequence_id}: {msa_file}")
         except Exception as e:
-            print(f"Error reading MSA datasheet {msa_datasheet}: {e}")
+            print(f"Error reading MSA table {msa_table}: {e}")
     
     # Build configuration dictionary
     config = {'sequences': []}
@@ -100,33 +100,33 @@ def build_config_with_msas_from_csv(sequences_csv: str, msa_datasheet: str,
     return yaml_str
 
 def build_config_with_msas(protein_sequence: str, ligand_smiles: str, 
-                          msa_datasheet: str, affinity: bool = False) -> str:
+                          msa_table: str, affinity: bool = False) -> str:
     """
     Build Boltz2 YAML configuration with MSA paths (legacy single sequence version).
     
     Args:
         protein_sequence: Protein amino acid sequence
         ligand_smiles: Ligand SMILES string
-        msa_datasheet: Path to CSV with MSA file mappings
+        msa_table: Path to CSV with MSA file mappings
         affinity: Whether to calculate binding affinity
         
     Returns:
         YAML configuration string
     """
-    # Read MSA datasheet to get MSA file path
+    # Read MSA table to get MSA file path
     msa_file_path = None
-    if msa_datasheet and os.path.exists(msa_datasheet):
+    if msa_table and os.path.exists(msa_table):
         try:
-            msa_df = pd.read_csv(msa_datasheet)
+            msa_df = pd.read_csv(msa_table)
             # Look for MSA file for protein sequence A (assuming single protein)
             protein_rows = msa_df[msa_df['sequence_id'] == 'A']
             if not protein_rows.empty:
                 msa_file_path = protein_rows.iloc[0]['msa_file']
                 print(f"Found MSA file for sequence A: {msa_file_path}")
             else:
-                print(f"Warning: No MSA file found for sequence A in {msa_datasheet}")
+                print(f"Warning: No MSA file found for sequence A in {msa_table}")
         except Exception as e:
-            print(f"Error reading MSA datasheet {msa_datasheet}: {e}")
+            print(f"Error reading MSA table {msa_table}: {e}")
     
     # Build configuration dictionary
     config = {
@@ -179,7 +179,7 @@ def main():
     group.add_argument('--sequences-csv', help='CSV file with id,sequence columns')
     
     parser.add_argument('--ligand-smiles', help='Ligand SMILES string')
-    parser.add_argument('--msa-datasheet', help='Path to MSA datasheet CSV')
+    parser.add_argument('--msa-table', help='Path to MSA table CSV')
     parser.add_argument('--output', required=True, help='Output YAML config file')
     parser.add_argument('--affinity', help='Enable affinity calculation (true/false)')
     
@@ -194,7 +194,7 @@ def main():
             # CSV-based approach for multiple sequences
             yaml_config = build_config_with_msas_from_csv(
                 sequences_csv=args.sequences_csv,
-                msa_datasheet=args.msa_datasheet or "",
+                msa_table=args.msa_table or "",
                 ligand_smiles=args.ligand_smiles or "",
                 affinity=affinity_flag
             )
@@ -203,7 +203,7 @@ def main():
             yaml_config = build_config_with_msas(
                 protein_sequence=args.protein_sequence,
                 ligand_smiles=args.ligand_smiles or "",
-                msa_datasheet=args.msa_datasheet or "",
+                msa_table=args.msa_table or "",
                 affinity=affinity_flag
             )
         

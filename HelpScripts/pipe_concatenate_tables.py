@@ -2,7 +2,7 @@
 """
 Runtime helper script for concatenating tool outputs.
 
-This script concatenates structures, sequences, compounds and datasheets
+This script concatenates structures, sequences, compounds and tables
 from multiple tool outputs into a unified result for iterative optimization cycles.
 """
 
@@ -114,41 +114,41 @@ def concatenate_compounds(pool_configs: List[Dict[str, Any]], output_dir: str) -
     return output_files
 
 
-def concatenate_datasheets(data_configs: List[Dict[str, Any]], output_csv: str) -> None:
+def concatenate_tables(data_configs: List[Dict[str, Any]], output_csv: str) -> None:
     """
-    Concatenate datasheets from multiple data sources.
+    Concatenate tables from multiple data sources.
     
     Args:
         data_configs: List of data source configurations
         output_csv: Output CSV file path
     """
-    print("Concatenating datasheets...")
+    print("Concatenating tables...")
     
     all_dataframes = []
     
     for i, data_config in enumerate(data_configs):
         prefix = data_config['prefix']
-        datasheets = data_config.get('datasheets', {})
+        tables = data_config.get('tables', {})
         
-        if not datasheets:
-            print(f"Warning: No datasheets found for {prefix}")
+        if not tables:
+            print(f"Warning: No tables found for {prefix}")
             continue
         
-        # Find the main datasheet to use
+        # Find the main table to use
         csv_path = None
-        priority_names = ['analysis', 'merged', 'filtered', 'combined', 'datasheet', 'main']
+        priority_names = ['analysis', 'merged', 'filtered', 'combined', 'table', 'main']
         
         for name in priority_names:
-            if name in datasheets:
-                csv_path = datasheets[name]
+            if name in tables:
+                csv_path = tables[name]
                 break
         
         if not csv_path:
-            # Use first available datasheet
-            csv_path = next(iter(datasheets.values()))
+            # Use first available table
+            csv_path = next(iter(tables.values()))
         
         if not os.path.exists(csv_path):
-            print(f"Warning: Datasheet file not found: {csv_path}")
+            print(f"Warning: Table file not found: {csv_path}")
             continue
         
         try:
@@ -162,11 +162,11 @@ def concatenate_datasheets(data_configs: List[Dict[str, Any]], output_csv: str) 
             all_dataframes.append(df)
             
         except Exception as e:
-            print(f"Error loading datasheet {csv_path}: {e}")
+            print(f"Error loading table {csv_path}: {e}")
             continue
     
     if not all_dataframes:
-        print("Warning: No datasheets could be loaded, creating empty output")
+        print("Warning: No tables could be loaded, creating empty output")
         # Create minimal empty dataframe
         empty_df = pd.DataFrame({
             'id': [],
@@ -177,7 +177,7 @@ def concatenate_datasheets(data_configs: List[Dict[str, Any]], output_csv: str) 
         return
     
     # Concatenate all dataframes
-    print(f"Concatenating {len(all_dataframes)} datasheets...")
+    print(f"Concatenating {len(all_dataframes)} tables...")
     combined_df = pd.concat(all_dataframes, ignore_index=True, sort=False)
     
     # Ensure unique IDs by adding source pool info
@@ -185,53 +185,53 @@ def concatenate_datasheets(data_configs: List[Dict[str, Any]], output_csv: str) 
         combined_df['original_id'] = combined_df['id']
         combined_df['id'] = combined_df['source_pool'] + '_' + combined_df['id'].astype(str)
     
-    print(f"Final concatenated datasheet: {combined_df.shape[0]} rows, {combined_df.shape[1]} columns")
+    print(f"Final concatenated table: {combined_df.shape[0]} rows, {combined_df.shape[1]} columns")
     
     # Create output directory
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
     
     # Save concatenated dataframe
     combined_df.to_csv(output_csv, index=False)
-    print(f"Concatenated datasheet saved: {output_csv}")
+    print(f"Concatenated table saved: {output_csv}")
 
 
-def concatenate_datasheets_only(config_data: Dict[str, Any]) -> None:
+def concatenate_tables_only(config_data: Dict[str, Any]) -> None:
     """
-    Concatenate datasheets vertically (like SQL UNION).
+    Concatenate tables vertically (like SQL UNION).
     
     Args:
-        config_data: Configuration dictionary with datasheet inputs and settings
+        config_data: Configuration dictionary with table inputs and settings
     """
-    datasheet_configs = config_data['datasheet_configs']
+    table_configs = config_data['table_configs']
     fill = config_data.get('fill', None)
     output_csv = config_data['output_csv']
     
-    print(f"Concatenating {len(datasheet_configs)} datasheets")
+    print(f"Concatenating {len(table_configs)} tables")
     print(f"Fill strategy: {fill if fill is not None else 'remove non-common columns'}")
     
-    # Load all datasheets
+    # Load all tables
     dataframes = []
-    for i, config in enumerate(datasheet_configs):
-        datasheet_path = config['datasheet_path']
+    for i, config in enumerate(table_configs):
+        table_path = config['table_path']
         
-        if not os.path.exists(datasheet_path):
-            print(f"Warning: Datasheet {i} not found: {datasheet_path}")
+        if not os.path.exists(table_path):
+            print(f"Warning: Table {i} not found: {table_path}")
             continue
             
         try:
-            df = pd.read_csv(datasheet_path)
-            df['source_datasheet'] = f"datasheet_{i}"
+            df = pd.read_csv(table_path)
+            df['source_table'] = f"table_{i}"
             dataframes.append(df)
-            print(f"Loaded datasheet {i}: {df.shape[0]} rows from {datasheet_path}")
+            print(f"Loaded table {i}: {df.shape[0]} rows from {table_path}")
         except Exception as e:
-            print(f"Error loading datasheet {i} from {datasheet_path}: {e}")
+            print(f"Error loading table {i} from {table_path}: {e}")
             continue
     
     if not dataframes:
-        print("Error: No datasheets could be loaded")
+        print("Error: No tables could be loaded")
         return
     
-    # Concatenate datasheets
+    # Concatenate tables
     if fill is None:
         # Remove non-common columns - use intersection of all columns
         common_columns = set(dataframes[0].columns)
@@ -256,7 +256,7 @@ def concatenate_datasheets_only(config_data: Dict[str, Any]) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Concatenate datasheets vertically')
+    parser = argparse.ArgumentParser(description='Concatenate tables vertically')
     parser.add_argument('--config', required=True, help='JSON config file with concatenation parameters')
     
     args = parser.parse_args()
@@ -274,17 +274,17 @@ def main():
         sys.exit(1)
     
     # Validate required parameters
-    required_params = ['datasheet_configs', 'output_csv']
+    required_params = ['table_configs', 'output_csv']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")
             sys.exit(1)
     
     try:
-        concatenate_datasheets_only(config_data)
+        concatenate_tables_only(config_data)
         
     except Exception as e:
-        print(f"Error concatenating datasheets: {e}")
+        print(f"Error concatenating tables: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

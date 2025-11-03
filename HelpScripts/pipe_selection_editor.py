@@ -9,7 +9,7 @@ Usage:
     python pipe_selection_editor.py <config_json>
 
 Config JSON should contain:
-    - selection_datasheet: Path to CSV with selection column
+    - selection_table: Path to CSV with selection column
     - selection_column: Name of column containing selections
     - structures: List of PDB file paths
     - expand: Residues to add on each side (int)
@@ -365,7 +365,7 @@ def process_selections(config_path: str):
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    selection_datasheet = config['selection_datasheet']
+    selection_table = config['selection_table']
     selection_column = config['selection_column']
     structures = config['structures']
     expand = config.get('expand', 0)
@@ -374,16 +374,16 @@ def process_selections(config_path: str):
     invert = config.get('invert', False)
     output_csv = config['output_csv']
 
-    # Load selection datasheet
-    if not os.path.exists(selection_datasheet):
-        raise ValueError(f"Selection datasheet not found: {selection_datasheet}")
+    # Load selection table
+    if not os.path.exists(selection_table):
+        raise ValueError(f"Selection table not found: {selection_table}")
 
-    df = pd.read_csv(selection_datasheet)
+    df = pd.read_csv(selection_table)
 
     # Validate column exists
     if selection_column not in df.columns:
         raise ValueError(
-            f"Column '{selection_column}' not found in datasheet. "
+            f"Column '{selection_column}' not found in table. "
             f"Available columns: {list(df.columns)}"
         )
 

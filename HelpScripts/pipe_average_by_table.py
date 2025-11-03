@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Helper script for AverageByDatasheet tool.
+Helper script for AverageByTable tool.
 
-Computes averages of numeric columns across multiple datasheets.
-Each row in the output corresponds to the average from each input datasheet.
+Computes averages of numeric columns across multiple tables.
+Each row in the output corresponds to the average from each input table.
 Non-numeric values and inconsistent values are discarded.
 """
 
@@ -15,34 +15,34 @@ import sys
 import os
 
 
-def load_datasheet(path):
-    """Load a datasheet CSV file."""
+def load_table(path):
+    """Load a table CSV file."""
     try:
         return pd.read_csv(path)
     except Exception as e:
-        print(f"Error loading datasheet {path}: {e}")
+        print(f"Error loading table {path}: {e}")
         return None
 
 
-def compute_averages(datasheets, datasheet_paths):
+def compute_averages(tables, table_paths):
     """
-    Compute averages across multiple datasheets.
+    Compute averages across multiple tables.
 
     Args:
-        datasheets: List of pandas DataFrames
-        datasheet_paths: List of file paths for naming
+        tables: List of pandas DataFrames
+        table_paths: List of file paths for naming
 
     Returns:
         pandas DataFrame with averages
     """
-    if not datasheets:
-        raise ValueError("No valid datasheets to process")
+    if not tables:
+        raise ValueError("No valid tables to process")
 
-    # Find common numeric columns across all datasheets
+    # Find common numeric columns across all tables
     common_columns = None
     numeric_columns = set()
 
-    for df in datasheets:
+    for df in tables:
         if df is None:
             continue
 
@@ -56,23 +56,23 @@ def compute_averages(datasheets, datasheet_paths):
             if col in common_columns and pd.api.types.is_numeric_dtype(df[col]):
                 numeric_columns.add(col)
 
-    # Keep only numeric columns that exist in all datasheets
+    # Keep only numeric columns that exist in all tables
     numeric_columns = numeric_columns.intersection(common_columns)
 
     if not numeric_columns:
-        print("Warning: No common numeric columns found across all datasheets")
+        print("Warning: No common numeric columns found across all tables")
         return pd.DataFrame()
 
     print(f"Found {len(numeric_columns)} common numeric columns: {list(numeric_columns)}")
 
-    # Compute averages for each datasheet
+    # Compute averages for each table
     results = []
 
-    for i, (df, path) in enumerate(zip(datasheets, datasheet_paths)):
+    for i, (df, path) in enumerate(zip(tables, table_paths)):
         if df is None:
             continue
 
-        row = {"datasheet_name": os.path.basename(path)}
+        row = {"table_name": os.path.basename(path)}
 
         # Compute average for each numeric column
         for col in numeric_columns:
@@ -92,7 +92,7 @@ def compute_averages(datasheets, datasheet_paths):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Compute averages across multiple datasheets')
+    parser = argparse.ArgumentParser(description='Compute averages across multiple tables')
     parser.add_argument('--config', required=True, help='Configuration file path')
     args = parser.parse_args()
 
@@ -104,17 +104,17 @@ def main():
         print(f"Error loading configuration: {e}")
         sys.exit(1)
 
-    datasheet_paths = config['datasheets']
+    table_paths = config['tables']
     output_path = config['output']
 
-    print(f"Processing {len(datasheet_paths)} datasheets")
+    print(f"Processing {len(table_paths)} tables")
 
-    # Load all datasheets
-    datasheets = []
-    for path in datasheet_paths:
+    # Load all tables
+    tables = []
+    for path in table_paths:
         print(f"Loading: {path}")
-        df = load_datasheet(path)
-        datasheets.append(df)
+        df = load_table(path)
+        tables.append(df)
         if df is not None:
             print(f"  Shape: {df.shape}")
         else:
@@ -122,12 +122,12 @@ def main():
 
     # Compute averages
     try:
-        averages_df = compute_averages(datasheets, datasheet_paths)
+        averages_df = compute_averages(tables, table_paths)
 
         if averages_df.empty:
             print("Warning: No averages computed")
             # Create empty output file
-            averages_df = pd.DataFrame(columns=["datasheet_name"])
+            averages_df = pd.DataFrame(columns=["table_name"])
 
         # Save results
         averages_df.to_csv(output_path, index=False)

@@ -2,7 +2,7 @@
 """
 Runtime helper script for LoadOutput filtering.
 
-Filters CSV datasheets based on filtered IDs and saves them to LoadOutput's output folder.
+Filters CSV tables based on filtered IDs and saves them to LoadOutput's output folder.
 """
 
 import os
@@ -49,9 +49,9 @@ def filter_csv_file(input_path: str, output_path: str, filtered_ids: Set[str]) -
         raise
 
 
-def filter_datasheets(config_data: Dict[str, Any]) -> int:
+def filter_tables(config_data: Dict[str, Any]) -> int:
     """
-    Filter all CSV datasheets based on configuration.
+    Filter all CSV tables based on configuration.
 
     Args:
         config_data: Configuration dictionary with filtered_ids and output_structure
@@ -63,17 +63,17 @@ def filter_datasheets(config_data: Dict[str, Any]) -> int:
     output_structure = config_data['output_structure']
     output_folder = config_data['output_folder']
 
-    print(f"Filtering datasheets with {len(filtered_ids)} IDs")
+    print(f"Filtering tables with {len(filtered_ids)} IDs")
     print(f"Output folder: {output_folder}")
 
     os.makedirs(output_folder, exist_ok=True)
 
-    # Filter datasheets
-    if 'datasheets' in output_structure:
-        datasheets = output_structure['datasheets']
-        if isinstance(datasheets, dict):
-            print("\nFiltering datasheets:")
-            for ds_name, ds_info in datasheets.items():
+    # Filter tables
+    if 'tables' in output_structure:
+        tables = output_structure['tables']
+        if isinstance(tables, dict):
+            print("\nFiltering tables:")
+            for ds_name, ds_info in tables.items():
                 # Get original path
                 original_path = None
                 if isinstance(ds_info, dict) and 'path' in ds_info:
@@ -105,7 +105,7 @@ def filter_datasheets(config_data: Dict[str, Any]) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Filter LoadOutput datasheets')
+    parser = argparse.ArgumentParser(description='Filter LoadOutput tables')
     parser.add_argument('--config', required=True, help='JSON config file with filter parameters')
 
     args = parser.parse_args()
@@ -122,8 +122,8 @@ def main():
         print(f"Error loading config: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Filter datasheets
-    exit_code = filter_datasheets(config_data)
+    # Filter tables
+    exit_code = filter_tables(config_data)
     sys.exit(exit_code)
 
 

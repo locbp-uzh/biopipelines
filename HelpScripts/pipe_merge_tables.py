@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Runtime helper script for merging analysis datasheets.
+Runtime helper script for merging analysis tables.
 
 This script merges CSV files from multiple analysis tools into a unified
-datasheet, handling metric name collisions with prefixes and adding calculated columns.
+table, handling metric name collisions with prefixes and adding calculated columns.
 """
 
 import os
@@ -14,9 +14,9 @@ import pandas as pd
 from typing import Dict, List, Any, Optional
 
 
-def merge_datasheets(config_data: Dict[str, Any]) -> None:
+def merge_tables(config_data: Dict[str, Any]) -> None:
     """
-    Merge multiple analysis CSV files into one unified datasheet.
+    Merge multiple analysis CSV files into one unified table.
     
     Args:
         config_data: Configuration dictionary with input files and settings
@@ -146,7 +146,7 @@ def merge_datasheets(config_data: Dict[str, Any]) -> None:
     
     # Save combined dataframe
     combined_df.to_csv(output_csv, index=False)
-    print(f"\nCombined datasheet saved: {output_csv}")
+    print(f"\nCombined table saved: {output_csv}")
     
     # Summary
     print("\nCombination completed successfully!")
@@ -156,7 +156,7 @@ def merge_datasheets(config_data: Dict[str, Any]) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Merge analysis datasheets')
+    parser = argparse.ArgumentParser(description='Merge analysis tables')
     parser.add_argument('--config', required=True, help='JSON config file with combination parameters')
     
     args = parser.parse_args()
@@ -181,10 +181,10 @@ def main():
             sys.exit(1)
     
     try:
-        merge_datasheets(config_data)
+        merge_tables(config_data)
         
     except Exception as e:
-        print(f"Error combining datasheets: {e}")
+        print(f"Error combining tables: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

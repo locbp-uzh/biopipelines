@@ -3,7 +3,7 @@
 Runtime helper script for RF3 tool.
 
 Processes RF3 configuration, generates JSON input files, runs RF3 predictions in batch,
-and post-processes results into standardized datasheets.
+and post-processes results into standardized tables.
 """
 
 import os
@@ -16,30 +16,30 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple
 
 
-def load_sequences_from_datasheet(datasheet_path: str) -> List[Tuple[str, str]]:
+def load_sequences_from_table(table_path: str) -> List[Tuple[str, str]]:
     """
-    Load sequences from datasheet.
+    Load sequences from table.
 
     Returns:
         List of (id, sequence) tuples
     """
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     if 'id' not in df.columns or 'sequence' not in df.columns:
-        raise ValueError(f"Datasheet must have 'id' and 'sequence' columns: {datasheet_path}")
+        raise ValueError(f"Table must have 'id' and 'sequence' columns: {table_path}")
 
     return list(zip(df['id'], df['sequence']))
 
 
-def load_compounds_from_datasheet(datasheet_path: str) -> List[Tuple[str, str]]:
+def load_compounds_from_table(table_path: str) -> List[Tuple[str, str]]:
     """
-    Load compounds from datasheet.
+    Load compounds from table.
 
     Returns:
         List of (id, smiles) tuples
     """
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     if 'id' not in df.columns or 'smiles' not in df.columns:
-        raise ValueError(f"Datasheet must have 'id' and 'smiles' columns: {datasheet_path}")
+        raise ValueError(f"Table must have 'id' and 'smiles' columns: {table_path}")
 
     return list(zip(df['id'], df['smiles']))
 
@@ -226,12 +226,12 @@ def process_rf3_predictions(config_data: Dict[str, Any]) -> int:
 
     if protein_input:
         if protein_input.get('type') == 'tool_output':
-            # Load from datasheets
-            datasheets = config_data.get('input_datasheets', {})
-            if 'sequences' in datasheets:
-                sequences = load_sequences_from_datasheet(datasheets['sequences'])
+            # Load from tables
+            tables = config_data.get('input_tables', {})
+            if 'sequences' in tables:
+                sequences = load_sequences_from_table(tables['sequences'])
             else:
-                print("Error: No sequences datasheet found in input", file=sys.stderr)
+                print("Error: No sequences table found in input", file=sys.stderr)
                 return 1
         elif protein_input.get('type') == 'string':
             # Single sequence
@@ -251,9 +251,9 @@ def process_rf3_predictions(config_data: Dict[str, Any]) -> int:
     ligand_input = config_data.get('ligands')
     if ligand_input:
         if ligand_input.get('type') == 'tool_output':
-            datasheets = config_data.get('input_datasheets', {})
-            if 'compounds' in datasheets:
-                ligands = load_compounds_from_datasheet(datasheets['compounds'])
+            tables = config_data.get('input_tables', {})
+            if 'compounds' in tables:
+                ligands = load_compounds_from_table(tables['compounds'])
         elif ligand_input.get('type') == 'string':
             ligands = [("ligand_1", ligand_input['value'])]
 
@@ -298,7 +298,7 @@ def process_rf3_predictions(config_data: Dict[str, Any]) -> int:
         config_data.get('output_format', 'pdb')
     )
 
-    # Save datasheets
+    # Save tables
     structures_csv = os.path.join(output_folder, "structures.csv")
     confidence_csv = os.path.join(output_folder, "confidence_scores.csv")
 

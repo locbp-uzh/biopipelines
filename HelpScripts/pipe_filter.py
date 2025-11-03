@@ -80,15 +80,15 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                 except Exception as e:
                     print(f"Warning: Could not copy compound {source}: {e}")
     
-    # Extract all datasheets from pool folder (not just sequences)
-    datasheet_patterns = [
+    # Extract all tables from pool folder (not just sequences)
+    table_patterns = [
         os.path.join(pool_folder, "*.csv"),
         os.path.join(pool_folder, "**", "*.csv")
     ]
     
     processed_files = set()  # Track processed files to avoid duplicates
     
-    for pattern in datasheet_patterns:
+    for pattern in table_patterns:
         matches = glob.glob(pattern, recursive=True)
         for source_csv in matches:
             if source_csv in processed_files:
@@ -99,8 +99,8 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                 df = pd.read_csv(source_csv)
                 filename = os.path.basename(source_csv)
                 
-                # Only process files that have an 'id' column (actual datasheets)
-                # Skip individual MSA files and other non-datasheet CSVs
+                # Only process files that have an 'id' column (actual tables)
+                # Skip individual MSA files and other non-table CSVs
                 if 'id' not in df.columns:
                     continue
                 
@@ -109,16 +109,16 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                     matching_rows = df[df['id'].isin(filtered_ids)]
                     dest = os.path.join(output_folder, filename)
                     matching_rows.to_csv(dest, index=False)
-                    print(f"Filtered datasheet: {filename} ({len(matching_rows)} rows)")
+                    print(f"Filtered table: {filename} ({len(matching_rows)} rows)")
                 else:
-                    # Create empty datasheet with same columns
+                    # Create empty table with same columns
                     empty_df = pd.DataFrame(columns=df.columns)
                     dest = os.path.join(output_folder, filename)
                     empty_df.to_csv(dest, index=False)
-                    print(f"Created empty datasheet: {filename} with {len(df.columns)} columns")
+                    print(f"Created empty table: {filename} with {len(df.columns)} columns")
                     
             except Exception as e:
-                print(f"Warning: Could not process datasheet {source_csv}: {e}")
+                print(f"Warning: Could not process table {source_csv}: {e}")
     
     return extracted_files
 
@@ -186,7 +186,7 @@ def apply_filter(config_data: Dict[str, Any]) -> None:
         filtered_df.to_csv(output_csv, index=False)
         if use_pool_mode and pool_output_folder:
             print("No structures to copy (empty filter result)")
-            # Still create empty datasheet files with correct headers
+            # Still create empty table files with correct headers
             output_dir = os.path.dirname(output_csv)
             extract_pool_data_for_filtered_ids([], pool_output_folder, output_dir)
             # Create missing_ids.csv for empty filter result

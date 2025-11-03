@@ -10,13 +10,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class MutationProfiler(BaseConfig):
@@ -99,27 +99,27 @@ class MutationProfiler(BaseConfig):
     
     def _extract_sequences_path(self, input_obj: Union[ToolOutput, StandardizedOutput], input_type: str) -> str:
         """Extract sequences path from ToolOutput or StandardizedOutput."""
-        # Try to get sequences datasheet from input
-        if hasattr(input_obj, 'datasheets'):
-            datasheets = input_obj.datasheets
+        # Try to get sequences table from input
+        if hasattr(input_obj, 'tables'):
+            tables = input_obj.tables
             
-            # Check for sequences datasheet
-            if hasattr(datasheets, 'sequences'):
-                if isinstance(datasheets.sequences,str):
-                    return datasheets.sequences
+            # Check for sequences table
+            if hasattr(tables, 'sequences'):
+                if isinstance(tables.sequences,str):
+                    return tables.sequences
                 else:
-                    if hasattr(datasheets.sequences,'path'):
-                        return datasheets.sequences.path
+                    if hasattr(tables.sequences,'path'):
+                        return tables.sequences.path
                     else:
-                        raise ValueError("Cannot extract path of sequences datasheet")
-            elif hasattr(datasheets, '_datasheets'):
+                        raise ValueError("Cannot extract path of sequences table")
+            elif hasattr(tables, '_tables'):
                 # Standard BioPipelines format
-                for name, info in datasheets._datasheets.items():
+                for name, info in tables._tables.items():
                     if 'sequence' in name.lower():
                         return info.path
-            elif isinstance(datasheets, dict):
+            elif isinstance(tables, dict):
                 # Dict format
-                for name, info in datasheets.items():
+                for name, info in tables.items():
                     if 'sequence' in name.lower():
                         if isinstance(info,str):
                             return info
@@ -132,7 +132,7 @@ class MutationProfiler(BaseConfig):
         if hasattr(input_obj, 'output_folder'):
             predicted_files = [
                 os.path.join(input_obj.output_folder, 'sequences.csv'),
-                os.path.join(input_obj.output_folder, 'datasheet.csv'),
+                os.path.join(input_obj.output_folder, 'table.csv'),
                 os.path.join(input_obj.output_folder, 'results.csv')
             ]
             return predicted_files[0]  # Return first prediction
@@ -237,7 +237,7 @@ fi
         Get expected output files after mutation profiling.
         
         Returns:
-            Dictionary with output file paths and datasheet information
+            Dictionary with output file paths and table information
         """
         profile_csv = os.path.join(self.output_folder, "profile.csv")
         mutations_csv = os.path.join(self.output_folder, "mutations.csv")
@@ -250,30 +250,30 @@ fi
         sequence_logo_counts_svg = os.path.join(self.output_folder, "sequence_logo_counts.svg")
         sequence_logo_counts_png = os.path.join(self.output_folder, "sequence_logo_counts.png")
         
-        # Define datasheets that will be created
-        datasheets = {
-            "profile": DatasheetInfo(
+        # Define tables that will be created
+        tables = {
+            "profile": TableInfo(
                 name="profile",
                 path=profile_csv,
                 columns=["position", "original", "count", "frequency"],
                 description="Position-wise mutation statistics",
                 count=None  # Will be determined at runtime
             ),
-            "mutations": DatasheetInfo(
+            "mutations": TableInfo(
                 name="mutations",
                 path=mutations_csv,
                 columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
                 description="Raw amino acid mutation counts per position",
                 count=None
             ),
-            "absolute_frequencies": DatasheetInfo(
+            "absolute_frequencies": TableInfo(
                 name="absolute_frequencies", 
                 path=absolute_freq_csv,
                 columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
                 description="Absolute amino acid frequencies per position (mutation_count/total_sequences)",
                 count=None
             ),
-            "relative_frequencies": DatasheetInfo(
+            "relative_frequencies": TableInfo(
                 name="relative_frequencies",
                 path=relative_freq_csv, 
                 columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
@@ -289,7 +289,7 @@ fi
             "compound_ids": [],
             "sequences": [],  # This is an analysis tool, doesn't generate new sequences
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "visualizations": [sequence_logo_relative_svg, sequence_logo_relative_png, 
                              sequence_logo_absolute_svg, sequence_logo_absolute_png,
                              sequence_logo_counts_svg, sequence_logo_counts_png],

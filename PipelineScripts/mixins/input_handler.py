@@ -13,19 +13,19 @@ class ResolvedInput:
     """Container for resolved input data with consistent interface."""
 
     def __init__(self, files: List[str], ids: List[str],
-                 datasheets: Any, source: Any):
+                 tables: Any, source: Any):
         """
         Initialize resolved input.
 
         Args:
             files: List of file paths (structures, sequences, or compounds)
             ids: List of IDs corresponding to files
-            datasheets: Datasheets associated with input (if any)
+            tables: Tables associated with input (if any)
             source: Original input source
         """
         self.files = files
         self.ids = ids
-        self.datasheets = datasheets
+        self.tables = tables
         self.source = source
 
         # Import here to avoid circular imports
@@ -66,13 +66,13 @@ class InputHandlerMixin:
                 - 'compounds': SDF/MOL files
 
         Returns:
-            ResolvedInput object with .files, .ids, .datasheets attributes
+            ResolvedInput object with .files, .ids, .tables attributes
 
         Examples:
             >>> resolved = self.resolve_input(self.input_structures, 'structures')
             >>> pdb_files = resolved.files
             >>> structure_ids = resolved.ids
-            >>> input_datasheets = resolved.datasheets
+            >>> input_tables = resolved.tables
         """
         # Import here to avoid circular imports
         try:
@@ -96,7 +96,7 @@ class InputHandlerMixin:
             return ResolvedInput(
                 files=files,
                 ids=ids,
-                datasheets=input_param.datasheets if hasattr(input_param, 'datasheets') else None,
+                tables=input_param.tables if hasattr(input_param, 'tables') else None,
                 source=input_param
             )
 
@@ -112,7 +112,7 @@ class InputHandlerMixin:
             return ResolvedInput(
                 files=files,
                 ids=ids,
-                datasheets=input_param.datasheets if hasattr(input_param, 'datasheets') else None,
+                tables=input_param.tables if hasattr(input_param, 'tables') else None,
                 source=input_param
             )
 
@@ -122,7 +122,7 @@ class InputHandlerMixin:
             return ResolvedInput(
                 files=input_param,
                 ids=ids,
-                datasheets=None,
+                tables=None,
                 source=input_param
             )
 
@@ -147,14 +147,14 @@ class InputHandlerMixin:
                     ])
 
                 ids = [os.path.splitext(os.path.basename(f))[0] for f in files]
-                return ResolvedInput(files=files, ids=ids, datasheets=None, source=input_param)
+                return ResolvedInput(files=files, ids=ids, tables=None, source=input_param)
             else:
                 # Single file
                 file_id = os.path.splitext(os.path.basename(input_param))[0]
                 return ResolvedInput(
                     files=[input_param],
                     ids=[file_id],
-                    datasheets=None,
+                    tables=None,
                     source=input_param
                 )
 
@@ -167,8 +167,8 @@ class InputHandlerMixin:
             if not ids and files:
                 ids = [os.path.splitext(os.path.basename(f))[0] for f in files]
 
-            datasheets = input_param.get('datasheets', None)
-            return ResolvedInput(files=files, ids=ids, datasheets=datasheets, source=input_param)
+            tables = input_param.get('tables', None)
+            return ResolvedInput(files=files, ids=ids, tables=tables, source=input_param)
 
         # Unsupported type
         raise ValueError(

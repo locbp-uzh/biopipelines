@@ -13,12 +13,12 @@ from PipelineScripts.mutation_composer import MutationComposer
 from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.residue_atom_distance import ResidueAtomDistance
-from PipelineScripts.merge_datasheets import MergeDatasheets
-from PipelineScripts.concatenate_datasheets import ConcatenateDatasheets
+from PipelineScripts.merge_tables import MergeTables
+from PipelineScripts.concatenate_tables import ConcatenateTables
 from PipelineScripts.remove_duplicates import RemoveDuplicates
 from PipelineScripts.filter import Filter
 from PipelineScripts.select_best import SelectBest
-from PipelineScripts.average_by_datasheet import AverageByDatasheet
+from PipelineScripts.average_by_table import AverageByTable
 from PipelineScripts.extract_metrics import ExtractMetrics
 
 with Pipeline(project="Examples",
@@ -34,8 +34,8 @@ with Pipeline(project="Examples",
 
     best_open,best_close=original_open,original_close
 
-    original_analysis = MergeDatasheets(datasheets=[best_open.datasheets.affinity,
-                                                    best_close.datasheets.affinity],
+    original_analysis = MergeTables(tables=[best_open.tables.affinity,
+                                                    best_close.tables.affinity],
                                         prefixes=["open_", "close_"],
                                         id_map={"original":["HT7_Cy7_C_R","HT7_Cy7_C_RR"]},
                                         calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
@@ -60,7 +60,7 @@ with Pipeline(project="Examples",
         
         profiler = MutationProfiler(original=best_open,
                                     mutants=lmpnn)
-        composer = MutationComposer(frequencies=profiler.datasheets.absolute_frequencies,
+        composer = MutationComposer(frequencies=profiler.tables.absolute_frequencies,
                                     num_sequences=20,
                                     mode="weighted_random",
                                     max_mutations=3)
@@ -71,12 +71,12 @@ with Pipeline(project="Examples",
                                                 compare="sequence")           # Compare protein sequences
 
         if all_sequences_seen is None:
-            # First cycle - initialize history with ConcatenateDatasheets (single input)
-            all_sequences_seen = ConcatenateDatasheets(datasheets=[unique_new_sequences.datasheets.sequences])
+            # First cycle - initialize history with ConcatenateTables (single input)
+            all_sequences_seen = ConcatenateTables(tables=[unique_new_sequences.tables.sequences])
         else:
             # Subsequent cycles - concatenate unique sequences with existing history
-            all_sequences_seen = ConcatenateDatasheets(datasheets=[unique_new_sequences.datasheets.sequences, 
-                                                                   all_sequences_seen.datasheets.concatenated])
+            all_sequences_seen = ConcatenateTables(tables=[unique_new_sequences.tables.sequences, 
+                                                                   all_sequences_seen.tables.concatenated])
         
         msas = MMseqs2(sequences=unique_new_sequences)
         boltz_holo_open = Boltz2(proteins=unique_new_sequences,
@@ -96,10 +96,10 @@ with Pipeline(project="Examples",
                                                             residue='D in IHDWG',
                                                             atom='LIG.N88',
                                                             metric_name='open_cap_distance')
-        current_analysis = MergeDatasheets(datasheets=[boltz_holo_open.datasheets.affinity,
-                                                        boltz_holo_close.datasheets.affinity,
-                                                        open_chlorine_aspartate_distance.datasheets.analysis,
-                                                        open_cap_aspartate_distance.datasheets.analysis],
+        current_analysis = MergeTables(tables=[boltz_holo_open.tables.affinity,
+                                                        boltz_holo_close.tables.affinity,
+                                                        open_chlorine_aspartate_distance.tables.analysis,
+                                                        open_cap_aspartate_distance.tables.analysis],
                                             prefixes=["open_","close_","",""],
                                             calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"} )
         current_filtered = Filter(data=current_analysis,
@@ -110,19 +110,19 @@ with Pipeline(project="Examples",
         all_analyses.append(current_filtered)
         
         best_open = SelectBest(pool=[pool for pool in all_pools],  # We select the best across all cycles
-                               datasheets=[x.datasheets.merged for x in all_analyses],  # All analyses from all cycles
+                               tables=[x.tables.merged for x in all_analyses],  # All analyses from all cycles
                                metric='open_affinity_pred_value',
                                mode='min',
                                name=f'{CYCLE+1}_best')
 
-    all_merged = [x.datasheets.merged for x in all_analyses]
-    combined_datasheets = ConcatenateDatasheets(all_merged)
-    AverageByDatasheet(all_merged)
+    all_merged = [x.tables.merged for x in all_analyses]
+    combined_tables = ConcatenateTables(all_merged)
+    AverageByTable(all_merged)
 
     #extract metrics for column analysis on Prism
     metrics = ["affinity_delta",
             "open_affinity_pred_value",
             "close_affinity_pred_value"]
-    ExtractMetrics(datasheets=all_merged,
+    ExtractMetrics(tables=all_merged,
                     metrics=metrics)
 

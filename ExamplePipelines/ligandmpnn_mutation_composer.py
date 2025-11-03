@@ -12,14 +12,14 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 from PipelineScripts.pipeline import *
 from PipelineScripts.load_output import LoadOutput
 from PipelineScripts.ligand_mpnn import LigandMPNN
-from PipelineScripts.slice_datasheet import SliceDatasheet
+from PipelineScripts.slice_table import SliceTable
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.residue_atom_distance import ResidueAtomDistance
-from PipelineScripts.merge_datasheets import MergeDatasheets
+from PipelineScripts.merge_tables import MergeTables
 from PipelineScripts.mutation_profiler import MutationProfiler
 from PipelineScripts.mutation_composer import MutationComposer
 from PipelineScripts.filter import Filter
-from PipelineScripts.concatenate_datasheets import ConcatenateDatasheets
+from PipelineScripts.concatenate_tables import ConcatenateTables
 from PipelineScripts.extract_metrics import ExtractMetrics
 
 
@@ -35,8 +35,8 @@ with Pipeline(project="Examples",
     original_open = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json')
     original_close = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json')
 
-    original_analysis = MergeDatasheets(datasheets=[original_open.datasheets.affinity,
-                                                    original_close.datasheets.affinity],
+    original_analysis = MergeTables(tables=[original_open.tables.affinity,
+                                                    original_close.tables.affinity],
                                         prefixes=["open_","close_"],
                                         id_map={'original':["HT7_Cy7_C_R","HT7_Cy7_C_RR"]},
                                         calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"})
@@ -50,7 +50,7 @@ with Pipeline(project="Examples",
 
 
     Suffix("first_10") #suffix for these tools
-    first_10_sequences = SliceDatasheet(input=lmpnn,
+    first_10_sequences = SliceTable(input=lmpnn,
                                         n_rows=10)
 
     #Fold the first 10 sequences from LigandMPNN for comparison
@@ -71,10 +71,10 @@ with Pipeline(project="Examples",
                                                                     residue='D in IHDWG',
                                                                     atom='LIG.Cl',
                                                                     metric_name='close_chlorine_distance')
-    analysis_first10 = MergeDatasheets(datasheets=[boltz_holo_open_first10.datasheets.affinity,
-                                                   boltz_holo_close_first10.datasheets.affinity,
-                                                   open_chlorine_aspartate_distance_first10.datasheets.analysis,
-                                                   close_chlorine_aspartate_distance_first10.datasheets.analysis],
+    analysis_first10 = MergeTables(tables=[boltz_holo_open_first10.tables.affinity,
+                                                   boltz_holo_close_first10.tables.affinity,
+                                                   open_chlorine_aspartate_distance_first10.tables.analysis,
+                                                   close_chlorine_aspartate_distance_first10.tables.analysis],
                                         prefixes=["open_","close_","",""],
                                         calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"} )
 
@@ -87,7 +87,7 @@ with Pipeline(project="Examples",
 
     for mode in ["single_point","weighted_random","hotspot_focused","top_mutations"]:
         Suffix(mode) #all folders generated from now on will have this suffix
-        composer = MutationComposer(frequencies=profiler.datasheets.absolute_frequencies,
+        composer = MutationComposer(frequencies=profiler.tables.absolute_frequencies,
                                     num_sequences=10,
                                     mode=mode,
                                     prefix=mode)
@@ -109,10 +109,10 @@ with Pipeline(project="Examples",
                                                                 residue='D in IHDWG',
                                                                 atom='LIG.Cl',
                                                                 metric_name='close_chlorine_distance')
-        analysis = MergeDatasheets(datasheets=[boltz_holo_open.datasheets.affinity,
-                                               boltz_holo_close.datasheets.affinity,
-                                               open_chlorine_aspartate_distance.datasheets.analysis,
-                                               close_chlorine_aspartate_distance.datasheets.analysis],
+        analysis = MergeTables(tables=[boltz_holo_open.tables.affinity,
+                                               boltz_holo_close.tables.affinity,
+                                               open_chlorine_aspartate_distance.tables.analysis,
+                                               close_chlorine_aspartate_distance.tables.analysis],
                                     prefixes=["open_","close_","",""],
                                     calculate = {"affinity_delta":"open_affinity_pred_value-close_affinity_pred_value"} )
         filtered_analysis = Filter(data=analysis,
@@ -120,8 +120,8 @@ with Pipeline(project="Examples",
         all_analysis.append(filtered_analysis)
 
     Suffix("ALL_ANALYSIS")
-    ConcatenateDatasheets([x.datasheets.merged for x in all_analysis])
-    ExtractMetrics(datasheets=[x.datasheets.merged for x in all_analysis],
+    ConcatenateTables([x.tables.merged for x in all_analysis])
+    ExtractMetrics(tables=[x.tables.merged for x in all_analysis],
                    metrics=["affinity_delta",
                             "open_affinity_pred_value",
                             "close_affinity_pred_value"])

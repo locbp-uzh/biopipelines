@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class DistanceSelector(BaseConfig):
@@ -51,12 +51,12 @@ class DistanceSelector(BaseConfig):
                                (e.g., "resname ATP", "resi 100-105")
             restrict_to: Optional selection to restrict distance search to.
                                   Accepts:
-                                  - Datasheet reference tuple: (datasheet, "column")
+                                  - Table reference tuple: (table, "column")
                                   - Direct selection string: "10-20+30-40"
                                   - None: Consider all protein residues (default)
-            id_map: ID mapping pattern for matching structure IDs to datasheet IDs (default: {"*": "*_<N>"})
-                   - Used when datasheet IDs don't match structure IDs
-                   - Example: structure ID "rifampicin_1_2" maps to datasheet ID "rifampicin_1"
+            id_map: ID mapping pattern for matching structure IDs to table IDs (default: {"*": "*_<N>"})
+                   - Used when table IDs don't match structure IDs
+                   - Example: structure ID "rifampicin_1_2" maps to table ID "rifampicin_1"
                    - Pattern {"*": "*_<N>"} strips last "_<number>" from structure ID
                    - Set to {"*": "*"} for no mapping (1:1 ID match)
             **kwargs: Additional parameters
@@ -77,11 +77,11 @@ class DistanceSelector(BaseConfig):
         # Initialize base class
         super().__init__(**kwargs)
 
-        # Track dependency if restrict_to_selection is a datasheet reference
+        # Track dependency if restrict_to_selection is a table reference
         if isinstance(restrict_to, tuple) and len(restrict_to) == 2:
-            datasheet_obj, _ = restrict_to
-            if hasattr(datasheet_obj, 'config'):
-                self.dependencies.append(datasheet_obj.config)
+            table_obj, _ = restrict_to
+            if hasattr(table_obj, 'config'):
+                self.dependencies.append(table_obj.config)
 
         # Initialize file paths (will be set in configure_inputs)
         self._initialize_file_paths()
@@ -107,7 +107,7 @@ class DistanceSelector(BaseConfig):
         if self.restrict_to_selection is not None:
             if isinstance(self.restrict_to_selection, tuple):
                 if len(self.restrict_to_selection) != 2:
-                    raise ValueError("Datasheet reference must be a tuple of (datasheet, column_name)")
+                    raise ValueError("Table reference must be a tuple of (table, column_name)")
             elif not isinstance(self.restrict_to_selection, str):
                 raise ValueError("restrict_to_selection must be a string, tuple, or None")
 
@@ -208,8 +208,8 @@ class DistanceSelector(BaseConfig):
 
         if self.restrict_to_selection is not None:
             if isinstance(self.restrict_to_selection, tuple):
-                datasheet_obj, column = self.restrict_to_selection
-                config_lines.append(f"RESTRICT TO: {column} from datasheet")
+                table_obj, column = self.restrict_to_selection
+                config_lines.append(f"RESTRICT TO: {column} from table")
             else:
                 config_lines.append(f"RESTRICT TO: {self.restrict_to_selection}")
 
@@ -247,7 +247,7 @@ class DistanceSelector(BaseConfig):
 
         # Resolve restrict_to_selection using base class method
         if self.restrict_to_selection is not None:
-            restrict_spec = self.resolve_datasheet_reference(self.restrict_to_selection)
+            restrict_spec = self.resolve_table_reference(self.restrict_to_selection)
         else:
             restrict_spec = ""  # Empty means no restriction
 
@@ -306,7 +306,7 @@ echo "Selections saved to: {self.selections_csv}"
             - structures: Empty (no structures from DistanceSelector)
             - compounds: Empty (no compounds from DistanceSelector)
             - sequences: Empty (no sequences from DistanceSelector)
-            - datasheets: Selections datasheet with distance-based residue selections
+            - tables: Selections table with distance-based residue selections
             - output_folder: Tool's output directory
         """
         # Ensure file paths are set up
@@ -317,9 +317,9 @@ echo "Selections saved to: {self.selections_csv}"
         # Predict structure IDs for analysis count
         structure_ids = self._predict_structure_ids()
 
-        # Organize datasheets by content type with detailed metadata
-        datasheets = {
-            "selections": DatasheetInfo(
+        # Organize tables by content type with detailed metadata
+        tables = {
+            "selections": TableInfo(
                 name="selections",
                 path=self.selections_csv,
                 columns=["id", "pdb", "within", "beyond", "distance_cutoff", "reference_ligand"],
@@ -335,7 +335,7 @@ echo "Selections saved to: {self.selections_csv}"
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

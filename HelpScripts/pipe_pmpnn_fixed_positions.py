@@ -8,10 +8,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from pdb_parser import parse_pdb_file
 
-parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion datasheet, use direct selections, or apply pLDDT threshold')
+parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion table, use direct selections, or apply pLDDT threshold')
 parser.add_argument('JOB_FOLDER', type=str, help="Directory containing PDB files")
-parser.add_argument('input_source', type=str, help = "'datasheet' for reading from datasheet, 'selection' for direct input, 'plddt' for threshold")
-parser.add_argument('input_datasheet', type=str, help='Path to input datasheet (e.g., tool_results.csv) or "-" if not used')
+parser.add_argument('input_source', type=str, help = "'table' for reading from table, 'selection' for direct input, 'plddt' for threshold")
+parser.add_argument('input_table', type=str, help='Path to input table (e.g., tool_results.csv) or "-" if not used')
 parser.add_argument('pLDDT_thr', type=float, help="Will consider residues with pLDDT > threshold as fixed ")
 parser.add_argument('FIXED', type=str, help="PyMOL selection for fixed positions or '-'")
 parser.add_argument('DESIGNED', type=str, help="PyMOL selection for designed positions or '-'")
@@ -22,7 +22,7 @@ parser.add_argument('sele_csv_file', type=str, help="output file with selections
 args = parser.parse_args()
 JOB_FOLDER=args.JOB_FOLDER
 input_source=args.input_source
-input_datasheet=args.input_datasheet
+input_table=args.input_table
 pLDDT_thr=args.pLDDT_thr
 FIXED=args.FIXED
 DESIGNED=args.DESIGNED
@@ -127,12 +127,12 @@ def compute_complement(all_residues, redesigned_residues):
     complement = [res for res in all_residues if res not in redesigned_set]
     return sorted(complement)
 
-def resolve_datasheet_reference(reference, design_names):
+def resolve_table_reference(reference, design_names):
     """
-    Resolve datasheet reference to per-design selections.
+    Resolve table reference to per-design selections.
 
     Args:
-        reference: Either a datasheet reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
+        reference: Either a table reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
         design_names: List of design names (PDB base names without extension)
 
     Returns:
@@ -142,17 +142,17 @@ def resolve_datasheet_reference(reference, design_names):
         # Direct PyMOL selection - same for all designs
         return {name: sele_to_list(reference) for name in design_names}
 
-    # Parse datasheet reference: DATASHEET_REFERENCE:path:column
-    _, datasheet_path, column_name = reference.split(":", 2)
+    # Parse table reference: DATASHEET_REFERENCE:path:column
+    _, table_path, column_name = reference.split(":", 2)
 
-    if not os.path.exists(datasheet_path):
-        raise FileNotFoundError(f"Datasheet not found: {datasheet_path}")
+    if not os.path.exists(table_path):
+        raise FileNotFoundError(f"Table not found: {table_path}")
 
-    df = pd.read_csv(datasheet_path)
+    df = pd.read_csv(table_path)
     positions_per_design = {}
 
     for design_name in design_names:
-        # Find matching row in datasheet
+        # Find matching row in table
         matching_rows = df[df['pdb'] == design_name + '.pdb']
         if matching_rows.empty:
             # Try with base name in 'id' column
@@ -166,7 +166,7 @@ def resolve_datasheet_reference(reference, design_names):
             else:
                 positions_per_design[design_name] = []
         else:
-            print(f"Warning: No datasheet entry found for {design_name} in column {column_name}")
+            print(f"Warning: No table entry found for {design_name} in column {column_name}")
             positions_per_design[design_name] = []
 
     return positions_per_design
@@ -180,11 +180,11 @@ design_names = [d[:-4] for d in os.listdir(JOB_FOLDER) if d.endswith(".pdb")]
 fixed_dict = dict()
 mobile_dict = dict()
 
-if input_source == "datasheet": #derive from datasheet
+if input_source == "table": #derive from table
     try:
-        # Read input datasheet
-        df = pd.read_csv(input_datasheet)
-        print(f"Reading from datasheet: {input_datasheet}")
+        # Read input table
+        df = pd.read_csv(input_table)
+        print(f"Reading from table: {input_table}")
         
         for _, row in df.iterrows():
             pdb_name = os.path.splitext(os.path.basename(row['pdb']))[0]
@@ -192,7 +192,7 @@ if input_source == "datasheet": #derive from datasheet
                 fixed_dict[pdb_name] = dict()
                 mobile_dict[pdb_name] = dict()
                 
-                # Parse fixed and designed selections from datasheet
+                # Parse fixed and designed selections from table
                 if 'fixed' in df.columns and pd.notna(row['fixed']) and row['fixed'] != '':
                     fixed_dict[pdb_name][FIXED_CHAIN] = sele_to_list(str(row['fixed']))
                 else:
@@ -206,18 +206,18 @@ if input_source == "datasheet": #derive from datasheet
                 print(f"Design: {pdb_name}, Fixed: {fixed_dict[pdb_name][FIXED_CHAIN]}, Designed: {mobile_dict[pdb_name][FIXED_CHAIN]}")
                 
     except Exception as e:
-        print(f"Error reading datasheet {input_datasheet}: {e}")
+        print(f"Error reading table {input_table}: {e}")
         print("Falling back to pLDDT threshold method...")
         input_source = "plddt"
 
 if input_source == "selection":
-    # Use direct selections or datasheet references
+    # Use direct selections or table references
     FIXED = FIXED if FIXED != '-' else ''
     DESIGNED = DESIGNED if DESIGNED != '-' else ''
 
-    # Resolve datasheet references if present
-    fixed_per_design = resolve_datasheet_reference(FIXED, design_names) if FIXED else {name: [] for name in design_names}
-    designed_per_design = resolve_datasheet_reference(DESIGNED, design_names) if DESIGNED else {name: [] for name in design_names}
+    # Resolve table references if present
+    fixed_per_design = resolve_table_reference(FIXED, design_names) if FIXED else {name: [] for name in design_names}
+    designed_per_design = resolve_table_reference(DESIGNED, design_names) if DESIGNED else {name: [] for name in design_names}
 
     for name in design_names:
         fixed_dict[name] = dict()
@@ -252,7 +252,7 @@ if input_source == "selection":
         # Store final fixed positions (what ProteinMPNN will use)
         fixed_dict[name][FIXED_CHAIN] = final_fixed
         
-elif input_source == "plddt" or input_source == "datasheet":  # datasheet fallback
+elif input_source == "plddt" or input_source == "table":  # table fallback
     # Use pLDDT threshold method
     FIXED = FIXED if FIXED != '-' else ''
     if pLDDT_thr < 100:
@@ -265,7 +265,7 @@ elif input_source == "plddt" or input_source == "datasheet":  # datasheet fallba
             print(str(e))
     
     for name in design_names:
-        if name not in fixed_dict:  # Skip if already processed from datasheet
+        if name not in fixed_dict:  # Skip if already processed from table
             fixed_dict[name] = dict()
             mobile_dict[name] = dict()
             
@@ -317,7 +317,7 @@ print(f"Selections summary written to: {sele_csv_file}")
 #Dictionary of fixed positions looks like this
 #{"design_0": {"A": [1, 2, 3, 7, 8, 9, 22, 25, 33], "B": []}, "design_1": {"A": [], "B": []}}
 #Input modes:
-# - datasheet: Read fixed/designed from input datasheet (e.g., from RFdiffusion or other tools)
+# - table: Read fixed/designed from input table (e.g., from RFdiffusion or other tools)
 # - selection: Use FIXED and DESIGNED parameters directly
 # - plddt: Use pLDDT threshold to determine positions
 

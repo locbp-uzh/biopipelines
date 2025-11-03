@@ -13,8 +13,8 @@ from .alphafold import AlphaFold
 from .ligand_mpnn import LigandMPNN
 from .boltz2 import Boltz2
 from .compound_library import CompoundLibrary
-from .slice_datasheet import SliceDatasheet
-from .average_by_datasheet import AverageByDatasheet
+from .slice_table import SliceTable
+from .average_by_table import AverageByTable
 from .extract_metrics import ExtractMetrics
 from .folders import FolderManager
 from .conformational_change import ConformationalChange
@@ -37,8 +37,8 @@ __all__ = [
     'LigandMPNN',
     'Boltz2',
     'CompoundLibrary',
-    'SliceDatasheet',
-    'AverageByDatasheet',
+    'SliceTable',
+    'AverageByTable',
     'ExtractMetrics',
     'ConformationalChange',
     'ProteinLigandContacts',

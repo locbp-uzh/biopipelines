@@ -51,11 +51,11 @@ class MMseqs2(BaseConfig):
             timeout: Timeout in seconds for server response
             mask: Positions to mask in MSA (excluding query sequence)
                   - String format: "10-20+30-40" (PyMOL selection style)
-                  - Tuple format: (DatasheetInfo, "column_name") for per-sequence masking
+                  - Tuple format: (TableInfo, "column_name") for per-sequence masking
                   - Empty string: no masking (default)
-            id_map: ID mapping pattern for matching sequence IDs to datasheet IDs (default: {"*": "*_<N>"})
-                  - Used when mask datasheet IDs don't match sequence IDs
-                  - Example: sequence ID "rifampicin_1_2" maps to datasheet ID "rifampicin_1"
+            id_map: ID mapping pattern for matching sequence IDs to table IDs (default: {"*": "*_<N>"})
+                  - Used when mask table IDs don't match sequence IDs
+                  - Example: sequence ID "rifampicin_1_2" maps to table ID "rifampicin_1"
                   - Pattern {"*": "*_<N>"} strips last "_<number>" from sequence ID
             **kwargs: Additional parameters
         """
@@ -107,7 +107,7 @@ class MMseqs2(BaseConfig):
 
         # Validate mask parameter if provided
         if self.mask_positions:
-            self.validate_datasheet_reference(self.mask_positions)
+            self.validate_table_reference(self.mask_positions)
 
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
@@ -356,15 +356,15 @@ echo "MMseqs2 processing completed"
         import json
         id_map_json = json.dumps(self.id_map).replace('"', '\\"')
 
-        # Handle tuple format: (DatasheetInfo, "column_name")
+        # Handle tuple format: (TableInfo, "column_name")
         if isinstance(self.mask_positions, tuple):
             if len(self.mask_positions) == 2:
-                datasheet_info, column_name = self.mask_positions
-                if hasattr(datasheet_info, 'path'):
-                    # Per-sequence masking from datasheet
-                    return f' \\\n    --mask_datasheet "{datasheet_info.path}" \\\n    --mask_column "{column_name}" \\\n    --id_map "{id_map_json}"'
+                table_info, column_name = self.mask_positions
+                if hasattr(table_info, 'path'):
+                    # Per-sequence masking from table
+                    return f' \\\n    --mask_table "{table_info.path}" \\\n    --mask_column "{column_name}" \\\n    --id_map "{id_map_json}"'
                 else:
-                    raise ValueError(f"Invalid datasheet reference in mask parameter: {self.mask_positions}")
+                    raise ValueError(f"Invalid table reference in mask parameter: {self.mask_positions}")
             else:
                 raise ValueError(f"Invalid tuple format for mask parameter: {self.mask_positions}")
 
@@ -437,8 +437,8 @@ echo "MMseqs2 processing completed"
                 msa_file = os.path.join(self.output_folder, f"{seq_id}.a3m")
             individual_msas.append(msa_file)
 
-        # Organize datasheets by content type
-        datasheets = {
+        # Organize tables by content type
+        tables = {
             "msas": {
                 "path": self.output_msa_csv,
                 "columns": ["id", "sequence_id", "sequence", "msa_file"],
@@ -456,7 +456,7 @@ echo "MMseqs2 processing completed"
             "structure_ids": [],
             "compounds": [],
             "compound_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 
@@ -765,7 +765,7 @@ bash {gpu_script_path}
             "structure_ids": [],
             "compounds": [],
             "compound_ids": [],
-            "datasheets": {},
+            "tables": {},
             "output_folder": self.output_folder
         }
 

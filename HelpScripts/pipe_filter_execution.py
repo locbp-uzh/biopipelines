@@ -199,10 +199,10 @@ def save_filtering_results(result: Dict[str, Any], output_folder: str, job_name:
     with open(manifest_file, 'w') as f:
         json.dump(result, f, indent=2)
     
-    # Create filtered datasheet
-    datasheet_file = os.path.join(output_folder, f"{job_name}_filtered_{filter_type}.csv")
+    # Create filtered table
+    table_file = os.path.join(output_folder, f"{job_name}_filtered_{filter_type}.csv")
     
-    # Build datasheet based on filter type
+    # Build table based on filter type
     rows = []
     
     # Add kept items
@@ -229,7 +229,7 @@ def save_filtering_results(result: Dict[str, Any], output_folder: str, job_name:
     
     # Save as CSV
     df = pd.DataFrame(rows)
-    df.to_csv(datasheet_file, index=False)
+    df.to_csv(table_file, index=False)
     
     # Generate filter report
     report_file = os.path.join(output_folder, f"{job_name}_filter_report.txt")
@@ -275,7 +275,7 @@ def save_filtering_results(result: Dict[str, Any], output_folder: str, job_name:
     
     print(f"Filter results saved:")
     print(f"  Manifest: {manifest_file}")
-    print(f"  Datasheet: {datasheet_file}")
+    print(f"  Table: {table_file}")
     print(f"  Report: {report_file}")
 
 

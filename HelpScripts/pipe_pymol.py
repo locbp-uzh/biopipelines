@@ -120,34 +120,34 @@ def load_structures_from_source(source_config: Dict[str, Any]) -> List[str]:
     return loaded_objects
 
 
-def load_datasheet_values(datasheet_path: str, column: str) -> Dict[str, float]:
-    """Load values from a datasheet CSV for coloring."""
-    if not os.path.exists(datasheet_path):
-        print(f"Warning: Datasheet not found: {datasheet_path}")
+def load_table_values(table_path: str, column: str) -> Dict[str, float]:
+    """Load values from a table CSV for coloring."""
+    if not os.path.exists(table_path):
+        print(f"Warning: Table not found: {table_path}")
         return {}
     
     try:
         import pandas as pd
-        df = pd.read_csv(datasheet_path)
+        df = pd.read_csv(table_path)
         
         if 'id' not in df.columns:
-            print(f"Warning: 'id' column not found in {datasheet_path}")
+            print(f"Warning: 'id' column not found in {table_path}")
             return {}
         
         if column not in df.columns:
-            print(f"Warning: Column '{column}' not found in {datasheet_path}")
+            print(f"Warning: Column '{column}' not found in {table_path}")
             return {}
         
         # Convert to dictionary mapping id -> value
         return dict(zip(df['id'], df[column]))
     
     except Exception as e:
-        print(f"Error reading datasheet {datasheet_path}: {e}")
+        print(f"Error reading table {table_path}: {e}")
         return {}
 
 
 def apply_custom_coloring(loaded_objects: List[str], color_values: Dict[str, float], prefix: str):
-    """Apply custom coloring based on datasheet values."""
+    """Apply custom coloring based on table values."""
     if not color_values:
         print("No color values available, using default coloring")
         return
@@ -257,19 +257,19 @@ def main():
     color_by = config.get('color_by')
     if color_by:
         print(f"\nApplying coloring based on: {color_by}")
-        # Parse color_by format: tool.output.datasheets.sheet.column
+        # Parse color_by format: tool.output.tables.sheet.column
         parts = color_by.split('.')
         if len(parts) >= 5:
             column = parts[-1]
             sheet = parts[-2]
             
-            # Try to find corresponding datasheet files
+            # Try to find corresponding table files
             # This is a simplified approach - in practice, we'd need to resolve
-            # the tool reference and find the correct datasheet
+            # the tool reference and find the correct table
             for source_config in config['structure_sources']:
-                datasheet_path = os.path.join(source_config['input_folder'], f"{sheet}.csv")
-                if os.path.exists(datasheet_path):
-                    values = load_datasheet_values(datasheet_path, column)
+                table_path = os.path.join(source_config['input_folder'], f"{sheet}.csv")
+                if os.path.exists(table_path):
+                    values = load_table_values(table_path, column)
                     color_values.update(values)
                     break
             

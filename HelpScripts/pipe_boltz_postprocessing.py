@@ -267,7 +267,7 @@ if os.path.exists(sequences_csv):
         seq_df = pd.read_csv(sequences_csv)
         if 'sequence' in seq_df.columns:
             sequences_data = dict(zip(seq_df['id'], seq_df['sequence']))
-        print(f"Loaded {len(sequences_data)} sequences for MSA datasheet")
+        print(f"Loaded {len(sequences_data)} sequences for MSA table")
     except Exception as e:
         print(f"Warning: Could not load sequences from {sequences_csv}: {e}")
 
@@ -280,7 +280,7 @@ if os.path.exists(msas_folder):
             seq_id = os.path.splitext(msa_file)[0]  # This is already the sequence_id since we renamed files
             
             msa_entry = {
-                'id': seq_id,  # Remove msa_ prefix - use same ID as other datasheets
+                'id': seq_id,  # Remove msa_ prefix - use same ID as other tables
                 'sequence_id': seq_id,
                 'sequence': sequences_data.get(seq_id, ''),  # Add actual protein sequence
                 'msa_file': os.path.join(msas_folder, msa_file)

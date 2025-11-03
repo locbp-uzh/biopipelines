@@ -11,13 +11,13 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class StitchSequences(BaseConfig):
@@ -47,12 +47,12 @@ class StitchSequences(BaseConfig):
             selections: Position specifications for each sequence (except first base sequence).
                       Can be:
                       - List of strings: ["", "10-20+30-40"] - empty string means base, string means overlay positions
-                      - List of datasheet references: ["", distances.datasheets.analysis.within]
+                      - List of table references: ["", distances.tables.analysis.within]
                       - Single string: "10-20+30-40" - applies to second sequence only
-            id_map: ID mapping pattern between datasheet and sequence IDs. Default: {"*": "*_<N>"}
-                   - Left side (*): Pattern for datasheet IDs (base structure IDs)
+            id_map: ID mapping pattern between table and sequence IDs. Default: {"*": "*_<N>"}
+                   - Left side (*): Pattern for table IDs (base structure IDs)
                    - Right side (*_<N>): Pattern for sequence IDs where <N> is sequence number
-                   - Enables matching datasheet ID 'protein_1' to sequences 'protein_1_1', 'protein_1_2', etc.
+                   - Enables matching table ID 'protein_1' to sequences 'protein_1_1', 'protein_1_2', etc.
             **kwargs: Additional parameters
 
         Position Syntax:
@@ -62,34 +62,34 @@ class StitchSequences(BaseConfig):
             - "10-20+30-40" → overlay at residues 10-20 and 30-40
             - "145+147+150" → overlay at specific residues 145, 147, and 150
 
-            Datasheet format:
-            - datasheet_reference → use position values from datasheet column
+            Table format:
+            - table_reference → use position values from table column
 
         ID Mapping:
-            The id_map parameter handles cases where datasheet IDs (from tools like DistanceSelector)
+            The id_map parameter handles cases where table IDs (from tools like DistanceSelector)
             don't match sequence IDs (from ProteinMPNN/LigandMPNN). For example:
-            - Datasheet: 'rifampicin_014_1', 'rifampicin_014_2'
+            - Table: 'rifampicin_014_1', 'rifampicin_014_2'
             - Sequences: 'rifampicin_014_1_1', 'rifampicin_014_1_2', 'rifampicin_014_2_1', ...
 
             With id_map={"*": "*_<N>"}, all sequences matching 'rifampicin_014_1_*' will use
-            positions from datasheet entry 'rifampicin_014_1'. All combinations are generated
+            positions from table entry 'rifampicin_014_1'. All combinations are generated
             using Cartesian product.
 
         Examples:
             # Basic usage with default ID mapping
             sequences = pipeline.add(StitchSequences(
                 sequences=[pmpnn, lmpnn],
-                selections=["", distances.datasheets.selections.within]
+                selections=["", distances.tables.selections.within]
             ))
 
             # Explicit ID mapping (same as default)
             sequences = pipeline.add(StitchSequences(
                 sequences=[pmpnn, lmpnn],
-                selections=["", distances.datasheets.selections.within],
+                selections=["", distances.tables.selections.within],
                 id_map={"*": "*_<N>"}
             ))
 
-            # Fixed positions instead of datasheet
+            # Fixed positions instead of table
             sequences = pipeline.add(StitchSequences(
                 sequences=[base_tool, overlay_tool],
                 selections=["", "10-20+30-40"]
@@ -148,25 +148,25 @@ class StitchSequences(BaseConfig):
         """Configure input sequences from previous tools."""
         self.folders = pipeline_folders
 
-        # Get sequence datasheets from each source - no assumptions or fallbacks
+        # Get sequence tables from each source - no assumptions or fallbacks
         self.sequence_sources = []
 
         for i, seq_source in enumerate(self.input_sequences):
-            # Each source MUST have a sequences datasheet
-            if not hasattr(seq_source, 'datasheets'):
-                raise ValueError(f"Sequence source {i} must have datasheets")
+            # Each source MUST have a sequences table
+            if not hasattr(seq_source, 'tables'):
+                raise ValueError(f"Sequence source {i} must have tables")
 
-            if not hasattr(seq_source.datasheets, 'sequences'):
-                raise ValueError(f"Sequence source {i} must have datasheets.sequences")
+            if not hasattr(seq_source.tables, 'sequences'):
+                raise ValueError(f"Sequence source {i} must have tables.sequences")
 
-            # Get the sequences datasheet path directly
-            sequences_datasheet = seq_source.datasheets.sequences
-            if hasattr(sequences_datasheet, 'path'):
-                sequences_file = sequences_datasheet.path
-            elif isinstance(sequences_datasheet, str):
-                sequences_file = sequences_datasheet
+            # Get the sequences table path directly
+            sequences_table = seq_source.tables.sequences
+            if hasattr(sequences_table, 'path'):
+                sequences_file = sequences_table.path
+            elif isinstance(sequences_table, str):
+                sequences_file = sequences_table
             else:
-                raise ValueError(f"Sequence source {i} datasheets.sequences must have path or be string path")
+                raise ValueError(f"Sequence source {i} tables.sequences must have path or be string path")
 
             source_info = {
                 'tool': seq_source,
@@ -187,7 +187,7 @@ class StitchSequences(BaseConfig):
 
         for i in range(1, len(self.input_sequences)):
             positions = self.position_specs[i]
-            pos_display = positions if isinstance(positions, str) else f"Datasheet: {positions}"
+            pos_display = positions if isinstance(positions, str) else f"Table: {positions}"
             config_lines.append(f"OVERLAY {i}: {self.input_sequences[i].__class__.__name__} at {pos_display}")
 
         return config_lines
@@ -233,19 +233,19 @@ class StitchSequences(BaseConfig):
                     "value": pos_spec
                 })
             else:
-                # Datasheet reference - handle tuple format (DatasheetInfo_object, column_name)
+                # Table reference - handle tuple format (TableInfo_object, column_name)
                 if isinstance(pos_spec, tuple) and len(pos_spec) == 2:
-                    datasheet_obj, column_name = pos_spec
-                    datasheet_path = datasheet_obj.path if hasattr(datasheet_obj, 'path') else ''
+                    table_obj, column_name = pos_spec
+                    table_path = table_obj.path if hasattr(table_obj, 'path') else ''
                 else:
                     # Fallback for other formats
-                    datasheet_path = getattr(pos_spec, 'path', '') if hasattr(pos_spec, 'path') else ''
+                    table_path = getattr(pos_spec, 'path', '') if hasattr(pos_spec, 'path') else ''
                     column_name = 'within'  # Default column for positions
 
                 config_data["position_specs"].append({
                     "index": i,
-                    "type": "datasheet",
-                    "datasheet_path": datasheet_path,
+                    "type": "table",
+                    "table_path": table_path,
                     "column_name": column_name
                 })
 
@@ -304,8 +304,8 @@ fi
         # Predict output sequence IDs using Cartesian product
         predicted_ids = self._predict_output_sequence_ids()
 
-        datasheets = {
-            "sequences": DatasheetInfo(
+        tables = {
+            "sequences": TableInfo(
                 name="sequences",
                 path=sequences_csv,
                 columns=["id", "sequence"],
@@ -321,7 +321,7 @@ fi
             "compound_ids": [],
             "sequences": [sequences_csv],
             "sequence_ids": predicted_ids,
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
 

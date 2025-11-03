@@ -1,7 +1,7 @@
 """
-MergeDatasheets tool for merging multiple analysis CSV files.
+MergeTables tool for merging multiple analysis CSV files.
 
-Merges analysis results from multiple tools into a unified datasheet for filtering.
+Merges analysis results from multiple tools into a unified table for filtering.
 Handles metric name collisions with prefixes and maintains all information.
 """
 
@@ -10,39 +10,39 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
-class MergeDatasheets(BaseConfig):
+class MergeTables(BaseConfig):
     """
-    Tool for combining multiple analysis datasheets into a unified CSV.
+    Tool for combining multiple analysis tables into a unified CSV.
     
     Merges CSV files from multiple analysis tools on a common key column,
     handling metric name collisions with prefixes and preserving all data.
     """
     
-    TOOL_NAME = "MergeDatasheets"
+    TOOL_NAME = "MergeTables"
     DEFAULT_ENV = None  # Loaded from config.yaml
     
     def __init__(self,
-                 datasheets: List[Any],
+                 tables: List[Any],
                  prefixes: Optional[List[str]] = None,
                  key: str = "id",
                  calculate: Optional[Dict[str, str]] = None,
                  id_map: Optional[Dict[str, List[str]]] = None,
                  **kwargs):
         """
-        Initialize MergeDatasheets tool.
+        Initialize MergeTables tool.
         
         Args:
-            datasheets: List of datasheets (file paths, ToolOutput.datasheets entries, etc.)
-            prefixes: Optional list of prefixes for each datasheet (must match datasheets length)
+            tables: List of tables (file paths, ToolOutput.tables entries, etc.)
+            prefixes: Optional list of prefixes for each table (must match tables length)
             key: Column name to merge on (default: "id")
             calculate: Optional dict of {new_column: expression} for calculated columns
             id_map: Optional dict mapping new_id -> [old_id1, old_id2, ...] to consolidate different IDs
@@ -50,113 +50,113 @@ class MergeDatasheets(BaseConfig):
             
         Examples:
             # Simple combination
-            merged = pipeline.add(MergeDatasheets(
-                datasheets=[confidence_results.datasheets.analysis,
-                           distance_results.datasheets.analysis],
+            merged = pipeline.add(MergeTables(
+                tables=[confidence_results.tables.analysis,
+                           distance_results.tables.analysis],
                 key="structure_id"
             ))
             
-            # With prefixes and explicit datasheet specification
-            merged = pipeline.add(MergeDatasheets(
-                datasheets=[boltz_apo.datasheets.affinity, boltz_holo.datasheets.affinity],
+            # With prefixes and explicit table specification
+            merged = pipeline.add(MergeTables(
+                tables=[boltz_apo.tables.affinity, boltz_holo.tables.affinity],
                 prefixes=["apo_", "holo_"],
                 calculate={"affinity_diff": "holo_affinity - apo_affinity"}
             ))
             
             # With ID mapping to consolidate different IDs into common entities
-            merged = pipeline.add(MergeDatasheets(
-                datasheets=[open_results.datasheets.affinity, close_results.datasheets.affinity],
+            merged = pipeline.add(MergeTables(
+                tables=[open_results.tables.affinity, close_results.tables.affinity],
                 prefixes=["open_", "close_"],
                 id_map={"original": ["HT_Cy7_C_R", "HT_Cy7_C_RR"]},
                 calculate={"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}
             ))
         """
-        self.datasheets = datasheets
+        self.tables = tables
         self.prefixes = prefixes or []
         self.merge_key = key
         self.calculate = calculate or {}
         self.id_map = id_map or {}
         
         # Validate inputs
-        if not self.datasheets:
-            raise ValueError("At least one datasheet must be provided")
+        if not self.tables:
+            raise ValueError("At least one table must be provided")
         
-        if self.prefixes and len(self.prefixes) != len(self.datasheets):
-            raise ValueError("Number of prefixes must match number of datasheets")
+        if self.prefixes and len(self.prefixes) != len(self.tables):
+            raise ValueError("Number of prefixes must match number of tables")
         
         
         # Initialize base class
         super().__init__(**kwargs)
         
         # Set up dependencies
-        for datasheet in self.datasheets:
-            if hasattr(datasheet, 'config'):
-                self.dependencies.append(datasheet.config)
+        for table in self.tables:
+            if hasattr(table, 'config'):
+                self.dependencies.append(table.config)
     
     def validate_params(self):
-        """Validate MergeDatasheets parameters."""
+        """Validate MergeTables parameters."""
         if not self.merge_key:
             raise ValueError("merge_key cannot be empty")
         
-        if not self.datasheets:
-            raise ValueError("At least one datasheet is required")
+        if not self.tables:
+            raise ValueError("At least one table is required")
         
-        if self.prefixes and len(self.prefixes) != len(self.datasheets):
-            raise ValueError("Number of prefixes must match number of datasheets")
+        if self.prefixes and len(self.prefixes) != len(self.tables):
+            raise ValueError("Number of prefixes must match number of tables")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input datasheets from analysis tools."""
+        """Configure input tables from analysis tools."""
         self.folders = pipeline_folders
         self.input_csv_paths = []
         
-        for i, datasheet in enumerate(self.datasheets):
-            csv_path = self._get_csv_path_from_datasheet(datasheet)
+        for i, table in enumerate(self.tables):
+            csv_path = self._get_csv_path_from_table(table)
             if csv_path is None:
-                raise ValueError(f"Could not determine CSV path from datasheet: {datasheet}")
+                raise ValueError(f"Could not determine CSV path from table: {table}")
             self.input_csv_paths.append(csv_path)
     
-    def _get_csv_path_from_datasheet(self, datasheet: Any) -> Optional[str]:
+    def _get_csv_path_from_table(self, table: Any) -> Optional[str]:
         """
-        Get predicted CSV file path from datasheet reference.
+        Get predicted CSV file path from table reference.
         
         Args:
-            datasheet: Datasheet reference (path, dict with 'path', or ToolOutput)
+            table: Table reference (path, dict with 'path', or ToolOutput)
             
         Returns:
             Predicted path to CSV file or None if cannot determine
         """
-        # Handle tuple from column reference (datasheet_info, column_name)
-        if isinstance(datasheet, tuple) and len(datasheet) == 2:
-            # Extract the DatasheetInfo object from the tuple
-            datasheet_info, column_name = datasheet
-            # Use the DatasheetInfo path
-            if hasattr(datasheet_info, 'path'):
-                return datasheet_info.path
+        # Handle tuple from column reference (table_info, column_name)
+        if isinstance(table, tuple) and len(table) == 2:
+            # Extract the TableInfo object from the tuple
+            table_info, column_name = table
+            # Use the TableInfo path
+            if hasattr(table_info, 'path'):
+                return table_info.path
 
         # Direct path string
-        if isinstance(datasheet, str):
-            return datasheet
+        if isinstance(table, str):
+            return table
         
         # Dict with path key
-        if isinstance(datasheet, dict) and 'path' in datasheet:
-            return datasheet['path']
+        if isinstance(table, dict) and 'path' in table:
+            return table['path']
 
-        # DatasheetInfo object (from LoadOutput)
-        if hasattr(datasheet, 'path') and hasattr(datasheet, 'name') and hasattr(datasheet, 'columns'):
-            # This is likely a DatasheetInfo object - use its path directly
-            return datasheet.path
+        # TableInfo object (from LoadOutput)
+        if hasattr(table, 'path') and hasattr(table, 'name') and hasattr(table, 'columns'):
+            # This is likely a TableInfo object - use its path directly
+            return table.path
 
         # ToolOutput object
-        if hasattr(datasheet, 'datasheets'):
-            datasheets = datasheet.datasheets
-            if isinstance(datasheets, dict):
-                if len(datasheets) == 1:
-                    # Single datasheet - use it automatically
-                    ds_info = next(iter(datasheets.values()))
+        if hasattr(table, 'tables'):
+            tables = table.tables
+            if isinstance(tables, dict):
+                if len(tables) == 1:
+                    # Single table - use it automatically
+                    ds_info = next(iter(tables.values()))
                 else:
-                    # Multiple datasheets - ambiguous
-                    datasheet_names = list(datasheets.keys())
-                    raise ValueError(f"Ambiguous: ToolOutput has multiple datasheets {datasheet_names}. Use explicit specification like datasheets=[tool.datasheets.affinity, ...]")
+                    # Multiple tables - ambiguous
+                    table_names = list(tables.keys())
+                    raise ValueError(f"Ambiguous: ToolOutput has multiple tables {table_names}. Use explicit specification like tables=[tool.tables.affinity, ...]")
                 
                 if isinstance(ds_info, dict) and 'path' in ds_info:
                     return ds_info['path']
@@ -164,8 +164,8 @@ class MergeDatasheets(BaseConfig):
                     return str(ds_info)
         
         # Predict based on output folder (simplified - no assumptions about names)
-        if hasattr(datasheet, 'output_folder'):
-            output_folder = datasheet.output_folder
+        if hasattr(table, 'output_folder'):
+            output_folder = table.output_folder
             # Just use a generic prediction - no assumptions about specific tool outputs
             return os.path.join(output_folder, 'results.csv')
         
@@ -176,7 +176,7 @@ class MergeDatasheets(BaseConfig):
         config_lines = super().get_config_display()
         
         config_lines.extend([
-            f"INPUTS: {len(self.datasheets)} datasheets",
+            f"INPUTS: {len(self.tables)} tables",
             f"MERGE KEY: {self.merge_key}",
         ])
         
@@ -197,7 +197,7 @@ class MergeDatasheets(BaseConfig):
     
     def generate_script(self, script_path: str) -> str:
         """
-        Generate script to merge analysis datasheets.
+        Generate script to merge analysis tables.
         
         Args:
             script_path: Path where script should be written
@@ -229,25 +229,25 @@ class MergeDatasheets(BaseConfig):
         
         # Generate script content
         script_content = f"""#!/bin/bash
-# MergeDatasheets execution script
+# MergeTables execution script
 # Generated by BioPipelines pipeline system
 
 {self.generate_completion_check_header()}
 
-echo "Combining analysis datasheets"
-echo "Input datasheets: {len(self.input_csv_paths)}"
+echo "Combining analysis tables"
+echo "Input tables: {len(self.input_csv_paths)}"
 echo "Merge key: {self.merge_key}"
 echo "Output: {merged_csv}"
 
 # Run Python combination script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_merge_datasheets.py')}" \\
+python "{os.path.join(self.folders['HelpScripts'], 'pipe_merge_tables.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
-    echo "Successfully merged {len(self.input_csv_paths)} datasheets"
+    echo "Successfully merged {len(self.input_csv_paths)} tables"
     echo "Output written to: {merged_csv}"
 else
-    echo "Error: Failed to merge datasheets"
+    echo "Error: Failed to merge tables"
     exit 1
 fi
 
@@ -258,14 +258,14 @@ fi
     
     def get_output_files(self) -> Dict[str, List[str]]:
         """
-        Get expected output files after combining datasheets.
+        Get expected output files after combining tables.
         
         Returns:
             Dictionary with output file paths
         """
         merged_csv = os.path.join(self.output_folder, "merged.csv")
         
-        # Determine expected columns by combining input datasheets info
+        # Determine expected columns by combining input tables info
         expected_columns = [self.merge_key, "source_structure"]  # Common columns
         
         # Predict prefixed metric columns based on known tool outputs
@@ -289,8 +289,8 @@ fi
         if self.calculate:
             expected_columns.extend(self.calculate.keys())
         
-        datasheets = {
-            "merged": DatasheetInfo(
+        tables = {
+            "merged": TableInfo(
                 name="merged",
                 path=merged_csv,
                 columns=expected_columns,
@@ -306,7 +306,7 @@ fi
             "compound_ids": [],
             "sequences": [],
             "sequence_ids": [],
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder
         }
     
@@ -315,7 +315,7 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "num_datasheets": len(self.datasheets),
+                "num_tables": len(self.tables),
                 "merge_key": self.merge_key,
                 "prefixes": self.prefixes,
                 "calculate": self.calculate,

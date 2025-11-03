@@ -1,50 +1,50 @@
 """
-Datasheet Navigator Mixin for unified datasheet access.
+Table Navigator Mixin for unified table access.
 
-Provides elegant navigation across different datasheet formats
-(DatasheetContainer, dict, list, legacy formats).
+Provides elegant navigation across different table formats
+(TableContainer, dict, list, legacy formats).
 """
 
 from typing import Union, Optional, List, Any
 
 
-class DatasheetNavigatorMixin:
+class TableNavigatorMixin:
     """
-    Mixin providing elegant datasheet navigation across all formats.
+    Mixin providing elegant table navigation across all formats.
 
-    Eliminates complex nested if-else chains for accessing datasheets
+    Eliminates complex nested if-else chains for accessing tables
     from various sources and formats.
     """
 
-    def get_datasheet(self,
+    def get_table(self,
                       source: Any,
                       name: Optional[str] = None,
                       fallback_names: Optional[List[str]] = None) -> Any:
         """
-        Universal datasheet getter - works with all formats.
+        Universal table getter - works with all formats.
 
         This method replaces 30+ lines of nested if-else logic for accessing
-        datasheets from different formats with a single function call.
+        tables from different formats with a single function call.
 
         Args:
-            source: ToolOutput, StandardizedOutput, DatasheetContainer, dict, or list
-            name: Preferred datasheet name (e.g., 'structures', 'sequences', 'filtered')
+            source: ToolOutput, StandardizedOutput, TableContainer, dict, or list
+            name: Preferred table name (e.g., 'structures', 'sequences', 'filtered')
             fallback_names: List of fallback names to try if primary name not found
                            Default: ['main', 'structures', 'sequences', 'compounds']
 
         Returns:
-            DatasheetInfo object or path string
+            TableInfo object or path string
 
         Raises:
-            ValueError: If datasheet cannot be found
+            ValueError: If table cannot be found
 
         Examples:
-            >>> # Get 'structures' datasheet, falling back to 'main'
-            >>> ds = self.get_datasheet(tool_output, 'structures')
+            >>> # Get 'structures' table, falling back to 'main'
+            >>> ds = self.get_table(tool_output, 'structures')
 
-            >>> # Get any available datasheet with custom fallbacks
-            >>> ds = self.get_datasheet(
-            ...     tool_output.datasheets,
+            >>> # Get any available table with custom fallbacks
+            >>> ds = self.get_table(
+            ...     tool_output.tables,
             ...     name='filtered',
             ...     fallback_names=['merged', 'combined', 'main']
             ... )
@@ -63,15 +63,15 @@ class DatasheetNavigatorMixin:
         seen = set()
         names_to_try = [n for n in names_to_try if not (n in seen or seen.add(n))]
 
-        # Handle DatasheetContainer (modern format with _datasheets attribute)
-        if hasattr(source, '_datasheets'):
+        # Handle TableContainer (modern format with _tables attribute)
+        if hasattr(source, '_tables'):
             for n in names_to_try:
-                if n in source._datasheets:
-                    return source._datasheets[n]
+                if n in source._tables:
+                    return source._tables[n]
             # If no match found, raise with helpful message
-            available = list(source._datasheets.keys())
+            available = list(source._tables.keys())
             raise ValueError(
-                f"Datasheet '{name}' not found in DatasheetContainer. "
+                f"Table '{name}' not found in TableContainer. "
                 f"Available: {available}"
             )
 
@@ -88,120 +88,120 @@ class DatasheetNavigatorMixin:
             # If no match found, raise with helpful message
             available = list(source.keys())
             raise ValueError(
-                f"Datasheet '{name}' not found in dict. "
+                f"Table '{name}' not found in dict. "
                 f"Available: {available}"
             )
 
-        # Handle ToolOutput/StandardizedOutput - recurse on their datasheets
-        if hasattr(source, 'datasheets'):
-            return self.get_datasheet(source.datasheets, name, fallback_names)
+        # Handle ToolOutput/StandardizedOutput - recurse on their tables
+        if hasattr(source, 'tables'):
+            return self.get_table(source.tables, name, fallback_names)
 
         # Handle legacy list format (first item is always "main")
         if isinstance(source, list) and source:
             if name in ['main', None] or name in fallback_names:
                 return source[0]
             raise ValueError(
-                f"Legacy list format only supports 'main' datasheet, "
+                f"Legacy list format only supports 'main' table, "
                 f"requested: '{name}'"
             )
 
         # Unsupported type
         raise ValueError(
-            f"Cannot access datasheet from type: {type(source)}. "
-            f"Expected DatasheetContainer, ToolOutput, StandardizedOutput, dict, or list."
+            f"Cannot access table from type: {type(source)}. "
+            f"Expected TableContainer, ToolOutput, StandardizedOutput, dict, or list."
         )
 
-    def get_datasheet_path(self,
+    def get_table_path(self,
                            source: Any,
                            name: Optional[str] = None,
                            fallback_names: Optional[List[str]] = None) -> str:
         """
-        Get datasheet path string (convenience method).
+        Get table path string (convenience method).
 
-        Automatically extracts the path from DatasheetInfo objects.
+        Automatically extracts the path from TableInfo objects.
 
         Args:
-            source: Same as get_datasheet()
-            name: Same as get_datasheet()
-            fallback_names: Same as get_datasheet()
+            source: Same as get_table()
+            name: Same as get_table()
+            fallback_names: Same as get_table()
 
         Returns:
-            Path string to datasheet CSV file
+            Path string to table CSV file
 
         Example:
-            >>> path = self.get_datasheet_path(tool_output, 'structures')
+            >>> path = self.get_table_path(tool_output, 'structures')
             >>> # Returns: '/path/to/structures.csv'
         """
-        datasheet = self.get_datasheet(source, name, fallback_names)
+        table = self.get_table(source, name, fallback_names)
 
-        # Extract path from DatasheetInfo object
-        if hasattr(datasheet, 'path'):
-            return datasheet.path
+        # Extract path from TableInfo object
+        if hasattr(table, 'path'):
+            return table.path
 
         # Handle dict format
-        if isinstance(datasheet, dict) and 'path' in datasheet:
-            return datasheet['path']
+        if isinstance(table, dict) and 'path' in table:
+            return table['path']
 
         # Assume it's already a path string
-        if isinstance(datasheet, str):
-            return datasheet
+        if isinstance(table, str):
+            return table
 
         raise ValueError(
-            f"Cannot extract path from datasheet: {type(datasheet)}"
+            f"Cannot extract path from table: {type(table)}"
         )
 
-    def get_all_datasheets(self, source: Any) -> dict:
+    def get_all_tables(self, source: Any) -> dict:
         """
-        Get all datasheets as a dictionary.
+        Get all tables as a dictionary.
 
         Args:
-            source: DatasheetContainer, ToolOutput, StandardizedOutput, dict, or list
+            source: TableContainer, ToolOutput, StandardizedOutput, dict, or list
 
         Returns:
-            Dictionary mapping datasheet names to DatasheetInfo objects or paths
+            Dictionary mapping table names to TableInfo objects or paths
 
         Example:
-            >>> all_ds = self.get_all_datasheets(tool_output)
+            >>> all_ds = self.get_all_tables(tool_output)
             >>> for name, ds in all_ds.items():
             ...     print(f"{name}: {ds.path}")
         """
-        # Handle DatasheetContainer
-        if hasattr(source, '_datasheets'):
-            return dict(source._datasheets)
+        # Handle TableContainer
+        if hasattr(source, '_tables'):
+            return dict(source._tables)
 
         # Handle dict format
         if isinstance(source, dict):
             return source.copy()
 
         # Handle ToolOutput/StandardizedOutput
-        if hasattr(source, 'datasheets'):
-            return self.get_all_datasheets(source.datasheets)
+        if hasattr(source, 'tables'):
+            return self.get_all_tables(source.tables)
 
         # Handle legacy list format
         if isinstance(source, list):
             return {'main': source[0]} if source else {}
 
         raise ValueError(
-            f"Cannot get all datasheets from type: {type(source)}"
+            f"Cannot get all tables from type: {type(source)}"
         )
 
-    def datasheet_exists(self, source: Any, name: str) -> bool:
+    def table_exists(self, source: Any, name: str) -> bool:
         """
-        Check if a datasheet exists.
+        Check if a table exists.
 
         Args:
-            source: Any datasheet source
-            name: Datasheet name to check
+            source: Any table source
+            name: Table name to check
 
         Returns:
-            True if datasheet exists, False otherwise
+            True if table exists, False otherwise
 
         Example:
-            >>> if self.datasheet_exists(tool_output, 'structures'):
-            ...     ds = self.get_datasheet(tool_output, 'structures')
+            >>> if self.table_exists(tool_output, 'structures'):
+            ...     ds = self.get_table(tool_output, 'structures')
         """
         try:
-            self.get_datasheet(source, name, fallback_names=[])
+            self.get_table(source, name, fallback_names=[])
             return True
         except ValueError:
             return False

@@ -9,13 +9,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, DatasheetInfo
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class Boltz2(BaseConfig):
@@ -57,8 +57,8 @@ class Boltz2(BaseConfig):
         Args:
             config: Direct YAML configuration string (Example 1: Boltz2(config=yaml))
             proteins: Protein sequences - can be ToolOutput, StandardizedOutput, file path, or direct sequence
-            ligands: Single ligand SMILES string, ToolOutput with compounds, or datasheet reference
-            msas: MSA files for recycling (e.g., boltz2_apo.datasheets.msas)
+            ligands: Single ligand SMILES string, ToolOutput with compounds, or table reference
+            msas: MSA files for recycling (e.g., boltz2_apo.tables.msas)
             ligand_library: Path to CSV file with ligand library
             primary_key: Key column in library to filter by
             library_repr: Ligand representation ("SMILES" or "CCD")
@@ -79,7 +79,7 @@ class Boltz2(BaseConfig):
         self.msas = msas
         self.input_sequences = None
         self.input_compounds = []
-        self.input_datasheets = {}
+        self.input_tables = {}
         self.input_is_tool_output = False
         self.standardized_input = None
 
@@ -87,14 +87,14 @@ class Boltz2(BaseConfig):
         if isinstance(proteins, StandardizedOutput):
             # Explicit: proteins=tool
             self.input_sequences = proteins.sequences
-            self.input_datasheets = getattr(proteins, 'datasheets', {})
+            self.input_tables = getattr(proteins, 'tables', {})
             self.input_is_tool_output = False
             self.standardized_input = proteins
             # Keep proteins as StandardizedOutput reference
         elif isinstance(proteins, ToolOutput):
             # ToolOutput for proteins
             self.input_sequences = proteins
-            self.input_datasheets = proteins.get_output_files("datasheets")
+            self.input_tables = proteins.get_output_files("tables")
             self.input_is_tool_output = True
             self.standardized_input = None
             self.dependencies.append(proteins.config)
@@ -102,21 +102,21 @@ class Boltz2(BaseConfig):
             # Explicit: ligands=compounds from previous tool
             if isinstance(ligands, StandardizedOutput):
                 self.input_compounds = getattr(ligands, 'compounds', [])
-                self.input_datasheets = getattr(ligands, 'datasheets', {})
+                self.input_tables = getattr(ligands, 'tables', {})
             else:  # ToolOutput
                 self.input_compounds = ligands.get_output_files("compounds")
-                self.input_datasheets = ligands.get_output_files("datasheets")
+                self.input_tables = ligands.get_output_files("tables")
                 # Add dependency for ToolOutput
                 self.dependencies.append(ligands.config)
             # Keep ligands as tool reference
         elif isinstance(msas, StandardizedOutput):
             # Explicit: msas=previous_boltz
-            self.input_datasheets = getattr(msas, 'datasheets', {})
+            self.input_tables = getattr(msas, 'tables', {})
         else:
             # Direct inputs (strings, lists, etc.)
             self.input_sequences = self.proteins
             self.input_compounds = []
-            self.input_datasheets = {}
+            self.input_tables = {}
             self.input_is_tool_output = isinstance(self.proteins, ToolOutput)
             self.standardized_input = None
         
@@ -248,20 +248,20 @@ class Boltz2(BaseConfig):
             raise ValueError("Cannot specify multiple primary input methods (config and proteins)")
         
         # For proteins input (not config), ligand information is typically required
-        # But with standardized input, ligands might come from datasheets
+        # But with standardized input, ligands might come from tables
         if (self.proteins and not self.config and 
             not self.ligands and not self.ligand_library and not self.msas and
             not self.standardized_input):
-            # Only warn, don't error - ligands might be in datasheets or MSAs
+            # Only warn, don't error - ligands might be in tables or MSAs
             pass
         
         # Cannot specify both single ligand and library
         if self.ligands and self.ligand_library:
             raise ValueError("Cannot specify both ligands and ligand_library")
         
-        # Validate datasheet references if provided (skip for StandardizedOutput)
+        # Validate table references if provided (skip for StandardizedOutput)
         if self.ligands and isinstance(self.ligands, str):
-            self.validate_datasheet_reference(self.ligands)
+            self.validate_table_reference(self.ligands)
         
         # Validate enum values
         if self.library_repr not in ["SMILES", "CCD"]:
@@ -416,28 +416,28 @@ class Boltz2(BaseConfig):
         if not self.msas:
             return
             
-        # Get MSA datasheet from previous tool
+        # Get MSA table from previous tool
         msa_paths = {}
-        if hasattr(self.msas, 'datasheets'):
-            if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
-                # MSAs should be provided in the datasheets.msas
-                # Handle both DatasheetContainer (returns path string) and dict format
-                msa_datasheet = self.msas.datasheets['msas']
-                if isinstance(msa_datasheet, str):
-                    # DatasheetContainer returns path directly
-                    msa_datasheet_path = msa_datasheet
-                elif isinstance(msa_datasheet, dict) and 'path' in msa_datasheet:
+        if hasattr(self.msas, 'tables'):
+            if hasattr(self.msas, 'tables') and 'msas' in self.msas.tables:
+                # MSAs should be provided in the tables.msas
+                # Handle both TableContainer (returns path string) and dict format
+                msa_table = self.msas.tables['msas']
+                if isinstance(msa_table, str):
+                    # TableContainer returns path directly
+                    msa_table_path = msa_table
+                elif isinstance(msa_table, dict) and 'path' in msa_table:
                     # Raw dict format
-                    msa_datasheet_path = msa_datasheet['path']
+                    msa_table_path = msa_table['path']
                 else:
-                    raise ValueError(f"Invalid MSA datasheet format: {type(msa_datasheet)}")
+                    raise ValueError(f"Invalid MSA table format: {type(msa_table)}")
                 
                 # This will be a CSV with columns: id, sequence_id, msa_file
                 # We need to read this at runtime, not pipeline time
                 # For now, just signal that MSAs will be integrated at runtime
                 pass
             else:
-                raise ValueError("MSA ToolOutput doesn't have datasheets.msas")
+                raise ValueError("MSA ToolOutput doesn't have tables.msas")
         elif isinstance(self.msas, str):
             # Direct path to MSA folder
             pass
@@ -739,15 +739,15 @@ EOF
             # Prepare MSA parameter if available
             msa_param = ""
             if hasattr(self, '_needs_msa_integration') and self._needs_msa_integration:
-                if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
-                    msa_ds = self.msas.datasheets['msas']
+                if hasattr(self.msas, 'tables') and 'msas' in self.msas.tables:
+                    msa_ds = self.msas.tables['msas']
                     if isinstance(msa_ds, str):
-                        msa_datasheet = msa_ds
+                        msa_table = msa_ds
                     elif isinstance(msa_ds, dict) and 'path' in msa_ds:
-                        msa_datasheet = msa_ds['path']
+                        msa_table = msa_ds['path']
                     else:
-                        msa_datasheet = str(msa_ds)
-                    msa_param = f'--msa-datasheet "{msa_datasheet}"'
+                        msa_table = str(msa_ds)
+                    msa_param = f'--msa-table "{msa_table}"'
             elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
                 msa_param = f'--global-msa-cache --msa-folder "{self.msa_cache_folder}"'
             
@@ -773,23 +773,23 @@ python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_
 """
         elif hasattr(self, '_needs_msa_integration') and self._needs_msa_integration and not self.queries_csv_file:
             # Generate YAML config with MSAs at runtime (single protein case)
-            msa_datasheet = ""
-            if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
-                # Handle both DatasheetContainer and dict formats
-                msa_ds = self.msas.datasheets['msas']
+            msa_table = ""
+            if hasattr(self.msas, 'tables') and 'msas' in self.msas.tables:
+                # Handle both TableContainer and dict formats
+                msa_ds = self.msas.tables['msas']
                 if isinstance(msa_ds, str):
-                    msa_datasheet = msa_ds
+                    msa_table = msa_ds
                 elif isinstance(msa_ds, dict) and 'path' in msa_ds:
-                    msa_datasheet = msa_ds['path']
+                    msa_table = msa_ds['path']
                 else:
-                    msa_datasheet = str(msa_ds)  # Fallback
+                    msa_table = str(msa_ds)  # Fallback
             
             script_content += f"""
 echo "Creating configuration with MSA integration"
 python {os.path.join(self.folders['HelpScripts'], 'pipe_build_boltz_config_with_msas.py')} \\
     --protein-sequence "{self._get_protein_sequence()}" \\
     --ligand-smiles "{self._get_ligand_smiles()}" \\
-    --msa-datasheet "{msa_datasheet}" \\
+    --msa-table "{msa_table}" \\
     --output "{config_file_path}" \\
     --affinity "{self.affinity if self.affinity else 'false'}"
 
@@ -832,24 +832,24 @@ EOF
                 ligand_param = ligands_csv
 
             # Add MSA parameter if MSAs are provided
-            msa_datasheet_flag = ""
+            msa_table_flag = ""
             if self.msas:
-                if hasattr(self.msas, 'datasheets'):
-                    # ToolOutput or StandardizedOutput case - access MSA datasheet
-                    if hasattr(self.msas.datasheets, '_datasheets') and 'msas' in self.msas.datasheets._datasheets:
-                        msa_datasheet_path = self.msas.datasheets._datasheets['msas'].path
-                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
-                    elif hasattr(self.msas.datasheets, 'msas'):
-                        msa_datasheet_path = self.msas.datasheets.msas  # Direct path access
-                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
+                if hasattr(self.msas, 'tables'):
+                    # ToolOutput or StandardizedOutput case - access MSA table
+                    if hasattr(self.msas.tables, '_tables') and 'msas' in self.msas.tables._tables:
+                        msa_table_path = self.msas.tables._tables['msas'].path
+                        msa_table_flag = f'--msa-table "{msa_table_path}"'
+                    elif hasattr(self.msas.tables, 'msas'):
+                        msa_table_path = self.msas.tables.msas  # Direct path access
+                        msa_table_flag = f'--msa-table "{msa_table_path}"'
                 elif isinstance(self.msas, str) and self.msas.endswith('.csv'):
                     # Direct CSV path
-                    msa_datasheet_flag = f'--msa-datasheet "{self.msas}"'
+                    msa_table_flag = f'--msa-table "{self.msas}"'
 
             script_content += f"""
 echo "Converting CSV to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_param}" {config_files_dir} {affinity_flag} {msa_datasheet_flag}
+python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag}
 
 """
         
@@ -892,24 +892,24 @@ EOF
                 ligand_param = ligands_csv
 
             # Add MSA parameter if MSAs are provided
-            msa_datasheet_flag = ""
+            msa_table_flag = ""
             if self.msas:
-                if hasattr(self.msas, 'datasheets'):
-                    # ToolOutput or StandardizedOutput case - access MSA datasheet
-                    if hasattr(self.msas.datasheets, '_datasheets') and 'msas' in self.msas.datasheets._datasheets:
-                        msa_datasheet_path = self.msas.datasheets._datasheets['msas'].path
-                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
-                    elif hasattr(self.msas.datasheets, 'msas'):
-                        msa_datasheet_path = self.msas.datasheets.msas  # Direct path access
-                        msa_datasheet_flag = f'--msa-datasheet "{msa_datasheet_path}"'
+                if hasattr(self.msas, 'tables'):
+                    # ToolOutput or StandardizedOutput case - access MSA table
+                    if hasattr(self.msas.tables, '_tables') and 'msas' in self.msas.tables._tables:
+                        msa_table_path = self.msas.tables._tables['msas'].path
+                        msa_table_flag = f'--msa-table "{msa_table_path}"'
+                    elif hasattr(self.msas.tables, 'msas'):
+                        msa_table_path = self.msas.tables.msas  # Direct path access
+                        msa_table_flag = f'--msa-table "{msa_table_path}"'
                 elif isinstance(self.msas, str) and self.msas.endswith('.csv'):
                     # Direct CSV path
-                    msa_datasheet_flag = f'--msa-datasheet "{self.msas}"'
+                    msa_table_flag = f'--msa-table "{self.msas}"'
 
             script_content += f"""
 echo "Converting FASTA files to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_protein_ligand_configs_py} "{fasta_files_str}" "{ligand_param}" {config_files_dir} {affinity_flag} {msa_datasheet_flag}
+python {self.boltz_protein_ligand_configs_py} "{fasta_files_str}" "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag}
 
 """
             base_config_file = self.queries_csv
@@ -981,15 +981,15 @@ EOF
             # Prepare MSA parameter if available
             msa_param = ""
             if hasattr(self, '_needs_msa_integration') and self._needs_msa_integration:
-                if hasattr(self.msas, 'datasheets') and 'msas' in self.msas.datasheets:
-                    msa_ds = self.msas.datasheets['msas']
+                if hasattr(self.msas, 'tables') and 'msas' in self.msas.tables:
+                    msa_ds = self.msas.tables['msas']
                     if isinstance(msa_ds, str):
-                        msa_datasheet = msa_ds
+                        msa_table = msa_ds
                     elif isinstance(msa_ds, dict) and 'path' in msa_ds:
-                        msa_datasheet = msa_ds['path']
+                        msa_table = msa_ds['path']
                     else:
-                        msa_datasheet = str(msa_ds)
-                    msa_param = f'--msa-datasheet "{msa_datasheet}"'
+                        msa_table = str(msa_ds)
+                    msa_param = f'--msa-table "{msa_table}"'
             elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
                 msa_param = f'--global-msa-cache --msa-folder "{self.msa_cache_folder}"'
             
@@ -1066,33 +1066,33 @@ boltz predict {config_file_path} {boltz_options}
         """
         # Check if we need to filter missing sequences
         has_missing_sequences = False
-        missing_datasheet_path = None
+        missing_table_path = None
 
-        # Try to find missing sequences datasheet in proteins input
-        if hasattr(self.proteins, 'datasheets'):
-            datasheets = self.proteins.datasheets
-            if hasattr(datasheets, '_datasheets'):
+        # Try to find missing sequences table in proteins input
+        if hasattr(self.proteins, 'tables'):
+            tables = self.proteins.tables
+            if hasattr(tables, '_tables'):
                 # Standard BioPipelines format
-                for name, info in datasheets._datasheets.items():
+                for name, info in tables._tables.items():
                     if 'missing' in name.lower():
                         has_missing_sequences = True
                         if hasattr(info, 'path'):
-                            missing_datasheet_path = info.path
+                            missing_table_path = info.path
                         elif isinstance(info, str):
-                            missing_datasheet_path = info
+                            missing_table_path = info
                         break
-            elif isinstance(datasheets, dict):
+            elif isinstance(tables, dict):
                 # Dict format
-                for name, info in datasheets.items():
+                for name, info in tables.items():
                     if 'missing' in name.lower():
                         has_missing_sequences = True
                         if isinstance(info, str):
-                            missing_datasheet_path = info
+                            missing_table_path = info
                         elif isinstance(info, dict) and 'path' in info:
-                            missing_datasheet_path = info['path']
+                            missing_table_path = info['path']
                         break
 
-        if has_missing_sequences and missing_datasheet_path:
+        if has_missing_sequences and missing_table_path:
             return f"""
 # Custom completion check that accounts for missing sequences
 echo "Checking outputs and filtering missing sequences..."
@@ -1113,7 +1113,7 @@ try:
 
     # Read missing sequences
     try:
-        missing_df = pd.read_csv('{missing_datasheet_path}')
+        missing_df = pd.read_csv('{missing_table_path}')
         missing_ids = set(missing_df['id'].tolist())
         print(f'Found {{len(missing_ids)}} missing sequence IDs: {{sorted(missing_ids)}}')
     except:
@@ -1212,12 +1212,12 @@ fi
                     msa_file = os.path.join(self.msa_cache_folder, f"{seq_id}.csv")
                 msa_files.append(msa_file)
         
-        # Organize datasheets by content type with detailed metadata
-        datasheets = {}
+        # Organize tables by content type with detailed metadata
+        tables = {}
         
-        # Confidence scores datasheet (converted from JSON to CSV for compatibility)
+        # Confidence scores table (converted from JSON to CSV for compatibility)
         confidence_csv = os.path.join(self.output_folder, "confidence_scores.csv")
-        datasheets["confidence"] = DatasheetInfo(
+        tables["confidence"] = TableInfo(
             name="confidence",
             path=confidence_csv,
             columns=["id", "input_file", "confidence_score", "ptm", "iptm", "complex_plddt", "complex_iplddt"],
@@ -1225,10 +1225,10 @@ fi
             count=len(input_file_names)
         )
         
-        # Affinity scores datasheet (if affinity calculation enabled)
+        # Affinity scores table (if affinity calculation enabled)
         if self.affinity:
             affinity_csv = os.path.join(self.output_folder, "affinity_scores.csv")
-            datasheets["affinity"] = DatasheetInfo(
+            tables["affinity"] = TableInfo(
                 name="affinity",
                 path=affinity_csv,
                 columns=["id", "input_file", "affinity_pred_value", "affinity_probability_binary"],
@@ -1236,10 +1236,10 @@ fi
                 count=len(input_file_names)
             )
         
-        # MSAs datasheet (for recycling between apo/holo predictions)
+        # MSAs table (for recycling between apo/holo predictions)
         if msa_files:
             msa_csv = os.path.join(self.output_folder, "msas.csv")
-            datasheets["msas"] = DatasheetInfo(
+            tables["msas"] = TableInfo(
                 name="msas",
                 path=msa_csv,
                 columns=["id", "sequence_id", "sequence", "msa_file"],
@@ -1247,9 +1247,9 @@ fi
                 count=len(msa_files)
             )
         
-        # Input sequences datasheet (for downstream tools)
+        # Input sequences table (for downstream tools)
         sequences_csv = os.path.join(self.output_folder, "sequences.csv")
-        datasheets["sequences"] = DatasheetInfo(
+        tables["sequences"] = TableInfo(
             name="sequences",
             path=sequences_csv,
             columns=["id", "sequence"],
@@ -1276,8 +1276,8 @@ fi
                 # Fallback placeholder
                 compound_ids = ["library_compounds"]
 
-            # Add compounds datasheet pointing to the ligand library
-            datasheets["compounds"] = DatasheetInfo(
+            # Add compounds table pointing to the ligand library
+            tables["compounds"] = TableInfo(
                 name="compounds",
                 path=self.ligand_library,
                 columns=["id", "format", "smiles", "ccd"],
@@ -1299,8 +1299,8 @@ fi
                 ligand_id = effective_job_name
             compound_ids = [ligand_id]
 
-            # Add compounds datasheet for single SMILES
-            datasheets["compounds"] = DatasheetInfo(
+            # Add compounds table for single SMILES
+            tables["compounds"] = TableInfo(
                 name="compounds",
                 path=compounds_csv,
                 columns=["id", "format", "smiles", "ccd"],
@@ -1316,7 +1316,7 @@ fi
             "sequences": [sequences_csv],  # Main sequence file
             "sequence_ids": sequence_ids,
             "msas": msa_files,  # Individual MSA files for recycling
-            "datasheets": datasheets,
+            "tables": tables,
             "output_folder": self.output_folder,
             # Keep some legacy aliases for compatibility
             "pdbs": structures,
@@ -1355,21 +1355,21 @@ fi
         """
         missing_ids = []
 
-        # Check proteins input for missing sequences datasheet
-        if hasattr(self.proteins, 'datasheets'):
-            datasheets = self.proteins.datasheets
-            if hasattr(datasheets, '_datasheets'):
+        # Check proteins input for missing sequences table
+        if hasattr(self.proteins, 'tables'):
+            tables = self.proteins.tables
+            if hasattr(tables, '_tables'):
                 # Standard BioPipelines format
-                for name, info in datasheets._datasheets.items():
+                for name, info in tables._tables.items():
                     if 'missing' in name.lower():
-                        # This is a missing sequences datasheet - we'll extract IDs at runtime
+                        # This is a missing sequences table - we'll extract IDs at runtime
                         # For now, we can't predict them, so we'll handle this in the script
                         pass
-            elif isinstance(datasheets, dict):
+            elif isinstance(tables, dict):
                 # Dict format
-                for name, info in datasheets.items():
+                for name, info in tables.items():
                     if 'missing' in name.lower():
-                        # This is a missing sequences datasheet
+                        # This is a missing sequences table
                         pass
 
         return missing_ids
@@ -1484,7 +1484,7 @@ fi
         Returns:
             Bash script content for MSA handling
         """
-        if hasattr(self.msas, 'datasheets'):
+        if hasattr(self.msas, 'tables'):
             # MSAs from previous Boltz2 prediction - use the MSA files directly
             if hasattr(self.msas, 'msas') and self.msas.msas:
                 # Use the MSA files array from previous tool
@@ -1507,11 +1507,11 @@ echo "Recycling MSAs from previous prediction"
         elif isinstance(self.msas, str):
             # Handle different string path types
             if self.msas.endswith('.csv'):
-                # MSA datasheet CSV - read it and copy individual MSA files
+                # MSA table CSV - read it and copy individual MSA files
                 return f"""
-echo "Using MSAs from datasheet: {self.msas}"
+echo "Using MSAs from table: {self.msas}"
 mkdir -p {self.msa_cache_folder}
-# Read MSA datasheet and copy individual MSA files
+# Read MSA table and copy individual MSA files
 python -c "
 import pandas as pd
 import shutil
