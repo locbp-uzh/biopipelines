@@ -89,7 +89,7 @@ BioPipelines is a Python framework that generates bash scripts for bioinformatic
 
 ### Core Concepts
 
-**Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. Pipelines can be used with context manager syntax (preferred) or traditional syntax. Both generate a unique folder /shares/*USER*/MyProject/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the pipeline and job names.
+**Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. Pipelines can be used with context manager syntax (preferred) or traditional syntax. Both generate a unique folder /shares/*USER*/MyProject/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the project and job names.
 
 ```python
 # Context manager syntax (preferred)
@@ -209,10 +209,10 @@ Resources(memory="128GB", time="24:00:00", cpus=32)        # CPU-only
 - `"high-memory"` - Equivalent to `"32GB|80GB"`
 - Omit parameter for CPU-only jobs
 
-Calling `pipeline.slurm()` to validate the pipeline (done automatically with context manager), generates the full scripts, and generate a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
+Calling `pipeline.slurm()` to validate the pipeline (done automatically with context manager), generates the full scripts, and generates a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
 1. Run from console the pipeline with python (requires packages pandas and yaml to be executable) and then run the sbatch command in output;
 2. Run from console the pipeline with python and then copy-paste the job name and slurm content in the job composer form (https://apps.s3it.uzh.ch/pun/sys/myjobs);
-3. Instead of running the pipeline with `python /path/to/<pipeline>.py`, use `./submit /path/to/<pipeline.py>` to both run and submit. If not available, this will install and activate a biopipelines environment with pandas and yaml.
+3. (Preferred) Instead of running the pipeline with `python /path/to/<pipeline>.py`, use `./submit /path/to/<pipeline.py>` to both run and submit. If not available, this will install and activate a biopipelines environment with pandas and yaml.
 
 ```python
 pipeline.slurm()
@@ -346,7 +346,7 @@ You can test the filesystem prediction locally by instantiating the pipeline obj
 pipeline = Pipeline(..., debug=True)
 ```
 
-# Complete BioPipelines Tool Reference
+# BioPipelines Tool Reference
 
 This document contains the complete, verified tool reference with all parameters, default environments, and output specifications.
 
@@ -1110,13 +1110,12 @@ cd DynamicBind
 wget https://zenodo.org/records/10183369/files/workdir.zip
 unzip workdir.zip
 
-# Request additional resources during installation e.g.:
-srun --mem=32G --cpus-per-task=8 --time=04:00:00 --pty bash
+# Request additional resources during installation
+srun --mem=32G --cpus-per-task=8 --time=02:00:00 --pty bash
 
 conda create -n dynamicbind python=3.9 -y
 conda activate dynamicbind
-pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 \
-    --extra-index-url https://download.pytorch.org/whl/cu117
+pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
 
 # Setup LD_LIBRARY_PATH inside the environment
 mkdir -p $CONDA_PREFIX/etc/conda/activate.d
