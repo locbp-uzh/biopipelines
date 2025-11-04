@@ -92,7 +92,8 @@ class FolderManager:
             "DynamicBind": dynamicbind_base,
             "DynamicBindWeights": os.path.join(dynamicbind_base, "workdir"),
             "ModelForge": os.path.join(self._folders["data"], tool_data_config.get('ModelForge', 'modelforge')),
-            "BioPipelines": os.path.join(self._folders["user"], "BioPipelines")})
+            "BioPipelines": os.path.join(self._folders["user"], "BioPipelines"),
+            "MMseqs2Server": os.path.join(self._folders["user"], "BioPipelines", "MMseqs2Server")})
         self._folders.update({
             "project": os.path.join(self._folders["BioPipelines"],project) if not debug else "Debug"})
 

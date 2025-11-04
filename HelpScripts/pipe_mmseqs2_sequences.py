@@ -90,12 +90,11 @@ def apply_mask_to_msa(msa_sequences, mask_positions):
 
     return masked_sequences
 
-def check_and_resubmit_server():
+def check_and_resubmit_server(server_dir):
     """Check if MMseqs2 server is running, and resubmit if not."""
     log("Entering check_and_resubmit_server()")
-    # Use per-user server directory
-    user = os.environ.get('USER', os.getlogin())
-    MMSEQS_SERVER_DIR = f"/shares/locbp.chem.uzh/{user}/BioPipelines/MMseqs2Server"
+    # Use server directory passed from pipeline
+    MMSEQS_SERVER_DIR = server_dir
     GPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/GPU_SERVER"
     CPU_TIMESTAMP = f"{MMSEQS_SERVER_DIR}/CPU_SERVER"
     GPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/GPU_SUBMITTING"
@@ -360,6 +359,8 @@ def main():
     parser.add_argument('client_script', help='Path to MMseqs2 client script')
     parser.add_argument('--output_format', default='csv', choices=['csv', 'a3m'],
                        help='Output format from server (default: csv)')
+    parser.add_argument('--server_dir', required=True,
+                       help='Path to MMseqs2 server directory for timestamp files')
     parser.add_argument('--mask_table', default=None,
                        help='Path to table CSV with mask information per sequence')
     parser.add_argument('--mask_column', default=None,
@@ -455,7 +456,7 @@ def main():
 
     # Check server status before starting
     log("Checking server status before starting submissions...")
-    check_and_resubmit_server()
+    check_and_resubmit_server(args.server_dir)
 
     # Process each sequence
     all_msa_rows = []
@@ -468,7 +469,7 @@ def main():
         # Check server status every 25 submissions
         if submission_counter > 0 and submission_counter % 25 == 0:
             log(f"Checking server status after {submission_counter} submissions...")
-            check_and_resubmit_server()
+            check_and_resubmit_server(args.server_dir)
 
         # Save individual MSA file with sequence ID name
         output_dir = os.path.dirname(args.output_msa_csv)

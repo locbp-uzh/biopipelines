@@ -116,6 +116,7 @@ class MMseqs2(BaseConfig):
         self.pipeline_name = None
         self.client_script_path = None
         self.helper_script_path = None
+        self.server_dir = None
 
     def _setup_file_paths(self):
         """Set up all file paths after output_folder is known."""
@@ -130,6 +131,9 @@ class MMseqs2(BaseConfig):
             self.client_script_path = os.path.join(self.folders["HelpScripts"], "mmseqs2_client.sh")
             self.helper_script_path = os.path.join(self.folders["HelpScripts"], "pipe_mmseqs2_sequences.py")
 
+            # Server directory from folders configuration
+            self.server_dir = self.folders["MMseqs2Server"]
+
             # Input sequences file path
             if self.sequences_is_tool_output:
                 # Use the actual file path from tool output
@@ -142,6 +146,7 @@ class MMseqs2(BaseConfig):
             self.client_script_path = None
             self.helper_script_path = None
             self.input_sequences_csv = ""
+            self.server_dir = None
 
     def _extract_pipeline_name(self) -> str:
         """Extract pipeline name from output folder structure."""
@@ -336,7 +341,8 @@ python {self.helper_script_path} \\
     "{self.input_sequences_csv}" \\
     "{self.output_msa_csv}" \\
     "{self.client_script_path}" \\
-    --output_format {self.output_format}{self._generate_mask_arguments()}
+    --output_format {self.output_format} \\
+    --server_dir "{self.server_dir}"{self._generate_mask_arguments()}
 
 echo "MMseqs2 processing completed"
 
