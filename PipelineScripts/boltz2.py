@@ -1470,12 +1470,17 @@ fi
                     sequence_ids.append(f"{protein_id}_{ligand_id}")
             return sequence_ids
         else:
-            # Single protein, single ligand: use effective job name or fallback
-            if hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
-                effective_job_name = self.get_effective_job_name()
-                return [effective_job_name if effective_job_name is not None else "prediction"]
-            base_name = input_names[0] if input_names else "structure"
-            return [base_name]
+            # Single protein, single ligand: use ligand ID if available (matches config file naming)
+            if ligand_ids:
+                # Ligand provided (as tool output, SMILES, etc.) - use ligand ID
+                return ligand_ids[:1]
+            else:
+                # No ligand - use effective job name or fallback
+                if hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
+                    effective_job_name = self.get_effective_job_name()
+                    return [effective_job_name if effective_job_name is not None else "prediction"]
+                base_name = input_names[0] if input_names else "structure"
+                return [base_name]
     
     def _generate_msa_recycling_section(self) -> str:
         """

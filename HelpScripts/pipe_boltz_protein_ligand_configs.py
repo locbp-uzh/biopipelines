@@ -61,27 +61,32 @@ def load_msa_mappings(msa_table, use_global_cache=False):
         # For global cache, we'll check if MSA files exist in the MSA cache folder
         # This will be handled during config creation
         return {}
-    
+
     if not msa_table:
         return {}
-    
+
     try:
         df = pd.read_csv(msa_table)
-        # Expected columns: id, sequence_id, msa_file
+        # Expected columns: id, sequence_id, sequence, msa_file
         if 'id' not in df.columns or 'msa_file' not in df.columns:
             print(f"Warning: MSA table {msa_table} missing required columns")
             return {}
-        
-        # Create mapping from protein id to MSA file
-        msa_map = {}
+
+        # Create two mappings: by ID and by sequence (for fallback)
+        msa_map_by_id = {}
+        msa_map_by_seq = {}
         for _, row in df.iterrows():
             protein_id = row['sequence_id'] if 'sequence_id' in df.columns else row['id']
-            msa_map[protein_id] = row['msa_file']
-        
-        return msa_map
+            msa_map_by_id[protein_id] = row['msa_file']
+
+            # Also map by sequence if available (for when protein IDs don't match)
+            if 'sequence' in df.columns and pd.notna(row['sequence']):
+                msa_map_by_seq[row['sequence']] = row['msa_file']
+
+        return {'by_id': msa_map_by_id, 'by_seq': msa_map_by_seq}
     except Exception as e:
         print(f"Error loading MSA table {msa_table}: {e}")
-        return {}
+        return {'by_id': {}, 'by_seq': {}}
 
 def create_config(protein, ligand, msa_file, enable_affinity, use_global_cache=False, msa_folder=None):
     """Create YAML config for a protein-ligand combination."""
@@ -190,7 +195,22 @@ def main():
     
     for protein in proteins:
         protein_id = protein['id']
-        msa_file = msa_mappings.get(protein_id)
+        protein_seq = protein['sequence']
+
+        # Look up MSA file - first by ID, then by sequence (fallback)
+        msa_file = None
+        if isinstance(msa_mappings, dict) and 'by_id' in msa_mappings:
+            # Try lookup by protein ID first
+            msa_file = msa_mappings['by_id'].get(protein_id)
+
+            # Fallback: lookup by sequence if ID didn't match
+            if not msa_file and 'by_seq' in msa_mappings:
+                msa_file = msa_mappings['by_seq'].get(protein_seq)
+                if msa_file:
+                    print(f"MSA matched by sequence for protein '{protein_id}' (ID mismatch resolved)")
+        elif isinstance(msa_mappings, dict):
+            # Legacy format (backward compatibility)
+            msa_file = msa_mappings.get(protein_id)
         
         if ligands:
             # Create one config per protein-ligand combination
