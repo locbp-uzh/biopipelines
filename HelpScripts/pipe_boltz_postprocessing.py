@@ -101,14 +101,26 @@ for boltz_folder in sorted(boltz_results_folders):
             elif config_id in sequence_ids:
                 # Config ID matches expected - use it
                 sequence_id = config_id
+                print(f"Mapping {config_id} to sequence ID: {sequence_id} (exact match)")
             else:
-                # Try to find best match or use the first available expected ID
-                print(f"Warning: {config_id} not found in expected sequence IDs: {sequence_ids}")
-                print(f"Using first expected sequence ID as fallback")
-                sequence_id = sequence_ids[0]
+                # Try pattern matching for protein_ligand combinations
+                matched = False
+                for seq_id in sequence_ids:
+                    # Check if config_id contains seq_id as a component
+                    if config_id == seq_id or config_id.startswith(seq_id + '_') or config_id.endswith('_' + seq_id):
+                        sequence_id = seq_id
+                        matched = True
+                        print(f"Mapping {config_id} to sequence ID: {sequence_id} (pattern match)")
+                        break
+
+                if not matched:
+                    # Cannot determine mapping - crash instead of guessing
+                    raise ValueError(f"ERROR: Cannot map config_id '{config_id}' to any expected sequence ID: {sequence_ids}. "
+                                   f"Cannot proceed with output validation.")
         else:
-            # No expected sequence IDs - use config_id as fallback
+            # No expected sequence IDs - use config_id directly
             sequence_id = config_id
+            print(f"Using config_id as sequence_id: {sequence_id}")
         
         folder_to_sequence_map[config_id] = sequence_id
         

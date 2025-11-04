@@ -34,19 +34,22 @@ def build_config_with_msas_from_csv(sequences_csv: str, msa_table: str,
         print(f"Error reading sequences CSV: {e}")
         return None
     
-    # Read MSA table to create sequence_id -> msa_file mapping
-    msa_lookup = {}
+    # Read MSA table to create dual lookup: by sequence_id and by sequence
+    msa_lookup_by_id = {}
+    msa_lookup_by_sequence = {}
     if msa_table and os.path.exists(msa_table):
         try:
             msa_df = pd.read_csv(msa_table)
             print(f"Read {len(msa_df)} MSA entries from {msa_table}")
-            
-            # Create lookup by sequence_id
+
+            # Create dual lookup
             for _, row in msa_df.iterrows():
                 sequence_id = row['sequence_id']
+                sequence = row['sequence']
                 msa_file = row['msa_file']
                 if os.path.exists(msa_file):
-                    msa_lookup[sequence_id] = msa_file
+                    msa_lookup_by_id[sequence_id] = msa_file
+                    msa_lookup_by_sequence[sequence] = msa_file
                     print(f"MSA found for {sequence_id}: {os.path.basename(msa_file)}")
                 else:
                     print(f"Warning: MSA file not found for {sequence_id}: {msa_file}")
@@ -69,12 +72,23 @@ def build_config_with_msas_from_csv(sequences_csv: str, msa_table: str,
             }
         }
         
-        # Add MSA if available
-        if seq_id in msa_lookup:
-            protein_entry['protein']['msa'] = msa_lookup[seq_id]
-            print(f"Added MSA for sequence {seq_id}")
-        else:
-            print(f"No MSA found for sequence {seq_id}")
+        # Add MSA if available - priority: ID match -> sequence match -> error
+        if msa_table and os.path.exists(msa_table):
+            msa_file = None
+            # Priority 1: Try exact sequence_id match
+            if seq_id in msa_lookup_by_id:
+                msa_file = msa_lookup_by_id[seq_id]
+                print(f"Added MSA for sequence {seq_id} (matched by ID)")
+            # Priority 2: Try sequence match
+            elif sequence in msa_lookup_by_sequence:
+                msa_file = msa_lookup_by_sequence[sequence]
+                print(f"Added MSA for sequence {seq_id} (matched by sequence)")
+            # Priority 3: Error - MSA was provided but cannot be matched
+            else:
+                raise ValueError(f"ERROR: MSA table provided but no MSA found for sequence {seq_id}. "
+                               f"Tried matching by ID and by sequence. Cannot proceed with Boltz2.")
+
+            protein_entry['protein']['msa'] = msa_file
         
         # Add ligand if provided
         if ligand_smiles:

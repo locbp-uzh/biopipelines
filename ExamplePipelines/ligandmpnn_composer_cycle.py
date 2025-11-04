@@ -55,8 +55,7 @@ with Pipeline(project="Examples",
                             ligand="LIG", #in ligand mpnn you should always specify the ligand name, which is LIG if from Boltz
                             num_sequences=1000,
                             batch_size=25, 
-                            redesigned=mutation_range, #similarly you can specify fixed=...
-                            design_within=4)
+                            redesigned=mutation_range)
         
         profiler = MutationProfiler(original=best_open,
                                     mutants=lmpnn)
