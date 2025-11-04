@@ -148,58 +148,10 @@ CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
 GPUSERVER_PID=$!
 log "GPU server PID=$GPUSERVER_PID"
 
-# Test GPU server connection
-log "Testing GPU server connection..."
-if ! ps -p $GPUSERVER_PID > /dev/null; then
-    log "ERROR: GPU server failed to start"
-    exit 1
-fi
-
-# Wait until gpuserver has actually loaded the DB into GPU memory
-log "Waiting for gpuserver to finish preloading DB into GPU memory"
-log "Database should load to ~9-10GB of GPU memory"
-
-# Wait for GPU memory to actually increase (database loading)
-# Timeout after 10 minutes
-max_wait_seconds=600
-wait_start=$(date +%s)
-prev_mem=-1
-db_loaded=false
-
-while true; do
-  curr_mem=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
-  current_time=$(date +%s)
-  elapsed=$((current_time - wait_start))
-
-  # Check if database is loaded (GPU memory should be ~9000+ MiB)
-  if [[ "$curr_mem" -gt 9000 ]]; then
-    log "GPU memory at ${curr_mem} MiB - database loaded successfully"
-    db_loaded=true
-    break
-  fi
-
-  # Check timeout
-  if [[ $elapsed -gt $max_wait_seconds ]]; then
-    log "WARNING: Timeout waiting for database to load after ${max_wait_seconds}s"
-    log "GPU memory only at ${curr_mem} MiB (expected >9000 MiB)"
-    log "Proceeding anyway, but searches may be slow or fail"
-    break
-  fi
-
-  # Log progress
-  if [[ "$curr_mem" -ne "$prev_mem" ]]; then
-    log "GPU memory at ${curr_mem} MiB (loading... ${elapsed}s elapsed)"
-    prev_mem=$curr_mem
-  fi
-
-  sleep 5
-done
-
-if [[ "$db_loaded" == "true" ]]; then
-  log "GPU server initialization complete and ready to process jobs"
-else
-  log "GPU server may not be fully initialized"
-fi
+# Wait 3 minutes for database to load into GPU memory
+log "Waiting 3 minutes for database to load into GPU memory..."
+sleep 180
+log "Wait complete, assuming GPU server is ready"
 
 # Cleanup on exit
 cleanup() {
