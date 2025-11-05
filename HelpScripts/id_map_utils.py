@@ -101,151 +101,123 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
         raise ValueError(f"Invalid ID map pattern '{pattern_str}': {e}")
 
 
-def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> str:
+def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     """
-    Map structure ID to table ID using id_map pattern, applying recursively.
+    Generate all candidate IDs for lookup by recursively applying id_map pattern.
 
-    This function extracts the base ID from a structure ID by repeatedly removing
-    numeric suffixes specified in the id_map pattern. This allows a single pattern
-    like {"*": "*_<N>"} to handle IDs that have been modified multiple times
-    (e.g., rifampicin_1_2 → rifampicin).
+    This function generates a list of IDs to try when looking up a structure ID in a table.
+    It starts with the original ID and progressively strips suffixes according to the
+    id_map pattern, generating all intermediate IDs in priority order (most specific first).
 
     Args:
-        structure_id: Structure ID (e.g., "rifampicin_1_2", "protein-seq-42")
+        structure_id: Structure ID (e.g., "RFDAA_Hit_Screen_007_1_1")
         id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
 
     Returns:
-        Mapped table ID (e.g., "rifampicin", "protein")
-        If pattern doesn't match, returns structure_id unchanged
+        List of candidate IDs to try, from most specific to least specific
+        (e.g., ["RFDAA_Hit_Screen_007_1_1", "RFDAA_Hit_Screen_007_1", "RFDAA_Hit_Screen_007", "RFDAA_Hit_Screen"])
 
     Examples:
-        >>> map_structure_id_to_table_id("rifampicin_1", {"*": "*_<N>"})
-        'rifampicin'
+        >>> map_table_ids_to_ids("rifampicin_1_2", {"*": "*_<N>"})
+        ['rifampicin_1_2', 'rifampicin_1', 'rifampicin']
 
-        >>> map_structure_id_to_table_id("rifampicin_1_2", {"*": "*_<N>"})
-        'rifampicin'
+        >>> map_table_ids_to_ids("protein-seq-42", {"*": "*-seq-<N>"})
+        ['protein-seq-42', 'protein']
 
-        >>> map_structure_id_to_table_id("rifampicin_1_2_3", {"*": "*_<N>"})
-        'rifampicin'
-
-        >>> map_structure_id_to_table_id("protein-seq-42", {"*": "*-seq-<N>"})
-        'protein'
-
-        >>> map_structure_id_to_table_id("no_change", {"*": "*"})
-        'no_change'
-
-        >>> map_structure_id_to_table_id("no_match", {"*": "*_<N>"})
-        'no_match'
+        >>> map_table_ids_to_ids("no_change", {"*": "*"})
+        ['no_change']
     """
     if not id_map or "*" not in id_map:
-        return structure_id
+        return [structure_id]
 
     pattern_str = id_map["*"]
 
     # Check if pattern is just "*" (identity mapping)
     if pattern_str == "*":
-        return structure_id
+        return [structure_id]
 
     # Verify pattern starts with "*"
     if not pattern_str.startswith("*"):
-        return structure_id
+        return [structure_id]
 
-    # Extract the suffix pattern (everything after the first "*")
+    # Extract the suffix pattern
     suffix_pattern = pattern_str[1:]  # Remove leading "*"
 
     if not suffix_pattern:
-        return structure_id
-
-    # Parse the pattern to extract delimiter and literal parts
-    # e.g., "_<N>" → delimiter="_", no literal
-    # e.g., "-seq-<N>" → delimiter="-", literal="seq"
+        return [structure_id]
 
     # Find the first occurrence of <N>
     n_pos = suffix_pattern.find('<N>')
     if n_pos == -1:
-        # No <N> in pattern, use regex method
-        pattern = parse_id_map_pattern(id_map)
-        if pattern is None:
-            return structure_id
-        match = pattern.match(structure_id)
-        if match:
-            return match.group(1)
-        return structure_id
+        return [structure_id]
 
-    # Extract delimiter (character before <N> or at start)
+    # Extract delimiter
     if n_pos == 0:
-        return structure_id  # Pattern like "*<N>" doesn't make sense
+        return [structure_id]  # Pattern like "*<N>" doesn't make sense
 
     delimiter = suffix_pattern[n_pos - 1]
-    # Extract literal part, excluding the leading delimiter if present
     literal_with_delim = suffix_pattern[:n_pos - 1] if n_pos > 1 else ""
-    # Remove leading delimiter from literal if it exists
     if literal_with_delim.startswith(delimiter):
         literal_part = literal_with_delim[1:]
     else:
         literal_part = literal_with_delim
 
-    # Split the ID by delimiter
-    parts = structure_id.split(delimiter)
+    # Generate all intermediate IDs by progressively stripping suffixes
+    candidates = [structure_id]  # Start with original
+    current_id = structure_id
 
-    if len(parts) <= 1:
-        # No delimiter found, return as-is
-        return structure_id
+    # Recursively strip suffixes
+    while True:
+        parts = current_id.split(delimiter)
 
-    # Remove trailing parts that match the pattern
-    # Work from the end backwards to strip matching suffixes
+        if len(parts) <= 1:
+            break
 
-    if literal_part:
-        # Pattern like "*-seq-<N>" or "*_something_<N>"
-        # We need to find and remove suffix that matches: delimiter + literal + delimiter + digits
-        # e.g., "-seq-42" from "protein-seq-42"
+        stripped = False
 
-        # Reconstruct what we're looking for at the end
-        # The pattern after "*" is like "-seq-<N>"
-        # So we're looking for parts ending with: literal part followed by digits
+        if literal_part:
+            # Pattern like "*-seq-<N>"
+            # Check if we can strip literal + number at the end
+            if len(parts) >= 2:
+                last_part = parts[-1]
+                second_last = parts[-2] if len(parts) >= 2 else ""
 
-        # Work backwards: remove trailing numeric parts that follow the literal
-        while len(parts) >= 2:
-            last_part = parts[-1]
-            second_last = parts[-2] if len(parts) >= 2 else ""
+                if last_part.isdigit() and second_last == literal_part:
+                    # Remove both literal and number parts
+                    parts = parts[:-2]
+                    stripped = True
+        else:
+            # Pattern like "*_<N>": strip trailing numeric part
+            if parts[-1].isdigit():
+                parts = parts[:-1]
+                stripped = True
 
-            # Check if last part is a number and second-to-last matches literal
-            if last_part.isdigit() and second_last == literal_part:
-                # Remove both parts
-                parts = parts[:-2]
-            elif last_part == literal_part and len(parts) >= 2:
-                # Literal is at the end without a number, shouldn't match
-                break
-            else:
-                break
+        if not stripped or not parts:
+            break
 
-    else:
-        # Pattern like "*_<N>": strip all trailing numeric parts
-        while len(parts) > 0 and parts[-1].isdigit():
-            parts = parts[:-1]
+        # Rejoin and add to candidates
+        current_id = delimiter.join(parts)
+        if current_id != candidates[-1]:  # Avoid duplicates
+            candidates.append(current_id)
 
-    # Rejoin with delimiter
-    if not parts:
-        return structure_id
-
-    return delimiter.join(parts)
+    return candidates
 
 
 if __name__ == "__main__":
-    # Test cases
+    # Test cases - now expecting lists of candidates
     test_cases = [
-        ("rifampicin_1", {"*": "*_<N>"}, "rifampicin"),
-        ("rifampicin_1_2", {"*": "*_<N>"}, "rifampicin"),  # Now works with single pattern
-        ("rifampicin_1_2_3", {"*": "*_<N>"}, "rifampicin"),  # Multiple suffixes
-        ("rifampicin_1_2", {"*": "*_<N>_<N>"}, "rifampicin"),  # Old style still works
-        ("protein-seq-42", {"*": "*-seq-<N>"}, "protein"),
-        ("data_something_123", {"*": "*_something_<N>"}, "data"),
-        ("no_change", {"*": "*"}, "no_change"),
-        ("no_match", {"*": "*_<N>"}, "no_match"),
-        ("complex_001_v2_3", {"*": "*_v2_<N>"}, "complex_001"),
+        ("rifampicin_1", {"*": "*_<N>"}, ["rifampicin_1", "rifampicin"]),
+        ("rifampicin_1_2", {"*": "*_<N>"}, ["rifampicin_1_2", "rifampicin_1", "rifampicin"]),
+        ("rifampicin_1_2_3", {"*": "*_<N>"}, ["rifampicin_1_2_3", "rifampicin_1_2", "rifampicin_1", "rifampicin"]),
+        ("RFDAA_Hit_Screen_007_1_1", {"*": "*_<N>"}, ["RFDAA_Hit_Screen_007_1_1", "RFDAA_Hit_Screen_007_1", "RFDAA_Hit_Screen_007", "RFDAA_Hit_Screen"]),
+        ("protein-seq-42", {"*": "*-seq-<N>"}, ["protein-seq-42", "protein"]),
+        ("data_something_123", {"*": "*_something_<N>"}, ["data_something_123", "data"]),
+        ("no_change", {"*": "*"}, ["no_change"]),
+        ("no_match", {"*": "*_<N>"}, ["no_match"]),  # No numeric suffix
+        ("complex_001_v2_3", {"*": "*_v2_<N>"}, ["complex_001_v2_3", "complex_001"]),
         # Edge cases
-        ("test_1_2_foo", {"*": "*_<N>"}, "test_1_2_foo"),  # Non-numeric part at end
-        ("test_foo_1", {"*": "*_<N>"}, "test_foo"),  # Non-numeric part in middle
+        ("test_1_2_foo", {"*": "*_<N>"}, ["test_1_2_foo"]),  # Non-numeric part at end
+        ("test_foo_1", {"*": "*_<N>"}, ["test_foo_1", "test_foo"]),  # Non-numeric part in middle
     ]
 
     print("Running ID mapping tests...")
@@ -257,7 +229,9 @@ if __name__ == "__main__":
         all_passed = all_passed and passed
 
         status = "PASS" if passed else "FAIL"
-        print(f"[{status}] {structure_id} with {id_map} -> {result} (expected: {expected})")
+        print(f"[{status}] {structure_id} with {id_map}")
+        print(f"  Result:   {result}")
+        print(f"  Expected: {expected}")
 
     if all_passed:
         print("\nAll tests passed!")

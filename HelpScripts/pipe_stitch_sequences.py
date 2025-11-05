@@ -110,7 +110,10 @@ def extract_base_id(seq_id: str, id_map: Dict[str, str]) -> str:
     Returns:
         Base structure ID (e.g., 'rifampicin_014_1')
     """
-    return map_table_ids_to_ids(seq_id, id_map)
+    candidate_ids = map_table_ids_to_ids(seq_id, id_map)
+    # Return ID with one level stripped (second element if it exists, otherwise first)
+    # e.g., ['rifampicin_014_1_1', 'rifampicin_014_1', 'rifampicin_014', 'rifampicin'] -> 'rifampicin_014_1'
+    return candidate_ids[1] if len(candidate_ids) > 1 else candidate_ids[0]
 
 
 def group_sequences_by_base_id(sequences: Dict[str, str], id_map: Dict[str, str]) -> Dict[str, List[str]]:

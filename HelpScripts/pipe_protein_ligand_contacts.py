@@ -460,22 +460,20 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
         # Map structure IDs to table IDs and populate selections_map
         for structure_path in input_structures:
             structure_id = os.path.splitext(os.path.basename(structure_path))[0]
-            table_id = map_table_ids_to_ids(structure_id, id_map)
+            candidate_ids = map_table_ids_to_ids(structure_id, id_map)
 
-            # Try mapped ID first
-            if table_id in table_selections:
-                selections_map[structure_id] = table_selections[table_id]
-                if table_id != structure_id:
-                    print(f"Mapped structure ID '{structure_id}' -> table ID '{table_id}'")
-            # Fallback: try original structure ID if mapping was applied
-            elif table_id != structure_id and structure_id in table_selections:
-                selections_map[structure_id] = table_selections[structure_id]
-                print(f"Found match using original structure ID '{structure_id}' (mapped ID '{table_id}' not found)")
-            else:
-                attempted_ids = [table_id]
-                if table_id != structure_id:
-                    attempted_ids.append(structure_id)
-                print(f"Warning: No table entry for structure ID '{structure_id}'. Tried: {', '.join(attempted_ids)}")
+            # Try all candidate IDs in priority order (most specific to least specific)
+            found = False
+            for candidate_id in candidate_ids:
+                if candidate_id in table_selections:
+                    selections_map[structure_id] = table_selections[candidate_id]
+                    if candidate_id != structure_id:
+                        print(f"Mapped structure ID '{structure_id}' -> table ID '{candidate_id}'")
+                    found = True
+                    break
+
+            if not found:
+                print(f"Warning: No table entry for structure ID '{structure_id}'. Tried: {', '.join(candidate_ids)}")
 
     # Process structures
     results = []

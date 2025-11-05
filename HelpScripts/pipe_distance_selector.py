@@ -223,27 +223,23 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
         pdb_name = os.path.basename(pdb_file)
         pdb_base = os.path.splitext(pdb_name)[0]
 
-        # Apply id_map to get table ID from structure ID
-        if id_map:
-            table_id = map_table_ids_to_ids(pdb_base, id_map)
-            if table_id != pdb_base:
-                print(f"Mapping structure ID '{pdb_base}' to table ID '{table_id}' using id_map")
-        else:
-            table_id = pdb_base
-
         # Find matching row - try multiple lookup strategies in order:
         # 1. Try pdb filename match
         matching_rows = df[df['pdb'] == pdb_name]
 
-        # 2. Try mapped table ID
-        if matching_rows.empty:
-            matching_rows = df[df['id'] == table_id]
+        # 2. Apply id_map to get candidate IDs and try each in priority order
+        if matching_rows.empty and id_map:
+            candidate_ids = map_table_ids_to_ids(pdb_base, id_map)
+            for candidate_id in candidate_ids:
+                matching_rows = df[df['id'] == candidate_id]
+                if not matching_rows.empty:
+                    if candidate_id != pdb_base:
+                        print(f"Mapped structure ID '{pdb_base}' -> table ID '{candidate_id}'")
+                    break
 
-        # 3. If mapping was applied and failed, try original structure ID as fallback
-        if matching_rows.empty and id_map and table_id != pdb_base:
+        # 3. If no id_map or no match yet, try original structure ID
+        if matching_rows.empty:
             matching_rows = df[df['id'] == pdb_base]
-            if not matching_rows.empty:
-                print(f"Found match using original structure ID '{pdb_base}' (mapped ID '{table_id}' not found)")
 
         if not matching_rows.empty:
             row = matching_rows.iloc[0]

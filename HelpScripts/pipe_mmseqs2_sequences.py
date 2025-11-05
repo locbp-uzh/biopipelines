@@ -428,16 +428,19 @@ def main():
 
             # Now map sequence IDs to table IDs and populate mask_data
             for seq_id in sequences_df['id']:
-                table_id = map_table_ids_to_ids(seq_id, id_map)
-                # Try mapped ID first
-                if table_id in table_mask_data:
-                    mask_data[seq_id] = table_mask_data[table_id]
-                    if table_id != seq_id:
-                        log(f"Mapped sequence ID '{seq_id}' -> table ID '{table_id}'")
-                # Fallback: try original sequence ID if mapping was applied
-                elif table_id != seq_id and seq_id in table_mask_data:
-                    mask_data[seq_id] = table_mask_data[seq_id]
-                    log(f"Found match using original sequence ID '{seq_id}' (mapped ID '{table_id}' not found)")
+                candidate_ids = map_table_ids_to_ids(seq_id, id_map)
+                # Try all candidate IDs in priority order
+                found = False
+                for candidate_id in candidate_ids:
+                    if candidate_id in table_mask_data:
+                        mask_data[seq_id] = table_mask_data[candidate_id]
+                        if candidate_id != seq_id:
+                            log(f"Mapped sequence ID '{seq_id}' -> table ID '{candidate_id}'")
+                        found = True
+                        break
+
+                if not found:
+                    log(f"Warning: No mask data for sequence ID '{seq_id}'. Tried: {', '.join(candidate_ids)}")
 
         except Exception as e:
             log(f"ERROR: Failed to load mask table: {str(e)}")
