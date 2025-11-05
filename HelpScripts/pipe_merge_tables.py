@@ -40,64 +40,56 @@ def merge_tables(config_data: Dict[str, Any]) -> None:
     dataframes = []
     for i, csv_path in enumerate(input_csvs):
         if not os.path.exists(csv_path):
-            print(f"Warning: Input file not found: {csv_path}")
-            continue
-        
+            raise FileNotFoundError(f"Input file not found: {csv_path}")
+
         print(f"Loading: {csv_path}")
-        try:
-            df = pd.read_csv(csv_path)
-            print(f"  - Shape: {df.shape}")
-            print(f"  - Columns: {list(df.columns)}")
-            
-            # Check if merge key exists
-            if merge_key not in df.columns:
-                print(f"Error: Merge key '{merge_key}' not found in {csv_path}")
-                print(f"Available columns: {list(df.columns)}")
-                continue
-            
-            # Apply ID mapping if specified
-            if id_map:
-                original_ids = df[merge_key].unique()
-                print(f"  - Original IDs: {list(original_ids)}")
-                
-                # Create reverse mapping: old_id -> new_id
-                reverse_map = {}
-                for new_id, old_id_list in id_map.items():
-                    for old_id in old_id_list:
-                        reverse_map[old_id] = new_id
-                
-                # Apply mapping
-                mapped_count = 0
-                for old_id, new_id in reverse_map.items():
-                    if old_id in df[merge_key].values:
-                        df.loc[df[merge_key] == old_id, merge_key] = new_id
-                        mapped_count += 1
-                        print(f"  - Mapped ID: {old_id} -> {new_id}")
-                
-                if mapped_count > 0:
-                    print(f"  - Total ID mappings applied: {mapped_count}")
-                    print(f"  - New IDs: {list(df[merge_key].unique())}")
-            
-            # Apply prefix to column names (except merge key and common columns)
-            if prefixes and i < len(prefixes) and prefixes[i]:
-                prefix = prefixes[i]
-                common_cols = {merge_key, 'source_structure', 'id', 'source_id'}
-                columns_to_rename = {}
-                
-                for col in df.columns:
-                    if col not in common_cols:
-                        new_name = f"{prefix}{col}"
-                        columns_to_rename[col] = new_name
-                        print(f"  - Renaming column: {col} -> {new_name}")
-                
-                if columns_to_rename:
-                    df = df.rename(columns=columns_to_rename)
-            
-            dataframes.append(df)
-            
-        except Exception as e:
-            print(f"Error loading {csv_path}: {e}")
-            continue
+        df = pd.read_csv(csv_path)
+        print(f"  - Shape: {df.shape}")
+        print(f"  - Columns: {list(df.columns)}")
+
+        # Check if merge key exists
+        if merge_key not in df.columns:
+            raise ValueError(f"Merge key '{merge_key}' not found in {csv_path}. Available columns: {list(df.columns)}")
+
+        # Apply ID mapping if specified
+        if id_map:
+            original_ids = df[merge_key].unique()
+            print(f"  - Original IDs: {list(original_ids)}")
+
+            # Create reverse mapping: old_id -> new_id
+            reverse_map = {}
+            for new_id, old_id_list in id_map.items():
+                for old_id in old_id_list:
+                    reverse_map[old_id] = new_id
+
+            # Apply mapping
+            mapped_count = 0
+            for old_id, new_id in reverse_map.items():
+                if old_id in df[merge_key].values:
+                    df.loc[df[merge_key] == old_id, merge_key] = new_id
+                    mapped_count += 1
+                    print(f"  - Mapped ID: {old_id} -> {new_id}")
+
+            if mapped_count > 0:
+                print(f"  - Total ID mappings applied: {mapped_count}")
+                print(f"  - New IDs: {list(df[merge_key].unique())}")
+
+        # Apply prefix to column names (except merge key and common columns)
+        if prefixes and i < len(prefixes) and prefixes[i]:
+            prefix = prefixes[i]
+            common_cols = {merge_key, 'source_structure', 'id', 'source_id'}
+            columns_to_rename = {}
+
+            for col in df.columns:
+                if col not in common_cols:
+                    new_name = f"{prefix}{col}"
+                    columns_to_rename[col] = new_name
+                    print(f"  - Renaming column: {col} -> {new_name}")
+
+            if columns_to_rename:
+                df = df.rename(columns=columns_to_rename)
+
+        dataframes.append(df)
     
     if not dataframes:
         raise ValueError("No valid input dataframes found")
