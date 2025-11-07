@@ -67,6 +67,7 @@
     - [ProteinLigandContacts](#proteinligandcontacts)
   - [Data Management](#data-management)
     - [Filter](#filter)
+    - [Rank](#rank)
     - [SelectBest](#selectbest)
     - [RemoveDuplicates](#removeduplicates)
     - [MergeTables](#mergetables)
@@ -1566,6 +1567,69 @@ filtered = Filter(
     max_items=10,
     sort_by="distance"
 
+```
+
+---
+
+### Rank
+
+Ranks entries based on a metric (column or computed expression), renames IDs to sequential format, and optionally copies structures/compounds in ranked order. Useful for generating ranked lists with standardized naming.
+
+**Environment**: `ProteinEnv`
+
+**Parameters**:
+- `data`: Union[ToolOutput, StandardizedOutput] (required) - Table input to rank
+- `pool`: Union[ToolOutput, StandardizedOutput] = None - Structure/sequence pool for copying ranked items
+- `metric`: str (required) - Column name or expression for ranking (e.g., "pLDDT" or "0.8*pLDDT+0.2*affinity")
+- `ascending`: bool = False - Sort order (False = descending/best first, True = ascending)
+- `prefix`: str = "rank" - Prefix for renamed IDs (e.g., "rank" produces rank_1, rank_2, ...)
+- `top`: Optional[int] = None - Limit to top N entries after ranking
+
+**Outputs**:
+- Ranked pool with same structure as input (when pool provided)
+- `tables.ranked`:
+
+  | id | source_id | metric | {variable_columns} | {original_columns} |
+  |----|-----------|--------|-------------------|-------------------|
+
+**Output Columns**:
+- `id`: Renamed IDs (e.g., rank_1, rank_2, ...)
+- `source_id`: Original IDs
+- `metric`: Computed metric column (if expression used)
+- Individual variable columns if metric is an expression with multiple variables (e.g., pLDDT, affinity)
+- All other original columns preserved
+
+**Metric Types**:
+- **Column reference**: Simple column name (e.g., "pLDDT", "affinity")
+- **Expression**: Computed metric using pandas eval syntax (e.g., "0.8*pLDDT + 0.2*affinity", "pLDDT - 2*rmsd")
+
+**Example**:
+```python
+# Rank by single column
+ranked = Rank(
+    data=analysis.tables.merged,
+    pool=boltz,
+    metric="pLDDT",
+    ascending=False,  # Higher is better
+    prefix="model",
+    top=10
+)
+
+# Rank by computed expression
+ranked = Rank(
+    data=merged.tables.merged,
+    metric="0.8*pLDDT + 0.2*binding_affinity",
+    prefix="design",
+    top=20
+)
+
+# Rank with custom prefix (data-only mode)
+ranked = Rank(
+    data=distances.tables.analysis,
+    metric="distance",
+    ascending=True,  # Lower is better
+    prefix="candidate"
+)
 ```
 
 ---
