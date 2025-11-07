@@ -1615,17 +1615,19 @@ ranked = Rank(
     top=10
 )
 
-# Rank by computed expression
+# Rank by computed expression with pool mode
 ranked = Rank(
     data=merged.tables.merged,
+    pool=boltz,
     metric="0.8*pLDDT + 0.2*binding_affinity",
     prefix="design",
     top=20
 )
 
-# Rank with custom prefix (data-only mode)
+# Rank with ascending order (lower is better)
 ranked = Rank(
     data=distances.tables.analysis,
+    pool=structures,
     metric="distance",
     ascending=True,  # Lower is better
     prefix="candidate"
