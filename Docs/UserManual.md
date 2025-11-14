@@ -49,6 +49,7 @@
     - [SDM (SiteDirectedMutagenesis)](#sdm-sitedirectedmutagenesis)
     - [Fuse](#fuse)
     - [StitchSequences](#stitchsequences)
+    - [DNAEncoder](#dnaencoder)
   - [Structure Prediction](#structure-prediction)
     - [AlphaFold](#alphafold)
     - [ESMFold](#esmfold)
@@ -64,6 +65,7 @@
     - [SelectionEditor](#selectioneditor)
     - [ConformationalChange](#conformationalchange)
     - [MutationProfiler](#mutationprofiler)
+    - [SequenceMetricAnalysis](#sequencemetricanalysis)
     - [ProteinLigandContacts](#proteinligandcontacts)
   - [Data Management](#data-management)
     - [Filter](#filter)
@@ -805,6 +807,40 @@ stitched = StitchSequences(
 
 ---
 
+### DNAEncoder
+
+Reverse-translates protein sequences to DNA with organism-specific codon optimization. Uses thresholded weighted codon sampling based on CoCoPUTs genome frequency tables.
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `sequences`: Union[ToolOutput, StandardizedOutput] (required) - Input protein sequences
+- `organism`: str = "EC" - Target organism for codon optimization:
+  - "EC" (Escherichia coli)
+  - "SC" (Saccharomyces cerevisiae)
+  - "HS" (Homo sapiens)
+  - Combinations: "EC&HS", "EC&SC", "HS&SC", "EC&HS&SC"
+
+**Outputs**:
+- `tables.dna`:
+
+  | id | protein_sequence | dna_sequence | organism | method |
+  |----|------------------|--------------|----------|--------|
+
+- Excel file with color-coded codons (red <5‰, orange 5-10‰, black ≥10‰)
+
+**Example**:
+```python
+dna = DNAEncoder(
+    sequences=lmpnn,
+    organism="EC&HS"  # Conservative optimization for both E. coli and human
+)
+```
+
+**Note**: Uses thresholded weighted sampling (codons ≥10‰, fallback to ≥5‰). For multi-organism optimization, uses minimum frequency across organisms. Please cite CoCoPUTs (HIVE) when using.
+
+---
+
 ## Structure Prediction
 
 ### AlphaFold
@@ -1424,6 +1460,179 @@ profiler = MutationProfiler(
     mutants=lmpnn
 
 ```
+
+---
+
+### SequenceMetricAnalysis
+
+Analyzes correlations between sequence mutations and performance metrics across pools. Tracks position-specific mutation statistics and generates scored mutation tables for data-driven sequence optimization in iterative design cycles.
+
+**Environment**: `ProteinEnv`
+
+**Parameters**:
+- `sequences`: Union[ToolOutput, StandardizedOutput] (required) - Sequence pool with 'id' and 'sequence' columns
+- `metrics`: Union[ToolOutput, StandardizedOutput, TableInfo, str] (required) - Table with metric values (must have matching 'id' column)
+- `reference_sequence`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference sequence for mutation calling (can be string or tool output)
+- `metric_columns`: Union[str, List[str]] (required) - Metric column name(s) to analyze
+- `primary_metric`: str (required) - Which metric to use for scoring in mutation_deltas/mutation_zscores tables
+- `mode`: str = "minimize" - Optimization direction: "minimize" (lower is better) or "maximize" (higher is better)
+- `min_observations`: int = 3 - Minimum observation count to assign non-zero scores in delta/zscore tables
+- `history`: Optional[Union[ToolOutput, StandardizedOutput]] = None - Previous analysis results to accumulate with
+
+**Outputs**:
+- `tables.mutation_statistics`:
+
+  | position | wt_aa | mut_aa | count | affinity_mean | affinity_std | affinity_min | affinity_max | plddt_mean | plddt_std | ... |
+  |----------|-------|--------|-------|---------------|--------------|--------------|--------------|------------|-----------|-----|
+
+- `tables.mutation_deltas`: (MutationComposer-compatible)
+
+  | position | wt_aa | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|-------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+  Values are delta scores (improvement vs WT): positive = beneficial, negative = detrimental, zero = neutral/insufficient data
+
+- `tables.mutation_zscores`: (MutationComposer-compatible)
+
+  | position | wt_aa | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|-------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+  Values are z-scores (standardized): positive = better than average, negative = worse than average, zero = neutral/insufficient data
+
+- `tables.top_mutations`:
+
+  | position | wt_aa | best_mutation | count | delta_score | zscore | affinity_mean | plddt_mean | ... |
+  |----------|-------|---------------|-------|-------------|--------|---------------|------------|-----|
+
+- `tables.coverage`:
+
+  | position | wt_aa | n_observations | n_mutations_tested | coverage_fraction | max_count | min_count | mean_count |
+  |----------|-------|----------------|-------------------|-------------------|-----------|-----------|------------|
+
+**Example**:
+```python
+# First cycle: initialize analysis
+analysis = SequenceMetricAnalysis(
+    sequences=filtered.tables.sequences,
+    metrics=filtered.tables.merged,
+    reference_sequence=original_holo,
+    metric_columns=["affinity_pred_value", "complex_plddt", "contacts"],
+    primary_metric="affinity_pred_value",
+    mode="minimize"
+)
+
+# Subsequent cycles: accumulate with history
+analysis = SequenceMetricAnalysis(
+    sequences=filtered.tables.sequences,
+    metrics=filtered.tables.merged,
+    reference_sequence=original_holo,
+    metric_columns=["affinity_pred_value", "complex_plddt"],
+    primary_metric="affinity_pred_value",
+    mode="minimize",
+    min_observations=5,
+    history=analysis  # Accumulates observations
+)
+
+# Use scored tables with MutationComposer (future enhancement)
+# composer = MutationComposer(
+#     frequencies=analysis.tables.mutation_deltas,
+#     mode="score_weighted",
+#     num_sequences=20
+# )
+```
+
+**Iterative Pipeline Example**:
+```python
+# Complete example: Iterative affinity optimization with correlation tracking
+with Pipeline("Rifampicin", "OptimizationCycle", "..."):
+
+    rifampicin = LoadOutput("rifampicin.json")
+    original_holo = PDB("template")
+    best_holo = original_holo
+
+    # Track analysis across cycles
+    correlation_analysis = None
+
+    for CYCLE in range(20):
+        Suffix(f"Cycle{CYCLE+1}")
+
+        # Generate sequences
+        lmpnn = LigandMPNN(structures=best_holo, ligand="LIG",
+                          num_sequences=1000, redesigned="1-24")
+
+        profiler = MutationProfiler(original=best_holo, mutants=lmpnn)
+
+        composer = MutationComposer(
+            frequencies=profiler.tables.absolute_frequencies,
+            num_sequences=10,
+            mode="weighted_random",
+            max_mutations=3
+        )
+
+        # Predict structures
+        msas = MMseqs2(sequences=composer)
+        boltz = Boltz2(proteins=composer, ligands=rifampicin, msas=msas)
+
+        # Analyze and filter
+        contacts = ProteinLigandContacts(structures=boltz,
+                                         selections="1-24", ligand="LIG")
+        pose = PoseDistance(reference_structure=rifampicin,
+                           sample_structures=boltz,
+                           reference_ligand="LIG")
+
+        merged = MergeTables(tables=[boltz.tables.affinity,
+                                    boltz.tables.confidence,
+                                    contacts.tables.contact_analysis,
+                                    pose.tables.analysis])
+
+        filtered = Filter(data=merged, pool=boltz,
+                         expression="contacts>=3 and ligand_rmsd<2")
+
+        # Track mutation-metric correlations
+        if correlation_analysis is None:
+            correlation_analysis = SequenceMetricAnalysis(
+                sequences=filtered.tables.sequences,
+                metrics=filtered.tables.merged,
+                reference_sequence=original_holo,
+                metric_columns=["affinity_pred_value", "complex_plddt",
+                              "contacts", "ligand_rmsd"],
+                primary_metric="affinity_pred_value",
+                mode="minimize",
+                min_observations=3
+            )
+        else:
+            correlation_analysis = SequenceMetricAnalysis(
+                sequences=filtered.tables.sequences,
+                metrics=filtered.tables.merged,
+                reference_sequence=original_holo,
+                metric_columns=["affinity_pred_value", "complex_plddt",
+                              "contacts", "ligand_rmsd"],
+                primary_metric="affinity_pred_value",
+                mode="minimize",
+                min_observations=3,
+                history=correlation_analysis
+            )
+
+        # Select best for next cycle
+        best_holo = SelectBest(pool=filtered,
+                              tables=[filtered.tables.merged],
+                              metric='affinity_pred_value',
+                              mode='min')
+
+    # After all cycles, correlation_analysis contains:
+    # - mutation_statistics: All observed mutations with full statistics
+    # - mutation_deltas: Position-specific improvement scores
+    # - mutation_zscores: Standardized scores across all mutations
+    # - top_mutations: Best mutation at each position
+    # - coverage: How well each position has been explored
+```
+
+**Key Features**:
+- **Multi-metric tracking**: Analyze multiple metrics simultaneously (affinity, pLDDT, contacts, etc.)
+- **Accumulation**: Pass previous analysis as history to accumulate statistics across cycles
+- **Dual scoring**: Both delta scores (interpretable units) and z-scores (standardized) for flexibility
+- **MutationComposer-compatible**: mutation_deltas and mutation_zscores tables use same format as MutationProfiler frequencies
+- **Confidence filtering**: min_observations threshold ensures reliable mutation scores
 
 ---
 

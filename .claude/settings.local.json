@@ -34,7 +34,13 @@
       "Bash(python -m py_compile:*)",
       "Bash(for:*)",
       "Bash(do echo \"=== $file ===\" head -20 \"$file\")",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "WebSearch",
+      "WebFetch(domain:pyqt-node-editor.readthedocs.io)",
+      "WebFetch(domain:dash.plotly.com)",
+      "WebFetch(domain:dearpygui.readthedocs.io)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(git mv:*)"
     ],
     "deny": [],
     "ask": []

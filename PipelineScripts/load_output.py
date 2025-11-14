@@ -749,3 +749,157 @@ echo "Files loaded from {original_tool} are ready for use"
         """String representation."""
         original_tool = self.original_tool_name or 'Unknown'
         return f"LoadOutput(from {original_tool}: {os.path.basename(self.result_file)})"
+
+
+def LoadOutputs(path: str,
+                tool: Optional[str] = None,
+                suffix: Optional[str] = None,
+                ascending: bool = True,
+                **load_output_kwargs) -> Dict[str, LoadOutput]:
+    """
+    Load multiple tool outputs from a ToolOutputs folder with filtering and sorting.
+
+    This helper function scans a ToolOutputs folder and loads multiple outputs
+    matching specified criteria, returning them as a dictionary for easy access.
+
+    Args:
+        path: Path to the job folder or ToolOutputs folder
+              - If job folder: automatically appends "ToolOutputs"
+              - If ToolOutputs folder: uses directly
+        tool: Filter by tool name (e.g., "MergeTables", "Filter", "Boltz2")
+              - Matches the tool name in JSON files
+        suffix: Filter by filename suffix (e.g., "Cycle10", "Affinity")
+                - Matches pattern: NNN_ToolName_Suffix.json
+        ascending: Sort order (True = ascending by name, False = descending by name)
+        **load_output_kwargs: Additional parameters passed to LoadOutput constructor
+                              (e.g., filter, validate_files)
+
+    Returns:
+        Dictionary mapping identifiers to LoadOutput objects
+        - Keys are generated from: "{execution_order}_{tool_name}_{suffix}" (if suffix)
+                               or: "{execution_order}_{tool_name}" (otherwise)
+        - Values are LoadOutput instances
+
+    Examples:
+        # Load all MergeTables outputs from a job
+        >>> data = LoadOutputs(
+        ...     path="/shares/user/BioPipelines/Project/Job_001",
+        ...     tool="MergeTables"
+        ... )
+        >>> # Access outputs: data["003_MergeTables"], data["007_MergeTables"], etc.
+
+        # Load all outputs from Cycle10 with validation disabled
+        >>> cycle10_data = LoadOutputs(
+        ...     path="/shares/user/BioPipelines/Project/Job_001/ToolOutputs",
+        ...     suffix="Cycle10",
+        ...     validate_files=False
+        ... )
+
+        # Load all Filter outputs in descending order
+        >>> filters = LoadOutputs(
+        ...     path="/shares/user/BioPipelines/Project/Job_001",
+        ...     tool="Filter",
+        ...     ascending=False
+        ... )
+
+        # Combine filters: specific tool with suffix
+        >>> merged_cycle5 = LoadOutputs(
+        ...     path="/shares/user/BioPipelines/Project/Job_001",
+        ...     tool="MergeTables",
+        ...     suffix="Cycle5"
+        ... )
+    """
+    # Normalize path - check if it's ToolOutputs folder or job folder
+    if os.path.basename(path) == "ToolOutputs":
+        tool_outputs_folder = path
+    else:
+        # Assume it's a job folder - append ToolOutputs
+        tool_outputs_folder = os.path.join(path, "ToolOutputs")
+
+    # Validate folder exists
+    if not os.path.exists(tool_outputs_folder):
+        raise ValueError(f"ToolOutputs folder not found: {tool_outputs_folder}")
+
+    if not os.path.isdir(tool_outputs_folder):
+        raise ValueError(f"Path is not a directory: {tool_outputs_folder}")
+
+    # Scan for JSON files
+    json_files = [f for f in os.listdir(tool_outputs_folder) if f.endswith('.json')]
+
+    if not json_files:
+        raise ValueError(f"No JSON files found in: {tool_outputs_folder}")
+
+    # Filter and load outputs
+    loaded_outputs = {}
+
+    for json_filename in json_files:
+        json_path = os.path.join(tool_outputs_folder, json_filename)
+
+        # Load JSON to check filters
+        try:
+            with open(json_path, 'r') as f:
+                json_data = json.load(f)
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Warning: Could not load {json_filename}: {e}")
+            continue
+
+        # Apply filters
+        # 1. Tool name filter
+        if tool is not None:
+            tool_name = json_data.get('tool_name', '')
+            if tool_name != tool:
+                continue
+
+        # 2. Suffix filter
+        # Parse filename: NNN_ToolName.json or NNN_ToolName_Suffix.json
+        if suffix is not None:
+            # Extract suffix from filename (everything between last _ and .json)
+            # Pattern: NNN_ToolName_Suffix.json
+            basename = os.path.splitext(json_filename)[0]  # Remove .json
+            parts = basename.split('_')
+
+            # Check if there's a suffix (more than 2 parts: index, toolname, suffix...)
+            if len(parts) > 2:
+                # Everything after tool name is considered suffix
+                file_suffix = '_'.join(parts[2:])
+                if file_suffix != suffix:
+                    continue
+            else:
+                # No suffix in filename, skip this file
+                continue
+
+        # File passed all filters - create LoadOutput
+        try:
+            load_output = LoadOutput(json_path, **load_output_kwargs)
+
+            # Generate key from filename components
+            basename = os.path.splitext(json_filename)[0]  # Remove .json
+
+            # Use basename as key (includes index, tool name, and suffix if present)
+            loaded_outputs[basename] = load_output
+
+        except Exception as e:
+            print(f"Warning: Could not create LoadOutput for {json_filename}: {e}")
+            continue
+
+    if not loaded_outputs:
+        raise ValueError(
+            f"No outputs matched the specified filters:\n"
+            f"  Path: {tool_outputs_folder}\n"
+            f"  Tool: {tool if tool else 'any'}\n"
+            f"  Suffix: {suffix if suffix else 'any'}\n"
+            f"  Found {len(json_files)} JSON files, but none matched filters"
+        )
+
+    # Sort outputs by name (ascending or descending)
+    sorted_outputs = dict(sorted(loaded_outputs.items(), reverse=not ascending))
+
+    print(f"LoadOutputs: Loaded {len(sorted_outputs)} outputs from {tool_outputs_folder}")
+    if tool:
+        print(f"  - Tool filter: {tool}")
+    if suffix:
+        print(f"  - Suffix filter: {suffix}")
+    print(f"  - Sort order: {'ascending' if ascending else 'descending'}")
+    print(f"  - Keys: {list(sorted_outputs.keys())}")
+
+    return sorted_outputs

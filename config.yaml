@@ -75,3 +75,4 @@ environments:
   # Library and compound tools
   CompoundLibrary: "biopipelines"
   PDB: "biopipelines"
+  DNAEncoder: "biopipelines"
