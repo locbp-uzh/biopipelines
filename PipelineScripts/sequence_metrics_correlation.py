@@ -143,8 +143,8 @@ class SequenceMetricsCorrelation(BaseConfig):
 
     def validate_params(self):
         """Validate SequenceMetricAnalysis parameters."""
-        if not isinstance(self.sequences_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("sequences must be a ToolOutput or StandardizedOutput object")
+        if not isinstance(self.sequences_input, (ToolOutput, StandardizedOutput, TableInfo)):
+            raise ValueError("sequences must be a ToolOutput, StandardizedOutput, or TableInfo object")
 
         if not isinstance(self.metrics_input, (ToolOutput, StandardizedOutput, TableInfo, str)):
             raise ValueError("metrics must be a ToolOutput, StandardizedOutput, TableInfo, or string path")
@@ -174,8 +174,15 @@ class SequenceMetricsCorrelation(BaseConfig):
         else:
             self.history_path = None
 
-    def _extract_sequences_path(self, input_obj: Union[ToolOutput, StandardizedOutput]) -> str:
+    def _extract_sequences_path(self, input_obj: Union[ToolOutput, StandardizedOutput, TableInfo]) -> str:
         """Extract sequences table path from input."""
+        # Handle TableInfo object directly
+        if isinstance(input_obj, TableInfo):
+            if hasattr(input_obj, 'path'):
+                return input_obj.path
+            raise ValueError("TableInfo object does not have a 'path' attribute")
+
+        # Handle ToolOutput/StandardizedOutput
         if hasattr(input_obj, 'tables'):
             tables = input_obj.tables
 
