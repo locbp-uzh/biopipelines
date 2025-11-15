@@ -3,10 +3,24 @@
 Sequence-metric correlation runtime script for BioPipelines.
 
 Computes correlation signals c(i) and c(i,aa) where:
-c(i) = (mean_metric_mutated - mean_metric_wt) / sqrt(var_mutated + var_wt)
-c(i,aa) = (mean_metric_aa - mean_metric_non_aa) / sqrt(var_aa + var_non_aa)
 
-When n <= 1, variance cannot be computed and correlation is set to 0.
+c(i) = (m̄_i-mut - m̄_i-wt) / sqrt(s²_i-mut + s²_i-wt)
+
+where:
+  - m̄_i-mut = average metric over sequences where position i is mutated
+  - m̄_i-wt  = average metric over sequences where position i is NOT mutated
+  - s²_i-mut = unbiased variance of metric for mutated group (ddof=1)
+  - s²_i-wt  = unbiased variance of metric for wild-type group (ddof=1)
+
+c(i,aa) = (m̄_i,aa - m̄_i,¬aa) / sqrt(s²_i,aa + s²_i,¬aa)
+
+where:
+  - m̄_i,aa   = average metric over sequences with amino acid 'aa' at position i
+  - m̄_i,¬aa  = average metric over sequences with other amino acids at position i
+  - s²_i,aa  = unbiased variance for sequences with 'aa' at position i
+  - s²_i,¬aa = unbiased variance for sequences without 'aa' at position i
+
+When n <= 1 for either group, variance cannot be reliably computed and correlation is set to 0.
 """
 
 import argparse
@@ -197,12 +211,16 @@ def compute_correlation_1d(merged_df: pd.DataFrame, reference_seq: str,
             var_mutated = np.var(mutated_values, ddof=1) if n_mutated > 1 else 0.0
             var_wt = np.var(wt_values, ddof=1) if n_wt > 1 else 0.0
 
-            # Handle cases where variance cannot be computed
+            # Handle cases where variance cannot be computed reliably
+            # When either group has n <= 1, we can't compute unbiased variance
             if (n_mutated <= 1 or n_wt <= 1):
                 correlation = 0.0
             elif (var_mutated + var_wt) == 0:
+                # Both variances are zero (all values identical in both groups)
                 correlation = 0.0
             else:
+                # Compute effect size: (difference in means) / sqrt(sum of variances)
+                # This is the standardized mean difference accounting for variance in both groups
                 correlation = (mean_mutated - mean_wt) / np.sqrt(var_mutated + var_wt)
         else:
             mean_mutated = 0.0
@@ -255,8 +273,10 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
         position_label = pos + 1  # 1-indexed
         ref_aa = reference_seq[pos]
 
-        # Call mutations at this position for all sequences
-        position_mutations = {}
+        # Collect all metric values grouped by amino acid at this position
+        # This includes both mutated and wild-type sequences
+        position_aa_metrics = {}
+
         for _, row in merged_df.iterrows():
             sequence = row['sequence']
             metric_value = row[metric]
@@ -266,26 +286,20 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
 
             if pos < len(sequence):
                 current_aa = sequence[pos]
-                mutations = call_mutations(sequence, reference_seq)
 
-                # Check if this position is mutated in this sequence
-                is_mutated_at_pos = any(m[0] == position_label for m in mutations)
-
-                if is_mutated_at_pos:
-                    # Get the mutation
-                    mut_aa = current_aa
-                    if mut_aa not in position_mutations:
-                        position_mutations[mut_aa] = []
-                    position_mutations[mut_aa].append(metric_value)
+                # Group metric values by the amino acid at this position
+                if current_aa not in position_aa_metrics:
+                    position_aa_metrics[current_aa] = []
+                position_aa_metrics[current_aa].append(metric_value)
 
         # Compute correlation for each amino acid
         row_data = {'position': position_label, 'wt_aa': ref_aa}
 
         for aa in AMINO_ACIDS:
-            # Get values for sequences mutated to this aa vs everything else
-            aa_values = position_mutations.get(aa, [])
+            # Get values for sequences with this aa at position i vs all other aa
+            aa_values = position_aa_metrics.get(aa, [])
             non_aa_values = []
-            for other_aa, values in position_mutations.items():
+            for other_aa, values in position_aa_metrics.items():
                 if other_aa != aa:
                     non_aa_values.extend(values)
 
@@ -296,15 +310,21 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
                 mean_aa = np.mean(aa_values)
                 mean_non_aa = np.mean(non_aa_values)
 
+                # Compute unbiased variance (ddof=1)
                 var_aa = np.var(aa_values, ddof=1) if n_aa > 1 else 0.0
                 var_non_aa = np.var(non_aa_values, ddof=1) if n_non_aa > 1 else 0.0
 
-                # Handle cases where variance cannot be computed
+                # Handle cases where variance cannot be computed reliably
+                # When either group has n <= 1, we can't compute unbiased variance
                 if (n_aa <= 1 or n_non_aa <= 1):
                     correlation = 0.0
                 elif (var_aa + var_non_aa) == 0:
+                    # Both variances are zero (all values identical in both groups)
                     correlation = 0.0
                 else:
+                    # Compute effect size: (difference in means) / sqrt(sum of variances)
+                    # Positive correlation: this amino acid improves the metric
+                    # Negative correlation: this amino acid worsens the metric
                     correlation = (mean_aa - mean_non_aa) / np.sqrt(var_aa + var_non_aa)
             else:
                 correlation = 0.0
@@ -338,19 +358,19 @@ def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: 
     """
     logger.info("Creating correlation logo plot...")
 
-    # Filter positions with significant correlations (at least one aa with |c| > threshold)
-    threshold = 0.01
+    # Filter positions where at least one amino acid has non-zero correlation
     positions_to_plot = []
 
     for i, row in correlation_2d_df.iterrows():
-        max_abs_corr = max(abs(row[aa]) for aa in AMINO_ACIDS)
-        if max_abs_corr > threshold:
+        # Check if any amino acid at this position has non-zero correlation
+        has_nonzero = any(row[aa] != 0 for aa in AMINO_ACIDS)
+        if has_nonzero:
             positions_to_plot.append(row)
 
     if not positions_to_plot:
         # Create empty plot
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.text(0.5, 0.5, 'No significant correlations found',
+        ax.text(0.5, 0.5, 'No correlations found\n(all c(i,aa) = 0 at all positions)',
                 ha='center', va='center', transform=ax.transAxes, fontsize=16)
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
@@ -359,47 +379,37 @@ def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: 
         plt.savefig(svg_path, format='svg', dpi=300, bbox_inches='tight')
         plt.savefig(png_path, format='png', dpi=300, bbox_inches='tight')
         plt.close()
+        logger.warning("All correlations are zero. Possible causes: insufficient data (n≤1), no metric variation, or all sequences identical.")
         return
 
     # Prepare data for logomaker
-    # We need separate dataframes for positive and negative values
-    positive_data = []
-    negative_data = []
+    # Create a single dataframe with all correlation values (both positive and negative)
+    logo_data = []
     x_labels = []
 
     for row in positions_to_plot:
         position = row['position']
         wt_aa = row['wt_aa']
 
-        pos_row = {}
-        neg_row = {}
-
+        aa_row = {}
         for aa in AMINO_ACIDS:
-            corr_value = row[aa]
-            if corr_value > 0:
-                pos_row[aa] = corr_value
-                neg_row[aa] = 0.0
-            else:
-                pos_row[aa] = 0.0
-                neg_row[aa] = corr_value  # Keep negative
+            aa_row[aa] = row[aa]  # Keep both positive and negative values
 
-        positive_data.append(pos_row)
-        negative_data.append(neg_row)
+        logo_data.append(aa_row)
         x_labels.append(f"{wt_aa}{position}")
 
     # Create figure
     num_positions = len(positions_to_plot)
     fig, ax = plt.subplots(figsize=(max(12, num_positions * 0.8), 6))
 
-    # Convert to DataFrames
-    positive_df = pd.DataFrame(positive_data)
-    negative_df = pd.DataFrame(negative_data)
-    positive_df.index = range(len(positive_df))
-    negative_df.index = range(len(negative_df))
+    # Convert to DataFrame
+    logo_df = pd.DataFrame(logo_data)
+    logo_df.index = range(len(logo_df))
 
-    # Create logos
-    logo_pos = logomaker.Logo(positive_df, ax=ax, color_scheme='chemistry', baseline_width=0)
-    logo_neg = logomaker.Logo(negative_df, ax=ax, color_scheme='chemistry', baseline_width=0)
+    # Create logo with both positive and negative values
+    # logomaker handles positive and negative values automatically
+    logo = logomaker.Logo(logo_df, ax=ax, color_scheme='chemistry',
+                         baseline_width=0, show_spines=False)
 
     # Customize plot
     ax.set_ylabel('Correlation Signal c(i,aa)', fontsize=14)
