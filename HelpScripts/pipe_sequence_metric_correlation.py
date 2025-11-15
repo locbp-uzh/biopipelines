@@ -408,8 +408,9 @@ def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: 
 
     # Create logo with both positive and negative values
     # logomaker handles positive and negative values automatically
+    # flip_below=False keeps negative letters upright (not flipped upside down)
     logo = logomaker.Logo(logo_df, ax=ax, color_scheme='chemistry',
-                         baseline_width=0, show_spines=False)
+                         baseline_width=0, show_spines=False, flip_below=False)
 
     # Customize plot
     ax.set_ylabel('Correlation Signal c(i,aa)', fontsize=14)
