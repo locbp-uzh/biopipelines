@@ -23,7 +23,7 @@ from .stitch_sequences import StitchSequences
 from .dynamic_bind import DynamicBind
 from .dna_encoder import DNAEncoder
 from .load_output import LoadOutput, LoadOutputs
-from .sequence_metrics_correlation import SequenceMetricsCorrelation
+from .sequence_metric_correlation import SequenceMetricsCorrelation
 from .converters import *
 
 __all__ = [

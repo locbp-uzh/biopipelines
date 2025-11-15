@@ -40,7 +40,8 @@
       "WebFetch(domain:dash.plotly.com)",
       "WebFetch(domain:dearpygui.readthedocs.io)",
       "WebFetch(domain:pypi.org)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(xargs basename:*)"
     ],
     "deny": [],
     "ask": []
