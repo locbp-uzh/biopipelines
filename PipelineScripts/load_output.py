@@ -98,7 +98,7 @@ class LoadOutput(BaseConfig):
         """Load and validate the result file."""
         if not os.path.exists(self.result_file):
             raise ValueError(f"Result file not found: {self.result_file}")
-        
+
         try:
             with open(self.result_file, 'r') as f:
                 self.loaded_result = json.load(f)
@@ -106,15 +106,15 @@ class LoadOutput(BaseConfig):
             raise ValueError(f"Invalid JSON in result file {self.result_file}: {e}")
         except Exception as e:
             raise ValueError(f"Error loading result file {self.result_file}: {e}")
-        
+
         # Validate required fields
         required_fields = ['tool_name', 'tool_class', 'output_structure']
         for field in required_fields:
             if field not in self.loaded_result:
                 raise ValueError(f"Missing required field '{field}' in result file")
-        
+
         self.original_tool_name = self.loaded_result['tool_name']
-        
+
         # Validate file existence if requested
         if self.validate_files:
             self._validate_file_existence()
@@ -482,6 +482,11 @@ class LoadOutput(BaseConfig):
 
         # Get the original output structure
         output_structure = self.loaded_result['output_structure'].copy()
+
+        # Backward compatibility: rename "datasheets" to "tables"
+        if 'datasheets' in output_structure and 'tables' not in output_structure:
+            print(f"LoadOutput: Converting legacy 'datasheets' to 'tables' for compatibility")
+            output_structure['tables'] = output_structure.pop('datasheets')
 
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:

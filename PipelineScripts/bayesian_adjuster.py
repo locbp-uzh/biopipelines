@@ -9,8 +9,8 @@ Mathematical formula:
     p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c(i,aa))
 
 where:
-    - p₀(i,aa) = prior probability from MutationProfiler
-    - c(i,aa) = correlation signal from SequenceMetricCorrelation
+    - p₀(i,aa) = prior probability (from MutationProfiler)
+    - c(i,aa) = correlation signal (from SequenceMetricCorrelation)
     - γ = strength hyperparameter
     - σ(x) = 1/(1+e⁻ˣ) (sigmoid function)
     - σ⁻¹(p) = log(p/(1-p)) (logit function)
@@ -33,7 +33,7 @@ class BayesianAdjuster(BaseConfig):
     """
     Pipeline tool for Bayesian adjustment of mutation frequencies.
 
-    Takes frequency tables from MutationProfiler and correlation signals from
+    Takes frequency tables e.g. from MutationProfiler and correlation signals e.g. from
     SequenceMetricCorrelation, applies Bayesian log-odds updates to generate
     adjusted probabilities that favor beneficial mutations.
 
