@@ -13,6 +13,7 @@ import sys
 import subprocess
 import tempfile
 import time
+import random
 
 # Import unified ID mapping utilities
 from id_map_utils import map_table_ids_to_ids
@@ -89,6 +90,56 @@ def apply_mask_to_msa(msa_sequences, mask_positions):
         masked_sequences.append(''.join(masked_seq))
 
     return masked_sequences
+
+def handle_server_error(server_dir):
+    """
+    Handle server error by checking if server is running and resubmitting if needed.
+
+    Logic:
+    1. Check if server is running (via check_and_resubmit_server)
+    2. If random < 0.2, resubmit anyway (this handles error due to server overload by many jobs)
+    """
+
+    # First, check and resubmit if server is not running
+    check_and_resubmit_server(server_dir)
+
+    # 15% probability to resubmit anyway
+    if random.random() < 0.2:
+        log("Server overload: Resubmitting anyway")
+
+        MMSEQS_SERVER_DIR = server_dir
+        GPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/GPU_SUBMITTING"
+
+        os.makedirs(MMSEQS_SERVER_DIR, exist_ok=True)
+        with open(GPU_SUBMITTING, 'w') as f:
+            f.write(time.strftime("%H:%M:%S"))
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.dirname(script_dir)
+
+        try:
+            result = subprocess.run(
+                ["./submit", "ExamplePipelines/mmseqs2_server.py"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True
+            )
+
+            import re
+            match = re.search(r'Submitted batch job (\d+)', result.stdout)
+            if match:
+                log(f"MMseqs2 server resubmitted with job ID: {match.group(1)}")
+            else:
+                try:
+                    os.remove(GPU_SUBMITTING)
+                except:
+                    pass
+        except Exception as e:
+            log(f"Error resubmitting server: {e}")
+            try:
+                os.remove(GPU_SUBMITTING)
+            except:
+                pass
 
 def check_and_resubmit_server(server_dir):
     """Check if MMseqs2 server is running, and resubmit if not."""
@@ -224,7 +275,7 @@ def check_and_resubmit_server(server_dir):
 
     log("Exiting check_and_resubmit_server()")
 
-def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None, timeout=3600):
+def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None, timeout=3600, server_dir=None):
     """Submit a single sequence to MMseqs2 server with specified output path."""
     try:
         # Build command
@@ -257,6 +308,11 @@ def submit_sequence_to_server(sequence, sequence_id, client_script, output_forma
 
     except subprocess.TimeoutExpired:
         log(f"ERROR: Timeout waiting for sequence {sequence_id}")
+
+        # Handle timeout error by checking server and potentially resubmitting
+        if server_dir:
+            handle_server_error(server_dir)
+
         return None
     except Exception as e:
         log(f"ERROR: Exception processing sequence {sequence_id}: {str(e)}")
@@ -515,7 +571,8 @@ def main():
                 temp_output = temp_file.name
 
             result_file = submit_sequence_to_server(
-                sequence, sequence_id, args.client_script, args.output_format, temp_output
+                sequence, sequence_id, args.client_script, args.output_format, temp_output,
+                server_dir=args.server_dir
             )
 
             if result_file is None:
@@ -536,7 +593,8 @@ def main():
         else:
             # No masking - server writes directly to final location
             result_file = submit_sequence_to_server(
-                sequence, sequence_id, args.client_script, args.output_format, individual_msa_file
+                sequence, sequence_id, args.client_script, args.output_format, individual_msa_file,
+                server_dir=args.server_dir
             )
 
             if result_file is None:

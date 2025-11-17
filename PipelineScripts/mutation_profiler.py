@@ -41,23 +41,33 @@ class MutationProfiler(BaseConfig):
                  original: Union[ToolOutput, StandardizedOutput],
                  mutants: Union[ToolOutput, StandardizedOutput],
                  include_original: bool = True,
+                 positions: Optional[str] = None,
                  **kwargs):
         """
         Initialize mutation profiler tool.
-        
+
         Args:
             original: Original sequences (ToolOutput or StandardizedOutput)
-            mutants: Mutant sequences to compare against original (ToolOutput or StandardizedOutput)  
+            mutants: Mutant sequences to compare against original (ToolOutput or StandardizedOutput)
             include_original: Whether to include original sequence in analysis (default: True)
+            positions: PyMOL-style selection string for positions to display in plots (e.g., "141+143+145+147-149")
+                      If None, shows all positions with mutations. This ensures consistent x-axis across tools.
             **kwargs: Additional parameters
-            
+
         Examples:
             # Analyze LigandMPNN mutations against original
             profiler = pipeline.add(MutationProfiler(
                 original=original_structure,
                 mutants=lmpnn
             ))
-            
+
+            # Profile mutations with specific positions for plot consistency
+            profiler = pipeline.add(MutationProfiler(
+                original=original_structure,
+                mutants=lmpnn,
+                positions="141+143+145+147-149+151-152"
+            ))
+
             # Profile mutations without including original in statistics
             profiler = pipeline.add(MutationProfiler(
                 original=wild_type,
@@ -68,6 +78,7 @@ class MutationProfiler(BaseConfig):
         self.original_input = original
         self.mutants_input = mutants
         self.include_original = include_original
+        self.positions = positions
         
         # Initialize base class
         super().__init__(**kwargs)
@@ -142,13 +153,14 @@ class MutationProfiler(BaseConfig):
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
-        
+
         config_lines.extend([
             f"ORIGINAL: {type(self.original_input).__name__}",
             f"MUTANTS: {type(self.mutants_input).__name__}",
-            f"INCLUDE_ORIGINAL: {self.include_original}"
+            f"INCLUDE_ORIGINAL: {self.include_original}",
+            f"POSITIONS: {self.positions if self.positions else 'auto (all mutations)'}"
         ])
-        
+
         return config_lines
     
     def generate_script(self, script_path: str) -> str:
@@ -183,6 +195,7 @@ class MutationProfiler(BaseConfig):
             "original_sequences": self.original_sequences_path,
             "mutants_sequences": self.mutants_sequences_path,
             "include_original": self.include_original,
+            "positions": self.positions,
             "profile_output": profile_csv,
             "mutations_output": mutations_csv,
             "absolute_frequencies_output": absolute_freq_csv,
@@ -301,7 +314,8 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "include_original": self.include_original
+                "include_original": self.include_original,
+                "positions": self.positions
             }
         })
         return base_dict

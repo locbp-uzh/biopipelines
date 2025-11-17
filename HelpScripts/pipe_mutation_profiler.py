@@ -23,6 +23,49 @@ import logomaker
 # Standard amino acids
 AMINO_ACIDS = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
 
+
+def parse_positions_selection(selection_str: Optional[str]) -> Optional[List[int]]:
+    """
+    Parse PyMOL-style position selection string.
+
+    Args:
+        selection_str: Selection string like "141+143+145+147-149+151-152"
+                      '+' separates individual positions or ranges
+                      '-' indicates a range (e.g., "147-149" means 147, 148, 149)
+
+    Returns:
+        Sorted list of positions (1-indexed), or None if selection_str is None/empty
+    """
+    if not selection_str or not selection_str.strip():
+        return None
+
+    positions = []
+    parts = selection_str.split('+')
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part and not part.startswith('-'):
+            # Range like "147-149"
+            range_parts = part.split('-')
+            if len(range_parts) == 2:
+                try:
+                    start = int(range_parts[0])
+                    end = int(range_parts[1])
+                    positions.extend(range(start, end + 1))
+                except ValueError:
+                    pass  # Skip malformed ranges
+        else:
+            # Single position
+            try:
+                positions.append(int(part))
+            except ValueError:
+                pass  # Skip malformed positions
+
+    return sorted(set(positions)) if positions else None
+
 # Color scheme for amino acids (based on chemical properties)
 AMINO_ACID_COLORS = {
     # Hydrophobic (blue shades)
@@ -205,31 +248,43 @@ def analyze_mutations(original_seqs: List[str], mutant_seqs: List[str],
     return profile_df, mutations_df, absolute_freq_df, relative_freq_df
 
 
-def create_sequence_logo(relative_freq_df: pd.DataFrame, absolute_freq_df: pd.DataFrame, profile_df: pd.DataFrame, 
-                        relative_svg: str, relative_png: str, absolute_svg: str, absolute_png: str, 
-                        counts_svg: str, counts_png: str):
+def create_sequence_logo(relative_freq_df: pd.DataFrame, absolute_freq_df: pd.DataFrame, profile_df: pd.DataFrame,
+                        relative_svg: str, relative_png: str, absolute_svg: str, absolute_png: str,
+                        counts_svg: str, counts_png: str, positions_filter: Optional[List[int]] = None):
     """
     Create sequence logo visualizations showing mutation patterns.
-    
+
     Args:
         relative_freq_df: DataFrame with relative frequencies per position
-        absolute_freq_df: DataFrame with absolute frequencies per position 
+        absolute_freq_df: DataFrame with absolute frequencies per position
         profile_df: DataFrame with mutation counts per position
         relative_svg: Output SVG file path for relative frequencies
         relative_png: Output PNG file path for relative frequencies
-        absolute_svg: Output SVG file path for absolute frequencies  
+        absolute_svg: Output SVG file path for absolute frequencies
         absolute_png: Output PNG file path for absolute frequencies
         counts_svg: Output SVG file path for counts
         counts_png: Output PNG file path for counts
+        positions_filter: List of positions to include (1-indexed). If None, includes only mutated positions (>1% frequency).
     """
-    # Filter positions that have mutations
+    # Filter positions based on positions_filter or mutation threshold
     mutation_positions = []
     for i, row in relative_freq_df.iterrows():
-        total_freq = sum(row[aa] for aa in AMINO_ACIDS)
-        if total_freq > 0.01:  # Only show positions with >1% mutation frequency
-            abs_row = absolute_freq_df.iloc[i]
-            count_row = profile_df.iloc[i]
-            mutation_positions.append((row, abs_row, count_row))
+        position = int(row['position'])
+
+        # Apply position filter if specified
+        if positions_filter is not None:
+            if position not in positions_filter:
+                continue
+            # Include all specified positions, even if no mutations
+        else:
+            # Default: only show positions with >1% mutation frequency
+            total_freq = sum(row[aa] for aa in AMINO_ACIDS)
+            if total_freq <= 0.01:
+                continue
+
+        abs_row = absolute_freq_df.iloc[i]
+        count_row = profile_df.iloc[i]
+        mutation_positions.append((row, abs_row, count_row))
     
     if not mutation_positions:
         # Create empty plots for all three types
@@ -404,10 +459,16 @@ def main():
         
         # Create sequence logo
         logger.info("Creating sequence logo visualizations...")
-        create_sequence_logo(relative_freq_df, absolute_freq_df, profile_df, 
+        # Parse positions filter if provided
+        positions_filter = parse_positions_selection(config.get('positions'))
+        if positions_filter:
+            logger.info(f"Using positions filter: {positions_filter} ({len(positions_filter)} positions)")
+
+        create_sequence_logo(relative_freq_df, absolute_freq_df, profile_df,
                            config['sequence_logo_relative_svg'], config['sequence_logo_relative_png'],
                            config['sequence_logo_absolute_svg'], config['sequence_logo_absolute_png'],
-                           config['sequence_logo_counts_svg'], config['sequence_logo_counts_png'])
+                           config['sequence_logo_counts_svg'], config['sequence_logo_counts_png'],
+                           positions_filter=positions_filter)
         logger.info(f"Sequence logos saved to:")
         logger.info(f"  Relative frequencies: {config['sequence_logo_relative_svg']} and {config['sequence_logo_relative_png']}")
         logger.info(f"  Absolute frequencies: {config['sequence_logo_absolute_svg']} and {config['sequence_logo_absolute_png']}")

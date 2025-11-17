@@ -33,6 +33,49 @@ AMINO_ACIDS = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 
 EPSILON = 1e-9
 
 
+def parse_positions_selection(selection_str):
+    """
+    Parse PyMOL-style position selection string.
+
+    Args:
+        selection_str: Selection string like "141+143+145+147-149+151-152"
+                      '+' separates individual positions or ranges
+                      '-' indicates a range (e.g., "147-149" means 147, 148, 149)
+
+    Returns:
+        Sorted list of positions (1-indexed), or None if selection_str is None/empty
+    """
+    if not selection_str or not str(selection_str).strip():
+        return None
+
+    positions = []
+    parts = str(selection_str).split('+')
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part and not part.startswith('-'):
+            # Range like "147-149"
+            range_parts = part.split('-')
+            if len(range_parts) == 2:
+                try:
+                    start = int(range_parts[0])
+                    end = int(range_parts[1])
+                    positions.extend(range(start, end + 1))
+                except ValueError:
+                    pass  # Skip malformed ranges
+        else:
+            # Single position
+            try:
+                positions.append(int(part))
+            except ValueError:
+                pass  # Skip malformed positions
+
+    return sorted(set(positions)) if positions else None
+
+
 def setup_logging():
     """Set up logging configuration."""
     logging.basicConfig(
@@ -113,10 +156,54 @@ def load_and_merge_tables(frequencies_path: str, correlations_path: str,
     return frequencies_df, correlations_df
 
 
+def apply_pseudocounts(frequencies_df: pd.DataFrame, pseudocount: float, logger) -> pd.DataFrame:
+    """
+    Apply pseudocounts to all amino acids at each position and renormalize.
+
+    Args:
+        frequencies_df: DataFrame with prior frequencies
+        pseudocount: Pseudocount to add to each amino acid
+        logger: Logger instance
+
+    Returns:
+        DataFrame with pseudocounts applied and renormalized
+    """
+    if pseudocount == 0:
+        logger.info("Pseudocount is 0, skipping pseudocount application")
+        return frequencies_df.copy()
+
+    logger.info(f"Applying pseudocount: {pseudocount}")
+
+    pseudocount_df = frequencies_df.copy()
+
+    for idx, row in pseudocount_df.iterrows():
+        position = row['position']
+
+        # Calculate original sum across all amino acids
+        original_sum = sum(row[aa] for aa in AMINO_ACIDS)
+
+        # Add pseudocount to all amino acids
+        for aa in AMINO_ACIDS:
+            pseudocount_df.at[idx, aa] = row[aa] + pseudocount
+
+        # Calculate new sum after adding pseudocounts
+        new_sum = sum(pseudocount_df.loc[idx, aa] for aa in AMINO_ACIDS)
+
+        # Renormalize to preserve original sum
+        if new_sum > 0 and original_sum > 0:
+            normalization_factor = original_sum / new_sum
+            for aa in AMINO_ACIDS:
+                pseudocount_df.at[idx, aa] = pseudocount_df.at[idx, aa] * normalization_factor
+
+    logger.info("Pseudocounts applied and renormalized")
+    return pseudocount_df
+
+
 def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
                               correlations_df: pd.DataFrame,
                               mode: str,
                               gamma: float,
+                              pseudocount: float,
                               logger) -> Tuple[pd.DataFrame, List[Dict]]:
     """
     Apply Bayesian adjustment to all positions and amino acids.
@@ -126,12 +213,16 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
         correlations_df: DataFrame with correlation signals
         mode: "min" or "max" (determines sign of correlations)
         gamma: Strength hyperparameter
+        pseudocount: Pseudocount to add to all amino acids before adjustment
         logger: Logger instance
 
     Returns:
         Tuple of (adjusted_probabilities_df, adjustment_log)
     """
     logger.info("Applying Bayesian adjustments...")
+
+    # Apply pseudocounts first
+    frequencies_df = apply_pseudocounts(frequencies_df, pseudocount, logger)
 
     adjusted_data = []
     adjustment_log = []
@@ -265,7 +356,7 @@ def normalize_relative(adjusted_df: pd.DataFrame, logger) -> pd.DataFrame:
 
 
 def create_logo_plot(prob_df: pd.DataFrame, title: str, ylabel: str,
-                    svg_path: str, png_path: str, logger):
+                    svg_path: str, png_path: str, logger, positions_filter=None, pseudocount=None):
     """
     Create sequence logo visualization for probabilities.
 
@@ -281,19 +372,34 @@ def create_logo_plot(prob_df: pd.DataFrame, title: str, ylabel: str,
         svg_path: Output SVG file path
         png_path: Output PNG file path
         logger: Logger instance
+        positions_filter: List of positions to include (1-indexed). If None, includes positions where any amino acid has p(i,aa) > threshold.
+        pseudocount: Threshold for significance. If None, uses 0.01 (1%).
     """
     logger.info(f"Creating logo plot: {title}")
 
-    # Filter positions with significant probabilities (threshold > 0.01)
-    threshold = 0.01
+    # Determine threshold: pseudocount if given, otherwise 1%
+    threshold = pseudocount if pseudocount is not None else 0.01
+
+    # Filter positions based on positions_filter or significance threshold
     positions_to_plot = []
 
     for i, row in prob_df.iterrows():
+        position = int(row['position'])
         original_aa = row['original']
-        # Sum probabilities for non-original amino acids
-        total_prob = sum(row[aa] for aa in AMINO_ACIDS if aa != original_aa)
-        if total_prob > threshold:
-            positions_to_plot.append(row)
+
+        # Apply position filter if specified
+        if positions_filter is not None:
+            if position not in positions_filter:
+                continue
+            # Include all specified positions
+        else:
+            # Default: only include positions where at least one non-original amino acid
+            # has probability > threshold (this includes resurrected mutations)
+            has_significant = any(row[aa] > threshold for aa in AMINO_ACIDS if aa != original_aa)
+            if not has_significant:
+                continue
+
+        positions_to_plot.append(row)
 
     if not positions_to_plot:
         # Create empty plot
@@ -389,6 +495,7 @@ def main():
             correlations_df,
             config['mode'],
             config['gamma'],
+            config['pseudocount'],
             logger
         )
 
@@ -411,6 +518,14 @@ def main():
         adjustment_log_df = pd.DataFrame(adjustment_log)
         adjustment_log_df.to_csv(config['adjustment_log_output'], index=False)
 
+        # Parse positions filter if provided
+        positions_filter = parse_positions_selection(config.get('positions'))
+        if positions_filter:
+            logger.info(f"Using positions filter: {positions_filter} ({len(positions_filter)} positions)")
+
+        # Get pseudocount for threshold
+        pseudocount = config.get('pseudocount')
+
         # Create logo plots
         create_logo_plot(
             adjusted_df,
@@ -418,7 +533,9 @@ def main():
             'Adjusted Probability',
             config['adjusted_logo_svg'],
             config['adjusted_logo_png'],
-            logger
+            logger,
+            positions_filter=positions_filter,
+            pseudocount=pseudocount
         )
 
         create_logo_plot(
@@ -427,7 +544,9 @@ def main():
             'Absolute Probability',
             config['absolute_logo_svg'],
             config['absolute_logo_png'],
-            logger
+            logger,
+            positions_filter=positions_filter,
+            pseudocount=pseudocount
         )
 
         create_logo_plot(
@@ -436,7 +555,9 @@ def main():
             'Relative Probability',
             config['relative_logo_svg'],
             config['relative_logo_png'],
-            logger
+            logger,
+            positions_filter=positions_filter,
+            pseudocount=pseudocount
         )
 
         # Print summary
@@ -444,6 +565,7 @@ def main():
         logger.info(f"  Positions adjusted: {len(adjusted_df)}")
         logger.info(f"  Mode: {config['mode']}")
         logger.info(f"  Gamma: {config['gamma']}")
+        logger.info(f"  Pseudocount: {config['pseudocount']}")
 
         # Calculate and log some statistics
         total_change = adjustment_log_df['change'].abs().sum()

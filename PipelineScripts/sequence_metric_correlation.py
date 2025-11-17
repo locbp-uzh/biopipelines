@@ -45,6 +45,7 @@ class SequenceMetricCorrelation(BaseConfig):
                  data: Union[ToolOutput, StandardizedOutput, TableInfo, str, List[Union[ToolOutput, StandardizedOutput, TableInfo, str]]],
                  original: Union[str, ToolOutput, StandardizedOutput],
                  metric: str,
+                 positions: Optional[str] = None,
                  **kwargs):
         """
         Initialize sequence-metric correlation analysis.
@@ -59,6 +60,8 @@ class SequenceMetricCorrelation(BaseConfig):
                       - String: direct sequence
                       - ToolOutput/StandardizedOutput: extracts first sequence
             metric: Column name of the metric to analyze
+            positions: PyMOL-style selection string for positions to display in plots (e.g., "141+143+145+147-149")
+                      If None, shows all positions with correlations. This ensures consistent x-axis across tools.
             **kwargs: Additional parameters
 
         Examples:
@@ -70,12 +73,13 @@ class SequenceMetricCorrelation(BaseConfig):
                 metric="affinity_pred_value"
             )
 
-            # Multi-cycle analysis (accumulate data)
+            # Multi-cycle analysis (accumulate data) with position filter
             correlation = SequenceMetricCorrelation(
                 mutants=[cycle1.tables.sequences, cycle2.tables.sequences],
                 data=[cycle1.tables.merged, cycle2.tables.merged],
                 original=original_holo,
-                metric="affinity_pred_value"
+                metric="affinity_pred_value",
+                positions="141+143+145+147-149+151-152"
             )
         """
         # Handle list inputs
@@ -91,6 +95,7 @@ class SequenceMetricCorrelation(BaseConfig):
 
         self.original_input = original
         self.metric = metric
+        self.positions = positions
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -264,7 +269,8 @@ class SequenceMetricCorrelation(BaseConfig):
         config_lines.extend([
             f"METRIC: {self.metric}",
             f"MUTANTS INPUTS: {len(self.mutants_input)}",
-            f"DATA INPUTS: {len(self.data_input)}"
+            f"DATA INPUTS: {len(self.data_input)}",
+            f"POSITIONS: {self.positions if self.positions else 'auto (all correlations)'}"
         ])
 
         return config_lines
@@ -296,6 +302,7 @@ class SequenceMetricCorrelation(BaseConfig):
             "data_paths": self.data_paths,
             "original_sequence": self.original_sequence,
             "metric": self.metric,
+            "positions": self.positions,
             "correlation_1d_output": correlation_1d_csv,
             "correlation_2d_output": correlation_2d_csv,
             "logo_svg_output": logo_svg,
@@ -382,7 +389,8 @@ fi
             "tool_params": {
                 "metric": self.metric,
                 "num_mutants_inputs": len(self.mutants_input),
-                "num_data_inputs": len(self.data_input)
+                "num_data_inputs": len(self.data_input),
+                "positions": self.positions
             }
         })
         return base_dict

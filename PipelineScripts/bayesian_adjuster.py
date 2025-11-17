@@ -53,6 +53,8 @@ class BayesianAdjuster(BaseConfig):
                  mode: str = "min",
                  gamma: float = 3.0,
                  kappa: float = 10.0,
+                 pseudocount: float = 0.01,
+                 positions: Optional[str] = None,
                  **kwargs):
         """
         Initialize Bayesian frequency adjuster.
@@ -70,6 +72,12 @@ class BayesianAdjuster(BaseConfig):
                    Lower values = more conservative, stays closer to prior
             kappa: Pseudo-observations for sample size shrinkage (default: 10.0)
                    Used to down-weight correlations from small sample sizes
+            pseudocount: Pseudocount added to all amino acids before adjustment (default: 0.01)
+                        Ensures no amino acid has exactly zero probability, allowing correlation
+                        signals to resurrect unseen but beneficial mutations. After adding,
+                        frequencies are normalized to preserve the original sum at each position.
+            positions: PyMOL-style selection string for positions to display in plots (e.g., "141+143+145+147-149")
+                      If None, shows all positions with adjustments. This ensures consistent x-axis across tools.
             **kwargs: Additional parameters
 
         Examples:
@@ -78,7 +86,18 @@ class BayesianAdjuster(BaseConfig):
                 frequencies=profiler.tables.absolute_frequencies,
                 correlations=correlation_analysis.tables.correlation_2d,
                 mode="min",  # Minimize affinity
-                gamma=3.0
+                gamma=3.0,
+                pseudocount=0.01
+            )
+
+            # With position filter for plot consistency
+            adjuster = BayesianAdjuster(
+                frequencies=profiler.tables.absolute_frequencies,
+                correlations=correlation_analysis.tables.correlation_2d,
+                mode="min",
+                gamma=3.0,
+                pseudocount=0.01,
+                positions="141+143+145+147-149+151-152"
             )
 
             # Use adjusted probabilities in MutationComposer
@@ -93,6 +112,8 @@ class BayesianAdjuster(BaseConfig):
         self.mode = mode
         self.gamma = gamma
         self.kappa = kappa
+        self.pseudocount = pseudocount
+        self.positions = positions
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -122,6 +143,8 @@ class BayesianAdjuster(BaseConfig):
             raise ValueError(f"gamma must be positive, got: {self.gamma}")
         if self.kappa < 0:
             raise ValueError(f"kappa must be non-negative, got: {self.kappa}")
+        if self.pseudocount < 0:
+            raise ValueError(f"pseudocount must be non-negative, got: {self.pseudocount}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input tables from previous tools."""
@@ -153,6 +176,8 @@ class BayesianAdjuster(BaseConfig):
             f"MODE: {self.mode}",
             f"GAMMA: {self.gamma}",
             f"KAPPA: {self.kappa}",
+            f"PSEUDOCOUNT: {self.pseudocount}",
+            f"POSITIONS: {self.positions if self.positions else 'auto (all adjustments)'}",
             f"FREQUENCIES: {self.frequencies_path if hasattr(self, 'frequencies_path') else 'not configured'}",
             f"CORRELATIONS: {self.correlations_path if hasattr(self, 'correlations_path') else 'not configured'}"
         ])
@@ -195,6 +220,8 @@ class BayesianAdjuster(BaseConfig):
             "mode": self.mode,
             "gamma": self.gamma,
             "kappa": self.kappa,
+            "pseudocount": self.pseudocount,
+            "positions": self.positions,
             "adjusted_probabilities_output": adjusted_probs_csv,
             "absolute_probabilities_output": absolute_probs_csv,
             "relative_probabilities_output": relative_probs_csv,
@@ -222,6 +249,7 @@ echo "Running Bayesian frequency adjustment"
 echo "Mode: {self.mode}"
 echo "Gamma: {self.gamma}"
 echo "Kappa: {self.kappa}"
+echo "Pseudocount: {self.pseudocount}"
 echo "Output folder: {output_folder}"
 
 # Run Python adjustment script
@@ -306,7 +334,9 @@ fi
             "tool_params": {
                 "mode": self.mode,
                 "gamma": self.gamma,
-                "kappa": self.kappa
+                "kappa": self.kappa,
+                "pseudocount": self.pseudocount,
+                "positions": self.positions
             }
         })
         return base_dict

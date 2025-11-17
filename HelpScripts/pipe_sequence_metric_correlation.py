@@ -38,6 +38,49 @@ import sys
 AMINO_ACIDS = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
 
 
+def parse_positions_selection(selection_str: Optional[str]) -> Optional[List[int]]:
+    """
+    Parse PyMOL-style position selection string.
+
+    Args:
+        selection_str: Selection string like "141+143+145+147-149+151-152"
+                      '+' separates individual positions or ranges
+                      '-' indicates a range (e.g., "147-149" means 147, 148, 149)
+
+    Returns:
+        Sorted list of positions (1-indexed), or None if selection_str is None/empty
+    """
+    if not selection_str or not selection_str.strip():
+        return None
+
+    positions = []
+    parts = selection_str.split('+')
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part and not part.startswith('-'):
+            # Range like "147-149"
+            range_parts = part.split('-')
+            if len(range_parts) == 2:
+                try:
+                    start = int(range_parts[0])
+                    end = int(range_parts[1])
+                    positions.extend(range(start, end + 1))
+                except ValueError:
+                    pass  # Skip malformed ranges
+        else:
+            # Single position
+            try:
+                positions.append(int(part))
+            except ValueError:
+                pass  # Skip malformed positions
+
+    return sorted(set(positions)) if positions else None
+
+
 def setup_logging():
     """Set up logging configuration."""
     logging.basicConfig(
@@ -341,7 +384,7 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
 
 
 def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: pd.DataFrame,
-                           svg_path: str, png_path: str, logger):
+                           svg_path: str, png_path: str, logger, positions_filter: Optional[List[int]] = None):
     """
     Create sequence logo visualization for correlations.
 
@@ -355,17 +398,30 @@ def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: 
         svg_path: Output SVG file path
         png_path: Output PNG file path
         logger: Logger instance
+        positions_filter: List of positions to include (1-indexed). If None, includes all positions in the sequence (both mutated >1% and positions with correlations).
     """
     logger.info("Creating correlation logo plot...")
 
-    # Filter positions where at least one amino acid has non-zero correlation
+    # Filter positions based on positions_filter or mutation/correlation
     positions_to_plot = []
 
     for i, row in correlation_2d_df.iterrows():
-        # Check if any amino acid at this position has non-zero correlation
-        has_nonzero = any(row[aa] != 0 for aa in AMINO_ACIDS)
-        if has_nonzero:
-            positions_to_plot.append(row)
+        position = int(row['position'])
+        corr_1d_row = correlation_1d_df.iloc[i]
+
+        # Apply position filter if specified
+        if positions_filter is not None:
+            if position not in positions_filter:
+                continue
+        else:
+            # Default: include positions that either have mutation or correlation
+            has_correlation = any(abs(row[aa]) > 1e-6 for aa in AMINO_ACIDS)
+            was_mutated = corr_1d_row['n_mutated'] > 0
+
+            if not (has_correlation or was_mutated):
+                continue
+
+        positions_to_plot.append((row, corr_1d_row))
 
     if not positions_to_plot:
         # Create empty plot
@@ -477,12 +533,18 @@ def main():
         correlation_2d_df.to_csv(config['correlation_2d_output'], index=False)
 
         # Create correlation logo
+        # Parse positions filter if provided
+        positions_filter = parse_positions_selection(config.get('positions'))
+        if positions_filter:
+            logger.info(f"Using positions filter: {positions_filter} ({len(positions_filter)} positions)")
+
         create_correlation_logo(
             correlation_2d_df,
             correlation_1d_df,
             config['logo_svg_output'],
             config['logo_png_output'],
-            logger
+            logger,
+            positions_filter=positions_filter
         )
 
         # Print summary
