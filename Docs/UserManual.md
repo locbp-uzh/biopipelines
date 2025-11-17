@@ -1463,6 +1463,144 @@ profiler = MutationProfiler(
 
 ---
 
+### SequenceMetricCorrelation
+
+Computes correlation signals between sequence mutations and performance metrics. Quantifies how specific mutations affect metrics using standardized effect sizes.
+
+**Correlation Formulas**:
+
+1D correlation (position-level):
+```
+c(i) = (m̄ᵢ₋ₘᵤₜ - m̄ᵢ₋wₜ) / √(s²ᵢ₋ₘᵤₜ + s²ᵢ₋wₜ)
+```
+Where:
+- m̄ᵢ₋ₘᵤₜ = mean metric for sequences with mutation at position i
+- m̄ᵢ₋wₜ = mean metric for sequences with wildtype at position i
+- s²ᵢ₋ₘᵤₜ, s²ᵢ₋wₜ = unbiased variances (ddof=1)
+
+2D correlation (amino acid-specific):
+```
+c(i,aa) = (m̄ᵢ,ₐₐ - m̄ᵢ,¬ₐₐ) / √(s²ᵢ,ₐₐ + s²ᵢ,¬ₐₐ)
+```
+Where:
+- m̄ᵢ,ₐₐ = mean metric for sequences with amino acid 'aa' at position i
+- m̄ᵢ,¬ₐₐ = mean metric for sequences with other amino acids at position i
+- s²ᵢ,ₐₐ, s²ᵢ,¬ₐₐ = unbiased variances (ddof=1)
+
+Note: When n ≤ 1 for either group, correlation is set to 0.
+
+**Installation**: Same environment as MutationProfiler.
+
+**Parameters**:
+- `mutants`: Union[ToolOutput, StandardizedOutput, List[...]] (required) - Mutant sequences
+- `data`: Union[ToolOutput, StandardizedOutput, TableInfo, str, List[...]] (required) - Table(s) with metric values
+- `original`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference sequence
+- `metric`: str (required) - Metric column name to analyze
+- `positions`: Optional[str] = None - PyMOL-style position filter (e.g., "141+143+145+147-149")
+
+**Outputs**:
+- `tables.correlation_1d`:
+
+  | position | wt_aa | correlation | mean_mutated | mean_wt | var_mutated | var_wt | n_mutated | n_wt |
+  |----------|-------|-------------|--------------|---------|-------------|--------|-----------|------|
+
+- `tables.correlation_2d`:
+
+  | position | wt_aa | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|-------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+**Example**:
+```python
+# Single cycle
+correlation = SequenceMetricCorrelation(
+    mutants=filtered.tables.sequences,
+    data=filtered.tables.merged,
+    original=original_holo,
+    metric="affinity_pred_value"
+)
+
+# Multi-cycle accumulation
+correlation = SequenceMetricCorrelation(
+    mutants=[cycle1.tables.sequences, cycle2.tables.sequences],
+    data=[cycle1.tables.merged, cycle2.tables.merged],
+    original=original_holo,
+    metric="affinity_pred_value",
+    positions="141+143+145+147-149"  # Filter plot to these positions
+)
+```
+
+---
+
+### BayesianAdjuster
+
+Adjusts mutation frequencies using correlation signals via Bayesian log-odds updates. Boosts beneficial mutations and suppresses detrimental ones based on correlation evidence.
+
+**Bayesian Update Formula**:
+```
+p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c(i,aa))
+```
+Where:
+- p₀(i,aa) = prior probability from MutationProfiler frequencies
+- c(i,aa) = correlation signal from SequenceMetricCorrelation
+- γ = strength hyperparameter (higher = more aggressive adjustment)
+- σ(x) = sigmoid function = 1/(1+e⁻ˣ)
+- σ⁻¹(p) = logit function = log(p/(1-p))
+
+**Installation**: Same environment as MutationProfiler.
+
+**Parameters**:
+- `frequencies`: Union[TableInfo, str] (required) - Frequency table from MutationProfiler (typically absolute_frequencies)
+- `correlations`: Union[TableInfo, str] (required) - Correlation table from SequenceMetricCorrelation (correlation_2d)
+- `mode`: str = "min" - Optimization direction:
+  - "min" = lower metric values are better (e.g., binding affinity)
+  - "max" = higher metric values are better (e.g., activity)
+- `gamma`: float = 3.0 - Strength hyperparameter for Bayesian update (higher = more aggressive)
+- `kappa`: float = 10.0 - Pseudo-observations for sample size shrinkage (planned feature, not yet implemented). Intended to down-weight correlations from small sample sizes.
+- `pseudocount`: float = 0.01 - Pseudocount added to all amino acids before adjustment. Ensures no amino acid has zero probability, allowing correlation signals to resurrect beneficial mutations. After adding, frequencies are normalized to preserve original sum.
+- `positions`: Optional[str] = None - PyMOL-style position filter (e.g., "141+143+145+147-149")
+
+**Outputs**:
+- `tables.adjusted_probabilities`: Raw Bayesian-adjusted probabilities
+- `tables.absolute_probabilities`: Normalized as absolute probabilities
+- `tables.relative_probabilities`: Normalized as relative probabilities (original AA = 0)
+- `tables.adjustment_log`: Detailed log of all adjustments
+
+**Example**:
+```python
+# Basic usage
+adjuster = BayesianAdjuster(
+    frequencies=profiler.tables.absolute_frequencies,
+    correlations=correlation.tables.correlation_2d,
+    mode="min",  # Minimize affinity
+    gamma=3.0,
+    pseudocount=0.01
+)
+
+# More aggressive adjustment with position filter
+adjuster = BayesianAdjuster(
+    frequencies=profiler.tables.absolute_frequencies,
+    correlations=correlation.tables.correlation_2d,
+    mode="min",
+    gamma=5.0,  # More aggressive
+    pseudocount=0.005,  # Lower threshold for resurrected mutations
+    positions="141+143+145+147-149"
+)
+
+# Use adjusted frequencies in MutationComposer
+composer = MutationComposer(
+    frequencies=adjuster.tables.absolute_probabilities,
+    num_sequences=50,
+    mode="weighted_random"
+)
+```
+
+**Key Features**:
+- **Pseudocount mechanism**: Allows resurrection of beneficial mutations that weren't initially present (probability = 0) but have strong positive correlations
+- **Position filtering**: Consistent x-axis with MutationProfiler and SequenceMetricCorrelation for easy visual comparison
+- **Dual normalization**: Provides both absolute (comparable to MutationProfiler) and relative (original AA excluded) probabilities
+
+---
+
 ### SequenceMetricAnalysis
 
 Analyzes correlations between sequence mutations and performance metrics across pools. Tracks position-specific mutation statistics and generates scored mutation tables for data-driven sequence optimization in iterative design cycles.
@@ -1533,99 +1671,6 @@ analysis = SequenceMetricAnalysis(
     history=analysis  # Accumulates observations
 )
 
-# Use scored tables with MutationComposer (future enhancement)
-# composer = MutationComposer(
-#     frequencies=analysis.tables.mutation_deltas,
-#     mode="score_weighted",
-#     num_sequences=20
-# )
-```
-
-**Iterative Pipeline Example**:
-```python
-# Complete example: Iterative affinity optimization with correlation tracking
-with Pipeline("Rifampicin", "OptimizationCycle", "..."):
-
-    rifampicin = LoadOutput("rifampicin.json")
-    original_holo = PDB("template")
-    best_holo = original_holo
-
-    # Track analysis across cycles
-    correlation_analysis = None
-
-    for CYCLE in range(20):
-        Suffix(f"Cycle{CYCLE+1}")
-
-        # Generate sequences
-        lmpnn = LigandMPNN(structures=best_holo, ligand="LIG",
-                          num_sequences=1000, redesigned="1-24")
-
-        profiler = MutationProfiler(original=best_holo, mutants=lmpnn)
-
-        composer = MutationComposer(
-            frequencies=profiler.tables.absolute_frequencies,
-            num_sequences=10,
-            mode="weighted_random",
-            max_mutations=3
-        )
-
-        # Predict structures
-        msas = MMseqs2(sequences=composer)
-        boltz = Boltz2(proteins=composer, ligands=rifampicin, msas=msas)
-
-        # Analyze and filter
-        contacts = ProteinLigandContacts(structures=boltz,
-                                         selections="1-24", ligand="LIG")
-        pose = PoseDistance(reference_structure=rifampicin,
-                           sample_structures=boltz,
-                           reference_ligand="LIG")
-
-        merged = MergeTables(tables=[boltz.tables.affinity,
-                                    boltz.tables.confidence,
-                                    contacts.tables.contact_analysis,
-                                    pose.tables.analysis])
-
-        filtered = Filter(data=merged, pool=boltz,
-                         expression="contacts>=3 and ligand_rmsd<2")
-
-        # Track mutation-metric correlations
-        if correlation_analysis is None:
-            correlation_analysis = SequenceMetricAnalysis(
-                sequences=filtered.tables.sequences,
-                metrics=filtered.tables.merged,
-                reference_sequence=original_holo,
-                metric_columns=["affinity_pred_value", "complex_plddt",
-                              "contacts", "ligand_rmsd"],
-                primary_metric="affinity_pred_value",
-                mode="minimize",
-                min_observations=3
-            )
-        else:
-            correlation_analysis = SequenceMetricAnalysis(
-                sequences=filtered.tables.sequences,
-                metrics=filtered.tables.merged,
-                reference_sequence=original_holo,
-                metric_columns=["affinity_pred_value", "complex_plddt",
-                              "contacts", "ligand_rmsd"],
-                primary_metric="affinity_pred_value",
-                mode="minimize",
-                min_observations=3,
-                history=correlation_analysis
-            )
-
-        # Select best for next cycle
-        best_holo = SelectBest(pool=filtered,
-                              tables=[filtered.tables.merged],
-                              metric='affinity_pred_value',
-                              mode='min')
-
-    # After all cycles, correlation_analysis contains:
-    # - mutation_statistics: All observed mutations with full statistics
-    # - mutation_deltas: Position-specific improvement scores
-    # - mutation_zscores: Standardized scores across all mutations
-    # - top_mutations: Best mutation at each position
-    # - coverage: How well each position has been explored
-```
 
 **Key Features**:
 - **Multi-metric tracking**: Analyze multiple metrics simultaneously (affinity, pLDDT, contacts, etc.)
@@ -1633,7 +1678,7 @@ with Pipeline("Rifampicin", "OptimizationCycle", "..."):
 - **Dual scoring**: Both delta scores (interpretable units) and z-scores (standardized) for flexibility
 - **MutationComposer-compatible**: mutation_deltas and mutation_zscores tables use same format as MutationProfiler frequencies
 - **Confidence filtering**: min_observations threshold ensures reliable mutation scores
-
+```
 ---
 
 ### ProteinLigandContacts

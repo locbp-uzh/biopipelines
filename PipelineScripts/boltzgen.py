@@ -41,8 +41,13 @@ class BoltzGen(BaseConfig):
     DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
-                 # Design specification
-                 design_spec: Union[str, Dict[str, Any]],
+                 # Design specification - Option 1: Manual YAML/dict
+                 design_spec: Union[str, Dict[str, Any]] = None,
+                 # Design specification - Option 2: Automatic building from BioPipelines inputs
+                 target_structure: Union[str, ToolOutput, StandardizedOutput] = None,
+                 ligand: str = None,
+                 binder_spec: Union[str, Dict[str, Any]] = None,
+                 binding_region: str = None,
                  # Output configuration
                  protocol: str = "protein-anything",
                  num_designs: int = 10000,
@@ -69,12 +74,21 @@ class BoltzGen(BaseConfig):
         """
         Initialize BoltzGen configuration.
 
+        You can provide EITHER design_spec (manual) OR target_structure + binder_spec (automatic).
+
         Args:
             design_spec: YAML configuration string/dict or path to YAML file defining:
                         - Target entities (proteins, ligands)
                         - Binder specification (sequence ranges)
                         - Binding site constraints
                         - Secondary structure specifications
+            target_structure: BioPipelines structure input (ToolOutput or file path) for automatic spec building
+            ligand: Ligand residue name in target structure (e.g., "LIG", "ATP") for automatic binding site detection
+            binder_spec: Binder specification for automatic building:
+                        - String format: "50-100" for length range, or "50" for fixed length
+                        - Dict format: {"length": [50, 100]} or custom specification
+            binding_region: Target binding region (optional, PyMOL-style: "A:9-140")
+                          If not provided and ligand is given, will auto-detect from ligand proximity
             protocol: Design protocol - one of:
                      - "protein-anything": General protein binder design
                      - "peptide-anything": Peptide binder design
@@ -98,8 +112,14 @@ class BoltzGen(BaseConfig):
             cache_dir: Model download location (default: ~/.cache)
             **kwargs: Additional parameters passed to BaseConfig
         """
-        # Store BoltzGen-specific parameters
+        # Store design specification parameters
         self.design_spec = design_spec
+        self.target_structure = target_structure
+        self.ligand = ligand
+        self.binder_spec = binder_spec
+        self.binding_region = binding_region
+
+        # Store output configuration
         self.protocol = protocol
         self.num_designs = num_designs
         self.budget = budget
@@ -126,16 +146,28 @@ class BoltzGen(BaseConfig):
         self.steps = steps or []
         self.cache_dir = cache_dir
 
-        # Track design spec type
-        self.design_spec_is_dict = isinstance(design_spec, dict)
-        self.design_spec_is_yaml_str = isinstance(design_spec, str) and (
-            'entities:' in design_spec or '- protein:' in design_spec
-        )
-        self.design_spec_is_file = isinstance(design_spec, str) and not self.design_spec_is_yaml_str
+        # Determine specification mode
+        if design_spec is not None:
+            # Manual mode: user provided design_spec
+            self.spec_mode = "manual"
+            self.design_spec_is_dict = isinstance(design_spec, dict)
+            self.design_spec_is_yaml_str = isinstance(design_spec, str) and (
+                'entities:' in design_spec or '- protein:' in design_spec
+            )
+            self.design_spec_is_file = isinstance(design_spec, str) and not self.design_spec_is_yaml_str
+        elif target_structure is not None and binder_spec is not None:
+            # Automatic mode: build from BioPipelines inputs
+            self.spec_mode = "automatic"
+            self.design_spec_is_dict = False
+            self.design_spec_is_yaml_str = False
+            self.design_spec_is_file = False
+        else:
+            self.spec_mode = None  # Will fail validation
 
         # Track inputs from previous tools
         self.input_structures = None
         self.input_compounds = None
+        self.target_structure_path = None
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -204,8 +236,21 @@ class BoltzGen(BaseConfig):
 
     def validate_params(self):
         """Validate BoltzGen parameters."""
-        if not self.design_spec:
-            raise ValueError("design_spec parameter is required")
+        # Validate specification mode
+        if self.spec_mode is None:
+            raise ValueError(
+                "Must provide EITHER design_spec (manual) OR "
+                "(target_structure + binder_spec) for automatic building"
+            )
+
+        if self.spec_mode == "manual" and not self.design_spec:
+            raise ValueError("design_spec cannot be empty in manual mode")
+
+        if self.spec_mode == "automatic":
+            if not self.target_structure:
+                raise ValueError("target_structure is required in automatic mode")
+            if not self.binder_spec:
+                raise ValueError("binder_spec is required in automatic mode")
 
         # Validate protocol
         valid_protocols = [
@@ -253,41 +298,80 @@ class BoltzGen(BaseConfig):
         self.folders = pipeline_folders
         self._setup_file_paths()
 
-        # Handle design specification input
-        if self.design_spec_is_dict:
-            # Dictionary specification - will convert to YAML in script generation
-            pass
-        elif self.design_spec_is_file:
-            # File path - check if it exists
-            if os.path.isabs(self.design_spec):
-                spec_path = self.design_spec
+        if self.spec_mode == "manual":
+            # Handle manual design specification input
+            if self.design_spec_is_dict:
+                # Dictionary specification - will convert to YAML in script generation
+                pass
+            elif self.design_spec_is_file:
+                # File path - check if it exists
+                if os.path.isabs(self.design_spec):
+                    spec_path = self.design_spec
+                else:
+                    # Try relative to project folders
+                    spec_path = os.path.join(pipeline_folders.get("notebooks", "."), self.design_spec)
+
+                if not os.path.exists(spec_path):
+                    raise ValueError(f"Design specification file not found: {self.design_spec}")
+
+                self.design_spec = spec_path
+            elif self.design_spec_is_yaml_str:
+                # Direct YAML string - will write to file in script generation
+                pass
             else:
-                # Try relative to project folders
-                spec_path = os.path.join(pipeline_folders.get("notebooks", "."), self.design_spec)
+                raise ValueError(
+                    "design_spec must be a YAML string, dictionary, or path to YAML file"
+                )
 
-            if not os.path.exists(spec_path):
-                raise ValueError(f"Design specification file not found: {self.design_spec}")
+        elif self.spec_mode == "automatic":
+            # Handle automatic mode: extract structure path from ToolOutput
+            if isinstance(self.target_structure, (ToolOutput, StandardizedOutput)):
+                # Extract first structure from tool output
+                if hasattr(self.target_structure, 'structures') and self.target_structure.structures:
+                    self.target_structure_path = self.target_structure.structures[0]
+                elif hasattr(self.target_structure, 'get') and 'structures' in self.target_structure:
+                    structures = self.target_structure.get('structures', [])
+                    if structures:
+                        self.target_structure_path = structures[0]
+                    else:
+                        raise ValueError("No structures found in target_structure ToolOutput")
+                else:
+                    raise ValueError("target_structure ToolOutput has no structures attribute")
+            elif isinstance(self.target_structure, str):
+                # Direct file path
+                if not os.path.exists(self.target_structure):
+                    raise ValueError(f"Target structure file not found: {self.target_structure}")
+                self.target_structure_path = self.target_structure
+            else:
+                raise ValueError(
+                    f"target_structure must be a file path or ToolOutput, got {type(self.target_structure)}"
+                )
 
-            self.design_spec = spec_path
-        elif self.design_spec_is_yaml_str:
-            # Direct YAML string - will write to file in script generation
-            pass
-        else:
-            raise ValueError(
-                "design_spec must be a YAML string, dictionary, or path to YAML file"
-            )
+            # Will build design spec in script generation
+            self.design_spec = None
 
     def get_config_display(self) -> List[str]:
         """Get BoltzGen configuration display lines."""
         config_lines = super().get_config_display()
 
         # Design specification display
-        if self.design_spec_is_dict:
-            spec_display = f"Dictionary ({len(self.design_spec)} keys)"
-        elif self.design_spec_is_file:
-            spec_display = f"File: {os.path.basename(self.design_spec)}"
-        else:
-            spec_display = "YAML string"
+        if self.spec_mode == "manual":
+            if self.design_spec_is_dict:
+                spec_display = f"Manual (Dictionary, {len(self.design_spec)} keys)"
+            elif self.design_spec_is_file:
+                spec_display = f"Manual (File: {os.path.basename(self.design_spec)})"
+            else:
+                spec_display = "Manual (YAML string)"
+        else:  # automatic
+            spec_display = "Automatic (from target_structure + binder_spec)"
+            if self.target_structure_path:
+                spec_display += f"\n  Target: {os.path.basename(self.target_structure_path)}"
+            if self.ligand:
+                spec_display += f"\n  Ligand: {self.ligand}"
+            if self.binder_spec:
+                spec_display += f"\n  Binder: {self.binder_spec}"
+            if self.binding_region:
+                spec_display += f"\n  Binding region: {self.binding_region}"
 
         config_lines.extend([
             f"DESIGN SPEC: {spec_display}",
@@ -313,6 +397,62 @@ class BoltzGen(BaseConfig):
 
         return config_lines
 
+    def _build_automatic_yaml_spec(self) -> Dict[str, Any]:
+        """
+        Build BoltzGen YAML specification from BioPipelines inputs.
+
+        Returns:
+            Dictionary representing the design specification
+        """
+        # Parse binder_spec
+        if isinstance(self.binder_spec, dict):
+            binder_length = self.binder_spec.get("length", [50, 100])
+        elif isinstance(self.binder_spec, str):
+            # Parse string format: "50-100" or "50"
+            if "-" in self.binder_spec:
+                parts = self.binder_spec.split("-")
+                binder_length = [int(parts[0]), int(parts[1])]
+            else:
+                length_val = int(self.binder_spec)
+                binder_length = [length_val, length_val]
+        else:
+            raise ValueError(f"Invalid binder_spec format: {self.binder_spec}")
+
+        # Build entities section
+        entities = []
+
+        # Add target structure
+        entities.append({
+            "file": {
+                "path": self.target_structure_path,
+                "include": [{"chain": {"id": "A"}}]  # Default to chain A
+            }
+        })
+
+        # Add binder
+        entities.append({
+            "protein": {
+                "id": "binder",
+                "sequence": f"{binder_length[0]}..{binder_length[1]}"
+            }
+        })
+
+        # Build the full specification
+        spec = {"entities": entities}
+
+        # Add bindings section if binding region is specified
+        if self.binding_region:
+            # Parse binding region format: "A:9-140" -> target_chains: [A], target_region: "9-140"
+            if ":" in self.binding_region:
+                chain, region = self.binding_region.split(":", 1)
+                spec["bindings"] = [{
+                    "binder_chain": "binder",
+                    "target_chains": [chain],
+                    "target_region": region
+                }]
+
+        return spec
+
     def generate_script(self, script_path: str) -> str:
         """
         Generate BoltzGen execution script.
@@ -328,7 +468,13 @@ class BoltzGen(BaseConfig):
         os.makedirs(self.config_folder, exist_ok=True)
 
         # Prepare design specification file
-        if self.design_spec_is_dict:
+        if self.spec_mode == "automatic":
+            # Build YAML spec automatically
+            import yaml
+            auto_spec = self._build_automatic_yaml_spec()
+            with open(self.design_spec_yaml_file, 'w') as f:
+                yaml.dump(auto_spec, f, default_flow_style=False, sort_keys=False)
+        elif self.design_spec_is_dict:
             # Convert dictionary to YAML and write to file
             import yaml
             with open(self.design_spec_yaml_file, 'w') as f:
@@ -365,6 +511,20 @@ if [ $? -eq 0 ]; then
 else
     echo "Error: BoltzGen failed"
     exit 1
+fi
+
+# Run postprocessing to extract sequences and format tables
+echo "Running BoltzGen postprocessing..."
+python "{self.boltzgen_helper_py}" \\
+  --output_folder "{self.output_folder}" \\
+  --budget {self.budget} \\
+  --extract_sequences \\
+  --validate
+
+if [ $? -eq 0 ]; then
+    echo "Postprocessing completed successfully"
+else
+    echo "Warning: Postprocessing had errors (continuing anyway)"
 fi
 
 {self.generate_completion_check_footer()}
@@ -443,6 +603,7 @@ fi
         Returns:
             Dictionary mapping output types to file paths with standard keys:
             - structures: List of final designed structure files
+            - sequences: Path to sequences CSV
             - tables: Analysis metrics and results
             - output_folder: Tool's output directory
         """
@@ -453,10 +614,14 @@ fi
         # BoltzGen generates structures in final_ranked_designs/final_<budget>_designs/
         final_designs_folder = os.path.join(self.final_ranked_folder, f"final_{self.budget}_designs")
 
-        # Structures will be .cif files in the final designs folder
-        # Exact filenames depend on design IDs, so we return the folder
-        structures = []
-        structure_ids = []
+        # Structures list file (created by postprocessing script)
+        structures_list_file = os.path.join(self.output_folder, "final_structures.txt")
+
+        # Sequences CSV (created by postprocessing script)
+        sequences_csv = os.path.join(self.output_folder, "sequences.csv")
+
+        # Structures CSV (created by postprocessing script)
+        structures_csv = os.path.join(self.output_folder, "structures.csv")
 
         # Organize tables by content type
         tables = {
@@ -493,14 +658,28 @@ fi
                 columns=["target_id", "num_designs", "avg_rmsd", "avg_plddt"],
                 description="Per-target performance metrics",
                 count=None
+            ),
+            "sequences": TableInfo(
+                name="sequences",
+                path=sequences_csv,
+                columns=["id", "sequence"],
+                description="Extracted sequences from designed structures",
+                count=self.budget
+            ),
+            "structures": TableInfo(
+                name="structures",
+                path=structures_csv,
+                columns=["id", "pdb"],
+                description="List of designed structure files",
+                count=self.budget
             )
         }
 
         return {
-            "structures": structures,
-            "structure_ids": structure_ids,
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": structures_list_file,  # Will be populated at runtime
+            "structure_ids": [],  # Will be populated at runtime
+            "sequences": sequences_csv,
+            "sequence_ids": [],  # Will be populated at runtime
             "tables": tables,
             "output_folder": self.output_folder,
             "final_designs_folder": final_designs_folder,
@@ -510,9 +689,23 @@ fi
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration with all BoltzGen parameters."""
         base_dict = super().to_dict()
+
+        # Prepare design spec for serialization
+        if self.spec_mode == "automatic":
+            design_spec_value = f"<automatic from {self.target_structure_path}>"
+        elif self.design_spec_is_dict:
+            design_spec_value = "<dict>"
+        else:
+            design_spec_value = self.design_spec
+
         base_dict.update({
             "tool_params": {
-                "design_spec": self.design_spec if not self.design_spec_is_dict else "<dict>",
+                "spec_mode": self.spec_mode,
+                "design_spec": design_spec_value,
+                "target_structure": str(self.target_structure) if self.target_structure else None,
+                "ligand": self.ligand,
+                "binder_spec": self.binder_spec,
+                "binding_region": self.binding_region,
                 "protocol": self.protocol,
                 "num_designs": self.num_designs,
                 "budget": self.budget,
