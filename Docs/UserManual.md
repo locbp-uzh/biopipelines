@@ -238,6 +238,20 @@ sbatch --job-name=Test --output path/to/RunTime/slurm.out path/to/RunTime/slurm.
 """
 ```
 
+**Multiple job submission**
+When submitting jobs with `./submit /path/to/<pipeline.py>`, all pipelines created within the script will be submitted. For example, one can test the influence of a given parameter on the pipeline as follows:
+
+```python
+#MyPipelines/beta_test.py
+#imports
+for beta in [0, 1, 10, 100]:
+  with Pipeline("Diffusion",
+                f"Rhodamine_Beta{beta}",
+                f"Run diffusion simulation with beta value {beta}"):
+      #tools
+```
+Running `./submit MyPipelines/beta_test.py` will then result in the submission of four jobs, *Rhodamine_Beta0*, *Rhodamine_Beta1*, *Rhodamine_Beta10*, *Rhodamine_Beta100*.
+
 ### Filesystem Structure
 
 After the execution, the filesystem will look somewhat like this:

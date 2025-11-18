@@ -139,10 +139,10 @@ class BayesianAdjuster(BaseConfig):
             raise ValueError(f"mode must be 'min' or 'max', got: {self.mode}")
 
         # Validate hyperparameters
-        if self.gamma <= 0:
-            raise ValueError(f"gamma must be positive, got: {self.gamma}")
-        if self.kappa < 0:
-            raise ValueError(f"kappa must be non-negative, got: {self.kappa}")
+        #if self.gamma <= 0:
+        #    raise ValueError(f"gamma must be positive, got: {self.gamma}")
+        #if self.kappa < 0:
+        #    raise ValueError(f"kappa must be non-negative, got: {self.kappa}")
         if self.pseudocount < 0:
             raise ValueError(f"pseudocount must be non-negative, got: {self.pseudocount}")
 
