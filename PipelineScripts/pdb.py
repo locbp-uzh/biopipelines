@@ -144,18 +144,10 @@ class PDB(BaseConfig):
         self.found_locally = []
         self.needs_download = []
 
-        # Print search locations
-        print(f"  Searching for PDB structures:")
-        if self.local_folder:
-            print(f"    1. Custom folder: {self.local_folder}")
-            print(f"    2. PDBs folder: {repo_pdbs_folder}")
-        else:
-            print(f"    1. PDBs folder: {repo_pdbs_folder}")
-        print(f"    {'3' if self.local_folder else '2'}. RCSB download (if not found)")
-
-        for pdb_id in self.pdb_ids:
+        for pdb_id, custom_id in zip(self.pdb_ids, self.custom_ids):
             extension = ".pdb" if self.format == "pdb" else ".cif"
             found = False
+            local_path = None
 
             # Check local_folder if specified
             if self.local_folder:
@@ -166,73 +158,148 @@ class PDB(BaseConfig):
 
             # Check PDBs/ folder
             if not found and repo_pdbs_folder:
-                pdbs_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{extension}")
-                if os.path.exists(pdbs_path):
-                    self.found_locally.append((pdb_id, pdbs_path))
+                local_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{extension}")
+                if os.path.exists(local_path):
+                    self.found_locally.append((pdb_id, local_path))
                     found = True
 
-            if not found:
+            if found:
+                # Check if it's a valid RCSB ID and query for ligands
+                rcsb_id = pdb_id.upper()
+                if len(rcsb_id) == 4 and rcsb_id.isalnum():
+                    # Valid RCSB format - check for ligands
+                    try:
+                        has_ligands = self._check_rcsb_exists_silent(rcsb_id, custom_id)
+                        if has_ligands:
+                            print(f"  Found PDB {pdb_id} locally: {local_path} (contains ligands)")
+                        else:
+                            print(f"  Found PDB {pdb_id} locally: {local_path}")
+                    except:
+                        # RCSB query failed, just show found locally
+                        print(f"  Found PDB {pdb_id} locally: {local_path}")
+                else:
+                    # Custom file, not an RCSB ID
+                    print(f"  Found PDB {pdb_id} locally: {local_path}")
+            else:
+                # Not found locally - check if valid RCSB ID
+                rcsb_id = pdb_id.upper()
+                if len(rcsb_id) != 4 or not rcsb_id.isalnum():
+                    raise ValueError(f"PDB '{pdb_id}' not found locally and is not a valid RCSB PDB ID (must be 4 alphanumeric characters)")
+
+                # Check if exists on RCSB
+                has_ligands = self._check_rcsb_exists(rcsb_id, custom_id)
                 self.needs_download.append(pdb_id)
 
-        # Print status with paths
-        if self.found_locally:
-            print(f"  Found locally:")
-            for pdb_id, path in self.found_locally:
-                print(f"      {pdb_id}: {path}")
-        if self.needs_download:
-            print(f"  Will download from RCSB: {', '.join(self.needs_download)}")
+                if has_ligands:
+                    print(f"  PDB {pdb_id} not found locally, will download from RCSB (contains ligands)")
+                else:
+                    print(f"  PDB {pdb_id} not found locally, will download from RCSB")
 
-        # Query RCSB API to get ligand information for structures that will be downloaded
+        # Query RCSB API to get ligand information for all structures
         self._fetch_ligand_info_from_rcsb()
 
-    def _fetch_ligand_info_from_rcsb(self):
-        """Fetch ligand information from RCSB API at pipeline runtime."""
-        self.predicted_compound_ids = []
+    def _check_ligands_in_rcsb(self, rcsb_id: str, custom_id: str = None) -> tuple:
+        """
+        Check RCSB for ligands (shared logic).
 
-        # Query for ALL structures (local and download) to get complete ligand list
-        if not self.pdb_ids:
-            return
+        Args:
+            rcsb_id: RCSB PDB ID (uppercase, 4 characters)
+            custom_id: Custom ID for compound naming (optional)
 
-        print(f"  Querying RCSB API for ligand information...")
-
+        Returns:
+            Tuple of (has_ligands: bool, ligand_codes: list)
+        """
         try:
             import requests
         except ImportError:
-            print("  Warning: 'requests' module not available, cannot query ligand info at pipeline runtime")
-            return
+            return False, []
 
-        for pdb_id, custom_id in zip(self.pdb_ids, self.custom_ids):
-            try:
-                # Use RCSB REST API to get ligand list
-                url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
+        try:
+            url = f"https://data.rcsb.org/rest/v1/core/entry/{rcsb_id}"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
 
-                data = response.json()
-                ligands = []
+            data = response.json()
 
-                # Extract ligand codes from entry info
-                if 'rcsb_entry_info' in data:
-                    entry_info = data['rcsb_entry_info']
-                    # Get non-polymer bound molecules
-                    if 'nonpolymer_bound_components' in entry_info:
-                        ligands = entry_info['nonpolymer_bound_components']
+            # Check for ligands
+            if 'rcsb_entry_info' in data:
+                entry_info = data['rcsb_entry_info']
+                if 'nonpolymer_bound_components' in entry_info:
+                    ligands = entry_info['nonpolymer_bound_components']
+                    # Filter out common solvents/ions
+                    common_solvents = {'HOH', 'WAT', 'H2O', 'NA', 'CL', 'CA', 'MG', 'K', 'ZN', 'SO4', 'PO4', 'GOL', 'EDO'}
+                    real_ligands = [lig for lig in ligands if lig not in common_solvents]
 
-                # Filter out common non-ligands (water, ions, etc.)
-                exclude_residues = {'HOH', 'WAT', 'H2O', 'SOL', 'NA', 'CL', 'K', 'CA', 'MG', 'ZN', 'FE', 'CU', 'MN'}
-                ligands = [lig for lig in ligands if lig not in exclude_residues]
+                    # Store predicted compound IDs if custom_id provided
+                    if custom_id and real_ligands:
+                        for ligand_code in real_ligands:
+                            self.predicted_compound_ids.append(f"{custom_id}_{ligand_code}")
 
-                if ligands:
-                    print(f"    {pdb_id}: {', '.join(ligands)}")
-                    # Generate predicted compound IDs
-                    for ligand_code in ligands:
-                        self.predicted_compound_ids.append(f"{custom_id}_{ligand_code}")
-                else:
-                    print(f"    {pdb_id}: No ligands found")
+                    return len(real_ligands) > 0, real_ligands
 
-            except Exception as e:
-                print(f"    Warning: Could not fetch ligand info for {pdb_id}: {str(e)}")
-                continue
+            return False, []
+
+        except Exception:
+            return False, []
+
+    def _check_rcsb_exists_silent(self, rcsb_id: str, custom_id: str = None) -> bool:
+        """
+        Check if PDB has ligands on RCSB (silent, no exceptions).
+
+        Args:
+            rcsb_id: RCSB PDB ID (uppercase, 4 characters)
+            custom_id: Custom ID for compound naming (optional)
+
+        Returns:
+            True if has ligands, False otherwise
+        """
+        has_ligands, _ = self._check_ligands_in_rcsb(rcsb_id, custom_id)
+        return has_ligands
+
+    def _check_rcsb_exists(self, rcsb_id: str, custom_id: str = None) -> bool:
+        """
+        Check if PDB exists on RCSB and return if it has ligands.
+
+        Args:
+            rcsb_id: RCSB PDB ID (uppercase, 4 characters)
+            custom_id: Custom ID for compound naming (optional)
+
+        Returns:
+            True if has ligands, False if no ligands
+
+        Raises:
+            ValueError: If PDB doesn't exist on RCSB
+        """
+        try:
+            import requests
+        except ImportError:
+            # Can't check, assume it exists
+            return False
+
+        try:
+            url = f"https://data.rcsb.org/rest/v1/core/entry/{rcsb_id}"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+
+            # Use shared logic for ligand checking
+            has_ligands, _ = self._check_ligands_in_rcsb(rcsb_id, custom_id)
+            return has_ligands
+
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise ValueError(f"PDB '{rcsb_id}' not found on RCSB (URL: {url})")
+            else:
+                raise ValueError(f"Error checking RCSB for '{rcsb_id}': {e}")
+        except Exception as e:
+            raise ValueError(f"Error checking RCSB for '{rcsb_id}': {e}")
+
+    def _fetch_ligand_info_from_rcsb(self):
+        """Fetch ligand information from RCSB API at pipeline runtime (silently for local files)."""
+        self.predicted_compound_ids = []
+
+        # Skip - ligand info already handled in _check_rcsb_exists for downloads
+        # For local files, don't query RCSB (they may be custom files)
+        return
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
