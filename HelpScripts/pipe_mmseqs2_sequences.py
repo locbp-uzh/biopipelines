@@ -97,14 +97,14 @@ def handle_server_error(server_dir):
 
     Logic:
     1. Check if server is running (via check_and_resubmit_server)
-    2. If random < 0.2, resubmit anyway (this handles error due to server overload by many jobs)
+    2. If random < 0.1, resubmit anyway (this handles error due to server overload by many jobs)
     """
 
     # First, check and resubmit if server is not running
     check_and_resubmit_server(server_dir)
 
-    # 15% probability to resubmit anyway
-    if random.random() < 0.2:
+    # 10% probability to resubmit anyway
+    if random.random() < 0.1:
         log("Server overload: Resubmitting anyway")
 
         MMSEQS_SERVER_DIR = server_dir

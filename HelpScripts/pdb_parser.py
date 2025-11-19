@@ -147,20 +147,65 @@ def debug_ligand_atoms(atoms: List[Atom]) -> None:
     else:
         print("  - No ligand residues found")
 
-def select_atoms_by_residue_number(atoms: List[Atom], residue_numbers: List[int]) -> List[Atom]:
+def select_atoms_by_residue_number(atoms: List[Atom], residue_numbers: List[int], chain: str = None) -> List[Atom]:
     """
     Select atoms from specific residue numbers.
-    
+    Supports negative indexing: -1 for last residue, -2 for second-to-last, etc.
+
     Args:
         atoms: List of all atoms
-        residue_numbers: List of residue numbers to select
-        
+        residue_numbers: List of residue numbers to select (supports negative indexing)
+        chain: Optional chain filter for negative indexing
+
     Returns:
         List of selected atoms
     """
+    # Standard amino acid mapping for filtering protein residues
+    standard_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+
+    # Check if any negative indices are used
+    has_negative = any(num < 0 for num in residue_numbers)
+
+    if has_negative:
+        # Build a list of unique protein residue numbers (sorted)
+        protein_residues = {}
+        for atom in atoms:
+            if atom.res_name in standard_residues:
+                key = (atom.chain, atom.res_num)
+                if key not in protein_residues:
+                    protein_residues[key] = atom.res_num
+
+        # Sort by chain and residue number
+        sorted_residues = sorted(protein_residues.items(), key=lambda x: (x[0][0], x[0][1]))
+
+        # If chain is specified, filter to that chain
+        if chain:
+            sorted_residues = [(k, v) for k, v in sorted_residues if k[0] == chain]
+
+        # Convert negative indices to actual residue numbers
+        actual_residue_numbers = []
+        for num in residue_numbers:
+            if num < 0:
+                # Negative indexing: -1 is last, -2 is second-to-last, etc.
+                idx = len(sorted_residues) + num
+                if 0 <= idx < len(sorted_residues):
+                    actual_res_num = sorted_residues[idx][1]
+                    actual_residue_numbers.append(actual_res_num)
+                    print(f"  - Negative index {num} -> residue {actual_res_num}")
+                else:
+                    print(f"  - Warning: Negative index {num} out of range (total residues: {len(sorted_residues)})")
+            else:
+                actual_residue_numbers.append(num)
+    else:
+        actual_residue_numbers = residue_numbers
+
+    # Select atoms with the resolved residue numbers
     selected = []
     for atom in atoms:
-        if atom.res_num in residue_numbers:
+        if atom.res_num in actual_residue_numbers:
             selected.append(atom)
     return selected
 
@@ -234,11 +279,11 @@ def select_atoms_by_sequence_context(atoms: List[Atom], target_residue: str, seq
 def parse_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
     """
     Parse selection string and return matching atoms.
-    
+
     Args:
-        selection: Selection string (e.g., 'LIG.Cl', 'D in IGDWG', '145')
+        selection: Selection string (e.g., 'LIG.Cl', 'D in IGDWG', '145', '-1')
         atoms: List of all atoms
-        
+
     Returns:
         List of selected atoms
     """
@@ -248,30 +293,43 @@ def parse_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
         ligand_name = parts[0]
         atom_name = parts[1] if len(parts) > 1 else None
         return select_atoms_by_ligand(atoms, ligand_name, atom_name)
-    
+
     elif ' in ' in selection:
         # Residue in sequence context: 'D in IGDWG'
         parts = selection.split(' in ')
         target_residue = parts[0].strip()
         sequence_context = parts[1].strip()
         return select_atoms_by_sequence_context(atoms, target_residue, sequence_context)
-    
-    elif selection.isdigit():
-        # Simple residue number: '145'
+
+    elif selection.lstrip('-').isdigit():
+        # Simple residue number: '145' or '-1' (negative indexing)
         res_num = int(selection)
         return select_atoms_by_residue_number(atoms, [res_num])
-    
-    elif '-' in selection and all(part.isdigit() for part in selection.split('-')):
-        # Residue range: '145-150'
-        start, end = map(int, selection.split('-'))
-        res_nums = list(range(start, end + 1))
-        return select_atoms_by_residue_number(atoms, res_nums)
-    
+
+    elif '-' in selection and selection.count('-') == 1:
+        # Could be residue range '145-150' or negative number '-1'
+        parts = selection.split('-')
+        # Check if it's a range (two positive numbers)
+        if parts[0] and parts[1] and parts[0].isdigit() and parts[1].isdigit():
+            # Residue range: '145-150'
+            start, end = int(parts[0]), int(parts[1])
+            res_nums = list(range(start, end + 1))
+            return select_atoms_by_residue_number(atoms, res_nums)
+        else:
+            # Single negative number: '-1'
+            res_num = int(selection)
+            return select_atoms_by_residue_number(atoms, [res_num])
+
     elif '+' in selection:
-        # Multiple residues: '145+147+150'
-        res_nums = [int(x) for x in selection.split('+') if x.isdigit()]
+        # Multiple residues: '145+147+150' or '1+-1' (supports negative)
+        parts = selection.split('+')
+        res_nums = []
+        for part in parts:
+            part = part.strip()
+            if part.lstrip('-').isdigit():
+                res_nums.append(int(part))
         return select_atoms_by_residue_number(atoms, res_nums)
-    
+
     else:
         # Try as atom name
         selected = []

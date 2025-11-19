@@ -42,8 +42,8 @@ class ResidueAtomDistance(BaseConfig):
     
     def __init__(self,
                  structures: Union[ToolOutput, StandardizedOutput],
-                 atom: str,
-                 residue: str,
+                 atom: Union[str, List[str], None] = None,
+                 residue: Union[str, List[str], None] = None,
                  method: str = "min",
                  metric_name: str = None,
                  **kwargs):
@@ -52,52 +52,83 @@ class ResidueAtomDistance(BaseConfig):
 
         Args:
             structures: Input structures from previous tool (ToolOutput or StandardizedOutput)
-            atom: Atom selection string (e.g., 'LIG.Cl', 'HAL.Cl', 'name CA')
-            residue: Residue selection string (e.g., 'D in IGDWG', '145', '145-150')
+            atom: Atom selection string, list of two selections, or None
+            residue: Residue selection string, list of two selections, or None
             method: How to calculate distance ("min", "max", "mean", "closest")
             metric_name: Custom name for the distance column (default: "distance")
             **kwargs: Additional parameters
-            
+
+        Selection Modes:
+            1. Atom-Residue mode: atom=str, residue=str
+            2. Atom-Atom mode: atom=[str, str], residue=None
+            3. Residue-Residue mode: atom=None, residue=[str, str]
+
         Selection Syntax:
             Atom selections:
             - 'LIG.Cl' → ligand chlorine atoms
-            - 'HAL.Br' → halogen bromine atoms  
+            - 'HAL.Br' → halogen bromine atoms
             - 'name CA' → all alpha carbon atoms
-            
+
             Residue selections:
             - 'D in IGDWG' → aspartic acid in sequence context
             - '145' → residue number 145
             - '145-150' → residue range 145 to 150
             - '145+147+150' → specific residues 145, 147, and 150
-            
+            - '-1' → last residue (C-terminus)
+            - '-2' → second-to-last residue
+            - '1' → first residue (N-terminus)
+
         Examples:
-            # Analyze ligand chlorine distance to specific aspartic acids
-            distance_analysis = pipeline.add(ResidueAtomDistance(
+            # Atom-Residue: ligand chlorine distance to specific aspartic acids
+            distance_analysis = ResidueAtomDistance(
                 structures=boltz_results,
                 atom='LIG.Cl',
                 residue='D in IGDWG',
                 metric_name='chlorine_distance'
-            ))
+            )
 
-            # Analyze specific residue distance to ligand
-            ca_analysis = pipeline.add(ResidueAtomDistance(
+            # Residue-Residue: distance between N and C termini
+            termini_distance = ResidueAtomDistance(
+                structures=af_results,
+                atom=None,
+                residue=['1', '-1'],  # First and last residue
+                metric_name='termini_distance'
+            )
+
+            # Atom-Atom: distance between two ligand atoms
+            ligand_internal = ResidueAtomDistance(
                 structures=structure_tool,
-                atom='LIG.Br',
-                residue='145-150',
-                method='mean',
-                metric_name='binding_site_distance'
-            ))
+                atom=['LIG.Cl', 'LIG.Br'],
+                residue=None,
+                metric_name='cl_br_distance'
+            )
         """
         self.distance_input = structures
         self.atom_selection = atom
-        self.residue_selection = residue  
+        self.residue_selection = residue
         self.distance_metric = method
         self.custom_metric_name = metric_name
-        
+
+        # Validate selection mode
+        if atom is None and residue is None:
+            raise ValueError("Both atom and residue cannot be None")
+
+        # Validate that if one is a list, the other must be None
+        if isinstance(atom, list) and residue is not None:
+            raise ValueError("If atom is a list, residue must be None")
+        if isinstance(residue, list) and atom is not None:
+            raise ValueError("If residue is a list, atom must be None")
+
+        # Validate list lengths
+        if isinstance(atom, list) and len(atom) != 2:
+            raise ValueError("atom list must contain exactly 2 selections")
+        if isinstance(residue, list) and len(residue) != 2:
+            raise ValueError("residue list must contain exactly 2 selections")
+
         # Validate distance metric
         if method not in ["min", "max", "mean", "closest"]:
             raise ValueError(f"Invalid method: {method}. Options: min, max, mean, closest")
-        
+
         # Initialize base class
         super().__init__(**kwargs)
 
@@ -120,12 +151,10 @@ class ResidueAtomDistance(BaseConfig):
         """Validate ResidueAtomDistance parameters."""
         if not isinstance(self.distance_input, (ToolOutput, StandardizedOutput)):
             raise ValueError("Input must be a ToolOutput or StandardizedOutput object")
-        
-        if not self.atom_selection:
-            raise ValueError("atom selection cannot be empty")
-        
-        if not self.residue_selection:
-            raise ValueError("residue selection cannot be empty")
+
+        # At least one of atom or residue must be specified
+        if self.atom_selection is None and self.residue_selection is None:
+            raise ValueError("At least one of atom or residue must be specified")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures from previous tool."""
@@ -155,14 +184,29 @@ class ResidueAtomDistance(BaseConfig):
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
-        
+
+        # Determine mode
+        if isinstance(self.atom_selection, list):
+            mode = "Atom-Atom"
+            config_lines.append(f"MODE: {mode}")
+            config_lines.append(f"ATOM 1: {self.atom_selection[0]}")
+            config_lines.append(f"ATOM 2: {self.atom_selection[1]}")
+        elif isinstance(self.residue_selection, list):
+            mode = "Residue-Residue"
+            config_lines.append(f"MODE: {mode}")
+            config_lines.append(f"RESIDUE 1: {self.residue_selection[0]}")
+            config_lines.append(f"RESIDUE 2: {self.residue_selection[1]}")
+        else:
+            mode = "Atom-Residue"
+            config_lines.append(f"MODE: {mode}")
+            config_lines.append(f"ATOM SELECTION: {self.atom_selection}")
+            config_lines.append(f"RESIDUE SELECTION: {self.residue_selection}")
+
         config_lines.extend([
-            f"ATOM SELECTION: {self.atom_selection}",
-            f"RESIDUE SELECTION: {self.residue_selection}",
             f"DISTANCE METRIC: {self.distance_metric}",
             f"OUTPUT METRIC: {self.get_metric_name()}"
         ])
-        
+
         return config_lines
     
     def generate_script(self, script_path: str) -> str:
@@ -260,8 +304,18 @@ fi
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
+
+        # Determine mode
+        if isinstance(self.atom_selection, list):
+            mode = "atom-atom"
+        elif isinstance(self.residue_selection, list):
+            mode = "residue-residue"
+        else:
+            mode = "atom-residue"
+
         base_dict.update({
             "tool_params": {
+                "mode": mode,
                 "atom_selection": self.atom_selection,
                 "residue_selection": self.residue_selection,
                 "distance_metric": self.distance_metric,

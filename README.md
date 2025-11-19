@@ -11,55 +11,9 @@ git clone https://gitlab.uzh.ch/locbp/public/biopipelines
 ```
 Specific environments for using the tools have to be installed separately. Good luck.
 
-## Available Tools
+## More info
 
-### Structure Generation
-- **RFdiffusion** - Backbone structure generation
-- **RFdiffusionAllAtom** - All-atom structure generation with ligands
-
-### Sequence Generation
-- **LigandMPNN** - Ligand-aware sequence design
-- **ProteinMPNN** - Protein sequence design (0-based indexing: sample 0 = template)
-- **MutationComposer** - Mutation-guided sequence generation
-- **Fuse** - Protein-protein fusion design
-- **StitchSequences** - Combine sequences from multiple tools
-- **SiteDirectedMutagenesis** - Introduce specific mutations
-
-### Folding/Cofolding
-- **AlphaFold** - Structure prediction (ColabFold backend)
-- **Boltz** - Advanced structure prediction with noncovalent interactions
-
-### Analysis of MPNN Output
-- **MutationProfiler** - Statistical analysis of sequence variations
-
-### Structure Analysis
-- **ResidueAtomDistance** - Distance measurements and contacts
-- **ProteinLigandContacts** - Protein-ligand contact analysis
-- **PoseDistance** - Measure ligand pose RMSD between reference and designed structures
-- **ConformationalChange** - Quantify structural changes with multiple metrics (RMSD, distances)
-- **DistanceSelector** - Distance-based residue selection
-- **PLIP** - Protein-ligand interaction profiling
-
-### Data Management & Filtering
-- **Filter** - Expression-based result filtering
-- **SelectBest** - Select top-performing structures/sequences
-- **MergeTables** - Combine multiple analysis results
-- **ConcatenateTables** - Merge datasets across cycles
-- **RemoveDuplicates** - Sequence deduplication
-- **SliceTable** - Extract subset of rows
-- **AverageByTable** - Calculate average metrics
-- **ExtractMetrics** - Extract specific metrics from tables
-
-### Visualization
-- **PyMOL** - Automated molecular visualization sessions
-
-### Utilities
-- **LoadOutput** - Import results from previous pipelines
-- **MMseqs2** - Multiple sequence alignment and homology search
-- **CompoundLibrary** - Generate compound libraries and properties
-- **PDB** - Fetch structures from local folders or RCSB PDB
-
-## Documentation
+Check out the following resources for a detailed explanation of it.
 
 - **[User Manual](UserManual.md)** - Complete usage guide with tool reference
 - **[Examples](ExamplePipelines/)** - Pipeline examples

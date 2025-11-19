@@ -17,62 +17,87 @@ from pdb_parser import parse_pdb_file, parse_selection, calculate_distances, deb
 
 
 
-def calculate_distance(structure_path: str, atom_selection: str, residue_selection: str, 
+def calculate_distance(structure_path: str, atom_selection, residue_selection,
                       distance_metric: str) -> Optional[float]:
     """
-    Calculate distance between atom and residue selections by parsing PDB file.
-    
+    Calculate distance between selections by parsing PDB file.
+    Supports three modes:
+    - Atom-Residue: atom=str, residue=str
+    - Atom-Atom: atom=[str, str], residue=None
+    - Residue-Residue: atom=None, residue=[str, str]
+
     Args:
         structure_path: Path to structure file
-        atom_selection: Atom selection string
-        residue_selection: Residue selection string  
+        atom_selection: Atom selection string, list of two strings, or None
+        residue_selection: Residue selection string, list of two strings, or None
         distance_metric: Type of distance calculation (min, max, mean)
-        
+
     Returns:
         Calculated distance or None if failed
     """
     try:
         # Parse PDB file
         atoms = parse_pdb_file(structure_path)
-        
+
         if not atoms:
             print(f"  - Warning: No atoms found in {structure_path}")
             return None
-        
+
         print(f"  - Total atoms in structure: {len(atoms)}")
-        
-        # Parse selections
-        selected_atoms = parse_selection(atom_selection, atoms)
-        selected_residues = parse_selection(residue_selection, atoms)
-        
-        print(f"  - Atom selection '{atom_selection}': {len(selected_atoms)} atoms")
-        print(f"  - Residue selection '{residue_selection}': {len(selected_residues)} atoms")
-        
-        if not selected_atoms:
-            print(f"  - Warning: No atoms found for selection '{atom_selection}'")
+
+        # Determine mode and parse selections
+        if isinstance(atom_selection, list) and len(atom_selection) == 2:
+            # Atom-Atom mode
+            selection1 = parse_selection(atom_selection[0], atoms)
+            selection2 = parse_selection(atom_selection[1], atoms)
+            print(f"  - Mode: Atom-Atom")
+            print(f"  - Atom 1 selection '{atom_selection[0]}': {len(selection1)} atoms")
+            print(f"  - Atom 2 selection '{atom_selection[1]}': {len(selection2)} atoms")
+
+        elif isinstance(residue_selection, list) and len(residue_selection) == 2:
+            # Residue-Residue mode
+            selection1 = parse_selection(residue_selection[0], atoms)
+            selection2 = parse_selection(residue_selection[1], atoms)
+            print(f"  - Mode: Residue-Residue")
+            print(f"  - Residue 1 selection '{residue_selection[0]}': {len(selection1)} atoms")
+            print(f"  - Residue 2 selection '{residue_selection[1]}': {len(selection2)} atoms")
+
+        else:
+            # Atom-Residue mode (original behavior)
+            selection1 = parse_selection(atom_selection, atoms)
+            selection2 = parse_selection(residue_selection, atoms)
+            print(f"  - Mode: Atom-Residue")
+            print(f"  - Atom selection '{atom_selection}': {len(selection1)} atoms")
+            print(f"  - Residue selection '{residue_selection}': {len(selection2)} atoms")
+
+        if not selection1:
+            print(f"  - Warning: No atoms found for first selection")
             return None
-        
-        if not selected_residues:
-            print(f"  - Warning: No atoms found for selection '{residue_selection}'")
+
+        if not selection2:
+            print(f"  - Warning: No atoms found for second selection")
             return None
-        
+
         # Calculate distances using pdb_parser
-        distance = calculate_distances(selected_atoms, selected_residues, distance_metric)
-        
+        distance = calculate_distances(selection1, selection2, distance_metric)
+
         if distance is not None:
             print(f"  - Distance ({distance_metric}): {distance:.3f} Å")
-        
+
         return distance
-        
+
     except Exception as e:
         print(f"  - Error calculating distance: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
 def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
     """
-    Analyze distances between atoms and residues in structures by parsing PDB files.
-    
+    Analyze distances between selections in structures by parsing PDB files.
+    Supports atom-residue, atom-atom, and residue-residue modes.
+
     Args:
         config_data: Configuration dictionary with analysis parameters
     """
@@ -82,10 +107,23 @@ def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
     distance_metric = config_data['distance_metric']
     metric_name = config_data['metric_name']
     output_csv = config_data['output_csv']
-    
+
     print(f"Analyzing distances in {len(input_structures)} structures")
-    print(f"Atom selection: {atom_selection}")
-    print(f"Residue selection: {residue_selection}")
+
+    # Determine and display mode
+    if isinstance(atom_selection, list):
+        print(f"Mode: Atom-Atom")
+        print(f"Atom 1: {atom_selection[0]}")
+        print(f"Atom 2: {atom_selection[1]}")
+    elif isinstance(residue_selection, list):
+        print(f"Mode: Residue-Residue")
+        print(f"Residue 1: {residue_selection[0]}")
+        print(f"Residue 2: {residue_selection[1]}")
+    else:
+        print(f"Mode: Atom-Residue")
+        print(f"Atom selection: {atom_selection}")
+        print(f"Residue selection: {residue_selection}")
+
     print(f"Distance metric: {distance_metric}")
     print(f"Output column: {metric_name}")
     
