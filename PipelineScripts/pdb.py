@@ -85,11 +85,11 @@ class PDB(BaseConfig):
                 remove_waters=False
             ))
         """
-        # Normalize pdbs to list
+        # Normalize pdbs to list - preserve original case for local file lookups
         if isinstance(pdbs, str):
-            self.pdb_ids = [pdbs.upper()]
+            self.pdb_ids = [pdbs]
         else:
-            self.pdb_ids = [pdb_id.upper() for pdb_id in pdbs]
+            self.pdb_ids = list(pdbs)
 
         # Handle custom IDs - default to pdb_ids if not provided
         if ids is None:
