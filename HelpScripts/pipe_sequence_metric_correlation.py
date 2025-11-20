@@ -443,13 +443,13 @@ def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: 
     logo_data = []
     x_labels = []
 
-    for row in positions_to_plot:
-        position = row['position']
-        wt_aa = row['wt_aa']
+    for row_2d, row_1d in positions_to_plot:
+        position = row_2d['position']
+        wt_aa = row_2d['wt_aa']
 
         aa_row = {}
         for aa in AMINO_ACIDS:
-            aa_row[aa] = row[aa]  # Keep both positive and negative values
+            aa_row[aa] = row_2d[aa]  # Keep both positive and negative values
 
         logo_data.append(aa_row)
         x_labels.append(f"{wt_aa}{position}")
