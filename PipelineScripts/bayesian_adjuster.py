@@ -72,10 +72,12 @@ class BayesianAdjuster(BaseConfig):
                    Lower values = more conservative, stays closer to prior
             kappa: Pseudo-observations for sample size shrinkage (default: 10.0)
                    Used to down-weight correlations from small sample sizes
-            pseudocount: Pseudocount added to all amino acids before adjustment (default: 0.01)
-                        Ensures no amino acid has exactly zero probability, allowing correlation
-                        signals to resurrect unseen but beneficial mutations. After adding,
-                        frequencies are normalized to preserve the original sum at each position.
+            pseudocount: Pseudocount added only to amino acids with good correlations (default: 0.01)
+                        Only amino acids where c(i,aa) is nonzero and good (negative for min mode,
+                        positive for max mode) receive pseudocounts. This allows correlation signals
+                        to resurrect unseen but beneficial mutations while preventing all amino acids
+                        from having nonzero probability. After adding, frequencies are normalized to
+                        preserve the original sum at each position.
             positions: PyMOL-style selection string for positions to display in plots (e.g., "141+143+145+147-149")
                       If None, shows all positions with adjustments. This ensures consistent x-axis across tools.
             **kwargs: Additional parameters

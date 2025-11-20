@@ -156,35 +156,60 @@ def load_and_merge_tables(frequencies_path: str, correlations_path: str,
     return frequencies_df, correlations_df
 
 
-def apply_pseudocounts(frequencies_df: pd.DataFrame, pseudocount: float, logger) -> pd.DataFrame:
+def apply_pseudocounts(frequencies_df: pd.DataFrame, correlations_df: pd.DataFrame,
+                       pseudocount: float, mode: str, logger) -> pd.DataFrame:
     """
-    Apply pseudocounts to all amino acids at each position and renormalize.
+    Apply pseudocounts only to amino acids with good correlation signals and renormalize.
+
+    Only amino acids where c(i,aa) is nonzero and good (positive for max mode, negative for min mode)
+    receive pseudocounts. This prevents all amino acids from having nonzero probability after adjustment.
 
     Args:
         frequencies_df: DataFrame with prior frequencies
-        pseudocount: Pseudocount to add to each amino acid
+        correlations_df: DataFrame with correlation signals
+        pseudocount: Pseudocount to add to amino acids with good correlations
+        mode: "min" or "max" (determines what "good" correlation means)
         logger: Logger instance
 
     Returns:
-        DataFrame with pseudocounts applied and renormalized
+        DataFrame with selective pseudocounts applied and renormalized
     """
     if pseudocount == 0:
         logger.info("Pseudocount is 0, skipping pseudocount application")
         return frequencies_df.copy()
 
-    logger.info(f"Applying pseudocount: {pseudocount}")
+    logger.info(f"Applying pseudocount: {pseudocount} (mode: {mode})")
+
+    # Sign factor determines what "good" means
+    # min mode: negative correlations are good (lower metric is better)
+    # max mode: positive correlations are good (higher metric is better)
+    sign_factor = -1.0 if mode == "min" else 1.0
 
     pseudocount_df = frequencies_df.copy()
+    total_pseudocounts_added = 0
 
     for idx, row in pseudocount_df.iterrows():
         position = row['position']
 
+        # Find matching correlation row
+        corr_row = correlations_df[correlations_df['position'] == position]
+        if corr_row.empty:
+            logger.warning(f"No correlation data for position {position}, skipping pseudocount")
+            continue
+
+        corr_row = corr_row.iloc[0]
+
         # Calculate original sum across all amino acids
         original_sum = sum(row[aa] for aa in AMINO_ACIDS)
 
-        # Add pseudocount to all amino acids
+        # Add pseudocount only to amino acids with good correlations
         for aa in AMINO_ACIDS:
-            pseudocount_df.at[idx, aa] = row[aa] + pseudocount
+            correlation = corr_row[aa] * sign_factor
+            # Good correlation: positive after sign correction, and nonzero
+            if correlation > EPSILON:
+                pseudocount_df.at[idx, aa] = row[aa] + pseudocount
+                total_pseudocounts_added += 1
+            # else: keep original frequency (no pseudocount added)
 
         # Calculate new sum after adding pseudocounts
         new_sum = sum(pseudocount_df.loc[idx, aa] for aa in AMINO_ACIDS)
@@ -195,7 +220,7 @@ def apply_pseudocounts(frequencies_df: pd.DataFrame, pseudocount: float, logger)
             for aa in AMINO_ACIDS:
                 pseudocount_df.at[idx, aa] = pseudocount_df.at[idx, aa] * normalization_factor
 
-    logger.info("Pseudocounts applied and renormalized")
+    logger.info(f"Pseudocounts applied selectively to {total_pseudocounts_added} amino acids with good correlations")
     return pseudocount_df
 
 
@@ -213,7 +238,7 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
         correlations_df: DataFrame with correlation signals
         mode: "min" or "max" (determines sign of correlations)
         gamma: Strength hyperparameter
-        pseudocount: Pseudocount to add to all amino acids before adjustment
+        pseudocount: Pseudocount to add only to amino acids with good correlations
         logger: Logger instance
 
     Returns:
@@ -221,8 +246,31 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
     """
     logger.info("Applying Bayesian adjustments...")
 
-    # Apply pseudocounts first
-    frequencies_df = apply_pseudocounts(frequencies_df, pseudocount, logger)
+    # If gamma is 0, return original frequencies unchanged
+    if gamma == 0:
+        logger.info("Gamma is 0, returning original frequencies without adjustment")
+        adjusted_df = frequencies_df.copy()
+
+        # Create empty adjustment log
+        adjustment_log = []
+        for _, row in adjusted_df.iterrows():
+            position = row['position']
+            original_aa = row['original']
+            for aa in AMINO_ACIDS:
+                adjustment_log.append({
+                    'position': position,
+                    'wt_aa': original_aa,
+                    'aa': aa,
+                    'prior_freq': row[aa],
+                    'correlation': 0.0,
+                    'adjusted_prob': row[aa],
+                    'change': 0.0
+                })
+
+        return adjusted_df, adjustment_log
+
+    # Apply pseudocounts selectively to amino acids with good correlations
+    frequencies_df = apply_pseudocounts(frequencies_df, correlations_df, pseudocount, mode, logger)
 
     adjusted_data = []
     adjustment_log = []
