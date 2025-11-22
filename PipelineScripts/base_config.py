@@ -542,6 +542,40 @@ fi
 
         # No dots - regular value, not a table reference
 
+    def _get_upstream_missing_table_path(self, *input_sources) -> Optional[str]:
+        """
+        Get the path to the missing table from upstream tool outputs.
+
+        This should be called during get_output_files() to check if there's an upstream
+        missing table that needs to be propagated.
+
+        Args:
+            *input_sources: Variable number of StandardizedOutput or ToolOutput objects
+
+        Returns:
+            Path to upstream missing.csv, or None if no missing table exists
+        """
+        for input_source in input_sources:
+            if input_source is None:
+                continue
+
+            # Try to find missing table from input source
+            if hasattr(input_source, 'tables'):
+                tables = input_source.tables
+                if hasattr(tables, '_tables') and 'missing' in tables._tables:
+                    missing_info = tables._tables['missing']
+                    return missing_info.path if hasattr(missing_info, 'path') else str(missing_info)
+                elif isinstance(tables, dict) and 'missing' in tables:
+                    missing_info = tables['missing']
+                    if isinstance(missing_info, dict) and 'path' in missing_info:
+                        return missing_info['path']
+                    elif hasattr(missing_info, 'path'):
+                        return missing_info.path
+                    else:
+                        return str(missing_info)
+
+        return None
+
 
 class TableInfo:
     """Information about a table including name, path, and expected columns."""

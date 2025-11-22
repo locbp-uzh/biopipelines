@@ -11,13 +11,13 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class AlphaFold(BaseConfig):
@@ -230,10 +230,10 @@ class AlphaFold(BaseConfig):
     def generate_script(self, script_path: str) -> str:
         """
         Generate AlphaFold execution script.
-        
+
         Args:
             script_path: Path where script should be written
-            
+
         Returns:
             Script content as string
         """
@@ -245,8 +245,10 @@ class AlphaFold(BaseConfig):
         script_content += self.generate_script_prepare_sequences()
         script_content += self.generate_script_run_alphafold()
         script_content += self.generate_script_extract_best_rank()
+        script_content += self.generate_script_extract_confidence()
+        script_content += self.generate_script_create_msas_table()
         script_content += self.generate_completion_check_footer()
-        
+
         return script_content
     
     def generate_script_prepare_sequences(self) -> str:
@@ -316,14 +318,20 @@ mkdir -p "{folding_folder}"
 """
     def generate_script_extract_best_rank(self) -> str:
         folding_folder = os.path.join(self.output_folder, "Folding")
-        
+        msas_folder = os.path.join(self.output_folder, "MSAs")
+
         return f"""echo "Extracting best structures from Folding subfolder"
-# AlphaFold creates files like: 
+# AlphaFold creates files like:
 # - sequenceid_unrelaxed_rank_001_alphafold2_ptm_model_N_seed_SSS.pdb
 # - sequenceid_relaxed_rank_001_alphafold2_ptm_model_N_seed_SSS.pdb
+# - sequenceid.a3m (MSA file)
 # We want to copy the best ones to main directory as: sequenceid.pdb
+# And MSA files to MSAs subfolder
 
 cd "{folding_folder}"
+
+# Create MSAs subfolder
+mkdir -p "{msas_folder}"
 
 # Handle relaxed format (preferred if both exist)
 for file in *_relaxed_rank_001_*.pdb; do
@@ -350,11 +358,41 @@ for file in *_unrelaxed_rank_001_*.pdb; do
     fi
 done
 
+# Copy MSA files to MSAs subfolder
+echo "Extracting MSA files"
+for msa_file in *.a3m; do
+    if [ -f "$msa_file" ]; then
+        cp "$msa_file" "{msas_folder}/"
+        echo "Copied MSA: $msa_file"
+    fi
+done
+
 cd - > /dev/null
 
 """
 
-    
+    def generate_script_extract_confidence(self) -> str:
+        """Generate script section to extract confidence metrics from JSON files."""
+        folding_folder = os.path.join(self.output_folder, "Folding")
+        confidence_csv = os.path.join(self.output_folder, "confidence.csv")
+        alphafold_confidence_py = os.path.join(self.folders["HelpScripts"], "pipe_alphafold_confidence.py")
+
+        return f"""echo "Extracting confidence metrics from JSON files"
+python {alphafold_confidence_py} "{folding_folder}" "{self.output_folder}" "{confidence_csv}"
+
+"""
+
+    def generate_script_create_msas_table(self) -> str:
+        """Generate script section to create MSAs CSV table."""
+        msas_folder = os.path.join(self.output_folder, "MSAs")
+        msa_csv = os.path.join(self.output_folder, "msas.csv")
+        alphafold_msas_py = os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py")
+
+        return f"""echo "Creating MSAs table"
+python {alphafold_msas_py} "{msas_folder}" "{self.queries_csv}" "{msa_csv}"
+
+"""
+
     def _predict_structure_outputs(self) -> List[str]:
         """
         Predict structure files that AlphaFold will generate.
@@ -387,14 +425,20 @@ cd - > /dev/null
                 if hasattr(dep, '_predict_sequence_ids'):
                     sequence_ids = dep._predict_sequence_ids()
                     break
-        
+
+        # Handle direct sequence input with name parameter
+        if not sequence_ids and "direct_sequence" in self.input_sources:
+            # Use the name parameter as the sequence ID
+            if self.name:
+                sequence_ids = [self.name]
+
         # Generate structure file paths from sequence IDs
         if sequence_ids:
             for seq_id in sequence_ids:
                 # Use simple naming: just the sequence ID + .pdb
                 pdb_path = os.path.join(self.output_folder, f"{seq_id}.pdb")
                 structure_files.append(pdb_path)
-        
+
         # Must have structure files from dependencies
         if not structure_files:
             raise ValueError("Could not determine sequence IDs for structure prediction - no upstream sequence data found")
@@ -438,16 +482,44 @@ cd - > /dev/null
             if hasattr(self.standardized_input, 'sequence_ids'):
                 sequence_ids = self.standardized_input.sequence_ids
         
-        # Organize tables by content type (empty for now - ranking could be added later)
+        # Confidence scores table
+        confidence_csv = os.path.join(self.output_folder, "confidence.csv")
+
+        # MSA files (AlphaFold generates .a3m files)
+        msas_folder = os.path.join(self.output_folder, "MSAs")
+        msa_files = []
+        for seq_id in structure_ids:
+            msa_file = os.path.join(msas_folder, f"{seq_id}.a3m")
+            msa_files.append(msa_file)
+
+        # MSA table
+        msa_csv = os.path.join(self.output_folder, "msas.csv")
+
+        # Organize tables by content type
         tables = {
-            "structures": {
-                "path": queries_csv,  # Input sequences that generated the structures
-                "columns": ["id", "source_id", "sequence"],
-                "description": "Input sequences used for AlphaFold structure prediction",
-                "count": len(structure_ids)
-            }
+            "structures": TableInfo(
+                name="structures",
+                path=queries_csv,  # Input sequences that generated the structures
+                columns=["id", "source_id", "sequence"],
+                description="Input sequences used for AlphaFold structure prediction",
+                count=len(structure_ids)
+            ),
+            "confidence": TableInfo(
+                name="confidence",
+                path=confidence_csv,
+                columns=["id", "structure", "plddt", "max_pae", "ptm"],
+                description="AlphaFold confidence metrics extracted from best rank models",
+                count=len(structure_ids)
+            ),
+            "msas": TableInfo(
+                name="msas",
+                path=msa_csv,
+                columns=["id", "sequence_id", "sequence", "msa_file"],
+                description="MSA files for sequence recycling between predictions",
+                count=len(msa_files)
+            )
         }
-        
+
         return {
             "structures": structure_files,
             "structure_ids": structure_ids,
@@ -455,6 +527,7 @@ cd - > /dev/null
             "compound_ids": [],
             "sequences": [queries_csv],  # Main sequence input/output
             "sequence_ids": sequence_ids,
+            "msas": msa_files,  # Individual MSA files
             "tables": tables,
             "output_folder": self.output_folder,
             # Keep legacy aliases for compatibility

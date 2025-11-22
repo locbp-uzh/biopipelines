@@ -1038,10 +1038,13 @@ boltz predict {config_file_path} {boltz_options}
         
         # Post-process results using dedicated script
         script_content += self._generate_postprocess_with_script()
-        
+
         # Add newly calculated MSAs to global cache after post-processing
         if hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
             script_content += self._generate_global_msa_cache_storage_section(boltz_cache_folder)
+
+        # Propagate missing table from upstream tools
+        script_content += self._generate_missing_table_propagation()
 
         script_content += self._generate_boltz2_completion_check()
 
@@ -1307,7 +1310,25 @@ fi
                 description="Single ligand compound used for binding prediction",
                 count=1
             )
-        
+
+        # Add missing table if there's an upstream missing table to propagate
+        upstream_missing_path = self._get_upstream_missing_table_path(
+            self.proteins,
+            self.input_sequences,
+            getattr(self, 'standardized_input', None)
+        )
+
+        if upstream_missing_path:
+            # Propagate missing table - IDs will be updated at SLURM runtime
+            missing_csv = os.path.join(self.output_folder, "missing.csv")
+            tables["missing"] = TableInfo(
+                name="missing",
+                path=missing_csv,
+                columns=["id", "structure", "msa"],
+                description="Sequences filtered out by upstream tools",
+                count="variable"
+            )
+
         return {
             "structures": structures,
             "structure_ids": structure_ids,
@@ -1634,10 +1655,54 @@ python {self.output_folder}/postprocess.py
 """
         return postprocess_script
     
+    def _generate_missing_table_propagation(self) -> str:
+        """
+        Generate script section to propagate missing.csv from upstream tools.
+
+        Returns:
+            Bash script content for missing table propagation
+        """
+        # Check if there's an upstream missing table to propagate
+        upstream_missing_path = self._get_upstream_missing_table_path(
+            self.proteins,
+            self.input_sequences,
+            getattr(self, 'standardized_input', None)
+        )
+
+        if not upstream_missing_path:
+            # No upstream missing table - nothing to propagate
+            return ""
+
+        # Get the upstream output folder (parent of missing.csv)
+        upstream_folder = os.path.dirname(upstream_missing_path)
+
+        # Path to propagation script
+        propagate_script = os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py")
+
+        # Determine file extensions based on output format
+        structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
+        msa_ext = ".csv" if self.msa_server == "public" else ".a3m"
+
+        return f"""
+# Propagate missing table from upstream tools
+echo "Checking for upstream missing sequences..."
+if [ -f "{upstream_missing_path}" ]; then
+    echo "Found upstream missing.csv - propagating to current tool"
+    python {propagate_script} \\
+        --upstream-folders "{upstream_folder}" \\
+        --output-folder "{self.output_folder}" \\
+        --structure-ext "{structure_ext}" \\
+        --msa-ext "{msa_ext}"
+else
+    echo "No upstream missing.csv found"
+fi
+
+"""
+
     def _generate_postprocess_with_script(self) -> str:
         """
         Generate script section for post-processing using dedicated pipe_boltz_postprocessing.py script.
-        
+
         Returns:
             Bash script content for post-processing with proper sequence ID handling
         """
