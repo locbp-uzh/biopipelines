@@ -154,6 +154,7 @@ class Rank(BaseConfig):
         self.input_csv_path = None
         self.input_table_name = "ranked"  # Default name
         self.input_table_info = None
+        self.input_row_count = None  # Will be determined at runtime
 
         if hasattr(self.data_input, 'tables'):
             tables = self.data_input.tables
@@ -165,6 +166,9 @@ class Rank(BaseConfig):
                 self.input_csv_path = ds_info.path
                 self.input_table_name = first_name
                 self.input_table_info = ds_info
+                # Try to get count if available
+                if hasattr(ds_info, 'count') and isinstance(ds_info.count, int):
+                    self.input_row_count = ds_info.count
             elif isinstance(tables, dict):
                 # Handle raw dict (legacy format)
                 first_name, ds_info = next(iter(tables.items()))
@@ -255,6 +259,21 @@ class Rank(BaseConfig):
         ranked_csv_name = "ranked.csv"
         ranked_csv = os.path.join(output_folder, ranked_csv_name)
 
+        # Determine num_digits from pool structure_ids count (only structures can be ranked)
+        predicted_count = 0
+        if self.use_pool_mode:
+            if hasattr(self.pool_output, 'structure_ids') and self.pool_output.structure_ids:
+                predicted_count = len(self.pool_output.structure_ids)
+            elif hasattr(self.pool_output, 'structures') and self.pool_output.structures:
+                predicted_count = len(self.pool_output.structures)
+
+        # Apply top limit if specified
+        if self.top and predicted_count > 0:
+            predicted_count = min(predicted_count, self.top)
+
+        # Calculate num_digits
+        num_digits = len(str(predicted_count)) if predicted_count > 0 else 1
+
         # Create config file for the rank operation
         config_file = os.path.join(output_folder, "rank_config.json")
         config_data = {
@@ -265,7 +284,8 @@ class Rank(BaseConfig):
             "top": self.top,
             "output_csv": ranked_csv,
             "use_pool_mode": self.use_pool_mode,
-            "pool_output_folder": self.pool_folder if self.use_pool_mode else None
+            "pool_output_folder": self.pool_folder if self.use_pool_mode else None,
+            "num_digits": num_digits  # Pass the calculated num_digits
         }
 
         import json
@@ -299,6 +319,12 @@ fi
 """
 
         return script_content
+
+    def _calculate_num_digits(self, count: int) -> int:
+        """Calculate number of digits needed for zero-padding based on count."""
+        if count == 0:
+            return 1
+        return len(str(count))
 
     def get_output_files(self) -> Dict[str, List[str]]:
         """
@@ -352,31 +378,55 @@ fi
             updated_compounds = []
             updated_sequences = []
 
+            # Use the SAME num_digits calculation as in generate_script()
+            # This ensures prediction matches runtime output
+            predicted_count = 0
+            if hasattr(self.pool_output, 'structure_ids') and self.pool_output.structure_ids:
+                predicted_count = len(self.pool_output.structure_ids)
+            elif hasattr(self.pool_output, 'structures') and self.pool_output.structures:
+                predicted_count = len(self.pool_output.structures)
+
+            # Apply top limit if specified
+            if self.top and predicted_count > 0:
+                predicted_count = min(predicted_count, self.top)
+
+            # Calculate num_digits (same logic as in generate_script)
+            num_digits = len(str(predicted_count)) if predicted_count > 0 else 1
+
             # Copy structure file paths with ranked names
             if hasattr(self.pool_output, 'structures') and self.pool_output.structures:
                 for i, struct_path in enumerate(self.pool_output.structures):
+                    if self.top and i >= self.top:
+                        break
                     ext = os.path.splitext(struct_path)[1]
-                    ranked_name = f"{self.prefix}_{i+1}{ext}"
+                    ranked_name = f"{self.prefix}_{i+1:0{num_digits}d}{ext}"
                     updated_structures.append(os.path.join(self.output_folder, ranked_name))
 
             # Copy compound file paths with ranked names
             if hasattr(self.pool_output, 'compounds') and self.pool_output.compounds:
                 for i, comp_path in enumerate(self.pool_output.compounds):
+                    if self.top and i >= self.top:
+                        break
                     ext = os.path.splitext(comp_path)[1]
-                    ranked_name = f"{self.prefix}_{i+1}{ext}"
+                    ranked_name = f"{self.prefix}_{i+1:0{num_digits}d}{ext}"
                     updated_compounds.append(os.path.join(self.output_folder, ranked_name))
 
             # Copy sequence file paths with ranked names
             if hasattr(self.pool_output, 'sequences') and self.pool_output.sequences:
                 for i, seq_path in enumerate(self.pool_output.sequences):
+                    if self.top and i >= self.top:
+                        break
                     ext = os.path.splitext(seq_path)[1]
-                    ranked_name = f"{self.prefix}_{i+1}{ext}"
+                    ranked_name = f"{self.prefix}_{i+1:0{num_digits}d}{ext}"
                     updated_sequences.append(os.path.join(self.output_folder, ranked_name))
 
             # Combine pool tables with ranked table
             combined_tables = tables.copy()
             if hasattr(self.pool_output, 'tables') and hasattr(self.pool_output.tables, '_tables'):
                 for name, info in self.pool_output.tables._tables.items():
+                    # Skip the 'ranked' table to avoid duplication (we create our own)
+                    if name == 'ranked':
+                        continue
                     filename = os.path.basename(info.path)
                     combined_tables[name] = TableInfo(
                         name=name,
@@ -386,10 +436,10 @@ fi
                         count=info.count
                     )
 
-            # Generate ranked IDs
-            structure_ids = [f"{self.prefix}_{i+1}" for i in range(len(updated_structures))]
-            compound_ids = [f"{self.prefix}_{i+1}" for i in range(len(updated_compounds))]
-            sequence_ids = [f"{self.prefix}_{i+1}" for i in range(len(updated_sequences))]
+            # Generate ranked IDs with zero-padding
+            structure_ids = [f"{self.prefix}_{i+1:0{num_digits}d}" for i in range(len(updated_structures))]
+            compound_ids = [f"{self.prefix}_{i+1:0{num_digits}d}" for i in range(len(updated_compounds))]
+            sequence_ids = [f"{self.prefix}_{i+1:0{num_digits}d}" for i in range(len(updated_sequences))]
 
             return {
                 "structures": updated_structures,

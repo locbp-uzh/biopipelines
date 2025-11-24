@@ -917,7 +917,7 @@ def Resources(**kwargs):
     Must be called within a Pipeline context manager.
 
     Args:
-        gpu: GPU memory (e.g., "32GB", "16GB", or None for no GPU)
+        gpu: GPU memory ("T4", "V100", "A100", "H100", "32GB", "80GB", "32GB|80GB", "!T4", "gpu", "high-memory", None))
         memory: System RAM (e.g., "16GB", "32GB")
         time: Wall time limit (e.g., "24:00:00", "2:00:00")
 

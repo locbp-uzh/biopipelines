@@ -141,7 +141,7 @@ Resources(memory="128GB", time="24:00:00", cpus=32)        # CPU-only
 **GPU parameter options:**
 - `"T4"`, `"V100"`, `"A100"`, `"H100"` - Specific GPU models
 - `"32GB"`, `"80GB"`, `"32GB|80GB"` - Memory-based selection
-- `"!T4"`, `"!V100"` - Exclude specific models
+- `"!T4"` - Equivalent to `"32GB|80GB"`
 - `"gpu"` - Any available GPU
 - `"high-memory"` - Equivalent to `"32GB|80GB"`
 - Omit parameter for CPU-only jobs

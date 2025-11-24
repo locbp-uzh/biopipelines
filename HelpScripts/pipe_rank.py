@@ -53,7 +53,7 @@ def extract_variables_from_expression(metric: str) -> List[str]:
 
 
 def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
-                                     output_folder: str, prefix: str) -> Dict[str, List[str]]:
+                                     output_folder: str, prefix: str, num_digits: int) -> Dict[str, List[str]]:
     """
     Extract structures, compounds, and sequences from pool for ranked IDs.
     Copy them in ranked order with sequential naming.
@@ -62,19 +62,22 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
         ranked_ids: List of IDs in ranked order
         pool_folder: Pool output folder containing all data types
         output_folder: Where to copy the ranked data
-        prefix: Prefix for renamed files (e.g., "rank" -> rank_1.pdb, rank_2.pdb)
+        prefix: Prefix for renamed files (e.g., "rank" -> rank_001.pdb, rank_002.pdb)
+        num_digits: Number of digits for zero-padding (determined from pool structure count)
 
     Returns:
         Dictionary mapping data type to list of extracted file paths
     """
     extracted_files = {"structures": [], "compounds": [], "sequences": []}
+    missing_ranked_ids = []  # Track ranked IDs that couldn't be created
 
     os.makedirs(output_folder, exist_ok=True)
 
     print(f"\nPool mode: Extracting data for {len(ranked_ids)} ranked IDs")
+    print(f"Using {num_digits}-digit zero-padding for ranked IDs")
 
     for rank_idx, source_id in enumerate(ranked_ids, start=1):
-        ranked_id = f"{prefix}_{rank_idx}"
+        ranked_id = f"{prefix}_{rank_idx:0{num_digits}d}"
 
         # Extract structures (PDB/CIF files)
         structure_patterns = [
@@ -86,6 +89,7 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
             os.path.join(pool_folder, "**", f"*{source_id}*.pdb"),
         ]
 
+        structure_found = False
         for pattern in structure_patterns:
             matches = glob.glob(pattern, recursive=True)
             if matches:
@@ -96,9 +100,15 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
                     shutil.copy2(source, dest)
                     extracted_files["structures"].append(dest)
                     print(f"Extracted structure: {source_id} -> {ranked_id}{ext}")
+                    structure_found = True
                     break
                 except Exception as e:
                     print(f"Warning: Could not copy structure {source}: {e}")
+
+        if not structure_found:
+            print(f"Note: Structure not found for {source_id} (may have been filtered out)")
+            # Track this ranked ID as missing
+            missing_ranked_ids.append(ranked_id)
 
         # Extract compounds (SDF files)
         compound_patterns = [
@@ -108,6 +118,7 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
             os.path.join(pool_folder, "**", f"*{source_id}*.sdf"),
         ]
 
+        compound_found = False
         for pattern in compound_patterns:
             matches = glob.glob(pattern, recursive=True)
             if matches:
@@ -117,9 +128,15 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
                     shutil.copy2(source, dest)
                     extracted_files["compounds"].append(dest)
                     print(f"Extracted compound: {source_id} -> {ranked_id}.sdf")
+                    compound_found = True
                     break
                 except Exception as e:
                     print(f"Warning: Could not copy compound {source}: {e}")
+
+        if not compound_found and not structure_found:
+            # Only add to missing if BOTH structure and compound are missing
+            # (already added above if structure not found)
+            pass
 
     # Extract all tables from pool folder
     table_patterns = [
@@ -128,6 +145,7 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
     ]
 
     processed_files = set()  # Track processed files to avoid duplicates
+    upstream_missing_df = None  # Store upstream missing.csv if it exists
 
     for pattern in table_patterns:
         matches = glob.glob(pattern, recursive=True)
@@ -139,6 +157,12 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
             try:
                 df = pd.read_csv(source_csv)
                 filename = os.path.basename(source_csv)
+
+                # Special handling for missing.csv - store for later merging
+                if filename == "missing.csv":
+                    upstream_missing_df = df
+                    print(f"Found upstream missing.csv ({len(df)} rows) - will merge with rank missing IDs")
+                    continue
 
                 # Only process files that have an 'id' column
                 if 'id' not in df.columns:
@@ -152,6 +176,14 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
                     # Filter matching rows
                     matching_rows = df[df['id'].isin(ranked_ids)].copy()
 
+                    if len(matching_rows) == 0:
+                        # No matching rows - create empty table with same columns
+                        empty_df = pd.DataFrame(columns=df.columns)
+                        dest = os.path.join(output_folder, filename)
+                        empty_df.to_csv(dest, index=False)
+                        print(f"Created empty table: {filename} (no matching IDs in ranked set)")
+                        continue
+
                     # Add rank column for sorting
                     matching_rows['_rank_order'] = matching_rows['id'].map(id_to_rank)
 
@@ -161,8 +193,8 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
                     # Remove temporary rank column
                     matching_rows = matching_rows.drop('_rank_order', axis=1)
 
-                    # Rename IDs to ranked format
-                    matching_rows['id'] = [f"{prefix}_{i}" for i in range(1, len(matching_rows) + 1)]
+                    # Rename IDs to ranked format with zero-padding (using num_digits passed to this function)
+                    matching_rows['id'] = [f"{prefix}_{i:0{num_digits}d}" for i in range(1, len(matching_rows) + 1)]
 
                     dest = os.path.join(output_folder, filename)
                     matching_rows.to_csv(dest, index=False)
@@ -176,6 +208,37 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
 
             except Exception as e:
                 print(f"Warning: Could not process table {source_csv}: {e}")
+
+    # Create or update missing.csv with ranked IDs that couldn't be created
+    if missing_ranked_ids:
+        missing_data = []
+        for missing_id in missing_ranked_ids:
+            structure_path = os.path.join(output_folder, f"{missing_id}.pdb")
+            msa_path = os.path.join(output_folder, f"{missing_id}.csv")
+            missing_data.append({
+                'id': missing_id,
+                'structure': structure_path,
+                'msa': msa_path
+            })
+        rank_missing_df = pd.DataFrame(missing_data)
+
+        # Merge with upstream missing.csv if it exists
+        if upstream_missing_df is not None and len(upstream_missing_df) > 0:
+            # Combine both dataframes
+            combined_missing_df = pd.concat([upstream_missing_df, rank_missing_df], ignore_index=True)
+        else:
+            combined_missing_df = rank_missing_df
+
+        missing_csv_path = os.path.join(output_folder, "missing.csv")
+        combined_missing_df.to_csv(missing_csv_path, index=False)
+        print(f"\nCreated missing.csv with {len(combined_missing_df)} total missing IDs:")
+        print(f"  - {len(upstream_missing_df) if upstream_missing_df is not None else 0} from upstream filter")
+        print(f"  - {len(missing_ranked_ids)} ranked IDs that couldn't be created")
+    elif upstream_missing_df is not None:
+        # Only upstream missing IDs exist - copy as-is
+        missing_csv_path = os.path.join(output_folder, "missing.csv")
+        upstream_missing_df.to_csv(missing_csv_path, index=False)
+        print(f"\nCopied upstream missing.csv ({len(upstream_missing_df)} rows)")
 
     return extracted_files
 
@@ -198,9 +261,13 @@ def apply_ranking(config_data: Dict[str, Any]) -> None:
     use_pool_mode = config_data.get('use_pool_mode', False)
     pool_output_folder = config_data.get('pool_output_folder')
 
+    # Get num_digits from config (determined at pipeline generation time)
+    num_digits = config_data.get('num_digits', 1)
+
     print(f"Ranking by metric: {metric}")
     print(f"Input: {input_csv}")
     print(f"Sort order: {'ascending' if ascending else 'descending'}")
+    print(f"Zero-padding: {num_digits} digits")
     if top:
         print(f"Limiting to top {top} entries")
     if use_pool_mode:
@@ -277,8 +344,8 @@ def apply_ranking(config_data: Dict[str, Any]) -> None:
     # Store original IDs
     sorted_df['source_id'] = sorted_df['id']
 
-    # Rename IDs to ranked format
-    sorted_df['id'] = [f"{prefix}_{i}" for i in range(1, len(sorted_df) + 1)]
+    # Rename IDs to ranked format with zero-padding (num_digits from config)
+    sorted_df['id'] = [f"{prefix}_{i:0{num_digits}d}" for i in range(1, len(sorted_df) + 1)]
 
     # Reorder columns: id, source_id, metric (if computed), variables (if expression), rest
     column_order = ['id', 'source_id']
@@ -345,7 +412,7 @@ def apply_ranking(config_data: Dict[str, Any]) -> None:
         if ranked_source_ids:
             output_dir = os.path.dirname(output_csv)
             extracted_files = extract_pool_data_for_ranked_ids(
-                ranked_source_ids, pool_output_folder, output_dir, prefix
+                ranked_source_ids, pool_output_folder, output_dir, prefix, num_digits
             )
 
             print(f"\nPool mode summary:")
