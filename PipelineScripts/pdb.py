@@ -226,8 +226,16 @@ class PDB(BaseConfig):
                 entry_info = data['rcsb_entry_info']
                 if 'nonpolymer_bound_components' in entry_info:
                     ligands = entry_info['nonpolymer_bound_components']
-                    # Filter out common solvents/ions
-                    common_solvents = {'HOH', 'WAT', 'H2O', 'NA', 'CL', 'CA', 'MG', 'K', 'ZN', 'SO4', 'PO4', 'GOL', 'EDO'}
+                    # Filter out common solvents/ions/crystallization agents
+                    common_solvents = {
+                        'HOH', 'WAT', 'H2O',  # Water
+                        'NA', 'CL', 'CA', 'MG', 'K', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',  # Common ions
+                        'SO4', 'PO4', 'NO3',  # Anions
+                        'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',  # Glycols and PEGs
+                        'ACT', 'ACE', 'ACY',  # Acetate
+                        'PYR', 'PYO',  # Pyruvate
+                        'DMS', 'DMSO', 'BME', 'MPD', 'TRS', 'EPE'  # Common solvents
+                    }
                     real_ligands = [lig for lig in ligands if lig not in common_solvents]
 
                     # Store predicted compound IDs if custom_id provided

@@ -105,10 +105,17 @@ def extract_ligands_from_structure(content: str, format: str) -> List[str]:
     ligands = set()
     lines = content.split('\n')
 
-    # Common non-ligand residues to exclude
-    exclude_residues = {'HOH', 'WAT', 'H2O', 'SOL', 'TIP3', 'TIP4', 'SPC',
-                       'NA', 'CL', 'K', 'CA', 'MG', 'ZN', 'FE', 'CU', 'MN',
-                       'ACE', 'NME', 'NH2'}  # Caps and common modifications
+    # Common non-ligand residues to exclude (solvents, ions, crystallization agents, caps)
+    exclude_residues = {
+        'HOH', 'WAT', 'H2O', 'SOL', 'TIP3', 'TIP4', 'SPC',  # Water variants
+        'NA', 'CL', 'K', 'CA', 'MG', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',  # Common ions
+        'SO4', 'PO4', 'NO3',  # Anions
+        'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',  # Glycols and PEGs
+        'ACT', 'ACE', 'ACY',  # Acetate
+        'PYR', 'PYO',  # Pyruvate
+        'DMS', 'BME', 'MPD', 'TRS', 'EPE',  # Common solvents
+        'NME', 'NH2'  # Caps and common modifications
+    }
 
     for line in lines:
         if line.startswith('HETATM'):
