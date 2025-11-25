@@ -29,7 +29,12 @@ def sele_to_list(s):
     Format: "10-20+30-40" or "10 15 20"
     """
     a = []
-    if not s or s == "":
+    if not s or s == "" or pd.isna(s):
+        return a
+
+    # Convert to string to handle numeric types
+    s = str(s)
+    if s == "nan":
         return a
 
     # Handle both '+' separated ranges and space-separated legacy format

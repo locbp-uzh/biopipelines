@@ -34,7 +34,12 @@ sele_csv_file=args.sele_csv_file
 def sele_to_list(s):
     """Convert selection string to list of residue numbers."""
     a = []
-    if s == "":
+    if not s or s == "":
+        return a
+
+    # Convert to string to handle numeric types
+    s = str(s)
+    if s == "nan":
         return a
 
     # Handle both '+' separated ranges and space-separated legacy format

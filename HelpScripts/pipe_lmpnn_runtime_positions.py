@@ -32,11 +32,12 @@ from pathlib import Path
 
 def sele_to_list(sele_str):
     """Convert selection string to list of residue numbers."""
-    if not sele_str or sele_str == "-":
+    # Handle None, empty, or "-"
+    if not sele_str or sele_str == "-" or pd.isna(sele_str):
         return []
 
     residues = []
-    parts = sele_str.split('+')
+    parts = str(sele_str).split('+')
 
     for part in parts:
         if '-' in part and not part.startswith('-'):
