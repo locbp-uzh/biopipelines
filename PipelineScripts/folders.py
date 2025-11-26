@@ -51,11 +51,13 @@ class FolderManager:
         group_folder = folder_config.get('group', '/shares/locbp.chem.uzh')
 
         # Base system folders
-        # For shared pipelines, use a shared PDBs folder accessible to all users
+        # For shared pipelines, use shared PDBs/Ligands folders accessible to all users
         if shared:
             pdbs_folder = os.path.join(group_folder, user_code, "PDBs")
+            ligands_folder = os.path.join(group_folder, user_code, "Ligands")
         else:
             pdbs_folder = os.path.join(notebooks_folder, "PDBs")
+            ligands_folder = os.path.join(notebooks_folder, "Ligands")
 
         self._folders.update({
             "notebooks": notebooks_folder,
@@ -65,6 +67,7 @@ class FolderManager:
             "group": group_folder,
             "user": f"{group_folder}/{user_code}",
             "PDBs": pdbs_folder,
+            "Ligands": ligands_folder,
             "HelpScripts": os.path.join(notebooks_folder, "HelpScripts"),
             "MMseqs2": os.path.join(notebooks_folder, "MMseqs2")})
 
@@ -97,7 +100,7 @@ class FolderManager:
         self._folders.update({
             "project": os.path.join(self._folders["BioPipelines"],project) if not debug else "Debug"})
 
-        for folder_key in ["user", "BioPipelines", "PDBs"]:
+        for folder_key in ["user", "BioPipelines", "PDBs", "Ligands"]:
             if not debug: os.makedirs(self._folders[folder_key], exist_ok=True) #create directories
         os.makedirs(self._folders["project"], exist_ok=True)
 
