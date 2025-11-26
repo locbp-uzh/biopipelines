@@ -153,7 +153,7 @@ def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
 
 def convert_sdf_to_pdb(sdf_content: str, ligand_code: str) -> Optional[str]:
     """
-    Convert SDF content to PDB format using RDKit.
+    Convert SDF content to PDB format using OpenBabel.
 
     Args:
         sdf_content: SDF file content as string
@@ -163,53 +163,54 @@ def convert_sdf_to_pdb(sdf_content: str, ligand_code: str) -> Optional[str]:
         PDB content as string, or None if conversion fails
     """
     try:
-        from rdkit import Chem
-        from rdkit.Chem import AllChem
-        import io
+        import tempfile
+        import subprocess
 
-        # Parse SDF content
-        supplier = Chem.SDMolSupplier()
-        supplier.SetData(sdf_content)
+        # Create temporary files for conversion
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sdf', delete=False) as sdf_file:
+            sdf_file.write(sdf_content)
+            sdf_path = sdf_file.name
 
-        mol = None
-        for m in supplier:
-            if m is not None:
-                mol = m
-                break
+        with tempfile.NamedTemporaryFile(mode='r', suffix='.pdb', delete=False) as pdb_file:
+            pdb_path = pdb_file.name
 
-        if mol is None:
-            print(f"  Error: Could not parse SDF content for {ligand_code}")
-            return None
+        try:
+            # Use obabel command line tool
+            result = subprocess.run(
+                ['obabel', sdf_path, '-O', pdb_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
 
-        # Add hydrogens if needed
-        mol = Chem.AddHs(mol)
+            if result.returncode != 0:
+                print(f"  Error: OpenBabel conversion failed: {result.stderr}")
+                return None
 
-        # Generate 3D coordinates if not present
-        if mol.GetNumConformers() == 0:
-            AllChem.EmbedMolecule(mol, randomSeed=42)
-            AllChem.MMFFOptimizeMolecule(mol)
+            with open(pdb_path, 'r') as f:
+                pdb_content = f.read()
 
-        # Convert to PDB format
-        pdb_block = Chem.MolToPDBBlock(mol)
+            # Replace residue name with the ligand code
+            lines = pdb_content.split('\n')
+            pdb_lines = []
+            for line in lines:
+                if line.startswith(('HETATM', 'ATOM')):
+                    # Replace residue name (columns 18-20, 1-indexed) with ligand code
+                    # PDB format: columns are 1-indexed, so residue name is at positions 17-19 (0-indexed: 17:20)
+                    line = line[:17] + ligand_code.ljust(3) + line[20:]
+                pdb_lines.append(line)
 
-        # Replace residue name with the ligand code
-        lines = pdb_block.split('\n')
-        pdb_lines = []
-        for line in lines:
-            if line.startswith(('HETATM', 'ATOM')):
-                # Replace residue name (columns 18-20, 1-indexed) with ligand code
-                # PDB format: columns are 1-indexed, so residue name is at positions 17-19 (0-indexed: 17:20)
-                line = line[:17] + ligand_code.ljust(3) + line[20:]
-            pdb_lines.append(line)
+            return '\n'.join(pdb_lines)
 
-        return '\n'.join(pdb_lines)
+        finally:
+            # Clean up temporary files
+            if os.path.exists(sdf_path):
+                os.unlink(sdf_path)
+            if os.path.exists(pdb_path):
+                os.unlink(pdb_path)
 
-    except ImportError:
-        print(f"  Error: RDKit not available. Cannot convert SDF to PDB.")
-        print(f"  Please install RDKit: conda install -c conda-forge rdkit")
-        return None
     except Exception as e:
-        print(f"  Error converting SDF to PDB for {ligand_code}: {str(e)}")
+        print(f"  Error converting SDF to PDB with OpenBabel: {str(e)}")
         return None
 
 
