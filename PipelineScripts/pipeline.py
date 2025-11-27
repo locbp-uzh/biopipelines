@@ -492,7 +492,7 @@ class Pipeline:
                 log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}.log")
             script_lines.extend([
                 f"echo {tool.TOOL_NAME}",
-                f"{tool_script_path} | tee {log_file}",
+                f"{tool_script_path} 2>&1 | tee {log_file}",
                 "echo"
             ])
         

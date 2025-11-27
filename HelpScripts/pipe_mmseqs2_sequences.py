@@ -110,7 +110,7 @@ def handle_server_error(server_dir):
 
     # 10% probability to resubmit anyway
     if random.random() < 0.1:
-        log("Server overload: Resubmitting anyway")
+        log("Server overload: Submitting another one")
 
         MMSEQS_SERVER_DIR = server_dir
         GPU_SUBMITTING = f"{MMSEQS_SERVER_DIR}/GPU_SUBMITTING"
@@ -280,7 +280,7 @@ def check_and_resubmit_server(server_dir):
 
     log("Exiting check_and_resubmit_server()")
 
-def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None, timeout=3600, server_dir=None):
+def submit_sequence_to_server(sequence, sequence_id, client_script, output_format="csv", output_path=None, timeout=1200, server_dir=None):
     """Submit a single sequence to MMseqs2 server with specified output path."""
     try:
         # Build command
