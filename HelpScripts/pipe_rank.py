@@ -52,6 +52,29 @@ def extract_variables_from_expression(metric: str) -> List[str]:
     return list(set(variables))  # Remove duplicates
 
 
+def find_structure_in_pool(source_id: str, pool_folder: str) -> Optional[str]:
+    """
+    Find a structure file for the given source ID in the pool folder.
+
+    Args:
+        source_id: ID to search for
+        pool_folder: Pool output folder to search in
+
+    Returns:
+        Path to structure file if found, None otherwise
+    """
+    structure_patterns = [
+        os.path.join(pool_folder, f"{source_id}.pdb"),
+        os.path.join(pool_folder, f"{source_id}.cif"),
+    ]
+
+    for pattern in structure_patterns:
+        if os.path.exists(pattern):
+            return pattern
+
+    return None
+
+
 def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
                                      output_folder: str, prefix: str, num_digits: int) -> Dict[str, List[str]]:
     """
@@ -80,32 +103,19 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
         ranked_id = f"{prefix}_{rank_idx:0{num_digits}d}"
 
         # Extract structures (PDB/CIF files)
-        structure_patterns = [
-            os.path.join(pool_folder, f"{source_id}.pdb"),
-            os.path.join(pool_folder, f"*{source_id}*.pdb"),
-            os.path.join(pool_folder, f"{source_id}.cif"),
-            os.path.join(pool_folder, f"*{source_id}*.cif"),
-            os.path.join(pool_folder, "**", f"{source_id}.pdb"),
-            os.path.join(pool_folder, "**", f"*{source_id}*.pdb"),
-        ]
+        source_structure = find_structure_in_pool(source_id, pool_folder)
 
-        structure_found = False
-        for pattern in structure_patterns:
-            matches = glob.glob(pattern, recursive=True)
-            if matches:
-                source = matches[0]
-                ext = os.path.splitext(source)[1]
-                dest = os.path.join(output_folder, f"{ranked_id}{ext}")
-                try:
-                    shutil.copy2(source, dest)
-                    extracted_files["structures"].append(dest)
-                    print(f"Extracted structure: {source_id} -> {ranked_id}{ext}")
-                    structure_found = True
-                    break
-                except Exception as e:
-                    print(f"Warning: Could not copy structure {source}: {e}")
-
-        if not structure_found:
+        if source_structure:
+            ext = os.path.splitext(source_structure)[1]
+            dest = os.path.join(output_folder, f"{ranked_id}{ext}")
+            try:
+                shutil.copy2(source_structure, dest)
+                extracted_files["structures"].append(dest)
+                print(f"Extracted structure: {source_id} -> {ranked_id}{ext}")
+            except Exception as e:
+                print(f"Warning: Could not copy structure {source_structure}: {e}")
+                missing_ranked_ids.append(ranked_id)
+        else:
             print(f"Note: Structure not found for {source_id} (may have been filtered out)")
             # Track this ranked ID as missing
             missing_ranked_ids.append(ranked_id)
@@ -336,7 +346,26 @@ def apply_ranking(config_data: Dict[str, Any]) -> None:
     print(f"\nSorting by '{sort_column}' ({'ascending' if ascending else 'descending'})")
     sorted_df = df.sort_values(by=sort_column, ascending=ascending).copy()
 
-    # Apply top N limit if specified
+    # In pool mode, filter to only include IDs for which structures exist
+    if use_pool_mode and pool_output_folder:
+        print("\nPool mode: Filtering to only include IDs with existing structures...")
+        original_count = len(sorted_df)
+        existing_ids = []
+
+        for idx, row in sorted_df.iterrows():
+            source_id = str(row['id'])
+            if find_structure_in_pool(source_id, pool_output_folder) is not None:
+                existing_ids.append(source_id)
+
+        # Filter dataframe to only include existing IDs
+        sorted_df = sorted_df[sorted_df['id'].isin(existing_ids)].copy()
+        filtered_count = len(sorted_df)
+        print(f"Filtered from {original_count} to {filtered_count} entries with existing structures")
+
+        if filtered_count == 0:
+            print("Warning: No structures found for any ranked IDs")
+
+    # Apply top N limit if specified (after filtering by existence)
     if top and top < len(sorted_df):
         print(f"Limiting to top {top} entries")
         sorted_df = sorted_df.head(top)
@@ -345,6 +374,7 @@ def apply_ranking(config_data: Dict[str, Any]) -> None:
     sorted_df['source_id'] = sorted_df['id']
 
     # Rename IDs to ranked format with zero-padding (num_digits from config)
+    # Use sequential numbering starting from 1
     sorted_df['id'] = [f"{prefix}_{i:0{num_digits}d}" for i in range(1, len(sorted_df) + 1)]
 
     # Reorder columns: id, source_id, metric (if computed), variables (if expression), rest

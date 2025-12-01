@@ -47,7 +47,7 @@ class Rank(BaseConfig):
             data: Table input to rank (required)
             pool: Structure pool for copying ranked structures (optional)
             metric: Column name or expression for ranking (e.g., "pLDDT" or "0.8*pLDDT+0.2*affinity") (required)
-            ascending: Sort order - False for descending (best first), True for ascending
+            ascending: Sort order - False for descending (highest first), True for ascending
             prefix: Prefix for renamed IDs (default: "rank", produces rank_1, rank_2, ...)
             top: Limit to top N entries after ranking (optional)
             **kwargs: Additional parameters
