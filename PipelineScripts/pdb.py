@@ -43,7 +43,9 @@ class PDB(BaseConfig):
         Initialize PDB tool.
 
         Args:
-            pdbs: PDB ID(s) to fetch. Can be single string or list of strings (e.g. "4ufc" or ["4ufc","1abc"])
+            pdbs: PDB ID(s) to fetch, or a folder path containing PDB files.
+                  Can be single string, list of strings (e.g. "4ufc" or ["4ufc","1abc"]),
+                  or a folder path (absolute or relative to PDBs folder)
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
             format: File format ("pdb" or "cif", default: "pdb")
             local_folder: Custom local folder to check first (before PDBs/). Default: None
@@ -70,6 +72,16 @@ class PDB(BaseConfig):
                 format="pdb"
             ))
 
+            # Load all PDB files from a folder (absolute path)
+            pdb = pipeline.add(PDB(
+                pdbs="/path/to/my/structures"
+            ))
+
+            # Load all PDB files from a folder (relative to PDBs folder)
+            pdb = pipeline.add(PDB(
+                pdbs="my_structures_subfolder"
+            ))
+
             # Check custom folder first, then PDBs/, then download
             pdb = pipeline.add(PDB(
                 pdbs="my_structure",
@@ -85,8 +97,11 @@ class PDB(BaseConfig):
                 remove_waters=False
             ))
         """
+        # Check if pdbs is a folder path and load all files from it
+        if isinstance(pdbs, str) and self._is_folder_path(pdbs):
+            self.pdb_ids = self._load_files_from_folder(pdbs, format)
         # Normalize pdbs to list - preserve original case for local file lookups
-        if isinstance(pdbs, str):
+        elif isinstance(pdbs, str):
             self.pdb_ids = [pdbs]
         else:
             self.pdb_ids = list(pdbs)
@@ -121,6 +136,75 @@ class PDB(BaseConfig):
         # Initialize base class
         super().__init__(**kwargs)
     
+    def _is_folder_path(self, path: str) -> bool:
+        """
+        Check if a string is a folder path.
+
+        Args:
+            path: Path to check
+
+        Returns:
+            True if path is a folder, False otherwise
+        """
+        # Check if absolute path exists and is a directory
+        if os.path.isabs(path) and os.path.isdir(path):
+            return True
+
+        # Check if it's a relative path to PDBs folder (we'll check this at configure_inputs time)
+        # For now, if it contains path separators or exists as a directory, treat it as a folder
+        if os.path.isdir(path):
+            return True
+
+        return False
+
+    def _load_files_from_folder(self, folder_path: str, format: str) -> List[str]:
+        """
+        Load all PDB/CIF files from a folder.
+
+        Args:
+            folder_path: Path to folder (absolute or relative to current directory)
+            format: File format to look for ('pdb' or 'cif')
+
+        Returns:
+            List of file basenames without extension
+
+        Note:
+            This method is called at __init__ time. It tries to find the folder as an absolute path
+            or relative to current directory. The folder will also be checked relative to PDBs folder
+            later in configure_inputs if needed.
+        """
+        extension = f".{format}"
+
+        # Try absolute path first
+        if os.path.isabs(folder_path) and os.path.isdir(folder_path):
+            target_folder = folder_path
+        # Try relative path as-is
+        elif os.path.isdir(folder_path):
+            target_folder = folder_path
+        else:
+            # Store for later resolution relative to PDBs folder
+            # This will be checked in configure_inputs when we have access to pipeline_folders
+            self.folder_source = folder_path
+            self.folder_needs_resolution = True
+            return []  # Will be populated in configure_inputs
+
+        # List all files with the specified extension
+        files = [f for f in os.listdir(target_folder) if f.endswith(extension)]
+
+        if not files:
+            raise ValueError(f"No {format.upper()} files found in folder '{folder_path}'")
+
+        # Extract basenames without extension
+        basenames = [os.path.splitext(f)[0] for f in sorted(files)]
+
+        print(f"  Found {len(basenames)} {format.upper()} files in folder: {folder_path}")
+
+        # Store the folder path for use in configure_inputs
+        self.folder_source = target_folder
+        self.folder_needs_resolution = False
+
+        return basenames
+
     def validate_params(self):
         """Validate PDB parameters."""
         if not self.pdb_ids:
@@ -139,6 +223,32 @@ class PDB(BaseConfig):
         """Configure input parameters and check for local files."""
         self.folders = pipeline_folders
 
+        # Check if folder needs resolution relative to PDBs
+        if hasattr(self, 'folder_needs_resolution') and self.folder_needs_resolution:
+            repo_pdbs_folder = pipeline_folders.get('PDBs', '')
+            candidate_path = os.path.join(repo_pdbs_folder, self.folder_source)
+
+            if os.path.isdir(candidate_path):
+                # Found the folder relative to PDBs
+                extension = f".{self.format}"
+                files = [f for f in os.listdir(candidate_path) if f.endswith(extension)]
+
+                if not files:
+                    raise ValueError(f"No {self.format.upper()} files found in folder '{candidate_path}'")
+
+                # Extract basenames without extension
+                basenames = [os.path.splitext(f)[0] for f in sorted(files)]
+
+                print(f"  Found {len(basenames)} {self.format.upper()} files in folder (relative to PDBs): {self.folder_source}")
+
+                # Update pdb_ids and custom_ids
+                self.pdb_ids = basenames
+                self.custom_ids = basenames.copy()
+                self.folder_source = candidate_path
+                self.folder_needs_resolution = False
+            else:
+                raise ValueError(f"Folder '{self.folder_source}' not found (tried absolute, relative, and relative to PDBs folder)")
+
         # Check which files exist locally and which will need to be downloaded
         repo_pdbs_folder = pipeline_folders.get('PDBs', '')
         self.found_locally = []
@@ -149,8 +259,15 @@ class PDB(BaseConfig):
             found = False
             local_path = None
 
+            # Check folder_source first if it was set (from folder loading)
+            if hasattr(self, 'folder_source') and self.folder_source:
+                local_path = os.path.join(self.folder_source, f"{pdb_id}{extension}")
+                if os.path.exists(local_path):
+                    self.found_locally.append((pdb_id, local_path))
+                    found = True
+
             # Check local_folder if specified
-            if self.local_folder:
+            if not found and self.local_folder:
                 local_path = os.path.join(self.local_folder, f"{pdb_id}{extension}")
                 if os.path.exists(local_path):
                     self.found_locally.append((pdb_id, local_path))
@@ -354,12 +471,15 @@ class PDB(BaseConfig):
         repo_pdbs_folder = self.folders['PDBs']
 
         # Create config file for fetching
+        # If folder_source is set (from folder loading), use it as local_folder for the runtime script
+        effective_local_folder = getattr(self, 'folder_source', None) or self.local_folder
+
         config_file = os.path.join(output_folder, "fetch_config.json")
         config_data = {
             "pdb_ids": self.pdb_ids,
             "custom_ids": self.custom_ids,
             "format": self.format,
-            "local_folder": self.local_folder,
+            "local_folder": effective_local_folder,
             "repo_pdbs_folder": repo_pdbs_folder,
             "biological_assembly": self.biological_assembly,
             "remove_waters": self.remove_waters,

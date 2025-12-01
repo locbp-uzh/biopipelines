@@ -11,8 +11,10 @@ from .rfdiffusion import RFdiffusion
 from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .protein_mpnn import ProteinMPNN
 from .alphafold import AlphaFold
+from .ligand import Ligand
 from .ligand_mpnn import LigandMPNN
 from .boltz2 import Boltz2
+from .boltzgen import BoltzGen
 from .compound_library import CompoundLibrary
 from .slice_table import SliceTable
 from .average_by_table import AverageByTable
@@ -40,8 +42,10 @@ __all__ = [
     'RFDAA_PrepareLigand',
     'ProteinMPNN',
     'AlphaFold',
+    'Ligand',
     'LigandMPNN',
     'Boltz2',
+    'BoltzGen',
     'CompoundLibrary',
     'SliceTable',
     'AverageByTable',
