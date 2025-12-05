@@ -76,6 +76,7 @@ class FolderManager:
         models_path = shared_config.get('models', 'models')
         containers_path = shared_config.get('containers', 'containers')
         boltz_cache_path = shared_config.get('BoltzCache', 'models/Boltz')
+        boltzgen_cache_path = shared_config.get('BoltzGenCache', 'models/BoltzGen')
 
         self._folders.update({
             "models": os.path.join(self._folders["group"], models_path),
@@ -92,6 +93,7 @@ class FolderManager:
             "OmegaFold": os.path.join(self._folders["data"], tool_data_config.get('OmegaFold', 'OmegaFold')),
             "Boltz": os.path.join(self._folders["data"], tool_data_config.get('Boltz', 'boltz')),
             "BoltzCache": os.path.join(self._folders["group"], boltz_cache_path),
+            "BoltzGenCache": os.path.join(self._folders["group"], boltzgen_cache_path),
             "DynamicBind": dynamicbind_base,
             "DynamicBindWeights": os.path.join(dynamicbind_base, "workdir"),
             "ModelForge": os.path.join(self._folders["data"], tool_data_config.get('ModelForge', 'modelforge')),

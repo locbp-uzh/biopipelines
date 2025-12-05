@@ -23,6 +23,7 @@ folders:
     models: "models"
     containers: "containers"
     BoltzCache: "models/Boltz"
+    BoltzGenCache: "models/BoltzGen"
 
 # Default Environments
 # Each tool can have a default conda environment specified here
@@ -31,6 +32,7 @@ folders:
 environments:
   # Structure prediction and design tools
   Boltz2: "Boltz2Env"
+  BoltzGen: "boltzgen"
   RF3: "modelforge"
   ESMFold: "ProteinEnv"
   RFdiffusion: "ProteinEnv"

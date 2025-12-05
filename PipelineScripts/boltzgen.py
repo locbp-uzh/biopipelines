@@ -226,11 +226,14 @@ class BoltzGen(BaseConfig):
             self.final_ranked_folder, "results_overview.pdf"
         )
 
-        # Helper script paths (only set if folders are available)
+        # Helper script paths and cache directory (only set if folders are available)
         if hasattr(self, 'folders') and self.folders:
             self.boltzgen_helper_py = os.path.join(
                 self.folders["HelpScripts"], "pipe_boltzgen.py"
             )
+            # Use BoltzGenCache from folders if user didn't specify custom cache_dir
+            if self.cache_dir is None:
+                self.cache_dir = self.folders.get("BoltzGenCache")
         else:
             self.boltzgen_helper_py = None
 

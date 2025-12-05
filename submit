@@ -11,15 +11,17 @@
 # If no arguments provided, will look for the most recent pipeline output.
 #
 
-module load mamba
-source /apps/opt/spack/linux-ubuntu20.04-x86_64/gcc-9.3.0/mamba-23.11.0-0-334ztq7i4mzu762ew2x3kbbrrorhe6eg/etc/profile.d/conda.sh
+module load miniforge3
+# miniforge3 automatically sources conda.sh
+# source /apps/opt/spack/linux-ubuntu20.04-x86_64/gcc-9.3.0/mamba-23.11.0-0-334ztq7i4mzu762ew2x3kbbrrorhe6eg/etc/profile.d/conda.sh
+
 
 set -e  # Exit on any error
 
 # Activate or create biopipelines conda environment
-if conda env list | grep -q "^biopipelines "; then
-    echo "Activating biopipelines conda environment..."
-    conda activate biopipelines
+if mamba env list | grep -q "^biopipelines "; then
+    echo "Activating biopipelines environment..."
+    mamba activate biopipelines
 else
     echo "biopipelines environment not found. Creating it..."
 
@@ -29,14 +31,14 @@ else
 
     if [ -f "$ENV_FILE" ]; then
         echo "Using environment specification: $ENV_FILE"
-        conda env create -f "$ENV_FILE"
+        mamba env create -f "$ENV_FILE"
     else
         echo "Warning: biopipelines.yaml not found, creating minimal environment"
-        conda create -n biopipelines -y python pyyaml pandas requests numpy
+        mamba create -n biopipelines -y python pyyaml pandas requests numpy
     fi
 
     echo "Activating newly created biopipelines environment..."
-    conda activate biopipelines
+    mamba activate biopipelines
 fi
 echo ""
 
@@ -77,7 +79,62 @@ run_pipeline_and_submit() {
         echo ""
     fi
 
-    # Extract sbatch commands from pipeline output
+    # Check if this is a multi-batch pipeline by looking for slurm_batch*.sh files
+    # Extract runtime directory from pipeline output
+    local runtime_dir=$(echo "$pipeline_output" | grep -o '/[^ ]*/RunTime' | head -1)
+
+    if [ -n "$runtime_dir" ] && [ -d "$runtime_dir" ]; then
+        # Check for batch files
+        local batch_files=$(ls "$runtime_dir"/slurm_batch*.sh 2>/dev/null | sort -V)
+
+        if [ -n "$batch_files" ]; then
+            # Multi-batch pipeline
+            echo ""
+            echo "Detected multi-batch pipeline"
+            echo "Submitting jobs with dependencies..."
+            echo "=========================================="
+            echo ""
+
+            local job_count=0
+            local last_job_id=""
+
+            for batch_file in $batch_files; do
+                job_count=$((job_count + 1))
+
+                # Replace <JOBID> placeholder with previous job ID
+                if [ -n "$last_job_id" ]; then
+                    echo "Updating $batch_file with dependency on job $last_job_id"
+                    sed -i "s/<JOBID>/$last_job_id/g" "$batch_file"
+                fi
+
+                # Extract job name from batch file or use default
+                local batch_num=$(basename "$batch_file" | grep -o '[0-9]\+')
+                local job_name=$(echo "$pipeline_output" | grep "Job:" | head -1 | sed 's/.*Job: //')
+
+                # Submit and capture job ID
+                echo "Submitting batch $batch_num..."
+                local submit_output=$(sbatch --parsable "$batch_file" 2>&1)
+                local submit_exit=$?
+
+                if [ $submit_exit -eq 0 ]; then
+                    last_job_id="$submit_output"
+                    echo "✓ Batch $batch_num submitted: Job ID $last_job_id"
+                else
+                    echo "✗ Failed to submit batch $batch_num"
+                    echo "$submit_output"
+                    return 1
+                fi
+                echo ""
+            done
+
+            echo "=========================================="
+            echo "All batches submitted. Total: $job_count"
+            echo "Job dependency chain: $batch_files"
+            return 0
+        fi
+    fi
+
+    # Single batch pipeline (original behavior)
     local sbatch_commands=$(echo "$pipeline_output" | grep "^sbatch ")
 
     if [ -z "$sbatch_commands" ]; then

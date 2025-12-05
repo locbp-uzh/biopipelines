@@ -37,7 +37,7 @@ Tool2 -> <tool2>.sh -> <job folder>/<Execution order>_<Tool name>/<output files>
 
 ### Execution Environments
 The notebooks are designed for University of Zürich's cluster computing environment with:
-- GPU allocation: T4, V100, A100 options
+- GPU allocation: L4, V100, A100, H100, H200 options
 - SLURM job scheduling integration
 - Shared storage at `/shares/locbp.chem.uzh`
 - User data directories at `/data/{username}` and `/home/{username}`

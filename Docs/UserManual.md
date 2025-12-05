@@ -132,18 +132,18 @@ Configure computational resources before submitting:
 
 ```python
 # Examples
-Resources(gpu="A100", memory="32GB", time="24:00:00")      # Specific model
-Resources(gpu="32GB|80GB", memory="32GB", time="24:00:00") # V100 or A100/H100
-Resources(gpu="!T4", memory="32GB", time="24:00:00")       # Exclude T4, equivalent to above one
-Resources(memory="128GB", time="24:00:00", cpus=32)        # CPU-only
+Resources(gpu="A100", memory="32GB", time="24:00:00")              # Specific model
+Resources(gpu="32GB|80GB|141GB", memory="32GB", time="24:00:00")   # V100, A100, H100, or H200
+Resources(gpu="!L4", memory="32GB", time="24:00:00")               # Exclude L4, equivalent to above
+Resources(memory="128GB", time="24:00:00", cpus=32)                # CPU-only
 ```
 
 **GPU parameter options:**
-- `"T4"`, `"V100"`, `"A100"`, `"H100"` - Specific GPU models
-- `"32GB"`, `"80GB"`, `"32GB|80GB"` - Memory-based selection
-- `"!T4"` - Equivalent to `"32GB|80GB"`
+- `"L4"`, `"V100"`, `"A100"`, `"H100"`, `"H200"` - Specific GPU models
+- `"24GB"`, `"32GB"`, `"80GB"`, `"141GB"`, `"32GB|80GB|141GB"` - Memory-based selection
+- `"!L4"` - Equivalent to `"32GB|80GB|141GB"`
 - `"gpu"` - Any available GPU
-- `"high-memory"` - Equivalent to `"32GB|80GB"`
+- `"high-memory"` - Equivalent to `"32GB|80GB|141GB"`
 - Omit parameter for CPU-only jobs
 
 Calling `pipeline.slurm()` to validate the pipeline (done automatically with context manager), generates the full scripts, and generates a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
