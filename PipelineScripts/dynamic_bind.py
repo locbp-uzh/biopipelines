@@ -393,7 +393,7 @@ python {self.folders["HelpScripts"]}/pipe_dynamicbind_prepare_ligands.py "{self.
 """
 
         script += f"""# Get Python paths from both environments
-source $(conda info --base)/etc/profile.d/conda.sh
+eval "$(conda shell.bash hook)"
 
 # Activate dynamicbind environment and get python path
 echo "Activating dynamicbind environment..."
