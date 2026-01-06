@@ -34,9 +34,13 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv):
     # Look for unrelaxed or relaxed rank_001 PDB files (best models)
     for pdb_file in glob.glob(os.path.join(folding_folder, "*_rank_001_*.pdb")):
         # Extract base name and corresponding JSON file
-        # Format: <id>_unrelaxed_rank_001_alphafold2_ptm_model_2_seed_000.pdb
-        # JSON:   <id>_unrelaxed_rank_001_alphafold2_ptm_model_2_seed_000.json
+        # ColabFold naming:
+        # PDB:  <id>_unrelaxed_rank_001_alphafold2_ptm_model_2_seed_000.pdb
+        # JSON: <id>_scores_rank_001_alphafold2_ptm_model_2_seed_000.json
+        # Replace _unrelaxed_ or _relaxed_ with _scores_ to get JSON filename
         json_file = pdb_file.replace('.pdb', '.json')
+        json_file = json_file.replace('_unrelaxed_', '_scores_')
+        json_file = json_file.replace('_relaxed_', '_scores_')
 
         if not os.path.exists(json_file):
             print(f"Warning: JSON file not found for {pdb_file}")

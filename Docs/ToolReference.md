@@ -687,7 +687,7 @@ Predicts biomolecular structures using RoseTTAFold3. Supports protein-only and p
 **Installation**:
 The official RF3 repository uses `uv` for installation, but for consistency with BioPipelines we use conda. Run the following in your data folder:
 ```bash
-cd /data/$USER
+cd /home/$USER/data
 git clone https://github.com/RosettaCommons/modelforge.git
 cd modelforge
 conda create -n modelforge python=3.12
@@ -755,7 +755,7 @@ Predicts protein-ligand binding affinities from complex structures using OnionNe
 
 **Installation**:
 ```bash
-cd /data/$USER
+cd /home/$USER/data
 git lfs clone https://github.com/zhenglz/onionnet.git
 cd onionnet
 conda env create -f onet_env.yaml
@@ -795,7 +795,7 @@ Predicts protein-ligand binding affinities using OnionNet-2, an improved version
 
 **Installation**:
 ```bash
-cd /data/$USER
+cd /home/$USER/data
 git clone https://github.com/zchwang/OnionNet-2.git
 cd OnionNet-2
 conda create -n OnionNet2Env python=3.8
@@ -845,10 +845,10 @@ Predicts ligand-specific protein-ligand complex structures using equivariant dif
 
 **Installation:**
 
-Requires two conda environments. 
+Requires two conda environments.
 
 ```bash
-cd /data/$USER
+cd /home/$USER/data
 git clone https://github.com/luwei0917/DynamicBind.git
 cd DynamicBind
 wget https://zenodo.org/records/10183369/files/workdir.zip
@@ -888,7 +888,7 @@ conda install -c conda-forge openmm pdbfixer biopython openmmforcefields openff-
 
 Config: `DynamicBind: null` (tool manages environments)
 
-Model weights location: `/data/{username}/DynamicBind/workdir`
+Model weights location: `/home/{username}/data/DynamicBind/workdir`
 
 **Parameters:**
 - `proteins`: Input protein(s) - PDB filename, list of PDBs, or tool output (all structures used)

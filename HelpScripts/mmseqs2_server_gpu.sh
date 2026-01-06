@@ -40,12 +40,12 @@ log() {
 }
 
 check_mmseqs_installation() {
-    local mmseqs_dir="/data/$USER/mmseqs"
+    local mmseqs_dir="/home/$USER/data/mmseqs"
     local mmseqs_bin="$mmseqs_dir/bin/mmseqs"
 
     if [[ ! -f "$mmseqs_bin" ]]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - MMseqs2 not found at $mmseqs_bin, downloading..."
-        cd "/data/$USER" || { echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot access /data/$USER"; exit 1; }
+        cd "/home/$USER/data" || { echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot access /home/$USER/data"; exit 1; }
 
         # Download MMseqs2
         wget https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
@@ -110,7 +110,7 @@ convert_to_a3m() {
     local scratch_a3m="$tmp_dir/raw.a3m"
     local final_a3m="$output_file"
 
-    /data/$USER/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
+    /home/$USER/data/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
         --msa-format-mode 5 \
         --threads "$OMP_NUM_THREADS"
 
@@ -141,7 +141,7 @@ convert_a3m_to_csv() {
 
 # Start GPU server with optimized settings
 log "Starting MMseqs2 GPU server for $DB_PATH"
-CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
+CUDA_VISIBLE_DEVICES=0 /home/$USER/data/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
@@ -315,7 +315,7 @@ while true; do
     cp "$fasta" "$tmp/query.fasta"
     query_db="$tmp/queryDB"
     log "Creating queryDB"
-    /data/$USER/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
+    /home/$USER/data/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
 
     # Result database (not m8 format)
     result_db="$tmp/resultDB"
@@ -330,7 +330,7 @@ while true; do
     gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory before search: ${gpu_mem_before}MB"
 
-    if ! CUDA_VISIBLE_DEVICES=0 /data/$USER/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
+    if ! CUDA_VISIBLE_DEVICES=0 /home/$USER/data/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
       --gpu 1 \
       --gpu-server 1 \
       --prefilter-mode 1 \

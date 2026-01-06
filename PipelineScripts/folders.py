@@ -62,7 +62,7 @@ class FolderManager:
         self._folders.update({
             "notebooks": notebooks_folder,
             "home": f"/home/{user_name}",
-            "data": f"/data/{user_name}",
+            "data": f"/home/{user_name}/data",
             "scratch": f"/scratch/{user_name}",
             "group": group_folder,
             "user": f"{group_folder}/{user_code}",

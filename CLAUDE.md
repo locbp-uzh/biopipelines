@@ -40,7 +40,7 @@ The notebooks are designed for University of Zürich's cluster computing environ
 - GPU allocation: L4, V100, A100, H100, H200 options
 - SLURM job scheduling integration
 - Shared storage at `/shares/locbp.chem.uzh`
-- User data directories at `/data/{username}` and `/home/{username}`
+- User data directories at `/home/{username}/data` and `/home/{username}`
 
 ## Common Development Commands
 

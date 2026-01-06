@@ -450,7 +450,7 @@ class Pipeline:
         # Activate primary environment (if one is needed)
         if primary_env is not None:
             script_lines.extend([
-                'eval "$(conda shell.bash hook)"',
+                'eval "$(mamba shell hook --shell bash)"',
                 f"mamba activate {primary_env}",
                 "echo"
             ])

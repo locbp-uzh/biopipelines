@@ -7,7 +7,7 @@ folders:
   # Base system folders
   group: "/shares/locbp.chem.uzh"
 
-  # Tool-specific data folders (relative to /data/{username})
+  # Tool-specific data folders (relative to /home/{username}/data)
   tool_data:
     RFdiffusion: "RFdiffusion"
     RFdiffusionAllAtom: "rf_diffusion_all_atom"
@@ -39,7 +39,7 @@ environments:
   RFdiffusionAllAtom: "ProteinEnv"
   ProteinMPNN: "ProteinEnv"
   LigandMPNN: "ligandmpnn_env"
-  AlphaFold: null
+  AlphaFold: "biopipelines"
 
   # Analysis and utility tools
   MMseqs2: "biopipelines"
@@ -51,6 +51,7 @@ environments:
 
   # Data manipulation tools
   Filter: "biopipelines"
+  Rank: "biopipelines"
   SelectBest: "biopipelines"
   MergeTables: "biopipelines"
   ConcatenateTables: "biopipelines"

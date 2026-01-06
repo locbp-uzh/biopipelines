@@ -1,0 +1,1 @@
+Read Docs/UserManual.md. Understand the difference between pipeline and slurm runtime. This session is run on a local computer, not on the cluster. Understand the organization of the repository and the relationship between PipelineScripts and HelpScripts. Understand the folder configuration on the cluster.
