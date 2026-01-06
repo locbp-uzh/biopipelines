@@ -103,6 +103,7 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
         ranked_id = f"{prefix}_{rank_idx:0{num_digits}d}"
 
         # Extract structures (PDB/CIF files)
+        structure_found = False
         source_structure = find_structure_in_pool(source_id, pool_folder)
 
         if source_structure:
@@ -112,6 +113,7 @@ def extract_pool_data_for_ranked_ids(ranked_ids: List[str], pool_folder: str,
                 shutil.copy2(source_structure, dest)
                 extracted_files["structures"].append(dest)
                 print(f"Extracted structure: {source_id} -> {ranked_id}{ext}")
+                structure_found = True
             except Exception as e:
                 print(f"Warning: Could not copy structure {source_structure}: {e}")
                 missing_ranked_ids.append(ranked_id)
