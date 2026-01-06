@@ -438,19 +438,21 @@ class Pipeline:
             "",
             "set -e  # Exit on any error",
             "umask 002  # Make all files group-writable by default",
+            "",
+            "# Initialize mamba for environment activation",
+            'eval "$(mamba shell hook --shell bash)"',
             ""
         ]
-        
+
         # Determine primary environment (most common)
         env_counts = {}
         for tool in self.tools:
             env_counts[tool.environment] = env_counts.get(tool.environment, 0) + 1
         primary_env = max(env_counts, key=env_counts.get)
-        
+
         # Activate primary environment (if one is needed)
         if primary_env is not None:
             script_lines.extend([
-                'eval "$(mamba shell hook --shell bash)"',
                 f"mamba activate {primary_env}",
                 "echo"
             ])
@@ -774,6 +776,9 @@ umask 002
             "",
             "set -e  # Exit on any error",
             "umask 002  # Make all files group-writable by default",
+            "",
+            "# Initialize mamba for environment activation",
+            'eval "$(mamba shell hook --shell bash)"',
             ""
         ]
 
@@ -785,7 +790,7 @@ umask 002
 
         # Activate primary environment
         if primary_env is not None:
-            script_lines.extend(['eval "$(conda shell.bash hook)"', f"mamba activate {primary_env}", "echo"])
+            script_lines.extend([f"mamba activate {primary_env}", "echo"])
 
         script_lines.extend([
             "echo Configuration",
