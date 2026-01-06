@@ -33,7 +33,7 @@ class Rank(BaseConfig):
     DEFAULT_ENV = None  # Loaded from config.yaml
 
     def __init__(self,
-                 data: Union[ToolOutput, StandardizedOutput] = None,
+                 data: Union[ToolOutput, StandardizedOutput, TableInfo] = None,
                  pool: Union[ToolOutput, StandardizedOutput] = None,
                  metric: str = None,
                  ascending: bool = False,
@@ -134,8 +134,8 @@ class Rank(BaseConfig):
 
     def validate_params(self):
         """Validate Rank parameters."""
-        if not isinstance(self.data_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("data must be a ToolOutput or StandardizedOutput object")
+        if not isinstance(self.data_input, (ToolOutput, StandardizedOutput, TableInfo)):
+            raise ValueError("data must be a ToolOutput, StandardizedOutput, or TableInfo object")
 
         if self.pool_output and not isinstance(self.pool_output, (ToolOutput, StandardizedOutput)):
             raise ValueError("pool must be a ToolOutput or StandardizedOutput object")
@@ -156,7 +156,14 @@ class Rank(BaseConfig):
         self.input_table_info = None
         self.input_row_count = None  # Will be determined at runtime
 
-        if hasattr(self.data_input, 'tables'):
+        # Check if data_input is a TableInfo object directly
+        if isinstance(self.data_input, TableInfo):
+            self.input_csv_path = self.data_input.path
+            self.input_table_name = self.data_input.name
+            self.input_table_info = self.data_input
+            if hasattr(self.data_input, 'count') and isinstance(self.data_input.count, int):
+                self.input_row_count = self.data_input.count
+        elif hasattr(self.data_input, 'tables'):
             tables = self.data_input.tables
 
             # Handle TableContainer objects
@@ -199,8 +206,12 @@ class Rank(BaseConfig):
 
     def _get_input_columns(self) -> List[str]:
         """Get column names from the input table."""
+        # If data_input is a TableInfo directly, get columns from it
+        if isinstance(self.data_input, TableInfo):
+            if hasattr(self.data_input, 'columns') and self.data_input.columns:
+                return self.data_input.columns
         # Try to get columns from data tool's table info
-        if hasattr(self.data_input, 'tables') and hasattr(self.data_input.tables, '_tables'):
+        elif hasattr(self.data_input, 'tables') and hasattr(self.data_input.tables, '_tables'):
             # Look through the tables to find one with column info
             for name, info in self.data_input.tables._tables.items():
                 if hasattr(info, 'columns') and info.columns:
