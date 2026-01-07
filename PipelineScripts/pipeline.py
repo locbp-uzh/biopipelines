@@ -577,7 +577,7 @@ class Pipeline:
             return ""
         elif gpu_spec == "high-memory":
             return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM141GB\""
-        elif gpu_spec == "gpu":
+        elif gpu_spec == "gpu" or gpu_spec == "any":
             return "#SBATCH --gpus=1"
         elif gpu_spec.startswith("!"):
             excluded_model = gpu_spec[1:]
