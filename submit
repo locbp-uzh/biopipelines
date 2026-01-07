@@ -21,7 +21,7 @@ eval "$(conda shell.bash hook)"
 set -e  # Exit on any error
 
 # Activate or create biopipelines conda environment
-if mamba env list | grep -q "^biopipelines "; then
+if mamba env list | grep -qw "biopipelines"; then
     echo "Activating biopipelines environment..."
     mamba activate biopipelines
 else
