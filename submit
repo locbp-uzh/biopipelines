@@ -15,6 +15,8 @@ module load miniforge3
 # miniforge3 automatically sources conda.sh
 # source /apps/opt/spack/linux-ubuntu20.04-x86_64/gcc-9.3.0/mamba-23.11.0-0-334ztq7i4mzu762ew2x3kbbrrorhe6eg/etc/profile.d/conda.sh
 
+# Initialize mamba for current shell session
+eval "$(mamba shell.bash hook)"
 
 set -e  # Exit on any error
 
@@ -33,8 +35,8 @@ else
         echo "Using environment specification: $ENV_FILE"
         mamba env create -f "$ENV_FILE"
     else
-        echo "Warning: biopipelines.yaml not found, creating minimal environment"
-        mamba create -n biopipelines -y python pyyaml pandas requests numpy
+        echo "ERROR: biopipelines.yaml not found, creating minimal environment"
+        # mamba create -n biopipelines -y python pyyaml pandas requests numpy
     fi
 
     echo "Activating newly created biopipelines environment..."
