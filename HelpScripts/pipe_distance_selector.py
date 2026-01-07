@@ -82,6 +82,44 @@ def get_ligand_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
     return ligand_atoms
 
 
+def get_residue_atoms(atoms: List[Atom], residue_selection: str) -> List[Atom]:
+    """
+    Get atoms for specific residues using PyMOL-style selection.
+
+    Args:
+        atoms: List of all atoms from PDB file
+        residue_selection: PyMOL-style residue selection (e.g., "87-100", "10+15+20-25")
+
+    Returns:
+        List of Atom objects for the selected residues
+    """
+    # Parse selection to get list of residue numbers
+    selected_residues = set(sele_to_list(residue_selection))
+
+    if not selected_residues:
+        raise ValueError(f"Could not parse residue selection: {residue_selection}")
+
+    # Standard amino acid names
+    standard_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+
+    # Select atoms from specified residues
+    residue_atoms = []
+    for atom in atoms:
+        if atom.res_name in standard_residues and atom.res_num in selected_residues:
+            residue_atoms.append(atom)
+
+    if not residue_atoms:
+        # Get all available residue numbers for error message
+        available_residues = sorted(set(atom.res_num for atom in atoms if atom.res_name in standard_residues))
+        raise ValueError(f"Could not find residues matching selection '{residue_selection}'. Available protein residues: {format_ligandmpnn_selection_from_list(available_residues)}")
+
+    print(f"Found residues '{residue_selection}': {len(residue_atoms)} atoms")
+    return residue_atoms
+
+
 def get_protein_residues(atoms: List[Atom]) -> Dict[int, List[Atom]]:
     """
     Get protein residues organized by residue number.
@@ -259,7 +297,7 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
     else:
         return sele_to_list(restrict_spec)
 
-def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], distance_cutoff: float, restrict_to_residues: List[int] = None) -> Tuple[List[str], List[str]]:
+def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], distance_cutoff: float, restrict_to_residues: List[int] = None, exclude_reference_residues: List[int] = None) -> Tuple[List[str], List[str]]:
     """
     Calculate distances from protein residues to reference atoms using native PDB parser.
 
@@ -268,6 +306,7 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
         reference_atoms: List of reference atoms
         distance_cutoff: Distance cutoff in Angstroms
         restrict_to_residues: Optional list of residue numbers to restrict search to
+        exclude_reference_residues: Optional list of reference residue numbers to exclude from "within"
 
     Returns:
         Tuple of (within_residues, beyond_residues) as lists of residue identifiers
@@ -298,7 +337,11 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
         residue_id = f"{chain_id}{res_num}"
 
         if min_distance <= distance_cutoff:
-            within_residues.append(residue_id)
+            # Exclude reference residues if requested
+            if exclude_reference_residues and res_num in exclude_reference_residues:
+                beyond_residues.append(residue_id)
+            else:
+                within_residues.append(residue_id)
         else:
             beyond_residues.append(residue_id)
 
@@ -402,7 +445,7 @@ def format_pymol_selection(residue_list):
     return "+".join(range_parts)
 
 
-def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float, restrict_spec: str = "", id_map: Dict[str, str] = None) -> Dict[str, any]:
+def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float, restrict_spec: str = "", id_map: Dict[str, str] = None, include_reference: bool = True) -> Dict[str, any]:
     """
     Analyze a single structure for distance-based residue selection using native PDB parser.
 
@@ -412,6 +455,7 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
         distance_cutoff: Distance cutoff in Angstroms
         restrict_spec: Restriction specification (table reference or direct selection)
         id_map: ID mapping dictionary for matching structure IDs to table IDs
+        include_reference: Whether to include reference residues in "within" selection
 
     Returns:
         Dictionary with analysis results
@@ -432,10 +476,18 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
     if reference_type == "ligand":
         reference_atoms = get_ligand_atoms(atoms, selection)
         reference_description = selection
+        exclude_reference_residues = None  # Ligands are not protein residues
+    elif reference_type == "residues":
+        reference_atoms = get_residue_atoms(atoms, selection)
+        reference_description = selection
+        # If include_reference is False, exclude the reference residues from "within"
+        if not include_reference:
+            exclude_reference_residues = sele_to_list(selection)
+        else:
+            exclude_reference_residues = None
     else:
-        # For atoms/residues, we'll need to implement native selection parsing
-        # For now, only ligand selection is supported
-        raise ValueError(f"Reference type '{reference_type}' not yet supported with native PDB parser. Only 'ligand' is supported.")
+        # For atoms, we'll need to implement native selection parsing
+        raise ValueError(f"Reference type '{reference_type}' not yet supported with native PDB parser. Supported types: 'ligand', 'residues'")
 
     print(f"Using reference: {reference_description} ({len(reference_atoms)} atoms)")
 
@@ -446,7 +498,7 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
     # Calculate distances with restriction
     within_residues, beyond_residues = calculate_residue_distances(
-        atoms, reference_atoms, distance_cutoff, restrict_to_residues
+        atoms, reference_atoms, distance_cutoff, restrict_to_residues, exclude_reference_residues
     )
 
     # Format as universal selections (numbers only) - works for all tools
@@ -467,16 +519,17 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
 
 def main():
-    if len(sys.argv) != 7:
-        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map>")
+    if len(sys.argv) != 8:
+        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map> <include_reference>")
         print("")
         print("Arguments:")
         print("  structure_files: Comma-separated list of PDB file paths")
-        print("  reference_spec: Reference specification (e.g., 'ligand:LIG', 'atoms:resname ATP')")
+        print("  reference_spec: Reference specification (e.g., 'ligand:LIG', 'residues:87-100')")
         print("  distance: Distance cutoff in Angstroms")
         print("  restrict_spec: Restriction specification (table reference, direct selection, or empty string)")
         print("  output_csv: Path to output CSV file")
         print("  id_map: JSON string with ID mapping pattern (e.g., '{\"*\": \"*_<N>\"}')")
+        print("  include_reference: 'true' or 'false' - whether to include reference residues in 'within'")
         sys.exit(1)
 
     structure_files_str = sys.argv[1]
@@ -485,6 +538,7 @@ def main():
     restrict_spec = sys.argv[4]
     output_csv = sys.argv[5]
     id_map_str = sys.argv[6]
+    include_reference_str = sys.argv[7]
 
     # Parse comma-separated list of structure files
     structure_files = [f.strip() for f in structure_files_str.split(",") if f.strip()]
@@ -498,11 +552,15 @@ def main():
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid id_map JSON: {e}")
 
+    # Parse include_reference boolean
+    include_reference = include_reference_str.lower() in ['true', '1', 'yes']
+
     print(f"Analyzing {len(structure_files)} structures with distance cutoff {distance_cutoff}Å")
     print(f"Reference: {reference_spec}")
     if restrict_spec:
         print(f"Restriction: {restrict_spec}")
     print(f"ID mapping: {id_map}")
+    print(f"Include reference: {include_reference}")
 
     # Analyze each structure
     results = []
@@ -513,7 +571,7 @@ def main():
 
         try:
             print(f"\nAnalyzing: {os.path.basename(pdb_file)}")
-            result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff, restrict_spec, id_map)
+            result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff, restrict_spec, id_map, include_reference)
             results.append(result)
 
             print(f"  Within {distance_cutoff}Å: {len(result['within'].split('+')) if result['within'] else 0} residues")

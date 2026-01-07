@@ -33,10 +33,14 @@ class DistanceSelector(BaseConfig):
                  structures: Union[str, List[str], ToolOutput] = None,
                  ligand: str = "",
                  distance: float = 5.0,
-                 reference_type: str = "ligand",
-                 reference_selection: str = "",
+                 reference: str = "ligand",
+                 residues: str = "",
                  restrict_to: Union[str, tuple, None] = None,
                  id_map: Dict[str, str] = {"*": "*_<N>"},
+                 include_reference: bool = True,
+                 # Deprecated parameters for backward compatibility
+                 reference_type: str = None,
+                 reference_selection: str = None,
                  **kwargs):
         """
         Initialize DistanceSelector configuration.
@@ -45,30 +49,42 @@ class DistanceSelector(BaseConfig):
             structures: Input structures (PDB files or ToolOutput from previous tool)
             ligand: Ligand identifier for distance reference (e.g., "LIG", "ATP")
             distance: Distance cutoff in Angstroms (default: 5.0)
-            reference_type: Type of reference for distance calculation (default: "ligand")
-                          Options: "ligand", "atoms", "residues"
-            reference_selection: Specific selection if not using ligand
-                               (e.g., "resname ATP", "resi 100-105")
+            reference: Type of reference for distance calculation (default: "ligand")
+                      Options: "ligand", "residues"
+            residues: PyMOL-style residue selection when reference="residues"
+                     (e.g., "87-100", "10+15+20-25")
             restrict_to: Optional selection to restrict distance search to.
-                                  Accepts:
-                                  - Table reference tuple: (table, "column")
-                                  - Direct selection string: "10-20+30-40"
-                                  - None: Consider all protein residues (default)
+                        Accepts:
+                        - Table reference tuple: (table, "column")
+                        - Direct selection string: "10-20+30-40"
+                        - None: Consider all protein residues (default)
             id_map: ID mapping pattern for matching structure IDs to table IDs (default: {"*": "*_<N>"})
                    - Used when table IDs don't match structure IDs
                    - Example: structure ID "rifampicin_1_2" maps to table ID "rifampicin_1"
                    - Pattern {"*": "*_<N>"} strips last "_<number>" from structure ID
                    - Set to {"*": "*"} for no mapping (1:1 ID match)
+            include_reference: Whether to include reference residues in "within" selection (default: True)
+                             - True: "within" includes reference + nearby residues
+                             - False: "within" includes only nearby residues (excludes reference itself)
+            reference_type: DEPRECATED - use 'reference' instead
+            reference_selection: DEPRECATED - use 'residues' instead
             **kwargs: Additional parameters
         """
+        # Handle deprecated parameters
+        if reference_type is not None:
+            reference = reference_type
+        if reference_selection is not None:
+            residues = reference_selection
+
         # Store DistanceSelector-specific parameters
         self.structures = structures
         self.ligand = ligand
         self.distance = distance
-        self.reference_type = reference_type
-        self.reference_selection = reference_selection
+        self.reference = reference
+        self.residues = residues
         self.restrict_to_selection = restrict_to
         self.id_map = id_map
+        self.include_reference = include_reference
 
         # Track input source type
         self.input_is_tool_output = isinstance(structures, ToolOutput)
@@ -91,17 +107,17 @@ class DistanceSelector(BaseConfig):
         if not self.structures:
             raise ValueError("structures parameter is required")
 
-        if not self.ligand and self.reference_type == "ligand":
-            raise ValueError("ligand parameter is required when reference_type is 'ligand'")
+        if not self.ligand and self.reference == "ligand":
+            raise ValueError("ligand parameter is required when reference is 'ligand'")
 
         if self.distance <= 0:
             raise ValueError("distance must be positive")
 
-        if self.reference_type not in ["ligand", "atoms", "residues"]:
-            raise ValueError("reference_type must be 'ligand', 'atoms', or 'residues'")
+        if self.reference not in ["ligand", "residues"]:
+            raise ValueError("reference must be 'ligand' or 'residues'")
 
-        if self.reference_type != "ligand" and not self.reference_selection:
-            raise ValueError("reference_selection is required when reference_type is not 'ligand'")
+        if self.reference == "residues" and not self.residues:
+            raise ValueError("residues parameter is required when reference is 'residues'")
 
         # Validate restrict_to_selection if provided
         if self.restrict_to_selection is not None:
@@ -198,13 +214,16 @@ class DistanceSelector(BaseConfig):
             config_lines.append(f"INPUT: {self.input_structures}")
 
         config_lines.extend([
-            f"LIGAND: {self.ligand}",
+            f"REFERENCE: {self.reference}",
             f"DISTANCE: {self.distance}Å",
-            f"REFERENCE TYPE: {self.reference_type}",
         ])
 
-        if self.reference_selection:
-            config_lines.append(f"REFERENCE SELECTION: {self.reference_selection}")
+        if self.reference == "ligand":
+            config_lines.append(f"LIGAND: {self.ligand}")
+        elif self.reference == "residues":
+            config_lines.append(f"RESIDUES: {self.residues}")
+
+        config_lines.append(f"INCLUDE REFERENCE: {self.include_reference}")
 
         if self.restrict_to_selection is not None:
             if isinstance(self.restrict_to_selection, tuple):
@@ -240,10 +259,10 @@ class DistanceSelector(BaseConfig):
             raise ValueError("No structure sources found")
 
         # Determine reference specification
-        if self.reference_type == "ligand":
+        if self.reference == "ligand":
             reference_spec = f"ligand:{self.ligand}"
         else:
-            reference_spec = f"{self.reference_type}:{self.reference_selection}"
+            reference_spec = f"{self.reference}:{self.residues}"
 
         # Resolve restrict_to_selection using base class method
         if self.restrict_to_selection is not None:
@@ -257,13 +276,17 @@ class DistanceSelector(BaseConfig):
         import json
         id_map_json = json.dumps(self.id_map)
 
+        # Convert include_reference to string for bash
+        include_reference_str = "true" if self.include_reference else "false"
+
         script_content += f"""echo "Analyzing residue distances for {len(structure_files)} structures"
 echo "Reference: {reference_spec}"
 echo "Distance cutoff: {self.distance}Å"
+echo "Include reference: {self.include_reference}"
 {restrict_echo}
 
 # Run distance analysis
-python {self.distance_selector_py} "{structure_files_str}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}'
+python {self.distance_selector_py} "{structure_files_str}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}' {include_reference_str}
 
 echo "Distance analysis completed"
 echo "Selections saved to: {self.selections_csv}"
@@ -346,9 +369,10 @@ echo "Selections saved to: {self.selections_csv}"
             "distance_selector_params": {
                 "ligand": self.ligand,
                 "distance": self.distance,
-                "reference_type": self.reference_type,
-                "reference_selection": self.reference_selection,
+                "reference": self.reference,
+                "residues": self.residues,
                 "restrict_to_selection": str(self.restrict_to_selection) if self.restrict_to_selection else None,
+                "include_reference": self.include_reference,
                 "input_type": "tool_output" if self.input_is_tool_output else "direct"
             }
         })
