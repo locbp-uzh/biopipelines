@@ -573,7 +573,7 @@ class Pipeline:
 
     def _generate_gpu_line(self, gpu_spec):
         """Generate SBATCH GPU constraint line based on GPU specification."""
-        if gpu_spec is None or gpu_spec == "none":
+        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
             return ""
         elif gpu_spec == "high-memory":
             return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM141GB\""
@@ -598,17 +598,11 @@ class Pipeline:
 
     def _generate_gpu_setup(self, gpu_spec):
         """Generate GPU setup script based on GPU specification."""
-        if gpu_spec is None or gpu_spec == "none":
+        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
             return ""
         return """
-# Check if nvidia-smi is available
-if ! command -v nvidia-smi &> /dev/null
-then
-    echo "Could not load GPU correctly: nvidia-smi could not be found"
-    exit 1
-fi
-
-gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader)
+# Display GPU information
+gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2>/dev/null || echo "Unknown")
 echo "GPU Type: $gpu_type"
 """
 

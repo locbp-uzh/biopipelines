@@ -174,13 +174,14 @@ run_pipeline_and_submit() {
                 local submit_output=$(sbatch --parsable --job-name="$job_name" --output="$output_path" "$batch_file" 2>&1)
                 local submit_exit=$?
 
-                if [ $submit_exit -eq 0 ]; then
+                # Check for both exit code and error messages in output
+                if [ $submit_exit -eq 0 ] && ! echo "$submit_output" | grep -qi "error\|invalid\|failed"; then
                     last_job_id="$submit_output"
                     echo "✓ Batch $batch_num submitted: Job ID $last_job_id"
                     total_jobs_submitted=$((total_jobs_submitted + 1))
                 else
                     echo "✗ Failed to submit batch $batch_num"
-                    echo "$submit_output"
+                    echo "   Error: $submit_output"
                     return 1
                 fi
                 echo ""
@@ -207,12 +208,13 @@ run_pipeline_and_submit() {
                 local submit_output=$(sbatch --job-name="$job_name" --output "$output_path" --parsable "$slurm_script" 2>&1)
                 local submit_exit=$?
 
-                if [ $submit_exit -eq 0 ]; then
+                # Check for both exit code and error messages in output
+                if [ $submit_exit -eq 0 ] && ! echo "$submit_output" | grep -qi "error\|invalid\|failed"; then
                     echo "✓ Job submitted: Job ID $submit_output"
                     total_jobs_submitted=$((total_jobs_submitted + 1))
                 else
                     echo "✗ Failed to submit job"
-                    echo "$submit_output"
+                    echo "   Error: $submit_output"
                     return 1
                 fi
                 echo ""
