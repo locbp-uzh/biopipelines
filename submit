@@ -152,14 +152,26 @@ run_pipeline_and_submit() {
                 if [ -n "$last_job_id" ]; then
                     echo "Updating $batch_file with dependency on job $last_job_id"
                     sed -i "s/<JOBID>/$last_job_id/g" "$batch_file"
+                    # Verify replacement worked
+                    if grep -q "<JOBID>" "$batch_file"; then
+                        echo "Warning: Failed to replace <JOBID> placeholder in $batch_file"
+                    fi
                 fi
 
-                # Extract job name from batch file or use default
+                # Extract batch number for job naming
                 local batch_num=$(basename "$batch_file" | grep -o '[0-9]\+')
+                local job_name="${pipeline_name}_batch${batch_num}"
+                local output_path="$runtime_dir/job_batch${batch_num}.out"
 
                 # Submit and capture job ID
                 echo "Submitting batch $batch_num..."
-                local submit_output=$(sbatch --parsable "$batch_file" 2>&1)
+                echo "  Job name: $job_name"
+                echo "  Output: $output_path"
+                if [ -n "$last_job_id" ]; then
+                    echo "  Dependency: afterok:$last_job_id"
+                fi
+
+                local submit_output=$(sbatch --parsable --job-name="$job_name" --output="$output_path" "$batch_file" 2>&1)
                 local submit_exit=$?
 
                 if [ $submit_exit -eq 0 ]; then
