@@ -186,6 +186,21 @@ for beta in [0, 1, 10, 100]:
 ```
 Running `./submit MyPipelines/beta_test.py` will then result in the submission of four jobs, *Rhodamine_Beta0*, *Rhodamine_Beta1*, *Rhodamine_Beta10*, *Rhodamine_Beta100*.
 
+**Batch dependencies**
+Calling `Resources()` multiple times within a pipeline creates sequential batches with automatic dependency management. Each batch waits for the previous one to complete successfully before starting:
+
+```python
+with Pipeline("Project", "Job", "Description"):
+    Resources(gpu="V100", time="4:00:00")    # Batch 1: GPU tools
+    tool1 = RFdiffusion(...)
+    tool2 = ProteinMPNN(...)
+
+    Resources(time="2:00:00")                # Batch 2: CPU-only analysis (waits for Batch 1)
+    tool3 = Filter(...)
+```
+
+The `./submit` script automatically chains batch jobs using `--dependency=afterok:<jobid>`, ensuring proper execution order and resource optimization.
+
 ### Filesystem Structure
 
 After the execution, the filesystem will look somewhat like this:
