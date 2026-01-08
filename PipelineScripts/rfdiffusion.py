@@ -288,6 +288,7 @@ echo "Options: {rfd_options}"
 echo "Output folder: {rfd_job_folder}"
 
 # Run RFdiffusion
+cd {self.folders["RFdiffusion"]}
 python {self.inference_py_file} {rfd_options}
 
 """

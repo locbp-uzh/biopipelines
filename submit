@@ -81,20 +81,65 @@ run_pipeline_and_submit() {
         echo ""
     fi
 
-    # Check if this is a multi-batch pipeline by looking for slurm_batch*.sh files
-    # Extract runtime directory from pipeline output
-    local runtime_dir=$(echo "$pipeline_output" | grep -o '/[^ ]*/RunTime' | head -1)
+    # Extract ALL runtime directories from pipeline output
+    local runtime_dirs=$(echo "$pipeline_output" | grep -o '/[^ ]*/RunTime' | sort -u)
 
-    if [ -n "$runtime_dir" ] && [ -d "$runtime_dir" ]; then
-        # Check for batch files
+    if [ -z "$runtime_dirs" ]; then
+        echo "No runtime directories found in pipeline output"
+        # Fall back to checking for sbatch commands (backward compatibility)
+        local sbatch_commands=$(echo "$pipeline_output" | grep "^sbatch ")
+        if [ -n "$sbatch_commands" ]; then
+            echo ""
+            echo "Submitting jobs..."
+            echo "=========================================="
+            echo ""
+
+            local job_count=0
+            while IFS= read -r sbatch_cmd; do
+                if [ -n "$sbatch_cmd" ]; then
+                    job_count=$((job_count + 1))
+                    echo "Job $job_count:"
+                    echo "$sbatch_cmd"
+                    eval "$sbatch_cmd" || true
+                    echo ""
+                fi
+            done <<< "$sbatch_commands"
+
+            echo "=========================================="
+            echo "All jobs submitted. Total: $job_count"
+            return 0
+        else
+            return 1
+        fi
+    fi
+
+    echo ""
+    echo "Found $(echo "$runtime_dirs" | wc -l) pipeline(s) to submit"
+    echo "=========================================="
+    echo ""
+
+    local total_jobs_submitted=0
+
+    # Process each runtime directory
+    while IFS= read -r runtime_dir; do
+        if [ -z "$runtime_dir" ] || [ ! -d "$runtime_dir" ]; then
+            continue
+        fi
+
+        # Extract pipeline name from runtime directory
+        local pipeline_name=$(basename "$(dirname "$runtime_dir")")
+        echo "Processing pipeline: $pipeline_name"
+        echo "Runtime directory: $runtime_dir"
+        echo ""
+
+        # Check for batch files (multi-batch pipeline)
         local batch_files=$(ls "$runtime_dir"/slurm_batch*.sh 2>/dev/null | sort -V)
 
         if [ -n "$batch_files" ]; then
             # Multi-batch pipeline
-            echo ""
             echo "Detected multi-batch pipeline"
             echo "Submitting jobs with dependencies..."
-            echo "=========================================="
+            echo "------------------------------------------"
             echo ""
 
             local job_count=0
@@ -111,7 +156,6 @@ run_pipeline_and_submit() {
 
                 # Extract job name from batch file or use default
                 local batch_num=$(basename "$batch_file" | grep -o '[0-9]\+')
-                local job_name=$(echo "$pipeline_output" | grep "Job:" | head -1 | sed 's/.*Job: //')
 
                 # Submit and capture job ID
                 echo "Submitting batch $batch_num..."
@@ -121,6 +165,7 @@ run_pipeline_and_submit() {
                 if [ $submit_exit -eq 0 ]; then
                     last_job_id="$submit_output"
                     echo "✓ Batch $batch_num submitted: Job ID $last_job_id"
+                    total_jobs_submitted=$((total_jobs_submitted + 1))
                 else
                     echo "✗ Failed to submit batch $batch_num"
                     echo "$submit_output"
@@ -129,40 +174,45 @@ run_pipeline_and_submit() {
                 echo ""
             done
 
-            echo "=========================================="
-            echo "All batches submitted. Total: $job_count"
-            echo "Job dependency chain: $batch_files"
-            return 0
-        fi
-    fi
-
-    # Single batch pipeline (original behavior)
-    local sbatch_commands=$(echo "$pipeline_output" | grep "^sbatch ")
-
-    if [ -z "$sbatch_commands" ]; then
-        echo "No sbatch commands found in pipeline output"
-        return 1
-    fi
-
-    echo ""
-    echo "Submitting jobs..."
-    echo "=========================================="
-    echo ""
-
-    # Execute each sbatch command
-    local job_count=0
-    while IFS= read -r sbatch_cmd; do
-        if [ -n "$sbatch_cmd" ]; then
-            job_count=$((job_count + 1))
-            echo "Job $job_count:"
-            echo "$sbatch_cmd"
-            eval "$sbatch_cmd" || true
+            echo "Pipeline $pipeline_name: $job_count batch(es) submitted"
             echo ""
+        else
+            # Single batch pipeline - look for slurm.sh
+            local slurm_script="$runtime_dir/slurm.sh"
+            if [ -f "$slurm_script" ]; then
+                echo "Detected single-batch pipeline"
+                echo "Submitting job..."
+                echo "------------------------------------------"
+                echo ""
+
+                # Extract job name from pipeline output
+                local job_name=$(echo "$pipeline_output" | grep -A1 "$runtime_dir" | grep -o "Job: .*" | sed 's/Job: //' | head -1)
+                if [ -z "$job_name" ]; then
+                    job_name="$pipeline_name"
+                fi
+
+                local output_path="$runtime_dir/slurm.out"
+                local submit_output=$(sbatch --job-name="$job_name" --output "$output_path" --parsable "$slurm_script" 2>&1)
+                local submit_exit=$?
+
+                if [ $submit_exit -eq 0 ]; then
+                    echo "✓ Job submitted: Job ID $submit_output"
+                    total_jobs_submitted=$((total_jobs_submitted + 1))
+                else
+                    echo "✗ Failed to submit job"
+                    echo "$submit_output"
+                    return 1
+                fi
+                echo ""
+            else
+                echo "Warning: No slurm script found in $runtime_dir"
+                echo ""
+            fi
         fi
-    done <<< "$sbatch_commands"
+    done <<< "$runtime_dirs"
 
     echo "=========================================="
-    echo "All jobs submitted. Total: $job_count"
+    echo "All pipelines submitted. Total jobs: $total_jobs_submitted"
 }
 
 # Main execution
