@@ -65,8 +65,8 @@ Generates novel protein backbone structures using diffusion models. Designs de n
 
 **Installation**: Go to the data directory, then clone the RFdiffusion git repository and download the weights as indicated in https://github.com/RosettaCommons/RFdiffusion. The environment they provide won't work on our cluster, so instead go to the biopipelines directory and run this:
 ```bash
-conda env create -f Environments/ProteinEnv.yaml
-conda activate ProteinEnv
+mamba env create -f Environments/ProteinEnv.yaml
+mamba activate ProteinEnv
 pip install -r Environments/ProteinEnv_pip_requirements.txt
 ```
 Followed by the original instructions:
@@ -166,8 +166,8 @@ Generates protein binders (proteins, peptides, or nanobodies) targeting specifie
 
 **Installation**: Install BoltzGen via pip with Python ≥3.11:
 ```bash
-conda create -n boltzgen python=3.11
-conda activate boltzgen
+mamba create -n boltzgen python=3.11
+mamba activate boltzgen
 pip install boltzgen
 ```
 
@@ -327,7 +327,7 @@ Designs protein sequences optimized for ligand binding. Specialized version of P
 git clone https://github.com/dauparas/LigandMPNN.git
 cd LigandMPNN
 bash get_model_params.sh "./model_params"
-conda create -n ligandmpnn_env python=3.11
+mamba create -n ligandmpnn_env python=3.11
 pip3 install -r requirements.txt
 ```
 
@@ -590,7 +590,7 @@ Predicts protein structures using Meta's ESM-2 with ESMFold. Fast single-sequenc
 
 **Installation**: ESMFold works in the ProteinEnv environment. Install requirements:
 ```bash
-conda activate ProteinEnv
+mamba activate ProteinEnv
 pip install "fair-esm[esmfold]"
 pip install 'dllogger @ git+https://github.com/NVIDIA/dllogger.git'
 pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059694619831a7db195b7e0988fc4ff3a307'
@@ -685,13 +685,13 @@ Predicts biomolecular structures using RoseTTAFold3. Supports protein-only and p
 **Environment**: `modelforge`
 
 **Installation**:
-The official RF3 repository uses `uv` for installation, but for consistency with BioPipelines we use conda. Run the following in your data folder:
+The official RF3 repository uses `uv` for installation, but for consistency with BioPipelines we use mamba. Run the following in your data folder:
 ```bash
 cd /home/$USER/data
 git clone https://github.com/RosettaCommons/modelforge.git
 cd modelforge
-conda create -n modelforge python=3.12
-conda activate modelforge
+mamba create -n modelforge python=3.12
+mamba activate modelforge
 pip install -e .
 ```
 
@@ -758,7 +758,7 @@ Predicts protein-ligand binding affinities from complex structures using OnionNe
 cd /home/$USER/data
 git lfs clone https://github.com/zhenglz/onionnet.git
 cd onionnet
-conda env create -f onet_env.yaml
+mamba env create -f onet_env.yaml
 ```
 
 **Parameters**:
@@ -798,8 +798,8 @@ Predicts protein-ligand binding affinities using OnionNet-2, an improved version
 cd /home/$USER/data
 git clone https://github.com/zchwang/OnionNet-2.git
 cd OnionNet-2
-conda create -n OnionNet2Env python=3.8
-conda activate OnionNet2Env
+mamba create -n OnionNet2Env python=3.8
+mamba activate OnionNet2Env
 pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 scipy==1.4.1
 ```
 
@@ -845,7 +845,7 @@ Predicts ligand-specific protein-ligand complex structures using equivariant dif
 
 **Installation:**
 
-Requires two conda environments.
+Requires two mamba environments.
 
 ```bash
 cd /home/$USER/data
@@ -857,18 +857,18 @@ unzip workdir.zip
 # Request additional resources during installation
 srun --mem=32G --cpus-per-task=8 --time=02:00:00 --pty bash
 
-conda create -n dynamicbind python=3.9 -y
-conda activate dynamicbind
+mamba create -n dynamicbind python=3.9 -y
+mamba activate dynamicbind
 pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
 
 # Setup LD_LIBRARY_PATH inside the environment
-mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+mkdir -p $CONDA_PREFIX/etc/mamba/activate.d
 echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH' > \
-     $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+     $CONDA_PREFIX/etc/mamba/activate.d/env_vars.sh
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
 # Continue installation
-conda install -c conda-forge rdkit biopython scipy pandas pyyaml networkx -y
+mamba install -c conda-forge rdkit biopython scipy pandas pyyaml networkx -y
 pip install numpy==1.26.4 e3nn==0.4.4 spyrmsd fair-esm tqdm
 pip install \
     torch-scatter==2.1.1+pt113cu117 \
@@ -881,9 +881,9 @@ pip install \
 pip install torch-geometric
 
 # Create relax environment
-conda create --name relax python=3.8
-conda activate relax
-conda install -c conda-forge openmm pdbfixer biopython openmmforcefields openff-toolkit ambertools=22 compilers -y
+mamba create --name relax python=3.8
+mamba activate relax
+mamba install -c conda-forge openmm pdbfixer biopython openmmforcefields openff-toolkit ambertools=22 compilers -y
 ```
 
 Config: `DynamicBind: null` (tool manages environments)
@@ -1131,7 +1131,7 @@ Analyzes mutation patterns across sequence sets. Calculates position-specific am
 
 **Installation**: This tool only needs the a small environment:
 ```bash
-conda create -n MutationEnv seaborn matplotlib pandas logomaker scipy
+mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 ```
 
 **Parameters**:
@@ -1847,7 +1847,7 @@ boltz = Boltz2(proteins=HaloTag,
                             ligands=compound1
 #submit
 
----
+```
 
 ### MMseqs2
 
@@ -1880,7 +1880,7 @@ msas = MMseqs2(
 
 Runs an MMseqs2 server for local MSA generation. Automatically started by MMseqs2 client when needed; manual setup typically not required.
 
-**Environment**: None (doesn't require conda)
+**Environment**: None (doesn't require mamba)
 
 **Parameters**:
 - `port`: int = 8000 - Server port
