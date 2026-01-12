@@ -7,6 +7,7 @@
 - [Structure Generation](#structure-generation)
   - [RFdiffusion](#rfdiffusion)
   - [RFdiffusionAllAtom](#rfdiffusionallatom)
+  - [RFdiffusion3](#rfdiffusion3)
   - [BoltzGen](#boltzgen)
 - [Sequence Design](#sequence-design)
   - [ProteinMPNN](#proteinmpnn)
@@ -154,6 +155,88 @@ rfdaa = RFdiffusionAllAtom(
     contigs='10-20,A6-140',
     num_designs=5
 
+```
+
+---
+
+### RFdiffusion3
+
+Third-generation all-atom diffusion model for protein design. Operates at the atomic level (4 backbone + 10 sidechain atoms per residue) rather than residue-level, enabling precise design of sidechain interactions with ligands, catalytic residues, DNA/RNA, and symmetric assemblies. Approximately 10× faster than RFdiffusion2 with higher success rates on enzyme design benchmarks.
+
+**References**:
+- Paper: https://www.biorxiv.org/content/10.1101/2024.11.13.623358v1
+- GitHub: https://github.com/RosettaCommons/foundry
+- Announcement: https://rosettacommons.org/2025/12/22/rfdiffusion3-is-now-available-in-foundry/
+
+**Installation**:
+
+RFdiffusion3 is part of the foundry framework, which requires Python ≥3.12. Install in a dedicated conda environment:
+
+```bash
+srun --pty --time=02:00:00 --mem=16GB bash
+mamba create -n foundry python=3.12
+mamba activate foundry
+pip install "rc-foundry[all]"
+#Download model weights. Default is ~/.foundry/checkpoints
+mkdir /home/$USER/data/rfdiffusion3
+foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
+```
+
+**Dependencies**:
+- `atomworks`: Structure I/O and preprocessing (auto-installed with foundry)
+- `biotite`: Core structural computations (auto-installed)
+- PyTorch with GPU support recommended
+
+**Parameters**:
+- `input`: Union[str, ToolOutput, StandardizedOutput] = None - Input PDB structure (optional for de novo design)
+- `contig`: str (required) - Contig specification defining protein chain ranges and design regions
+  - Format: "A1-50,60-80,B1-100" (chain letters indicate motif from input PDB)
+  - "/0" indicates chain break (adds 200aa jump)
+  - Numbers without prefix = design new residues
+- `length`: str = None - Length range for designed regions (e.g., "50-150")
+- `select_unfixed_sequence`: str = None - Residue positions where sequence can change (e.g., "A69-76,A153-154")
+- `select_fixed_atoms`: Dict[str, str] = None - Chain ranges to control atomic constraints
+- `select_hotspots`: Dict[str, str] = None - Hotspot residues with specific atoms (e.g., {"A181": "CG2,CG1", "A407": "NE1,CZ2"})
+- `infer_ori_strategy`: str = None - Strategy for orientation inference (e.g., "hotspots")
+- `num_designs`: int = 1 - Number of designs to generate
+- `design_startnum`: int = 1 - Starting number for design IDs
+- `design_name`: str = None - Base name for output designs
+- `out_dir`: str = None - Output directory path
+- `symmetric`: bool = False - Enable symmetric design mode
+- `symmetry_type`: str = None - Symmetry specification (e.g., "C3", "D2")
+
+**Outputs**:
+- `structures`: List of generated PDB files
+- `tables.structures`:
+
+  | id | source_id | pdb | contig | length | design_name | status |
+  |----|-----------|-----|--------|--------|-------------|--------|
+
+**Example**:
+```python
+# De novo protein design
+rfd3 = RFdiffusion3(
+    contig="80-120",
+    num_designs=10
+)
+
+# Binder design with hotspots
+rfd3 = RFdiffusion3(
+    input=target_pdb,
+    contig="50-80,A1-100",
+    select_hotspots={"A45": "NE,CZ", "A67": "OG"},
+    infer_ori_strategy="hotspots",
+    num_designs=20
+)
+
+# Enzyme active site design
+rfd3 = RFdiffusion3(
+    input=template_pdb,
+    contig="A1-50,40-60,A100-150",
+    select_unfixed_sequence="A25-30,A125-130",
+    length="90-110",
+    num_designs=50
+)
 ```
 
 ---

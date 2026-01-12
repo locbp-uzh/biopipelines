@@ -11,6 +11,7 @@ folders:
   tool_data:
     RFdiffusion: "RFdiffusion"
     RFdiffusionAllAtom: "rf_diffusion_all_atom"
+    RFdiffusion3: "rfdiffusion3"
     ProteinMPNN: "ProteinMPNN"
     AlphaFold: "localcolabfold"
     OmegaFold: "OmegaFold"
@@ -37,6 +38,7 @@ environments:
   ESMFold: "ProteinEnv"
   RFdiffusion: "ProteinEnv"
   RFdiffusionAllAtom: "ProteinEnv"
+  RFdiffusion3: "foundry"
   ProteinMPNN: "ProteinEnv"
   LigandMPNN: "ligandmpnn_env"
   AlphaFold: "biopipelines"
