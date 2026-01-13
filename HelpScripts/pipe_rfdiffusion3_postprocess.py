@@ -37,15 +37,15 @@ class AllAtoms(Select):
         return True
 
 
-def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int]]:
+def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int, int]]:
     """
-    Find all CIF.gz files in raw folder and extract model numbers.
+    Find all CIF.gz files in raw folder and extract design and model numbers.
 
     Args:
         raw_folder: Path to raw output folder
 
     Returns:
-        List of tuples: (cif_gz_path, json_path, model_number)
+        List of tuples: (cif_gz_path, json_path, design_number, model_number)
     """
     # Pattern: *_design_*_model_*.cif.gz
     pattern = os.path.join(raw_folder, "*_design_*_model_*.cif.gz")
@@ -53,33 +53,42 @@ def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int]]:
 
     results = []
     for cif_path in cif_files:
-        # Extract model number from filename
+        # Extract design and model numbers from filename
         basename = os.path.basename(cif_path)
         # Remove .cif.gz extension
         name_without_ext = basename.replace(".cif.gz", "")
 
-        # Find model_N at the end
-        parts = name_without_ext.split("_model_")
+        # Find design_N and model_M
+        # Pattern: *_design_N_model_M
+        parts = name_without_ext.split("_design_")
         if len(parts) == 2:
-            try:
-                model_num = int(parts[1])
-                # Find corresponding JSON file
-                json_path = cif_path.replace(".cif.gz", ".json")
+            # parts[1] should be "N_model_M"
+            design_and_model = parts[1].split("_model_")
+            if len(design_and_model) == 2:
+                try:
+                    design_num = int(design_and_model[0])
+                    model_num = int(design_and_model[1])
 
-                if os.path.exists(json_path):
-                    results.append((cif_path, json_path, model_num))
-                else:
-                    print(f"Warning: JSON file not found for {basename}")
-                    results.append((cif_path, None, model_num))
-            except ValueError:
-                print(f"Warning: Could not parse model number from {basename}")
+                    # Find corresponding JSON file
+                    json_path = cif_path.replace(".cif.gz", ".json")
+
+                    if os.path.exists(json_path):
+                        results.append((cif_path, json_path, design_num, model_num))
+                    else:
+                        print(f"Warning: JSON file not found for {basename}")
+                        results.append((cif_path, None, design_num, model_num))
+                except ValueError:
+                    print(f"Warning: Could not parse design/model numbers from {basename}")
+                    continue
+            else:
+                print(f"Warning: Unexpected filename format (model): {basename}")
                 continue
         else:
-            print(f"Warning: Unexpected filename format: {basename}")
+            print(f"Warning: Unexpected filename format (design): {basename}")
             continue
 
-    # Sort by model number
-    results.sort(key=lambda x: x[2])
+    # Sort by design number, then model number
+    results.sort(key=lambda x: (x[2], x[3]))
     return results
 
 
@@ -238,12 +247,12 @@ def main():
         specs_data = []
         success_count = 0
 
-        for idx, (cif_gz_path, json_path, model_num) in enumerate(cif_files):
+        for idx, (cif_gz_path, json_path, design_num, model_num) in enumerate(cif_files):
             # Calculate design ID
-            design_num = args.design_startnum + idx
-            design_id = f"{args.prefix}_{design_num}"
+            output_num = args.design_startnum + idx
+            design_id = f"{args.prefix}_{output_num}"
 
-            print(f"\nProcessing model_{model_num} -> {design_id}")
+            print(f"\nProcessing design_{design_num}_model_{model_num} -> {design_id}")
 
             # Decompress CIF.gz
             print(f"  Decompressing CIF.gz...")

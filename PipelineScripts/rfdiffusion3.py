@@ -367,28 +367,29 @@ class RFdiffusion3(BaseConfig):
         # Build config from parameters
         # Use prefix (which defaults to pipeline_name if not set)
         prefix = self.prefix if self.prefix else self.pipeline_name
-        design_key = f"{prefix}_design"
-        config = {
-            design_key: {}
-        }
 
-        entry = config[design_key]
+        # Create multiple design entries for num_designs
+        config = {}
+        for i in range(self.num_designs):
+            design_key = f"{prefix}_design_{i}"
+            config[design_key] = {}
+            entry = config[design_key]
 
-        # Required/common parameters
-        if self.contig:
-            entry["contig"] = self.contig
+            # Required/common parameters
+            if self.contig:
+                entry["contig"] = self.contig
 
-        if self.length is not None:
-            entry["length"] = str(self.length)
+            if self.length is not None:
+                entry["length"] = str(self.length)
 
-        if self.input_pdb_file:
-            entry["input"] = self.input_pdb_file
+            if self.input_pdb_file:
+                entry["input"] = self.input_pdb_file
 
-        if self.ligand:
-            entry["ligand"] = self.ligand
+            if self.ligand:
+                entry["ligand"] = self.ligand
 
-        if self.select_hotspots:
-            entry["select_hotspots"] = self._format_hotspots()
+            if self.select_hotspots:
+                entry["select_hotspots"] = self._format_hotspots()
 
         return config
 
@@ -464,7 +465,6 @@ fi
 rfd3 design \\
     out_dir="{self.raw_output_folder}" \\
     inputs="{self.json_file}" \\
-    diffusion_batch_size={self.num_designs} \\
     global_prefix="{self.prefix}"
 
 """
