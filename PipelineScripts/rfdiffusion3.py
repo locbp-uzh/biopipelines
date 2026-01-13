@@ -68,6 +68,7 @@ class RFdiffusion3(BaseConfig):
         pdb (str or ToolOutput): Input PDB structure (required when using contig)
         ligand (str): Ligand selection by chemical component name
         num_designs (int): Number of designs to generate (default: 1)
+        num_models (int): Number of models per design (default: 1)
         prefix (str): Prefix for output file names (default: uses pipeline name)
         select_hotspots (str or dict): Hotspot residues for binder design
             String: "A67,A89" (all atoms) or "A67:CA,CB;A89:CA" (specific atoms)
@@ -76,8 +77,8 @@ class RFdiffusion3(BaseConfig):
         design_startnum (int): Starting number for design numbering (default: 1)
 
     Outputs:
-        structures: List of PDB files ({prefix}_1.pdb, ...)
-        tables.structures: CSV with columns: id, pdb, contig, length, time, status
+        structures: List of PDB files ({prefix}_d{D}_m{M}.pdb, ...)
+        tables.structures: CSV with columns: id, design, model, pdb, contig, length, time, status
 
     Notes:
         - 10× faster than RFdiffusion/RFdiffusionAllAtom
@@ -105,6 +106,7 @@ class RFdiffusion3(BaseConfig):
                  pdb: Union[str, ToolOutput, StandardizedOutput] = "",
                  ligand: str = "",
                  num_designs: int = 1,
+                 num_models: int = 1,
                  prefix: str = None,
                  select_hotspots: Union[str, Dict[str, str]] = None,
                  json_config: Union[str, Dict] = None,
@@ -119,6 +121,7 @@ class RFdiffusion3(BaseConfig):
             pdb: Input PDB structure (optional)
             ligand: Ligand selection by name
             num_designs: Number of designs to generate
+            num_models: Number of models per design (default: 1)
             prefix: Prefix for output file names (defaults to pipeline name)
             select_hotspots: Hotspot residues specification
             json_config: Full JSON config override for advanced use
@@ -131,6 +134,7 @@ class RFdiffusion3(BaseConfig):
         self.pdb = pdb
         self.ligand = ligand
         self.num_designs = num_designs
+        self.num_models = num_models
         self.prefix = prefix
         self.select_hotspots = select_hotspots
         self.json_config = json_config
@@ -391,6 +395,10 @@ class RFdiffusion3(BaseConfig):
             if self.select_hotspots:
                 entry["select_hotspots"] = self._format_hotspots()
 
+            # Set number of models per design
+            if self.num_models > 1:
+                entry["diffusion_batch_size"] = self.num_models
+
         return config
 
     def get_config_display(self) -> List[str]:
@@ -421,6 +429,7 @@ class RFdiffusion3(BaseConfig):
             config_lines.append(f"HOTSPOTS: {hotspots_str}")
 
         config_lines.append(f"NUM DESIGNS: {self.num_designs}")
+        config_lines.append(f"NUM MODELS: {self.num_models}")
 
         if self.prefix:
             config_lines.append(f"PREFIX: {self.prefix}")
@@ -483,6 +492,7 @@ mamba run -n biopipelines python "{self.postprocess_py_file}" \\
     --output_folder "{self.output_folder}" \\
     --prefix "{self.prefix}" \\
     --num_designs {self.num_designs} \\
+    --num_models {self.num_models} \\
     --design_startnum {self.design_startnum} \\
     --metrics_csv "{self.metrics_csv}" \\
     --specifications_csv "{self.specifications_csv}"
@@ -497,6 +507,7 @@ python "{self.table_py_file}" \\
     --json_file "{self.json_file}" \\
     --pipeline_name "{self.prefix}" \\
     --num_designs {self.num_designs} \\
+    --num_models {self.num_models} \\
     --table_path "{self.main_table}" \\
     --design_startnum {self.design_startnum}
 
@@ -545,43 +556,47 @@ python "{self.table_py_file}" \\
         design_pdbs = []
         structure_ids = []
 
+        total_structures = self.num_designs * self.num_models
         for i in range(self.num_designs):
-            design_id = f"{self.prefix}_{self.design_startnum + i}"
-            design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
-            design_pdbs.append(design_path)
-            structure_ids.append(design_id)
+            for j in range(self.num_models):
+                design_num = self.design_startnum + i
+                model_num = self.design_startnum + j
+                structure_id = f"{self.prefix}_d{design_num}_m{model_num}"
+                structure_path = os.path.join(self.output_folder, f"{structure_id}.pdb")
+                design_pdbs.append(structure_path)
+                structure_ids.append(structure_id)
 
         # Define table structure
         tables = {
             "structures": TableInfo(
                 name="structures",
                 path=self.main_table,
-                columns=["id", "pdb", "contig", "length", "time", "status"],
+                columns=["id", "design", "model", "pdb", "contig", "length", "time", "status"],
                 description="RFdiffusion3 structure generation results",
-                count=self.num_designs
+                count=total_structures
             ),
             "metrics": TableInfo(
                 name="metrics",
                 path=self.metrics_csv,
                 columns=[
-                    "id", "max_ca_deviation", "n_chainbreaks",
+                    "id", "design", "model", "max_ca_deviation", "n_chainbreaks",
                     "n_clashing_interresidue_w_sidechain", "n_clashing_interresidue_w_backbone",
                     "non_loop_fraction", "loop_fraction", "helix_fraction", "sheet_fraction",
                     "num_ss_elements", "radius_of_gyration", "alanine_content",
                     "glycine_content", "num_residues"
                 ],
                 description="RFdiffusion3 quality metrics extracted from JSON outputs",
-                count=self.num_designs
+                count=total_structures
             ),
             "specifications": TableInfo(
                 name="specifications",
                 path=self.specifications_csv,
                 columns=[
-                    "id", "sampled_contig", "num_tokens_in", "num_residues_in",
+                    "id", "design", "model", "sampled_contig", "num_tokens_in", "num_residues_in",
                     "num_chains", "num_atoms", "num_residues"
                 ],
                 description="RFdiffusion3 design specifications and statistics",
-                count=self.num_designs
+                count=total_structures
             )
         }
 
@@ -608,6 +623,7 @@ python "{self.table_py_file}" \\
                 "length": self.length,
                 "ligand": self.ligand,
                 "num_designs": self.num_designs,
+                "num_models": self.num_models,
                 "prefix": self.prefix,
                 "select_hotspots": self.select_hotspots,
                 "has_json_config": self.json_config is not None,

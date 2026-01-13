@@ -146,6 +146,12 @@ def main():
         help="Number of designs"
     )
     parser.add_argument(
+        '--num_models',
+        type=int,
+        required=True,
+        help="Number of models per design"
+    )
+    parser.add_argument(
         '--table_path',
         required=True,
         help="Output CSV table path"
@@ -171,30 +177,34 @@ def main():
     # Build table
     designs = []
     for i in range(args.num_designs):
-        design_num = args.design_startnum + i
-        design_id = f"{args.pipeline_name}_{design_num}"
-        pdb_file = f"{design_id}.pdb"
-        pdb_path = os.path.join(args.output_folder, pdb_file)
+        for j in range(args.num_models):
+            design_num = args.design_startnum + i
+            model_num = args.design_startnum + j
+            structure_id = f"{args.pipeline_name}_d{design_num}_m{model_num}"
+            pdb_file = f"{structure_id}.pdb"
+            pdb_path = os.path.join(args.output_folder, pdb_file)
 
-        # Get actual length from PDB
-        actual_length = get_pdb_length(pdb_path)
+            # Get actual length from PDB
+            actual_length = get_pdb_length(pdb_path)
 
-        # Determine status
-        if os.path.exists(pdb_path):
-            status = "success"
-        else:
-            status = "missing"
+            # Determine status
+            if os.path.exists(pdb_path):
+                status = "success"
+            else:
+                status = "missing"
 
-        design_entry = {
-            "id": design_id,
-            "pdb": pdb_file,
-            "contig": metadata.get("contig", ""),
-            "length": actual_length if actual_length else metadata.get("length", ""),
-            "time": timing_info.get(i, None),
-            "status": status
-        }
+            design_entry = {
+                "id": structure_id,
+                "design": design_num,
+                "model": model_num,
+                "pdb": pdb_file,
+                "contig": metadata.get("contig", ""),
+                "length": actual_length if actual_length else metadata.get("length", ""),
+                "time": timing_info.get(i, None),
+                "status": status
+            }
 
-        designs.append(design_entry)
+            designs.append(design_entry)
 
     # Create DataFrame and save
     df = pd.DataFrame(designs)

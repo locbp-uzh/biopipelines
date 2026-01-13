@@ -215,6 +215,7 @@ def main():
     parser.add_argument("--output_folder", required=True, help="Final output folder for PDB files")
     parser.add_argument("--prefix", required=True, help="Prefix for output filenames")
     parser.add_argument("--num_designs", type=int, required=True, help="Expected number of designs")
+    parser.add_argument("--num_models", type=int, required=True, help="Expected number of models per design")
     parser.add_argument("--design_startnum", type=int, required=True, help="Starting design number")
     parser.add_argument("--metrics_csv", required=True, help="Path to metrics CSV output")
     parser.add_argument("--specifications_csv", required=True, help="Path to specifications CSV output")
@@ -225,6 +226,7 @@ def main():
     print(f"Output folder: {args.output_folder}")
     print(f"Prefix: {args.prefix}")
     print(f"Expected designs: {args.num_designs}")
+    print(f"Expected models per design: {args.num_models}")
 
     # Find all CIF.gz files
     cif_files = find_cif_gz_files(args.raw_folder)
@@ -235,8 +237,9 @@ def main():
 
     print(f"Found {len(cif_files)} CIF.gz files")
 
-    if len(cif_files) != args.num_designs:
-        print(f"WARNING: Found {len(cif_files)} files but expected {args.num_designs}")
+    expected_total = args.num_designs * args.num_models
+    if len(cif_files) != expected_total:
+        print(f"WARNING: Found {len(cif_files)} files but expected {expected_total} ({args.num_designs} designs × {args.num_models} models)")
 
     # Create temporary directory for decompressed CIF files
     temp_dir = tempfile.mkdtemp(prefix="rfd3_postprocess_")
@@ -248,36 +251,41 @@ def main():
         success_count = 0
 
         for idx, (cif_gz_path, json_path, design_num, model_num) in enumerate(cif_files):
-            # Calculate design ID
-            output_num = args.design_startnum + idx
-            design_id = f"{args.prefix}_{output_num}"
+            # Calculate output design and model numbers with offset
+            output_design = args.design_startnum + design_num
+            output_model = args.design_startnum + model_num
+            structure_id = f"{args.prefix}_d{output_design}_m{output_model}"
 
-            print(f"\nProcessing design_{design_num}_model_{model_num} -> {design_id}")
+            print(f"\nProcessing design_{design_num}_model_{model_num} -> {structure_id}")
 
             # Decompress CIF.gz
             print(f"  Decompressing CIF.gz...")
             cif_path = decompress_cif(cif_gz_path, temp_dir)
 
             # Convert to PDB
-            pdb_path = os.path.join(args.output_folder, f"{design_id}.pdb")
+            pdb_path = os.path.join(args.output_folder, f"{structure_id}.pdb")
             print(f"  Converting to PDB: {pdb_path}")
 
             if convert_cif_to_pdb(cif_path, pdb_path):
                 success_count += 1
-                print(f"  ✓ Successfully created {design_id}.pdb")
+                print(f"  ✓ Successfully created {structure_id}.pdb")
             else:
-                print(f"  ✗ Failed to convert {design_id}")
+                print(f"  ✗ Failed to convert {structure_id}")
                 continue
 
             # Extract metrics
             print(f"  Extracting metrics from JSON...")
             metrics = extract_metrics_from_json(json_path)
-            metrics["id"] = design_id
+            metrics["id"] = structure_id
+            metrics["design"] = output_design
+            metrics["model"] = output_model
             metrics_data.append(metrics)
 
             # Extract specifications
             specs = extract_specifications_from_json(json_path)
-            specs["id"] = design_id
+            specs["id"] = structure_id
+            specs["design"] = output_design
+            specs["model"] = output_model
             specs_data.append(specs)
 
         print(f"\n{'='*60}")
@@ -287,8 +295,8 @@ def main():
         if metrics_data:
             print(f"\nCreating metrics CSV: {args.metrics_csv}")
             metrics_df = pd.DataFrame(metrics_data)
-            # Reorder columns with id first
-            cols = ["id"] + [c for c in metrics_df.columns if c != "id"]
+            # Reorder columns with id, design, model first
+            cols = ["id", "design", "model"] + [c for c in metrics_df.columns if c not in ["id", "design", "model"]]
             metrics_df = metrics_df[cols]
             metrics_df.to_csv(args.metrics_csv, index=False)
             print(f"  ✓ Saved {len(metrics_df)} rows")
@@ -296,8 +304,8 @@ def main():
         if specs_data:
             print(f"\nCreating specifications CSV: {args.specifications_csv}")
             specs_df = pd.DataFrame(specs_data)
-            # Reorder columns with id first
-            cols = ["id"] + [c for c in specs_df.columns if c != "id"]
+            # Reorder columns with id, design, model first
+            cols = ["id", "design", "model"] + [c for c in specs_df.columns if c not in ["id", "design", "model"]]
             specs_df = specs_df[cols]
             specs_df.to_csv(args.specifications_csv, index=False)
             print(f"  ✓ Saved {len(specs_df)} rows")
