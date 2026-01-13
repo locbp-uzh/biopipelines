@@ -476,11 +476,9 @@ rfd3 design \\
         Runs in biopipelines environment (has BioPython, pandas).
         """
         return f"""echo "Post-processing RFdiffusion3 outputs"
-echo "Switching to biopipelines environment for post-processing..."
-mamba activate biopipelines
 
 # Process CIF.gz files: decompress, convert to PDB, extract metrics
-python "{self.postprocess_py_file}" \\
+mamba run -n biopipelines python "{self.postprocess_py_file}" \\
     --raw_folder "{self.raw_output_folder}" \\
     --output_folder "{self.output_folder}" \\
     --prefix "{self.prefix}" \\

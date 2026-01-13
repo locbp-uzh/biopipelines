@@ -42,7 +42,8 @@
       "WebFetch(domain:pypi.org)",
       "Bash(git mv:*)",
       "Bash(xargs basename:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(before parsing selections: ['contig']\"\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []

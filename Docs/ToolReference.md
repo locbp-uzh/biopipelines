@@ -165,8 +165,8 @@ Third-generation all-atom diffusion model for protein design. Operates at the at
 
 **References**:
 - Paper: https://www.biorxiv.org/content/10.1101/2024.11.13.623358v1
-- GitHub: https://github.com/RosettaCommons/foundry
-- Announcement: https://rosettacommons.org/2025/12/22/rfdiffusion3-is-now-available-in-foundry/
+- Github: https://github.com/RosettaCommons/foundry/blob/production/models/rfd3
+- Input: https://github.com/RosettaCommons/foundry/blob/production/models/rfd3/docs/input.md
 
 **Installation**:
 
