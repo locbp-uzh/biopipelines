@@ -430,11 +430,9 @@ if [ ! -d "${{FOUNDRY_CHECKPOINT_DIRS}}" ]; then
     exit 1
 fi
 
-# Change to output directory (rfd3 creates files in current directory)
-cd "{self.output_folder}"
-
 # Run RFdiffusion3
 rfd3 design \\
+    out_dir="{self.output_folder}" \\
     inputs="{self.json_file}" \\
     diffusion_batch_size={self.num_designs} \\
     global_prefix="{self.prefix}"
