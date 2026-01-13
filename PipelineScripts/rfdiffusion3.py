@@ -35,10 +35,10 @@ class RFdiffusion3(BaseConfig):
         - Environment variable: FOUNDRY_CHECKPOINT_DIRS (optional override)
 
     Examples:
-        # Basic de novo design
-        designs = RFdiffusion3(contig="100-120", num_designs=10)
+        # De novo design (no input PDB)
+        designs = RFdiffusion3(length="100-120", num_designs=10)
 
-        # Binder design with hotspots
+        # Binder design with hotspots (requires input PDB)
         target = PDB(pdb="7KDL")
         binder = RFdiffusion3(
             pdb=target,
@@ -59,11 +59,13 @@ class RFdiffusion3(BaseConfig):
         designs = RFdiffusion3(json_config=config)
 
     Parameters:
-        contig (str): Contig specification. Use '\\0' for chain breaks.
-            Example: "50-80,\\0,A1-100" (design 50-80 residues, break, copy A1-100)
-        length (str or int): Length constraint. Use "min-max" for range or int for exact.
+        length (str or int): Length constraint for de novo design (no input PDB).
+            Use "min-max" for range or int for exact length.
             Example: "100-150" or 120
-        pdb (str or ToolOutput): Input PDB structure (optional for de novo design)
+        contig (str): Contig specification for motif-based design (requires input PDB).
+            Use '\\0' for chain breaks. Chain letters reference input structure.
+            Example: "A50-100,80-100,\\0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
+        pdb (str or ToolOutput): Input PDB structure (required when using contig)
         ligand (str): Ligand selection by chemical component name
         num_designs (int): Number of designs to generate (default: 1)
         prefix (str): Prefix for output file names (default: uses pipeline name)
@@ -80,6 +82,8 @@ class RFdiffusion3(BaseConfig):
     Notes:
         - 10× faster than RFdiffusion/RFdiffusionAllAtom
         - All-atom model (4 backbone + 10 sidechain atoms)
+        - Use 'length' for de novo design, 'contig' for motif-based design
+        - 'contig' requires input PDB, even for numeric ranges
         - Chain breaks use '\\0' not '/' (different from RFdiffusion)
         - Advanced parameters available via json_config
 
@@ -161,9 +165,9 @@ class RFdiffusion3(BaseConfig):
 
     def validate_params(self):
         """Validate RFdiffusion3-specific parameters."""
-        # Require either contig or json_config
-        if not self.contig and not self.json_config:
-            raise ValueError("Either contig or json_config parameter is required")
+        # Require either length, contig, or json_config
+        if not self.length and not self.contig and not self.json_config:
+            raise ValueError("Either length, contig, or json_config parameter is required")
 
         # Check for incorrect chain break syntax
         if self.contig and '/' in self.contig:
