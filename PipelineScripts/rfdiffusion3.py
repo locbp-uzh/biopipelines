@@ -202,10 +202,14 @@ class RFdiffusion3(BaseConfig):
         self.pipeline_name = None
         self.json_file = None
         self.main_table = None
+        self.metrics_csv = None
+        self.specifications_csv = None
         self.rfd_log_file = None
         self.checkpoint_dir = None
         self.table_py_file = None
+        self.postprocess_py_file = None
         self.input_pdb_file = None
+        self.raw_output_folder = None
 
     def _extract_pipeline_name(self) -> str:
         """Extract pipeline/job name from output folder structure."""
@@ -237,6 +241,20 @@ class RFdiffusion3(BaseConfig):
             self.output_folder,
             "rfdiffusion3_results.csv"
         )
+        self.metrics_csv = os.path.join(
+            self.output_folder,
+            "rfdiffusion3_metrics.csv"
+        )
+        self.specifications_csv = os.path.join(
+            self.output_folder,
+            "rfdiffusion3_specifications.csv"
+        )
+
+        # Raw output folder for CIF.gz files
+        self.raw_output_folder = os.path.join(
+            self.output_folder,
+            "raw_output"
+        )
 
         # Log file in parent Logs folder
         parent_dir = os.path.dirname(self.output_folder)
@@ -259,10 +277,14 @@ class RFdiffusion3(BaseConfig):
                 checkpoint_base
             )
 
-            # HelpScript path
+            # HelpScript paths
             self.table_py_file = os.path.join(
                 self.folders["HelpScripts"],
                 "pipe_rfdiffusion3_table.py"
+            )
+            self.postprocess_py_file = os.path.join(
+                self.folders["HelpScripts"],
+                "pipe_rfdiffusion3_postprocess.py"
             )
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
@@ -423,6 +445,10 @@ EOF
         return f"""echo "Starting RFdiffusion3"
 echo "JSON config: {self.json_file}"
 echo "Output folder: {self.output_folder}"
+echo "Raw output folder: {self.raw_output_folder}"
+
+# Create raw output directory
+mkdir -p "{self.raw_output_folder}"
 
 # Set checkpoint directory
 export FOUNDRY_CHECKPOINT_DIRS="{self.checkpoint_dir}"
@@ -434,33 +460,31 @@ if [ ! -d "${{FOUNDRY_CHECKPOINT_DIRS}}" ]; then
     exit 1
 fi
 
-# Run RFdiffusion3
+# Run RFdiffusion3 (outputs CIF.gz format to raw folder)
 rfd3 design \\
-    out_dir="{self.output_folder}" \\
+    out_dir="{self.raw_output_folder}" \\
     inputs="{self.json_file}" \\
     diffusion_batch_size={self.num_designs} \\
     global_prefix="{self.prefix}"
 
 """
 
-    def _generate_rename_section(self) -> str:
-        """Generate bash section to rename outputs to BioPipelines convention."""
-        return f"""echo "Renaming outputs to BioPipelines convention"
+    def _generate_postprocess_section(self) -> str:
+        """Generate bash section to post-process RFdiffusion3 outputs.
 
-# RFdiffusion3 outputs: {{prefix}}_0.pdb, {{prefix}}_1.pdb, etc.
-# Rename to: {{prefix}}_{{design_startnum + i}}.pdb
-for i in $(seq 0 $(({self.num_designs} - 1))); do
-    old_name="{self.prefix}_${{i}}.pdb"
-    new_num=$(({self.design_startnum} + i))
-    new_name="{self.prefix}_${{new_num}}.pdb"
+        Converts CIF.gz outputs to PDB format and extracts metrics from JSON files.
+        """
+        return f"""echo "Post-processing RFdiffusion3 outputs"
 
-    if [ -f "$old_name" ]; then
-        mv "$old_name" "$new_name"
-        echo "Renamed $old_name -> $new_name"
-    else
-        echo "Warning: Expected output file not found: $old_name"
-    fi
-done
+# Process CIF.gz files: decompress, convert to PDB, extract metrics
+python "{self.postprocess_py_file}" \\
+    --raw_folder "{self.raw_output_folder}" \\
+    --output_folder "{self.output_folder}" \\
+    --prefix "{self.prefix}" \\
+    --num_designs {self.num_designs} \\
+    --design_startnum {self.design_startnum} \\
+    --metrics_csv "{self.metrics_csv}" \\
+    --specifications_csv "{self.specifications_csv}"
 
 """
 
@@ -493,7 +517,7 @@ python "{self.table_py_file}" \\
         script_content += self.generate_completion_check_header()
         script_content += self._generate_json_section()
         script_content += self.generate_script_run_rfdiffusion3()
-        script_content += self._generate_rename_section()
+        script_content += self._generate_postprocess_section()
         script_content += self.generate_script_create_table()
         script_content += self.generate_completion_check_footer()
 
@@ -533,6 +557,29 @@ python "{self.table_py_file}" \\
                 path=self.main_table,
                 columns=["id", "pdb", "contig", "length", "time", "status"],
                 description="RFdiffusion3 structure generation results",
+                count=self.num_designs
+            ),
+            "metrics": TableInfo(
+                name="metrics",
+                path=self.metrics_csv,
+                columns=[
+                    "id", "max_ca_deviation", "n_chainbreaks",
+                    "n_clashing_interresidue_w_sidechain", "n_clashing_interresidue_w_backbone",
+                    "non_loop_fraction", "loop_fraction", "helix_fraction", "sheet_fraction",
+                    "num_ss_elements", "radius_of_gyration", "alanine_content",
+                    "glycine_content", "num_residues"
+                ],
+                description="RFdiffusion3 quality metrics extracted from JSON outputs",
+                count=self.num_designs
+            ),
+            "specifications": TableInfo(
+                name="specifications",
+                path=self.specifications_csv,
+                columns=[
+                    "id", "sampled_contig", "num_tokens_in", "num_residues_in",
+                    "num_chains", "num_atoms", "num_residues"
+                ],
+                description="RFdiffusion3 design specifications and statistics",
                 count=self.num_designs
             )
         }

@@ -8,3 +8,4 @@ dependencies:
   - numpy
   - pyyaml
   - requests
+  - biopython<=1.79
