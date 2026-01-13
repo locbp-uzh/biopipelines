@@ -473,8 +473,11 @@ rfd3 design \\
         """Generate bash section to post-process RFdiffusion3 outputs.
 
         Converts CIF.gz outputs to PDB format and extracts metrics from JSON files.
+        Runs in biopipelines environment (has BioPython, pandas).
         """
         return f"""echo "Post-processing RFdiffusion3 outputs"
+echo "Switching to biopipelines environment for post-processing..."
+mamba activate biopipelines
 
 # Process CIF.gz files: decompress, convert to PDB, extract metrics
 python "{self.postprocess_py_file}" \\
