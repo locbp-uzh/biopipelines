@@ -181,12 +181,6 @@ pip install "rc-foundry[all]"
 mkdir /home/$USER/data/rfdiffusion3
 foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 ```
-
-**Dependencies**:
-- `atomworks`: Structure I/O and preprocessing (auto-installed with foundry)
-- `biotite`: Core structural computations (auto-installed)
-- PyTorch with GPU support recommended
-
 **Parameters**:
 - `input`: Union[str, ToolOutput, StandardizedOutput] = None - Input PDB structure (optional for de novo design)
 - `contig`: str (required) - Contig specification defining protein chain ranges and design regions
@@ -196,7 +190,7 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 - `length`: str = None - Length range for designed regions (e.g., "50-150")
 - `select_unfixed_sequence`: str = None - Residue positions where sequence can change (e.g., "A69-76,A153-154")
 - `select_fixed_atoms`: Dict[str, str] = None - Chain ranges to control atomic constraints
-- `select_hotspots`: Dict[str, str] = None - Hotspot residues with specific atoms (e.g., {"A181": "CG2,CG1", "A407": "NE1,CZ2"})
+- `select_hotspots`: Dict[str, str] = None - Hotspot residues and/or specific atoms (e.g., {"A181": "CG2,CG1", "A407": "NE1,CZ2"})
 - `infer_ori_strategy`: str = None - Strategy for orientation inference (e.g., "hotspots")
 - `num_designs`: int = 1 - Number of designs to generate
 - `design_startnum`: int = 1 - Starting number for design IDs
@@ -671,7 +665,7 @@ Predicts protein structures using Meta's ESM-2 with ESMFold. Fast single-sequenc
 
 **References**: https://github.com/facebookresearch/esm
 
-**Installation**: ESMFold works in the ProteinEnv environment. Install requirements:
+**Installation**: ESMFold works in the ProteinEnv environment, with some additional packages:
 ```bash
 mamba activate ProteinEnv
 pip install "fair-esm[esmfold]"
@@ -709,6 +703,12 @@ esm = ESMFold(
 
 Predicts biomolecular complexes including proteins, nucleic acids, and small molecules. State-of-the-art model for protein-ligand and protein-protein complex prediction.
 
+**Installation**: 
+```bash
+mamba create -n Boltz2Env python=3.11
+mamba activate Boltz2Env
+pip install boltz[cuda] -U
+```
 **Environment**: `Boltz2Env`
 
 **Parameters**:

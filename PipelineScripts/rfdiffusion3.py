@@ -66,6 +66,7 @@ class RFdiffusion3(BaseConfig):
         pdb (str or ToolOutput): Input PDB structure (optional for de novo design)
         ligand (str): Ligand selection by chemical component name
         num_designs (int): Number of designs to generate (default: 1)
+        prefix (str): Prefix for output file names (default: uses pipeline name)
         select_hotspots (str or dict): Hotspot residues for binder design
             String: "A67,A89" (all atoms) or "A67:CA,CB;A89:CA" (specific atoms)
             Dict: {"A67": "CA,CB", "A89": ""}
@@ -73,7 +74,7 @@ class RFdiffusion3(BaseConfig):
         design_startnum (int): Starting number for design numbering (default: 1)
 
     Outputs:
-        structures: List of PDB files ({pipeline_name}_1.pdb, ...)
+        structures: List of PDB files ({prefix}_1.pdb, ...)
         tables.structures: CSV with columns: id, pdb, contig, length, time, status
 
     Notes:
@@ -100,6 +101,7 @@ class RFdiffusion3(BaseConfig):
                  pdb: Union[str, ToolOutput, StandardizedOutput] = "",
                  ligand: str = "",
                  num_designs: int = 1,
+                 prefix: str = None,
                  select_hotspots: Union[str, Dict[str, str]] = None,
                  json_config: Union[str, Dict] = None,
                  design_startnum: int = 1,
@@ -113,6 +115,7 @@ class RFdiffusion3(BaseConfig):
             pdb: Input PDB structure (optional)
             ligand: Ligand selection by name
             num_designs: Number of designs to generate
+            prefix: Prefix for output file names (defaults to pipeline name)
             select_hotspots: Hotspot residues specification
             json_config: Full JSON config override for advanced use
             design_startnum: Starting number for design IDs
@@ -124,6 +127,7 @@ class RFdiffusion3(BaseConfig):
         self.pdb = pdb
         self.ligand = ligand
         self.num_designs = num_designs
+        self.prefix = prefix
         self.select_hotspots = select_hotspots
         self.json_config = json_config
         self.design_startnum = design_startnum
@@ -216,10 +220,14 @@ class RFdiffusion3(BaseConfig):
         # Extract pipeline name
         self.pipeline_name = self._extract_pipeline_name()
 
+        # Use provided prefix or default to pipeline name
+        if self.prefix is None:
+            self.prefix = self.pipeline_name
+
         # Core files
         self.json_file = os.path.join(
             self.output_folder,
-            f"{self.pipeline_name}_rfd3_input.json"
+            f"{self.prefix}_rfd3_input.json"
         )
         self.main_table = os.path.join(
             self.output_folder,
@@ -331,7 +339,9 @@ class RFdiffusion3(BaseConfig):
                 return json.loads(self.json_config)
 
         # Build config from parameters
-        design_key = f"{self.pipeline_name}_design"
+        # Use prefix (which defaults to pipeline_name if not set)
+        prefix = self.prefix if self.prefix else self.pipeline_name
+        design_key = f"{prefix}_design"
         config = {
             design_key: {}
         }
@@ -385,6 +395,9 @@ class RFdiffusion3(BaseConfig):
 
         config_lines.append(f"NUM DESIGNS: {self.num_designs}")
 
+        if self.prefix:
+            config_lines.append(f"PREFIX: {self.prefix}")
+
         if self.json_config:
             config_lines.append("MODE: Advanced (JSON config)")
 
@@ -417,26 +430,27 @@ if [ ! -d "${{FOUNDRY_CHECKPOINT_DIRS}}" ]; then
     exit 1
 fi
 
+# Change to output directory (rfd3 creates files in current directory)
+cd "{self.output_folder}"
+
 # Run RFdiffusion3
 rfd3 design \\
-    out_dir="{self.output_folder}" \\
     inputs="{self.json_file}" \\
     diffusion_batch_size={self.num_designs} \\
-    global_prefix="{self.pipeline_name}"
+    global_prefix="{self.prefix}"
 
 """
 
     def _generate_rename_section(self) -> str:
         """Generate bash section to rename outputs to BioPipelines convention."""
         return f"""echo "Renaming outputs to BioPipelines convention"
-cd "{self.output_folder}"
 
-# RFdiffusion3 outputs: {{pipeline_name}}_0.pdb, {{pipeline_name}}_1.pdb, etc.
-# Rename to: {{pipeline_name}}_{{design_startnum + i}}.pdb
+# RFdiffusion3 outputs: {{prefix}}_0.pdb, {{prefix}}_1.pdb, etc.
+# Rename to: {{prefix}}_{{design_startnum + i}}.pdb
 for i in $(seq 0 $(({self.num_designs} - 1))); do
-    old_name="{self.pipeline_name}_${{i}}.pdb"
+    old_name="{self.prefix}_${{i}}.pdb"
     new_num=$(({self.design_startnum} + i))
-    new_name="{self.pipeline_name}_${{new_num}}.pdb"
+    new_name="{self.prefix}_${{new_num}}.pdb"
 
     if [ -f "$old_name" ]; then
         mv "$old_name" "$new_name"
@@ -446,8 +460,6 @@ for i in $(seq 0 $(({self.num_designs} - 1))); do
     fi
 done
 
-cd - > /dev/null
-
 """
 
     def generate_script_create_table(self) -> str:
@@ -456,7 +468,7 @@ cd - > /dev/null
 python "{self.table_py_file}" \\
     --output_folder "{self.output_folder}" \\
     --json_file "{self.json_file}" \\
-    --pipeline_name "{self.pipeline_name}" \\
+    --pipeline_name "{self.prefix}" \\
     --num_designs {self.num_designs} \\
     --table_path "{self.main_table}" \\
     --design_startnum {self.design_startnum}
@@ -507,7 +519,7 @@ python "{self.table_py_file}" \\
         structure_ids = []
 
         for i in range(self.num_designs):
-            design_id = f"{self.pipeline_name}_{self.design_startnum + i}"
+            design_id = f"{self.prefix}_{self.design_startnum + i}"
             design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
             design_pdbs.append(design_path)
             structure_ids.append(design_id)
@@ -546,6 +558,7 @@ python "{self.table_py_file}" \\
                 "length": self.length,
                 "ligand": self.ligand,
                 "num_designs": self.num_designs,
+                "prefix": self.prefix,
                 "select_hotspots": self.select_hotspots,
                 "has_json_config": self.json_config is not None,
                 "design_startnum": self.design_startnum,
