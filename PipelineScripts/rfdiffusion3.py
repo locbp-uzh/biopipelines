@@ -398,9 +398,8 @@ class RFdiffusion3(BaseConfig):
             if self.select_hotspots:
                 entry["select_hotspots"] = self._format_hotspots()
 
-            # Set number of models per design
-            if self.num_models > 1:
-                entry["diffusion_batch_size"] = self.num_models
+            # Set number of models per design (always set to override RFD3's default of 8)
+            entry["diffusion_batch_size"] = self.num_models
 
         return config
 
