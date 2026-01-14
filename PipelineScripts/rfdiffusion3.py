@@ -375,31 +375,27 @@ class RFdiffusion3(BaseConfig):
         # Use prefix (which defaults to pipeline_name if not set)
         prefix = self.prefix if self.prefix else self.pipeline_name
 
-        # Create multiple design entries for num_designs
+        # Create single design entry (n_batches and diffusion_batch_size control multiplicity)
         config = {}
-        for i in range(self.num_designs):
-            design_key = f"{prefix}_design_{i}"
-            config[design_key] = {}
-            entry = config[design_key]
+        design_key = f"{prefix}"
+        config[design_key] = {}
+        entry = config[design_key]
 
-            # Required/common parameters
-            if self.contig:
-                entry["contig"] = self.contig
+        # Required/common parameters
+        if self.contig:
+            entry["contig"] = self.contig
 
-            if self.length is not None:
-                entry["length"] = str(self.length)
+        if self.length is not None:
+            entry["length"] = str(self.length)
 
-            if self.input_pdb_file:
-                entry["input"] = self.input_pdb_file
+        if self.input_pdb_file:
+            entry["input"] = self.input_pdb_file
 
-            if self.ligand:
-                entry["ligand"] = self.ligand
+        if self.ligand:
+            entry["ligand"] = self.ligand
 
-            if self.select_hotspots:
-                entry["select_hotspots"] = self._format_hotspots()
-
-            # Set number of models per design (always set to override RFD3's default of 8)
-            entry["diffusion_batch_size"] = self.num_models
+        if self.select_hotspots:
+            entry["select_hotspots"] = self._format_hotspots()
 
         return config
 
@@ -473,10 +469,14 @@ if [ ! -d "${{FOUNDRY_CHECKPOINT_DIRS}}" ]; then
 fi
 
 # Run RFdiffusion3 (outputs CIF.gz format to raw folder)
+# n_batches: number of designs to generate (default: 1)
+# diffusion_batch_size: number of models per design (default: 8)
 rfd3 design \\
     out_dir="{self.raw_output_folder}" \\
     inputs="{self.json_file}" \\
-    global_prefix="{self.prefix}"
+    global_prefix="{self.prefix}" \\
+    n_batches={self.num_designs} \\
+    diffusion_batch_size={self.num_models}
 
 """
 

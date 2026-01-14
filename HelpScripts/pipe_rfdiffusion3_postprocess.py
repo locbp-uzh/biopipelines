@@ -251,9 +251,9 @@ def main():
         success_count = 0
 
         for idx, (cif_gz_path, json_path, design_num, model_num) in enumerate(cif_files):
-            # RFdiffusion3 numbers designs as 0, 10, 20, ... (divide by 10)
-            # Models are numbered as 0, 1, 2, ... (keep as is)
-            output_design = args.design_startnum + (design_num // 10)
+            # With n_batches parameter, designs are numbered sequentially: 0, 1, 2, ...
+            # Models within each design are also numbered sequentially: 0, 1, 2, ...
+            output_design = args.design_startnum + design_num
             output_model = args.design_startnum + model_num
             structure_id = f"{args.prefix}_d{output_design}_m{output_model}"
 
