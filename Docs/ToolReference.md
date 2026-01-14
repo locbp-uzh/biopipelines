@@ -565,15 +565,17 @@ Combines a template sequence with substitutions at specific regions, generating 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `template`: Union[str, ToolOutput, StandardizedOutput] (required) - Base sequence (raw string or tool output)
+- `template`: Union[str, ToolOutput, StandardizedOutput] - Base sequence (raw string or tool output). Optional if using concatenation mode.
 - `substitutions`: Dict[str, Union[List[str], ToolOutput]] = None - Position ranges mapped to replacement options:
-  - Keys: Position strings like `"11-19"` or `"10-20+30-40"`, or table references like `table.column`
+  - Keys: Position strings like `"11-19"` or `"10-20+30-40"`, table references, or integers for concatenation mode
   - Values: List of raw sequences or ToolOutput with sequences
 - `id_map`: Dict[str, str] = {"*": "*_<N>"} - ID mapping pattern for matching sequences
 
 **Position Syntax**:
 - `"10-20"` → positions 10 to 20 (inclusive, 1-indexed)
 - `"10-20+30-40"` → positions 10-20 and 30-40
+
+**Concatenation Mode**: When `template` is omitted and keys are integers (1, 2, 3...), sequences are concatenated in order. Each key represents a segment position, and all combinations are generated.
 
 **Outputs**:
 - `sequences`: CSV file with stitched sequences
@@ -601,6 +603,16 @@ stitched = StitchSequences(
         distances.tables.selections.within: lmpnn
     }
 )
+
+# Concatenation mode (no template, integer keys)
+stitched = StitchSequences(
+    substitutions={
+        1: ["AAAA", "BBBB"],         # First segment
+        2: ["CCCC"],                 # Second segment
+        3: ["DDDD", "EEEE", "FFFF"]  # Third segment
+    }
+)
+# Output: 2 × 1 × 3 = 6 concatenated sequences
 ```
 
 ---

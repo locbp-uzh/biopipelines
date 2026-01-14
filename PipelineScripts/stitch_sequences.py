@@ -78,7 +78,25 @@ class StitchSequences(BaseConfig):
                     "31-44": ["DDDDDDDDDDDDDD", "EEEEEEEEEEEEEE"]
                 }
             )
+
+            # Concatenation mode (no template, integer keys)
+            stitched = StitchSequences(
+                substitutions={
+                    1: ["AAAA", "BBBB"],      # First segment options
+                    2: ["CCCC", "DDDD", "EEEE"]  # Second segment options
+                }
+            )
+            # Output: 2 × 3 = 6 concatenated sequences
         """
+        # Handle concatenation mode: no template, integer keys
+        if template is None and substitutions:
+            # Check if all keys are integers
+            if all(isinstance(k, int) for k in substitutions.keys()):
+                # Auto-generate template and convert keys
+                num_segments = len(substitutions)
+                template = "A" * num_segments
+                substitutions = {str(k): v for k, v in substitutions.items()}
+
         if template is None:
             raise ValueError("template parameter is required")
 
