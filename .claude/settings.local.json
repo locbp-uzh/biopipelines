@@ -43,7 +43,8 @@
       "Bash(git mv:*)",
       "Bash(xargs basename:*)",
       "Bash(done)",
-      "Bash(before parsing selections: ['contig']\"\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(before parsing selections: ['contig']\"\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "WebFetch(domain:rosettacommons.github.io)"
     ],
     "deny": [],
     "ask": []
