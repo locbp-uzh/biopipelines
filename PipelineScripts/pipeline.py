@@ -36,7 +36,11 @@ EMAILS = {
     'gquarg': 'gianluca.quargnali@chem.uzh.ch',
     'pabriv': 'pablo.riverafuentes@uzh.ch',
     'clsonn': 'clarissa.sonnemann@chem.uzh.ch',
-    'crstev': 'craig.steven@chem.uzh.ch'
+    'crstev': 'craig.steven@chem.uzh.ch',
+    'rrezen': 'renata.rezendemiranda@chem.uzh.ch',
+    'qiaxu': 'qianqian.xu@chem.uzh.ch',
+    'wgoddi': 'wouter.goddijn@chem.uzh.ch',
+    'tahofm': 'tatjana.hofmann@chem.uzh.ch'
 }
 
 

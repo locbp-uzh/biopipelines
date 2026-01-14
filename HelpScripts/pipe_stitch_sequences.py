@@ -201,9 +201,11 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         for sub_info in substitutions_info.values()
     )
 
-    if template_is_raw and all_positions_fixed and all_subs_raw:
-        results = stitch_raw_sequences(template_sequences, substitutions)
+    if all_positions_fixed and all_subs_raw:
+        # Raw substitutions with fixed positions - apply to all templates
+        results = stitch_with_raw_substitutions(template_sequences, substitutions)
     else:
+        # Complex case: match sequences by base ID
         results = stitch_matched_sequences(template_sequences, substitutions, id_map)
 
     # Save results
@@ -224,38 +226,41 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         raise ValueError("No stitched sequences generated")
 
 
-def stitch_raw_sequences(
+def stitch_with_raw_substitutions(
     template_sequences: Dict[str, str],
     substitutions: List[Dict]
 ) -> List[Dict[str, Any]]:
-    """Stitch raw sequences with fixed positions using Cartesian product."""
+    """Stitch templates with raw substitutions at fixed positions using Cartesian product."""
     results = []
 
-    # Build option lists for Cartesian product
+    # Build option lists for Cartesian product (just the sequences, ignore their IDs)
     option_lists = []
     pos_ranges = []
     for sub in substitutions:
         pos_ranges.append(sub['position_key']['positions'])
-        option_lists.append(list(sub['sequences'].items()))
+        # Only use the sequences, not the IDs (raw sequences have generic IDs)
+        option_lists.append(list(sub['sequences'].values()))
 
     for template_id, template_seq in template_sequences.items():
         if not option_lists:
             results.append({'id': template_id, 'sequence': template_seq})
             continue
 
+        # Get base ID from template
+        base_id = extract_base_id(template_id)
+
         combo_idx = 0
         for combo in product(*option_lists):
             combo_idx += 1
             subs = {}
-            for i, (opt_id, opt_seq) in enumerate(combo):
+            for i, opt_seq in enumerate(combo):
                 subs[pos_ranges[i]] = opt_seq
 
             stitched = substitute_segments(template_seq, subs)
-            base_id = extract_base_id(template_id)
             output_id = f"{base_id}_{combo_idx}"
             results.append({'id': output_id, 'sequence': stitched})
 
-    print(f"\nGenerated {len(results)} stitched sequences from raw inputs")
+    print(f"\nGenerated {len(results)} stitched sequences")
     return results
 
 

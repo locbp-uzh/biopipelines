@@ -29,7 +29,8 @@ with Pipeline(project="Examples",
                       steps=20)
 
     pmpnn = ProteinMPNN(structures=rfd,
-                        num_sequences=2)
+                        num_sequences=2,
+                        redesigned=rfd.tables.structures.designed)
 
     msas = MMseqs2(sequences=pmpnn)
     
