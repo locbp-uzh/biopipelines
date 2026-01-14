@@ -560,14 +560,20 @@ fused = Fuse(
 
 ### StitchSequences
 
-Combines different regions from multiple sequence sources into chimeric proteins. Useful for creating hybrid sequences from different design outputs.
+Combines a template sequence with substitutions at specific regions, generating all Cartesian product combinations. Supports both raw sequences and ToolOutput objects, with fixed or table-based position specifications.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `sequences`: List[Union[ToolOutput, StandardizedOutput]] (required) - List of sequence outputs to stitch
-- `selections`: Union[List[Union[str, ToolOutput]], str] = None - Position specifications for each sequence (e.g., ["1-50", "51-100"])
-- `id_map`: Dict[str, str] = None - ID mapping pattern (default: {"*": "*_N"})
+- `template`: Union[str, ToolOutput, StandardizedOutput] (required) - Base sequence (raw string or tool output)
+- `substitutions`: Dict[str, Union[List[str], ToolOutput]] = None - Position ranges mapped to replacement options:
+  - Keys: Position strings like `"11-19"` or `"10-20+30-40"`, or table references like `table.column`
+  - Values: List of raw sequences or ToolOutput with sequences
+- `id_map`: Dict[str, str] = {"*": "*_<N>"} - ID mapping pattern for matching sequences
+
+**Position Syntax**:
+- `"10-20"` → positions 10 to 20 (inclusive, 1-indexed)
+- `"10-20+30-40"` → positions 10-20 and 30-40
 
 **Outputs**:
 - `sequences`: CSV file with stitched sequences
@@ -576,12 +582,25 @@ Combines different regions from multiple sequence sources into chimeric proteins
   | id | sequence |
   |----|----------|
 
-**Example**:
+**Examples**:
 ```python
+# Raw sequences with fixed positions
 stitched = StitchSequences(
-    sequences=[lmpnn1, lmpnn2],
-    selections=["1-50", "51-100"]
+    template="MKTAYIAKQRQISFVKSHFS...",
+    substitutions={
+        "11-19": ["AAAAAAAA", "BBBBBBBB", "CCCCCCCC"],
+        "31-44": ["DDDDDDDDDDDDDD", "EEEEEEEEEEEEEE"]
+    }
+)
+# Output: 3 × 2 = 6 combinations
 
+# ToolOutput with table-based positions
+stitched = StitchSequences(
+    template=pmpnn,
+    substitutions={
+        distances.tables.selections.within: lmpnn
+    }
+)
 ```
 
 ---

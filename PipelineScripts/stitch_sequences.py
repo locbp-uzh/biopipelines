@@ -1,260 +1,254 @@
 """
-StitchSequences tool for combining sequences from multiple sequence generation tools.
+StitchSequences tool for combining sequences with segment substitutions.
 
-Takes sequences from multiple tools and combines them by stitching the sequences
-together based on position specifications. Takes a base sequence and overlays
-other sequences at specified positions to create combined sequences.
+Takes a template sequence and substitutes specific regions with alternative
+sequences, generating all combinations (Cartesian product).
 """
 
 import os
-import pandas as pd
-from typing import Dict, List, Any, Optional, Union
+import json
+from typing import Dict, List, Any, Union
 
 try:
     from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
 class StitchSequences(BaseConfig):
     """
-    Pipeline tool for stitching sequences from multiple sequence generation tools.
+    Pipeline tool for stitching sequences with segment substitutions.
 
-    Combines sequences from different tools by overlaying/replacing specific positions.
-    Takes a base sequence (first tool) and overlays other sequences at specified positions,
-    creating combined sequences.
+    Takes a template sequence and replaces specific regions with alternative
+    sequences, generating all Cartesian product combinations.
+
+    Usage:
+        StitchSequences(
+            template=tool1,  # or raw sequence string
+            substitutions={
+                "11-19": tool2,      # ToolOutput with sequences
+                "31-44": ["AAAA", "BBBB", "CCCC"]  # or list of raw sequences
+            }
+        )
     """
 
-    # Tool identification
     TOOL_NAME = "StitchSequences"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    DEFAULT_ENV = None
 
     def __init__(self,
-                 sequences: List[Union[ToolOutput, StandardizedOutput]],
-                 selections: Union[List[Union[str, ToolOutput]], str] = None,
+                 template: Union[str, ToolOutput, StandardizedOutput],
+                 substitutions: Dict[str, Union[List[str], ToolOutput, StandardizedOutput]] = None,
                  id_map: Dict[str, str] = {"*": "*_<N>"},
                  **kwargs):
         """
         Initialize StitchSequences configuration.
 
         Args:
-            sequences: List of sequence tools/outputs to combine. First is base, others overlay.
-                      e.g., [tool1, tool2] - tool1 provides base, tool2 overlays at positions
-            selections: Position specifications for each sequence (except first base sequence).
-                      Can be:
-                      - List of strings: ["", "10-20+30-40"] - empty string means base, string means overlay positions
-                      - List of table references: ["", distances.tables.analysis.within]
-                      - Single string: "10-20+30-40" - applies to second sequence only
-            id_map: ID mapping pattern between table and sequence IDs. Default: {"*": "*_<N>"}
-                   - Left side (*): Pattern for table IDs (base structure IDs)
-                   - Right side (*_<N>): Pattern for sequence IDs where <N> is sequence number
-                   - Enables matching table ID 'protein_1' to sequences 'protein_1_1', 'protein_1_2', etc.
+            template: Base sequence - can be:
+                - Raw sequence string
+                - ToolOutput/StandardizedOutput with sequences
+            substitutions: Dictionary mapping position ranges to replacement options:
+                - Keys: Position strings like "11-19" or "31-44+50-55"
+                - Values: List of raw sequences OR ToolOutput with sequences
+            id_map: ID mapping pattern for matching table IDs to sequence IDs
             **kwargs: Additional parameters
 
         Position Syntax:
-            String format:
-            - "" → base sequence (no overlay)
-            - "10-20" → overlay at residues 10 to 20
-            - "10-20+30-40" → overlay at residues 10-20 and 30-40
-            - "145+147+150" → overlay at specific residues 145, 147, and 150
-
-            Table format:
-            - table_reference → use position values from table column
-
-        ID Mapping:
-            The id_map parameter handles cases where table IDs (from tools like DistanceSelector)
-            don't match sequence IDs (from ProteinMPNN/LigandMPNN). For example:
-            - Table: 'rifampicin_014_1', 'rifampicin_014_2'
-            - Sequences: 'rifampicin_014_1_1', 'rifampicin_014_1_2', 'rifampicin_014_2_1', ...
-
-            With id_map={"*": "*_<N>"}, all sequences matching 'rifampicin_014_1_*' will use
-            positions from table entry 'rifampicin_014_1'. All combinations are generated
-            using Cartesian product.
+            - "10-20" → positions 10 to 20 (inclusive, 1-indexed)
+            - "10-20+30-40" → positions 10-20 and 30-40
+            - "145+147+150" → specific positions 145, 147, and 150
 
         Examples:
-            # Basic usage with default ID mapping
-            sequences = pipeline.add(StitchSequences(
-                sequences=[pmpnn, lmpnn],
-                selections=["", distances.tables.selections.within]
-            ))
+            # With ToolOutput
+            stitched = StitchSequences(
+                template=proteinmpnn_output,
+                substitutions={
+                    "11-19": ligandmpnn_output,
+                    "31-44": ["AAAA", "BBBB"]
+                }
+            )
 
-            # Explicit ID mapping (same as default)
-            sequences = pipeline.add(StitchSequences(
-                sequences=[pmpnn, lmpnn],
-                selections=["", distances.tables.selections.within],
-                id_map={"*": "*_<N>"}
-            ))
-
-            # Fixed positions instead of table
-            sequences = pipeline.add(StitchSequences(
-                sequences=[base_tool, overlay_tool],
-                selections=["", "10-20+30-40"]
-            ))
+            # With raw sequences
+            stitched = StitchSequences(
+                template="MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQQIAAALEHHHHHH",
+                substitutions={
+                    "11-19": ["AAAAAAAA", "BBBBBBBB", "CCCCCCCC"],
+                    "31-44": ["DDDDDDDDDDDDDD", "EEEEEEEEEEEEEE"]
+                }
+            )
         """
-        self.input_sequences = sequences
-        self.position_specs = selections
+        if template is None:
+            raise ValueError("template parameter is required")
+
+        self.template = template
+        self.substitutions = substitutions or {}
         self.id_map = id_map
 
-        # Validate input
-        if not sequences or len(sequences) < 2:
-            raise ValueError("At least 2 sequence sources are required")
-
-        # Normalize selections parameter
-        if selections is None:
-            # Default: first is base, others have empty positions (no overlay)
-            self.position_specs = [""] + [""] * (len(sequences) - 1)
-        elif isinstance(selections, str):
-            # Single string: applies to second sequence only
-            if len(sequences) != 2:
-                raise ValueError("Single selection string only valid with exactly 2 sequence sources")
-            self.position_specs = ["", selections]
-        elif isinstance(selections, list):
-            if len(selections) != len(sequences):
-                raise ValueError(f"Selection specifications ({len(selections)}) must match sequence count ({len(sequences)})")
-            self.position_specs = selections
-        else:
-            raise ValueError("Selections must be string, list, or None")
+        # Validate substitution keys are position strings or table references
+        for pos_key in self.substitutions.keys():
+            if not isinstance(pos_key, (str, tuple)):
+                raise ValueError(f"Substitution key must be position string or table reference, got {type(pos_key)}")
 
         # Initialize base class
         super().__init__(**kwargs)
 
         # Set up dependencies
-        for seq_source in sequences:
-            if hasattr(seq_source, 'config'):
-                self.dependencies.append(seq_source.config)
+        if isinstance(self.template, (ToolOutput, StandardizedOutput)):
+            if hasattr(self.template, 'config'):
+                self.dependencies.append(self.template.config)
 
-        for pos_spec in self.position_specs:
-            if hasattr(pos_spec, 'config'):
-                self.dependencies.append(pos_spec.config)
+        for options in self.substitutions.values():
+            if isinstance(options, (ToolOutput, StandardizedOutput)):
+                if hasattr(options, 'config'):
+                    self.dependencies.append(options.config)
 
     def validate_params(self):
         """Validate StitchSequences parameters."""
-        if not self.input_sequences:
-            raise ValueError("sequences parameter is required")
+        if self.template is None:
+            raise ValueError("template is required")
 
-        if len(self.input_sequences) < 2:
-            raise ValueError("At least 2 sequence sources required")
+        for pos_range, options in self.substitutions.items():
+            self._parse_position_range(pos_range)
+            if options is None:
+                raise ValueError(f"Substitution options for '{pos_range}' cannot be None")
 
-        # Validate all sequence sources are valid types
-        for i, seq_source in enumerate(self.input_sequences):
-            if not isinstance(seq_source, (ToolOutput, StandardizedOutput)):
-                raise ValueError(f"Sequence source {i} must be ToolOutput or StandardizedOutput")
+    def _parse_position_range(self, pos_range: str) -> List[int]:
+        """Parse position range string into list of positions."""
+        positions = []
+        parts = pos_range.split('+')
+
+        for part in parts:
+            part = part.strip()
+            if '-' in part:
+                start, end = map(int, part.split('-'))
+                positions.extend(range(start, end + 1))
+            else:
+                positions.append(int(part))
+
+        return sorted(set(positions))
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input sequences from previous tools."""
+        """Configure inputs from template and substitutions."""
         self.folders = pipeline_folders
 
-        # Get sequence tables from each source - no assumptions or fallbacks
-        self.sequence_sources = []
+        self.template_info = self._extract_sequence_info(self.template, "template")
 
-        for i, seq_source in enumerate(self.input_sequences):
-            # Each source MUST have a sequences table
-            if not hasattr(seq_source, 'tables'):
-                raise ValueError(f"Sequence source {i} must have tables")
+        # Process substitutions - keys can be strings or table references
+        self.substitution_infos = {}
+        for pos_key, options in self.substitutions.items():
+            # Convert key to a serializable format
+            if isinstance(pos_key, str):
+                key_info = {"type": "fixed", "positions": pos_key}
+                key_str = pos_key
+            elif isinstance(pos_key, tuple) and len(pos_key) == 2:
+                # Table reference (TableInfo, column_name)
+                table_info, column_name = pos_key
+                table_path = table_info.path if hasattr(table_info, 'path') else str(table_info)
+                key_info = {"type": "table", "table_path": table_path, "column": column_name}
+                key_str = f"table:{column_name}"
+            else:
+                raise ValueError(f"Invalid position key type: {type(pos_key)}")
 
-            if not hasattr(seq_source.tables, 'sequences'):
-                raise ValueError(f"Sequence source {i} must have tables.sequences")
+            self.substitution_infos[key_str] = {
+                "position_key": key_info,
+                "sequences": self._extract_sequence_info(options, f"substitution[{key_str}]")
+            }
 
-            # Get the sequences table path directly
-            sequences_table = seq_source.tables.sequences
+    def _extract_sequence_info(self, source, name: str) -> Dict[str, Any]:
+        """Extract sequence information from various source types."""
+        if isinstance(source, str):
+            return {
+                "type": "raw",
+                "sequences": [source],
+                "source_name": "raw_sequence"
+            }
+
+        elif isinstance(source, list):
+            if not all(isinstance(s, str) for s in source):
+                raise ValueError(f"{name}: list must contain only strings")
+            return {
+                "type": "raw_list",
+                "sequences": source,
+                "source_name": "raw_sequences"
+            }
+
+        elif isinstance(source, (ToolOutput, StandardizedOutput)):
+            if not hasattr(source, 'tables'):
+                raise ValueError(f"{name}: ToolOutput must have tables")
+
+            if not hasattr(source.tables, 'sequences'):
+                raise ValueError(f"{name}: ToolOutput must have tables.sequences")
+
+            sequences_table = source.tables.sequences
             if hasattr(sequences_table, 'path'):
                 sequences_file = sequences_table.path
             elif isinstance(sequences_table, str):
                 sequences_file = sequences_table
             else:
-                raise ValueError(f"Sequence source {i} tables.sequences must have path or be string path")
+                raise ValueError(f"{name}: tables.sequences must have path or be string")
 
-            source_info = {
-                'tool': seq_source,
-                'sequences_file': sequences_file,
-                'tool_name': seq_source.__class__.__name__
+            return {
+                "type": "tool_output",
+                "sequences_file": sequences_file,
+                "source_name": source.__class__.__name__,
+                "sequence_ids": getattr(source, 'sequence_ids', [])
             }
 
-            self.sequence_sources.append(source_info)
+        else:
+            raise ValueError(f"{name}: unsupported type {type(source)}")
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
-        config_lines.extend([
-            f"SEQUENCE SOURCES: {len(self.input_sequences)}",
-            f"BASE SEQUENCE: {self.input_sequences[0].__class__.__name__}",
-        ])
+        if isinstance(self.template, str):
+            template_display = f"raw sequence ({len(self.template)} chars)"
+        elif isinstance(self.template, (ToolOutput, StandardizedOutput)):
+            template_display = self.template.__class__.__name__
+        else:
+            template_display = str(type(self.template))
 
-        for i in range(1, len(self.input_sequences)):
-            positions = self.position_specs[i]
-            pos_display = positions if isinstance(positions, str) else f"Table: {positions}"
-            config_lines.append(f"OVERLAY {i}: {self.input_sequences[i].__class__.__name__} at {pos_display}")
+        config_lines.append(f"TEMPLATE: {template_display}")
+        config_lines.append(f"SUBSTITUTIONS: {len(self.substitutions)} regions")
+
+        for pos_key, options in self.substitutions.items():
+            # Format position key
+            if isinstance(pos_key, str):
+                pos_display = pos_key
+            elif isinstance(pos_key, tuple):
+                pos_display = f"table:{pos_key[1]}"
+            else:
+                pos_display = str(pos_key)
+
+            # Format options
+            if isinstance(options, list):
+                options_display = f"{len(options)} raw sequences"
+            elif isinstance(options, (ToolOutput, StandardizedOutput)):
+                options_display = options.__class__.__name__
+            else:
+                options_display = str(type(options))
+            config_lines.append(f"  {pos_display}: {options_display}")
 
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """
-        Generate sequence stitching script.
-
-        Args:
-            script_path: Path where script should be written
-
-        Returns:
-            Script content as string
-        """
-        # Output files
-        stitched_sequences_csv = os.path.join(self.output_folder, "sequences.csv")
-
-        # Create config file for the stitching process
+        """Generate sequence stitching script."""
+        output_csv = os.path.join(self.output_folder, "sequences.csv")
         config_file = os.path.join(self.output_folder, "stitch_config.json")
 
-        # Build configuration data
         config_data = {
-            "sequence_sources": [],
-            "position_specs": [],
+            "template": self.template_info,
+            "substitutions": self.substitution_infos,
             "id_map": self.id_map,
-            "output_csv": stitched_sequences_csv
+            "output_csv": output_csv
         }
 
-        # Add sequence source files
-        for i, source in enumerate(self.sequence_sources):
-            config_data["sequence_sources"].append({
-                "index": i,
-                "sequences_file": source['sequences_file'],
-                "tool_name": source['tool'].__class__.__name__
-            })
-
-        # Add position specifications
-        for i, pos_spec in enumerate(self.position_specs):
-            if isinstance(pos_spec, str):
-                config_data["position_specs"].append({
-                    "index": i,
-                    "type": "fixed",
-                    "value": pos_spec
-                })
-            else:
-                # Table reference - handle tuple format (TableInfo_object, column_name)
-                if isinstance(pos_spec, tuple) and len(pos_spec) == 2:
-                    table_obj, column_name = pos_spec
-                    table_path = table_obj.path if hasattr(table_obj, 'path') else ''
-                else:
-                    # Fallback for other formats
-                    table_path = getattr(pos_spec, 'path', '') if hasattr(pos_spec, 'path') else ''
-                    column_name = 'within'  # Default column for positions
-
-                config_data["position_specs"].append({
-                    "index": i,
-                    "type": "table",
-                    "table_path": table_path,
-                    "column_name": column_name
-                })
-
-        # Write config file
-        import json
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
         with open(config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        # Generate script content
         script_content = f"""#!/bin/bash
 # StitchSequences execution script
 # Generated by BioPipelines pipeline system
@@ -262,23 +256,21 @@ class StitchSequences(BaseConfig):
 {self.generate_completion_check_header()}
 
 echo "Running sequence stitching"
-echo "Sequence sources: {len(self.input_sequences)}"
-echo "Base sequence: {self.input_sequences[0].__class__.__name__}"
+echo "Template: {self.template_info['source_name']}"
+echo "Substitution regions: {len(self.substitutions)}"
 """
 
-        # Add overlay echo statements for each overlay tool
-        for i in range(1, len(self.input_sequences)):
-            script_content += f'echo "Overlay {i}: {self.input_sequences[i].__class__.__name__}"\n'
+        for key_str, info in self.substitution_infos.items():
+            script_content += f'echo "  {key_str}: {info["sequences"]["source_name"]}"\n'
 
-        script_content += f"""echo "Output: {stitched_sequences_csv}"
+        script_content += f"""echo "Output: {output_csv}"
 
-# Run Python stitching script
 python "{os.path.join(self.folders['HelpScripts'], 'pipe_stitch_sequences.py')}" \\
   --config "{config_file}"
 
 if [ $? -eq 0 ]; then
     echo "Sequence stitching completed successfully"
-    echo "Results written to: {stitched_sequences_csv}"
+    echo "Results written to: {output_csv}"
 else
     echo "Error: Sequence stitching failed"
     exit 1
@@ -290,18 +282,8 @@ fi
         return script_content
 
     def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after sequence stitching.
-
-        Predicts output sequence IDs based on Cartesian product of all input sequences
-        grouped by base structure ID.
-
-        Returns:
-            Dictionary with output file paths
-        """
+        """Get expected output files after sequence stitching."""
         sequences_csv = os.path.join(self.output_folder, "sequences.csv")
-
-        # Predict output sequence IDs using Cartesian product
         predicted_ids = self._predict_output_sequence_ids()
 
         tables = {
@@ -309,7 +291,7 @@ fi
                 name="sequences",
                 path=sequences_csv,
                 columns=["id", "sequence"],
-                description="Stitched sequences combining multiple MPNN tools via Cartesian product",
+                description="Stitched sequences with segment substitutions",
                 count=len(predicted_ids)
             )
         }
@@ -326,81 +308,56 @@ fi
         }
 
     def _predict_output_sequence_ids(self) -> List[str]:
-        """
-        Predict output sequence IDs based on Cartesian product of input sequences.
-
-        Uses id_map pattern to group sequences by base structure ID, then generates
-        all combinations and numbers them sequentially.
-
-        Returns:
-            List of predicted output sequence IDs
-        """
+        """Predict output sequence IDs based on Cartesian product of all options."""
         import re
 
-        # Parse id_map pattern
-        if "*" not in self.id_map or "*_<N>" not in self.id_map.values():
-            # Fallback to simple base IDs if pattern doesn't match expected format
-            base_tool = self.input_sequences[0]
-            if not hasattr(base_tool, 'sequence_ids'):
-                raise ValueError("Base sequence tool must have sequence_ids")
-            return base_tool.sequence_ids
-
-        # Extract base structure IDs by stripping sequence numbers from first tool
-        base_tool = self.input_sequences[0]
-        if not hasattr(base_tool, 'sequence_ids'):
-            raise ValueError("Base sequence tool must have sequence_ids")
-
-        # Group sequence IDs by base structure ID (strip trailing _N)
-        base_structure_ids = {}
-        for seq_id in base_tool.sequence_ids:
-            # Match pattern: anything ending with _<number>
-            match = re.match(r'^(.+)_\d+$', seq_id)
-            if match:
-                base_id = match.group(1)
-                if base_id not in base_structure_ids:
-                    base_structure_ids[base_id] = []
-                base_structure_ids[base_id].append(seq_id)
+        # Get template sequence IDs
+        if isinstance(self.template, str):
+            template_ids = ["seq"]
+        elif isinstance(self.template, list):
+            template_ids = [f"seq_{i+1}" for i in range(len(self.template))]
+        elif isinstance(self.template, (ToolOutput, StandardizedOutput)):
+            if hasattr(self.template, 'sequence_ids'):
+                template_ids = self.template.sequence_ids
             else:
-                # No number suffix, use as-is
-                if seq_id not in base_structure_ids:
-                    base_structure_ids[seq_id] = []
-                base_structure_ids[seq_id].append(seq_id)
+                template_ids = ["seq"]
+        else:
+            template_ids = ["seq"]
 
-        # Count sequences per source for each base structure
-        sequences_per_source = []
-        for tool in self.input_sequences:
-            if not hasattr(tool, 'sequence_ids'):
-                raise ValueError(f"Tool {tool.__class__.__name__} must have sequence_ids")
-
-            # Group this tool's sequences by base ID
-            tool_sequences_by_base = {}
-            for seq_id in tool.sequence_ids:
-                match = re.match(r'^(.+)_\d+$', seq_id)
-                if match:
-                    base_id = match.group(1)
-                    if base_id not in tool_sequences_by_base:
-                        tool_sequences_by_base[base_id] = 0
-                    tool_sequences_by_base[base_id] += 1
+        # Get counts for each substitution region
+        substitution_counts = []
+        for options in self.substitutions.values():
+            if isinstance(options, list):
+                substitution_counts.append(len(options))
+            elif isinstance(options, (ToolOutput, StandardizedOutput)):
+                if hasattr(options, 'sequence_ids'):
+                    seq_ids = options.sequence_ids
+                    base_ids = set()
+                    for seq_id in seq_ids:
+                        match = re.match(r'^(.+)_\d+$', seq_id)
+                        base_ids.add(match.group(1) if match else seq_id)
+                    if base_ids:
+                        avg_per_base = len(seq_ids) // len(base_ids)
+                        substitution_counts.append(max(1, avg_per_base))
+                    else:
+                        substitution_counts.append(1)
                 else:
-                    if seq_id not in tool_sequences_by_base:
-                        tool_sequences_by_base[seq_id] = 0
-                    tool_sequences_by_base[seq_id] += 1
+                    substitution_counts.append(1)
+            else:
+                substitution_counts.append(1)
 
-            sequences_per_source.append(tool_sequences_by_base)
+        # Calculate total combinations per template ID
+        total_per_template = 1
+        for count in substitution_counts:
+            total_per_template *= count
 
-        # Generate predicted IDs using Cartesian product
+        # Generate predicted IDs
         predicted_ids = []
+        for template_id in template_ids:
+            match = re.match(r'^(.+)_\d+$', template_id)
+            base_id = match.group(1) if match else template_id
 
-        for base_id in sorted(base_structure_ids.keys()):
-            # Calculate total combinations for this base structure
-            # Cartesian product: multiply counts from each source
-            total_combinations = 1
-            for source_counts in sequences_per_source:
-                count = source_counts.get(base_id, 1)
-                total_combinations *= count
-
-            # Generate sequential IDs for all combinations
-            for n in range(1, total_combinations + 1):
+            for n in range(1, total_per_template + 1):
                 predicted_ids.append(f"{base_id}_{n}")
 
         return predicted_ids
@@ -408,12 +365,37 @@ fi
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
+
+        if isinstance(self.template, str):
+            template_summary = f"raw_sequence({len(self.template)} chars)"
+        elif isinstance(self.template, (ToolOutput, StandardizedOutput)):
+            template_summary = self.template.__class__.__name__
+        else:
+            template_summary = str(type(self.template))
+
+        substitutions_summary = {}
+        for pos_key, options in self.substitutions.items():
+            # Format key
+            if isinstance(pos_key, str):
+                key_str = pos_key
+            elif isinstance(pos_key, tuple):
+                key_str = f"table:{pos_key[1]}"
+            else:
+                key_str = str(pos_key)
+
+            # Format value
+            if isinstance(options, list):
+                substitutions_summary[key_str] = f"{len(options)} raw sequences"
+            elif isinstance(options, (ToolOutput, StandardizedOutput)):
+                substitutions_summary[key_str] = options.__class__.__name__
+            else:
+                substitutions_summary[key_str] = str(type(options))
+
         base_dict.update({
             "tool_params": {
-                "sequence_count": len(self.input_sequences),
-                "selection_specs": [str(pos) for pos in self.position_specs],
-                "base_tool": self.input_sequences[0].__class__.__name__,
-                "overlay_tools": [tool.__class__.__name__ for tool in self.input_sequences[1:]]
+                "template": template_summary,
+                "substitutions": substitutions_summary,
+                "id_map": self.id_map
             }
         })
         return base_dict
