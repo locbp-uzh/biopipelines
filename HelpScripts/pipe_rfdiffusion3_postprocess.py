@@ -47,8 +47,8 @@ def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int, int]]:
     Returns:
         List of tuples: (cif_gz_path, json_path, design_number, model_number)
     """
-    # Pattern: *_design_*_model_*.cif.gz
-    pattern = os.path.join(raw_folder, "*_design_*_model_*.cif.gz")
+    # Pattern: *_*_model_*.cif.gz (no "design" word in newer RFD3 versions)
+    pattern = os.path.join(raw_folder, "*_model_*.cif.gz")
     cif_files = glob.glob(pattern)
 
     results = []
@@ -58,33 +58,35 @@ def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int, int]]:
         # Remove .cif.gz extension
         name_without_ext = basename.replace(".cif.gz", "")
 
-        # Find design_N and model_M
-        # Pattern: *_design_N_model_M
-        parts = name_without_ext.split("_design_")
+        # Find N_model_M pattern
+        # Split by _model_ to get the model number
+        parts = name_without_ext.split("_model_")
         if len(parts) == 2:
-            # parts[1] should be "N_model_M"
-            design_and_model = parts[1].split("_model_")
-            if len(design_and_model) == 2:
-                try:
-                    design_num = int(design_and_model[0])
-                    model_num = int(design_and_model[1])
+            try:
+                model_num = int(parts[1])
 
-                    # Find corresponding JSON file
-                    json_path = cif_path.replace(".cif.gz", ".json")
-
-                    if os.path.exists(json_path):
-                        results.append((cif_path, json_path, design_num, model_num))
-                    else:
-                        print(f"Warning: JSON file not found for {basename}")
-                        results.append((cif_path, None, design_num, model_num))
-                except ValueError:
-                    print(f"Warning: Could not parse design/model numbers from {basename}")
+                # The design number is the last underscore-separated part before _model_
+                prefix_and_design = parts[0]
+                design_parts = prefix_and_design.split("_")
+                if len(design_parts) >= 1:
+                    design_num = int(design_parts[-1])
+                else:
+                    print(f"Warning: Could not extract design number from {basename}")
                     continue
-            else:
-                print(f"Warning: Unexpected filename format (model): {basename}")
+
+                # Find corresponding JSON file
+                json_path = cif_path.replace(".cif.gz", ".json")
+
+                if os.path.exists(json_path):
+                    results.append((cif_path, json_path, design_num, model_num))
+                else:
+                    print(f"Warning: JSON file not found for {basename}")
+                    results.append((cif_path, None, design_num, model_num))
+            except ValueError:
+                print(f"Warning: Could not parse design/model numbers from {basename}")
                 continue
         else:
-            print(f"Warning: Unexpected filename format (design): {basename}")
+            print(f"Warning: Unexpected filename format: {basename}")
             continue
 
     # Sort by design number, then model number
@@ -255,9 +257,14 @@ def main():
             # Models within each design are also numbered sequentially: 0, 1, 2, ...
             output_design = args.design_startnum + design_num
             output_model = args.design_startnum + model_num
-            structure_id = f"{args.prefix}_d{output_design}_m{output_model}"
 
-            print(f"\nProcessing design_{design_num}_model_{model_num} -> {structure_id}")
+            # Conditional naming: include model suffix only if num_models > 1
+            if args.num_models > 1:
+                structure_id = f"{args.prefix}_d{output_design}_m{output_model}"
+            else:
+                structure_id = f"{args.prefix}_{output_design}"
+
+            print(f"\nProcessing {design_num}_model_{model_num} -> {structure_id}")
 
             # Decompress CIF.gz
             print(f"  Decompressing CIF.gz...")

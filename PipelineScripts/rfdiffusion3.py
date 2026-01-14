@@ -563,7 +563,13 @@ python "{self.table_py_file}" \\
             for j in range(self.num_models):
                 design_num = self.design_startnum + i
                 model_num = self.design_startnum + j
-                structure_id = f"{self.prefix}_d{design_num}_m{model_num}"
+
+                # Conditional naming: include model suffix only if num_models > 1
+                if self.num_models > 1:
+                    structure_id = f"{self.prefix}_d{design_num}_m{model_num}"
+                else:
+                    structure_id = f"{self.prefix}_{design_num}"
+
                 structure_path = os.path.join(self.output_folder, f"{structure_id}.pdb")
                 design_pdbs.append(structure_path)
                 structure_ids.append(structure_id)

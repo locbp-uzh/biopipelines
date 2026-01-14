@@ -180,7 +180,13 @@ def main():
         for j in range(args.num_models):
             design_num = args.design_startnum + i
             model_num = args.design_startnum + j
-            structure_id = f"{args.pipeline_name}_d{design_num}_m{model_num}"
+
+            # Conditional naming: include model suffix only if num_models > 1
+            if args.num_models > 1:
+                structure_id = f"{args.pipeline_name}_d{design_num}_m{model_num}"
+            else:
+                structure_id = f"{args.pipeline_name}_{design_num}"
+
             pdb_file = f"{structure_id}.pdb"
             pdb_path = os.path.join(args.output_folder, pdb_file)
 
