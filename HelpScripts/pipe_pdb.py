@@ -20,6 +20,58 @@ sys.path.append(os.path.dirname(__file__))
 from pdb_parser import get_protein_sequence, parse_pdb_file
 
 
+def convert_cif_to_pdb(cif_content: str) -> str:
+    """
+    Convert CIF format to PDB format using BioPython.
+
+    Args:
+        cif_content: CIF file content
+
+    Returns:
+        PDB format content
+
+    Raises:
+        Exception: If conversion fails
+    """
+    import tempfile
+    from Bio.PDB import MMCIFParser, PDBIO
+
+    # Write CIF content to temporary file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.cif', delete=False) as tmp_cif:
+        tmp_cif.write(cif_content)
+        tmp_cif.flush()
+        cif_path = tmp_cif.name
+
+    try:
+        # Parse CIF file
+        parser = MMCIFParser(QUIET=True)
+        structure = parser.get_structure("structure", cif_path)
+
+        # Write to PDB format
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pdb', delete=False) as tmp_pdb:
+            pdb_path = tmp_pdb.name
+
+        io = PDBIO()
+        io.set_structure(structure)
+        io.save(pdb_path)
+
+        # Read PDB content
+        with open(pdb_path, 'r') as f:
+            pdb_content = f.read()
+
+        # Clean up temporary files
+        os.unlink(cif_path)
+        os.unlink(pdb_path)
+
+        return pdb_content
+
+    except Exception as e:
+        # Clean up on error
+        if os.path.exists(cif_path):
+            os.unlink(cif_path)
+        raise Exception(f"CIF to PDB conversion failed: {str(e)}")
+
+
 def remove_waters_from_content(content: str, format: str) -> str:
     """
     Remove water molecules from structure content.
@@ -182,48 +234,69 @@ def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
 
 
 def find_local_structure(pdb_id: str, format: str, local_folder: str,
-                        repo_pdbs_folder: str) -> Optional[str]:
+                        repo_pdbs_folder: str) -> Optional[Tuple[str, str]]:
     """
-    Find structure file locally.
+    Find structure file locally with fallback to CIF if PDB not found.
 
-    Priority: local_folder (if given) -> repo_pdbs_folder -> None
+    Priority for PDB format: X.pdb -> X.cif (will convert)
+    Priority for CIF format: X.cif -> X.pdb (will convert, though unusual)
+    Search locations: local_folder (if given) -> repo_pdbs_folder
 
     Args:
-        pdb_id: PDB identifier (4 characters)
-        format: File format ("pdb" or "cif")
+        pdb_id: PDB identifier (with or without extension)
+        format: Requested format ("pdb" or "cif")
         local_folder: Custom local folder (can be None)
         repo_pdbs_folder: Repository PDBs folder
 
     Returns:
-        Path to local file or None if not found
+        Tuple of (path to local file, actual format) or None if not found
     """
-    extension = ".pdb" if format == "pdb" else ".cif"
-    search_locations = []
+    # Remove extension if provided
+    pdb_id_base = pdb_id.replace('.pdb', '').replace('.cif', '')
 
+    # Determine primary and fallback extensions
+    if format == "pdb":
+        primary_ext = ".pdb"
+        fallback_ext = ".cif"
+    else:
+        primary_ext = ".cif"
+        fallback_ext = ".pdb"
+
+    search_locations = []
     if local_folder:
         search_locations.append(local_folder)
     search_locations.append(repo_pdbs_folder)
 
+    # Try primary format first
     for location in search_locations:
-        candidate = os.path.join(location, f"{pdb_id}{extension}")
+        candidate = os.path.join(location, f"{pdb_id_base}{primary_ext}")
         if os.path.exists(candidate):
-            print(f"Found {pdb_id} locally: {candidate}")
-            return candidate
+            print(f"Found {pdb_id_base} locally: {candidate}")
+            return candidate, format
+
+    # Try fallback format
+    for location in search_locations:
+        candidate = os.path.join(location, f"{pdb_id_base}{fallback_ext}")
+        if os.path.exists(candidate):
+            fallback_format = "cif" if fallback_ext == ".cif" else "pdb"
+            print(f"Found {pdb_id_base} as {fallback_format.upper()} (will convert to {format.upper()}): {candidate}")
+            return candidate, fallback_format
 
     return None
 
 
 def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
-                        format: str, remove_waters: bool,
+                        source_format: str, target_format: str, remove_waters: bool,
                         output_folder: str) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
-    Copy local structure file to output folder.
+    Copy local structure file to output folder with optional format conversion.
 
     Args:
         pdb_id: PDB identifier
         custom_id: Custom ID for output filename
         source_path: Path to local structure file
-        format: File format ("pdb" or "cif")
+        source_format: Format of source file ("pdb" or "cif")
+        target_format: Desired output format ("pdb" or "cif")
         remove_waters: Whether to remove water molecules
         output_folder: Directory to save the structure
 
@@ -234,10 +307,19 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         with open(source_path, 'r') as f:
             content = f.read()
 
-        if remove_waters:
-            content = remove_waters_from_content(content, format)
+        # Convert format if needed
+        needs_conversion = (source_format != target_format)
+        if needs_conversion:
+            if source_format == "cif" and target_format == "pdb":
+                print(f"  Converting CIF to PDB format...")
+                content = convert_cif_to_pdb(content)
+            elif source_format == "pdb" and target_format == "cif":
+                raise NotImplementedError("PDB to CIF conversion not implemented")
 
-        extension = ".pdb" if format == "pdb" else ".cif"
+        if remove_waters:
+            content = remove_waters_from_content(content, target_format)
+
+        extension = ".pdb" if target_format == "pdb" else ".cif"
         filename = f"{custom_id}{extension}"
         output_path = os.path.join(output_folder, filename)
 
@@ -245,10 +327,10 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
             f.write(content)
 
         file_size = os.path.getsize(output_path)
-        sequence = extract_sequence_from_structure(content, format)
+        sequence = extract_sequence_from_structure(content, target_format)
 
         # Extract ligands and fetch SMILES
-        ligand_codes = extract_ligands_from_structure(content, format)
+        ligand_codes = extract_ligands_from_structure(content, target_format)
         ligands = []
         if ligand_codes:
             print(f"  Found {len(ligand_codes)} ligand(s) in structure: {', '.join(ligand_codes)}")
@@ -262,17 +344,21 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
                     'ccd': ligand_code  # CCD code is the 3-letter code
                 })
 
+        source_info = f"local ({source_format.upper()})"
+        if needs_conversion:
+            source_info += f" -> converted to {target_format.upper()}"
+
         metadata = {
             "file_size": file_size,
-            "source": "local",
+            "source": source_info,
             "source_path": source_path
         }
 
-        print(f"Successfully copied {pdb_id} as {custom_id}: {file_size} bytes (from local)")
+        print(f"Successfully processed {pdb_id} as {custom_id}: {file_size} bytes ({source_info})")
         return True, output_path, sequence, ligands, metadata
 
     except Exception as e:
-        error_msg = f"Error copying local file {pdb_id}: {str(e)}"
+        error_msg = f"Error processing local file {pdb_id}: {str(e)}"
         print(f"Error: {error_msg}")
         metadata = {
             "error_message": error_msg,
@@ -286,6 +372,8 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                    remove_waters: bool, output_folder: str, repo_pdbs_folder: str) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Download a single structure from RCSB PDB and save to both PDBs/ and output folder.
+
+    If PDB format is requested but not available, automatically falls back to CIF and converts.
 
     Args:
         pdb_id: PDB identifier (4 characters)
@@ -310,21 +398,30 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
             "source": "rcsb_invalid_id",
             "attempted_path": "N/A"
         }
-        return False, "", "", metadata
+        return False, "", "", [], metadata
 
-    # Determine URL based on format and assembly
-    extension = ".pdb" if format == "pdb" else ".cif"
+    # Try primary format first, then fallback if needed
+    download_format = format
+    fallback_attempted = False
 
-    if format == "pdb":
-        if biological_assembly:
-            url = f"https://files.rcsb.org/download/{pdb_id}.pdb1.gz"
-        else:
-            url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
-    else:  # cif
-        if biological_assembly:
-            url = f"https://files.rcsb.org/download/{pdb_id}-assembly1.cif.gz"
-        else:
-            url = f"https://files.rcsb.org/download/{pdb_id}.cif"
+    def attempt_download(download_fmt: str):
+        """Helper to attempt download in specified format."""
+        extension = ".pdb" if download_fmt == "pdb" else ".cif"
+
+        if download_fmt == "pdb":
+            if biological_assembly:
+                url = f"https://files.rcsb.org/download/{pdb_id}.pdb1.gz"
+            else:
+                url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+        else:  # cif
+            if biological_assembly:
+                url = f"https://files.rcsb.org/download/{pdb_id}-assembly1.cif.gz"
+            else:
+                url = f"https://files.rcsb.org/download/{pdb_id}.cif"
+
+        return url, extension
+
+    url, extension = attempt_download(download_format)
 
     try:
         print(f"Downloading {pdb_id} from RCSB: {url}")
@@ -353,32 +450,45 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         # Handle gzipped content
         if url.endswith('.gz'):
             import gzip
-            content = gzip.decompress(response.content).decode('utf-8')
+            downloaded_content = gzip.decompress(response.content).decode('utf-8')
         else:
-            content = response.text
+            downloaded_content = response.text
 
-        # Remove waters if requested
+        # Save downloaded file to PDBs/ folder for caching BEFORE conversion (using pdb_id and download format)
+        os.makedirs(repo_pdbs_folder, exist_ok=True)
+        cache_extension = ".pdb" if download_format == "pdb" else ".cif"
+        cache_filename = f"{pdb_id}{cache_extension}"
+        cache_path = os.path.join(repo_pdbs_folder, cache_filename)
+        with open(cache_path, 'w') as f:
+            f.write(downloaded_content)
+        print(f"Cached to PDBs/ folder: {cache_path}")
+
+        # Convert format if needed
+        needs_conversion = (download_format != format)
+        if needs_conversion:
+            if download_format == "cif" and format == "pdb":
+                print(f"  Converting CIF to PDB format...")
+                content = convert_cif_to_pdb(downloaded_content)
+            elif download_format == "pdb" and format == "cif":
+                raise NotImplementedError("PDB to CIF conversion not implemented")
+        else:
+            content = downloaded_content
+
+        # Remove waters if requested (use target format after conversion)
         if remove_waters:
             content = remove_waters_from_content(content, format)
 
-        # Validate file content (basic check)
+        # Validate file content (basic check - use target format)
         if format == "pdb":
-            if not (content.startswith("HEADER") or content.startswith("ATOM") or content.startswith("MODEL")):
+            if not (content.startswith("HEADER") or content.startswith("ATOM") or content.startswith("MODEL") or content.startswith("REMARK")):
                 raise ValueError(f"Downloaded file does not appear to be valid PDB format")
         else:  # cif
             if not ("data_" in content or "_entry.id" in content):
                 raise ValueError(f"Downloaded file does not appear to be valid CIF format")
 
-        # Save to PDBs/ folder for caching (using pdb_id, not custom_id)
-        os.makedirs(repo_pdbs_folder, exist_ok=True)
-        cache_filename = f"{pdb_id}{extension}"
-        cache_path = os.path.join(repo_pdbs_folder, cache_filename)
-        with open(cache_path, 'w') as f:
-            f.write(content)
-        print(f"Cached to PDBs/ folder: {cache_path}")
-
-        # Save to output folder (using custom_id)
-        output_filename = f"{custom_id}{extension}"
+        # Save to output folder (using custom_id and target format)
+        output_extension = ".pdb" if format == "pdb" else ".cif"
+        output_filename = f"{custom_id}{output_extension}"
         output_path = os.path.join(output_folder, output_filename)
         with open(output_path, 'w') as f:
             f.write(content)
@@ -404,16 +514,92 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                     'ccd': ligand_code  # CCD code is the 3-letter code
                 })
 
+        source_info = f"rcsb_download ({download_format.upper()})"
+        if needs_conversion:
+            source_info += f" -> converted to {format.upper()}"
+
         metadata = {
             "file_size": file_size,
-            "source": "rcsb_download",
+            "source": source_info,
             "url": url
         }
 
-        print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes")
+        print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes ({source_info})")
         return True, output_path, sequence, ligands, metadata
 
     except Exception as e:
+        # Try fallback to CIF if PDB download failed and we haven't tried fallback yet
+        if format == "pdb" and not fallback_attempted and download_format == "pdb":
+            print(f"  PDB download failed, trying CIF format as fallback...")
+            fallback_attempted = True
+            download_format = "cif"
+            url, extension = attempt_download(download_format)
+
+            try:
+                print(f"  Downloading {pdb_id} from RCSB: {url}")
+                import requests
+                headers = {'User-Agent': 'BioPipelines-PDB/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+                response = requests.get(url, headers=headers, timeout=30)
+                response.raise_for_status()
+
+                # Handle gzipped content
+                if url.endswith('.gz'):
+                    import gzip
+                    cif_content = gzip.decompress(response.content).decode('utf-8')
+                else:
+                    cif_content = response.text
+
+                # Convert CIF to PDB
+                print(f"  Converting CIF to PDB format...")
+                content = convert_cif_to_pdb(cif_content)
+
+                # Remove waters if requested
+                if remove_waters:
+                    content = remove_waters_from_content(content, "pdb")
+
+                # Cache the CIF file
+                os.makedirs(repo_pdbs_folder, exist_ok=True)
+                cache_path = os.path.join(repo_pdbs_folder, f"{pdb_id}.cif")
+                with open(cache_path, 'w') as f:
+                    f.write(cif_content)
+                print(f"  Cached CIF to PDBs/ folder: {cache_path}")
+
+                # Save PDB to output folder
+                output_path = os.path.join(output_folder, f"{custom_id}.pdb")
+                with open(output_path, 'w') as f:
+                    f.write(content)
+
+                file_size = os.path.getsize(output_path)
+                sequence = extract_sequence_from_structure(content, "pdb")
+
+                # Extract ligands
+                ligand_codes = extract_ligands_from_structure(content, "pdb")
+                ligands = []
+                if ligand_codes:
+                    print(f"  Found {len(ligand_codes)} ligand(s) in structure: {', '.join(ligand_codes)}")
+                    for ligand_code in ligand_codes:
+                        smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
+                        ligands.append({
+                            'id': f"{custom_id}_{ligand_code}",
+                            'code': ligand_code,
+                            'format': 'smiles' if smiles else '',
+                            'smiles': smiles if smiles else '',
+                            'ccd': ligand_code
+                        })
+
+                metadata = {
+                    "file_size": file_size,
+                    "source": "rcsb_download (CIF) -> converted to PDB",
+                    "url": url
+                }
+
+                print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes (CIF fallback -> PDB)")
+                return True, output_path, sequence, ligands, metadata
+
+            except Exception as fallback_e:
+                print(f"  CIF fallback also failed: {str(fallback_e)}")
+                # Fall through to original error handling
+
         # Handle both requests exceptions and other errors
         error_type = type(e).__name__
 
@@ -483,16 +669,17 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     for i, (pdb_id, custom_id) in enumerate(zip(pdb_ids, custom_ids), 1):
         print(f"\n[{i}/{len(pdb_ids)}] Processing {pdb_id} -> {custom_id}")
 
-        # Try to find locally first
-        local_path = find_local_structure(pdb_id, format, local_folder, repo_pdbs_folder)
+        # Try to find locally first (returns tuple of (path, source_format) or None)
+        local_result = find_local_structure(pdb_id, format, local_folder, repo_pdbs_folder)
 
-        if local_path:
-            # Copy from local
+        if local_result:
+            # Copy from local (may need conversion)
+            local_path, source_format = local_result
             success, file_path, sequence, ligands, metadata = copy_local_structure(
-                pdb_id, custom_id, local_path, format, remove_waters, output_folder
+                pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder
             )
         else:
-            # Download from RCSB
+            # Download from RCSB (with automatic CIF fallback if PDB fails)
             print(f"{pdb_id} not found locally, downloading from RCSB")
             success, file_path, sequence, ligands, metadata = download_from_rcsb(
                 pdb_id, custom_id, format, biological_assembly, remove_waters,
