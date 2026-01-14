@@ -68,7 +68,9 @@ class RFdiffusion3(BaseConfig):
         pdb (str or ToolOutput): Input PDB structure (required when using contig)
         ligand (str): Ligand selection by chemical component name
         num_designs (int): Number of designs to generate (default: 1)
-        num_models (int): Number of models per design (default: 1)
+        num_models (int): Number of models per design (default: 1).
+            WARNING: RFdiffusion3's internal default is 8 models per design. Always
+            explicitly pass this parameter to avoid unexpected behavior.
         prefix (str): Prefix for output file names (default: uses pipeline name)
         select_hotspots (str or dict): Hotspot residues for binder design
             String: "A67,A89" (all atoms) or "A67:CA,CB;A89:CA" (specific atoms)
@@ -121,7 +123,8 @@ class RFdiffusion3(BaseConfig):
             pdb: Input PDB structure (optional)
             ligand: Ligand selection by name
             num_designs: Number of designs to generate
-            num_models: Number of models per design (default: 1)
+            num_models: Number of models per design (default: 1). WARNING: RFdiffusion3's
+                internal default is 8. Always pass explicitly.
             prefix: Prefix for output file names (defaults to pipeline name)
             select_hotspots: Hotspot residues specification
             json_config: Full JSON config override for advanced use
