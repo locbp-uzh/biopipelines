@@ -207,12 +207,19 @@ class StitchSequences(BaseConfig):
             else:
                 raise ValueError(f"{name}: tables.sequences must have path or be string")
 
-            return {
+            result = {
                 "type": "tool_output",
                 "sequences_file": sequences_file,
                 "source_name": source.__class__.__name__,
                 "sequence_ids": getattr(source, 'sequence_ids', [])
             }
+
+            # Include structure files if available (for PDB residue number mapping)
+            if hasattr(source, 'structures') and source.structures:
+                result["structure_files"] = source.structures
+                result["structure_ids"] = getattr(source, 'structure_ids', [])
+
+            return result
 
         else:
             raise ValueError(f"{name}: unsupported type {type(source)}")

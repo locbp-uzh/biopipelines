@@ -31,7 +31,7 @@ def parse_position_range(pos_range: str) -> List[Tuple[int, int]]:
         pos_range: Position string like '10-20' or '10-20+30-40'
 
     Returns:
-        List of (start, end) tuples, 1-indexed inclusive
+        List of (start, end) tuples (PDB residue numbers, inclusive)
     """
     ranges = []
     parts = pos_range.split('+')
@@ -48,13 +48,57 @@ def parse_position_range(pos_range: str) -> List[Tuple[int, int]]:
     return sorted(ranges, key=lambda x: x[0])
 
 
-def substitute_segments(template: str, substitutions: Dict[str, str]) -> str:
+def build_residue_mapping(pdb_path: str) -> Dict[int, int]:
+    """
+    Build a mapping from PDB residue numbers to sequence string indices.
+
+    Args:
+        pdb_path: Path to PDB file
+
+    Returns:
+        Dict mapping PDB residue number -> string index (0-based)
+    """
+    from pdb_parser import parse_pdb_file
+
+    # Standard amino acid codes
+    aa_codes = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+
+    atoms = parse_pdb_file(pdb_path)
+
+    # Collect unique residues (chain, res_num) for standard amino acids
+    residues = {}
+    for atom in atoms:
+        if atom.res_name in aa_codes:
+            key = (atom.chain, atom.res_num)
+            if key not in residues:
+                residues[key] = atom.res_num
+
+    # Sort by chain and residue number (same order as get_protein_sequence)
+    sorted_residues = sorted(residues.keys(), key=lambda x: (x[0], x[1]))
+
+    # Build mapping: PDB residue number -> string index
+    # Note: This concatenates all chains, matching get_protein_sequence behavior
+    mapping = {}
+    for idx, (chain, res_num) in enumerate(sorted_residues):
+        mapping[res_num] = idx
+
+    return mapping
+
+
+def substitute_segments(template: str, substitutions: Dict[str, str],
+                        residue_mapping: Dict[int, int] = None) -> str:
     """
     Replace segments of template sequence at specified positions.
 
     Args:
         template: Base sequence string
         substitutions: Dict mapping position ranges to replacement sequences
+        residue_mapping: Optional dict mapping PDB residue numbers to string indices.
+                        If provided, positions are interpreted as PDB residue numbers.
+                        If None, positions are interpreted as 1-indexed sequence positions.
 
     Returns:
         New sequence with substitutions applied
@@ -72,8 +116,21 @@ def substitute_segments(template: str, substitutions: Dict[str, str]) -> str:
 
     result = template
     for overall_start, overall_end, ranges, replacement in replacements:
-        start_idx = overall_start - 1
-        end_idx = overall_end
+        if residue_mapping is not None:
+            # Use PDB residue numbers via mapping
+            if overall_start not in residue_mapping:
+                raise ValueError(f"PDB residue {overall_start} not found in structure. "
+                               f"Available residue numbers: {min(residue_mapping.keys())}-{max(residue_mapping.keys())}")
+            if overall_end not in residue_mapping:
+                raise ValueError(f"PDB residue {overall_end} not found in structure. "
+                               f"Available residue numbers: {min(residue_mapping.keys())}-{max(residue_mapping.keys())}")
+            start_idx = residue_mapping[overall_start]
+            end_idx = residue_mapping[overall_end] + 1  # +1 because we want inclusive end
+        else:
+            # Fall back to 1-indexed positions (legacy behavior)
+            start_idx = overall_start - 1
+            end_idx = overall_end
+
         result = result[:start_idx] + replacement + result[end_idx:]
 
     return result
@@ -145,6 +202,47 @@ def load_sequences_from_info(info: Dict[str, Any]) -> Dict[str, str]:
         raise ValueError(f"Unknown source type: {source_type}")
 
 
+def load_residue_mapping_from_info(info: Dict[str, Any]) -> Dict[str, Dict[int, int]]:
+    """
+    Load residue mappings from template info if structure files are available.
+
+    Args:
+        info: Template info dictionary
+
+    Returns:
+        Dict mapping sequence ID to residue mapping (PDB res num -> string index).
+        Empty dict if no structure files available.
+    """
+    if info.get("type") != "tool_output":
+        return {}
+
+    structure_files = info.get("structure_files", [])
+    structure_ids = info.get("structure_ids", [])
+
+    if not structure_files:
+        return {}
+
+    mappings = {}
+    for i, struct_file in enumerate(structure_files):
+        if not os.path.exists(struct_file):
+            print(f"  Warning: Structure file not found: {struct_file}")
+            continue
+
+        # Get ID for this structure
+        struct_id = structure_ids[i] if i < len(structure_ids) else f"struct_{i+1}"
+
+        try:
+            mapping = build_residue_mapping(struct_file)
+            mappings[struct_id] = mapping
+            first_res = min(mapping.keys())
+            last_res = max(mapping.keys())
+            print(f"  Built residue mapping for {struct_id}: residues {first_res}-{last_res} -> indices 0-{len(mapping)-1}")
+        except Exception as e:
+            print(f"  Warning: Could not build residue mapping for {struct_file}: {e}")
+
+    return mappings
+
+
 def extract_base_id(seq_id: str) -> str:
     """Extract base ID by stripping trailing _N suffix."""
     match = re.match(r'^(.+)_\d+$', seq_id)
@@ -172,6 +270,14 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
     print("Loading template sequences...")
     template_sequences = load_sequences_from_info(template_info)
     print(f"  Loaded {len(template_sequences)} template sequences")
+
+    # Load residue mappings if structure files are available
+    print("Loading residue mappings from structure files...")
+    residue_mappings = load_residue_mapping_from_info(template_info)
+    if residue_mappings:
+        print(f"  Loaded residue mappings for {len(residue_mappings)} structures")
+    else:
+        print("  No structure files available, using 1-indexed positions")
 
     # Load substitution options and positions for each region
     print(f"\nLoading substitutions for {len(substitutions_info)} regions...")
@@ -203,10 +309,10 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 
     if all_positions_fixed and all_subs_raw:
         # Raw substitutions with fixed positions - apply to all templates
-        results = stitch_with_raw_substitutions(template_sequences, substitutions)
+        results = stitch_with_raw_substitutions(template_sequences, substitutions, residue_mappings)
     else:
         # Complex case: match sequences by base ID
-        results = stitch_matched_sequences(template_sequences, substitutions, id_map)
+        results = stitch_matched_sequences(template_sequences, substitutions, id_map, residue_mappings)
 
     # Save results
     if results:
@@ -228,10 +334,12 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 
 def stitch_with_raw_substitutions(
     template_sequences: Dict[str, str],
-    substitutions: List[Dict]
+    substitutions: List[Dict],
+    residue_mappings: Dict[str, Dict[int, int]] = None
 ) -> List[Dict[str, Any]]:
     """Stitch templates with raw substitutions at fixed positions using Cartesian product."""
     results = []
+    residue_mappings = residue_mappings or {}
 
     # Build option lists for Cartesian product (just the sequences, ignore their IDs)
     option_lists = []
@@ -249,6 +357,9 @@ def stitch_with_raw_substitutions(
         # Get base ID from template
         base_id = extract_base_id(template_id)
 
+        # Get residue mapping for this template (try exact match, then base_id)
+        residue_mapping = residue_mappings.get(template_id) or residue_mappings.get(base_id)
+
         combo_idx = 0
         for combo in product(*option_lists):
             combo_idx += 1
@@ -256,7 +367,7 @@ def stitch_with_raw_substitutions(
             for i, opt_seq in enumerate(combo):
                 subs[pos_ranges[i]] = opt_seq
 
-            stitched = substitute_segments(template_seq, subs)
+            stitched = substitute_segments(template_seq, subs, residue_mapping)
             output_id = f"{base_id}_{combo_idx}"
             results.append({'id': output_id, 'sequence': stitched})
 
@@ -267,10 +378,12 @@ def stitch_with_raw_substitutions(
 def stitch_matched_sequences(
     template_sequences: Dict[str, str],
     substitutions: List[Dict],
-    id_map: Dict[str, str]
+    id_map: Dict[str, str],
+    residue_mappings: Dict[str, Dict[int, int]] = None
 ) -> List[Dict[str, Any]]:
     """Stitch sequences by matching base IDs, with support for table-based positions."""
     results = []
+    residue_mappings = residue_mappings or {}
 
     # Group templates by base ID
     template_grouped = group_by_base_id(template_sequences)
@@ -297,6 +410,9 @@ def stitch_matched_sequences(
     for base_id in sorted(template_grouped.keys()):
         template_seqs = template_grouped[base_id]
         print(f"\n  Base ID: {base_id} ({len(template_seqs)} template sequences)")
+
+        # Get residue mapping for this base ID
+        residue_mapping = residue_mappings.get(base_id)
 
         # Check if all substitutions have sequences for this base ID
         sub_seqs_for_base = []
@@ -344,7 +460,7 @@ def stitch_matched_sequences(
             for i, (opt_id, opt_seq) in enumerate(combo[1:]):
                 subs[positions_for_base[i]] = opt_seq
 
-            stitched = substitute_segments(template_seq, subs)
+            stitched = substitute_segments(template_seq, subs, residue_mapping)
             output_id = f"{base_id}_{combo_idx}"
             results.append({'id': output_id, 'sequence': stitched})
 
