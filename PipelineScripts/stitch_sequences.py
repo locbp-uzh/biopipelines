@@ -335,6 +335,7 @@ fi
     def _predict_output_sequence_ids(self) -> List[str]:
         """Predict output sequence IDs based on Cartesian product of all options."""
         import re
+        from itertools import product
 
         # Get template sequence IDs
         if isinstance(self.template, str):
@@ -371,19 +372,22 @@ fi
             else:
                 substitution_counts.append(1)
 
-        # Calculate total combinations per template ID
-        total_per_template = 1
-        for count in substitution_counts:
-            total_per_template *= count
-
-        # Generate predicted IDs
+        # Generate predicted IDs using Cartesian product of indices
+        # Format: <basename>_<A>_<B>_... where A, B, ... are 1-indexed per substitution
         predicted_ids = []
         for template_id in template_ids:
             match = re.match(r'^(.+)_\d+$', template_id)
             base_id = match.group(1) if match else template_id
 
-            for n in range(1, total_per_template + 1):
-                predicted_ids.append(f"{base_id}_{n}")
+            if substitution_counts:
+                # Generate all combinations of indices
+                index_ranges = [range(1, count + 1) for count in substitution_counts]
+                for combo in product(*index_ranges):
+                    suffix = "_".join(str(idx) for idx in combo)
+                    predicted_ids.append(f"{base_id}_{suffix}")
+            else:
+                # No substitutions, just use template ID
+                predicted_ids.append(base_id)
 
         return predicted_ids
 

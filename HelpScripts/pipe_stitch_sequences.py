@@ -360,15 +360,19 @@ def stitch_with_raw_substitutions(
         # Get residue mapping for this template (try exact match, then base_id)
         residue_mapping = residue_mappings.get(template_id) or residue_mappings.get(base_id)
 
-        combo_idx = 0
-        for combo in product(*option_lists):
-            combo_idx += 1
+        # Generate index ranges for each substitution (1-indexed)
+        index_ranges = [range(1, len(opts) + 1) for opts in option_lists]
+
+        for index_combo in product(*index_ranges):
+            # Build substitutions using the indices
             subs = {}
-            for i, opt_seq in enumerate(combo):
-                subs[pos_ranges[i]] = opt_seq
+            for i, idx in enumerate(index_combo):
+                subs[pos_ranges[i]] = option_lists[i][idx - 1]  # Convert to 0-indexed for list access
 
             stitched = substitute_segments(template_seq, subs, residue_mapping)
-            output_id = f"{base_id}_{combo_idx}"
+            # Format: <basename>_<A>_<B>_... where A, B are indices per substitution
+            suffix = "_".join(str(idx) for idx in index_combo)
+            output_id = f"{base_id}_{suffix}"
             results.append({'id': output_id, 'sequence': stitched})
 
     print(f"\nGenerated {len(results)} stitched sequences")
@@ -446,25 +450,29 @@ def stitch_matched_sequences(
             continue
 
         # Build option lists for Cartesian product
-        option_lists = [list(template_seqs.items())]
-        for sub_seqs in sub_seqs_for_base:
-            option_lists.append(list(sub_seqs.items()))
+        template_list = list(template_seqs.items())
+        sub_option_lists = [list(sub_seqs.items()) for sub_seqs in sub_seqs_for_base]
+
+        # Generate index ranges for each substitution (1-indexed)
+        sub_index_ranges = [range(1, len(opts) + 1) for opts in sub_option_lists]
 
         # Generate all combinations
-        combo_idx = 0
-        for combo in product(*option_lists):
-            combo_idx += 1
-            template_id, template_seq = combo[0]
+        combo_count = 0
+        for template_id, template_seq in template_list:
+            for index_combo in product(*sub_index_ranges):
+                combo_count += 1
+                subs = {}
+                for i, idx in enumerate(index_combo):
+                    _, opt_seq = sub_option_lists[i][idx - 1]  # Convert to 0-indexed for list access
+                    subs[positions_for_base[i]] = opt_seq
 
-            subs = {}
-            for i, (opt_id, opt_seq) in enumerate(combo[1:]):
-                subs[positions_for_base[i]] = opt_seq
+                stitched = substitute_segments(template_seq, subs, residue_mapping)
+                # Format: <basename>_<A>_<B>_... where A, B are indices per substitution
+                suffix = "_".join(str(idx) for idx in index_combo)
+                output_id = f"{base_id}_{suffix}"
+                results.append({'id': output_id, 'sequence': stitched})
 
-            stitched = substitute_segments(template_seq, subs, residue_mapping)
-            output_id = f"{base_id}_{combo_idx}"
-            results.append({'id': output_id, 'sequence': stitched})
-
-        print(f"    Generated {combo_idx} combinations")
+        print(f"    Generated {combo_count} combinations")
 
     return results
 
