@@ -14,6 +14,10 @@ Debug/
 MyPipelines/*
 !MyPipelines/README.md
 
+# Ligands folder (cached ligand files)
+Ligands/*
+!Ligands/README.md
+
 # IDEs
 .vscode/
 .idea/

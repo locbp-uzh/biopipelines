@@ -2,35 +2,62 @@
 """
 Runtime helper script for Ligand tool.
 
-Fetches small molecule ligands with priority-based lookup: local_folder -> Ligands/ -> RCSB download.
-Downloads ideal SDF files from RCSB and converts them to PDB format.
-Downloads are saved to both Ligands/ folder (for reuse) and tool output folder.
+Fetches small molecule ligands with priority-based lookup: local_folder -> Ligands/ -> RCSB/PubChem download.
+Downloads SDF files and converts them to PDB format with proper atom numbering.
+Supports both RCSB (CCD codes) and PubChem (name, CID, CAS) as sources.
 """
 
 import os
 import sys
 import argparse
 import json
+import re
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
 
 
-def find_local_ligand(ligand_code: str, local_folder: str,
-                     repo_ligands_folder: str) -> Optional[str]:
+def detect_lookup_type(lookup: str) -> str:
+    """
+    Detect the type of lookup value.
+
+    Args:
+        lookup: The lookup value to analyze
+
+    Returns:
+        "ccd" (RCSB), "cid" (PubChem), "cas" (PubChem), or "name" (PubChem)
+    """
+    # CCD codes: 1-3 uppercase alphanumeric characters
+    if re.match(r'^[A-Z0-9]{1,3}$', lookup.upper()) and not lookup.isdigit():
+        return "ccd"
+
+    # PubChem CID: purely numeric
+    if lookup.isdigit():
+        return "cid"
+
+    # CAS number: XX-XX-X format (digits-digits-digit)
+    if re.match(r'^\d+-\d+-\d$', lookup):
+        return "cas"
+
+    # Default: compound name
+    return "name"
+
+
+def find_local_ligand(lookup: str, local_folder: str,
+                      repo_ligands_folder: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Find ligand file locally.
 
     Priority: local_folder (if given) -> repo_ligands_folder -> None
 
     Args:
-        ligand_code: 3-letter ligand code
+        lookup: Lookup value (used as filename stem)
         local_folder: Custom local folder (can be None)
         repo_ligands_folder: Repository Ligands folder
 
     Returns:
-        Path to local file or None if not found
+        Tuple of (path to local PDB file, path to local CSV file) or (None, None) if not found
     """
     search_locations = []
 
@@ -39,66 +66,184 @@ def find_local_ligand(ligand_code: str, local_folder: str,
     search_locations.append(repo_ligands_folder)
 
     for location in search_locations:
-        candidate = os.path.join(location, f"{ligand_code}.pdb")
-        if os.path.exists(candidate):
-            print(f"Found {ligand_code} locally: {candidate}")
-            return candidate
+        pdb_candidate = os.path.join(location, f"{lookup}.pdb")
+        csv_candidate = os.path.join(location, f"{lookup}.csv")
+        if os.path.exists(pdb_candidate):
+            print(f"Found {lookup} locally: {pdb_candidate}")
+            csv_path = csv_candidate if os.path.exists(csv_candidate) else None
+            return pdb_candidate, csv_path
 
-    return None
+    return None, None
 
 
-def copy_local_ligand(ligand_code: str, custom_id: str, source_path: str,
-                     output_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+def load_local_metadata(csv_path: str) -> Dict[str, Any]:
     """
-    Copy local ligand file to output folder.
+    Load metadata from local CSV file.
 
     Args:
-        ligand_code: 3-letter ligand code
+        csv_path: Path to the CSV metadata file
+
+    Returns:
+        Dictionary with metadata fields
+    """
+    try:
+        df = pd.read_csv(csv_path)
+        if len(df) > 0:
+            row = df.iloc[0].to_dict()
+            # Convert NaN to empty strings
+            return {k: ('' if pd.isna(v) else v) for k, v in row.items()}
+    except Exception as e:
+        print(f"  Warning: Could not load metadata from {csv_path}: {e}")
+    return {}
+
+
+def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
+                      source_pdb_path: str, source_csv_path: Optional[str],
+                      output_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Copy local ligand file to output folder with normalization.
+
+    Args:
+        lookup: Original lookup value
         custom_id: Custom ID for output filename
-        source_path: Path to local ligand file
+        residue_code: 3-letter residue code to use in PDB
+        source_pdb_path: Path to local ligand PDB file
+        source_csv_path: Path to local ligand CSV metadata file (can be None)
         output_folder: Directory to save the ligand
 
     Returns:
         Tuple of (success: bool, file_path: str, metadata: dict)
     """
     try:
-        with open(source_path, 'r') as f:
-            content = f.read()
+        with open(source_pdb_path, 'r') as f:
+            pdb_content = f.read()
+
+        # Normalize the PDB content
+        normalized_pdb = normalize_pdb_content(pdb_content, residue_code)
 
         filename = f"{custom_id}.pdb"
         output_path = os.path.join(output_folder, filename)
 
         with open(output_path, 'w') as f:
-            f.write(content)
+            f.write(normalized_pdb)
 
         file_size = os.path.getsize(output_path)
 
-        # Try to fetch SMILES from RCSB even for local files
-        smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
+        # Load metadata from CSV if available
+        metadata = {}
+        if source_csv_path:
+            metadata = load_local_metadata(source_csv_path)
 
-        metadata = {
+        # Update/override certain fields
+        metadata.update({
             "file_size": file_size,
-            "source": "local",
-            "source_path": source_path,
-            "smiles": smiles if smiles else "",
-            "format": "smiles" if smiles else ""
-        }
+            "source": metadata.get('source', 'local'),
+            "source_path": source_pdb_path,
+        })
 
-        print(f"Successfully copied {ligand_code} as {custom_id}: {file_size} bytes (from local)")
+        # Try to fetch SMILES from RCSB if not in metadata and looks like CCD
+        if not metadata.get('smiles') and detect_lookup_type(lookup) == "ccd":
+            smiles = fetch_smiles_from_rcsb(lookup.upper())
+            if smiles:
+                metadata['smiles'] = smiles
+                metadata['ccd'] = lookup.upper()
+
+        print(f"Successfully copied {lookup} as {custom_id}: {file_size} bytes (from local)")
         return True, output_path, metadata
 
     except Exception as e:
-        error_msg = f"Error copying local file {ligand_code}: {str(e)}"
+        error_msg = f"Error copying local file {lookup}: {str(e)}"
         print(f"Error: {error_msg}")
         metadata = {
             "error_message": error_msg,
             "source": "local_copy_failed",
-            "attempted_path": source_path
+            "attempted_path": source_pdb_path
         }
         return False, "", metadata
 
 
-def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
+def normalize_pdb_content(pdb_content: str, residue_code: str) -> str:
+    """
+    Normalize PDB content with proper atom numbering.
+
+    Args:
+        pdb_content: Raw PDB content from OpenBabel conversion or local file
+        residue_code: 3-letter residue code to use (e.g., "LIG")
+
+    Returns:
+        Normalized PDB content with:
+        - Sequential atom serial numbers (1, 2, 3, ...)
+        - Chain ID = 'A'
+        - Residue number = 1
+        - Residue name = residue_code (3-letter, uppercase)
+    """
+    lines = pdb_content.split('\n')
+    output_lines = []
+    atom_serial = 0
+
+    # Ensure residue code is uppercase and max 3 chars
+    res_code = residue_code.upper()[:3].ljust(3)
+
+    for line in lines:
+        if line.startswith(('HETATM', 'ATOM')):
+            atom_serial += 1
+            # PDB format positions (0-indexed Python slicing):
+            # 0-5: Record name (HETATM or ATOM)
+            # 6-10: Atom serial number (right-justified, 5 chars)
+            # 11: Space
+            # 12-15: Atom name (4 chars)
+            # 16: Alternate location indicator
+            # 17-19: Residue name (3 chars)
+            # 20: Space
+            # 21: Chain identifier
+            # 22-25: Residue sequence number (right-justified, 4 chars)
+            # 26: Code for insertion of residues
+            # 27-29: Spaces
+            # 30-37: X coordinate (8.3 format)
+            # 38-45: Y coordinate
+            # 46-53: Z coordinate
+            # 54-59: Occupancy
+            # 60-65: Temperature factor
+            # 76-77: Element symbol
+            # 78-79: Charge
+
+            record = 'HETATM'
+            serial_str = f"{atom_serial:5d}"
+
+            # Preserve atom name (columns 12-15, 0-indexed)
+            if len(line) >= 16:
+                atom_name = line[12:16]
+            else:
+                atom_name = '    '
+
+            alt_loc = ' '
+            chain = 'A'
+            res_seq = '   1'
+            icode = ' '
+
+            # Get the rest of the line (coordinates and beyond)
+            if len(line) >= 27:
+                rest = line[27:]
+            else:
+                rest = ''
+
+            # Build the new line
+            new_line = f"{record}{serial_str} {atom_name}{alt_loc}{res_code} {chain}{res_seq}{icode}{rest}"
+            output_lines.append(new_line)
+
+        elif line.startswith('CONECT'):
+            # Skip CONECT records - they reference old serial numbers
+            continue
+        elif line.startswith('END'):
+            output_lines.append(line)
+        else:
+            # Keep other records (HEADER, REMARK, etc.)
+            output_lines.append(line)
+
+    return '\n'.join(output_lines)
+
+
+def fetch_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
     """
     Fetch SMILES string for a ligand from RCSB REST API.
 
@@ -129,7 +274,6 @@ def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
             # Try different possible fields for SMILES
             for field in ['pdbx_smiles_canonical', 'smiles', 'smiles_canonical']:
                 if field in chem_comp and chem_comp[field]:
-                    print(f"  Found SMILES for {ligand_code}: {chem_comp[field][:50]}...")
                     return chem_comp[field]
 
         # Alternative location in descriptors
@@ -137,18 +281,63 @@ def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
             descriptors = data['rcsb_chem_comp_descriptor']
             if isinstance(descriptors, dict):
                 if 'smiles_canonical' in descriptors:
-                    print(f"  Found SMILES for {ligand_code}: {descriptors['smiles_canonical'][:50]}...")
                     return descriptors['smiles_canonical']
                 elif 'smiles' in descriptors:
-                    print(f"  Found SMILES for {ligand_code}: {descriptors['smiles'][:50]}...")
                     return descriptors['smiles']
 
-        print(f"  No SMILES found for {ligand_code} in RCSB response")
         return None
 
     except Exception as e:
-        print(f"  Warning: Could not fetch SMILES for {ligand_code}: {str(e)}")
+        print(f"  Warning: Could not fetch SMILES for {ligand_code} from RCSB: {str(e)}")
         return None
+
+
+def fetch_properties_from_rcsb(ligand_code: str) -> Dict[str, Any]:
+    """
+    Fetch compound properties from RCSB REST API.
+
+    Args:
+        ligand_code: 3-letter ligand code (e.g., 'ATP', 'GDP')
+
+    Returns:
+        Dictionary with smiles, name, formula fields
+    """
+    try:
+        import requests
+
+        url = f"https://data.rcsb.org/rest/v1/core/chemcomp/{ligand_code}"
+        headers = {
+            'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+        result = {'ccd': ligand_code}
+
+        if 'chem_comp' in data:
+            chem_comp = data['chem_comp']
+            result['name'] = chem_comp.get('name', '')
+            result['formula'] = chem_comp.get('formula', '')
+
+            # Get SMILES
+            for field in ['pdbx_smiles_canonical', 'smiles', 'smiles_canonical']:
+                if field in chem_comp and chem_comp[field]:
+                    result['smiles'] = chem_comp[field]
+                    break
+
+        # Alternative location for SMILES
+        if 'smiles' not in result and 'rcsb_chem_comp_descriptor' in data:
+            descriptors = data['rcsb_chem_comp_descriptor']
+            if isinstance(descriptors, dict):
+                result['smiles'] = descriptors.get('smiles_canonical') or descriptors.get('smiles', '')
+
+        return result
+
+    except Exception as e:
+        print(f"  Warning: Could not fetch properties for {ligand_code} from RCSB: {str(e)}")
+        return {}
 
 
 def convert_sdf_to_pdb(sdf_content: str, ligand_code: str) -> Optional[str]:
@@ -190,17 +379,8 @@ def convert_sdf_to_pdb(sdf_content: str, ligand_code: str) -> Optional[str]:
             with open(pdb_path, 'r') as f:
                 pdb_content = f.read()
 
-            # Replace residue name with the ligand code
-            lines = pdb_content.split('\n')
-            pdb_lines = []
-            for line in lines:
-                if line.startswith(('HETATM', 'ATOM')):
-                    # Replace residue name (columns 18-20, 1-indexed) with ligand code
-                    # PDB format: columns are 1-indexed, so residue name is at positions 17-19 (0-indexed: 17:20)
-                    line = line[:17] + ligand_code.ljust(3) + line[20:]
-                pdb_lines.append(line)
-
-            return '\n'.join(pdb_lines)
+            # Normalize the PDB content (sets residue name, renumbers atoms, etc.)
+            return normalize_pdb_content(pdb_content, ligand_code)
 
         finally:
             # Clean up temporary files
@@ -214,16 +394,98 @@ def convert_sdf_to_pdb(sdf_content: str, ligand_code: str) -> Optional[str]:
         return None
 
 
-def download_from_rcsb(ligand_code: str, custom_id: str, output_folder: str,
-                       repo_ligands_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+def fetch_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
     """
-    Download a single ligand from RCSB PDB and save to both Ligands/ and output folder.
+    Fetch compound data from PubChem.
+
+    Args:
+        lookup: The lookup value (name, CID, or CAS)
+        lookup_type: "cid", "cas", or "name"
+
+    Returns:
+        Dictionary with: cid, smiles, name, formula, sdf_content
+
+    Raises:
+        ValueError: If compound not found or download fails
+    """
+    import requests
+
+    base_url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+    headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+
+    # Step 1: Resolve to CID
+    if lookup_type == "cid":
+        cid = int(lookup)
+        print(f"  Using PubChem CID: {cid}")
+    else:
+        # Search by name or CAS
+        search_url = f"{base_url}/compound/name/{lookup}/cids/JSON"
+        print(f"  Searching PubChem for: {lookup}")
+        response = requests.get(search_url, headers=headers, timeout=30)
+
+        if response.status_code == 404:
+            raise ValueError(f"Compound '{lookup}' not found on PubChem")
+
+        response.raise_for_status()
+        data = response.json()
+
+        if 'IdentifierList' not in data or not data['IdentifierList'].get('CID'):
+            raise ValueError(f"Compound '{lookup}' not found on PubChem")
+
+        cid = data['IdentifierList']['CID'][0]  # Take first match
+        print(f"  Resolved to PubChem CID: {cid}")
+
+    # Step 2: Get properties (SMILES, name, formula)
+    props_url = f"{base_url}/compound/cid/{cid}/property/CanonicalSMILES,IUPACName,MolecularFormula/JSON"
+    response = requests.get(props_url, headers=headers, timeout=30)
+    response.raise_for_status()
+    props = response.json()['PropertyTable']['Properties'][0]
+
+    smiles = props.get('CanonicalSMILES', '')
+    name = props.get('IUPACName', '')
+    formula = props.get('MolecularFormula', '')
+
+    print(f"  SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"  SMILES: {smiles}")
+    print(f"  Name: {name[:50]}..." if len(name) > 50 else f"  Name: {name}")
+
+    # Step 3: Get 3D SDF (try 3D first, fall back to 2D)
+    sdf_url = f"{base_url}/compound/cid/{cid}/SDF?record_type=3d"
+    print(f"  Downloading 3D SDF...")
+    response = requests.get(sdf_url, headers=headers, timeout=30)
+
+    if response.status_code == 404:
+        # No 3D structure available, try 2D
+        print(f"  No 3D structure available, using 2D...")
+        sdf_url = f"{base_url}/compound/cid/{cid}/SDF"
+        response = requests.get(sdf_url, headers=headers, timeout=30)
+
+    response.raise_for_status()
+    sdf_content = response.text
+
+    if not sdf_content.strip():
+        raise ValueError(f"Downloaded SDF file for CID {cid} is empty")
+
+    return {
+        'cid': str(cid),
+        'smiles': smiles,
+        'name': name,
+        'formula': formula,
+        'sdf_content': sdf_content,
+        'source': 'pubchem'
+    }
+
+
+def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
+                       output_folder: str, repo_ligands_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Download a single ligand from RCSB PDB.
 
     Downloads the ideal SDF file and converts it to PDB format.
 
     Args:
         ligand_code: 3-letter ligand code (e.g., 'ATP')
         custom_id: Custom ID for renaming the ligand
+        residue_code: 3-letter code to use in PDB file
         output_folder: Directory to save the ligand
         repo_ligands_folder: Repository Ligands folder for caching
 
@@ -249,18 +511,7 @@ def download_from_rcsb(ligand_code: str, custom_id: str, output_folder: str,
     try:
         print(f"Downloading {ligand_code} ideal SDF from RCSB: {sdf_url}")
 
-        # Import requests only when needed for download
-        try:
-            import requests
-        except ImportError:
-            error_msg = f"Cannot download from RCSB: 'requests' module not available. Please install with: pip install requests"
-            print(f"Error: {error_msg}")
-            metadata = {
-                "error_message": error_msg,
-                "source": "rcsb_missing_dependency",
-                "attempted_path": sdf_url
-            }
-            return False, "", metadata
+        import requests
 
         # Download with proper headers
         headers = {
@@ -272,22 +523,41 @@ def download_from_rcsb(ligand_code: str, custom_id: str, output_folder: str,
 
         sdf_content = response.text
 
-        # Validate SDF content (basic check)
+        # Validate SDF content
         if not sdf_content.strip():
             raise ValueError(f"Downloaded SDF file is empty")
 
-        # Convert SDF to PDB
-        pdb_content = convert_sdf_to_pdb(sdf_content, ligand_code)
+        # Get additional properties from RCSB
+        props = fetch_properties_from_rcsb(ligand_code)
+
+        # Convert SDF to PDB (normalization happens inside)
+        pdb_content = convert_sdf_to_pdb(sdf_content, residue_code)
         if pdb_content is None:
             raise ValueError(f"Failed to convert SDF to PDB format")
 
-        # Save to Ligands/ folder for caching (using ligand_code, not custom_id)
+        # Save to Ligands/ folder for caching (using ligand_code as filename)
         os.makedirs(repo_ligands_folder, exist_ok=True)
-        cache_filename = f"{ligand_code}.pdb"
-        cache_path = os.path.join(repo_ligands_folder, cache_filename)
-        with open(cache_path, 'w') as f:
+        cache_pdb_path = os.path.join(repo_ligands_folder, f"{ligand_code}.pdb")
+        with open(cache_pdb_path, 'w') as f:
             f.write(pdb_content)
-        print(f"Cached to Ligands/ folder: {cache_path}")
+        print(f"  Cached to Ligands/ folder: {cache_pdb_path}")
+
+        # Save companion CSV with metadata
+        cache_csv_path = os.path.join(repo_ligands_folder, f"{ligand_code}.csv")
+        cache_metadata = {
+            'id': ligand_code,
+            'code': residue_code,
+            'lookup': ligand_code,
+            'source': 'rcsb',
+            'ccd': ligand_code,
+            'cid': '',
+            'cas': '',
+            'smiles': props.get('smiles', ''),
+            'name': props.get('name', ''),
+            'formula': props.get('formula', ''),
+        }
+        pd.DataFrame([cache_metadata]).to_csv(cache_csv_path, index=False)
+        print(f"  Cached metadata: {cache_csv_path}")
 
         # Save to output folder (using custom_id)
         output_filename = f"{custom_id}.pdb"
@@ -295,45 +565,118 @@ def download_from_rcsb(ligand_code: str, custom_id: str, output_folder: str,
         with open(output_path, 'w') as f:
             f.write(pdb_content)
 
-        # Get file size
         file_size = os.path.getsize(output_path)
-
-        # Fetch SMILES from RCSB API
-        smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
 
         metadata = {
             "file_size": file_size,
-            "source": "rcsb_download",
+            "source": "rcsb",
             "url": sdf_url,
-            "smiles": smiles if smiles else "",
-            "format": "smiles" if smiles else ""
+            "ccd": ligand_code,
+            "cid": "",
+            "cas": "",
+            "smiles": props.get('smiles', ''),
+            "name": props.get('name', ''),
+            "formula": props.get('formula', ''),
         }
 
         print(f"Successfully downloaded {ligand_code} as {custom_id}: {file_size} bytes")
         return True, output_path, metadata
 
     except Exception as e:
-        # Handle both requests exceptions and other errors
         error_type = type(e).__name__
-
-        # Try to extract HTTP status if it's a requests exception
-        http_status = 'unknown'
-        if 'requests' in sys.modules and hasattr(e, 'response') and e.response:
-            http_status = getattr(e.response, 'status_code', 'unknown')
-
-        if 'RequestException' in error_type or 'HTTPError' in error_type:
-            error_msg = f"HTTP error downloading {ligand_code}: {str(e)}"
-            source = f"rcsb_download_failed_{http_status}"
-        else:
-            error_msg = f"Unexpected error downloading {ligand_code}: {str(e)}"
-            source = "rcsb_processing_error"
-
+        error_msg = f"Error downloading {ligand_code} from RCSB: {str(e)}"
         print(f"Error: {error_msg}")
 
         metadata = {
             "error_message": error_msg,
-            "source": source,
+            "source": "rcsb_download_failed",
             "attempted_path": sdf_url
+        }
+
+        return False, "", metadata
+
+
+def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue_code: str,
+                          output_folder: str, repo_ligands_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Download a ligand from PubChem.
+
+    Args:
+        lookup: The lookup value (name, CID, or CAS)
+        lookup_type: "cid", "cas", or "name"
+        custom_id: Custom ID for renaming the ligand
+        residue_code: 3-letter code to use in PDB file
+        output_folder: Directory to save the ligand
+        repo_ligands_folder: Repository Ligands folder for caching
+
+    Returns:
+        Tuple of (success: bool, file_path: str, metadata: dict)
+    """
+    try:
+        print(f"Fetching {lookup} from PubChem ({lookup_type})...")
+
+        # Fetch from PubChem
+        pubchem_data = fetch_from_pubchem(lookup, lookup_type)
+
+        # Convert SDF to PDB
+        pdb_content = convert_sdf_to_pdb(pubchem_data['sdf_content'], residue_code)
+        if pdb_content is None:
+            raise ValueError(f"Failed to convert SDF to PDB format")
+
+        # Save to Ligands/ folder for caching
+        os.makedirs(repo_ligands_folder, exist_ok=True)
+        cache_pdb_path = os.path.join(repo_ligands_folder, f"{lookup}.pdb")
+        with open(cache_pdb_path, 'w') as f:
+            f.write(pdb_content)
+        print(f"  Cached to Ligands/ folder: {cache_pdb_path}")
+
+        # Save companion CSV with metadata
+        cache_csv_path = os.path.join(repo_ligands_folder, f"{lookup}.csv")
+        cache_metadata = {
+            'id': lookup,
+            'code': residue_code,
+            'lookup': lookup,
+            'source': 'pubchem',
+            'ccd': '',
+            'cid': pubchem_data.get('cid', ''),
+            'cas': lookup if lookup_type == 'cas' else '',
+            'smiles': pubchem_data.get('smiles', ''),
+            'name': pubchem_data.get('name', ''),
+            'formula': pubchem_data.get('formula', ''),
+        }
+        pd.DataFrame([cache_metadata]).to_csv(cache_csv_path, index=False)
+        print(f"  Cached metadata: {cache_csv_path}")
+
+        # Save to output folder (using custom_id)
+        output_filename = f"{custom_id}.pdb"
+        output_path = os.path.join(output_folder, output_filename)
+        with open(output_path, 'w') as f:
+            f.write(pdb_content)
+
+        file_size = os.path.getsize(output_path)
+
+        metadata = {
+            "file_size": file_size,
+            "source": "pubchem",
+            "ccd": "",
+            "cid": pubchem_data.get('cid', ''),
+            "cas": lookup if lookup_type == 'cas' else '',
+            "smiles": pubchem_data.get('smiles', ''),
+            "name": pubchem_data.get('name', ''),
+            "formula": pubchem_data.get('formula', ''),
+        }
+
+        print(f"Successfully downloaded {lookup} as {custom_id}: {file_size} bytes")
+        return True, output_path, metadata
+
+    except Exception as e:
+        error_msg = f"Error downloading {lookup} from PubChem: {str(e)}"
+        print(f"Error: {error_msg}")
+
+        metadata = {
+            "error_message": error_msg,
+            "source": "pubchem_download_failed",
+            "attempted_path": f"pubchem:{lookup}"
         }
 
         return False, "", metadata
@@ -341,7 +684,9 @@ def download_from_rcsb(ligand_code: str, custom_id: str, output_folder: str,
 
 def fetch_ligands(config_data: Dict[str, Any]) -> int:
     """
-    Fetch multiple ligands with priority-based lookup: local_folder -> Ligands/ -> RCSB download.
+    Fetch multiple ligands with priority-based lookup.
+
+    Priority: local_folder -> Ligands/ -> RCSB/PubChem download
 
     Args:
         config_data: Configuration dictionary with fetch parameters
@@ -349,16 +694,22 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     Returns:
         Number of failed fetches
     """
-    ligand_codes = config_data['ligand_codes']
-    custom_ids = config_data.get('custom_ids', ligand_codes)
+    custom_ids = config_data['custom_ids']
+    residue_codes = config_data['residue_codes']
+    lookup_values = config_data['lookup_values']
+    source = config_data.get('source')  # "rcsb", "pubchem", or None (auto-detect)
     local_folder = config_data.get('local_folder')
     repo_ligands_folder = config_data['repo_ligands_folder']
     output_folder = config_data['output_folder']
     compounds_table = config_data['compounds_table']
     failed_table = config_data['failed_table']
 
-    print(f"Fetching {len(ligand_codes)} ligands")
-    print(f"Priority: {'local_folder -> ' if local_folder else ''}Ligands/ -> RCSB download")
+    print(f"Fetching {len(lookup_values)} ligands")
+    if source:
+        print(f"Forced source: {source}")
+    else:
+        print(f"Source: auto-detect")
+    print(f"Priority: {'local_folder -> ' if local_folder else ''}Ligands/ -> download")
 
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
@@ -368,39 +719,62 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     failed_downloads = []
 
     # Fetch each ligand
-    for i, (ligand_code, custom_id) in enumerate(zip(ligand_codes, custom_ids), 1):
-        print(f"\n[{i}/{len(ligand_codes)}] Processing {ligand_code} -> {custom_id}")
+    for i, (custom_id, residue_code, lookup) in enumerate(zip(custom_ids, residue_codes, lookup_values), 1):
+        print(f"\n[{i}/{len(lookup_values)}] Processing {lookup} -> {custom_id} (code: {residue_code})")
+
+        # Detect lookup type
+        lookup_type = detect_lookup_type(lookup)
+        print(f"  Detected lookup type: {lookup_type}")
+
+        # Determine effective source
+        if source:
+            effective_source = source
+        else:
+            # Auto-detect
+            effective_source = "rcsb" if lookup_type == "ccd" else "pubchem"
+        print(f"  Source: {effective_source}")
 
         # Try to find locally first
-        local_path = find_local_ligand(ligand_code, local_folder, repo_ligands_folder)
+        local_pdb_path, local_csv_path = find_local_ligand(lookup, local_folder, repo_ligands_folder)
 
-        if local_path:
+        if local_pdb_path:
             # Copy from local
             success, file_path, metadata = copy_local_ligand(
-                ligand_code, custom_id, local_path, output_folder
+                lookup, custom_id, residue_code, local_pdb_path, local_csv_path, output_folder
             )
         else:
-            # Download from RCSB
-            print(f"{ligand_code} not found locally, downloading from RCSB")
-            success, file_path, metadata = download_from_rcsb(
-                ligand_code, custom_id, output_folder, repo_ligands_folder
-            )
+            # Download from appropriate source
+            print(f"  {lookup} not found locally, downloading from {effective_source}")
+
+            if effective_source == "rcsb":
+                success, file_path, metadata = download_from_rcsb(
+                    lookup, custom_id, residue_code, output_folder, repo_ligands_folder
+                )
+            else:
+                success, file_path, metadata = download_from_pubchem(
+                    lookup, lookup_type, custom_id, residue_code, output_folder, repo_ligands_folder
+                )
 
         if success:
             successful_downloads.append({
                 'id': custom_id,
-                'code': ligand_code,
-                'file_path': file_path,
-                'format': metadata.get('format', ''),
+                'code': residue_code,
+                'lookup': lookup,
+                'source': metadata.get('source', effective_source),
+                'ccd': metadata.get('ccd', ''),
+                'cid': metadata.get('cid', ''),
+                'cas': metadata.get('cas', ''),
                 'smiles': metadata.get('smiles', ''),
-                'ccd': ligand_code  # CCD code is the 3-letter code
+                'name': metadata.get('name', ''),
+                'formula': metadata.get('formula', ''),
+                'file_path': file_path
             })
         else:
             failed_downloads.append({
-                'ligand_code': ligand_code,
-                'error_message': metadata['error_message'],
-                'source': metadata['source'],
-                'attempted_path': metadata['attempted_path']
+                'lookup': lookup,
+                'error_message': metadata.get('error_message', 'Unknown error'),
+                'source': metadata.get('source', 'unknown'),
+                'attempted_path': metadata.get('attempted_path', '')
             })
 
     # Save successful downloads table
@@ -410,27 +784,28 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
         print(f"\nSuccessful fetches saved: {compounds_table} ({len(successful_downloads)} ligands)")
     else:
         # Create empty table with proper columns
-        empty_df = pd.DataFrame(columns=["id", "code", "file_path", "format", "smiles", "ccd"])
+        columns = ["id", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"]
+        empty_df = pd.DataFrame(columns=columns)
         empty_df.to_csv(compounds_table, index=False)
         print(f"No successful fetches - created empty table: {compounds_table}")
 
-    # Save failed downloads table (always create, even if empty)
+    # Save failed downloads table
     if failed_downloads:
         df_failed = pd.DataFrame(failed_downloads)
         df_failed.to_csv(failed_table, index=False)
         print(f"Failed fetches saved: {failed_table} ({len(failed_downloads)} failures)")
     else:
         # Create empty failed downloads table
-        empty_failed_df = pd.DataFrame(columns=["ligand_code", "error_message", "source", "attempted_path"])
+        empty_failed_df = pd.DataFrame(columns=["lookup", "error_message", "source", "attempted_path"])
         empty_failed_df.to_csv(failed_table, index=False)
         print("No failed fetches")
 
     # Summary
     print(f"\n=== FETCH SUMMARY ===")
-    print(f"Requested: {len(ligand_codes)} ligands")
+    print(f"Requested: {len(lookup_values)} ligands")
     print(f"Successful: {len(successful_downloads)}")
     print(f"Failed: {len(failed_downloads)}")
-    print(f"Success rate: {len(successful_downloads)/len(ligand_codes)*100:.1f}%")
+    print(f"Success rate: {len(successful_downloads)/len(lookup_values)*100:.1f}%")
 
     if successful_downloads:
         # Count how many have SMILES
@@ -441,7 +816,7 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     if failed_downloads:
         print(f"\nFailed fetches:")
         for failure in failed_downloads:
-            print(f"  - {failure['ligand_code']}: {failure['error_message']}")
+            print(f"  - {failure['lookup']}: {failure['error_message']}")
 
     # Return the number of failures
     return len(failed_downloads)
@@ -466,7 +841,8 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['ligand_codes', 'repo_ligands_folder', 'output_folder', 'compounds_table', 'failed_table']
+    required_params = ['custom_ids', 'residue_codes', 'lookup_values', 'repo_ligands_folder',
+                       'output_folder', 'compounds_table', 'failed_table']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")

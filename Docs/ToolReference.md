@@ -49,6 +49,7 @@
   - [MMseqs2Server](#mmseqs2server)
   - [CompoundLibrary](#compoundlibrary)
   - [PDB](#pdb)
+  - [Ligand](#ligand)
   - [PyMOL](#pymol)
 
 
@@ -193,6 +194,7 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 - `select_hotspots`: Dict[str, str] = None - Hotspot residues and/or specific atoms (e.g., {"A181": "CG2,CG1", "A407": "NE1,CZ2"})
 - `infer_ori_strategy`: str = None - Strategy for orientation inference (e.g., "hotspots")
 - `num_designs`: int = 1 - Number of designs to generate
+- `num_designs`: int = 1 - Number of models to generate for each design. Roughly equivalent in practice to number of sequences per design in backbone-only design 
 - `design_startnum`: int = 1 - Starting number for design IDs
 - `design_name`: str = None - Base name for output designs
 - `out_dir`: str = None - Output directory path
@@ -215,6 +217,8 @@ rfd3 = RFdiffusion3(
 )
 
 # Binder design with hotspots
+# You can see the name of each atom in pymol picking mode
+# If your ligand pdb doesn't have numbering of atoms (e.g. C, C, ...) you can assign individual ids in pymol with the command rename, and then save the pdb
 rfd3 = RFdiffusion3(
     input=target_pdb,
     contig="50-80,A1-100",
@@ -2105,6 +2109,85 @@ pdb = PDB(
     biological_assembly=True,
     remove_waters=False
 
+```
+
+---
+
+### Ligand
+
+Fetches small molecule ligands from RCSB PDB or PubChem. Downloads SDF files and converts to PDB format with proper atom numbering (sequential serial numbers, chain A, residue number 1). Supports lookup by CCD code (RCSB), compound name, CID, or CAS number (PubChem).
+
+**Environment**: `ProteinEnv` (requires OpenBabel for SDF to PDB conversion)
+
+**Parameters**:
+- `ids`: Union[str, List[str]] (required) - Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb)
+- `codes`: Optional[Union[str, List[str]]] - 3-letter PDB residue code(s) to use in PDB file (e.g., "LIG"). Defaults to lookup value (truncated to 3 chars, uppercased).
+- `lookup`: Optional[Union[str, List[str]]] - Lookup value(s) for fetching. Can be:
+  - RCSB CCD codes: "ATP", "GDP", "HEM"
+  - PubChem CID: "2244"
+  - PubChem CAS: "50-78-2"
+  - PubChem name: "aspirin", "caffeine"
+  Defaults to codes if not provided (backward compatibility).
+- `source`: Optional[str] = None - Force source ("rcsb" or "pubchem"). If None, auto-detects based on lookup format.
+- `local_folder`: Optional[str] = None - Custom folder to check before Ligands/ cache
+
+**Auto-Detection** (when source=None):
+- 1-3 uppercase alphanumeric -> RCSB (CCD)
+- Purely numeric -> PubChem (CID)
+- XX-XX-X format -> PubChem (CAS)
+- Otherwise -> PubChem (name)
+
+**Fetch Priority**:
+1. `local_folder` (if provided)
+2. `Ligands/` folder (cached downloads)
+3. Download from RCSB or PubChem (cached to Ligands/ for reuse)
+
+**PDB Normalization**:
+Downloaded ligands are normalized with:
+- Sequential atom serial numbers starting from 1
+- Chain ID = 'A'
+- Residue number = 1
+- Residue name = specified `codes` parameter
+
+**Outputs**:
+- `structures`: List of ligand PDB files
+- `tables.compounds`:
+
+  | id | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path |
+  |----|------|--------|--------|-----|-----|-----|--------|------|---------|-----------|
+
+- `tables.failed`:
+
+  | lookup | error_message | source | attempted_path |
+  |--------|---------------|--------|----------------|
+
+**Examples**:
+```python
+# RCSB ligand by CCD code (auto-detect)
+lig = Ligand(ids="atp_ligand", lookup="ATP")
+
+# PubChem ligand by compound name
+lig = Ligand(ids="aspirin_lig", lookup="aspirin", codes="ASP")
+
+# PubChem by CID
+lig = Ligand(ids="caffeine", lookup="2157", codes="CAF")
+
+# PubChem by CAS number
+lig = Ligand(ids="ibuprofen", lookup="15687-27-1", codes="IBU")
+
+# Multiple ligands with explicit codes
+lig = Ligand(
+    ids=["lig1", "lig2"],
+    lookup=["ATP", "aspirin"],
+    codes=["ATP", "LIG"]
+)
+
+# Force PubChem source for a CCD-like code
+lig = Ligand(ids="test", lookup="ATP", source="pubchem")
+
+# Use in RFdiffusion3 workflow
+ligand = Ligand(ids="my_ligand", lookup="2244", codes="LIG")
+rfd3 = RFdiffusion3(input=ligand, contig="50-80,A1-100")
 ```
 
 ---
