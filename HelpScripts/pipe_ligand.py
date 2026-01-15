@@ -141,12 +141,19 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
             "source_path": source_pdb_path,
         })
 
-        # Try to fetch SMILES from RCSB if not in metadata and looks like CCD
-        if not metadata.get('smiles') and detect_lookup_type(lookup) == "ccd":
-            smiles = fetch_smiles_from_rcsb(lookup.upper())
-            if smiles:
-                metadata['smiles'] = smiles
-                metadata['ccd'] = lookup.upper()
+        # Try to fetch SMILES if not in metadata
+        if not metadata.get('smiles'):
+            lookup_type = detect_lookup_type(lookup)
+            if lookup_type == "ccd":
+                smiles = fetch_smiles_from_rcsb(lookup.upper())
+                if smiles:
+                    metadata['smiles'] = smiles
+                    metadata['ccd'] = lookup.upper()
+            else:
+                # Try PubChem for name/CID/CAS lookups
+                smiles = fetch_smiles_from_pubchem(lookup, lookup_type)
+                if smiles:
+                    metadata['smiles'] = smiles
 
         print(f"Successfully copied {lookup} as {custom_id}: {file_size} bytes (from local)")
         return True, output_path, metadata
@@ -162,6 +169,45 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         return False, "", metadata
 
 
+def _extract_element_from_line(line: str) -> str:
+    """
+    Extract element symbol from a PDB ATOM/HETATM line.
+
+    Tries multiple sources: element column (76-77), atom name, or first alpha chars.
+
+    Args:
+        line: PDB ATOM/HETATM line
+
+    Returns:
+        Element symbol (1-2 chars, uppercase)
+    """
+    # Try element column (76-77) first - most reliable
+    if len(line) >= 78:
+        element = line[76:78].strip()
+        if element and element[0].isalpha():
+            return element.upper()
+
+    # Try to extract from atom name (columns 12-15)
+    if len(line) >= 16:
+        atom_name = line[12:16].strip()
+        if atom_name:
+            # Extract leading alpha characters
+            element = ''
+            for char in atom_name:
+                if char.isalpha():
+                    element += char
+                else:
+                    break
+            if element:
+                # Handle 2-char elements (e.g., CL, BR, FE)
+                element = element.upper()
+                if len(element) >= 2 and element[:2] in ['CL', 'BR', 'FE', 'ZN', 'MG', 'CA', 'NA', 'MN', 'CU', 'CO', 'NI', 'SE']:
+                    return element[:2]
+                return element[0]
+
+    return 'X'  # Unknown element
+
+
 def normalize_pdb_content(pdb_content: str, residue_code: str) -> str:
     """
     Normalize PDB content with proper atom numbering.
@@ -173,13 +219,18 @@ def normalize_pdb_content(pdb_content: str, residue_code: str) -> str:
     Returns:
         Normalized PDB content with:
         - Sequential atom serial numbers (1, 2, 3, ...)
+        - Properly numbered atom names (C1, C2, N1, O1, ...)
         - Chain ID = 'A'
         - Residue number = 1
         - Residue name = residue_code (3-letter, uppercase)
+        - Element symbol in columns 76-77
     """
     lines = pdb_content.split('\n')
     output_lines = []
     atom_serial = 0
+
+    # Track element counts for generating unique atom names
+    element_counts = {}
 
     # Ensure residue code is uppercase and max 3 chars
     res_code = residue_code.upper()[:3].ljust(3)
@@ -187,48 +238,51 @@ def normalize_pdb_content(pdb_content: str, residue_code: str) -> str:
     for line in lines:
         if line.startswith(('HETATM', 'ATOM')):
             atom_serial += 1
-            # PDB format positions (0-indexed Python slicing):
-            # 0-5: Record name (HETATM or ATOM)
-            # 6-10: Atom serial number (right-justified, 5 chars)
-            # 11: Space
-            # 12-15: Atom name (4 chars)
-            # 16: Alternate location indicator
-            # 17-19: Residue name (3 chars)
-            # 20: Space
-            # 21: Chain identifier
-            # 22-25: Residue sequence number (right-justified, 4 chars)
-            # 26: Code for insertion of residues
-            # 27-29: Spaces
-            # 30-37: X coordinate (8.3 format)
-            # 38-45: Y coordinate
-            # 46-53: Z coordinate
-            # 54-59: Occupancy
-            # 60-65: Temperature factor
-            # 76-77: Element symbol
-            # 78-79: Charge
+
+            # Extract element symbol
+            element = _extract_element_from_line(line)
+
+            # Generate numbered atom name
+            element_counts[element] = element_counts.get(element, 0) + 1
+            atom_num = element_counts[element]
+
+            # Format atom name (4 chars, columns 12-15)
+            # PDB convention: 1-char elements right-justify in col 13-14
+            # For ligands with numbers: typically "C1", "C12", etc.
+            atom_name_str = f"{element}{atom_num}"
+            if len(element) == 1:
+                # 1-char element: " C1 " or " C12"
+                atom_name = f" {atom_name_str:<3}"
+            else:
+                # 2-char element: "CL1 " or "CL12"
+                atom_name = f"{atom_name_str:<4}"
 
             record = 'HETATM'
             serial_str = f"{atom_serial:5d}"
-
-            # Preserve atom name (columns 12-15, 0-indexed)
-            if len(line) >= 16:
-                atom_name = line[12:16]
-            else:
-                atom_name = '    '
-
             alt_loc = ' '
             chain = 'A'
             res_seq = '   1'
             icode = ' '
 
-            # Get the rest of the line (coordinates and beyond)
-            if len(line) >= 27:
-                rest = line[27:]
+            # Get coordinates and other data (columns 27-66)
+            if len(line) >= 54:
+                coords = line[27:66]
+            elif len(line) >= 27:
+                coords = line[27:].ljust(39)
             else:
-                rest = ''
+                coords = ' ' * 39
 
-            # Build the new line
-            new_line = f"{record}{serial_str} {atom_name}{alt_loc}{res_code} {chain}{res_seq}{icode}{rest}"
+            # Pad coords to proper length if needed
+            coords = coords.ljust(39)
+
+            # Format element for columns 76-77 (right-justified)
+            element_col = f"{element:>2}"
+
+            # Build the new line (80 chars total for proper PDB format)
+            # Columns: 0-5(record), 6-10(serial), 11(space), 12-15(atom), 16(altloc),
+            #          17-19(resname), 20(space), 21(chain), 22-25(resseq), 26(icode),
+            #          27-65(coords+occupancy+temp), 66-75(spaces), 76-77(element)
+            new_line = f"{record}{serial_str} {atom_name}{alt_loc}{res_code} {chain}{res_seq}{icode}{coords}          {element_col}"
             output_lines.append(new_line)
 
         elif line.startswith('CONECT'):
@@ -289,6 +343,49 @@ def fetch_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
 
     except Exception as e:
         print(f"  Warning: Could not fetch SMILES for {ligand_code} from RCSB: {str(e)}")
+        return None
+
+
+def fetch_smiles_from_pubchem(lookup: str, lookup_type: str) -> Optional[str]:
+    """
+    Fetch SMILES string for a compound from PubChem.
+
+    Args:
+        lookup: The lookup value (name, CID, or CAS)
+        lookup_type: "cid", "cas", or "name"
+
+    Returns:
+        SMILES string or None if not found
+    """
+    try:
+        import requests
+
+        base_url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+        headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+
+        # Resolve to CID first
+        if lookup_type == "cid":
+            cid = int(lookup)
+        else:
+            search_url = f"{base_url}/compound/name/{lookup}/cids/JSON"
+            response = requests.get(search_url, headers=headers, timeout=30)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            data = response.json()
+            if 'IdentifierList' not in data or not data['IdentifierList'].get('CID'):
+                return None
+            cid = data['IdentifierList']['CID'][0]
+
+        # Get SMILES
+        props_url = f"{base_url}/compound/cid/{cid}/property/CanonicalSMILES/JSON"
+        response = requests.get(props_url, headers=headers, timeout=30)
+        response.raise_for_status()
+        props = response.json()['PropertyTable']['Properties'][0]
+        return props.get('CanonicalSMILES', None)
+
+    except Exception as e:
+        print(f"  Warning: Could not fetch SMILES for {lookup} from PubChem: {str(e)}")
         return None
 
 

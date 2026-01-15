@@ -66,7 +66,9 @@ class RFdiffusion3(BaseConfig):
             Use '\\0' for chain breaks. Chain letters reference input structure.
             Example: "A50-100,80-100,\\0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
         pdb (str or ToolOutput): Input PDB structure (required when using contig)
-        ligand (str): Ligand selection by chemical component name
+        ligand_code (str): Ligand CCD code identifying the molecule in input structure
+        ligand_structure (ToolOutput): Output from Ligand tool providing ligand PDB file.
+            When provided, this PDB becomes the input structure for design.
         num_designs (int): Number of designs to generate (default: 1)
         num_models (int): Number of models per design (default: 1).
             WARNING: RFdiffusion3's internal default is 8 models per design. Always
@@ -75,6 +77,17 @@ class RFdiffusion3(BaseConfig):
         select_hotspots (str or dict): Hotspot residues for binder design
             String: "A67,A89" (all atoms) or "A67:CA,CB;A89:CA" (specific atoms)
             Dict: {"A67": "CA,CB", "A89": ""}
+        select_fixed_atoms (bool, str, or dict): Atoms with fixed 3D coordinates.
+            True=all atoms fixed, ""=none fixed, dict=specific atoms per residue/ligand.
+            Example: {"AXL": ""} to not fix any ligand atoms
+        select_buried (str or dict): Atoms that should be buried in protein (RASA control).
+            Example: {"AXL": "C1,C2,C3"} or "AXL" for all atoms
+        select_exposed (str or dict): Atoms that should be solvent-exposed (RASA control).
+            Example: {"AXL": "O1,O2"} or "AXL" for all atoms
+        select_hbond_donor (dict): Hydrogen bond donor specification.
+            Dict mapping residue/ligand to donor atoms. Example: {"AXL": "N1,N2"}
+        select_hbond_acceptor (dict): Hydrogen bond acceptor specification.
+            Dict mapping residue/ligand to acceptor atoms. Example: {"AXL": "O1,O2"}
         json_config (str or dict): Override with full JSON configuration for advanced use
         design_startnum (int): Starting number for design numbering (default: 1)
 
@@ -106,11 +119,17 @@ class RFdiffusion3(BaseConfig):
                  contig: str = "",
                  length: Union[str, int] = None,
                  pdb: Union[str, ToolOutput, StandardizedOutput] = "",
-                 ligand: str = "",
+                 ligand_code: str = "",
+                 ligand_structure: Union[ToolOutput, StandardizedOutput] = None,
                  num_designs: int = 1,
                  num_models: int = 1,
                  prefix: str = None,
                  select_hotspots: Union[str, Dict[str, str]] = None,
+                 select_fixed_atoms: Union[bool, str, Dict[str, str]] = None,
+                 select_buried: Union[str, Dict[str, str]] = None,
+                 select_exposed: Union[str, Dict[str, str]] = None,
+                 select_hbond_donor: Dict[str, str] = None,
+                 select_hbond_acceptor: Dict[str, str] = None,
                  json_config: Union[str, Dict] = None,
                  design_startnum: int = 1,
                  **kwargs):
@@ -121,12 +140,18 @@ class RFdiffusion3(BaseConfig):
             contig: Contig specification (use '\\0' for chain breaks)
             length: Length constraint (str "min-max" or int)
             pdb: Input PDB structure (optional)
-            ligand: Ligand selection by name
+            ligand_code: Ligand CCD code identifying the molecule
+            ligand_structure: Output from Ligand tool providing ligand PDB file
             num_designs: Number of designs to generate
             num_models: Number of models per design (default: 1). WARNING: RFdiffusion3's
                 internal default is 8. Always pass explicitly.
             prefix: Prefix for output file names (defaults to pipeline name)
             select_hotspots: Hotspot residues specification
+            select_fixed_atoms: Atoms with fixed 3D coordinates (True/str/dict)
+            select_buried: Atoms to bury in protein (RASA control)
+            select_exposed: Atoms to expose to solvent (RASA control)
+            select_hbond_donor: Hydrogen bond donor atoms (dict)
+            select_hbond_acceptor: Hydrogen bond acceptor atoms (dict)
             json_config: Full JSON config override for advanced use
             design_startnum: Starting number for design IDs
             **kwargs: Additional parameters passed to BaseConfig
@@ -135,17 +160,45 @@ class RFdiffusion3(BaseConfig):
         self.contig = contig
         self.length = length
         self.pdb = pdb
-        self.ligand = ligand
+        self.ligand_code = ligand_code
+        self.ligand_structure = ligand_structure
         self.num_designs = num_designs
         self.num_models = num_models
         self.prefix = prefix
         self.select_hotspots = select_hotspots
+        self.select_fixed_atoms = select_fixed_atoms
+        self.select_buried = select_buried
+        self.select_exposed = select_exposed
+        self.select_hbond_donor = select_hbond_donor
+        self.select_hbond_acceptor = select_hbond_acceptor
         self.json_config = json_config
         self.design_startnum = design_startnum
 
         # Handle PDB input from tool outputs
         self.pdb_is_tool_output = False
         self.pdb_source_file = None
+
+        # Handle ligand structure from Ligand tool (takes precedence over pdb)
+        self.ligand_structure_is_tool_output = False
+        self.ligand_pdb_file = None
+
+        if isinstance(ligand_structure, StandardizedOutput):
+            self.ligand_structure_is_tool_output = True
+            if hasattr(ligand_structure, 'structures') and ligand_structure.structures:
+                self.ligand_pdb_file = ligand_structure.structures[0]
+            # Auto-extract ligand code from compound_ids if not provided
+            if not self.ligand_code and hasattr(ligand_structure, 'compound_ids') and ligand_structure.compound_ids:
+                self.ligand_code = ligand_structure.compound_ids[0]
+        elif isinstance(ligand_structure, ToolOutput):
+            self.ligand_structure_is_tool_output = True
+            structures = ligand_structure.get_output_files("structures")
+            if structures:
+                self.ligand_pdb_file = structures[0]
+                self.dependencies.append(ligand_structure.config)
+            # Auto-extract ligand code from compound_ids if not provided
+            compound_ids = ligand_structure.get_output_files("compound_ids")
+            if not self.ligand_code and compound_ids:
+                self.ligand_code = compound_ids[0]
 
         if isinstance(pdb, StandardizedOutput):
             # StandardizedOutput from upstream tool
@@ -203,6 +256,27 @@ class RFdiffusion3(BaseConfig):
                 raise ValueError(
                     "Invalid hotspots format. Use 'A67,A89' or 'A67:CA,CB;A89:NE'"
                 )
+
+        # Validate constraint parameter types
+        if self.select_fixed_atoms is not None:
+            if not isinstance(self.select_fixed_atoms, (bool, str, dict)):
+                raise ValueError("select_fixed_atoms must be bool, str, or dict")
+
+        if self.select_buried is not None:
+            if not isinstance(self.select_buried, (str, dict)):
+                raise ValueError("select_buried must be str or dict")
+
+        if self.select_exposed is not None:
+            if not isinstance(self.select_exposed, (str, dict)):
+                raise ValueError("select_exposed must be str or dict")
+
+        if self.select_hbond_donor is not None:
+            if not isinstance(self.select_hbond_donor, dict):
+                raise ValueError("select_hbond_donor must be dict")
+
+        if self.select_hbond_acceptor is not None:
+            if not isinstance(self.select_hbond_acceptor, dict):
+                raise ValueError("select_hbond_acceptor must be dict")
 
     def _initialize_file_paths(self):
         """Initialize file path placeholders."""
@@ -304,12 +378,18 @@ class RFdiffusion3(BaseConfig):
         self.folders = pipeline_folders
         self._setup_file_paths()
 
-        # Handle PDB input
-        if self.pdb_is_tool_output:
+        # Handle ligand structure (takes precedence over pdb for small molecule binder design)
+        if self.ligand_structure_is_tool_output:
+            self.input_sources["ligand_pdb"] = self.ligand_pdb_file
+            # For SM binder design, ligand PDB is the main input
+            self.input_pdb_file = self.ligand_pdb_file
+
+        # Handle PDB input (only if ligand_structure not provided)
+        if self.pdb_is_tool_output and not self.ligand_structure_is_tool_output:
             # File path already extracted in __init__
             self.input_sources["pdb"] = self.pdb_source_file
             self.input_pdb_file = self.pdb_source_file
-        elif self.pdb:
+        elif self.pdb and not self.ligand_structure_is_tool_output:
             # String filename - look in PDBs folder
             pdb_filename = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
             pdb_source = os.path.join(pipeline_folders["PDBs"], pdb_filename)
@@ -381,21 +461,41 @@ class RFdiffusion3(BaseConfig):
         config[design_key] = {}
         entry = config[design_key]
 
-        # Required/common parameters
-        if self.contig:
-            entry["contig"] = self.contig
-
-        if self.length is not None:
-            entry["length"] = str(self.length)
-
+        # Input structure (ligand PDB or scaffold PDB)
         if self.input_pdb_file:
             entry["input"] = self.input_pdb_file
 
-        if self.ligand:
-            entry["ligand"] = self.ligand
+        # Ligand specification
+        if self.ligand_code:
+            entry["ligand"] = self.ligand_code
 
+        # Contig specification (for motif scaffolding)
+        if self.contig:
+            entry["contig"] = self.contig
+
+        # Length constraint
+        if self.length is not None:
+            entry["length"] = str(self.length)
+
+        # Hotspot specification
         if self.select_hotspots:
             entry["select_hotspots"] = self._format_hotspots()
+
+        # Constraint parameters for small molecule binder design
+        if self.select_fixed_atoms is not None:
+            entry["select_fixed_atoms"] = self.select_fixed_atoms
+
+        if self.select_buried is not None:
+            entry["select_buried"] = self.select_buried
+
+        if self.select_exposed is not None:
+            entry["select_exposed"] = self.select_exposed
+
+        if self.select_hbond_donor is not None:
+            entry["select_hbond_donor"] = self.select_hbond_donor
+
+        if self.select_hbond_acceptor is not None:
+            entry["select_hbond_acceptor"] = self.select_hbond_acceptor
 
         return config
 
@@ -403,8 +503,11 @@ class RFdiffusion3(BaseConfig):
         """Get RFdiffusion3 configuration display lines."""
         config_lines = super().get_config_display()
 
-        # Input information
-        if self.pdb_is_tool_output:
+        # Input information - ligand structure takes precedence
+        if self.ligand_structure_is_tool_output:
+            config_lines.append(f"LIGAND STRUCTURE: {os.path.basename(self.ligand_pdb_file)}")
+            config_lines.append("MODE: Small molecule binder design")
+        elif self.pdb_is_tool_output:
             config_lines.append(f"INPUT PDB: {os.path.basename(self.pdb_source_file)}")
         elif self.pdb:
             config_lines.append(f"INPUT PDB: {self.pdb}")
@@ -417,14 +520,27 @@ class RFdiffusion3(BaseConfig):
         if self.length:
             config_lines.append(f"LENGTH: {self.length}")
 
-        if self.ligand:
-            config_lines.append(f"LIGAND: {self.ligand}")
+        if self.ligand_code:
+            config_lines.append(f"LIGAND CODE: {self.ligand_code}")
 
         if self.select_hotspots:
             hotspots_str = str(self.select_hotspots)
             if len(hotspots_str) > 50:
                 hotspots_str = hotspots_str[:47] + "..."
             config_lines.append(f"HOTSPOTS: {hotspots_str}")
+
+        # Display constraint parameters
+        if self.select_fixed_atoms is not None:
+            config_lines.append(f"FIXED ATOMS: {self._format_constraint_display(self.select_fixed_atoms)}")
+
+        if self.select_buried is not None:
+            config_lines.append(f"BURIAL CONSTRAINTS: {self._format_constraint_display(self.select_buried)}")
+
+        if self.select_exposed is not None:
+            config_lines.append(f"EXPOSURE CONSTRAINTS: {self._format_constraint_display(self.select_exposed)}")
+
+        if self.select_hbond_donor is not None or self.select_hbond_acceptor is not None:
+            config_lines.append("H-BOND CONSTRAINTS: defined")
 
         config_lines.append(f"NUM DESIGNS: {self.num_designs}")
         config_lines.append(f"NUM MODELS: {self.num_models}")
@@ -436,6 +552,23 @@ class RFdiffusion3(BaseConfig):
             config_lines.append("MODE: Advanced (JSON config)")
 
         return config_lines
+
+    def _format_constraint_display(self, constraint) -> str:
+        """Format constraint parameter for display."""
+        if isinstance(constraint, bool):
+            return "all" if constraint else "none"
+        elif isinstance(constraint, dict):
+            if len(constraint) == 0:
+                return "none"
+            keys = list(constraint.keys())
+            if len(keys) <= 2:
+                return str(constraint)
+            return f"{{{keys[0]}: ..., {keys[1]}: ...}} ({len(keys)} entries)"
+        elif isinstance(constraint, str):
+            if len(constraint) > 40:
+                return constraint[:37] + "..."
+            return constraint if constraint else "none"
+        return str(constraint)
 
     def _generate_json_section(self) -> str:
         """Generate bash section that creates JSON input file."""
@@ -625,18 +758,32 @@ python "{self.table_py_file}" \\
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration including RFdiffusion3-specific parameters."""
         base_dict = super().to_dict()
+
+        # Determine input type
+        if self.ligand_structure_is_tool_output:
+            input_type = "ligand_tool_output"
+        elif self.pdb_is_tool_output:
+            input_type = "pdb_tool_output"
+        else:
+            input_type = "direct"
+
         base_dict.update({
             "rfd3_params": {
                 "contig": self.contig,
                 "length": self.length,
-                "ligand": self.ligand,
+                "ligand_code": self.ligand_code,
                 "num_designs": self.num_designs,
                 "num_models": self.num_models,
                 "prefix": self.prefix,
                 "select_hotspots": self.select_hotspots,
+                "select_fixed_atoms": self.select_fixed_atoms,
+                "select_buried": self.select_buried,
+                "select_exposed": self.select_exposed,
+                "select_hbond_donor": self.select_hbond_donor,
+                "select_hbond_acceptor": self.select_hbond_acceptor,
                 "has_json_config": self.json_config is not None,
                 "design_startnum": self.design_startnum,
-                "input_type": "tool_output" if self.pdb_is_tool_output else "direct"
+                "input_type": input_type
             }
         })
         return base_dict
