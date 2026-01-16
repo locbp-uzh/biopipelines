@@ -320,13 +320,17 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
             atom_names.append(atom_name)
 
         # _atom_site section (required by biotite for structure parsing)
+        # Include all standard mmCIF fields that biotite/foundry may require
         cif_lines.append("loop_")
         cif_lines.append("_atom_site.id")
         cif_lines.append("_atom_site.type_symbol")
         cif_lines.append("_atom_site.label_atom_id")
+        cif_lines.append("_atom_site.label_alt_id")
         cif_lines.append("_atom_site.label_comp_id")
         cif_lines.append("_atom_site.label_asym_id")
+        cif_lines.append("_atom_site.label_entity_id")
         cif_lines.append("_atom_site.label_seq_id")
+        cif_lines.append("_atom_site.pdbx_PDB_ins_code")
         cif_lines.append("_atom_site.pdbx_PDB_model_num")
         cif_lines.append("_atom_site.Cartn_x")
         cif_lines.append("_atom_site.Cartn_y")
@@ -347,11 +351,13 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
             atom_name = atom_names[idx]
             atom_id = idx + 1  # 1-indexed
 
-            # Format: id type_symbol label_atom_id label_comp_id label_asym_id label_seq_id
-            #         pdbx_PDB_model_num Cartn_x Cartn_y Cartn_z occupancy B_iso
+            # Format: id type_symbol label_atom_id label_alt_id label_comp_id label_asym_id
+            #         label_entity_id label_seq_id pdbx_PDB_ins_code pdbx_PDB_model_num
+            #         Cartn_x Cartn_y Cartn_z occupancy B_iso
             #         auth_atom_id auth_comp_id auth_asym_id auth_seq_id pdbx_formal_charge
+            # Use . for empty/null values (standard mmCIF convention)
             cif_lines.append(
-                f"{atom_id} {element} {atom_name} {residue_code} A 1 1 "
+                f"{atom_id} {element} {atom_name} . {residue_code} A 1 . . 1 "
                 f"{pos.x:.3f} {pos.y:.3f} {pos.z:.3f} 1.00 0.00 "
                 f"{atom_name} {residue_code} A 1 {charge}"
             )
