@@ -6,13 +6,15 @@
 name: biopipelines
 channels:
   - conda-forge
-  - defaults
+channel_priority: strict
+
 dependencies:
-  - python>=3.10
+  - python>=3.10,<3.13
   - pandas
   - numpy
-  - pyyaml
+  - pyyaml=6.0
   - requests
   - biopython
   - rdkit
   - openbabel
+
