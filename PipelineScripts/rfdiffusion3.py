@@ -285,6 +285,7 @@ class RFdiffusion3(BaseConfig):
         self.main_table = None
         self.metrics_csv = None
         self.specifications_csv = None
+        self.sequences_csv = None
         self.rfd_log_file = None
         self.checkpoint_dir = None
         self.table_py_file = None
@@ -329,6 +330,10 @@ class RFdiffusion3(BaseConfig):
         self.specifications_csv = os.path.join(
             self.output_folder,
             "rfdiffusion3_specifications.csv"
+        )
+        self.sequences_csv = os.path.join(
+            self.output_folder,
+            "rfdiffusion3_sequences.csv"
         )
 
         # Raw output folder for CIF.gz files
@@ -621,7 +626,7 @@ rfd3 design \\
         """
         return f"""echo "Post-processing RFdiffusion3 outputs"
 
-# Process CIF.gz files: decompress, convert to PDB, extract metrics
+# Process CIF.gz files: decompress, convert to PDB, extract metrics and sequences
 mamba run -n biopipelines python "{self.postprocess_py_file}" \\
     --raw_folder "{self.raw_output_folder}" \\
     --output_folder "{self.output_folder}" \\
@@ -630,7 +635,8 @@ mamba run -n biopipelines python "{self.postprocess_py_file}" \\
     --num_models {self.num_models} \\
     --design_startnum {self.design_startnum} \\
     --metrics_csv "{self.metrics_csv}" \\
-    --specifications_csv "{self.specifications_csv}"
+    --specifications_csv "{self.specifications_csv}" \\
+    --sequences_csv "{self.sequences_csv}"
 
 """
 
@@ -739,6 +745,13 @@ python "{self.table_py_file}" \\
                 ],
                 description="RFdiffusion3 design specifications and statistics",
                 count=total_structures
+            ),
+            "sequences": TableInfo(
+                name="sequences",
+                path=self.sequences_csv,
+                columns=["id", "source_id", "source_pdb", "chain", "sequence", "length"],
+                description="RFdiffusion3 designed protein sequences extracted from PDB",
+                count=total_structures
             )
         }
 
@@ -747,8 +760,8 @@ python "{self.table_py_file}" \\
             "structure_ids": structure_ids,
             "compounds": [],
             "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "sequences": [self.sequences_csv],
+            "sequence_ids": structure_ids.copy(),
             "tables": tables,
             "output_folder": self.output_folder,
             # Legacy aliases for backward compatibility

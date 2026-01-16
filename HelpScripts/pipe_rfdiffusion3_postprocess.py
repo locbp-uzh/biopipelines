@@ -28,7 +28,8 @@ import glob
 import tempfile
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
-from Bio.PDB import MMCIFParser, PDBIO, Select
+from Bio.PDB import MMCIFParser, PDBIO, PDBParser, Select
+from Bio.SeqUtils import seq1
 
 
 class AllAtoms(Select):
@@ -213,6 +214,46 @@ def extract_specifications_from_json(json_path: Optional[str]) -> Dict:
         return {}
 
 
+def extract_sequence_from_pdb(pdb_path: str) -> Dict[str, str]:
+    """
+    Extract amino acid sequences from a PDB file.
+
+    Args:
+        pdb_path: Path to PDB file
+
+    Returns:
+        Dictionary mapping chain IDs to sequences
+    """
+    try:
+        parser = PDBParser(QUIET=True)
+        structure = parser.get_structure("structure", pdb_path)
+
+        sequences = {}
+        for model in structure:
+            for chain in model:
+                chain_id = chain.get_id()
+                residues = []
+                for residue in chain:
+                    # Skip hetero atoms (water, ligands, etc.)
+                    if residue.get_id()[0] != ' ':
+                        continue
+                    resname = residue.get_resname()
+                    try:
+                        one_letter = seq1(resname)
+                        residues.append(one_letter)
+                    except KeyError:
+                        # Unknown residue, skip
+                        continue
+                if residues:
+                    sequences[chain_id] = ''.join(residues)
+            break  # Only process first model
+
+        return sequences
+    except Exception as e:
+        print(f"Error extracting sequence from {pdb_path}: {e}")
+        return {}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Post-process RFdiffusion3 CIF.gz outputs")
     parser.add_argument("--raw_folder", required=True, help="Raw output folder with CIF.gz files")
@@ -223,6 +264,7 @@ def main():
     parser.add_argument("--design_startnum", type=int, required=True, help="Starting design number")
     parser.add_argument("--metrics_csv", required=True, help="Path to metrics CSV output")
     parser.add_argument("--specifications_csv", required=True, help="Path to specifications CSV output")
+    parser.add_argument("--sequences_csv", required=True, help="Path to sequences CSV output")
 
     args = parser.parse_args()
 
@@ -252,6 +294,7 @@ def main():
         # Process each CIF file
         metrics_data = []
         specs_data = []
+        sequences_data = []
         success_count = 0
 
         for idx, (cif_gz_path, json_path, design_num, model_num) in enumerate(cif_files):
@@ -282,6 +325,21 @@ def main():
             else:
                 print(f"  ✗ Failed to convert {structure_id}")
                 continue
+
+            # Extract sequence from PDB
+            print(f"  Extracting sequence from PDB...")
+            chain_sequences = extract_sequence_from_pdb(pdb_path)
+            for chain_id, sequence in chain_sequences.items():
+                seq_id = f"{structure_id}_{chain_id}" if len(chain_sequences) > 1 else structure_id
+                sequences_data.append({
+                    "id": seq_id,
+                    "source_id": structure_id,
+                    "source_pdb": pdb_path,
+                    "chain": chain_id,
+                    "sequence": sequence,
+                    "length": len(sequence)
+                })
+                print(f"    Chain {chain_id}: {len(sequence)} residues")
 
             # Extract metrics
             print(f"  Extracting metrics from JSON...")
@@ -319,6 +377,15 @@ def main():
             specs_df = specs_df[cols]
             specs_df.to_csv(args.specifications_csv, index=False)
             print(f"  ✓ Saved {len(specs_df)} rows")
+
+        if sequences_data:
+            print(f"\nCreating sequences CSV: {args.sequences_csv}")
+            sequences_df = pd.DataFrame(sequences_data)
+            # Reorder columns
+            cols = ["id", "source_id", "source_pdb", "chain", "sequence", "length"]
+            sequences_df = sequences_df[cols]
+            sequences_df.to_csv(args.sequences_csv, index=False)
+            print(f"  ✓ Saved {len(sequences_df)} sequences")
 
         print(f"\n{'='*60}")
         print("Post-processing complete!")
