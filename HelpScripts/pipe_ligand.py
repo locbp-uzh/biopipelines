@@ -239,8 +239,12 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
     """
     Convert SMILES to mmCIF format using RDKit with explicit bond orders.
 
-    This format is preferred for tools like RFdiffusion3 as it includes
-    explicit bond order information, avoiding the "BondType.ANY" warnings.
+    Generates a proper mmCIF structure file with:
+    - _atom_site category for atomic coordinates (required by biotite/foundry)
+    - _chem_comp_bond category for explicit bond orders (for RFdiffusion3)
+
+    This format is required for tools like RFdiffusion3 that use biotite to parse
+    structures and need explicit bond order information.
 
     Args:
         smiles: SMILES string of the molecule
@@ -286,46 +290,70 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
         # Remove hydrogens for cleaner output
         mol = Chem.RemoveHs(mol)
 
-        # Build mmCIF content manually with bond orders
+        # Get conformer for coordinates
+        conf = mol.GetConformer()
+
+        # Build mmCIF content with proper _atom_site category
         cif_lines = []
         cif_lines.append("data_" + residue_code)
         cif_lines.append("#")
 
-        # _chem_comp section
-        cif_lines.append("_chem_comp.id                          " + residue_code)
-        cif_lines.append("_chem_comp.name                        'Small molecule ligand'")
-        cif_lines.append("_chem_comp.type                        NON-POLYMER")
+        # _entry section
+        cif_lines.append(f"_entry.id {residue_code}")
         cif_lines.append("#")
 
-        # Get conformer for coordinates
-        conf = mol.GetConformer()
-
-        # _chem_comp_atom section
-        cif_lines.append("loop_")
-        cif_lines.append("_chem_comp_atom.comp_id")
-        cif_lines.append("_chem_comp_atom.atom_id")
-        cif_lines.append("_chem_comp_atom.type_symbol")
-        cif_lines.append("_chem_comp_atom.charge")
-        cif_lines.append("_chem_comp_atom.model_Cartn_x")
-        cif_lines.append("_chem_comp_atom.model_Cartn_y")
-        cif_lines.append("_chem_comp_atom.model_Cartn_z")
+        # _chem_comp section (component metadata)
+        cif_lines.append(f"_chem_comp.id {residue_code}")
+        cif_lines.append("_chem_comp.name 'Small molecule ligand'")
+        cif_lines.append("_chem_comp.type NON-POLYMER")
+        cif_lines.append("#")
 
         # Track atom names for bond section
         atom_names = []
         element_counts = {}
+
+        # Pre-generate atom names
+        for atom in mol.GetAtoms():
+            element = atom.GetSymbol()
+            element_counts[element] = element_counts.get(element, 0) + 1
+            atom_name = f"{element}{element_counts[element]}"
+            atom_names.append(atom_name)
+
+        # _atom_site section (required by biotite for structure parsing)
+        cif_lines.append("loop_")
+        cif_lines.append("_atom_site.id")
+        cif_lines.append("_atom_site.type_symbol")
+        cif_lines.append("_atom_site.label_atom_id")
+        cif_lines.append("_atom_site.label_comp_id")
+        cif_lines.append("_atom_site.label_asym_id")
+        cif_lines.append("_atom_site.label_seq_id")
+        cif_lines.append("_atom_site.Cartn_x")
+        cif_lines.append("_atom_site.Cartn_y")
+        cif_lines.append("_atom_site.Cartn_z")
+        cif_lines.append("_atom_site.occupancy")
+        cif_lines.append("_atom_site.B_iso_or_equiv")
+        cif_lines.append("_atom_site.auth_atom_id")
+        cif_lines.append("_atom_site.auth_comp_id")
+        cif_lines.append("_atom_site.auth_asym_id")
+        cif_lines.append("_atom_site.auth_seq_id")
+        cif_lines.append("_atom_site.pdbx_formal_charge")
 
         for atom in mol.GetAtoms():
             idx = atom.GetIdx()
             element = atom.GetSymbol()
             charge = atom.GetFormalCharge()
             pos = conf.GetAtomPosition(idx)
+            atom_name = atom_names[idx]
+            atom_id = idx + 1  # 1-indexed
 
-            # Generate atom name (element + count)
-            element_counts[element] = element_counts.get(element, 0) + 1
-            atom_name = f"{element}{element_counts[element]}"
-            atom_names.append(atom_name)
-
-            cif_lines.append(f"{residue_code} {atom_name} {element} {charge} {pos.x:.3f} {pos.y:.3f} {pos.z:.3f}")
+            # Format: id type_symbol label_atom_id label_comp_id label_asym_id label_seq_id
+            #         Cartn_x Cartn_y Cartn_z occupancy B_iso
+            #         auth_atom_id auth_comp_id auth_asym_id auth_seq_id pdbx_formal_charge
+            cif_lines.append(
+                f"{atom_id} {element} {atom_name} {residue_code} A 1 "
+                f"{pos.x:.3f} {pos.y:.3f} {pos.z:.3f} 1.00 0.00 "
+                f"{atom_name} {residue_code} A 1 {charge}"
+            )
 
         cif_lines.append("#")
 
