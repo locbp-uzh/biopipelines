@@ -365,37 +365,8 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
 
         cif_lines.append("#")
 
-        # _chem_comp_bond section with bond orders
-        cif_lines.append("loop_")
-        cif_lines.append("_chem_comp_bond.comp_id")
-        cif_lines.append("_chem_comp_bond.atom_id_1")
-        cif_lines.append("_chem_comp_bond.atom_id_2")
-        cif_lines.append("_chem_comp_bond.value_order")
-        cif_lines.append("_chem_comp_bond.pdbx_aromatic_flag")
-
-        for bond in mol.GetBonds():
-            begin_idx = bond.GetBeginAtomIdx()
-            end_idx = bond.GetEndAtomIdx()
-            atom1 = atom_names[begin_idx]
-            atom2 = atom_names[end_idx]
-
-            # Get bond order
-            bond_type = bond.GetBondType()
-            if bond_type == Chem.BondType.SINGLE:
-                order = "SING"
-            elif bond_type == Chem.BondType.DOUBLE:
-                order = "DOUB"
-            elif bond_type == Chem.BondType.TRIPLE:
-                order = "TRIP"
-            elif bond_type == Chem.BondType.AROMATIC:
-                order = "AROM"
-            else:
-                order = "SING"  # Default to single
-
-            aromatic = "Y" if bond.GetIsAromatic() else "N"
-            cif_lines.append(f"{residue_code} {atom1} {atom2} {order} {aromatic}")
-
-        cif_lines.append("#")
+        # Note: _chem_comp_bond is intentionally omitted as it's for CCD files,
+        # not structure files. Foundry/biotite infers bonds from coordinates.
 
         return "\n".join(cif_lines)
 
