@@ -24,6 +24,13 @@
 
 BioPipelines is a Python framework that generates bash scripts for bioinformatics workflows. It does not execute computations directly - instead, it predicts the filesystem structure and creates scripts that will be executed on SLURM clusters.
 
+### Installation
+
+Login to your cluster via terminal or the website ([text](https://apps.s3it.uzh.ch) > Clusters > Shell access). In your home directory, clone the biopipelines repository:
+```bash
+git clone https://gitlab.uzh.ch/locbp/public/biopipelines
+```
+
 ### Core Concepts
 
 **Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. Pipelines can be used with context manager syntax (preferred) or traditional syntax. Both generate a unique folder /shares/*USER*/MyProject/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the project and job names.

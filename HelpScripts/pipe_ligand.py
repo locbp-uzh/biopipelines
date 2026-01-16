@@ -118,7 +118,7 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         # Read local PDB and rename residue only (preserve atom names)
         with open(source_pdb_path, 'r') as f:
             local_pdb = f.read()
-        pdb_content = rename_residue_only(local_pdb, residue_code)
+        pdb_content = rename_residue_chain_A(local_pdb, residue_code)
 
         filename = f"{custom_id}.pdb"
         output_path = os.path.join(output_folder, filename)
@@ -214,7 +214,7 @@ def convert_smiles_to_pdb_rdkit(smiles: str, residue_code: str) -> Optional[str]
             return None
 
         # Only rename the residue code, preserve RDKit's atom naming
-        pdb_content = rename_residue_only(pdb_block, residue_code)
+        pdb_content = rename_residue_chain_A(pdb_block, residue_code)
 
         return pdb_content
 
@@ -226,9 +226,10 @@ def convert_smiles_to_pdb_rdkit(smiles: str, residue_code: str) -> Optional[str]
         return None
 
 
-def rename_residue_only(pdb_content: str, residue_code: str) -> str:
+def rename_residue_chain_A(pdb_content: str, residue_code: str) -> str:
     """
     Rename only the residue code in PDB content, preserving atom names.
+    Also sets chain to chain A.
 
     This is critical for RFdiffusion3 compatibility - it internally uses RDKit
     to regenerate conformers and expects the original RDKit atom naming.
@@ -250,8 +251,8 @@ def rename_residue_only(pdb_content: str, residue_code: str) -> str:
         if line.startswith(('HETATM', 'ATOM')):
             # PDB format: columns 17-19 are residue name (0-indexed: 17:20)
             # Preserve everything else including atom names (columns 12-15)
-            if len(line) >= 20:
-                new_line = line[:17] + res_code + line[20:]
+            if len(line) >= 22:
+                new_line = line[:17] + res_code + line[20] + "A" + line[22:]
                 output_lines.append(new_line)
             else:
                 output_lines.append(line)
