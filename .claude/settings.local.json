@@ -44,7 +44,12 @@
       "Bash(xargs basename:*)",
       "Bash(done)",
       "Bash(before parsing selections: ['contig']\"\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "WebFetch(domain:rosettacommons.github.io)"
+      "WebFetch(domain:rosettacommons.github.io)",
+      "WebFetch(domain:www.ipd.uw.edu)",
+      "WebFetch(domain:www.ailurus.bio)",
+      "WebFetch(domain:newsletter.kiin.bio)",
+      "WebFetch(domain:pubchem.ncbi.nlm.nih.gov)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

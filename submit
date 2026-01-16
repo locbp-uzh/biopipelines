@@ -20,27 +20,77 @@ eval "$(mamba shell hook --shell bash)"
 
 set -e  # Exit on any error
 
-# Activate or create biopipelines conda environment
-if mamba env list | grep -qw "biopipelines"; then
-    echo "Activating biopipelines environment..."
-    mamba activate biopipelines
-else
-    echo "biopipelines environment not found. Creating it..."
+# Get the directory where submit script is located (biopipelines root)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ENV_FILE="$SCRIPT_DIR/Environments/biopipelines.yaml"
 
-    # Get the directory where submit script is located (biopipelines root)
-    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-    ENV_FILE="$SCRIPT_DIR/Environments/biopipelines.yaml"
-
-    if [ -f "$ENV_FILE" ]; then
-        echo "Using environment specification: $ENV_FILE"
-        mamba env create -f "$ENV_FILE"
-    else
-        echo "ERROR: biopipelines.yaml not found, creating minimal environment"
-        # mamba create -n biopipelines -y python pyyaml pandas requests numpy
+# Read required version from yaml header comment
+if [ -f "$ENV_FILE" ]; then
+    REQUIRED_VERSION=$(grep "^# Version:" "$ENV_FILE" | sed 's/# Version: //' | tr -d '[:space:]')
+    if [ -z "$REQUIRED_VERSION" ]; then
+        echo "ERROR: Could not parse version from $ENV_FILE"
+        exit 1
     fi
+else
+    echo "ERROR: biopipelines.yaml not found"
+    exit 1
+fi
 
-    echo "Activating newly created biopipelines environment..."
-    mamba activate biopipelines
+# Function to get installed version from conda env
+get_installed_version() {
+    local env_prefix=$(mamba run -n biopipelines printenv CONDA_PREFIX 2>/dev/null || echo "")
+    if [ -n "$env_prefix" ] && [ -f "$env_prefix/.biopipelines_version" ]; then
+        cat "$env_prefix/.biopipelines_version" | tr -d '[:space:]'
+    else
+        echo ""
+    fi
+}
+
+# Function to store version in conda env
+store_version() {
+    local env_prefix=$(mamba run -n biopipelines printenv CONDA_PREFIX 2>/dev/null || echo "")
+    if [ -n "$env_prefix" ]; then
+        echo "$REQUIRED_VERSION" > "$env_prefix/.biopipelines_version"
+        echo "Stored version $REQUIRED_VERSION in environment"
+    fi
+}
+
+# Check if biopipelines env exists and has correct version
+NEEDS_UPDATE=false
+if mamba env list | grep -qw "biopipelines"; then
+    INSTALLED_VERSION=$(get_installed_version)
+    if [ "$INSTALLED_VERSION" = "$REQUIRED_VERSION" ]; then
+        echo "biopipelines environment found (version $INSTALLED_VERSION)"
+        echo "Activating biopipelines environment..."
+        mamba activate biopipelines
+    else
+        echo "biopipelines environment version mismatch!"
+        echo "  Installed: ${INSTALLED_VERSION:-unknown}"
+        echo "  Required:  $REQUIRED_VERSION"
+        NEEDS_UPDATE=true
+    fi
+else
+    echo "biopipelines environment not found."
+    NEEDS_UPDATE=true
+fi
+
+# Create or update environment if needed
+if [ "$NEEDS_UPDATE" = true ]; then
+    if [ -f "$ENV_FILE" ]; then
+        if mamba env list | grep -qw "biopipelines"; then
+            echo "Updating biopipelines environment to version $REQUIRED_VERSION..."
+            mamba env update -n biopipelines -f "$ENV_FILE" --prune
+        else
+            echo "Creating biopipelines environment (version $REQUIRED_VERSION)..."
+            mamba env create -f "$ENV_FILE"
+        fi
+        echo "Activating biopipelines environment..."
+        mamba activate biopipelines
+        store_version
+    else
+        echo "ERROR: biopipelines.yaml not found at $ENV_FILE"
+        exit 1
+    fi
 fi
 echo ""
 

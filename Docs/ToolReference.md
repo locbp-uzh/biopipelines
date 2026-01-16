@@ -661,7 +661,9 @@ dna = DNAEncoder(
 
 Predicts protein structures from amino acid sequences using AlphaFold2. Generates high-confidence 3D models with optional relaxation.
 
-**Environment**: `ProteinEnv`
+**Resources**: GPU. H100 NVL is not compatible. 
+
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `sequences`: Union[str, List[str], ToolOutput, Dict[str, Any]] (required) - Input sequences or dict with sequences
@@ -2117,7 +2119,7 @@ pdb = PDB(
 
 Fetches small molecule ligands from RCSB PDB or PubChem. Downloads SDF files and converts to PDB format with proper atom numbering (sequential serial numbers, chain A, residue number 1). Supports lookup by CCD code (RCSB), compound name, CID, or CAS number (PubChem).
 
-**Environment**: `ProteinEnv` (requires OpenBabel for SDF to PDB conversion)
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `ids`: Union[str, List[str]] (required) - Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb)

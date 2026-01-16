@@ -1,3 +1,8 @@
+# BioPipelines base environment
+# Version: 1.1
+# Changes:
+#   1.1 - Added rdkit and openbabel for molecule handling
+#   1.0 - Initial version with pandas, numpy, pyyaml, requests, biopython
 name: biopipelines
 channels:
   - conda-forge
@@ -9,3 +14,5 @@ dependencies:
   - pyyaml
   - requests
   - biopython<=1.79
+  - rdkit
+  - openbabel
