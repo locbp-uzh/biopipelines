@@ -45,7 +45,7 @@ def detect_lookup_type(lookup: str) -> str:
 
 
 def find_local_ligand(lookup: str, local_folder: str,
-                      repo_ligands_folder: str) -> Tuple[Optional[str], Optional[str]]:
+                      repo_ligands_folder: str, output_format: str = "pdb") -> Tuple[Optional[str], Optional[str]]:
     """
     Find ligand file locally.
 
@@ -55,23 +55,25 @@ def find_local_ligand(lookup: str, local_folder: str,
         lookup: Lookup value (used as filename stem)
         local_folder: Custom local folder (can be None)
         repo_ligands_folder: Repository Ligands folder
+        output_format: "pdb" or "cif" - the format to look for
 
     Returns:
-        Tuple of (path to local PDB file, path to local CSV file) or (None, None) if not found
+        Tuple of (path to local structure file, path to local CSV file) or (None, None) if not found
     """
     search_locations = []
+    ext = output_format  # "pdb" or "cif"
 
     if local_folder:
         search_locations.append(local_folder)
     search_locations.append(repo_ligands_folder)
 
     for location in search_locations:
-        pdb_candidate = os.path.join(location, f"{lookup}.pdb")
+        file_candidate = os.path.join(location, f"{lookup}.{ext}")
         csv_candidate = os.path.join(location, f"{lookup}.csv")
-        if os.path.exists(pdb_candidate):
-            print(f"Found {lookup} locally: {pdb_candidate}")
+        if os.path.exists(file_candidate):
+            print(f"Found {lookup} locally: {file_candidate}")
             csv_path = csv_candidate if os.path.exists(csv_candidate) else None
-            return pdb_candidate, csv_path
+            return file_candidate, csv_path
 
     return None, None
 
@@ -98,33 +100,40 @@ def load_local_metadata(csv_path: str) -> Dict[str, Any]:
 
 
 def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
-                      source_pdb_path: str, source_csv_path: Optional[str],
-                      output_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+                      source_path: str, source_csv_path: Optional[str],
+                      output_folder: str, output_format: str = "pdb") -> Tuple[bool, str, Dict[str, Any]]:
     """
     Copy local ligand file to output folder with residue renaming.
 
     Args:
         lookup: Original lookup value
         custom_id: Custom ID for output filename
-        residue_code: 3-letter residue code to use in PDB
-        source_pdb_path: Path to local ligand PDB file
+        residue_code: Residue code to use
+        source_path: Path to local ligand file (PDB or CIF)
         source_csv_path: Path to local ligand CSV metadata file (can be None)
         output_folder: Directory to save the ligand
+        output_format: "pdb" or "cif"
 
     Returns:
         Tuple of (success: bool, file_path: str, metadata: dict)
     """
     try:
-        # Read local PDB and rename residue only (preserve atom names)
-        with open(source_pdb_path, 'r') as f:
-            local_pdb = f.read()
-        pdb_content = rename_residue_chain_A(local_pdb, residue_code)
+        ext = output_format
 
-        filename = f"{custom_id}.pdb"
+        # Read local file
+        with open(source_path, 'r') as f:
+            content = f.read()
+
+        # For PDB, rename residue (preserve atom names)
+        if output_format == "pdb":
+            content = rename_residue_chain_A(content, residue_code)
+        # For CIF, the residue code is already embedded in the file structure
+
+        filename = f"{custom_id}.{ext}"
         output_path = os.path.join(output_folder, filename)
 
         with open(output_path, 'w') as f:
-            f.write(pdb_content)
+            f.write(content)
 
         file_size = os.path.getsize(output_path)
 
@@ -137,10 +146,10 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         metadata.update({
             "file_size": file_size,
             "source": metadata.get('source', 'local'),
-            "source_path": source_pdb_path,
+            "source_path": source_path,
         })
 
-        print(f"Successfully copied {lookup} as {custom_id}: {file_size} bytes (from local)")
+        print(f"Successfully copied {lookup} as {custom_id}.{ext}: {file_size} bytes (from local)")
         return True, output_path, metadata
 
     except Exception as e:
@@ -149,7 +158,7 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         metadata = {
             "error_message": error_msg,
             "source": "local_copy_failed",
-            "attempted_path": source_pdb_path
+            "attempted_path": source_path
         }
         return False, "", metadata
 
@@ -223,6 +232,144 @@ def convert_smiles_to_pdb_rdkit(smiles: str, residue_code: str) -> Optional[str]
         return None
     except Exception as e:
         print(f"  Error converting SMILES to PDB with RDKit: {str(e)}")
+        return None
+
+
+def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]:
+    """
+    Convert SMILES to mmCIF format using RDKit with explicit bond orders.
+
+    This format is preferred for tools like RFdiffusion3 as it includes
+    explicit bond order information, avoiding the "BondType.ANY" warnings.
+
+    Args:
+        smiles: SMILES string of the molecule
+        residue_code: Residue code to use (e.g., "LIG", "L_G")
+
+    Returns:
+        mmCIF content as string, or None if conversion fails
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        # Parse SMILES
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            print(f"  Error: Could not parse SMILES: {smiles[:50]}...")
+            return None
+
+        # Add hydrogens for proper 3D geometry
+        mol = Chem.AddHs(mol)
+
+        # Generate 3D coordinates using ETKDG (recommended method)
+        params = AllChem.ETKDGv3()
+        params.randomSeed = 42  # For reproducibility
+        result = AllChem.EmbedMolecule(mol, params)
+
+        if result == -1:
+            # ETKDG failed, try with random coordinates
+            print(f"  Warning: ETKDG embedding failed, trying random coordinates...")
+            params.useRandomCoords = True
+            result = AllChem.EmbedMolecule(mol, params)
+
+            if result == -1:
+                print(f"  Error: Could not generate 3D coordinates")
+                return None
+
+        # Optimize geometry with MMFF force field
+        try:
+            AllChem.MMFFOptimizeMolecule(mol, maxIters=200)
+        except Exception as e:
+            print(f"  Warning: MMFF optimization failed: {e}, using unoptimized coordinates")
+
+        # Remove hydrogens for cleaner output
+        mol = Chem.RemoveHs(mol)
+
+        # Build mmCIF content manually with bond orders
+        cif_lines = []
+        cif_lines.append("data_" + residue_code)
+        cif_lines.append("#")
+
+        # _chem_comp section
+        cif_lines.append("_chem_comp.id                          " + residue_code)
+        cif_lines.append("_chem_comp.name                        'Small molecule ligand'")
+        cif_lines.append("_chem_comp.type                        NON-POLYMER")
+        cif_lines.append("#")
+
+        # Get conformer for coordinates
+        conf = mol.GetConformer()
+
+        # _chem_comp_atom section
+        cif_lines.append("loop_")
+        cif_lines.append("_chem_comp_atom.comp_id")
+        cif_lines.append("_chem_comp_atom.atom_id")
+        cif_lines.append("_chem_comp_atom.type_symbol")
+        cif_lines.append("_chem_comp_atom.charge")
+        cif_lines.append("_chem_comp_atom.model_Cartn_x")
+        cif_lines.append("_chem_comp_atom.model_Cartn_y")
+        cif_lines.append("_chem_comp_atom.model_Cartn_z")
+
+        # Track atom names for bond section
+        atom_names = []
+        element_counts = {}
+
+        for atom in mol.GetAtoms():
+            idx = atom.GetIdx()
+            element = atom.GetSymbol()
+            charge = atom.GetFormalCharge()
+            pos = conf.GetAtomPosition(idx)
+
+            # Generate atom name (element + count)
+            element_counts[element] = element_counts.get(element, 0) + 1
+            atom_name = f"{element}{element_counts[element]}"
+            atom_names.append(atom_name)
+
+            cif_lines.append(f"{residue_code} {atom_name} {element} {charge} {pos.x:.3f} {pos.y:.3f} {pos.z:.3f}")
+
+        cif_lines.append("#")
+
+        # _chem_comp_bond section with bond orders
+        cif_lines.append("loop_")
+        cif_lines.append("_chem_comp_bond.comp_id")
+        cif_lines.append("_chem_comp_bond.atom_id_1")
+        cif_lines.append("_chem_comp_bond.atom_id_2")
+        cif_lines.append("_chem_comp_bond.value_order")
+        cif_lines.append("_chem_comp_bond.pdbx_aromatic_flag")
+
+        for bond in mol.GetBonds():
+            begin_idx = bond.GetBeginAtomIdx()
+            end_idx = bond.GetEndAtomIdx()
+            atom1 = atom_names[begin_idx]
+            atom2 = atom_names[end_idx]
+
+            # Get bond order
+            bond_type = bond.GetBondType()
+            if bond_type == Chem.BondType.SINGLE:
+                order = "SING"
+            elif bond_type == Chem.BondType.DOUBLE:
+                order = "DOUB"
+            elif bond_type == Chem.BondType.TRIPLE:
+                order = "TRIP"
+            elif bond_type == Chem.BondType.AROMATIC:
+                order = "AROM"
+            else:
+                order = "SING"  # Default to single
+
+            aromatic = "Y" if bond.GetIsAromatic() else "N"
+            cif_lines.append(f"{residue_code} {atom1} {atom2} {order} {aromatic}")
+
+        cif_lines.append("#")
+
+        return "\n".join(cif_lines)
+
+    except ImportError:
+        print("  Error: RDKit not available. Install with: pip install rdkit")
+        return None
+    except Exception as e:
+        print(f"  Error converting SMILES to CIF with RDKit: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -730,19 +877,21 @@ def fetch_sdf_from_pubchem(cid: str) -> str:
 
 
 def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
-                       output_folder: str, repo_ligands_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+                       output_folder: str, repo_ligands_folder: str,
+                       output_format: str = "pdb") -> Tuple[bool, str, Dict[str, Any]]:
     """
     Download a single ligand from RCSB PDB.
 
-    Uses RDKit to generate PDB from SMILES (primary method) for compatibility
-    with tools like RFdiffusion3. Falls back to OpenBabel SDF conversion if needed.
+    Uses RDKit to generate PDB or CIF from SMILES. CIF format includes explicit
+    bond orders which is recommended for tools like RFdiffusion3.
 
     Args:
         ligand_code: 3-letter ligand code (e.g., 'ATP')
         custom_id: Custom ID for renaming the ligand
-        residue_code: 3-letter code to use in PDB file
+        residue_code: Code to use in output file
         output_folder: Directory to save the ligand
         repo_ligands_folder: Repository Ligands folder for caching
+        output_format: "pdb" or "cif" (default: "pdb")
 
     Returns:
         Tuple of (success: bool, file_path: str, metadata: dict)
@@ -769,16 +918,21 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
         props = fetch_properties_from_rcsb(ligand_code)
         smiles = props.get('smiles', '')
 
-        pdb_content = None
+        content = None
+        ext = output_format  # "pdb" or "cif"
 
-        # Primary method: RDKit from SMILES (required for RFdiffusion3 compatibility)
+        # Convert SMILES to requested format using RDKit
         if smiles:
             print(f"  SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"  SMILES: {smiles}")
-            print(f"  Converting SMILES to PDB using RDKit (for RFD3 compatibility)...")
-            pdb_content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
+            if output_format == "cif":
+                print(f"  Converting SMILES to CIF using RDKit (with bond orders)...")
+                content = convert_smiles_to_cif_rdkit(smiles, residue_code)
+            else:
+                print(f"  Converting SMILES to PDB using RDKit...")
+                content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
 
-        # Fallback: OpenBabel SDF conversion (may not work with RFdiffusion3)
-        if pdb_content is None:
+        # Fallback for PDB: OpenBabel SDF conversion (only if RDKit failed)
+        if content is None and output_format == "pdb":
             print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
             sdf_url = f"https://files.rcsb.org/ligands/download/{ligand_code}_ideal.sdf"
             headers = {
@@ -791,17 +945,17 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
             if not sdf_content.strip():
                 raise ValueError(f"Downloaded SDF file is empty")
 
-            pdb_content = convert_sdf_to_pdb(sdf_content, residue_code)
+            content = convert_sdf_to_pdb(sdf_content, residue_code)
 
-        if pdb_content is None:
-            raise ValueError(f"Failed to convert ligand to PDB format")
+        if content is None:
+            raise ValueError(f"Failed to convert ligand to {output_format.upper()} format")
 
         # Save to Ligands/ folder for caching (using ligand_code as filename)
         os.makedirs(repo_ligands_folder, exist_ok=True)
-        cache_pdb_path = os.path.join(repo_ligands_folder, f"{ligand_code}.pdb")
-        with open(cache_pdb_path, 'w') as f:
-            f.write(pdb_content)
-        print(f"  Cached to Ligands/ folder: {cache_pdb_path}")
+        cache_path = os.path.join(repo_ligands_folder, f"{ligand_code}.{ext}")
+        with open(cache_path, 'w') as f:
+            f.write(content)
+        print(f"  Cached to Ligands/ folder: {cache_path}")
 
         # Save companion CSV with metadata
         cache_csv_path = os.path.join(repo_ligands_folder, f"{ligand_code}.csv")
@@ -821,10 +975,10 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
         print(f"  Cached metadata: {cache_csv_path}")
 
         # Save to output folder (using custom_id)
-        output_filename = f"{custom_id}.pdb"
+        output_filename = f"{custom_id}.{ext}"
         output_path = os.path.join(output_folder, output_filename)
         with open(output_path, 'w') as f:
-            f.write(pdb_content)
+            f.write(content)
 
         file_size = os.path.getsize(output_path)
 
@@ -839,7 +993,7 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
             "formula": props.get('formula', ''),
         }
 
-        print(f"Successfully downloaded {ligand_code} as {custom_id}: {file_size} bytes")
+        print(f"Successfully downloaded {ligand_code} as {custom_id}.{ext}: {file_size} bytes")
         return True, output_path, metadata
 
     except Exception as e:
@@ -856,20 +1010,22 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
 
 
 def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue_code: str,
-                          output_folder: str, repo_ligands_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
+                          output_folder: str, repo_ligands_folder: str,
+                          output_format: str = "pdb") -> Tuple[bool, str, Dict[str, Any]]:
     """
     Download a ligand from PubChem.
 
-    Uses RDKit to generate PDB from SMILES (primary method) for compatibility
-    with tools like RFdiffusion3. Falls back to OpenBabel SDF conversion if needed.
+    Uses RDKit to generate PDB or CIF from SMILES. CIF format includes explicit
+    bond orders which is recommended for tools like RFdiffusion3.
 
     Args:
         lookup: The lookup value (name, CID, or CAS)
         lookup_type: "cid", "cas", or "name"
         custom_id: Custom ID for renaming the ligand
-        residue_code: 3-letter code to use in PDB file
+        residue_code: Code to use in output file
         output_folder: Directory to save the ligand
         repo_ligands_folder: Repository Ligands folder for caching
+        output_format: "pdb" or "cif" (default: "pdb")
 
     Returns:
         Tuple of (success: bool, file_path: str, metadata: dict)
@@ -882,28 +1038,33 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
         smiles = pubchem_data.get('smiles', '')
         cid = pubchem_data.get('cid', '')
 
-        pdb_content = None
+        content = None
+        ext = output_format  # "pdb" or "cif"
 
-        # Primary method: RDKit from SMILES (required for RFdiffusion3 compatibility)
+        # Convert SMILES to requested format using RDKit
         if smiles:
-            print(f"  Converting SMILES to PDB using RDKit...")
-            pdb_content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
+            if output_format == "cif":
+                print(f"  Converting SMILES to CIF using RDKit (with bond orders)...")
+                content = convert_smiles_to_cif_rdkit(smiles, residue_code)
+            else:
+                print(f"  Converting SMILES to PDB using RDKit...")
+                content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
 
-        # Fallback: Download SDF and use OpenBabel (only if RDKit failed)
-        if pdb_content is None:
+        # Fallback for PDB: Download SDF and use OpenBabel (only if RDKit failed)
+        if content is None and output_format == "pdb":
             print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
             sdf_content = fetch_sdf_from_pubchem(cid)
-            pdb_content = convert_sdf_to_pdb(sdf_content, residue_code)
+            content = convert_sdf_to_pdb(sdf_content, residue_code)
 
-        if pdb_content is None:
-            raise ValueError(f"Failed to convert ligand to PDB format")
+        if content is None:
+            raise ValueError(f"Failed to convert ligand to {output_format.upper()} format")
 
-        # Save to Ligands/ folder for caching
+        # Save to Ligands/ folder for caching (always cache both formats if possible)
         os.makedirs(repo_ligands_folder, exist_ok=True)
-        cache_pdb_path = os.path.join(repo_ligands_folder, f"{lookup}.pdb")
-        with open(cache_pdb_path, 'w') as f:
-            f.write(pdb_content)
-        print(f"  Cached to Ligands/ folder: {cache_pdb_path}")
+        cache_path = os.path.join(repo_ligands_folder, f"{lookup}.{ext}")
+        with open(cache_path, 'w') as f:
+            f.write(content)
+        print(f"  Cached to Ligands/ folder: {cache_path}")
 
         # Save companion CSV with metadata
         cache_csv_path = os.path.join(repo_ligands_folder, f"{lookup}.csv")
@@ -923,10 +1084,10 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
         print(f"  Cached metadata: {cache_csv_path}")
 
         # Save to output folder (using custom_id)
-        output_filename = f"{custom_id}.pdb"
+        output_filename = f"{custom_id}.{ext}"
         output_path = os.path.join(output_folder, output_filename)
         with open(output_path, 'w') as f:
-            f.write(pdb_content)
+            f.write(content)
 
         file_size = os.path.getsize(output_path)
 
@@ -941,7 +1102,7 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
             "formula": pubchem_data.get('formula', ''),
         }
 
-        print(f"Successfully downloaded {lookup} as {custom_id}: {file_size} bytes")
+        print(f"Successfully downloaded {lookup} as {custom_id}.{ext}: {file_size} bytes")
         return True, output_path, metadata
 
     except Exception as e:
@@ -974,12 +1135,14 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     lookup_values = config_data['lookup_values']
     source = config_data.get('source')  # "rcsb", "pubchem", or None (auto-detect)
     local_folder = config_data.get('local_folder')
+    output_format = config_data.get('output_format', 'pdb')  # "pdb" or "cif"
     repo_ligands_folder = config_data['repo_ligands_folder']
     output_folder = config_data['output_folder']
     compounds_table = config_data['compounds_table']
     failed_table = config_data['failed_table']
 
     print(f"Fetching {len(lookup_values)} ligands")
+    print(f"Output format: {output_format.upper()}")
     if source:
         print(f"Forced source: {source}")
     else:
@@ -1009,13 +1172,13 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
             effective_source = "rcsb" if lookup_type == "ccd" else "pubchem"
         print(f"  Source: {effective_source}")
 
-        # Try to find locally first
-        local_pdb_path, local_csv_path = find_local_ligand(lookup, local_folder, repo_ligands_folder)
+        # Try to find locally first (check for requested format)
+        local_file_path, local_csv_path = find_local_ligand(lookup, local_folder, repo_ligands_folder, output_format)
 
-        if local_pdb_path:
+        if local_file_path:
             # Copy from local
             success, file_path, metadata = copy_local_ligand(
-                lookup, custom_id, residue_code, local_pdb_path, local_csv_path, output_folder
+                lookup, custom_id, residue_code, local_file_path, local_csv_path, output_folder, output_format
             )
         else:
             # Download from appropriate source
@@ -1023,11 +1186,11 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
 
             if effective_source == "rcsb":
                 success, file_path, metadata = download_from_rcsb(
-                    lookup, custom_id, residue_code, output_folder, repo_ligands_folder
+                    lookup, custom_id, residue_code, output_folder, repo_ligands_folder, output_format
                 )
             else:
                 success, file_path, metadata = download_from_pubchem(
-                    lookup, lookup_type, custom_id, residue_code, output_folder, repo_ligands_folder
+                    lookup, lookup_type, custom_id, residue_code, output_folder, repo_ligands_folder, output_format
                 )
 
         if success:

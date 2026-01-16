@@ -39,6 +39,7 @@ class Ligand(BaseConfig):
                  lookup: Optional[Union[str, List[str]]] = None,
                  source: Optional[str] = None,
                  local_folder: Optional[str] = None,
+                 output_format: str = "pdb",
                  **kwargs):
         """
         Initialize Ligand tool.
@@ -59,6 +60,8 @@ class Ligand(BaseConfig):
                     - XX-XX-X format -> PubChem (CAS)
                     - Otherwise -> PubChem (name)
             local_folder: Custom local folder to check first (before Ligands/). Default: None
+            output_format: Output format - "pdb" or "cif". CIF includes explicit bond orders
+                          which is recommended for tools like RFdiffusion3. Default: "pdb"
             **kwargs: Additional parameters
 
         Fetch Priority:
@@ -132,6 +135,11 @@ class Ligand(BaseConfig):
         self.source = source
 
         self.local_folder = local_folder
+
+        # Validate and store output format
+        if output_format not in ["pdb", "cif"]:
+            raise ValueError(f"Invalid output_format: {output_format}. Must be 'pdb' or 'cif'")
+        self.output_format = output_format
 
         # Warn about non-standard residue codes (standard PDB is 1-3 alphanumeric)
         for code in self.residue_codes:
@@ -231,6 +239,7 @@ class Ligand(BaseConfig):
             f"LOOKUP: {', '.join(self.lookup_values)}",
             f"CODES: {', '.join(self.residue_codes)}",
             f"SOURCE: {self.source if self.source else 'auto-detect'}",
+            f"FORMAT: {self.output_format.upper()}",
             f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses Ligands/)'}"
         ])
 
@@ -271,6 +280,7 @@ class Ligand(BaseConfig):
             "lookup_values": self.lookup_values,
             "source": self.source,
             "local_folder": self.local_folder,
+            "output_format": self.output_format,
             "repo_ligands_folder": repo_ligands_folder,
             "output_folder": output_folder,
             "compounds_table": compounds_table,
@@ -324,9 +334,10 @@ fi
             Dictionary with output file paths and table information
         """
         # Generate structure file paths using custom IDs
+        ext = self.output_format  # "pdb" or "cif"
         structure_files = []
         for custom_id in self.custom_ids:
-            structure_files.append(os.path.join(self.output_folder, f"{custom_id}.pdb"))
+            structure_files.append(os.path.join(self.output_folder, f"{custom_id}.{ext}"))
 
         # Structure IDs are the custom IDs
         structure_ids = self.custom_ids.copy()
@@ -371,7 +382,8 @@ fi
                 "residue_codes": self.residue_codes,
                 "lookup_values": self.lookup_values,
                 "source": self.source,
-                "local_folder": self.local_folder
+                "local_folder": self.local_folder,
+                "output_format": self.output_format
             }
         })
         return base_dict
