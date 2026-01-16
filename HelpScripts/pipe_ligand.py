@@ -101,7 +101,7 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
                       source_pdb_path: str, source_csv_path: Optional[str],
                       output_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
     """
-    Copy local ligand file to output folder with normalization.
+    Copy local ligand file to output folder with residue renaming.
 
     Args:
         lookup: Original lookup value
@@ -115,17 +115,16 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         Tuple of (success: bool, file_path: str, metadata: dict)
     """
     try:
+        # Read local PDB and rename residue only (preserve atom names)
         with open(source_pdb_path, 'r') as f:
-            pdb_content = f.read()
-
-        # Normalize the PDB content
-        normalized_pdb = normalize_pdb_content(pdb_content, residue_code)
+            local_pdb = f.read()
+        pdb_content = rename_residue_only(local_pdb, residue_code)
 
         filename = f"{custom_id}.pdb"
         output_path = os.path.join(output_folder, filename)
 
         with open(output_path, 'w') as f:
-            f.write(normalized_pdb)
+            f.write(pdb_content)
 
         file_size = os.path.getsize(output_path)
 
@@ -141,20 +140,6 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
             "source_path": source_pdb_path,
         })
 
-        # Try to fetch SMILES if not in metadata
-        if not metadata.get('smiles'):
-            lookup_type = detect_lookup_type(lookup)
-            if lookup_type == "ccd":
-                smiles = fetch_smiles_from_rcsb(lookup.upper())
-                if smiles:
-                    metadata['smiles'] = smiles
-                    metadata['ccd'] = lookup.upper()
-            else:
-                # Try PubChem for name/CID/CAS lookups
-                smiles = fetch_smiles_from_pubchem(lookup, lookup_type)
-                if smiles:
-                    metadata['smiles'] = smiles
-
         print(f"Successfully copied {lookup} as {custom_id}: {file_size} bytes (from local)")
         return True, output_path, metadata
 
@@ -167,6 +152,118 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
             "attempted_path": source_pdb_path
         }
         return False, "", metadata
+
+
+def convert_smiles_to_pdb_rdkit(smiles: str, residue_code: str) -> Optional[str]:
+    """
+    Convert SMILES to PDB format using RDKit.
+
+    IMPORTANT: This preserves RDKit's atom naming convention, which is required
+    for compatibility with tools like RFdiffusion3 that internally use RDKit
+    to regenerate conformers and expect matching atom names.
+
+    Args:
+        smiles: SMILES string of the molecule
+        residue_code: 3-letter residue code to use in PDB (e.g., "AMX")
+
+    Returns:
+        PDB content as string, or None if conversion fails
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        # Parse SMILES
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            print(f"  Error: Could not parse SMILES: {smiles[:50]}...")
+            return None
+
+        # Add hydrogens for proper 3D geometry
+        mol = Chem.AddHs(mol)
+
+        # Generate 3D coordinates using ETKDG (recommended method)
+        params = AllChem.ETKDGv3()
+        params.randomSeed = 42  # For reproducibility
+        result = AllChem.EmbedMolecule(mol, params)
+
+        if result == -1:
+            # ETKDG failed, try with random coordinates
+            print(f"  Warning: ETKDG embedding failed, trying random coordinates...")
+            params.useRandomCoords = True
+            result = AllChem.EmbedMolecule(mol, params)
+
+            if result == -1:
+                print(f"  Error: Could not generate 3D coordinates")
+                return None
+
+        # Optimize geometry with MMFF force field
+        try:
+            AllChem.MMFFOptimizeMolecule(mol, maxIters=200)
+        except Exception as e:
+            print(f"  Warning: MMFF optimization failed: {e}, using unoptimized coordinates")
+
+        # Remove hydrogens for cleaner output (RFD3 will add them back)
+        mol = Chem.RemoveHs(mol)
+
+        # Generate PDB block - RDKit uses its own atom naming
+        pdb_block = Chem.MolToPDBBlock(mol)
+
+        if not pdb_block:
+            print(f"  Error: Could not generate PDB block")
+            return None
+
+        # Only rename the residue code, preserve RDKit's atom naming
+        pdb_content = rename_residue_only(pdb_block, residue_code)
+
+        return pdb_content
+
+    except ImportError:
+        print("  Error: RDKit not available. Install with: pip install rdkit")
+        return None
+    except Exception as e:
+        print(f"  Error converting SMILES to PDB with RDKit: {str(e)}")
+        return None
+
+
+def rename_residue_only(pdb_content: str, residue_code: str) -> str:
+    """
+    Rename only the residue code in PDB content, preserving atom names.
+
+    This is critical for RFdiffusion3 compatibility - it internally uses RDKit
+    to regenerate conformers and expects the original RDKit atom naming.
+
+    Args:
+        pdb_content: PDB content (e.g., from RDKit)
+        residue_code: 3-letter residue code to use (e.g., "AMX")
+
+    Returns:
+        PDB content with residue renamed but atom names preserved
+    """
+    lines = pdb_content.split('\n')
+    output_lines = []
+
+    # Ensure residue code is uppercase and exactly 3 chars
+    res_code = residue_code.upper()[:3].ljust(3)
+
+    for line in lines:
+        if line.startswith(('HETATM', 'ATOM')):
+            # PDB format: columns 17-19 are residue name (0-indexed: 17:20)
+            # Preserve everything else including atom names (columns 12-15)
+            if len(line) >= 20:
+                new_line = line[:17] + res_code + line[20:]
+                output_lines.append(new_line)
+            else:
+                output_lines.append(line)
+        elif line.startswith('CONECT') or line.startswith('END'):
+            output_lines.append(line)
+        # Skip other lines (HEADER, COMPND, etc. from RDKit)
+
+    # Ensure END record
+    if output_lines and not output_lines[-1].startswith('END'):
+        output_lines.append('END')
+
+    return '\n'.join(output_lines)
 
 
 def _extract_element_from_line(line: str) -> str:
@@ -224,75 +321,113 @@ def normalize_pdb_content(pdb_content: str, residue_code: str) -> str:
         - Residue number = 1
         - Residue name = residue_code (3-letter, uppercase)
         - Element symbol in columns 76-77
+        - Renumbered CONECT records
     """
     lines = pdb_content.split('\n')
-    output_lines = []
-    atom_serial = 0
-
-    # Track element counts for generating unique atom names
-    element_counts = {}
+    atom_lines = []
+    conect_lines = []
+    other_lines = []
+    end_line = None
 
     # Ensure residue code is uppercase and max 3 chars
     res_code = residue_code.upper()[:3].ljust(3)
 
+    # First pass: categorize lines and build serial number mapping
+    old_to_new_serial = {}
+    new_serial = 0
+
     for line in lines:
         if line.startswith(('HETATM', 'ATOM')):
-            atom_serial += 1
-
-            # Extract element symbol
-            element = _extract_element_from_line(line)
-
-            # Generate numbered atom name
-            element_counts[element] = element_counts.get(element, 0) + 1
-            atom_num = element_counts[element]
-
-            # Format atom name (4 chars, columns 12-15)
-            # PDB convention: 1-char elements right-justify in col 13-14
-            # For ligands with numbers: typically "C1", "C12", etc.
-            atom_name_str = f"{element}{atom_num}"
-            if len(element) == 1:
-                # 1-char element: " C1 " or " C12"
-                atom_name = f" {atom_name_str:<3}"
-            else:
-                # 2-char element: "CL1 " or "CL12"
-                atom_name = f"{atom_name_str:<4}"
-
-            record = 'HETATM'
-            serial_str = f"{atom_serial:5d}"
-            alt_loc = ' '
-            chain = 'A'
-            res_seq = '   1'
-            icode = ' '
-
-            # Get coordinates and other data (columns 27-66)
-            if len(line) >= 54:
-                coords = line[27:66]
-            elif len(line) >= 27:
-                coords = line[27:].ljust(39)
-            else:
-                coords = ' ' * 39
-
-            # Pad coords to proper length if needed
-            coords = coords.ljust(39)
-
-            # Format element for columns 76-77 (right-justified)
-            element_col = f"{element:>2}"
-
-            # Build the new line (80 chars total for proper PDB format)
-            # Columns: 0-5(record), 6-10(serial), 11(space), 12-15(atom), 16(altloc),
-            #          17-19(resname), 20(space), 21(chain), 22-25(resseq), 26(icode),
-            #          27-65(coords+occupancy+temp), 66-75(spaces), 76-77(element)
-            new_line = f"{record}{serial_str} {atom_name}{alt_loc}{res_code} {chain}{res_seq}{icode}{coords}          {element_col}"
-            output_lines.append(new_line)
-
+            new_serial += 1
+            # Extract old serial number (columns 6-10)
+            try:
+                old_serial = int(line[6:11].strip())
+                old_to_new_serial[old_serial] = new_serial
+            except (ValueError, IndexError):
+                pass
+            atom_lines.append(line)
         elif line.startswith('CONECT'):
-            # Skip CONECT records - they reference old serial numbers
-            continue
+            conect_lines.append(line)
         elif line.startswith('END'):
-            output_lines.append(line)
+            end_line = line
         else:
-            # Keep other records (HEADER, REMARK, etc.)
-            output_lines.append(line)
+            other_lines.append(line)
+
+    # Second pass: process atoms with new serial numbers and atom names
+    output_lines = []
+    element_counts = {}
+    atom_serial = 0
+
+    for line in atom_lines:
+        atom_serial += 1
+
+        # Extract element symbol
+        element = _extract_element_from_line(line)
+
+        # Generate numbered atom name
+        element_counts[element] = element_counts.get(element, 0) + 1
+        atom_num = element_counts[element]
+
+        # Format atom name (4 chars, columns 12-15)
+        atom_name_str = f"{element}{atom_num}"
+        if len(element) == 1:
+            atom_name = f" {atom_name_str:<3}"
+        else:
+            atom_name = f"{atom_name_str:<4}"
+
+        record = 'HETATM'
+        serial_str = f"{atom_serial:5d}"
+        alt_loc = ' '
+        chain = 'A'
+        res_seq = '   1'
+        icode = ' '
+
+        # Get coordinates and other data (columns 27-66)
+        if len(line) >= 54:
+            coords = line[27:66]
+        elif len(line) >= 27:
+            coords = line[27:].ljust(39)
+        else:
+            coords = ' ' * 39
+
+        coords = coords.ljust(39)
+        element_col = f"{element:>2}"
+
+        new_line = f"{record}{serial_str} {atom_name}{alt_loc}{res_code} {chain}{res_seq}{icode}{coords}          {element_col}"
+        output_lines.append(new_line)
+
+    # Third pass: renumber CONECT records
+    for line in conect_lines:
+        # CONECT records have atom serial numbers in columns 6-10, 11-15, 16-20, 21-25, 26-30
+        # Each field is 5 characters wide
+        try:
+            new_conect = "CONECT"
+            # Parse all serial numbers from the CONECT line
+            i = 6
+            while i + 5 <= len(line):
+                field = line[i:i+5].strip()
+                if field:
+                    try:
+                        old_num = int(field)
+                        new_num = old_to_new_serial.get(old_num, old_num)
+                        new_conect += f"{new_num:5d}"
+                    except ValueError:
+                        break
+                else:
+                    break
+                i += 5
+
+            if len(new_conect) > 6:  # Has at least one connection
+                output_lines.append(new_conect)
+        except Exception:
+            # If parsing fails, skip this CONECT record
+            continue
+
+    # Add END record
+    if end_line:
+        output_lines.append(end_line)
+    else:
+        output_lines.append("END")
 
     return '\n'.join(output_lines)
 
@@ -322,22 +457,17 @@ def fetch_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
 
         data = response.json()
 
-        # Extract SMILES from the response
-        if 'chem_comp' in data:
-            chem_comp = data['chem_comp']
-            # Try different possible fields for SMILES
-            for field in ['pdbx_smiles_canonical', 'smiles', 'smiles_canonical']:
-                if field in chem_comp and chem_comp[field]:
-                    return chem_comp[field]
-
-        # Alternative location in descriptors
-        if 'rcsb_chem_comp_descriptor' in data:
-            descriptors = data['rcsb_chem_comp_descriptor']
-            if isinstance(descriptors, dict):
-                if 'smiles_canonical' in descriptors:
-                    return descriptors['smiles_canonical']
-                elif 'smiles' in descriptors:
-                    return descriptors['smiles']
+        # SMILES is in pdbx_chem_comp_descriptor array
+        # Each entry has: comp_id, descriptor, program, program_version, type
+        # Types include: SMILES, SMILES_CANONICAL, InChI, InChIKey
+        if 'pdbx_chem_comp_descriptor' in data:
+            descriptors = data['pdbx_chem_comp_descriptor']
+            if isinstance(descriptors, list):
+                # Prefer SMILES_CANONICAL, fall back to SMILES
+                for preferred_type in ['SMILES_CANONICAL', 'SMILES']:
+                    for desc in descriptors:
+                        if desc.get('type') == preferred_type and desc.get('descriptor'):
+                            return desc['descriptor']
 
         return None
 
@@ -377,12 +507,15 @@ def fetch_smiles_from_pubchem(lookup: str, lookup_type: str) -> Optional[str]:
                 return None
             cid = data['IdentifierList']['CID'][0]
 
-        # Get SMILES
+        # Get SMILES - PubChem may return different field names
         props_url = f"{base_url}/compound/cid/{cid}/property/CanonicalSMILES/JSON"
         response = requests.get(props_url, headers=headers, timeout=30)
         response.raise_for_status()
         props = response.json()['PropertyTable']['Properties'][0]
-        return props.get('CanonicalSMILES', None)
+        # PubChem returns ConnectivitySMILES when requesting CanonicalSMILES
+        return (props.get('CanonicalSMILES') or
+                props.get('ConnectivitySMILES') or
+                props.get('SMILES'))
 
     except Exception as e:
         print(f"  Warning: Could not fetch SMILES for {lookup} from PubChem: {str(e)}")
@@ -418,17 +551,17 @@ def fetch_properties_from_rcsb(ligand_code: str) -> Dict[str, Any]:
             result['name'] = chem_comp.get('name', '')
             result['formula'] = chem_comp.get('formula', '')
 
-            # Get SMILES
-            for field in ['pdbx_smiles_canonical', 'smiles', 'smiles_canonical']:
-                if field in chem_comp and chem_comp[field]:
-                    result['smiles'] = chem_comp[field]
-                    break
-
-        # Alternative location for SMILES
-        if 'smiles' not in result and 'rcsb_chem_comp_descriptor' in data:
-            descriptors = data['rcsb_chem_comp_descriptor']
-            if isinstance(descriptors, dict):
-                result['smiles'] = descriptors.get('smiles_canonical') or descriptors.get('smiles', '')
+        # SMILES is in pdbx_chem_comp_descriptor array
+        if 'pdbx_chem_comp_descriptor' in data:
+            descriptors = data['pdbx_chem_comp_descriptor']
+            if isinstance(descriptors, list):
+                for preferred_type in ['SMILES_CANONICAL', 'SMILES']:
+                    for desc in descriptors:
+                        if desc.get('type') == preferred_type and desc.get('descriptor'):
+                            result['smiles'] = desc['descriptor']
+                            break
+                    if 'smiles' in result:
+                        break
 
         return result
 
@@ -533,12 +666,17 @@ def fetch_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
         print(f"  Resolved to PubChem CID: {cid}")
 
     # Step 2: Get properties (SMILES, name, formula)
-    props_url = f"{base_url}/compound/cid/{cid}/property/CanonicalSMILES,IUPACName,MolecularFormula/JSON"
+    # Request multiple SMILES types since PubChem may return different ones
+    props_url = f"{base_url}/compound/cid/{cid}/property/CanonicalSMILES,IsomericSMILES,IUPACName,MolecularFormula/JSON"
     response = requests.get(props_url, headers=headers, timeout=30)
     response.raise_for_status()
     props = response.json()['PropertyTable']['Properties'][0]
 
-    smiles = props.get('CanonicalSMILES', '')
+    # PubChem returns different SMILES field names depending on query
+    smiles = (props.get('CanonicalSMILES') or
+              props.get('ConnectivitySMILES') or
+              props.get('SMILES') or
+              props.get('IsomericSMILES') or '')
     name = props.get('IUPACName', '')
     formula = props.get('MolecularFormula', '')
 
@@ -577,7 +715,8 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
     """
     Download a single ligand from RCSB PDB.
 
-    Downloads the ideal SDF file and converts it to PDB format.
+    Uses RDKit to generate PDB from SMILES (primary method) for compatibility
+    with tools like RFdiffusion3. Falls back to OpenBabel SDF conversion if needed.
 
     Args:
         ligand_code: 3-letter ligand code (e.g., 'ATP')
@@ -602,35 +741,41 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
         }
         return False, "", metadata
 
-    # RCSB ideal SDF download URL
-    sdf_url = f"https://files.rcsb.org/ligands/download/{ligand_code}_ideal.sdf"
-
     try:
-        print(f"Downloading {ligand_code} ideal SDF from RCSB: {sdf_url}")
-
         import requests
 
-        # Download with proper headers
-        headers = {
-            'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
-        }
+        print(f"Fetching {ligand_code} from RCSB...")
 
-        response = requests.get(sdf_url, headers=headers, timeout=30)
-        response.raise_for_status()
-
-        sdf_content = response.text
-
-        # Validate SDF content
-        if not sdf_content.strip():
-            raise ValueError(f"Downloaded SDF file is empty")
-
-        # Get additional properties from RCSB
+        # Get properties (including SMILES) from RCSB
         props = fetch_properties_from_rcsb(ligand_code)
+        smiles = props.get('smiles', '')
 
-        # Convert SDF to PDB (normalization happens inside)
-        pdb_content = convert_sdf_to_pdb(sdf_content, residue_code)
+        pdb_content = None
+
+        # Primary method: RDKit from SMILES (required for RFdiffusion3 compatibility)
+        if smiles:
+            print(f"  SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"  SMILES: {smiles}")
+            print(f"  Converting SMILES to PDB using RDKit (for RFD3 compatibility)...")
+            pdb_content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
+
+        # Fallback: OpenBabel SDF conversion (may not work with RFdiffusion3)
         if pdb_content is None:
-            raise ValueError(f"Failed to convert SDF to PDB format")
+            print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
+            sdf_url = f"https://files.rcsb.org/ligands/download/{ligand_code}_ideal.sdf"
+            headers = {
+                'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+            }
+            response = requests.get(sdf_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            sdf_content = response.text
+
+            if not sdf_content.strip():
+                raise ValueError(f"Downloaded SDF file is empty")
+
+            pdb_content = convert_sdf_to_pdb(sdf_content, residue_code)
+
+        if pdb_content is None:
+            raise ValueError(f"Failed to convert ligand to PDB format")
 
         # Save to Ligands/ folder for caching (using ligand_code as filename)
         os.makedirs(repo_ligands_folder, exist_ok=True)
@@ -649,7 +794,7 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
             'ccd': ligand_code,
             'cid': '',
             'cas': '',
-            'smiles': props.get('smiles', ''),
+            'smiles': smiles,
             'name': props.get('name', ''),
             'formula': props.get('formula', ''),
         }
@@ -667,11 +812,10 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
         metadata = {
             "file_size": file_size,
             "source": "rcsb",
-            "url": sdf_url,
             "ccd": ligand_code,
             "cid": "",
             "cas": "",
-            "smiles": props.get('smiles', ''),
+            "smiles": smiles,
             "name": props.get('name', ''),
             "formula": props.get('formula', ''),
         }
@@ -680,14 +824,13 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
         return True, output_path, metadata
 
     except Exception as e:
-        error_type = type(e).__name__
         error_msg = f"Error downloading {ligand_code} from RCSB: {str(e)}"
         print(f"Error: {error_msg}")
 
         metadata = {
             "error_message": error_msg,
             "source": "rcsb_download_failed",
-            "attempted_path": sdf_url
+            "attempted_path": f"rcsb:{ligand_code}"
         }
 
         return False, "", metadata
@@ -697,6 +840,9 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
                           output_folder: str, repo_ligands_folder: str) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Download a ligand from PubChem.
+
+    Uses RDKit to generate PDB from SMILES (primary method) for compatibility
+    with tools like RFdiffusion3. Falls back to OpenBabel SDF conversion if needed.
 
     Args:
         lookup: The lookup value (name, CID, or CAS)
@@ -712,13 +858,24 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
     try:
         print(f"Fetching {lookup} from PubChem ({lookup_type})...")
 
-        # Fetch from PubChem
+        # Fetch from PubChem (gets SMILES and SDF)
         pubchem_data = fetch_from_pubchem(lookup, lookup_type)
+        smiles = pubchem_data.get('smiles', '')
 
-        # Convert SDF to PDB
-        pdb_content = convert_sdf_to_pdb(pubchem_data['sdf_content'], residue_code)
+        pdb_content = None
+
+        # Primary method: RDKit from SMILES (required for RFdiffusion3 compatibility)
+        if smiles:
+            print(f"  Converting SMILES to PDB using RDKit (for RFD3 compatibility)...")
+            pdb_content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
+
+        # Fallback: OpenBabel SDF conversion (may not work with RFdiffusion3)
         if pdb_content is None:
-            raise ValueError(f"Failed to convert SDF to PDB format")
+            print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
+            pdb_content = convert_sdf_to_pdb(pubchem_data['sdf_content'], residue_code)
+
+        if pdb_content is None:
+            raise ValueError(f"Failed to convert ligand to PDB format")
 
         # Save to Ligands/ folder for caching
         os.makedirs(repo_ligands_folder, exist_ok=True)
@@ -737,7 +894,7 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
             'ccd': '',
             'cid': pubchem_data.get('cid', ''),
             'cas': lookup if lookup_type == 'cas' else '',
-            'smiles': pubchem_data.get('smiles', ''),
+            'smiles': smiles,
             'name': pubchem_data.get('name', ''),
             'formula': pubchem_data.get('formula', ''),
         }
@@ -758,7 +915,7 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
             "ccd": "",
             "cid": pubchem_data.get('cid', ''),
             "cas": lookup if lookup_type == 'cas' else '',
-            "smiles": pubchem_data.get('smiles', ''),
+            "smiles": smiles,
             "name": pubchem_data.get('name', ''),
             "formula": pubchem_data.get('formula', ''),
         }
