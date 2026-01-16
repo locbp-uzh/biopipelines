@@ -6,7 +6,10 @@
 
 - [Architecture Overview](#architecture-overview)
   - [What is BioPipelines?](#what-is-biopipelines)
+  - [Installation](#installation)
+  - [Repository Structure](#repository-structure)
   - [Core Concepts](#core-concepts)
+  - [Resources](#resources)
   - [Job Submission](#job-submission)
   - [Filesystem Structure](#filesystem-structure)
   - [Environment Management](#environment-management)
@@ -26,9 +29,35 @@ BioPipelines is a Python framework that generates bash scripts for bioinformatic
 
 ### Installation
 
-Login to your cluster via terminal or the website ([text](https://apps.s3it.uzh.ch) > Clusters > Shell access). In your home directory, clone the biopipelines repository:
+Login to your cluster via terminal or the website ([S3IT Apps](https://apps.s3it.uzh.ch) > Clusters > Shell access). In your home directory, clone the biopipelines repository:
 ```bash
 git clone https://gitlab.uzh.ch/locbp/public/biopipelines
+```
+
+### Repository Structure
+
+The repository is organized as follows:
+
+```
+/biopipelines/
+├── Docs/                       # Markdown files with usage information
+│   ├── UserManual.md           # General biopipelines manual
+│   ├── ToolReference.md        # Reference for installation, input, and expected output from each tool
+├── Environments/               # Definition of most important and hard-to-replicate conda environments 
+├── ExamplePipelines/           # Usage cases
+├── HelpScripts/                # Scripts that run at slurm runtime.
+│   ├── pipe_<tool&function>.py # Generic pipe scripts. 
+├── Ligands/                    # Folder for ligand structural files. The tool Ligand will download here.
+├── MyPipelines/                # Folder for user-written pipelines.
+├── PDBs/                       # Folder for protein structural files. The tool PDB will download here.
+├── PipelineScripts/            # Scripts that run at pipeline runtime, thus generating and coordinating other scripts.
+│   ├── pipeline.py             # Contains fundamental elements like Pipeline, Resources, ...
+│   ├── base_config.py          # Base class for tools and tool outputs.
+│   ├── <tool>.py               # Definition and declaration of a tool.
+│   ├── ...                     # Other utilities like folders.py, config_manager.py, ...
+├── config.yaml                 # Here the user can choose which environments to use and define where the models are.
+├── [re]submit                  # Bash scripts for [re]submission of pipeline scripts
+
 ```
 
 ### Core Concepts
@@ -133,33 +162,51 @@ with Pipeline("TestProject","Test","Some test"):
   pmd = ProteinMPNN(structures=rfd,num_sequences=2)
 ```
 
-### Job submission
+### Resources
 
-Configure computational resources before submitting:
+Resources are set before using tools as follows:
 
 ```python
-# Examples
-Resources(gpu="A100", memory="32GB", time="24:00:00")              # Specific model
-Resources(gpu="32GB|80GB|141GB", memory="32GB", time="24:00:00")   # V100, A100, H100, or H200
-Resources(gpu="!L4", memory="32GB", time="24:00:00")               # Exclude L4, equivalent to above
-Resources(memory="128GB", time="24:00:00", cpus=32)                # CPU-only
+with Pipeline("Project", "Job", "Description"):
+    Resources(gpu="A100", memory="32GB", time="24:00:00")              # Specific model
+    Resources(gpu="32GB|80GB|141GB", memory="32GB", time="24:00:00")   # V100, A100, H100, or H200
+    Resources(memory="128GB", time="24:00:00", cpus=32)                # CPU-only
 ```
 
 **GPU parameter options:**
-- `"L4"`, `"V100"`, `"A100"`, `"H100"`, `"H200"` - Specific GPU models
+- `"T4"`, `"L4"`, `"V100"`, `"A100"`, `"H100"`, `"H200"` - Specific GPU models
 - `"24GB"`, `"32GB"`, `"80GB"`, `"141GB"`, `"32GB|80GB|141GB"` - Memory-based selection
-- `"!L4"` - Equivalent to `"32GB|80GB|141GB"`
-- `"gpu"` - Any available GPU
+- `"gpu"` or `"any"` - Any available GPU
 - `"high-memory"` - Equivalent to `"32GB|80GB|141GB"`
 - Omit parameter for CPU-only jobs
 
-Calling `pipeline.slurm()` to validate the pipeline (done automatically with context manager), generates the full scripts, and generates a slurm file that can be executed on the cluster. Importantly, this will not result in the submission to slurm. For this you have to either:
-1. Run from console the pipeline with python (requires packages pandas and yaml to be executable) and then run the sbatch command in output;
-2. Run from console the pipeline with python and then copy-paste the job name and slurm content in the job composer form (https://apps.s3it.uzh.ch/pun/sys/myjobs);
-3. (Preferred) Instead of running the pipeline with `python /path/to/<pipeline>.py`, use `./submit /path/to/<pipeline.py>` to both run and submit. If not available, this will install and activate a biopipelines environment with pandas and yaml.
+### Job submission
 
-```python
-pipeline.slurm()
+Login to your cluster via terminal or the website ([S3IT Apps](https://apps.s3it.uzh.ch) > Clusters > Shell access). Move to the biopipelines repository, then submit using the submit script:
+
+```bash
+cd biopipelines
+
+./submit /path/to/<pipeline.py>
+```
+
+The script will activate the biopipelines environment for proper execution of the pipeline. If not available or not up-to-date, it will install it. If installation fails due to memory errors (e.g. std::bad_alloc) you can first run a console with more memory, and then submit:
+
+```bash
+srun --mem=8G --time=1:00:00 --pty bash
+
+./submit /path/to/<pipeline.py>
+```
+
+If for any reason you want to resubmit a pipeline another time, use the resubmit script with the path to the slurm shell script:
+```bash
+cd biopipelines
+
+./resubmit /shares/<group>/<user>/BioPipelines/<project>/<job>/RunTime/slurm.sh
+```
+
+Alternatively, running the pipeline script with python will result in the following output:
+```bash
 """
 ==============================Job============================== # Suggested job name
 Pipeline: Test (002)
@@ -268,7 +315,7 @@ sequences         # [str]     - Path to csv file with columns id, sequence, ...
 sequence_ids      # List[str] - Sequence identifiers
 msas              # [str]     - Path to csv file with columns id, sequence, msa, ...
 msa_ids           # List[str] - MSA identifiers
-tables        # List[DI]  – Contains objects of class TableInfo
+tables            # List[DI]  – Contains objects of class TableInfo
 tool_folder       # [str]     – Path to output directory
 ```
 
