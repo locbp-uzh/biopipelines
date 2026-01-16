@@ -327,6 +327,7 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
         cif_lines.append("_atom_site.label_comp_id")
         cif_lines.append("_atom_site.label_asym_id")
         cif_lines.append("_atom_site.label_seq_id")
+        cif_lines.append("_atom_site.pdbx_PDB_model_num")
         cif_lines.append("_atom_site.Cartn_x")
         cif_lines.append("_atom_site.Cartn_y")
         cif_lines.append("_atom_site.Cartn_z")
@@ -347,10 +348,10 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
             atom_id = idx + 1  # 1-indexed
 
             # Format: id type_symbol label_atom_id label_comp_id label_asym_id label_seq_id
-            #         Cartn_x Cartn_y Cartn_z occupancy B_iso
+            #         pdbx_PDB_model_num Cartn_x Cartn_y Cartn_z occupancy B_iso
             #         auth_atom_id auth_comp_id auth_asym_id auth_seq_id pdbx_formal_charge
             cif_lines.append(
-                f"{atom_id} {element} {atom_name} {residue_code} A 1 "
+                f"{atom_id} {element} {atom_name} {residue_code} A 1 1 "
                 f"{pos.x:.3f} {pos.y:.3f} {pos.z:.3f} 1.00 0.00 "
                 f"{atom_name} {residue_code} A 1 {charge}"
             )
