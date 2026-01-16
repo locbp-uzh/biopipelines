@@ -13,8 +13,10 @@ dependencies:
   - pandas
   - numpy
   - pyyaml=6.0
+  - yaml=0.2.5
   - requests
   - biopython
   - rdkit
-  - openbabel
+  - openbabel  
+
 
