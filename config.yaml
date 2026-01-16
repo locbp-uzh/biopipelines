@@ -42,6 +42,7 @@ environments:
   ProteinMPNN: "ProteinEnv"
   LigandMPNN: "ligandmpnn_env"
   AlphaFold: "biopipelines"
+  Ligand: "foundry"  # Requires RDKit for RFdiffusion3 compatibility
 
   # Analysis and utility tools
   MMseqs2: "biopipelines"
