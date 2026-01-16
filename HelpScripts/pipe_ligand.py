@@ -625,19 +625,19 @@ def convert_sdf_to_pdb(sdf_content: str, ligand_code: str) -> Optional[str]:
         return None
 
 
-def fetch_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
+def fetch_properties_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
     """
-    Fetch compound data from PubChem.
+    Fetch compound properties from PubChem (without downloading SDF).
 
     Args:
         lookup: The lookup value (name, CID, or CAS)
         lookup_type: "cid", "cas", or "name"
 
     Returns:
-        Dictionary with: cid, smiles, name, formula, sdf_content
+        Dictionary with: cid, smiles, name, formula
 
     Raises:
-        ValueError: If compound not found or download fails
+        ValueError: If compound not found
     """
     import requests
 
@@ -667,7 +667,6 @@ def fetch_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
         print(f"  Resolved to PubChem CID: {cid}")
 
     # Step 2: Get properties (SMILES, name, formula)
-    # Request multiple SMILES types since PubChem may return different ones
     props_url = f"{base_url}/compound/cid/{cid}/property/CanonicalSMILES,IsomericSMILES,IUPACName,MolecularFormula/JSON"
     response = requests.get(props_url, headers=headers, timeout=30)
     response.raise_for_status()
@@ -684,13 +683,39 @@ def fetch_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
     print(f"  SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"  SMILES: {smiles}")
     print(f"  Name: {name[:50]}..." if len(name) > 50 else f"  Name: {name}")
 
-    # Step 3: Get 3D SDF (try 3D first, fall back to 2D)
+    return {
+        'cid': str(cid),
+        'smiles': smiles,
+        'name': name,
+        'formula': formula,
+        'source': 'pubchem'
+    }
+
+
+def fetch_sdf_from_pubchem(cid: str) -> str:
+    """
+    Download SDF content from PubChem for a given CID.
+
+    Args:
+        cid: PubChem compound ID
+
+    Returns:
+        SDF content as string
+
+    Raises:
+        ValueError: If download fails
+    """
+    import requests
+
+    base_url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+    headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+
+    # Try 3D SDF first, fall back to 2D
     sdf_url = f"{base_url}/compound/cid/{cid}/SDF?record_type=3d"
-    print(f"  Downloading 3D SDF...")
+    print(f"  Downloading 3D SDF (fallback)...")
     response = requests.get(sdf_url, headers=headers, timeout=30)
 
     if response.status_code == 404:
-        # No 3D structure available, try 2D
         print(f"  No 3D structure available, using 2D...")
         sdf_url = f"{base_url}/compound/cid/{cid}/SDF"
         response = requests.get(sdf_url, headers=headers, timeout=30)
@@ -701,14 +726,7 @@ def fetch_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
     if not sdf_content.strip():
         raise ValueError(f"Downloaded SDF file for CID {cid} is empty")
 
-    return {
-        'cid': str(cid),
-        'smiles': smiles,
-        'name': name,
-        'formula': formula,
-        'sdf_content': sdf_content,
-        'source': 'pubchem'
-    }
+    return sdf_content
 
 
 def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
@@ -859,21 +877,23 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
     try:
         print(f"Fetching {lookup} from PubChem ({lookup_type})...")
 
-        # Fetch from PubChem (gets SMILES and SDF)
-        pubchem_data = fetch_from_pubchem(lookup, lookup_type)
+        # Fetch properties from PubChem (SMILES, name, formula - no SDF yet)
+        pubchem_data = fetch_properties_from_pubchem(lookup, lookup_type)
         smiles = pubchem_data.get('smiles', '')
+        cid = pubchem_data.get('cid', '')
 
         pdb_content = None
 
         # Primary method: RDKit from SMILES (required for RFdiffusion3 compatibility)
         if smiles:
-            print(f"  Converting SMILES to PDB using RDKit (for RFD3 compatibility)...")
+            print(f"  Converting SMILES to PDB using RDKit...")
             pdb_content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
 
-        # Fallback: OpenBabel SDF conversion (may not work with RFdiffusion3)
+        # Fallback: Download SDF and use OpenBabel (only if RDKit failed)
         if pdb_content is None:
             print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
-            pdb_content = convert_sdf_to_pdb(pubchem_data['sdf_content'], residue_code)
+            sdf_content = fetch_sdf_from_pubchem(cid)
+            pdb_content = convert_sdf_to_pdb(sdf_content, residue_code)
 
         if pdb_content is None:
             raise ValueError(f"Failed to convert ligand to PDB format")
@@ -893,7 +913,7 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
             'lookup': lookup,
             'source': 'pubchem',
             'ccd': '',
-            'cid': pubchem_data.get('cid', ''),
+            'cid': cid,
             'cas': lookup if lookup_type == 'cas' else '',
             'smiles': smiles,
             'name': pubchem_data.get('name', ''),
@@ -914,7 +934,7 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
             "file_size": file_size,
             "source": "pubchem",
             "ccd": "",
-            "cid": pubchem_data.get('cid', ''),
+            "cid": cid,
             "cas": lookup if lookup_type == 'cas' else '',
             "smiles": smiles,
             "name": pubchem_data.get('name', ''),

@@ -133,10 +133,12 @@ class Ligand(BaseConfig):
 
         self.local_folder = local_folder
 
-        # Validate residue codes (must be 1-3 alphanumeric)
+        # Warn about non-standard residue codes (standard PDB is 1-3 alphanumeric)
         for code in self.residue_codes:
-            if not code or len(code) > 3 or not code.isalnum():
-                raise ValueError(f"Invalid residue code: {code}. Must be 1-3 alphanumeric characters")
+            if not code:
+                raise ValueError("Residue code cannot be empty")
+            if len(code) > 3 or not code.isalnum():
+                print(f"  Warning: Non-standard residue code '{code}'. Standard PDB uses 1-3 alphanumeric characters.")
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -180,8 +182,8 @@ class Ligand(BaseConfig):
             raise ValueError("ids and codes must have same length")
 
         for code in self.residue_codes:
-            if not code or len(code) > 3 or not code.isalnum():
-                raise ValueError(f"Invalid residue code: {code}")
+            if not code:
+                raise ValueError("Residue code cannot be empty")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters and check for local files."""

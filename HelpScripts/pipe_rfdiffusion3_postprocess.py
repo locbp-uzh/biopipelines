@@ -165,6 +165,8 @@ def extract_metrics_from_json(json_path: Optional[str]) -> Dict:
             "n_chainbreaks": metrics.get("n_chainbreaks"),
             "n_clashing_interresidue_w_sidechain": metrics.get("n_clashing.interresidue_clashes_w_sidechain"),
             "n_clashing_interresidue_w_backbone": metrics.get("n_clashing.interresidue_clashes_w_backbone"),
+            "ligand_clashes": metrics.get("n_clashing.ligand_clashes"),
+            "ligand_min_distance": metrics.get("n_clashing.ligand_min_distance"),
             "non_loop_fraction": metrics.get("non_loop_fraction"),
             "loop_fraction": metrics.get("loop_fraction"),
             "helix_fraction": metrics.get("helix_fraction"),

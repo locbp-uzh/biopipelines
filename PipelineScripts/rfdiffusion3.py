@@ -66,7 +66,7 @@ class RFdiffusion3(BaseConfig):
             Use '\\0' for chain breaks. Chain letters reference input structure.
             Example: "A50-100,80-100,\\0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
         pdb (str or ToolOutput): Input PDB structure (required when using contig)
-        ligand_code (str): Ligand CCD code identifying the molecule in input structure
+        ligand_code (str): Ligand three-letter code identifying the molecule in input structure
         ligand_structure (ToolOutput): Output from Ligand tool providing ligand PDB file.
             When provided, this PDB becomes the input structure for design.
         num_designs (int): Number of designs to generate (default: 1)
@@ -722,6 +722,7 @@ python "{self.table_py_file}" \\
                 columns=[
                     "id", "design", "model", "max_ca_deviation", "n_chainbreaks",
                     "n_clashing_interresidue_w_sidechain", "n_clashing_interresidue_w_backbone",
+                    "ligand_clashes", "ligand_min_distance",
                     "non_loop_fraction", "loop_fraction", "helix_fraction", "sheet_fraction",
                     "num_ss_elements", "radius_of_gyration", "alanine_content",
                     "glycine_content", "num_residues"
