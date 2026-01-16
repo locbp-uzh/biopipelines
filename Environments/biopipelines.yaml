@@ -8,11 +8,11 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python
+  - python>=3.10
   - pandas
   - numpy
   - pyyaml
   - requests
-  - biopython<=1.79
+  - biopython
   - rdkit
   - openbabel
