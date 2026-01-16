@@ -363,7 +363,10 @@ class Boltz2(BaseConfig):
                 # Use the first sequence file from StandardizedOutput
                 self.queries_csv_file = primary_input.sequences[0]
             else:
-                raise ValueError("No sequences found in StandardizedOutput")
+                # Debug: show what's in the StandardizedOutput
+                available_attrs = [attr for attr in dir(primary_input) if not attr.startswith('_')]
+                sequences_value = getattr(primary_input, 'sequences', 'NOT_FOUND')
+                raise ValueError(f"No sequences found in StandardizedOutput. sequences={sequences_value}, available attrs: {available_attrs}")
         
         else:
             raise ValueError(f"Invalid input type: {type(primary_input)}. Supported types: str, list, ToolOutput, StandardizedOutput")
