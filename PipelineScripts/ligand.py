@@ -351,7 +351,7 @@ fi
             "compounds": TableInfo(
                 name="compounds",
                 path=compounds_csv,
-                columns=["id", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"],
+                columns=["id", "format", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"],
                 description="Successfully fetched ligand files with metadata",
                 count=len(self.lookup_values)
             ),

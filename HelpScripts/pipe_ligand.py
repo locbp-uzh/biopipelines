@@ -968,6 +968,7 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
         cache_csv_path = os.path.join(repo_ligands_folder, f"{ligand_code}.csv")
         cache_metadata = {
             'id': ligand_code,
+            'format': 'ccd',
             'code': residue_code,
             'lookup': ligand_code,
             'source': 'rcsb',
@@ -1077,6 +1078,7 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
         cache_csv_path = os.path.join(repo_ligands_folder, f"{lookup}.csv")
         cache_metadata = {
             'id': lookup,
+            'format': 'smiles',
             'code': residue_code,
             'lookup': lookup,
             'source': 'pubchem',
@@ -1201,12 +1203,16 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
                 )
 
         if success:
+            # Determine format: 'ccd' if has CCD code, otherwise 'smiles'
+            ccd_val = metadata.get('ccd', '')
+            fmt = 'ccd' if ccd_val else 'smiles'
             successful_downloads.append({
                 'id': custom_id,
+                'format': fmt,
                 'code': residue_code,
                 'lookup': lookup,
                 'source': metadata.get('source', effective_source),
-                'ccd': metadata.get('ccd', ''),
+                'ccd': ccd_val,
                 'cid': metadata.get('cid', ''),
                 'cas': metadata.get('cas', ''),
                 'smiles': metadata.get('smiles', ''),
@@ -1229,7 +1235,7 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
         print(f"\nSuccessful fetches saved: {compounds_table} ({len(successful_downloads)} ligands)")
     else:
         # Create empty table with proper columns
-        columns = ["id", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"]
+        columns = ["id", "format", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"]
         empty_df = pd.DataFrame(columns=columns)
         empty_df.to_csv(compounds_table, index=False)
         print(f"No successful fetches - created empty table: {compounds_table}")
