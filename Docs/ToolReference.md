@@ -1669,19 +1669,24 @@ Ranks entries based on a metric (column or computed expression), renames IDs to 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `data`: Union[ToolOutput, StandardizedOutput] (required) - Table input to rank
+- `data`: Union[ToolOutput, StandardizedOutput, TableInfo, tuple] (required) - Table input to rank. Supports tuple notation: `tool.tables.table_name.column_name` (metric auto-extracted)
 - `pool`: Union[ToolOutput, StandardizedOutput] = None - Structure/sequence pool for copying ranked items
-- `metric`: str (required) - Column name or expression for ranking (e.g., "pLDDT" or "0.8*pLDDT+0.2*affinity")
+- `metric`: str = None - Column name or expression for ranking (e.g., "pLDDT" or "0.8*pLDDT+0.2*affinity"). Optional if using tuple notation for data.
 - `ascending`: bool = False - Sort order (False = descending/best first, True = ascending)
 - `prefix`: str = "rank" - Prefix for renamed IDs (e.g., "rank" produces rank_1, rank_2, ...)
 - `top`: Optional[int] = None - Limit to top N entries after ranking
 
 **Outputs**:
 - Ranked pool with same structure as input (when pool provided)
-- `tables.ranked`:
+- `tables.ranked`: Full ranked table with all columns
 
   | id | source_id | metric | {variable_columns} | {original_columns} |
   |----|-----------|--------|-------------------|-------------------|
+
+- `tables.metrics`: Summary table with only ranking info
+
+  | id | source_id | {metric_column} |
+  |----|-----------|-----------------|
 
 **Output Columns**:
 - `id`: Renamed IDs (e.g., rank_1, rank_2, ...)
@@ -1696,7 +1701,15 @@ Ranks entries based on a metric (column or computed expression), renames IDs to 
 
 **Example**:
 ```python
-# Rank by single column
+# Rank using tuple notation (metric auto-extracted from column reference)
+ranked = Rank(
+    data=boltz.tables.structures.pLDDT,  # metric="pLDDT" inferred
+    pool=boltz,
+    prefix="model",
+    top=10
+)
+
+# Rank by single column (explicit metric)
 ranked = Rank(
     data=analysis.tables.merged,
     pool=boltz,
@@ -1713,15 +1726,6 @@ ranked = Rank(
     metric="0.8*pLDDT + 0.2*binding_affinity",
     prefix="design",
     top=20
-)
-
-# Rank with ascending order (lower is better)
-ranked = Rank(
-    data=distances.tables.analysis,
-    pool=structures,
-    metric="distance",
-    ascending=True,  # Lower is better
-    prefix="candidate"
 )
 ```
 
