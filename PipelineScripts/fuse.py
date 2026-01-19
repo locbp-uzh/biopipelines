@@ -68,8 +68,8 @@ class Fuse(BaseConfig):
                 self.input_is_tool_output = False
                 self.standardized_input = None
             elif isinstance(proteins, list):
-                # Direct list of sequences
-                self.input_proteins = proteins
+                # List of sequences/paths/StandardizedOutputs - process each item
+                self.input_proteins = self._process_protein_list(proteins)
                 self.input_is_tool_output = False
                 self.standardized_input = None
             else:
@@ -115,6 +115,36 @@ class Fuse(BaseConfig):
         # Initialize file paths (will be set in configure_inputs)
         self._initialize_file_paths()
     
+    def _process_protein_list(self, proteins: List) -> List[str]:
+        """
+        Process a list of proteins, handling mixed types.
+
+        Each item can be:
+        - str: Direct sequence or PDB file path (kept as-is)
+        - StandardizedOutput: Extract first structure path
+
+        Args:
+            proteins: List of protein inputs
+
+        Returns:
+            List of strings (sequences or file paths)
+        """
+        processed = []
+        for item in proteins:
+            if isinstance(item, StandardizedOutput):
+                # Extract first structure path from StandardizedOutput
+                if hasattr(item, 'structures') and item.structures:
+                    processed.append(item.structures[0])
+                elif hasattr(item, 'sequences') and item.sequences:
+                    processed.append(item.sequences[0])
+                else:
+                    raise ValueError(f"Cannot extract protein from StandardizedOutput: no structures or sequences found")
+            elif isinstance(item, str):
+                processed.append(item)
+            else:
+                raise ValueError(f"Unsupported protein type in list: {type(item)}")
+        return processed
+
     def _extract_sequences_from_standardized(self, standardized_output: StandardizedOutput) -> List[str]:
         """Extract protein sequences from StandardizedOutput."""
         # If it has sequence files, we'll need to read them at runtime
