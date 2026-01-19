@@ -2208,18 +2208,20 @@ rfd3 = RFdiffusion3(input=ligand, contig="50-80,A1-100")
 
 Creates PyMOL sessions using a declarative operation-based API. Supports ID-based matching between structures and table columns for per-structure selections and naming.
 
-**Environment**: `ProteinEnv`
+**Environment**: `ProteinEnv` (or any with pymol-open-source installed)
 
-**Operations** (static methods):
-- `PyMOL.Names(prefix, basename, suffix)` - Set up ID → PyMOL name mapping
-- `PyMOL.Load(structures)` - Load structures with current naming
-- `PyMOL.Color(structures, selection, color)` - Color selection on structures
-- `PyMOL.ColorAF(structures, upper=100)` - Color by AlphaFold pLDDT (B-factor), upper scales thresholds
-- `PyMOL.Align(method, target)` - Align all loaded objects
-- `PyMOL.Show(representation, selection)` - Show representation
-- `PyMOL.Hide(representation, selection)` - Hide representation
-- `PyMOL.Set(setting, value, selection)` - Set PyMOL setting
-- `PyMOL.Save(filename)` - Save session (auto-saves if omitted)
+**Operations**:
+- `Names(prefix, basename, suffix)` - Set up ID → PyMOL name mapping
+- `Load(structures)` - Load structures with current naming
+- `Color(structures, selection, color)` - Color selection on structures
+- `ColorAF(structures, upper=100)` - Color by AlphaFold pLDDT (B-factor), upper scales thresholds
+- `Align(method, target)` - Align all loaded objects
+- `Show(structures, representation, selection)` - Show representation (structures optional)
+- `Hide(structures, representation, selection)` - Hide representation (structures optional)
+- `Set(setting, value, selection)` - Set PyMOL setting
+- `Save(filename)` - Save session (auto-saves if omitted)
+
+These operations are accessible as static methods with  `PyMOL.<operation>` (see examples).
 
 **Parameters**:
 - `session`: str = "session" - Output session filename (without .pse)
@@ -2236,14 +2238,14 @@ Creates PyMOL sessions using a declarative operation-based API. Supports ID-base
 **Example**:
 ```python
 # Fuse domains with linkers
-fused = Fuse(proteins=[N, snap, C], linker="GSGAG", linker_lengths=["2-4", "2-4"])
+fused = Fuse(proteins=[A, B, C], linker="GSGAG", linker_lengths=["2-4", "2-4"])
 folded = AlphaFold(sequences=fused)
 
 # Create PyMOL session with domain coloring
-PyMOL(session="sensor_visualization",
-    # Set naming: ID "sensor_2_3" → PyMOL object "sensor_2_3_parts"
-    PyMOL.Names(prefix="sensor", basename=fused.tables.sequences.lengths, suffix="parts"),
-    PyMOL.Load(folded),
+PyMOL("domain_visualization",
+    # Set naming: ID "sensor_2_3" (from the basename table) → PyMOL object "s_2_3_parts"
+    PyMOL.Names(prefix="s", basename=fused.tables.sequences.lengths, suffix="parts"),
+    PyMOL.Load(folded), #folded IDs match fused table IDs
     # Color domains and linkers using per-structure selections from table
     PyMOL.Color(folded, selection=fused.tables.sequences.D1, color="white"),
     PyMOL.Color(folded, selection=fused.tables.sequences.L1, color="orange"),
@@ -2253,8 +2255,8 @@ PyMOL(session="sensor_visualization",
     # Load again with pLDDT coloring under different names
     PyMOL.Names(prefix="sensor", basename=fused.tables.sequences.lengths, suffix="pLDDT"),
     PyMOL.Load(folded),
-    PyMOL.ColorAF(folded),  # upper=100 by default for pLDDT
-    # Align all to first loaded object
+    PyMOL.ColorAF(folded), 
+    # Align all to first loaded object using align algorithm (sequence-based)
     PyMOL.Align("align")
 )
 ```
