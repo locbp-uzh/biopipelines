@@ -93,7 +93,7 @@ class Filter(BaseConfig):
         
         Args:
             data: Table input to filter (required)
-            pool: Structure pool for copying filtered structures (optional)
+            pool: Tool output having same ids as the data table (optional). Structures passing the filter will be copied, and all tables will be filtered and copied
             expression: Pandas query-style expression (e.g., "pLDDT>80 and distance < 5.0") (required)
             max_items: Maximum number of items to keep after filtering
             sort_by: Column name to sort by before applying max_items limit

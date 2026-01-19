@@ -379,12 +379,21 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
         # Predict sequence IDs for downstream tools
         sequence_ids = self._predict_sequence_ids()
         
+        # Build position column names dynamically based on number of proteins
+        # For n proteins: D1, L1, D2, L2, ..., D(n-1), L(n-1), Dn
+        num_proteins = len(self.input_proteins)
+        position_columns = []
+        for i in range(1, num_proteins + 1):
+            position_columns.append(f"D{i}")
+            if i < num_proteins:
+                position_columns.append(f"L{i}")
+
         # Organize tables by content type
         tables = {
             "sequences": {
                 "path": queries_csv,
-                "columns": ["id", "sequence", "lengths"],
-                "description": "Fusion sequences with linker length information",
+                "columns": ["id", "sequence", "lengths"] + position_columns,
+                "description": "Fusion sequences with domain/linker positions in PyMOL selection format",
                 "count": len(sequence_ids)
             }
         }

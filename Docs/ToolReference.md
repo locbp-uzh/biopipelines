@@ -534,7 +534,7 @@ sdm = SDM(
 
 ### Fuse
 
-Concatenates multiple protein sequences with flexible linkers. Creates fusion proteins with customizable linker lengths for domain engineering.
+Concatenates multiple protein sequences with flexible linkers. Creates fusion proteins with customizable linker lengths for domain engineering. Outputs include domain/linker position columns in PyMOL selection format for easy visualization.
 
 **Environment**: `ProteinEnv`
 
@@ -549,15 +549,25 @@ Concatenates multiple protein sequences with flexible linkers. Creates fusion pr
 - `sequences`: CSV file with fused sequences
 - `tables.sequences`:
 
-  | id | sequence | lengths |
-  |----|----------|---------|
+  | id | sequence | lengths | D1 | L1 | D2 | L2 | D3 | ... |
+  |----|----------|---------|----|----|----|----|----| --- |
+
+  - `lengths`: Shortname of the lengths e.e. 2_4, 5_2_4, ...
+  - `D1`, `D2`, `D3`, ...: Domain positions in PyMOL selection format (e.g., "1-73", "76-237")
+  - `L1`, `L2`, ...: Linker positions in PyMOL selection format (e.g., "74-75", "238-240")
+  - Number of columns depends on number of input proteins: n proteins → n domain columns (D1...Dn) and n-1 linker columns (L1...Ln-1)
 
 **Example**:
 ```python
+N="GNH..."
+mid=PDB("...")
+C="EFT..."
 fused = Fuse(
-    proteins=[domain1, domain2, domain3],
-    linker="GGGGS"
-
+    proteins=[N, mid, C],
+    linker="GSGAG",
+    linker_lengths=["2-4", "2-4"],
+    name="protein_fusion"
+)
 ```
 
 ---
