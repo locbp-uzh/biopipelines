@@ -2206,32 +2206,57 @@ rfd3 = RFdiffusion3(input=ligand, contig="50-80,A1-100")
 
 ### PyMOL
 
-Creates PyMOL visualizations and session files for structural analysis. Supports alignment, coloring schemes, and ray-traced image generation.
+Creates PyMOL sessions using a declarative operation-based API. Supports ID-based matching between structures and table columns for per-structure selections and naming.
 
 **Environment**: `ProteinEnv`
 
-**Note**: This tool is not fully debugged yet and may require adjustments.
+**Operations** (static methods):
+- `PyMOL.Names(prefix, basename, suffix)` - Set up ID → PyMOL name mapping
+- `PyMOL.Load(structures)` - Load structures with current naming
+- `PyMOL.Color(structures, selection, color)` - Color selection on structures
+- `PyMOL.ColorAF(structures, upper=100)` - Color by AlphaFold pLDDT (B-factor), upper scales thresholds
+- `PyMOL.Align(method, target)` - Align all loaded objects
+- `PyMOL.Show(representation, selection)` - Show representation
+- `PyMOL.Hide(representation, selection)` - Hide representation
+- `PyMOL.Set(setting, value, selection)` - Set PyMOL setting
+- `PyMOL.Save(filename)` - Save session (auto-saves if omitted)
 
 **Parameters**:
-- `structures`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Structures to visualize
-- `reference_structure`: Optional[Union[str, ToolOutput]] = None - Reference for alignment
-- `color_by`: str = "chain" - Coloring scheme (chain, b_factor, element, ss, spectrum)
-- `alignment`: str = "align" - Alignment method (align, super, cealign)
-- `ray_trace`: bool = False - Generate ray-traced images
-- `image_size`: Tuple[int, int] = (1920, 1080) - Image dimensions if ray tracing
+- `session`: str = "session" - Output session filename (without .pse)
+- `*operations`: Sequence of PyMOL operations
+
+**ID-based matching**:
+- `Names()` creates an ID → PyMOL name mapping from a table column
+- `Load()` uses this mapping to name objects (or uses ID if no mapping)
+- `Color()` looks up selections per-structure from table columns by ID
 
 **Outputs**:
-- PyMOL session files (.pse)
-- Images (if ray_trace=True)
+- PyMOL session file (.pse)
 
 **Example**:
 ```python
-pymol = PyMOL(
-    structures=best,
-    reference_structure=template,
-    color_by="b_factor",
-    alignment="super"
+# Fuse domains with linkers
+fused = Fuse(proteins=[N, snap, C], linker="GSGAG", linker_lengths=["2-4", "2-4"])
+folded = AlphaFold(sequences=fused)
 
+# Create PyMOL session with domain coloring
+PyMOL(session="sensor_visualization",
+    # Set naming: ID "sensor_2_3" → PyMOL object "sensor_2_3_parts"
+    PyMOL.Names(prefix="sensor", basename=fused.tables.sequences.lengths, suffix="parts"),
+    PyMOL.Load(folded),
+    # Color domains and linkers using per-structure selections from table
+    PyMOL.Color(folded, selection=fused.tables.sequences.D1, color="white"),
+    PyMOL.Color(folded, selection=fused.tables.sequences.L1, color="orange"),
+    PyMOL.Color(folded, selection=fused.tables.sequences.D2, color="marine"),
+    PyMOL.Color(folded, selection=fused.tables.sequences.L2, color="wheat"),
+    PyMOL.Color(folded, selection=fused.tables.sequences.D3, color="white"),
+    # Load again with pLDDT coloring under different names
+    PyMOL.Names(prefix="sensor", basename=fused.tables.sequences.lengths, suffix="pLDDT"),
+    PyMOL.Load(folded),
+    PyMOL.ColorAF(folded),  # upper=100 by default for pLDDT
+    # Align all to first loaded object
+    PyMOL.Align("align")
+)
 ```
 
 ---
