@@ -79,6 +79,18 @@ class Rank(BaseConfig):
         # Validate required parameters
         if data is None:
             raise ValueError("'data' parameter is required")
+
+        # Handle tuple notation: data=tool.tables.table_name.column_name
+        # This returns (TableInfo, column_name) tuple
+        if isinstance(data, tuple) and len(data) == 2:
+            table_info, column_name = data
+            if hasattr(table_info, 'path'):
+                # Extract metric from tuple if not explicitly provided
+                if metric is None:
+                    metric = column_name
+                # Use TableInfo as data
+                data = table_info
+
         if metric is None:
             raise ValueError("'metric' parameter is required")
 
@@ -370,12 +382,28 @@ fi
             if col not in output_columns and col != 'id':
                 output_columns.append(col)
 
+        # Determine metric column name for summary table
+        if len(metric_vars) > 1 or any(op in self.metric for op in ['+', '-', '*', '/', '(', ')']):
+            metric_col_name = "metric"
+        else:
+            metric_col_name = self.metric
+
+        # Summary table with only id, source_id, metric
+        metrics_csv = os.path.join(self.output_folder, "metrics.csv")
+
         tables = {
             "ranked": TableInfo(
                 name="ranked",
                 path=ranked_csv,
                 columns=output_columns if output_columns else ["id", "source_id", "metric"],
                 description=f"Ranked results by metric: {self.metric}",
+                count="variable"
+            ),
+            "metrics": TableInfo(
+                name="metrics",
+                path=metrics_csv,
+                columns=["id", "source_id", metric_col_name],
+                description=f"Summary table with id, source_id, and {metric_col_name}",
                 count="variable"
             )
         }

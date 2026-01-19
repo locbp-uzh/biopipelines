@@ -408,6 +408,18 @@ def apply_ranking(config_data: Dict[str, Any]) -> None:
     # Save ranked results
     sorted_df.to_csv(output_csv, index=False)
 
+    # Create metrics summary table (id, source_id, metric only)
+    metrics_cols = ['id', 'source_id']
+    if metric_is_expression:
+        metrics_cols.append('metric')
+    else:
+        metrics_cols.append(sort_column)
+
+    metrics_df = sorted_df[metrics_cols].copy()
+    metrics_csv = os.path.join(os.path.dirname(output_csv), "metrics.csv")
+    metrics_df.to_csv(metrics_csv, index=False)
+    print(f"Metrics summary saved: {metrics_csv}")
+
     # Summary
     total_count = len(df)
     ranked_count = len(sorted_df)
