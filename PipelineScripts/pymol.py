@@ -147,34 +147,38 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("align", method=method, target=target)
 
     @staticmethod
-    def Show(representation: str = "cartoon",
-             selection: Optional[str] = None) -> PyMOLOperation:
+    def Show(structures: Union[StandardizedOutput, ToolOutput, None] = None,
+             representation: str = "cartoon",
+             selection: Optional[Union[Tuple[TableInfo, str], str]] = None) -> PyMOLOperation:
         """
         Show a representation for structures.
 
         Args:
+            structures: Tool output containing structures (optional, defaults to all)
             representation: PyMOL representation (cartoon, sticks, surface, etc.)
-            selection: Optional selection to apply to (default: all)
+            selection: Optional selection - table column reference or fixed string
 
         Returns:
             PyMOLOperation for showing representation
         """
-        return PyMOLOperation("show", representation=representation, selection=selection)
+        return PyMOLOperation("show", structures=structures, representation=representation, selection=selection)
 
     @staticmethod
-    def Hide(representation: str = "everything",
-             selection: Optional[str] = None) -> PyMOLOperation:
+    def Hide(structures: Union[StandardizedOutput, ToolOutput, None] = None,
+             representation: str = "everything",
+             selection: Optional[Union[Tuple[TableInfo, str], str]] = None) -> PyMOLOperation:
         """
         Hide a representation for structures.
 
         Args:
+            structures: Tool output containing structures (optional, defaults to all)
             representation: PyMOL representation to hide
-            selection: Optional selection to apply to (default: all)
+            selection: Optional selection - table column reference or fixed string
 
         Returns:
             PyMOLOperation for hiding representation
         """
-        return PyMOLOperation("hide", representation=representation, selection=selection)
+        return PyMOLOperation("hide", structures=structures, representation=representation, selection=selection)
 
     @staticmethod
     def Set(setting: str, value: Any, selection: Optional[str] = None) -> PyMOLOperation:
@@ -238,7 +242,7 @@ class PyMOL(BaseConfig):
                 if structures is not None:
                     self._structure_sources.append(structures)
 
-            elif op.op_type == "color":
+            elif op.op_type in ("color", "coloraf", "show", "hide"):
                 structures = op.params.get("structures")
                 if structures is not None and structures not in self._structure_sources:
                     self._structure_sources.append(structures)
@@ -246,11 +250,6 @@ class PyMOL(BaseConfig):
                 selection = op.params.get("selection")
                 if isinstance(selection, tuple):
                     self._table_references.append(selection)
-
-            elif op.op_type == "coloraf":
-                structures = op.params.get("structures")
-                if structures is not None and structures not in self._structure_sources:
-                    self._structure_sources.append(structures)
 
             elif op.op_type == "names":
                 basename = op.params.get("basename")

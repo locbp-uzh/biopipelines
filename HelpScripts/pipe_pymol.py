@@ -352,32 +352,106 @@ class PyMOLSessionBuilder:
         Execute Show operation - show a representation.
 
         Args:
-            op: Operation dict with representation and optional selection
+            op: Operation dict with structures, representation, and optional selection
         """
+        structures_ref = op.get("structures")
         representation = op.get("representation", "cartoon")
-        selection = op.get("selection", "all")
+        selection_ref = op.get("selection")
 
-        try:
-            cmd.show(representation, selection)
-            print(f"Show: {representation} for {selection}")
-        except Exception as e:
-            print(f"Error in show: {e}")
+        # If no structures specified, apply to all
+        if not structures_ref:
+            selection = selection_ref if selection_ref else "all"
+            try:
+                cmd.show(representation, selection)
+                print(f"Show: {representation} for {selection}")
+            except Exception as e:
+                print(f"Error in show: {e}")
+            return
+
+        structures = self._resolve_structures(structures_ref)
+
+        # Resolve selection if it's a table column reference
+        if isinstance(selection_ref, dict) and selection_ref.get("type") == "table_column":
+            id_to_selection = self._resolve_table_column(selection_ref)
+        elif isinstance(selection_ref, str):
+            id_to_selection = {s["id"]: selection_ref for s in structures}
+        else:
+            id_to_selection = None
+
+        print(f"Show: {representation} for {len(structures)} structures")
+
+        for struct in structures:
+            struct_id = struct["id"]
+
+            if struct_id not in self.loaded_objects:
+                print(f"  Skipping {struct_id} - not loaded")
+                continue
+
+            pymol_name = self.loaded_objects[struct_id]
+
+            if id_to_selection and struct_id in id_to_selection:
+                pymol_selection = f"{pymol_name} and resi {id_to_selection[struct_id]}"
+            else:
+                pymol_selection = pymol_name
+
+            try:
+                cmd.show(representation, pymol_selection)
+                print(f"  Show {representation} for {pymol_selection}")
+            except Exception as e:
+                print(f"  Error showing {pymol_name}: {e}")
 
     def execute_hide(self, op: Dict[str, Any]):
         """
         Execute Hide operation - hide a representation.
 
         Args:
-            op: Operation dict with representation and optional selection
+            op: Operation dict with structures, representation, and optional selection
         """
+        structures_ref = op.get("structures")
         representation = op.get("representation", "everything")
-        selection = op.get("selection", "all")
+        selection_ref = op.get("selection")
 
-        try:
-            cmd.hide(representation, selection)
-            print(f"Hide: {representation} for {selection}")
-        except Exception as e:
-            print(f"Error in hide: {e}")
+        # If no structures specified, apply to all
+        if not structures_ref:
+            selection = selection_ref if selection_ref else "all"
+            try:
+                cmd.hide(representation, selection)
+                print(f"Hide: {representation} for {selection}")
+            except Exception as e:
+                print(f"Error in hide: {e}")
+            return
+
+        structures = self._resolve_structures(structures_ref)
+
+        # Resolve selection if it's a table column reference
+        if isinstance(selection_ref, dict) and selection_ref.get("type") == "table_column":
+            id_to_selection = self._resolve_table_column(selection_ref)
+        elif isinstance(selection_ref, str):
+            id_to_selection = {s["id"]: selection_ref for s in structures}
+        else:
+            id_to_selection = None
+
+        print(f"Hide: {representation} for {len(structures)} structures")
+
+        for struct in structures:
+            struct_id = struct["id"]
+
+            if struct_id not in self.loaded_objects:
+                print(f"  Skipping {struct_id} - not loaded")
+                continue
+
+            pymol_name = self.loaded_objects[struct_id]
+
+            if id_to_selection and struct_id in id_to_selection:
+                pymol_selection = f"{pymol_name} and resi {id_to_selection[struct_id]}"
+            else:
+                pymol_selection = pymol_name
+
+            try:
+                cmd.hide(representation, pymol_selection)
+                print(f"  Hide {representation} for {pymol_selection}")
+            except Exception as e:
+                print(f"  Error hiding {pymol_name}: {e}")
 
     def execute_set(self, op: Dict[str, Any]):
         """
