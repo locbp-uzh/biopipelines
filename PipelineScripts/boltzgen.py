@@ -109,7 +109,7 @@ class BoltzGen(BaseConfig):
             devices: Number of GPUs to use (default: auto-detect)
             reuse: Resume interrupted runs (default: False)
             steps: Run only specific pipeline steps (default: all steps)
-            cache_dir: Model download location (default: /home/$USER/data/boltzgen)
+            cache_dir: Model/cache location (default: /home/$USER/data/boltzgen, auto-downloaded on first run)
             **kwargs: Additional parameters passed to BaseConfig
         """
         # Store design specification parameters
@@ -514,14 +514,6 @@ echo "Running BoltzGen binder design"
 echo "Design specification: {self.design_spec_yaml_file}"
 echo "Protocol: {self.protocol}"
 echo "Output folder: {self.output_folder}"
-echo "Cache directory: {self.cache_dir}"
-
-# Check cache directory exists
-if [ ! -d "{self.cache_dir}" ]; then
-    echo "ERROR: BoltzGen cache/model weights not found at {self.cache_dir}"
-    echo "Please ensure model weights are installed at /home/$USER/data/boltzgen/"
-    exit 1
-fi
 
 # Run BoltzGen
 {boltzgen_cmd}
