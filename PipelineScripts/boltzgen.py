@@ -44,8 +44,11 @@ class BoltzGen(BaseConfig):
                  # Design specification - Option 1: Manual YAML/dict
                  design_spec: Union[str, Dict[str, Any]] = None,
                  # Design specification - Option 2: Automatic building from BioPipelines inputs
+                 # For protein-small_molecule: use ligand parameter
+                 # For protein-anything: use target_structure parameter
+                 ligand: Union[ToolOutput, StandardizedOutput] = None,
                  target_structure: Union[str, ToolOutput, StandardizedOutput] = None,
-                 ligand: str = None,
+                 ligand_code: str = None,
                  binder_spec: Union[str, Dict[str, Any]] = None,
                  binding_region: str = None,
                  # Output configuration
@@ -74,7 +77,10 @@ class BoltzGen(BaseConfig):
         """
         Initialize BoltzGen configuration.
 
-        You can provide EITHER design_spec (manual) OR target_structure + binder_spec (automatic).
+        You can provide EITHER design_spec (manual) OR automatic mode inputs.
+        For automatic mode, use ONE of:
+        - ligand + binder_spec: For protein-small_molecule protocol (binder against small molecule)
+        - target_structure + binder_spec: For protein-anything protocol (binder against protein target)
 
         Args:
             design_spec: YAML configuration string/dict or path to YAML file defining:
@@ -82,13 +88,18 @@ class BoltzGen(BaseConfig):
                         - Binder specification (sequence ranges)
                         - Binding site constraints
                         - Secondary structure specifications
-            target_structure: BioPipelines structure input (ToolOutput or file path) for automatic spec building
-            ligand: Ligand residue name in target structure (e.g., "LIG", "ATP") for automatic binding site detection
+            ligand: Ligand input from Ligand tool (ToolOutput/StandardizedOutput).
+                   For protein-small_molecule protocol. The tool reads the compounds.csv
+                   to determine format (smiles/ccd) automatically.
+            target_structure: BioPipelines structure input (ToolOutput or file path) for
+                            protein-anything protocol (binder against protein target)
+            ligand_code: Ligand residue name in target structure (e.g., "LIG", "ATP")
+                        for binding site detection when using target_structure
             binder_spec: Binder specification for automatic building:
                         - String format: "50-100" for length range, or "50" for fixed length
                         - Dict format: {"length": [50, 100]} or custom specification
             binding_region: Target binding region (optional, PyMOL-style: "A:9-140")
-                          If not provided and ligand is given, will auto-detect from ligand proximity
+                          If not provided and ligand_code is given, will auto-detect from ligand proximity
             protocol: Design protocol - one of:
                      - "protein-anything": General protein binder design
                      - "peptide-anything": Peptide binder design
@@ -114,8 +125,9 @@ class BoltzGen(BaseConfig):
         """
         # Store design specification parameters
         self.design_spec = design_spec
-        self.target_structure = target_structure
         self.ligand = ligand
+        self.target_structure = target_structure
+        self.ligand_code = ligand_code
         self.binder_spec = binder_spec
         self.binding_region = binding_region
 
@@ -146,6 +158,10 @@ class BoltzGen(BaseConfig):
         self.steps = steps or []
         self.cache_dir = cache_dir
 
+        # Track inputs from previous tools
+        self.ligand_compounds_csv = None  # Path to compounds.csv from Ligand tool
+        self.target_structure_path = None  # Path to target protein structure
+
         # Determine specification mode
         if design_spec is not None:
             # Manual mode: user provided design_spec
@@ -155,19 +171,20 @@ class BoltzGen(BaseConfig):
                 'entities:' in design_spec or '- protein:' in design_spec
             )
             self.design_spec_is_file = isinstance(design_spec, str) and not self.design_spec_is_yaml_str
+        elif ligand is not None and binder_spec is not None:
+            # Automatic mode: ligand + binder_spec (protein-small_molecule)
+            self.spec_mode = "ligand"
+            self.design_spec_is_dict = False
+            self.design_spec_is_yaml_str = False
+            self.design_spec_is_file = False
         elif target_structure is not None and binder_spec is not None:
-            # Automatic mode: build from BioPipelines inputs
-            self.spec_mode = "automatic"
+            # Automatic mode: target_structure + binder_spec (protein-anything)
+            self.spec_mode = "target"
             self.design_spec_is_dict = False
             self.design_spec_is_yaml_str = False
             self.design_spec_is_file = False
         else:
             self.spec_mode = None  # Will fail validation
-
-        # Track inputs from previous tools
-        self.input_structures = None
-        self.input_compounds = None
-        self.target_structure_path = None
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -252,17 +269,30 @@ class BoltzGen(BaseConfig):
         if self.spec_mode is None:
             raise ValueError(
                 "Must provide EITHER design_spec (manual) OR "
-                "(target_structure + binder_spec) for automatic building"
+                "(ligand + binder_spec) for protein-small_molecule OR "
+                "(target_structure + binder_spec) for protein-anything"
             )
 
         if self.spec_mode == "manual" and not self.design_spec:
             raise ValueError("design_spec cannot be empty in manual mode")
 
-        if self.spec_mode == "automatic":
-            if not self.target_structure:
-                raise ValueError("target_structure is required in automatic mode")
+        if self.spec_mode == "ligand":
+            if not self.ligand:
+                raise ValueError("ligand is required for protein-small_molecule mode")
             if not self.binder_spec:
-                raise ValueError("binder_spec is required in automatic mode")
+                raise ValueError("binder_spec is required for protein-small_molecule mode")
+            # Validate ligand is ToolOutput or StandardizedOutput
+            if not isinstance(self.ligand, (ToolOutput, StandardizedOutput)):
+                raise ValueError(
+                    f"ligand must be ToolOutput or StandardizedOutput from Ligand tool, "
+                    f"got {type(self.ligand)}"
+                )
+
+        if self.spec_mode == "target":
+            if not self.target_structure:
+                raise ValueError("target_structure is required for protein-anything mode")
+            if not self.binder_spec:
+                raise ValueError("binder_spec is required for protein-anything mode")
 
         # Validate protocol
         valid_protocols = [
@@ -335,8 +365,31 @@ class BoltzGen(BaseConfig):
                     "design_spec must be a YAML string, dictionary, or path to YAML file"
                 )
 
-        elif self.spec_mode == "automatic":
-            # Handle automatic mode: extract structure path from ToolOutput
+        elif self.spec_mode == "ligand":
+            # Handle ligand mode: extract compounds CSV from Ligand ToolOutput
+            if isinstance(self.ligand, StandardizedOutput):
+                # Get compounds CSV path
+                if hasattr(self.ligand, 'compounds') and self.ligand.compounds:
+                    self.ligand_compounds_csv = self.ligand.compounds[0]
+                elif hasattr(self.ligand, 'tables') and hasattr(self.ligand.tables, 'compounds'):
+                    self.ligand_compounds_csv = self.ligand.tables.compounds
+                else:
+                    raise ValueError("Ligand StandardizedOutput has no compounds attribute")
+            elif isinstance(self.ligand, ToolOutput):
+                # Get compounds CSV path from ToolOutput
+                compounds = self.ligand.get_output_files("compounds")
+                if compounds:
+                    self.ligand_compounds_csv = compounds[0]
+                    self.dependencies.append(self.ligand.config)
+                else:
+                    raise ValueError("Ligand ToolOutput has no compounds output")
+            else:
+                raise ValueError(
+                    f"ligand must be ToolOutput or StandardizedOutput, got {type(self.ligand)}"
+                )
+
+        elif self.spec_mode == "target":
+            # Handle target mode: extract structure path from ToolOutput
             if isinstance(self.target_structure, (ToolOutput, StandardizedOutput)):
                 # Extract first structure from tool output
                 if hasattr(self.target_structure, 'structures') and self.target_structure.structures:
@@ -374,16 +427,26 @@ class BoltzGen(BaseConfig):
                 spec_display = f"Manual (File: {os.path.basename(self.design_spec)})"
             else:
                 spec_display = "Manual (YAML string)"
-        else:  # automatic
-            spec_display = "Automatic (from target_structure + binder_spec)"
-            if self.target_structure_path:
-                spec_display += f"\n  Target: {os.path.basename(self.target_structure_path)}"
-            if self.ligand:
-                spec_display += f"\n  Ligand: {self.ligand}"
+        elif self.spec_mode == "ligand":
+            spec_display = "Automatic (from ligand + binder_spec)"
+            if self.ligand_compounds_csv:
+                spec_display += f"\n  Ligand CSV: {os.path.basename(self.ligand_compounds_csv)}"
             if self.binder_spec:
                 spec_display += f"\n  Binder: {self.binder_spec}"
             if self.binding_region:
                 spec_display += f"\n  Binding region: {self.binding_region}"
+        elif self.spec_mode == "target":
+            spec_display = "Automatic (from target_structure + binder_spec)"
+            if self.target_structure_path:
+                spec_display += f"\n  Target: {os.path.basename(self.target_structure_path)}"
+            if self.ligand_code:
+                spec_display += f"\n  Ligand code: {self.ligand_code}"
+            if self.binder_spec:
+                spec_display += f"\n  Binder: {self.binder_spec}"
+            if self.binding_region:
+                spec_display += f"\n  Binding region: {self.binding_region}"
+        else:
+            spec_display = "Unknown mode"
 
         config_lines.extend([
             f"DESIGN SPEC: {spec_display}",
@@ -479,26 +542,11 @@ class BoltzGen(BaseConfig):
         os.makedirs(self.output_folder, exist_ok=True)
         os.makedirs(self.config_folder, exist_ok=True)
 
-        # Prepare design specification file
-        if self.spec_mode == "automatic":
-            # Build YAML spec automatically
-            import yaml
-            auto_spec = self._build_automatic_yaml_spec()
-            with open(self.design_spec_yaml_file, 'w') as f:
-                yaml.dump(auto_spec, f, default_flow_style=False, sort_keys=False)
-        elif self.design_spec_is_dict:
-            # Convert dictionary to YAML and write to file
-            import yaml
-            with open(self.design_spec_yaml_file, 'w') as f:
-                yaml.dump(self.design_spec, f, default_flow_style=False)
-        elif self.design_spec_is_yaml_str:
-            # Write YAML string to file
-            with open(self.design_spec_yaml_file, 'w') as f:
-                f.write(self.design_spec)
-        elif self.design_spec_is_file:
-            # Copy existing file to output folder
-            import shutil
-            shutil.copy(self.design_spec, self.design_spec_yaml_file)
+        # Parse binder spec
+        binder_min, binder_max = self._parse_binder_spec()
+
+        # Generate config generation section (all modes generate YAML at runtime)
+        config_generation_section = self._generate_config_section(binder_min, binder_max)
 
         # Build BoltzGen command
         boltzgen_cmd = self._build_boltzgen_command()
@@ -511,9 +559,12 @@ class BoltzGen(BaseConfig):
 {self.generate_completion_check_header()}
 
 echo "Running BoltzGen binder design"
-echo "Design specification: {self.design_spec_yaml_file}"
 echo "Protocol: {self.protocol}"
 echo "Output folder: {self.output_folder}"
+
+{config_generation_section}
+
+echo "Design specification: {self.design_spec_yaml_file}"
 
 # Run BoltzGen
 {boltzgen_cmd}
@@ -543,6 +594,98 @@ fi
 """
 
         return script_content
+
+    def _parse_binder_spec(self):
+        """Parse binder_spec into min and max length values."""
+        if isinstance(self.binder_spec, dict):
+            # Dict format: {"length": [50, 100]}
+            length = self.binder_spec.get("length", [100, 200])
+            if isinstance(length, list) and len(length) == 2:
+                return length[0], length[1]
+            elif isinstance(length, int):
+                return length, length
+            else:
+                return 100, 200
+        elif isinstance(self.binder_spec, str):
+            # String format: "50-100" or "50"
+            if "-" in self.binder_spec:
+                parts = self.binder_spec.split("-")
+                return int(parts[0]), int(parts[1])
+            else:
+                length = int(self.binder_spec)
+                return length, length
+        else:
+            return 100, 200
+
+    def _generate_config_section(self, binder_min: int, binder_max: int) -> str:
+        """Generate the config file creation section for the bash script."""
+        config_py = os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_config.py")
+
+        if self.spec_mode == "ligand":
+            # Ligand mode: generate YAML at runtime from compounds.csv
+            target_args = ""
+            if self.binding_region:
+                target_args += f' --binding-region "{self.binding_region}"'
+
+            return f'''# Generate design specification from ligand
+echo "Generating design specification from ligand compounds..."
+python "{config_py}" \\
+  --ligand-csv "{self.ligand_compounds_csv}" \\
+  --output-yaml "{self.design_spec_yaml_file}" \\
+  --binder-length-min {binder_min} \\
+  --binder-length-max {binder_max}{target_args}
+
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to generate design specification"
+    exit 1
+fi
+'''
+
+        elif self.spec_mode == "target":
+            # Target mode: generate YAML at runtime with target structure
+            target_args = f' --target-structure "{self.target_structure_path}"'
+            if self.ligand_code:
+                target_args += f' --ligand-code "{self.ligand_code}"'
+            if self.binding_region:
+                target_args += f' --binding-region "{self.binding_region}"'
+
+            # For target mode we need a ligand CSV - create a dummy one if not provided
+            # Or require ligand input for target mode too
+            return f'''# Generate design specification from target structure
+echo "Generating design specification from target structure..."
+# Note: Target mode with protein structure - YAML will be built at runtime
+python "{config_py}" \\
+  --ligand-csv "NONE" \\
+  --output-yaml "{self.design_spec_yaml_file}" \\
+  --binder-length-min {binder_min} \\
+  --binder-length-max {binder_max}{target_args}
+
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to generate design specification"
+    exit 1
+fi
+'''
+
+        elif self.spec_mode == "manual":
+            # Manual mode: write YAML at pipeline time (user-provided spec)
+            if self.design_spec_is_dict:
+                # Convert dictionary to YAML and write to file at pipeline time
+                import yaml
+                with open(self.design_spec_yaml_file, 'w') as f:
+                    yaml.dump(self.design_spec, f, default_flow_style=False)
+                return f'# Using pre-generated design specification: {self.design_spec_yaml_file}\n'
+            elif self.design_spec_is_yaml_str:
+                # Write YAML string to file at pipeline time
+                with open(self.design_spec_yaml_file, 'w') as f:
+                    f.write(self.design_spec)
+                return f'# Using pre-generated design specification: {self.design_spec_yaml_file}\n'
+            elif self.design_spec_is_file:
+                # Copy existing file to output folder at pipeline time
+                import shutil
+                shutil.copy(self.design_spec, self.design_spec_yaml_file)
+                return f'# Using copied design specification: {self.design_spec_yaml_file}\n'
+
+        return "# Unknown spec mode\n"
 
     def _build_boltzgen_command(self) -> str:
         """Build the boltzgen run command with all arguments."""
