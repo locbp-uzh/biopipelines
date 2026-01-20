@@ -45,7 +45,7 @@
   - [ExtractMetrics](#extractmetrics)
   - [AverageByTable](#averagebytable)
 - [Utilities](#utilities)
-  - [LoadOutput](#loadoutput)
+  - [LoadOutput / LoadOutputs](#loadoutput--loadoutputs)
   - [MMseqs2Server](#mmseqs2server)
   - [CompoundLibrary](#compoundlibrary)
   - [PDB](#pdb)
@@ -100,10 +100,12 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 
 **Example**:
 ```python
+from PipelineScripts.rfdiffusion import RFdiffusion
+
 rfd = RFdiffusion(
     contigs="50-100",
     num_designs=10
-
+)
 ```
 
 ---
@@ -150,12 +152,14 @@ Generates protein structures with explicit modeling of ligands and small molecul
 
 **Example**:
 ```python
+from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
+
 rfdaa = RFdiffusionAllAtom(
     pdb=template,
     ligand='LIG',
     contigs='10-20,A6-140',
     num_designs=5
-
+)
 ```
 
 ---
@@ -210,6 +214,8 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 
 **Example**:
 ```python
+from PipelineScripts.rfdiffusion3 import RFdiffusion3
+
 # De novo protein design
 rfd3 = RFdiffusion3(
     contig="80-120",
@@ -312,6 +318,8 @@ Models (~6GB) download automatically to `~/.cache` on first run, or specify cust
 
 **Example**:
 ```python
+from PipelineScripts.boltzgen import BoltzGen
+
 # YAML design specification
 design_yaml = """
 entities:
@@ -331,7 +339,7 @@ boltzgen = BoltzGen(
     num_designs=10000,
     budget=100,
     alpha=0.5
-
+)
 
 # Access final designs
 best_designs = boltzgen.tables.final_metrics
@@ -339,6 +347,8 @@ best_designs = boltzgen.tables.final_metrics
 
 **Example with File**:
 ```python
+from PipelineScripts.boltzgen import BoltzGen
+
 # Using external YAML file
 boltzgen = BoltzGen(
     design_spec="designs/my_binder.yaml",
@@ -346,7 +356,7 @@ boltzgen = BoltzGen(
     num_designs=5000,
     budget=50,
     additional_filters=["design_ALA<0.3", "filter_rmsd_design<2.5"]
-
+)
 ```
 
 ---
@@ -387,12 +397,14 @@ git clone https://github.com/dauparas/ProteinMPN
 
 **Example**:
 ```python
+from PipelineScripts.protein_mpnn import ProteinMPNN
+
 pmpnn = ProteinMPNN(
     structures=rfd,
     num_sequences=10,
     fixed="1-10+50-60",
     redesigned="20-40"
-
+)
 ```
 
 ---
@@ -433,12 +445,14 @@ pip3 install -r requirements.txt
 
 **Example**:
 ```python
+from PipelineScripts.ligand_mpnn import LigandMPNN
+
 lmpnn = LigandMPNN(
     structures=rfdaa,
     ligand="LIG",
     num_sequences=5,
     redesigned=rfdaa.tables.structures.designed
-
+)
 ```
 
 ---
@@ -473,13 +487,16 @@ Generates new protein sequences by composing mutations based on frequency analys
 
 **Example**:
 ```python
-profiler = MutationProfiler(original=ref, mutants=variants
+from PipelineScripts.mutation_composer import MutationComposer
+from PipelineScripts.mutation_profiler import MutationProfiler
+
+profiler = MutationProfiler(original=ref, mutants=variants)
 composer = MutationComposer(
     frequencies=profiler.tables.relative_frequencies,
     num_sequences=50,
     mode="weighted_random",
     max_mutations=5
-
+)
 ```
 
 ---
@@ -522,12 +539,14 @@ Performs site-directed mutagenesis at specified positions. Generates systematic 
 
 **Example**:
 ```python
+from PipelineScripts.site_directed_mutagenesis import SDM
+
 sdm = SDM(
     original=template,
     position=42,
     mode="saturation",
     exclude="CP"
-
+)
 ```
 
 ---
@@ -559,6 +578,9 @@ Concatenates multiple protein sequences with flexible linkers. Creates fusion pr
 
 **Example**:
 ```python
+from PipelineScripts.fuse import Fuse
+from PipelineScripts.pdb import PDB
+
 N="GNH..."
 mid=PDB("...")
 C="EFT..."
@@ -600,6 +622,8 @@ Combines a template sequence with substitutions at specific regions, generating 
 
 **Examples**:
 ```python
+from PipelineScripts.stitch_sequences import StitchSequences
+
 # Raw sequences with fixed positions
 stitched = StitchSequences(
     template="MKTAYIAKQRQISFVKSHFS...",
@@ -655,6 +679,8 @@ Reverse-translates protein sequences to DNA with organism-specific codon optimiz
 
 **Example**:
 ```python
+from PipelineScripts.dna_encoder import DNAEncoder
+
 dna = DNAEncoder(
     sequences=lmpnn,
     organism="EC&HS"  # Conservative optimization for both E. coli and human
@@ -697,11 +723,13 @@ Predicts protein structures from amino acid sequences using AlphaFold2. Generate
 
 **Example**:
 ```python
+from PipelineScripts.alphafold import AlphaFold
+
 af = AlphaFold(
     sequences=lmpnn,
     num_relax=1,
     num_recycle=5
-
+)
 ```
 
 ---
@@ -738,10 +766,12 @@ pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059
 
 **Example**:
 ```python
+from PipelineScripts.esmfold import ESMFold
+
 esm = ESMFold(
     sequences=lmpnn,
     num_recycle=4
-
+)
 ```
 
 ---
@@ -791,13 +821,15 @@ pip install boltz[cuda] -U
 
 **Example**:
 ```python
-boltz_apo = Boltz2(proteins=lmpnn
+from PipelineScripts.boltz2 import Boltz2
+
+boltz_apo = Boltz2(proteins=lmpnn)
 boltz_holo = Boltz2(
     proteins=lmpnn,
     ligands="CC(=O)OC1=CC=CC=C1C(=O)O",  # Aspirin SMILES
     msas=boltz_apo,  # Pass entire ToolOutput
     affinity=True
-), env="Boltz2Env")
+)
 ```
 
 ---
@@ -850,27 +882,30 @@ pip install -e .
 
 **Example**:
 ```python
+from PipelineScripts.rf3 import RF3
+from PipelineScripts.compound_library import CompoundLibrary
+
 # Apo prediction
 rf3_apo = RF3(
     proteins=sequences
-
+)
 
 # Protein-ligand complex prediction
 rf3_holo = RF3(
     proteins=sequences,
     ligands="CC(=O)OC1=CC=CC=C1C(=O)O",  # Aspirin SMILES
     early_stopping_plddt=85.0
-
+)
 
 # Batch prediction with compound library
 compounds = CompoundLibrary({
     "AspA": "CC(=O)OC1=CC=CC=C1C(=O)O",
     "AspB": "CC(=O)OC1=CC=CC=C1C(=O)O"
-}
+})
 rf3_batch = RF3(
     proteins=protein_sequences,
     ligands=compounds
-
+)
 ```
 
 ---
@@ -905,12 +940,14 @@ mamba env create -f onet_env.yaml
 
 **Example**:
 ```python
+from PipelineScripts.onion_net import OnionNet
+
 # Predict affinities from Boltz2 structures
 affinity = OnionNet(
     structures=boltz_output,
     model_weights="/path/to/weights.h5",
     scaler_model="/path/to/scaler.model"
-
+)
 ```
 
 ---
@@ -948,13 +985,15 @@ pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 sci
 
 **Example**:
 ```python
+from PipelineScripts.onion_net import OnionNet2
+
 # Predict affinities with OnionNet-2
 affinity = OnionNet2(
     structures=boltz_output,
     model_path="/path/to/model.h5",
     scaler_path="/path/to/scaler.pkl",
     shells=62
-
+)
 ```
 
 ---
@@ -1032,23 +1071,27 @@ Model weights location: `/home/{username}/data/DynamicBind/workdir`
 **Example:**
 
 ```python
+from PipelineScripts.dynamic_bind import DynamicBind
+from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
+from PipelineScripts.compound_library import CompoundLibrary
+
 # Basic usage - single protein, SMILES string
 db = DynamicBind(
     proteins="target.pdb",
     ligands="CCO",  # SMILES string
     samples_per_complex=10
-
+)
 
 # Multiple proteins from PDBs folder
 db = DynamicBind(
     proteins=["protein1.pdb", "protein2.pdb"],
     ligands="CC(=O)O"
-
+)
 
 # Chain with other tools - all structures from tool output
-rfdaa = RFdiffusionAllAtom(ligand="ZIT", contigs="A1-100", num_designs=5
-compounds = CompoundLibrary(smiles_list=["CCO", "CC(=O)O"]
-db = DynamicBind(proteins=rfdaa, ligands=compounds
+rfdaa = RFdiffusionAllAtom(ligand="ZIT", contigs="A1-100", num_designs=5)
+compounds = CompoundLibrary(smiles_list=["CCO", "CC(=O)O"])
+db = DynamicBind(proteins=rfdaa, ligands=compounds)
 ```
 
 **Outputs:**
@@ -1080,13 +1123,15 @@ Measures distances between specific atoms and residues in structures. Useful for
 
 **Example**:
 ```python
+from PipelineScripts.residue_atom_distance import ResidueAtomDistance
+
 distances = ResidueAtomDistance(
     structures=boltz,
     atom="LIG.Cl",
     residue="D in IGDWG",
     method="min",
     metric_name="chlorine_distance"
-
+)
 ```
 
 ---
@@ -1121,11 +1166,13 @@ Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydr
 
 **Example**:
 ```python
+from PipelineScripts.plip import PLIP
+
 plip = PLIP(
     structures=boltz,
     ligand="LIG",
     create_pymol=True
-
+)
 ```
 
 ---
@@ -1151,11 +1198,13 @@ Selects protein residues based on proximity to ligands or other reference points
 
 **Example**:
 ```python
+from PipelineScripts.distance_selector import DistanceSelector
+
 selector = DistanceSelector(
     structures=boltz,
     ligand="ATP",
     distance=8.0
-
+)
 ```
 
 ---
@@ -1182,36 +1231,40 @@ Modifies PyMOL-formatted selection strings (e.g., "3-45+58-60") with structure-a
 
 **Example**:
 ```python
+from PipelineScripts.selection_editor import SelectionEditor
+from PipelineScripts.distance_selector import DistanceSelector
+from PipelineScripts.ligand_mpnn import LigandMPNN
+
 # Expand binding site selection by 2 residues
 distances = DistanceSelector(
     structures=rfdaa,
     ligand="LIG",
     distance=5
-
+)
 
 expanded = SelectionEditor(
     selection=distances.tables.selections.within,
     expand=2
-
+)
 
 # Use expanded selection with LigandMPNN
 lmpnn = LigandMPNN(
     structures=rfdaa,
     ligand="LIG",
     redesigned=expanded.tables.selections.within
-
+)
 
 # Invert selection to get everything except binding site
 fixed_region = SelectionEditor(
     selection=distances.tables.selections.within,
     invert=True
-
+)
 
 # Shrink selection
 tighter = SelectionEditor(
     selection=distances.tables.selections.within,
     shrink=1
-
+)
 ```
 
 **Key Features**:
@@ -1245,12 +1298,14 @@ Quantifies structural changes between reference and target structures. Calculate
 
 **Example**:
 ```python
+from PipelineScripts.conformational_change import ConformationalChange
+
 conf_change = ConformationalChange(
     reference_structures=apo_structures,
     target_structures=holo_structures,
     selection="resi 10-50",  # PyMOL selection
     alignment="super"
-
+)
 ```
 
 ---
@@ -1292,10 +1347,12 @@ mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 
 **Example**:
 ```python
+from PipelineScripts.mutation_profiler import MutationProfiler
+
 profiler = MutationProfiler(
     original=template,
     mutants=lmpnn
-
+)
 ```
 
 ---
@@ -1348,6 +1405,8 @@ Note: When n ≤ 1 for either group, correlation is set to 0.
 
 **Example**:
 ```python
+from PipelineScripts.sequence_metric_correlation import SequenceMetricCorrelation
+
 # Single cycle
 correlation = SequenceMetricCorrelation(
     mutants=filtered.tables.sequences,
@@ -1404,6 +1463,9 @@ Where:
 
 **Example**:
 ```python
+from PipelineScripts.bayesian_adjuster import BayesianAdjuster
+from PipelineScripts.mutation_composer import MutationComposer
+
 # Basic usage
 adjuster = BayesianAdjuster(
     frequencies=profiler.tables.absolute_frequencies,
@@ -1486,6 +1548,8 @@ Analyzes correlations between sequence mutations and performance metrics across 
 
 **Example**:
 ```python
+from PipelineScripts.sequence_metric_analysis import SequenceMetricAnalysis
+
 # First cycle: initialize analysis
 analysis = SequenceMetricAnalysis(
     sequences=filtered.tables.sequences,
@@ -1507,7 +1571,7 @@ analysis = SequenceMetricAnalysis(
     min_observations=5,
     history=analysis  # Accumulates observations
 )
-
+```
 
 **Key Features**:
 - **Multi-metric tracking**: Analyze multiple metrics simultaneously (affinity, pLDDT, contacts, etc.)
@@ -1515,7 +1579,6 @@ analysis = SequenceMetricAnalysis(
 - **Dual scoring**: Both delta scores (interpretable units) and z-scores (standardized) for flexibility
 - **MutationComposer-compatible**: mutation_deltas and mutation_zscores tables use same format as MutationProfiler frequencies
 - **Confidence filtering**: min_observations threshold ensures reliable mutation scores
-```
 ---
 
 ### ProteinLigandContacts
@@ -1549,13 +1612,15 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 
 **Example**:
 ```python
+from PipelineScripts.protein_ligand_contacts import ProteinLigandContacts
+
 # Analyze contacts with specific protein regions
 contacts = ProteinLigandContacts(
     structures=rfdaa,
     selections=rfdaa.tables.structures.designed,
     ligand="LIG",
     contact_threshold=5.0
-
+)
 
 # Use fixed selection for all structures
 contacts = ProteinLigandContacts(
@@ -1563,13 +1628,13 @@ contacts = ProteinLigandContacts(
     selections='10-20+30-40',
     ligand="ATP",
     contact_threshold=4.0
-
+)
 
 # Analyze all protein residues
 contacts = ProteinLigandContacts(
     structures=boltz,
     ligand="GDP"
-
+)
 ```
 
 ---
@@ -1603,9 +1668,14 @@ Measures ligand pose distance between reference holo structure and sample struct
 
 **Example**:
 ```python
+from PipelineScripts.pose_distance import PoseDistance
+from PipelineScripts.pdb import PDB
+from PipelineScripts.boltz2 import Boltz2
+from PipelineScripts.filter import Filter
+
 # Compare designed structures to XRC reference
-xrc = PDB(pdbs="4ufc", ids="reference"
-designed = Boltz2(proteins=sequences, ligands="CCO"
+xrc = PDB(pdbs="4ufc", ids="reference")
+designed = Boltz2(proteins=sequences, ligands="CCO")
 
 pose_analysis = PoseDistance(
     reference_structure=xrc,
@@ -1613,14 +1683,14 @@ pose_analysis = PoseDistance(
     reference_ligand="ATP",
     sample_ligand="LIG",
     alignment_selection="chain A and backbone"
-
+)
 
 # Filter structures with RMSD < 2.0 Å
 good_poses = Filter(
     data=pose_analysis.tables.analysis,
     pool=designed,
     expression="ligand_rmsd < 2.0"
-
+)
 ```
 
 ---
@@ -1651,13 +1721,15 @@ Filters structures or sequences based on metric criteria. Uses pandas query expr
 
 **Example**:
 ```python
+from PipelineScripts.filter import Filter
+
 filtered = Filter(
     data=distances.tables.analysis,
     pool=boltz,
     expression="distance < 3.5 and confidence_score > 0.85",
     max_items=10,
     sort_by="distance"
-
+)
 ```
 
 ---
@@ -1701,6 +1773,8 @@ Ranks entries based on a metric (column or computed expression), renames IDs to 
 
 **Example**:
 ```python
+from PipelineScripts.rank import Rank
+
 # Rank using tuple notation (metric auto-extracted from column reference)
 ranked = Rank(
     data=boltz.tables.structures.pLDDT,  # metric="pLDDT" inferred
@@ -1752,12 +1826,14 @@ Selects the single best structure or sequence based on optimization criteria. Su
 
 **Example**:
 ```python
+from PipelineScripts.select_best import SelectBest
+
 best = SelectBest(
     pool=boltz,
     tables=[distances.tables.analysis],
     metric="distance",
     mode="min"
-
+)
 
 # Multi-objective selection
 best_multi = SelectBest(
@@ -1766,7 +1842,7 @@ best_multi = SelectBest(
     metric="composite_score",
     weights={"binding_affinity": 0.6, "pLDDT": 0.4},
     mode="max"
-
+)
 ```
 
 ---
@@ -1792,10 +1868,12 @@ Removes duplicate structures or sequences from a pool. Supports deduplication by
 
 **Example**:
 ```python
+from PipelineScripts.remove_duplicates import RemoveDuplicates
+
 unique = RemoveDuplicates(
     pool=lmpnn,
     compare="sequence"
-
+)
 ```
 
 ---
@@ -1819,12 +1897,14 @@ Combines multiple tables by joining on a common key column. Enables integration 
 
 **Example**:
 ```python
+from PipelineScripts.merge_tables import MergeTables
+
 merged = MergeTables(
     tables=[distances.tables.analysis, plip.tables.interactions],
     prefixes=["dist_", "plip_"],
     key="id",
     calculate={"score": "dist_distance + plip_energy"}
-
+)
 ```
 
 ---
@@ -1845,10 +1925,12 @@ Stacks multiple tables vertically (row-wise). Useful for combining results from 
 
 **Example**:
 ```python
+from PipelineScripts.concatenate_tables import ConcatenateTables
+
 concat = ConcatenateTables(
     tables=[cycle1_results, cycle2_results, cycle3_results],
     fill="N/A"
-
+)
 ```
 
 ---
@@ -1871,12 +1953,14 @@ Extracts a subset of rows and/or columns from a table. Enables data sampling and
 
 **Example**:
 ```python
+from PipelineScripts.slice_table import SliceTable
+
 sliced = SliceTable(
     table=results.tables.analysis,
     start=0,
     end=100,
     columns=["id", "distance", "confidence"]
-
+)
 ```
 
 ---
@@ -1899,12 +1983,14 @@ Extracts and aggregates specific metrics from tables. Supports grouping and vari
 
 **Example**:
 ```python
+from PipelineScripts.extract_metrics import ExtractMetrics
+
 metrics = ExtractMetrics(
     tables=[boltz.tables.confidence],
     metrics=["complex_plddt", "ptm"],
     group_by="input_file",
     aggregation="mean"
-
+)
 ```
 
 ---
@@ -1926,22 +2012,28 @@ Computes averages of metrics grouped by a specified column. Useful for summarizi
 
 **Example**:
 ```python
+from PipelineScripts.average_by_table import AverageByTable
+
 averaged = AverageByTable(
     tables=[cycle1.tables.analysis, cycle2.tables.analysis],
     group_by="structure_id",
     metrics=["distance", "confidence"]
-
+)
 ```
 
 ---
 
 ## Utilities
 
-### LoadOutput
+### LoadOutput / LoadOutputs
 
-Loads previously saved tool outputs for reuse in new pipelines. Enables incremental development and filtering of existing results at pipeline runtime.
+Load previously saved tool outputs for reuse in new pipelines. Enables incremental development and filtering of existing results at pipeline runtime.
 
 **Environment**: `ProteinEnv`
+
+#### LoadOutput (single file)
+
+Loads a single tool output JSON file.
 
 **Parameters**:
 - `output_json`: str (required) - Path to tool output JSON file (in ToolOutputs folder)
@@ -1953,34 +2045,93 @@ Loads previously saved tool outputs for reuse in new pipelines. Enables incremen
 
 **Example**:
 ```python
+from PipelineScripts.load_output import LoadOutput
+
 previous_boltz = LoadOutput(
     output_json="/path/to/job/ToolOutputs/003_Boltz2.json",
     filter="confidence_score > 0.8"
-
+)
 ```
 
-**PracticalTips**:
+#### LoadOutputs (multiple files)
+
+Loads multiple tool outputs from a ToolOutputs folder with filtering and sorting.
+
+**Parameters**:
+- `path`: str (required) - Path to the job folder or ToolOutputs folder
+  - If job folder: automatically appends "ToolOutputs"
+  - If ToolOutputs folder: uses directly
+- `tool`: Optional[str] = None - Filter by tool name (e.g., "MergeTables", "Filter", "Boltz2")
+- `suffix`: Optional[str] = None - Filter by filename suffix (e.g., "Cycle10", "Affinity")
+  - Matches pattern: NNN_ToolName_Suffix.json
+- `ascending`: bool = True - Sort order (True = ascending by name, False = descending)
+- `**load_output_kwargs`: Additional parameters passed to LoadOutput (e.g., `filter`, `validate_files`)
+
+**Returns**:
+- Dictionary mapping identifiers to LoadOutput objects
+  - Keys: `"{execution_order}_{tool_name}_{suffix}"` or `"{execution_order}_{tool_name}"`
+  - Values: LoadOutput instances
+
+**Example**:
+```python
+from PipelineScripts.load_output import LoadOutputs
+
+# Load all MergeTables outputs from a job
+data = LoadOutputs(
+    path="/shares/user/BioPipelines/Project/Job_001",
+    tool="MergeTables"
+)
+# Access outputs: data["003_MergeTables"], data["007_MergeTables"], etc.
+
+# Load all outputs from Cycle10 with validation disabled
+cycle10_data = LoadOutputs(
+    path="/shares/user/BioPipelines/Project/Job_001/ToolOutputs",
+    suffix="Cycle10",
+    validate_files=False
+)
+
+# Load all Filter outputs in descending order
+filters = LoadOutputs(
+    path="/shares/user/BioPipelines/Project/Job_001",
+    tool="Filter",
+    ascending=False
+)
+
+# Combine filters: specific tool with suffix
+merged_cycle5 = LoadOutputs(
+    path="/shares/user/BioPipelines/Project/Job_001",
+    tool="MergeTables",
+    suffix="Cycle5"
+)
+```
+
+**Practical Tips**:
 - Instead of copy-pasting ligand SMILES across pipelines, you can create a compound library, and then load the smiles passing an id filter:
 ```python
+from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.compound_library import CompoundLibrary
+from PipelineScripts.boltz2 import Boltz2
+
 # Pipeline 1 to store the library
 # imports, pipeline instantiation, ...
 CompoundLibrary({
   "Compound1": "CCNCNNCC(=O)C",
   "Compound2": "CCNCNNCC(=O)C",
   ...
-}
+})
 # submit
 
-# Pipeline 2 running calculatios with one of the compounds
+# Pipeline 2 running calculations with one of the compounds
 # imports, pipeline instantiation, ...
 compound1 = LoadOutput(
     output_json="/path/to/job/ToolOutputs/001_CompoundLibrary.json",
-    filter='id == "Compound1"' #quotes are important for proper pandas query here: x is a column name; "x" is a string.
-
-boltz = Boltz2(proteins=HaloTag,
-                            ligands=compound1
-#submit
-
+    filter='id == "Compound1"'  # quotes are important for proper pandas query here: x is a column name; "x" is a string.
+)
+boltz = Boltz2(
+    proteins=HaloTag,
+    ligands=compound1
+)
+# submit
 ```
 
 ### MMseqs2
@@ -2002,10 +2153,12 @@ Generates multiple sequence alignments (MSAs) for protein sequences. Used for im
 
 **Example**:
 ```python
+from PipelineScripts.mmseqs2 import MMseqs2
+
 msas = MMseqs2(
     sequences=lmpnn,
     timeout=7200
-
+)
 ```
 
 ---
@@ -2047,6 +2200,8 @@ Creates and manages chemical compound libraries. Supports combinatorial SMILES e
 
 **Examples**:
 ```python
+from PipelineScripts.compound_library import CompoundLibrary
+
 # With primary_key for combinatorial expansion
 library = CompoundLibrary(
     library={
@@ -2055,14 +2210,14 @@ library = CompoundLibrary(
         "fluorophore": ["c1ccc(N)cc1"]
     },
     primary_key="scaffold"
-
+)
 
 # Without primary_key - direct SMILES list
 library = CompoundLibrary(
     library={
         "compounds": ["CCO", "CCCO", "CCCCO", "c1ccccc1"]
     }
-
+)
 ```
 
 ---
@@ -2106,17 +2261,19 @@ For each PDB ID, searches in order:
 
 **Examples**:
 ```python
+from PipelineScripts.pdb import PDB
+
 # Automatic fallback: checks PDBs/, then downloads
 pdb = PDB(
     pdbs=["4ufc", "1abc"],
     ids=["POI1", "POI2"]
-
+)
 
 # Check custom folder first, then PDBs/, then download
 pdb = PDB(
     pdbs=["my_structure"],
     local_folder="/path/to/my/pdbs"
-
+)
 
 # Download biological assembly
 pdb = PDB(
@@ -2124,7 +2281,7 @@ pdb = PDB(
     ids="MyProtein",
     biological_assembly=True,
     remove_waters=False
-
+)
 ```
 
 ---
@@ -2179,6 +2336,9 @@ Downloaded ligands are normalized with:
 
 **Examples**:
 ```python
+from PipelineScripts.ligand import Ligand
+from PipelineScripts.rfdiffusion3 import RFdiffusion3
+
 # RCSB ligand by CCD code (auto-detect)
 lig = Ligand(ids="atp_ligand", lookup="ATP")
 
@@ -2241,6 +2401,10 @@ These operations are accessible as static methods with  `PyMOL.<operation>` (see
 
 **Example**:
 ```python
+from PipelineScripts.pymol import PyMOL
+from PipelineScripts.fuse import Fuse
+from PipelineScripts.alphafold import AlphaFold
+
 # Fuse domains with linkers
 fused = Fuse(proteins=[A, B, C], linker="GSGAG", linker_lengths=["2-4", "2-4"])
 folded = AlphaFold(sequences=fused)
@@ -2249,7 +2413,7 @@ folded = AlphaFold(sequences=fused)
 PyMOL("domain_visualization",
     # Set naming: ID "sensor_2_3" (from the basename table) → PyMOL object "s_2_3_parts"
     PyMOL.Names(prefix="s", basename=fused.tables.sequences.lengths, suffix="parts"),
-    PyMOL.Load(folded), #folded IDs match fused table IDs
+    PyMOL.Load(folded),  # folded IDs match fused table IDs
     # Color domains and linkers using per-structure selections from table
     PyMOL.Color(folded, selection=fused.tables.sequences.D1, color="white"),
     PyMOL.Color(folded, selection=fused.tables.sequences.L1, color="orange"),
@@ -2259,7 +2423,7 @@ PyMOL("domain_visualization",
     # Load again with pLDDT coloring under different names
     PyMOL.Names(prefix="sensor", basename=fused.tables.sequences.lengths, suffix="pLDDT"),
     PyMOL.Load(folded),
-    PyMOL.ColorAF(folded), 
+    PyMOL.ColorAF(folded),
     # Align all to first loaded object using align algorithm (sequence-based)
     PyMOL.Align("align")
 )

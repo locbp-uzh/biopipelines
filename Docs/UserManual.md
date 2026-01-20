@@ -152,14 +152,19 @@ sequences=queries_csv
 All the outputs are standardized such that the identity of the previous tool is not needed for the prediction to be used as input, and in general tools have to be developed agnostic of previous tool identities. Furthermore, this systems allows:
 
 1. Verification of the success or failure of a given tool. At slurm runtime, after running a tool, the pipeline coordinator check for the presence of the predicted output and creates a file `<NNN>_<Tool>_COMPLETED` or `<NNN>_<Tool>_FAILED`. One can resubmit the same slurm bash script(for example, if the time ran out) and the completed steps will be skipped.
-2. Standardized saving and loading of tool outputs. All the predictions are saved in the folder `ToolOutputs` within the job folder, and can be loaded with the tool LoadOutput. In the following example, rfd behaves identically to the one in the previous snippet:
+2. Standardized saving and loading of tool outputs. All the predictions are saved in the folder `ToolOutputs` within the job folder, and can be loaded with `LoadOutput` (single file) or `LoadOutputs` (multiple files). In the following example, rfd behaves identically to the one in the previous snippet:
 ```python
 from PipelineScripts.pipeline import *
-from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.load_output import LoadOutput, LoadOutputs
 from PipelineScripts.protein_mpnn import ProteinMPNN
+
 with Pipeline("TestProject","Test","Some test"):
+  # Load single output
   rfd = LoadOutput('/path/to/ToolOutputs/001_RFdiffusion.json')
-  pmd = ProteinMPNN(structures=rfd,num_sequences=2)
+  pmd = ProteinMPNN(structures=rfd, num_sequences=2)
+
+  # Or load multiple outputs at once
+  all_merge_tables = LoadOutputs('/path/to/job', tool="MergeTables")
 ```
 
 ### Resources

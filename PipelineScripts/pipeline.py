@@ -580,20 +580,20 @@ class Pipeline:
         if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
             return ""
         elif gpu_spec == "high-memory":
-            return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM141GB\""
+            return "#SBATCH --gpus=1\n#SBATCH --constraint=\"(GPUMEM32GB|GPUMEM80GB|GPUMEM141GB)\""
         elif gpu_spec == "gpu" or gpu_spec == "any":
             return "#SBATCH --gpus=1"
         elif gpu_spec.startswith("!"):
             excluded_model = gpu_spec[1:]
             if excluded_model.upper() == "L4":
-                return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM141GB\""
+                return "#SBATCH --gpus=1\n#SBATCH --constraint=\"(GPUMEM32GB|GPUMEM80GB|GPUMEM141GB)\""
             else:
                 return f"#SBATCH --gpus=1\n#SBATCH --constraint=\"~GPU{excluded_model}\""
         elif gpu_spec in ["24GB", "32GB", "80GB", "141GB"] or "|" in gpu_spec:
             if "|" in gpu_spec:
                 memory_options = gpu_spec.split("|")
                 constraint_parts = [f"GPUMEM{mem}" for mem in memory_options]
-                constraint = "|".join(constraint_parts)
+                constraint = "(" + "|".join(constraint_parts) + ")"
             else:
                 constraint = f"GPUMEM{gpu_spec}"
             return f"#SBATCH --gpus=1\n#SBATCH --constraint=\"{constraint}\""
