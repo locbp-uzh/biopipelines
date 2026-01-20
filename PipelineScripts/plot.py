@@ -65,6 +65,16 @@ class Plot(BaseConfig):
                 title="pLDDT Comparison"
             )
         )
+
+        # HeatMap - correlation matrix
+        Plot(
+            Plot.HeatMap(data=analysis, columns=["pLDDT", "affinity", "contacts"], title="Metric Correlations")
+        )
+
+        # HeatMap - pivot table
+        Plot(
+            Plot.HeatMap(data=analysis, x="model", y="condition", value="score", title="Model Performance")
+        )
     """
 
     TOOL_NAME = "Plot"
@@ -80,6 +90,8 @@ class Plot(BaseConfig):
                 title: str = None,
                 xlabel: str = None,
                 ylabel: str = None,
+                x_name: str = None,
+                y_name: str = None,
                 figsize: Tuple[float, float] = (8, 6)) -> PlotOperation:
         """
         Create X vs Y scatter plot, optionally colored by a third column.
@@ -90,15 +102,18 @@ class Plot(BaseConfig):
             y: Column name for Y axis
             color: Column name for color grouping (optional)
             title: Plot title (optional)
-            xlabel: X axis label (defaults to column name)
-            ylabel: Y axis label (defaults to column name)
+            xlabel: X axis label (defaults to x_name or column name)
+            ylabel: Y axis label (defaults to y_name or column name)
+            x_name: Display name for X variable (alternative to xlabel)
+            y_name: Display name for Y variable (alternative to ylabel)
             figsize: Figure size as (width, height) in inches
 
         Returns:
             PlotOperation for scatter plot
         """
         return PlotOperation("scatter", data=data, x=x, y=y, color=color,
-                            title=title, xlabel=xlabel, ylabel=ylabel, figsize=figsize)
+                            title=title, xlabel=xlabel, ylabel=ylabel,
+                            x_name=x_name, y_name=y_name, figsize=figsize)
 
     @staticmethod
     def Histogram(data: Union[StandardizedOutput, ToolOutput, TableInfo],
@@ -107,6 +122,8 @@ class Plot(BaseConfig):
                   title: str = None,
                   xlabel: str = None,
                   ylabel: str = None,
+                  x_name: str = None,
+                  y_name: str = None,
                   figsize: Tuple[float, float] = (8, 6)) -> PlotOperation:
         """
         Create distribution histogram of a single column.
@@ -116,15 +133,18 @@ class Plot(BaseConfig):
             x: Column name to plot distribution of
             bins: Number of histogram bins
             title: Plot title (optional)
-            xlabel: X axis label (defaults to column name)
-            ylabel: Y axis label (defaults to "Count")
+            xlabel: X axis label (defaults to x_name or column name)
+            ylabel: Y axis label (defaults to y_name or "Count")
+            x_name: Display name for X variable (alternative to xlabel)
+            y_name: Display name for Y variable (alternative to ylabel)
             figsize: Figure size as (width, height) in inches
 
         Returns:
             PlotOperation for histogram
         """
         return PlotOperation("histogram", data=data, x=x, bins=bins,
-                            title=title, xlabel=xlabel, ylabel=ylabel, figsize=figsize)
+                            title=title, xlabel=xlabel, ylabel=ylabel,
+                            x_name=x_name, y_name=y_name, figsize=figsize)
 
     @staticmethod
     def Bar(data: Union[StandardizedOutput, ToolOutput, TableInfo],
@@ -133,6 +153,8 @@ class Plot(BaseConfig):
             title: str = None,
             xlabel: str = None,
             ylabel: str = None,
+            x_name: str = None,
+            y_name: str = None,
             figsize: Tuple[float, float] = (8, 6)) -> PlotOperation:
         """
         Create bar chart for categorical X axis.
@@ -142,15 +164,18 @@ class Plot(BaseConfig):
             x: Column name for categories (X axis)
             y: Column name for values (Y axis)
             title: Plot title (optional)
-            xlabel: X axis label (defaults to column name)
-            ylabel: Y axis label (defaults to column name)
+            xlabel: X axis label (defaults to x_name or column name)
+            ylabel: Y axis label (defaults to y_name or column name)
+            x_name: Display name for X variable (alternative to xlabel)
+            y_name: Display name for Y variable (alternative to ylabel)
             figsize: Figure size as (width, height) in inches
 
         Returns:
             PlotOperation for bar chart
         """
         return PlotOperation("bar", data=data, x=x, y=y,
-                            title=title, xlabel=xlabel, ylabel=ylabel, figsize=figsize)
+                            title=title, xlabel=xlabel, ylabel=ylabel,
+                            x_name=x_name, y_name=y_name, figsize=figsize)
 
     @staticmethod
     def Column(data: List[Union[StandardizedOutput, ToolOutput, TableInfo]],
@@ -159,6 +184,8 @@ class Plot(BaseConfig):
                title: str = None,
                xlabel: str = None,
                ylabel: str = None,
+               x_name: str = None,
+               y_name: str = None,
                show_points: bool = True,
                show_mean: bool = True,
                show_error: str = "sd",
@@ -174,8 +201,10 @@ class Plot(BaseConfig):
             y: Column name to compare across sources
             labels: Group labels (defaults to source filenames)
             title: Plot title (optional)
-            xlabel: X axis label (optional)
-            ylabel: Y axis label (defaults to column name)
+            xlabel: X axis label (defaults to x_name)
+            ylabel: Y axis label (defaults to y_name or column name)
+            x_name: Display name for X axis (alternative to xlabel)
+            y_name: Display name for Y variable (alternative to ylabel)
             show_points: Overlay individual data points on bars
             show_mean: Show mean line/bar
             show_error: Error bar type: "sd" (std dev), "sem" (std error), "ci" (95% CI), or None
@@ -185,8 +214,60 @@ class Plot(BaseConfig):
         """
         return PlotOperation("column", data=data, y=y, labels=labels,
                             title=title, xlabel=xlabel, ylabel=ylabel,
+                            x_name=x_name, y_name=y_name,
                             show_points=show_points, show_mean=show_mean,
                             show_error=show_error, figsize=figsize)
+
+    @staticmethod
+    def HeatMap(data: Union[StandardizedOutput, ToolOutput, TableInfo],
+                x: str = None,
+                y: str = None,
+                value: str = None,
+                columns: List[str] = None,
+                title: str = None,
+                xlabel: str = None,
+                ylabel: str = None,
+                x_name: str = None,
+                y_name: str = None,
+                cmap: str = "viridis",
+                annotate: bool = True,
+                figsize: Tuple[float, float] = (10, 8)) -> PlotOperation:
+        """
+        Create a heatmap visualization.
+
+        Two modes:
+        1. Pivot mode: Provide x, y, value columns to create a pivot table heatmap
+        2. Correlation mode: Provide columns list to show correlation matrix
+
+        Args:
+            data: Data source (tool output or table)
+            x: Column for X axis categories (pivot mode)
+            y: Column for Y axis categories (pivot mode)
+            value: Column for cell values (pivot mode)
+            columns: List of column names for correlation matrix (correlation mode)
+            title: Plot title (optional)
+            xlabel: X axis label (defaults to x_name or column name)
+            ylabel: Y axis label (defaults to y_name or column name)
+            x_name: Display name for X axis (alternative to xlabel)
+            y_name: Display name for Y axis (alternative to ylabel)
+            cmap: Colormap name (default: "viridis")
+            annotate: Show values in cells (default: True)
+            figsize: Figure size as (width, height) in inches
+
+        Returns:
+            PlotOperation for heatmap
+
+        Examples:
+            # Correlation matrix
+            Plot.HeatMap(data=results, columns=["pLDDT", "affinity", "contacts"])
+
+            # Pivot table heatmap
+            Plot.HeatMap(data=results, x="model", y="condition", value="score")
+        """
+        return PlotOperation("heatmap", data=data, x=x, y=y, value=value,
+                            columns=columns, title=title, xlabel=xlabel, ylabel=ylabel,
+                            x_name=x_name, y_name=y_name, cmap=cmap,
+                            annotate=annotate, figsize=figsize)
 
     # --- Instance methods ---
 
@@ -252,6 +333,12 @@ class Plot(BaseConfig):
                 data = op.params.get("data")
                 if not isinstance(data, list) or len(data) < 1:
                     raise ValueError(f"Column operation {i} requires 'data' to be a list with at least one source")
+            elif op.op_type == "heatmap":
+                # Either pivot mode (x, y, value) or correlation mode (columns)
+                has_pivot = op.params.get("x") and op.params.get("y") and op.params.get("value")
+                has_columns = op.params.get("columns")
+                if not has_pivot and not has_columns:
+                    raise ValueError(f"HeatMap operation {i} requires either (x, y, value) for pivot mode or 'columns' for correlation mode")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sources from pipeline context."""

@@ -86,6 +86,14 @@ class PlotBuilder:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
+    def _resolve_label(self, explicit_label: str, name: str, column: str) -> str:
+        """Resolve axis label from explicit label, name, or column."""
+        if explicit_label:
+            return explicit_label
+        if name:
+            return name
+        return column
+
     def execute_scatter(self, op: Dict[str, Any], output_path: str):
         """
         Execute Scatter operation - create X vs Y scatter plot.
@@ -99,8 +107,8 @@ class PlotBuilder:
         y_col = op.get("y")
         color_col = op.get("color")
         title = op.get("title")
-        xlabel = op.get("xlabel", x_col)
-        ylabel = op.get("ylabel", y_col)
+        xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
+        ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
         figsize = tuple(op.get("figsize", [8, 6]))
 
         df = self._resolve_data_source(data_ref)
@@ -159,8 +167,8 @@ class PlotBuilder:
         x_col = op.get("x")
         bins = op.get("bins", 20)
         title = op.get("title")
-        xlabel = op.get("xlabel", x_col)
-        ylabel = op.get("ylabel", "Count")
+        xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
+        ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), "Count")
         figsize = tuple(op.get("figsize", [8, 6]))
 
         df = self._resolve_data_source(data_ref)
@@ -216,8 +224,8 @@ class PlotBuilder:
         x_col = op.get("x")
         y_col = op.get("y")
         title = op.get("title")
-        xlabel = op.get("xlabel", x_col)
-        ylabel = op.get("ylabel", y_col)
+        xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
+        ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
         figsize = tuple(op.get("figsize", [8, 6]))
 
         df = self._resolve_data_source(data_ref)
@@ -275,8 +283,8 @@ class PlotBuilder:
         y_col = op.get("y")
         labels = op.get("labels")
         title = op.get("title")
-        xlabel = op.get("xlabel", "")
-        ylabel = op.get("ylabel", y_col)
+        xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), "")
+        ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
         show_points = op.get("show_points", True)
         show_mean = op.get("show_mean", True)
         show_error = op.get("show_error", "sd")
@@ -372,6 +380,117 @@ class PlotBuilder:
             "data_sources": "; ".join(source_names)
         })
 
+    def execute_heatmap(self, op: Dict[str, Any], output_path: str):
+        """
+        Execute HeatMap operation - create heatmap visualization.
+
+        Supports two modes:
+        1. Pivot mode: Create heatmap from x, y, value columns
+        2. Correlation mode: Create correlation matrix from selected columns
+
+        Args:
+            op: Operation dict with data, x, y, value, columns, etc.
+            output_path: Path to save the plot
+        """
+        data_ref = op.get("data")
+        x_col = op.get("x")
+        y_col = op.get("y")
+        value_col = op.get("value")
+        columns = op.get("columns")
+        title = op.get("title")
+        xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col or "")
+        ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col or "")
+        cmap = op.get("cmap", "viridis")
+        annotate = op.get("annotate", True)
+        figsize = tuple(op.get("figsize", [10, 8]))
+
+        df = self._resolve_data_source(data_ref)
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        if columns:
+            # Correlation mode
+            # Validate columns exist
+            missing_cols = [c for c in columns if c not in df.columns]
+            if missing_cols:
+                raise ValueError(f"Columns not found: {missing_cols}. Available: {list(df.columns)}")
+
+            # Compute correlation matrix
+            corr_matrix = df[columns].corr()
+            matrix_data = corr_matrix.values
+            x_labels = columns
+            y_labels = columns
+
+            if not title:
+                title = "Correlation Matrix"
+
+            # Use diverging colormap for correlations
+            cmap = "RdBu_r"
+            vmin, vmax = -1, 1
+
+        else:
+            # Pivot mode
+            if x_col not in df.columns:
+                raise ValueError(f"Column '{x_col}' not found. Available: {list(df.columns)}")
+            if y_col not in df.columns:
+                raise ValueError(f"Column '{y_col}' not found. Available: {list(df.columns)}")
+            if value_col not in df.columns:
+                raise ValueError(f"Column '{value_col}' not found. Available: {list(df.columns)}")
+
+            # Create pivot table
+            pivot_df = df.pivot_table(index=y_col, columns=x_col, values=value_col, aggfunc='mean')
+            matrix_data = pivot_df.values
+            x_labels = pivot_df.columns.tolist()
+            y_labels = pivot_df.index.tolist()
+
+            vmin, vmax = None, None
+
+        # Create heatmap
+        im = ax.imshow(matrix_data, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax)
+
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        if columns:
+            cbar.set_label('Correlation', fontsize=10)
+        elif value_col:
+            cbar.set_label(value_col, fontsize=10)
+
+        # Set ticks and labels
+        ax.set_xticks(np.arange(len(x_labels)))
+        ax.set_yticks(np.arange(len(y_labels)))
+        ax.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=9)
+        ax.set_yticklabels(y_labels, fontsize=9)
+
+        # Add annotations
+        if annotate:
+            for i in range(len(y_labels)):
+                for j in range(len(x_labels)):
+                    value = matrix_data[i, j]
+                    if not np.isnan(value):
+                        # Choose text color based on background
+                        text_color = 'white' if abs(value - (vmin or matrix_data.min())) > (((vmax or matrix_data.max()) - (vmin or matrix_data.min())) / 2) else 'black'
+                        ax.text(j, i, f'{value:.2f}', ha='center', va='center',
+                               color=text_color, fontsize=8)
+
+        self._apply_style(ax, title, xlabel, ylabel)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+
+        print(f"  Created heatmap: {output_path}")
+
+        # Record metadata
+        mode = "correlation" if columns else "pivot"
+        self.metadata.append({
+            "filename": os.path.basename(output_path),
+            "type": f"heatmap ({mode})",
+            "title": title or "",
+            "x_column": x_col or ", ".join(columns or []),
+            "y_column": y_col or ", ".join(columns or []),
+            "data_sources": self._get_data_source_name(data_ref)
+        })
+
     def execute_operation(self, op: Dict[str, Any], output_path: str):
         """
         Execute a single operation.
@@ -390,6 +509,8 @@ class PlotBuilder:
             self.execute_bar(op, output_path)
         elif op_type == "column":
             self.execute_column(op, output_path)
+        elif op_type == "heatmap":
+            self.execute_heatmap(op, output_path)
         else:
             print(f"Unknown operation type: {op_type}")
 
