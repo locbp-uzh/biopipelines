@@ -27,6 +27,11 @@ from .dynamic_bind import DynamicBind
 from .dna_encoder import DNAEncoder
 from .load_output import LoadOutput, LoadOutputs
 from .sequence_metric_correlation import SequenceMetricCorrelation
+from .filter import Filter
+from .rank import Rank
+from .pymol import PyMOL
+from .fuse import Fuse
+from .plot import Plot
 from .converters import *
 
 __all__ = [
@@ -58,6 +63,11 @@ __all__ = [
     'LoadOutput',
     'LoadOutputs',
     'SequenceMetricsCorrelation',
+    'Filter',
+    'Rank',
+    'PyMOL',
+    'Fuse',
+    'Plot',
 
     # Utility functions
     'pdb_to_jsonl',
