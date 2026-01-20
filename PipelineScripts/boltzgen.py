@@ -109,7 +109,7 @@ class BoltzGen(BaseConfig):
             devices: Number of GPUs to use (default: auto-detect)
             reuse: Resume interrupted runs (default: False)
             steps: Run only specific pipeline steps (default: all steps)
-            cache_dir: Model download location (default: ~/.cache)
+            cache_dir: Model download location (default: /home/$USER/data/boltzgen)
             **kwargs: Additional parameters passed to BaseConfig
         """
         # Store design specification parameters
@@ -231,9 +231,18 @@ class BoltzGen(BaseConfig):
             self.boltzgen_helper_py = os.path.join(
                 self.folders["HelpScripts"], "pipe_boltzgen.py"
             )
-            # Use BoltzGenCache from folders if user didn't specify custom cache_dir
+            # Use tool_data folder for cache if user didn't specify custom cache_dir
             if self.cache_dir is None:
-                self.cache_dir = self.folders.get("BoltzGenCache")
+                tool_data_folder = self.folders.get("tool_data", {})
+                if isinstance(tool_data_folder, dict):
+                    cache_base = tool_data_folder.get("BoltzGen", "boltzgen")
+                else:
+                    cache_base = "boltzgen"
+                self.cache_dir = os.path.join(
+                    os.path.expanduser("~"),
+                    "data",
+                    cache_base
+                )
         else:
             self.boltzgen_helper_py = None
 
@@ -505,6 +514,14 @@ echo "Running BoltzGen binder design"
 echo "Design specification: {self.design_spec_yaml_file}"
 echo "Protocol: {self.protocol}"
 echo "Output folder: {self.output_folder}"
+echo "Cache directory: {self.cache_dir}"
+
+# Check cache directory exists
+if [ ! -d "{self.cache_dir}" ]; then
+    echo "ERROR: BoltzGen cache/model weights not found at {self.cache_dir}"
+    echo "Please ensure model weights are installed at /home/$USER/data/boltzgen/"
+    exit 1
+fi
 
 # Run BoltzGen
 {boltzgen_cmd}

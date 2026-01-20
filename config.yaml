@@ -16,6 +16,7 @@ folders:
     AlphaFold: "localcolabfold"
     OmegaFold: "OmegaFold"
     Boltz: "boltz"
+    BoltzGen: "boltzgen"
     DynamicBind: "DynamicBind"
     ModelForge: "modelforge"
 
