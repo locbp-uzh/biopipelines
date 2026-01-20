@@ -580,20 +580,20 @@ class Pipeline:
         if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
             return ""
         elif gpu_spec == "high-memory":
-            return "#SBATCH --gpus=1\n#SBATCH --constraint=\"(GPUMEM32GB|GPUMEM80GB|GPUMEM141GB)\""
+            return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
         elif gpu_spec == "gpu" or gpu_spec == "any":
             return "#SBATCH --gpus=1"
         elif gpu_spec.startswith("!"):
             excluded_model = gpu_spec[1:]
             if excluded_model.upper() == "L4":
-                return "#SBATCH --gpus=1\n#SBATCH --constraint=\"(GPUMEM32GB|GPUMEM80GB|GPUMEM141GB)\""
+                return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
             else:
                 return f"#SBATCH --gpus=1\n#SBATCH --constraint=\"~GPU{excluded_model}\""
-        elif gpu_spec in ["24GB", "32GB", "80GB", "141GB"] or "|" in gpu_spec:
+        elif gpu_spec in ["24GB", "32GB", "80GB", "96GB"] or "|" in gpu_spec:
             if "|" in gpu_spec:
                 memory_options = gpu_spec.split("|")
                 constraint_parts = [f"GPUMEM{mem}" for mem in memory_options]
-                constraint = "(" + "|".join(constraint_parts) + ")"
+                constraint = "|".join(constraint_parts)
             else:
                 constraint = f"GPUMEM{gpu_spec}"
             return f"#SBATCH --gpus=1\n#SBATCH --constraint=\"{constraint}\""
@@ -830,9 +830,9 @@ umask 002
         Args:
             gpu: GPU specification. Options:
                 - Specific models: "L4", "V100", "A100", "H100", "H200"
-                - Memory-based: "24GB", "32GB", "80GB", "141GB", "32GB|80GB|141GB" (uses --constraint)
+                - Memory-based: "24GB", "32GB", "80GB", "96GB", "32GB|80GB|96GB" (uses --constraint)
                 - Generic: "gpu" (any available GPU)
-                - High-memory: "high-memory" (equivalent to "32GB|80GB|141GB")
+                - High-memory: "high-memory" (equivalent to "32GB|80GB|96GB")
                 - Exclusion: "!L4", "!V100", etc. (exclude specific model)
                 - None: Inherits from previous batch (or no GPU if first batch)
             memory: RAM allocation (e.g., "16GB", "32GB", "64GB")
@@ -1085,7 +1085,7 @@ def Resources(**kwargs):
     Must be called within a Pipeline context manager.
 
     Args:
-        gpu: GPU memory ("L4", "V100", "A100", "H100", "H200", "24GB", "32GB", "80GB", "141GB", "32GB|80GB|141GB", "!L4", "gpu", "high-memory", None))
+        gpu: GPU memory ("L4", "V100", "A100", "H100", "H200", "24GB", "32GB", "80GB", "96GB", "32GB|80GB|96GB", "!L4", "gpu", "high-memory", None))
         memory: System RAM (e.g., "16GB", "32GB")
         time: Wall time limit (e.g., "24:00:00", "2:00:00")
 

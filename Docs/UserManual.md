@@ -174,15 +174,15 @@ Resources are set before using tools as follows:
 ```python
 with Pipeline("Project", "Job", "Description"):
     Resources(gpu="A100", memory="32GB", time="24:00:00")              # Specific model
-    Resources(gpu="32GB|80GB|141GB", memory="32GB", time="24:00:00")   # V100, A100, H100, or H200
+    Resources(gpu="32GB|80GB|96GB", memory="32GB", time="24:00:00")   # V100, A100, H100, or H200
     Resources(memory="128GB", time="24:00:00", cpus=32)                # CPU-only
 ```
 
 **GPU parameter options:**
 - `"T4"`, `"L4"`, `"V100"`, `"A100"`, `"H100"`, `"H200"` - Specific GPU models
-- `"24GB"`, `"32GB"`, `"80GB"`, `"141GB"`, `"32GB|80GB|141GB"` - Memory-based selection
+- `"24GB"`, `"32GB"`, `"80GB"`, `"96GB"`, `"32GB|80GB|96GB"` - Memory-based selection
 - `"gpu"` or `"any"` - Any available GPU
-- `"high-memory"` - Equivalent to `"32GB|80GB|141GB"`
+- `"high-memory"` - Equivalent to `"32GB|80GB|96GB"`
 - Omit parameter for CPU-only jobs
 
 ### Job submission
