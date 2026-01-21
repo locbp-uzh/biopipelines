@@ -128,7 +128,10 @@ class StitchSequences(BaseConfig):
             raise ValueError("template is required")
 
         for pos_range, options in self.substitutions.items():
-            self._parse_position_range(pos_range)
+            # Only parse position range for string keys (fixed positions)
+            # Tuple keys are table references resolved at SLURM runtime
+            if isinstance(pos_range, str):
+                self._parse_position_range(pos_range)
             if options is None:
                 raise ValueError(f"Substitution options for '{pos_range}' cannot be None")
 
