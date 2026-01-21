@@ -32,6 +32,7 @@ from .rank import Rank
 from .pymol import PyMOL
 from .fuse import Fuse
 from .plot import Plot
+from .ghostfold import GhostFold
 from .converters import *
 
 __all__ = [
@@ -69,6 +70,7 @@ __all__ = [
     'PyMOL',
     'Fuse',
     'Plot',
+    'GhostFold',
 
     # Utility functions
     'pdb_to_jsonl',

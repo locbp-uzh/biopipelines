@@ -17,6 +17,7 @@ folders:
     OmegaFold: "OmegaFold"
     Boltz: "boltz"
     BoltzGen: "boltzgen"
+    GhostFold: "ghostfold"
     DynamicBind: "DynamicBind"
     ModelForge: "modelforge"
 
@@ -43,6 +44,7 @@ environments:
   ProteinMPNN: "ProteinEnv"
   LigandMPNN: "ligandmpnn_env"
   AlphaFold: "biopipelines"
+  GhostFold: "ghostfold"
 
   # Analysis and utility tools
   MMseqs2: "biopipelines"
