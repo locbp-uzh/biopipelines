@@ -63,8 +63,10 @@ mamba create -n ghostfold python=3.10
 mamba activate ghostfold
 
 # Install dependencies
-pip install torch transformers sentencepiece rich
+mamba install pytorch torchvision torchaudio -c pytorch
+mamba install transformers sentencepiece -c conda-forge
 
+pip install rich biopython
 # Login to HuggingFace for ProstT5 model access
 huggingface-cli login
 ```
@@ -142,12 +144,11 @@ Predicts protein structures using Meta's ESM-2 with ESMFold. Fast single-sequenc
 
 **References**: https://github.com/facebookresearch/esm
 
-**Installation**: ESMFold works in the ProteinEnv environment, with some additional packages:
+**Installation**: 
 ```bash
-mamba activate ProteinEnv
-pip install "fair-esm[esmfold]"
-pip install 'dllogger @ git+https://github.com/NVIDIA/dllogger.git'
-pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059694619831a7db195b7e0988fc4ff3a307'
+mamba create -n esmfold python=3.12
+mamba activate esmfold
+pip install 
 ```
 
 **Environment**: `ProteinEnv`

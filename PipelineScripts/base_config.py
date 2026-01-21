@@ -288,6 +288,13 @@ if [ -f "{parent_dir}/{completed_file}" ]; then
     exit 0
 fi
 
+# Environment diagnostics
+echo "=== Environment Check ==="
+echo "CONDA_DEFAULT_ENV: $CONDA_DEFAULT_ENV"
+echo "Python: $(which python)"
+echo "Python version: $(python --version 2>&1)"
+echo "========================="
+
 """
     
     def generate_completion_check_footer(self) -> str:

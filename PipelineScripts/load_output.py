@@ -759,6 +759,8 @@ echo "Files loaded from {original_tool} are ready for use"
 def LoadOutputs(path: str,
                 tool: Optional[str] = None,
                 suffix: Optional[str] = None,
+                in_suffix: Optional[Union[str, List[str]]] = None,
+                not_in_suffix: Optional[Union[str, List[str]]] = None,
                 ascending: bool = True,
                 **load_output_kwargs) -> Dict[str, LoadOutput]:
     """
@@ -775,6 +777,7 @@ def LoadOutputs(path: str,
               - Matches the tool name in JSON files
         suffix: Filter by filename suffix (e.g., "Cycle10", "Affinity")
                 - Matches pattern: NNN_ToolName_Suffix.json
+        [not]_in_suffix: Filter by filename suffix, whether a string or list of strings is contained in it or not
         ascending: Sort order (True = ascending by name, False = descending by name)
         **load_output_kwargs: Additional parameters passed to LoadOutput constructor
                               (e.g., filter, validate_files)
@@ -857,7 +860,7 @@ def LoadOutputs(path: str,
 
         # 2. Suffix filter
         # Parse filename: NNN_ToolName.json or NNN_ToolName_Suffix.json
-        if suffix is not None:
+        if suffix is not None or in_suffix is not None or not_in_suffix is not None:
             # Extract suffix from filename (everything between last _ and .json)
             # Pattern: NNN_ToolName_Suffix.json
             basename = os.path.splitext(json_filename)[0]  # Remove .json
@@ -867,8 +870,25 @@ def LoadOutputs(path: str,
             if len(parts) > 2:
                 # Everything after tool name is considered suffix
                 file_suffix = '_'.join(parts[2:])
-                if file_suffix != suffix:
-                    continue
+                if suffix is not None:
+                    if file_suffix != suffix:
+                        continue
+                if in_suffix is not None:
+                    if isinstance(in_suffix,str):
+                        if not in_suffix in suffix:
+                            continue
+                    else: #list of strings
+                        for cond in in_suffix:
+                            if not cond in suffix:
+                                continue
+                if not_in_suffix is not None:
+                    if isinstance(not_in_suffix,str):
+                        if not not_in_suffix in suffix:
+                            continue
+                    else: #list of strings
+                        for cond in not_in_suffix:
+                            if cond in suffix:
+                                continue
             else:
                 # No suffix in filename, skip this file
                 continue

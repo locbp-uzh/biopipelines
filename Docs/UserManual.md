@@ -164,7 +164,8 @@ with Pipeline("TestProject","Test","Some test"):
   pmd = ProteinMPNN(structures=rfd, num_sequences=2)
 
   # Or load multiple outputs at once
-  all_merge_tables = LoadOutputs('/path/to/job', tool="MergeTables")
+  # You can use suffix, in_suffix, not_in_suffix for more control
+  all_merge_tables = LoadOutputs('/path/to/job/' or '/path/to/ToolOutputs', tool="MergeTables")
 ```
 
 ### Resources

@@ -205,7 +205,7 @@ mamba activate boltzgen
 pip install boltzgen
 ```
 
-Models (~6GB) download automatically to `~/.cache` on first run, or specify custom cache with `cache_dir` parameter.
+**Resources**: GPU needed. Generation of 1000 designs for a small-molecule binder of 140-180 residues from design to affinity takes approx. 12-14 h (A100) or 6-7 h (H100). The analysis step requires 64 GB of memory.
 
 **Parameters**:
 - `design_spec`: Union[str, Dict] (required) - YAML configuration string/dict or path to YAML file defining:
@@ -258,7 +258,7 @@ Models (~6GB) download automatically to `~/.cache` on first run, or specify cust
   | target_id | num_designs | avg_rmsd | avg_plddt |
   |-----------|-------------|----------|-----------|
 
-**Important Notes**:
+**Notes**:
 - **Residue indexing**: All residue indices start at 1 and use canonical mmcif `label_asym_id`, not `auth_asym_id`
 - **Sequence specification**: Use ranges like "80..140" for random length, "15..20AAAA" for random prefix + fixed tail
 - **Output structure**: Pipeline generates intermediate designs, inverse-folded structures, and final ranked designs with comprehensive metrics

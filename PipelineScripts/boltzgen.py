@@ -610,6 +610,30 @@ class BoltzGen(BaseConfig):
         # Build BoltzGen command
         boltzgen_cmd = self._build_boltzgen_command()
 
+        # Determine if postprocessing is needed (only for filtering step)
+        # If no steps specified, all steps run including filtering
+        has_filtering = "filtering" in self.steps if self.steps else True
+
+        # Build postprocessing section
+        if has_filtering:
+            postprocessing_section = f"""
+# Run postprocessing to extract sequences and validate outputs
+echo "Running BoltzGen postprocessing..."
+python "{self.boltzgen_helper_py}" \\
+  --output_folder "{self.output_folder}" \\
+  --budget {self.budget} \\
+  --extract_sequences \\
+  --validate
+
+if [ $? -eq 0 ]; then
+    echo "Postprocessing completed successfully"
+else
+    echo "Warning: Postprocessing had errors (continuing anyway)"
+fi
+"""
+        else:
+            postprocessing_section = ""
+
         # Generate script content
         script_content = f"""#!/bin/bash
 # BoltzGen execution script
@@ -634,21 +658,7 @@ else
     echo "Error: BoltzGen failed"
     exit 1
 fi
-
-# Run postprocessing to extract sequences and format tables
-echo "Running BoltzGen postprocessing..."
-python "{self.boltzgen_helper_py}" \\
-  --output_folder "{self.output_folder}" \\
-  --budget {self.budget} \\
-  --extract_sequences \\
-  --validate
-
-if [ $? -eq 0 ]; then
-    echo "Postprocessing completed successfully"
-else
-    echo "Warning: Postprocessing had errors (continuing anyway)"
-fi
-
+{postprocessing_section}
 {self.generate_completion_check_footer()}
 """
 
@@ -827,91 +837,160 @@ fi
         """
         Get expected output files after BoltzGen execution.
 
+        Predictions are step-dependent:
+        - "analysis" in steps: aggregate_metrics_analyze.csv, per_target_metrics_analyze.csv
+        - "filtering" in steps: structures in final_<budget>_designs/ (rankNNNN_*.cif),
+                                all_designs_metrics.csv, final_designs_metrics_<budget>.csv,
+                                results_overview.pdf
+        - "folding" in steps (but not filtering): structures in refold_cif/ (design_spec_NNN.cif)
+        - None of above: empty prediction
+
         Returns:
-            Dictionary mapping output types to file paths with standard keys:
-            - structures: List of final designed structure files
-            - sequences: Path to sequences CSV
-            - tables: Analysis metrics and results
-            - output_folder: Tool's output directory
+            Dictionary mapping output types to file paths with standard keys.
         """
         # Ensure file paths are set up
         if not hasattr(self, 'final_ranked_folder') or self.final_ranked_folder is None:
             self._setup_file_paths()
 
-        # BoltzGen generates structures in final_ranked_designs/final_<budget>_designs/
-        final_designs_folder = os.path.join(self.final_ranked_folder, f"final_{self.budget}_designs")
+        # Determine which steps are being run
+        # If no steps specified, BoltzGen runs all steps by default
+        steps = self.steps if self.steps else [
+            "design", "inverse_folding", "folding", "design_folding", "affinity", "analysis", "filtering"
+        ]
+        has_analysis = "analysis" in steps
+        has_filtering = "filtering" in steps
+        has_folding = "folding" in steps or "design_folding" in steps
 
-        # Structures list file (created by postprocessing script)
-        structures_list_file = os.path.join(self.output_folder, "final_structures.txt")
+        # Initialize empty outputs
+        tables = {}
+        structures = []
+        structure_ids = []
+        output = {
+            "structures": structures,
+            "structure_ids": structure_ids,
+            "tables": tables,
+            "output_folder": self.output_folder,
+            "tool_folder": self.output_folder,
+        }
 
-        # Sequences CSV (created by postprocessing script)
-        sequences_csv = os.path.join(self.output_folder, "sequences.csv")
+        # If no relevant steps, return empty prediction
+        if not has_analysis and not has_filtering and not has_folding:
+            return output
 
-        # Structures CSV (created by postprocessing script)
-        structures_csv = os.path.join(self.output_folder, "structures.csv")
+        # Analysis step outputs
+        if has_analysis:
+            tables["aggregate_metrics"] = TableInfo(
+                name="aggregate_metrics",
+                path=self.aggregate_metrics_csv,
+                columns=[
+                    "id", "file_name", "designed_sequence", "designed_chain_sequence",
+                    "num_prot_tokens", "num_lig_atoms", "num_resolved_tokens", "num_tokens",
+                    "num_design", "UNK_fraction", "GLY_fraction", "ALA_fraction", "CYS_fraction",
+                    "SER_fraction", "PRO_fraction", "THR_fraction", "VAL_fraction", "ILE_fraction",
+                    "ASN_fraction", "ASP_fraction", "LEU_fraction", "MET_fraction", "GLN_fraction",
+                    "GLU_fraction", "LYS_fraction", "HIS_fraction", "PHE_fraction", "ARG_fraction",
+                    "TYR_fraction", "TRP_fraction", "loop", "helix", "sheet", "liability_score",
+                    "liability_num_violations", "liability_high_severity_violations",
+                    "liability_medium_severity_violations", "liability_low_severity_violations",
+                    "liability_AspBridge_count", "liability_AspCleave_count", "liability_ProtTryp_count",
+                    "liability_TrpOx_count", "liability_HydroPatch_count", "liability_UnpairedCys_count",
+                    "native_rmsd", "native_rmsd_bb", "native_rmsd_refolded", "native_rmsd_bb_refolded",
+                    "bb_rmsd", "bb_rmsd_design", "bb_rmsd_target", "design_ptm", "design_iptm",
+                    "design_to_target_iptm", "min_design_to_target_pae", "min_interaction_pae",
+                    "affinity_pred_value", "affinity_probability_binary1"
+                ],
+                description="Aggregate metrics for all designs from analysis step",
+                count=None
+            )
+            tables["per_target_metrics"] = TableInfo(
+                name="per_target_metrics",
+                path=self.per_target_metrics_csv,
+                columns=[
+                    "target_id", "num_prot_tokens", "num_lig_atoms", "num_resolved_tokens",
+                    "num_tokens", "num_design", "UNK_fraction", "GLY_fraction", "ALA_fraction",
+                    "CYS_fraction", "SER_fraction", "PRO_fraction", "THR_fraction", "VAL_fraction",
+                    "ILE_fraction", "ASN_fraction", "ASP_fraction", "LEU_fraction", "MET_fraction",
+                    "GLN_fraction", "GLU_fraction", "LYS_fraction", "HIS_fraction", "PHE_fraction",
+                    "ARG_fraction", "TYR_fraction", "TRP_fraction", "loop", "helix", "sheet",
+                    "liability_score", "liability_num_violations", "bb_rmsd", "bb_rmsd_design",
+                    "design_ptm", "design_iptm", "design_to_target_iptm", "min_design_to_target_pae",
+                    "affinity_pred_value", "affinity_probability_binary1"
+                ],
+                description="Per-target metrics from analysis step",
+                count=None
+            )
 
-        # Organize tables by content type
-        tables = {
-            "all_metrics": TableInfo(
-                name="all_metrics",
+        # Filtering step outputs
+        if has_filtering:
+            # Final designs folder
+            final_designs_folder = os.path.join(self.final_ranked_folder, f"final_{self.budget}_designs")
+            output["final_designs_folder"] = final_designs_folder
+
+            # Structure pattern: rankNNNN_*.cif
+            # We predict the pattern, actual files will be rankNNNN_<design_id>.cif
+            structures = [os.path.join(final_designs_folder, "rankNNNN_*.cif")]
+            structure_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
+            output["structures"] = structures
+            output["structure_ids"] = structure_ids
+
+            # All designs metrics
+            tables["all_designs_metrics"] = TableInfo(
+                name="all_designs_metrics",
                 path=self.all_designs_metrics_csv,
                 columns=[
-                    "id", "RMSD", "hydrogen_bonds", "packing_quality",
-                    "interface_contacts", "binding_energy", "design_plddt"
+                    "id", "final_rank", "designed_sequence", "designed_chain_sequence",
+                    "num_design", "affinity_probability_binary1", "design_to_target_iptm",
+                    "min_design_to_target_pae", "design_ptm", "filter_rmsd",
+                    "designfolding-filter_rmsd", "plip_hbonds_refolded", "delta_sasa_refolded",
+                    "design_largest_hydrophobic_patch_refolded", "design_chain_hydrophobicity",
+                    "design_hydrophobicity", "loop", "helix", "sheet", "file_name",
+                    "num_prot_tokens", "num_lig_atoms", "num_resolved_tokens", "num_tokens",
+                    "liability_score", "liability_num_violations", "bb_rmsd", "bb_rmsd_design",
+                    "design_iptm", "min_interaction_pae", "affinity_pred_value",
+                    "quality_score", "max_rank", "pass_filters", "num_filters_passed"
                 ],
-                description="Comprehensive metrics for all generated designs",
-                count=None  # Unknown until execution
-            ),
-            "final_metrics": TableInfo(
-                name="final_metrics",
+                description="Metrics for all designs considered by filtering",
+                count=None
+            )
+
+            # Final designs metrics
+            tables["final_designs_metrics"] = TableInfo(
+                name="final_designs_metrics",
                 path=self.final_designs_metrics_csv,
                 columns=[
-                    "id", "RMSD", "hydrogen_bonds", "packing_quality",
-                    "interface_contacts", "binding_energy", "design_plddt", "rank"
+                    "id", "final_rank", "designed_sequence", "designed_chain_sequence",
+                    "num_design", "affinity_probability_binary1", "design_to_target_iptm",
+                    "min_design_to_target_pae", "design_ptm", "filter_rmsd",
+                    "designfolding-filter_rmsd", "plip_hbonds_refolded", "delta_sasa_refolded",
+                    "design_largest_hydrophobic_patch_refolded", "design_chain_hydrophobicity",
+                    "design_hydrophobicity", "loop", "helix", "sheet", "file_name",
+                    "num_prot_tokens", "num_lig_atoms", "num_resolved_tokens", "num_tokens",
+                    "liability_score", "liability_num_violations", "bb_rmsd", "bb_rmsd_design",
+                    "design_iptm", "min_interaction_pae", "affinity_pred_value",
+                    "quality_score", "max_rank", "pass_filters", "num_filters_passed", "sequence"
                 ],
                 description=f"Metrics for top {self.budget} designs after filtering",
                 count=self.budget
-            ),
-            "aggregate_metrics": TableInfo(
-                name="aggregate_metrics",
-                path=self.aggregate_metrics_csv,
-                columns=["metric", "mean", "std", "min", "max"],
-                description="Aggregate statistics across all designs",
-                count=None
-            ),
-            "per_target_metrics": TableInfo(
-                name="per_target_metrics",
-                path=self.per_target_metrics_csv,
-                columns=["target_id", "num_designs", "avg_rmsd", "avg_plddt"],
-                description="Per-target performance metrics",
-                count=None
-            ),
-            "sequences": TableInfo(
-                name="sequences",
-                path=sequences_csv,
-                columns=["id", "sequence"],
-                description="Extracted sequences from designed structures",
-                count=self.budget
-            ),
-            "structures": TableInfo(
-                name="structures",
-                path=structures_csv,
-                columns=["id", "pdb"],
-                description="List of designed structure files",
-                count=self.budget
             )
-        }
 
-        return {
-            "structures": structures_list_file,  # Will be populated at runtime
-            "structure_ids": [],  # Will be populated at runtime
-            "sequences": sequences_csv,
-            "sequence_ids": [],  # Will be populated at runtime
-            "tables": tables,
-            "output_folder": self.output_folder,
-            "final_designs_folder": final_designs_folder,
-            "main": self.final_designs_metrics_csv
-        }
+            # Results overview PDF
+            output["results_pdf"] = self.results_overview_pdf
+            output["main"] = self.final_designs_metrics_csv
+
+        # Folding step outputs (only if filtering not present)
+        elif has_folding:
+            # Structures in refold_cif folder
+            refold_cif_folder = os.path.join(self.intermediate_inverse_folded_folder, "refold_cif")
+            output["refold_cif_folder"] = refold_cif_folder
+
+            # Structure pattern: design_spec_NNN.cif
+            structures = [os.path.join(refold_cif_folder, "design_spec_*.cif")]
+            structure_ids = [f"design_spec_{i}" for i in range(self.num_designs)]
+            output["structures"] = structures
+            output["structure_ids"] = structure_ids
+
+        output["tables"] = tables
+        return output
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration with all BoltzGen parameters."""
