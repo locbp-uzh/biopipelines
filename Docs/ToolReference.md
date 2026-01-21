@@ -249,7 +249,9 @@ rfd3 = RFdiffusion3(
 
 Generates protein binders (proteins, peptides, or nanobodies) targeting specified molecules using an end-to-end pipeline that combines diffusion-based backbone generation, inverse folding, structure prediction, and multi-metric filtering.
 
-**References**: https://github.com/HannesStark/boltzgen
+**References**: 
+- https://github.com/HannesStark/boltzgen
+- https://www.biorxiv.org/content/10.1101/2025.11.20.689494v1.full.pdf
 
 **Installation**: Install BoltzGen via pip with Python ≥3.11:
 ```bash
@@ -315,6 +317,10 @@ Models (~6GB) download automatically to `~/.cache` on first run, or specify cust
 - **Residue indexing**: All residue indices start at 1 and use canonical mmcif `label_asym_id`, not `auth_asym_id`
 - **Sequence specification**: Use ranges like "80..140" for random length, "15..20AAAA" for random prefix + fixed tail
 - **Output structure**: Pipeline generates intermediate designs, inverse-folded structures, and final ranked designs with comprehensive metrics
+- **Small molecule binders**: From the preprint:
+```text
+Our computational design pipeline generated on the order of 10 or 20 thousands designs of length 140 to 180 residues for each target. The initial set was filtered to a highest-confidence subset of 100 designs based on RMSD < 2.5 Å relative to the Boltz-2 refolded models. Within this filtered pool, designs were ranked using a composite metric (interaction score + Boltz score), which effectively integrates predicted structural fidelity with biophysical interaction quality. We slightly modify the weights of Boltz-2 metrics: design_iiptm: 1.1, design_ptm: 1.1, neg_min_design_to_target_pae: 1.1, plip_hbonds_refolded: 2, plip_saltbridge_refolded: 2, and delta_sasa_refolded: 2. To identify essential interactions, we fragmented the chemical groups of rucaparib and calculated the number of hydrogen bonds formed with each fragment. We prioritized designs forming hydrogen bonds with the carboxamide chemical groups, as this interaction is considered essential for specific binding. 
+```
 
 **Example**:
 ```python

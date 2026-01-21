@@ -64,13 +64,14 @@ class BoltzGen(BaseConfig):
                  inverse_fold_num_sequences: int = 1,
                  skip_inverse_folding: bool = False,
                  # Filtering parameters
-                 alpha: float = 0.5,
+                 alpha: float = None,
                  filter_biased: bool = True,
+                 refolding_rmsd_threshold: Optional[float] = None,
                  additional_filters: Optional[List[str]] = None,
                  metrics_override: Optional[Dict[str, float]] = None,
                  # Execution parameters
                  devices: Optional[int] = None,
-                 reuse: bool = False,
+                 reuse: Union[ToolOutput, StandardizedOutput, str, None] = None,
                  steps: Optional[List[str]] = None,
                  cache_dir: Optional[str] = None,
                  **kwargs):
@@ -113,12 +114,18 @@ class BoltzGen(BaseConfig):
             diffusion_batch_size: Samples per trunk run (auto if None)
             inverse_fold_num_sequences: Sequences per backbone (default: 1)
             skip_inverse_folding: Skip sequence redesign step (default: False)
-            alpha: Quality/diversity trade-off (0.0=quality, 1.0=diversity, default: 0.5)
+            alpha: Quality/diversity in sequence during filtering (0.0=quality, 1.0=diversity, default: 0.01 peptides and 0.001 others)
             filter_biased: Remove amino acid composition outliers (default: True)
+            refolding_rmsd_threshold: RMSD threshold for filtering designs based on refolding (e.g., 2.5)
             additional_filters: Hard threshold expressions (e.g., ["design_ALA>0.3"])
             metrics_override: Per-metric ranking weights override
             devices: Number of GPUs to use (default: auto-detect)
-            reuse: Resume interrupted runs (default: False)
+            reuse: Previous BoltzGen run to resume or extend. Can be:
+                  - ToolOutput/StandardizedOutput from a previous BoltzGen call
+                  - String path to a previous BoltzGen output directory
+                  When provided, operates on the existing output folder instead of
+                  creating a new one. Use with `steps` to run specific steps only
+                  (e.g., steps=["analysis"] or steps=["filtering"]).
             steps: Run only specific pipeline steps (default: all steps)
             cache_dir: Model/cache location (default: /home/$USER/data/boltzgen, auto-downloaded on first run)
             **kwargs: Additional parameters passed to BaseConfig
@@ -149,12 +156,14 @@ class BoltzGen(BaseConfig):
         # Filtering parameters
         self.alpha = alpha
         self.filter_biased = filter_biased
+        self.refolding_rmsd_threshold = refolding_rmsd_threshold
         self.additional_filters = additional_filters or []
         self.metrics_override = metrics_override
 
         # Execution parameters
         self.devices = devices
         self.reuse = reuse
+        self.reuse_path = None  # Will be set in configure_inputs if reuse is provided
         self.steps = steps or []
         self.cache_dir = cache_dir
 
@@ -163,7 +172,13 @@ class BoltzGen(BaseConfig):
         self.target_structure_path = None  # Path to target protein structure
 
         # Determine specification mode
-        if design_spec is not None:
+        if reuse is not None:
+            # Reuse mode: operating on existing BoltzGen output
+            self.spec_mode = "reuse"
+            self.design_spec_is_dict = False
+            self.design_spec_is_yaml_str = False
+            self.design_spec_is_file = False
+        elif design_spec is not None:
             # Manual mode: user provided design_spec
             self.spec_mode = "manual"
             self.design_spec_is_dict = isinstance(design_spec, dict)
@@ -270,8 +285,21 @@ class BoltzGen(BaseConfig):
             raise ValueError(
                 "Must provide EITHER design_spec (manual) OR "
                 "(ligand + binder_spec) for protein-small_molecule OR "
-                "(target_structure + binder_spec) for protein-anything"
+                "(target_structure + binder_spec) for protein-anything OR "
+                "reuse (to continue from existing run)"
             )
+
+        if self.spec_mode == "reuse":
+            # Validate reuse parameter
+            if not isinstance(self.reuse, (ToolOutput, StandardizedOutput, str)):
+                raise ValueError(
+                    f"reuse must be ToolOutput, StandardizedOutput, or path string, "
+                    f"got {type(self.reuse)}"
+                )
+            # Steps should typically be specified when reusing
+            if not self.steps:
+                # Allow full run with reuse (will skip completed steps)
+                pass
 
         if self.spec_mode == "manual" and not self.design_spec:
             raise ValueError("design_spec cannot be empty in manual mode")
@@ -319,7 +347,7 @@ class BoltzGen(BaseConfig):
         if self.inverse_fold_num_sequences <= 0:
             raise ValueError("inverse_fold_num_sequences must be positive")
 
-        if not (0.0 <= self.alpha <= 1.0):
+        if self.alpha and not (0.0 <= self.alpha <= 1.0):
             raise ValueError("alpha must be between 0.0 and 1.0")
 
         # Validate diffusion parameters if provided
@@ -338,6 +366,31 @@ class BoltzGen(BaseConfig):
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input design specification and dependencies."""
         self.folders = pipeline_folders
+
+        # Handle reuse mode first - extract path and override output_folder
+        if self.spec_mode == "reuse":
+            if isinstance(self.reuse, StandardizedOutput):
+                if hasattr(self.reuse, 'output_folder') and self.reuse.output_folder:
+                    self.reuse_path = self.reuse.output_folder
+                elif hasattr(self.reuse, 'tool_folder') and self.reuse.tool_folder:
+                    self.reuse_path = self.reuse.tool_folder
+                else:
+                    raise ValueError("StandardizedOutput has no output_folder or tool_folder")
+            elif isinstance(self.reuse, ToolOutput):
+                output_folder = self.reuse.get_output_files("output_folder")
+                if output_folder:
+                    self.reuse_path = output_folder[0] if isinstance(output_folder, list) else output_folder
+                    self.dependencies.append(self.reuse.config)
+                else:
+                    raise ValueError("ToolOutput has no output_folder")
+            elif isinstance(self.reuse, str):
+                self.reuse_path = self.reuse
+            else:
+                raise ValueError(f"Invalid reuse type: {type(self.reuse)}")
+
+            # Override output_folder with the reuse path
+            self.output_folder = self.reuse_path
+
         self._setup_file_paths()
 
         if self.spec_mode == "manual":
@@ -445,6 +498,12 @@ class BoltzGen(BaseConfig):
                 spec_display += f"\n  Binder: {self.binder_spec}"
             if self.binding_region:
                 spec_display += f"\n  Binding region: {self.binding_region}"
+        elif self.spec_mode == "reuse":
+            spec_display = "Reuse (from previous BoltzGen run)"
+            if self.reuse_path:
+                spec_display += f"\n  Source: {os.path.basename(self.reuse_path)}"
+            if self.steps:
+                spec_display += f"\n  Steps: {', '.join(self.steps)}"
         else:
             spec_display = "Unknown mode"
 
@@ -621,6 +680,13 @@ fi
         """Generate the config file creation section for the bash script."""
         config_py = os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_config.py")
 
+        if self.spec_mode == "reuse":
+            # Reuse mode: design_spec.yaml already exists in the reuse folder
+            return f'''# Using existing design specification from previous run
+echo "Reusing design specification from: {self.reuse_path}"
+echo "Design spec: {self.design_spec_yaml_file}"
+'''
+
         if self.spec_mode == "ligand":
             # Ligand mode: generate YAML at runtime from compounds.csv
             target_args = ""
@@ -720,19 +786,25 @@ fi
             cmd_parts.append('--skip_inverse_folding')
 
         # Filtering parameters
-        cmd_parts.append(f'--alpha {self.alpha}')
+        if self.alpha:
+            cmd_parts.append(f'--alpha {self.alpha}')
 
         if not self.filter_biased:
             cmd_parts.append('--filter_biased false')
 
+        if self.refolding_rmsd_threshold is not None:
+            cmd_parts.append(f'--refolding_rmsd_threshold {self.refolding_rmsd_threshold}')
+
         if self.additional_filters:
-            for filter_expr in self.additional_filters:
-                cmd_parts.append(f"--additional_filters '{filter_expr}'")
+            # Format: --additional_filters 'feature>threshold' 'feature<threshold'
+            filters_str = ' '.join(f"'{f}'" for f in self.additional_filters)
+            cmd_parts.append(f"--additional_filters {filters_str}")
 
         if self.metrics_override:
-            # Convert dict to JSON string for command line
-            metrics_json = json.dumps(self.metrics_override)
-            cmd_parts.append(f"--metrics_override '{metrics_json}'")
+            # Format: --metrics_override metric_name=weight metric_name=weight
+            # A larger weight down-weights that metric's rank
+            metrics_str = ' '.join(f"{k}={v}" for k, v in self.metrics_override.items())
+            cmd_parts.append(f"--metrics_override {metrics_str}")
 
         # Execution parameters
         if self.devices is not None:
@@ -881,3 +953,119 @@ fi
             }
         })
         return base_dict
+
+
+class BoltzGenMerge(BaseConfig):
+    """
+    Merge multiple BoltzGen output directories into one.
+
+    Use this to combine results from parallel BoltzGen runs before
+    re-running filtering on the combined set.
+
+    Example:
+        run1 = BoltzGen(ligand=..., binder_spec="140-180", ...)
+        run2 = BoltzGen(ligand=..., binder_spec="140-180", ...)
+        merged = BoltzGenMerge(sources=[run1, run2])
+        filtered = BoltzGenFilter(source=merged, budget=100, ...)
+    """
+
+    TOOL_NAME = "BoltzGenMerge"
+    DEFAULT_ENV = None  # Uses same env as BoltzGen
+
+    def __init__(self,
+                 sources: List[Union[ToolOutput, StandardizedOutput, str]] = None,
+                 **kwargs):
+        """
+        Initialize BoltzGenMerge configuration.
+
+        Args:
+            sources: List of BoltzGen outputs to merge. Can be ToolOutput,
+                    StandardizedOutput, or direct paths to output directories.
+            **kwargs: Additional parameters passed to BaseConfig
+        """
+        self.sources = sources or []
+        self.source_paths = []
+
+        # Initialize base class
+        super().__init__(**kwargs)
+
+    def validate_params(self):
+        """Validate BoltzGenMerge parameters."""
+        if not self.sources or len(self.sources) < 2:
+            raise ValueError("BoltzGenMerge requires at least 2 source directories to merge")
+
+    def configure_inputs(self, pipeline_folders: Dict[str, str]):
+        """Configure input sources."""
+        self.folders = pipeline_folders
+
+        # Extract paths from sources
+        for source in self.sources:
+            if isinstance(source, StandardizedOutput):
+                if hasattr(source, 'tool_folder') and source.tool_folder:
+                    self.source_paths.append(source.tool_folder)
+                else:
+                    raise ValueError("StandardizedOutput has no tool_folder")
+            elif isinstance(source, ToolOutput):
+                # Get output folder from ToolOutput
+                output_folder = source.get_output_files("output_folder")
+                if output_folder:
+                    self.source_paths.append(output_folder[0] if isinstance(output_folder, list) else output_folder)
+                    self.dependencies.append(source.config)
+                else:
+                    raise ValueError("ToolOutput has no output_folder")
+            elif isinstance(source, str):
+                self.source_paths.append(source)
+            else:
+                raise ValueError(f"Invalid source type: {type(source)}")
+
+    def generate_script(self, script_path: str) -> str:
+        """Generate BoltzGenMerge execution script."""
+        os.makedirs(self.output_folder, exist_ok=True)
+
+        # Build source paths string
+        sources_str = ' '.join(f'"{p}"' for p in self.source_paths)
+
+        script_content = f"""#!/bin/bash
+# BoltzGenMerge execution script
+# Generated by BioPipelines pipeline system
+
+{self.generate_completion_check_header()}
+
+echo "Merging BoltzGen outputs"
+echo "Sources: {', '.join(os.path.basename(p) for p in self.source_paths)}"
+echo "Output: {self.output_folder}"
+
+# Run BoltzGen merge
+boltzgen merge {sources_str} --output "{self.output_folder}"
+
+if [ $? -eq 0 ]; then
+    echo "BoltzGenMerge completed successfully"
+else
+    echo "Error: BoltzGenMerge failed"
+    exit 1
+fi
+
+{self.generate_completion_check_footer()}
+"""
+        return script_content
+
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after merge."""
+        return {
+            "output_folder": self.output_folder,
+            "tool_folder": self.output_folder,
+            # Merged outputs will have same structure as BoltzGen
+            "structures": [],  # Will be populated after merge
+            "structure_ids": [],
+            "tables": {}
+        }
+
+    def get_config_display(self) -> List[str]:
+        """Get configuration display lines."""
+        config_lines = super().get_config_display()
+        config_lines.append(f"SOURCES: {len(self.sources)} directories")
+        for i, path in enumerate(self.source_paths):
+            config_lines.append(f"  [{i+1}] {os.path.basename(path)}")
+        return config_lines
+
+
