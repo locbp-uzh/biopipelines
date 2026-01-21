@@ -124,10 +124,11 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         with open(source_path, 'r') as f:
             content = f.read()
 
-        # For PDB, rename residue (preserve atom names)
+        # Rename residue code in the file content
         if output_format == "pdb":
             content = rename_residue_chain_A(content, residue_code)
-        # For CIF, the residue code is already embedded in the file structure
+        elif output_format == "cif":
+            content = rename_residue_in_cif(content, residue_code)
 
         filename = f"{custom_id}.{ext}"
         output_path = os.path.join(output_folder, filename)
@@ -378,6 +379,112 @@ def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]
         import traceback
         traceback.print_exc()
         return None
+
+
+def rename_residue_in_cif(cif_content: str, new_residue_code: str) -> str:
+    """
+    Rename the residue code in CIF content.
+
+    Updates all occurrences of the residue code in the CIF file:
+    - data_<code> header
+    - _entry.id
+    - _chem_comp.id
+    - _atom_site.label_comp_id column
+    - _atom_site.auth_comp_id column
+
+    Args:
+        cif_content: CIF file content as string
+        new_residue_code: New residue code to use (e.g., "LIG", "G")
+
+    Returns:
+        CIF content with residue code renamed
+    """
+    lines = cif_content.split('\n')
+    output_lines = []
+
+    # First pass: find the original residue code from data_ line or _entry.id
+    original_code = None
+    for line in lines:
+        if line.startswith('data_'):
+            original_code = line[5:].strip()
+            break
+        if line.startswith('_entry.id '):
+            original_code = line.split()[1].strip()
+            break
+
+    if original_code is None:
+        # Can't determine original code, return as-is
+        return cif_content
+
+    # If codes are the same, no changes needed
+    if original_code == new_residue_code:
+        return cif_content
+
+    # Track if we're in the _atom_site loop and which columns have comp_id
+    in_atom_site_loop = False
+    atom_site_columns = []
+    label_comp_id_idx = None
+    auth_comp_id_idx = None
+
+    for line in lines:
+        # Check for entering _atom_site loop
+        if line.strip() == 'loop_':
+            in_atom_site_loop = False
+            atom_site_columns = []
+            label_comp_id_idx = None
+            auth_comp_id_idx = None
+            output_lines.append(line)
+            continue
+
+        # Track _atom_site column definitions
+        if line.startswith('_atom_site.'):
+            in_atom_site_loop = True
+            col_name = line.strip()
+            atom_site_columns.append(col_name)
+            if col_name == '_atom_site.label_comp_id':
+                label_comp_id_idx = len(atom_site_columns) - 1
+            elif col_name == '_atom_site.auth_comp_id':
+                auth_comp_id_idx = len(atom_site_columns) - 1
+            output_lines.append(line)
+            continue
+
+        # Handle data_ line
+        if line.startswith('data_'):
+            output_lines.append(f'data_{new_residue_code}')
+            continue
+
+        # Handle _entry.id line
+        if line.startswith('_entry.id '):
+            output_lines.append(f'_entry.id {new_residue_code}')
+            continue
+
+        # Handle _chem_comp.id line
+        if line.startswith('_chem_comp.id '):
+            output_lines.append(f'_chem_comp.id {new_residue_code}')
+            continue
+
+        # Handle _atom_site data rows (HETATM/ATOM lines)
+        if in_atom_site_loop and (line.startswith('HETATM') or line.startswith('ATOM')):
+            # Split the line into fields
+            parts = line.split()
+            if len(parts) >= len(atom_site_columns):
+                # Replace residue codes in the appropriate columns
+                if label_comp_id_idx is not None and label_comp_id_idx < len(parts):
+                    if parts[label_comp_id_idx] == original_code:
+                        parts[label_comp_id_idx] = new_residue_code
+                if auth_comp_id_idx is not None and auth_comp_id_idx < len(parts):
+                    if parts[auth_comp_id_idx] == original_code:
+                        parts[auth_comp_id_idx] = new_residue_code
+                output_lines.append(' '.join(parts))
+                continue
+
+        # Handle # separator - exit atom_site loop
+        if line.strip() == '#':
+            in_atom_site_loop = False
+
+        output_lines.append(line)
+
+    return '\n'.join(output_lines)
 
 
 def rename_residue_chain_A(pdb_content: str, residue_code: str) -> str:
