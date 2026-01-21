@@ -14,7 +14,7 @@ from .alphafold import AlphaFold
 from .ligand import Ligand
 from .ligand_mpnn import LigandMPNN
 from .boltz2 import Boltz2
-from .boltzgen import BoltzGen, BoltzGenMerge, BoltzGenFilter
+from .boltzgen import BoltzGen, BoltzGenMerge
 from .compound_library import CompoundLibrary
 from .slice_table import SliceTable
 from .average_by_table import AverageByTable
@@ -52,7 +52,6 @@ __all__ = [
     'Boltz2',
     'BoltzGen',
     'BoltzGenMerge',
-    'BoltzGenFilter',
     'CompoundLibrary',
     'SliceTable',
     'AverageByTable',
