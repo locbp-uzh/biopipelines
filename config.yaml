@@ -18,6 +18,7 @@ folders:
     Boltz: "boltz"
     BoltzGen: "boltzgen"
     GhostFold: "ghostfold"
+    ESMFold: "esmfold"
     DynamicBind: "DynamicBind"
     ModelForge: "modelforge"
 

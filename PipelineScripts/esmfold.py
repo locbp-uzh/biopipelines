@@ -110,8 +110,8 @@ class ESMFold(BaseConfig):
         # Helper script path and model cache
         if hasattr(self, 'folders') and self.folders:
             self.helper_script = os.path.join(self.folders["HelpScripts"], "pipe_esmfold.py")
-            # Use shared models folder for ESMFold cache
-            self.model_cache = os.path.join(self.folders["group"], self.folders["shared"]["models"], "ESMFold")
+            # Use user data folder for ESMFold model cache
+            self.model_cache = self.folders["ESMFold"]
         else:
             self.helper_script = None
             self.model_cache = None

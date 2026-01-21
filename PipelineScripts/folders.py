@@ -97,6 +97,8 @@ class FolderManager:
             "DynamicBind": dynamicbind_base,
             "DynamicBindWeights": os.path.join(dynamicbind_base, "workdir"),
             "ModelForge": os.path.join(self._folders["data"], tool_data_config.get('ModelForge', 'modelforge')),
+            "GhostFold": os.path.join(self._folders["data"], tool_data_config.get('GhostFold', 'ghostfold')),
+            "ESMFold": os.path.join(self._folders["data"], tool_data_config.get('ESMFold', 'esmfold')),
             "BioPipelines": os.path.join(self._folders["user"], "BioPipelines"),
             "MMseqs2Server": os.path.join(self._folders["user"], "BioPipelines", "MMseqs2Server")})
         self._folders.update({
