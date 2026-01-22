@@ -1228,3 +1228,311 @@ fi
         return config_lines
 
 
+class BoltzGenImport(BaseConfig):
+    """
+    Import external structures into BoltzGen filesystem format.
+
+    This tool converts structures (e.g., from RFdiffusion) into the BoltzGen
+    directory structure, enabling use of downstream BoltzGen steps like
+    folding, analysis, and filtering.
+
+    Two modes are supported:
+    1. Design only: Import backbone structures (simulates "design" step output)
+       BoltzGenImport(designs=rfd_output, ligand=lig, binder_spec="140-180")
+
+    2. Design + Inverse Folding: Import structures with sequences
+       (simulates "inverse_folding" step output)
+       BoltzGenImport(designs=rfd_output, sequences=lmpnn_output, ligand=lig, binder_spec="140-180")
+
+    After import, use BoltzGen(reuse=imported, steps=["folding", ...]) to
+    continue the pipeline.
+
+    Notes:
+    - Chain reassignment: Input structures (e.g., from RFdiffusion) may have
+      protein+ligand in chain A. This tool separates them into chain A (protein)
+      and chain B (ligand) as BoltzGen expects.
+    - When sequences are provided, sidechain atom coordinates are set to (0,0,0)
+      as BoltzGen expects - the folding step will predict them.
+    - NPZ files are not generated (BoltzGen should handle their absence).
+    """
+
+    TOOL_NAME = "BoltzGenImport"
+    DEFAULT_ENV = None
+
+    def __init__(self,
+                 designs: Union[ToolOutput, StandardizedOutput] = None,
+                 sequences: Union[ToolOutput, StandardizedOutput] = None,
+                 # Design spec parameters (same as BoltzGen)
+                 ligand: Union[ToolOutput, StandardizedOutput] = None,
+                 binder_spec: Union[str, Dict[str, Any]] = None,
+                 ligand_chain: str = "B",
+                 protein_chain: str = "A",
+                 **kwargs):
+        """
+        Initialize BoltzGenImport configuration.
+
+        Args:
+            designs: Structure input from a design tool (RFdiffusion, etc.).
+                    Must have 'structures' output with PDB/CIF files.
+            sequences: Optional sequence input from inverse folding tool
+                      (ProteinMPNN, LigandMPNN, etc.). Must have a table
+                      with 'id' and 'sequence' columns that map to designs.
+                      If provided, simulates inverse_folding step output.
+            ligand: Ligand input from Ligand tool (for design_spec generation).
+                   Used to get SMILES/CCD for the design specification.
+            binder_spec: Binder length specification (e.g., "140-180" or {"length": [140, 180]}).
+                        Used for design_spec generation.
+            ligand_chain: Chain ID for ligand in output (default: "B")
+            protein_chain: Chain ID for protein in output (default: "A")
+            **kwargs: Additional parameters passed to BaseConfig
+        """
+        self.designs = designs
+        self.sequences = sequences
+        self.ligand = ligand
+        self.binder_spec = binder_spec
+        self.ligand_chain = ligand_chain
+        self.protein_chain = protein_chain
+
+        # Paths to be resolved in configure_inputs
+        self.design_structures = []  # List of PDB/CIF paths
+        self.sequences_csv = None    # Path to sequences CSV
+        self.ligand_compounds_csv = None  # Path to ligand compounds CSV
+
+        # Determine mode
+        self.mode = "inverse_folding" if sequences is not None else "design"
+
+        super().__init__(**kwargs)
+
+    def validate_params(self):
+        """Validate BoltzGenImport parameters."""
+        if self.designs is None:
+            raise ValueError("designs parameter is required")
+
+        if not isinstance(self.designs, (ToolOutput, StandardizedOutput)):
+            raise ValueError(
+                f"designs must be ToolOutput or StandardizedOutput, "
+                f"got {type(self.designs)}"
+            )
+
+        if self.sequences is not None:
+            if not isinstance(self.sequences, (ToolOutput, StandardizedOutput)):
+                raise ValueError(
+                    f"sequences must be ToolOutput or StandardizedOutput, "
+                    f"got {type(self.sequences)}"
+                )
+
+        if self.binder_spec is None:
+            raise ValueError("binder_spec is required for design_spec generation")
+
+    def configure_inputs(self, pipeline_folders: Dict[str, str]):
+        """Configure input sources."""
+        self.folders = pipeline_folders
+
+        # Helper script path
+        self.import_helper_py = os.path.join(
+            pipeline_folders.get("HelpScripts", "HelpScripts"),
+            "pipe_boltzgen_import.py"
+        )
+
+        # Extract structure paths from designs
+        if isinstance(self.designs, StandardizedOutput):
+            if hasattr(self.designs, 'structures') and self.designs.structures:
+                self.design_structures = self.designs.structures
+            else:
+                raise ValueError("designs StandardizedOutput has no structures")
+        elif isinstance(self.designs, ToolOutput):
+            structures = self.designs.get_output_files("structures")
+            if structures:
+                self.design_structures = structures
+                self.dependencies.append(self.designs.config)
+            else:
+                raise ValueError("designs ToolOutput has no structures")
+
+        # Extract sequences CSV if provided
+        if self.sequences is not None:
+            if isinstance(self.sequences, StandardizedOutput):
+                # Look for sequences table or CSV
+                if hasattr(self.sequences, 'tables'):
+                    if hasattr(self.sequences.tables, 'sequences'):
+                        self.sequences_csv = self.sequences.tables.sequences.path
+                    elif hasattr(self.sequences.tables, '_tables'):
+                        for name, info in self.sequences.tables._tables.items():
+                            if 'sequence' in name.lower() or name == 'main':
+                                self.sequences_csv = info.path
+                                break
+                if not self.sequences_csv and hasattr(self.sequences, 'sequences'):
+                    seqs = self.sequences.sequences
+                    if seqs and len(seqs) > 0:
+                        self.sequences_csv = seqs[0]
+            elif isinstance(self.sequences, ToolOutput):
+                # Try to get sequences table
+                output_files = self.sequences.get_output_files()
+                if 'tables' in output_files:
+                    tables = output_files['tables']
+                    if isinstance(tables, dict):
+                        for name, info in tables.items():
+                            if 'sequence' in name.lower() or name == 'main':
+                                if hasattr(info, 'path'):
+                                    self.sequences_csv = info.path
+                                elif isinstance(info, dict) and 'path' in info:
+                                    self.sequences_csv = info['path']
+                                break
+                self.dependencies.append(self.sequences.config)
+
+            if not self.sequences_csv:
+                raise ValueError(
+                    "Could not find sequences CSV from sequences input. "
+                    "Ensure it has a table with 'id' and 'sequence' columns."
+                )
+
+        # Extract ligand compounds CSV if provided
+        if self.ligand is not None:
+            if isinstance(self.ligand, StandardizedOutput):
+                if hasattr(self.ligand, 'compounds') and self.ligand.compounds:
+                    self.ligand_compounds_csv = self.ligand.compounds[0]
+                elif hasattr(self.ligand, 'tables') and hasattr(self.ligand.tables, 'compounds'):
+                    self.ligand_compounds_csv = self.ligand.tables.compounds.path
+            elif isinstance(self.ligand, ToolOutput):
+                compounds = self.ligand.get_output_files("compounds")
+                if compounds:
+                    self.ligand_compounds_csv = compounds[0]
+                    self.dependencies.append(self.ligand.config)
+
+    def _parse_binder_spec(self):
+        """Parse binder_spec into min and max length values."""
+        if isinstance(self.binder_spec, dict):
+            length = self.binder_spec.get("length", [100, 200])
+            if isinstance(length, list) and len(length) == 2:
+                return length[0], length[1]
+            elif isinstance(length, int):
+                return length, length
+            else:
+                return 100, 200
+        elif isinstance(self.binder_spec, str):
+            if "-" in self.binder_spec:
+                parts = self.binder_spec.split("-")
+                return int(parts[0]), int(parts[1])
+            else:
+                length = int(self.binder_spec)
+                return length, length
+        else:
+            return 100, 200
+
+    def generate_script(self, script_path: str) -> str:
+        """Generate BoltzGenImport execution script."""
+        os.makedirs(self.output_folder, exist_ok=True)
+
+        # Create subdirectories
+        intermediate_designs = os.path.join(self.output_folder, "intermediate_designs")
+        intermediate_inverse_folded = os.path.join(
+            self.output_folder, "intermediate_designs_inverse_folded"
+        )
+        config_dir = os.path.join(self.output_folder, "config")
+
+        os.makedirs(intermediate_designs, exist_ok=True)
+        os.makedirs(config_dir, exist_ok=True)
+        if self.mode == "inverse_folding":
+            os.makedirs(intermediate_inverse_folded, exist_ok=True)
+
+        # Parse binder spec
+        binder_min, binder_max = self._parse_binder_spec()
+
+        # Build structures list file
+        structures_list_file = os.path.join(self.output_folder, ".input_structures.txt")
+        with open(structures_list_file, 'w') as f:
+            for struct in self.design_structures:
+                f.write(f"{struct}\n")
+
+        # Write steps.yaml
+        steps_yaml_file = os.path.join(self.output_folder, "steps.yaml")
+        if self.mode == "design":
+            steps_content = """steps:
+- name: design
+  config_file: config/design.yaml
+"""
+        else:  # inverse_folding
+            steps_content = """steps:
+- name: design
+  config_file: config/design.yaml
+- name: inverse_folding
+  config_file: config/inverse_folding.yaml
+"""
+        with open(steps_yaml_file, 'w') as f:
+            f.write(steps_content)
+
+        # Build command arguments
+        cmd_args = [
+            f'--structures "{structures_list_file}"',
+            f'--output "{self.output_folder}"',
+            f'--mode {self.mode}',
+            f'--protein-chain {self.protein_chain}',
+            f'--ligand-chain {self.ligand_chain}',
+            f'--binder-min {binder_min}',
+            f'--binder-max {binder_max}',
+        ]
+
+        if self.sequences_csv:
+            cmd_args.append(f'--sequences "{self.sequences_csv}"')
+
+        if self.ligand_compounds_csv:
+            cmd_args.append(f'--ligand-csv "{self.ligand_compounds_csv}"')
+
+        cmd_str = ' \\\n    '.join(cmd_args)
+
+        script_content = f"""#!/bin/bash
+# BoltzGenImport execution script
+# Generated by BioPipelines pipeline system
+
+{self.generate_completion_check_header()}
+
+echo "Importing structures into BoltzGen format"
+echo "Mode: {self.mode}"
+echo "Input structures: {len(self.design_structures)} files"
+echo "Output: {self.output_folder}"
+echo "Binder spec: {binder_min}-{binder_max}"
+{"echo 'Sequences CSV: " + self.sequences_csv + "'" if self.sequences_csv else ""}
+{"echo 'Ligand CSV: " + self.ligand_compounds_csv + "'" if self.ligand_compounds_csv else ""}
+
+# Run import helper
+python "{self.import_helper_py}" \\
+    {cmd_str}
+
+if [ $? -eq 0 ]; then
+    echo "BoltzGenImport completed successfully"
+else
+    echo "Error: BoltzGenImport failed"
+    exit 1
+fi
+
+{self.generate_completion_check_footer()}
+"""
+        return script_content
+
+    def get_output_files(self) -> Dict[str, Any]:
+        """
+        Get expected output files.
+
+        BoltzGenImport does not predict outputs - it creates the filesystem
+        structure for subsequent BoltzGen steps.
+        """
+        return {
+            "output_folder": self.output_folder,
+            "tool_folder": self.output_folder,
+            "structures": [],
+            "structure_ids": [],
+            "tables": {}
+        }
+
+    def get_config_display(self) -> List[str]:
+        """Get configuration display lines."""
+        config_lines = super().get_config_display()
+        config_lines.append(f"MODE: {self.mode}")
+        config_lines.append(f"INPUT STRUCTURES: {len(self.design_structures)} files")
+        config_lines.append(f"BINDER SPEC: {self.binder_spec}")
+        config_lines.append(f"CHAINS: protein={self.protein_chain}, ligand={self.ligand_chain}")
+        if self.sequences_csv:
+            config_lines.append(f"SEQUENCES CSV: {os.path.basename(self.sequences_csv)}")
+        if self.ligand_compounds_csv:
+            config_lines.append(f"LIGAND CSV: {os.path.basename(self.ligand_compounds_csv)}")
+        return config_lines
+
