@@ -1080,10 +1080,10 @@ class BoltzGenMerge(BaseConfig):
         # Extract paths from sources
         for source in self.sources:
             if isinstance(source, StandardizedOutput):
-                if hasattr(source, 'tool_folder') and source.tool_folder:
-                    self.source_paths.append(source.tool_folder)
+                if hasattr(source, 'output_folder') and source.output_folder:
+                    self.source_paths.append(source.output_folder)
                 else:
-                    raise ValueError("StandardizedOutput has no tool_folder")
+                    raise ValueError("StandardizedOutput has no output_folder")
             elif isinstance(source, ToolOutput):
                 # Get output folder from ToolOutput
                 output_folder = source.get_output_files("output_folder")
