@@ -73,7 +73,9 @@ class PlotBuilder:
         return os.path.splitext(os.path.basename(path))[0]
 
     def _apply_style(self, ax: plt.Axes, title: str = None,
-                     xlabel: str = None, ylabel: str = None):
+                     xlabel: str = None, ylabel: str = None,
+                     x_tick_rotation: float = 0, y_tick_rotation: float = 0,
+                     grid: bool = True):
         """Apply consistent styling to axes."""
         if title:
             ax.set_title(title, fontsize=12, fontweight='bold', pad=10)
@@ -85,6 +87,22 @@ class PlotBuilder:
         ax.tick_params(axis='both', labelsize=9)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
+
+        # Apply tick rotation
+        if x_tick_rotation != 0:
+            ha = 'right' if x_tick_rotation > 0 else 'left'
+            for label in ax.get_xticklabels():
+                label.set_rotation(x_tick_rotation)
+                label.set_horizontalalignment(ha)
+        if y_tick_rotation != 0:
+            for label in ax.get_yticklabels():
+                label.set_rotation(y_tick_rotation)
+
+        # Grid control
+        if grid:
+            ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        else:
+            ax.grid(False)
 
     def _resolve_label(self, explicit_label: str, name: str, column: str) -> str:
         """Resolve axis label from explicit label, name, or column."""
@@ -110,6 +128,10 @@ class PlotBuilder:
         xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
         figsize = tuple(op.get("figsize", [8, 6]))
+        x_tick_rotation = op.get("x_tick_rotation", 0)
+        y_tick_rotation = op.get("y_tick_rotation", 0)
+        grid = op.get("grid", True)
+        legend_loc = op.get("legend_loc", "upper right")
 
         df = self._resolve_data_source(data_ref)
 
@@ -131,13 +153,15 @@ class PlotBuilder:
                 ax.scatter(df.loc[mask, x_col], df.loc[mask, y_col],
                           c=[c], label=str(group), alpha=0.7, edgecolors='white', linewidth=0.5)
 
-            ax.legend(title=color_col, fontsize=9, title_fontsize=10)
+            ax.legend(title=color_col, fontsize=9, title_fontsize=10, loc=legend_loc)
         else:
             # Simple scatter
             ax.scatter(df[x_col], df[y_col], c='#1f77b4', alpha=0.7,
                       edgecolors='white', linewidth=0.5)
 
-        self._apply_style(ax, title, xlabel, ylabel)
+        self._apply_style(ax, title, xlabel, ylabel,
+                         x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                         grid=grid)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -194,7 +218,7 @@ class PlotBuilder:
                 verticalalignment='top', horizontalalignment='right',
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-        self._apply_style(ax, title, xlabel, ylabel)
+        self._apply_style(ax, title, xlabel, ylabel, grid=True)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -250,7 +274,7 @@ class PlotBuilder:
         ax.set_xticks(x_positions)
         ax.set_xticklabels(agg_df[x_col], rotation=45, ha='right')
 
-        self._apply_style(ax, title, xlabel, ylabel)
+        self._apply_style(ax, title, xlabel, ylabel, grid=True)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -289,6 +313,13 @@ class PlotBuilder:
         show_mean = op.get("show_mean", True)
         show_error = op.get("show_error", "sd")
         figsize = tuple(op.get("figsize", [8, 6]))
+        color_groups = op.get("color_groups")
+        explicit_colors = op.get("colors")
+        legend_title = op.get("legend_title")
+        legend_loc = op.get("legend_loc", "upper right")
+        x_tick_rotation = op.get("x_tick_rotation", 0)
+        y_tick_rotation = op.get("y_tick_rotation", 0)
+        grid = op.get("grid", True)
 
         # Load all data sources
         dataframes = []
@@ -309,8 +340,26 @@ class PlotBuilder:
 
         fig, ax = plt.subplots(figsize=figsize)
 
-        # Color palette
-        colors = plt.cm.tab10(np.linspace(0, 1, len(dataframes)))
+        # Build color mapping based on color_groups
+        if color_groups and len(color_groups) == len(dataframes):
+            unique_groups = list(dict.fromkeys(color_groups))  # Preserve order, remove duplicates
+            if explicit_colors and len(explicit_colors) >= len(unique_groups):
+                # Use explicit colors for each unique group
+                group_color_map = {g: explicit_colors[i] for i, g in enumerate(unique_groups)}
+            else:
+                # Generate colors from palette
+                palette = plt.cm.tab10(np.linspace(0, 1, len(unique_groups)))
+                group_color_map = {g: palette[i] for i, g in enumerate(unique_groups)}
+            colors = [group_color_map[g] for g in color_groups]
+        elif explicit_colors and len(explicit_colors) >= len(dataframes):
+            colors = explicit_colors[:len(dataframes)]
+            unique_groups = None
+            group_color_map = None
+        else:
+            # Default color palette
+            colors = plt.cm.tab10(np.linspace(0, 1, len(dataframes)))
+            unique_groups = None
+            group_color_map = None
 
         x_positions = np.arange(len(dataframes))
         bar_width = 0.6
@@ -347,7 +396,7 @@ class PlotBuilder:
                           edgecolors='black', linewidth=0.5, s=30, zorder=5)
 
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(group_labels, rotation=0)
+        ax.set_xticklabels(group_labels)
 
         # Add sample size annotations
         for i, df in enumerate(dataframes):
@@ -355,10 +404,18 @@ class PlotBuilder:
             ax.text(x_positions[i], ax.get_ylim()[0] - 0.05 * (ax.get_ylim()[1] - ax.get_ylim()[0]),
                    f'n={n}', ha='center', fontsize=8, color='gray')
 
-        self._apply_style(ax, title, xlabel, ylabel)
+        self._apply_style(ax, title, xlabel, ylabel,
+                         x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                         grid=grid)
 
-        # Add error bar type to legend if showing error
-        if show_error and show_mean:
+        # Add legend for color groups
+        if color_groups and group_color_map:
+            legend_handles = [mpatches.Patch(color=group_color_map[g], label=g) for g in unique_groups]
+            ax.legend(handles=legend_handles, title=legend_title, loc=legend_loc,
+                     fontsize=9, title_fontsize=10)
+
+        # Add error bar type annotation if showing error (but no color group legend)
+        if show_error and show_mean and not color_groups:
             error_label = {"sd": "SD", "sem": "SEM", "ci": "95% CI"}.get(show_error, "")
             if error_label:
                 ax.text(0.02, 0.98, f"Error bars: {error_label}",
@@ -472,7 +529,7 @@ class PlotBuilder:
                         ax.text(j, i, f'{value:.2f}', ha='center', va='center',
                                color=text_color, fontsize=8)
 
-        self._apply_style(ax, title, xlabel, ylabel)
+        self._apply_style(ax, title, xlabel, ylabel, grid=False)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
