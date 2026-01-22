@@ -340,9 +340,8 @@ class BoltzGen(BaseConfig):
             raise ValueError("budget must be positive")
 
         if self.budget > self.num_designs:
-            raise ValueError(
-                f"budget ({self.budget}) cannot exceed num_designs ({self.num_designs})"
-            )
+            self.budget = self.num_designs
+            print("[Warning] budget was set equal to num_designs.")
 
         if self.inverse_fold_num_sequences <= 0:
             raise ValueError("inverse_fold_num_sequences must be positive")
