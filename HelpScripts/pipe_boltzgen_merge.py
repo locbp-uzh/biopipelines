@@ -18,7 +18,6 @@ import sys
 import argparse
 import shutil
 import re
-from pathlib import Path
 
 
 def get_source_prefix(source_path: str, index: int, id_template: str) -> str:
@@ -91,77 +90,61 @@ def find_design_files(source_dir: str) -> dict:
     return files
 
 
-def extract_design_id(filename: str) -> str:
+def update_csv_ids_regex(content: str, prefix: str) -> str:
     """
-    Extract design ID from a filename.
+    Update all design IDs in CSV content using a single regex replacement.
 
-    Examples:
-        design_spec_001.cif -> design_spec_001
-        design_spec_001_model_0.cif -> design_spec_001_model_0
-    """
-    # Remove extension
-    name = os.path.splitext(filename)[0]
-    return name
-
-
-def rename_design_id(old_id: str, prefix: str) -> str:
-    """
-    Rename a design ID by prepending a prefix.
+    Since CSV files contain only filenames (not paths), we can use a regex
+    pattern to match all design IDs and prepend the prefix in one pass.
 
     Args:
-        old_id: Original design ID (e.g., "design_spec_001")
-        prefix: Prefix to prepend (e.g., "batch001_")
+        content: CSV file content as string
+        prefix: Prefix to prepend to all design IDs
 
     Returns:
-        New design ID (e.g., "batch001_design_spec_001")
+        Updated content with renamed IDs
     """
-    return f"{prefix}{old_id}"
+    # Pattern matches design IDs like: design_spec_001, design_spec_001_model_0, etc.
+    # The pattern captures the full ID to preserve suffixes like _model_0
+    pattern = r'(design_spec_\d+(?:_model_\d+)?)'
+    return re.sub(pattern, prefix + r'\1', content)
 
 
-def copy_and_rename_file(source_path: str, dest_dir: str, old_id: str, new_id: str) -> str:
+def collect_csv_headers(csv_files: list) -> list:
     """
-    Copy a file while renaming based on ID change.
+    Collect all unique headers from multiple CSV files, preserving order.
+
+    Args:
+        csv_files: List of (source_path, prefix) tuples
 
     Returns:
-        Path to the new file
+        List of all unique column names in order of first appearance
     """
-    filename = os.path.basename(source_path)
-    new_filename = filename.replace(old_id, new_id)
-    dest_path = os.path.join(dest_dir, new_filename)
+    all_columns = []
+    seen = set()
 
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    shutil.copy2(source_path, dest_path)
+    for csv_path, _ in csv_files:
+        with open(csv_path, 'r') as f:
+            header_line = f.readline().strip()
+            if header_line:
+                columns = header_line.split(',')
+                for col in columns:
+                    if col not in seen:
+                        seen.add(col)
+                        all_columns.append(col)
 
-    return dest_path
+    return all_columns
 
 
-def update_csv_ids(csv_path: str, id_mappings: dict) -> None:
+def merge_csv_files_with_headers(csv_files: list, output_path: str) -> None:
     """
-    Update all ID references in a CSV file.
+    Merge multiple CSV files into one, handling different headers.
+
+    Collects all unique headers across files, then merges rows with
+    proper column alignment. Missing columns get empty values.
 
     Args:
-        csv_path: Path to CSV file
-        id_mappings: Dictionary mapping old_id -> new_id
-    """
-    with open(csv_path, 'r') as f:
-        content = f.read()
-
-    # Sort by length (longest first) to avoid partial replacements
-    sorted_mappings = sorted(id_mappings.items(), key=lambda x: len(x[0]), reverse=True)
-
-    for old_id, new_id in sorted_mappings:
-        content = content.replace(old_id, new_id)
-
-    with open(csv_path, 'w') as f:
-        f.write(content)
-
-
-def merge_csv_files(csv_files: list, output_path: str) -> None:
-    """
-    Merge multiple CSV files into one, keeping header from first file.
-
-    Args:
-        csv_files: List of CSV file paths
+        csv_files: List of (source_csv_path, prefix) tuples
         output_path: Output merged CSV path
     """
     if not csv_files:
@@ -169,23 +152,78 @@ def merge_csv_files(csv_files: list, output_path: str) -> None:
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
+    # First pass: collect all unique headers
+    all_columns = collect_csv_headers(csv_files)
+
     with open(output_path, 'w') as out_f:
-        for i, csv_file in enumerate(csv_files):
-            with open(csv_file, 'r') as in_f:
-                lines = in_f.readlines()
-                if i == 0:
-                    # Write header and all data from first file
-                    out_f.writelines(lines)
-                else:
-                    # Skip header for subsequent files
-                    if len(lines) > 1:
-                        out_f.writelines(lines[1:])
+        # Write unified header
+        out_f.write(','.join(all_columns) + '\n')
+
+        # Second pass: merge data with proper column alignment
+        for csv_path, prefix in csv_files:
+            with open(csv_path, 'r') as in_f:
+                content = in_f.read()
+
+            # Apply ID renaming with single regex
+            content = update_csv_ids_regex(content, prefix)
+
+            lines = content.strip().split('\n')
+            if not lines:
+                continue
+
+            # Parse header to get column indices
+            file_columns = lines[0].split(',')
+            col_to_idx = {col: idx for idx, col in enumerate(file_columns)}
+
+            # Process data rows
+            for line in lines[1:]:
+                if not line.strip():
+                    continue
+
+                values = line.split(',')
+                # Build row with proper column alignment
+                row = []
+                for col in all_columns:
+                    if col in col_to_idx and col_to_idx[col] < len(values):
+                        row.append(values[col_to_idx[col]])
+                    else:
+                        row.append('')  # Empty for missing columns
+
+                out_f.write(','.join(row) + '\n')
+
+
+def rename_file_with_prefix(source_path: str, dest_dir: str, prefix: str) -> str:
+    """
+    Copy a file while renaming design IDs in the filename using regex.
+
+    Args:
+        source_path: Path to source file
+        dest_dir: Destination directory
+        prefix: Prefix to prepend to design IDs
+
+    Returns:
+        Path to the new file
+    """
+    filename = os.path.basename(source_path)
+    # Apply same regex pattern to filename
+    new_filename = re.sub(r'(design_spec_\d+(?:_model_\d+)?)', prefix + r'\1', filename)
+    dest_path = os.path.join(dest_dir, new_filename)
+
+    os.makedirs(dest_dir, exist_ok=True)
+    shutil.copy2(source_path, dest_path)
+
+    return dest_path
 
 
 def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
                            verbose: bool = True) -> dict:
     """
     Merge multiple BoltzGen outputs with ID renaming.
+
+    Optimized implementation:
+    - Uses single regex for ID renaming instead of per-ID string replacement
+    - Merges CSV files directly without temp files
+    - Handles different CSV headers by collecting all columns first
 
     Args:
         sources: List of source directory paths
@@ -212,9 +250,8 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
                    'config']:
         os.makedirs(os.path.join(output_dir, subdir), exist_ok=True)
 
-    # Track all ID mappings and CSV files to merge
-    all_id_mappings = {}
-    csv_files_to_merge = {}  # csv_name -> list of paths
+    # Track CSV files to merge: csv_name -> list of (source_path, prefix)
+    csv_files_to_merge = {}
 
     for i, source in enumerate(sources):
         prefix = get_source_prefix(source, i, id_template)
@@ -223,71 +260,54 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
             print(f"  Prefix: {prefix}")
 
         files = find_design_files(source)
-        source_id_mappings = {}
+        unique_ids = set()
 
-        # Process structure files (cif, npz)
+        # Process structure files (cif, npz) with regex-based renaming
         for file_type in ['cif', 'npz']:
             for rel_path in files[file_type]:
                 source_path = os.path.join(source, rel_path)
                 filename = os.path.basename(rel_path)
-                old_id = extract_design_id(filename)
-                new_id = rename_design_id(old_id, prefix)
 
-                source_id_mappings[old_id] = new_id
+                # Extract ID for counting (optional, for stats)
+                match = re.search(r'design_spec_\d+(?:_model_\d+)?', filename)
+                if match:
+                    unique_ids.add(match.group(0))
 
                 # Determine destination directory
                 dest_subdir = os.path.dirname(rel_path)
                 dest_dir = os.path.join(output_dir, dest_subdir)
 
-                copy_and_rename_file(source_path, dest_dir, old_id, new_id)
+                rename_file_with_prefix(source_path, dest_dir, prefix)
                 stats['files_copied'] += 1
 
-        stats['ids_renamed'] += len(source_id_mappings)
-        all_id_mappings.update(source_id_mappings)
+        stats['ids_renamed'] += len(unique_ids)
 
-        # Process CSV files - copy with renamed IDs, then merge later
+        # Collect CSV files with their prefixes (no temp files needed)
         for rel_path in files['csv']:
             source_path = os.path.join(source, rel_path)
             csv_name = os.path.basename(rel_path)
 
-            # Create temp copy with renamed IDs
-            temp_dir = os.path.join(output_dir, '_temp_csv', f'source_{i}')
-            os.makedirs(temp_dir, exist_ok=True)
-            temp_path = os.path.join(temp_dir, csv_name)
-
-            shutil.copy2(source_path, temp_path)
-            update_csv_ids(temp_path, source_id_mappings)
-
-            # Track for merging
             if csv_name not in csv_files_to_merge:
-                csv_files_to_merge[csv_name] = []
-            csv_files_to_merge[csv_name].append((rel_path, temp_path))
+                csv_files_to_merge[csv_name] = {'rel_path': rel_path, 'files': []}
+            csv_files_to_merge[csv_name]['files'].append((source_path, prefix))
 
         if verbose:
             print(f"  Copied {len(files['cif'])} CIF files, {len(files['npz'])} NPZ files")
-            print(f"  Renamed {len(source_id_mappings)} unique IDs")
+            print(f"  Found {len(unique_ids)} unique design IDs")
 
-    # Merge CSV files
+    # Merge CSV files with header alignment
     if verbose:
         print(f"\nMerging CSV files...")
 
-    for csv_name, file_list in csv_files_to_merge.items():
+    for csv_name, csv_info in csv_files_to_merge.items():
+        file_list = csv_info['files']
         if file_list:
-            # Use the relative path from first file
-            rel_path = file_list[0][0]
-            output_path = os.path.join(output_dir, rel_path)
-            temp_paths = [fp[1] for fp in file_list]
-
-            merge_csv_files(temp_paths, output_path)
+            output_path = os.path.join(output_dir, csv_info['rel_path'])
+            merge_csv_files_with_headers(file_list, output_path)
             stats['csvs_merged'][csv_name] = len(file_list)
 
             if verbose:
                 print(f"  {csv_name}: merged {len(file_list)} files")
-
-    # Clean up temp directory
-    temp_dir = os.path.join(output_dir, '_temp_csv')
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
 
     # Copy config and other files from first source
     first_source = sources[0]
