@@ -31,10 +31,14 @@ class AlphaFold(BaseConfig):
     TOOL_NAME = "AlphaFold"
     DEFAULT_ENV = None  # Loaded from config.yaml
     
+    # Valid MSA mode options for ColabFold
+    VALID_MSA_MODES = ["mmseqs2_uniref_env", "mmseqs2_uniref", "single_sequence"]
+
     def __init__(self, sequences: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
                  tables: Optional[List[str]] = None,
                  name: str = "",
                  num_relax: int = 0, num_recycle: int = 3, rand_seed: int = 0,
+                 msa_mode: Optional[str] = None,
                  **kwargs):
         """
         Initialize AlphaFold configuration.
@@ -43,11 +47,10 @@ class AlphaFold(BaseConfig):
             sequences: Input sequences - can be FASTA file, CSV file, list, ToolOutput, or dict with sequences
             tables: Input table files for metadata
             name: Job name for output files
-            rank: Rank structures by confidence metrics
-            only_first: Only use first model for ranking comparisons
             num_relax: Number of best models to relax with AMBER
             num_recycle: Number of recycling iterations (default 3)
             rand_seed: Random seed for reproducible results (0 = random)
+            msa_mode: MSA generation mode - "mmseqs2_uniref_env" (default), "mmseqs2_uniref", or "single_sequence" (no MSA)
             **kwargs: Additional parameters
         """
         # Handle different input formats
@@ -84,6 +87,7 @@ class AlphaFold(BaseConfig):
         self.num_relax = num_relax
         self.num_recycle = num_recycle
         self.rand_seed = rand_seed
+        self.msa_mode = msa_mode
         
         # Initialize base class
         super().__init__(**kwargs)
@@ -95,15 +99,18 @@ class AlphaFold(BaseConfig):
         """Validate AlphaFold-specific parameters."""
         if not self.input_sequences:
             raise ValueError("input sequences parameter is required")
-        
+
         if self.num_relax < 0:
             raise ValueError("num_relax cannot be negative")
-        
+
         if self.num_recycle < 1:
             raise ValueError("num_recycle must be at least 1")
-        
+
         if self.rand_seed < 0:
             raise ValueError("rand_seed cannot be negative")
+
+        if self.msa_mode is not None and self.msa_mode not in self.VALID_MSA_MODES:
+            raise ValueError(f"msa_mode must be one of {self.VALID_MSA_MODES}, got: {self.msa_mode}")
     
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
@@ -221,10 +228,13 @@ class AlphaFold(BaseConfig):
             f"NUM RELAX: {self.num_relax}",
             f"NUM RECYCLE: {self.num_recycle}"
         ])
-        
+
         if self.rand_seed > 0:
             config_lines.append(f"RAND SEED: {self.rand_seed}")
-        
+
+        if self.msa_mode:
+            config_lines.append(f"MSA MODE: {self.msa_mode}")
+
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
@@ -302,7 +312,9 @@ fi
             af_options += f" --num-recycle {self.num_recycle}"
         if self.rand_seed != 0:
             af_options += f" --random-seed {self.rand_seed}"
-        
+        if self.msa_mode:
+            af_options += f" --msa-mode {self.msa_mode}"
+
         folding_folder = os.path.join(self.output_folder, "Folding")
         
         return f"""echo "Running AlphaFold2/ColabFold"
@@ -320,18 +332,31 @@ mkdir -p "{folding_folder}"
         folding_folder = os.path.join(self.output_folder, "Folding")
         msas_folder = os.path.join(self.output_folder, "MSAs")
 
+        # MSA extraction section (only when not using single_sequence mode)
+        msa_section = ""
+        if self.msa_mode != "single_sequence":
+            msa_section = f"""
+# Create MSAs subfolder
+mkdir -p "{msas_folder}"
+
+# Copy MSA files to MSAs subfolder
+echo "Extracting MSA files"
+for msa_file in *.a3m; do
+    if [ -f "$msa_file" ]; then
+        cp "$msa_file" "{msas_folder}/"
+        echo "Copied MSA: $msa_file"
+    fi
+done
+"""
+
         return f"""echo "Extracting best structures from Folding subfolder"
 # AlphaFold creates files like:
 # - sequenceid_unrelaxed_rank_001_alphafold2_ptm_model_N_seed_SSS.pdb
 # - sequenceid_relaxed_rank_001_alphafold2_ptm_model_N_seed_SSS.pdb
-# - sequenceid.a3m (MSA file)
+# - sequenceid.a3m (MSA file, not generated in single_sequence mode)
 # We want to copy the best ones to main directory as: sequenceid.pdb
-# And MSA files to MSAs subfolder
 
 cd "{folding_folder}"
-
-# Create MSAs subfolder
-mkdir -p "{msas_folder}"
 
 # Handle relaxed format (preferred if both exist)
 for file in *_relaxed_rank_001_*.pdb; do
@@ -357,16 +382,7 @@ for file in *_unrelaxed_rank_001_*.pdb; do
         fi
     fi
 done
-
-# Copy MSA files to MSAs subfolder
-echo "Extracting MSA files"
-for msa_file in *.a3m; do
-    if [ -f "$msa_file" ]; then
-        cp "$msa_file" "{msas_folder}/"
-        echo "Copied MSA: $msa_file"
-    fi
-done
-
+{msa_section}
 cd - > /dev/null
 
 """
@@ -384,6 +400,12 @@ python {alphafold_confidence_py} "{folding_folder}" "{self.output_folder}" "{con
 
     def generate_script_create_msas_table(self) -> str:
         """Generate script section to create MSAs CSV table."""
+        # Skip MSA table creation in single_sequence mode (no MSAs generated)
+        if self.msa_mode == "single_sequence":
+            return """echo "Skipping MSA table creation (single_sequence mode)"
+
+"""
+
         msas_folder = os.path.join(self.output_folder, "MSAs")
         msa_csv = os.path.join(self.output_folder, "msas.csv")
         alphafold_msas_py = os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py")
@@ -485,15 +507,15 @@ python {alphafold_msas_py} "{msas_folder}" "{self.queries_csv}" "{msa_csv}"
         # Confidence scores table
         confidence_csv = os.path.join(self.output_folder, "confidence.csv")
 
-        # MSA files (AlphaFold generates .a3m files)
-        msas_folder = os.path.join(self.output_folder, "MSAs")
+        # MSA files (AlphaFold generates .a3m files, except in single_sequence mode)
         msa_files = []
-        for seq_id in structure_ids:
-            msa_file = os.path.join(msas_folder, f"{seq_id}.a3m")
-            msa_files.append(msa_file)
-
-        # MSA table
-        msa_csv = os.path.join(self.output_folder, "msas.csv")
+        msa_csv = None
+        if self.msa_mode != "single_sequence":
+            msas_folder = os.path.join(self.output_folder, "MSAs")
+            for seq_id in structure_ids:
+                msa_file = os.path.join(msas_folder, f"{seq_id}.a3m")
+                msa_files.append(msa_file)
+            msa_csv = os.path.join(self.output_folder, "msas.csv")
 
         # Organize tables by content type
         tables = {
@@ -510,15 +532,18 @@ python {alphafold_msas_py} "{msas_folder}" "{self.queries_csv}" "{msa_csv}"
                 columns=["id", "structure", "plddt", "max_pae", "ptm"],
                 description="AlphaFold confidence metrics extracted from best rank models",
                 count=len(structure_ids)
-            ),
-            "msas": TableInfo(
+            )
+        }
+
+        # Add MSA table only if MSAs are generated
+        if msa_csv:
+            tables["msas"] = TableInfo(
                 name="msas",
                 path=msa_csv,
                 columns=["id", "sequence_id", "sequence", "msa_file"],
                 description="MSA files for sequence recycling between predictions",
                 count=len(msa_files)
             )
-        }
 
         return {
             "structures": structure_files,
@@ -527,7 +552,7 @@ python {alphafold_msas_py} "{msas_folder}" "{self.queries_csv}" "{msa_csv}"
             "compound_ids": [],
             "sequences": [queries_csv],  # Main sequence input/output
             "sequence_ids": sequence_ids,
-            "msas": msa_files,  # Individual MSA files
+            "msas": msa_files,  # Individual MSA files (empty in single_sequence mode)
             "tables": tables,
             "output_folder": self.output_folder,
             # Keep legacy aliases for compatibility
@@ -545,6 +570,7 @@ python {alphafold_msas_py} "{msas_folder}" "{self.queries_csv}" "{msa_csv}"
                 "num_relax": self.num_relax,
                 "num_recycle": self.num_recycle,
                 "rand_seed": self.rand_seed,
+                "msa_mode": self.msa_mode,
                 "input_type": "tool_output" if self.input_is_tool_output else "direct"
             }
         })

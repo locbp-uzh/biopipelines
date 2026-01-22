@@ -6,7 +6,7 @@
 
 ### AlphaFold
 
-Predicts protein structures from amino acid sequences using AlphaFold2. Generates high-confidence 3D models with optional relaxation.
+Predicts protein structures from amino acid sequences using AlphaFold2. Generates high-confidence 3D models with optional relaxation. Supports single-sequence prediction mode for fast predictions without MSA generation.
 
 **Resources**: GPU. H100 NVL is not compatible.
 
@@ -27,9 +27,14 @@ rm install_colabbatch_linux.sh
 - `num_relax`: int = 0 - Number of best models to relax with AMBER
 - `num_recycle`: int = 3 - Number of recycling iterations
 - `rand_seed`: int = 0 - Random seed (0 = random)
+- `msa_mode`: Optional[str] = None - MSA generation mode:
+  - `"mmseqs2_uniref_env"` - MMseqs2 with UniRef + environmental databases (default)
+  - `"mmseqs2_uniref"` - MMseqs2 with UniRef only
+  - `"single_sequence"` - No MSA generation (fast single-sequence prediction)
 
 **Outputs**:
 - `structures`: List of predicted PDB files
+- `msas`: List of MSA files (.a3m) - empty when `msa_mode="single_sequence"`
 - `tables.structures`:
 
   | id | source_id | sequence |
@@ -40,14 +45,27 @@ rm install_colabbatch_linux.sh
   | id | structure | plddt | max_pae | ptm |
   |----|-----------|-------|---------|-----|
 
+- `tables.msas` (only when MSAs are generated):
+
+  | id | sequence_id | sequence | msa_file |
+  |----|-------------|----------|----------|
+
 **Example**:
 ```python
 from PipelineScripts.alphafold import AlphaFold
 
+# Standard prediction with MSA
 af = AlphaFold(
     sequences=lmpnn,
     num_relax=1,
     num_recycle=5
+)
+
+# Fast single-sequence prediction (no MSA)
+af_fast = AlphaFold(
+    sequences=lmpnn,
+    msa_mode="single_sequence",
+    num_recycle=3
 )
 ```
 
