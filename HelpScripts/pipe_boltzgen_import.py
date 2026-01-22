@@ -14,7 +14,9 @@ on structures from external tools like RFdiffusion.
 
 import os
 import sys
+import re
 import argparse
+import json
 import pandas as pd
 from pathlib import Path
 
@@ -53,7 +55,8 @@ def convert_and_reassign_chains(
     output_path: str,
     protein_chain: str = "A",
     ligand_chain: str = "B",
-    new_sequence: str = None
+    new_sequence: str = None,
+    ligand_name: str = "LIG"
 ) -> bool:
     """
     Convert structure to CIF and reassign chains.
@@ -67,6 +70,8 @@ def convert_and_reassign_chains(
         protein_chain: Target chain ID for protein (default: "A")
         ligand_chain: Target chain ID for ligand (default: "B")
         new_sequence: Optional new sequence to assign (zeros sidechains)
+        ligand_name: Residue name for ligand in output (default: "LIG").
+                    BoltzGen expects ligand to be named "LIG".
 
     Returns:
         True if successful, False otherwise
@@ -138,6 +143,9 @@ def convert_and_reassign_chains(
                 # Renumber to avoid conflicts
                 new_id = (' ', i + 1, ' ')
             residue.id = new_id
+            # Rename ligand residue to the specified name (default: LIG)
+            # BoltzGen expects all ligands to be named "LIG"
+            residue.resname = ligand_name
             ligand_chain_obj.add(residue)
 
         # Add chains to model
@@ -186,32 +194,89 @@ def load_sequences(sequences_csv: str) -> dict:
     return sequences
 
 
-def find_sequence_for_structure(structure_id: str, sequences: dict) -> str:
+def apply_id_map(structure_id: str, id_map: dict) -> list:
     """
-    Find the sequence for a given structure ID.
+    Apply id_map pattern to generate possible sequence ID patterns.
+
+    The id_map pattern {"*": "*_<N>"} means structure ID can have
+    recursive numeric suffixes added to match sequence IDs.
+
+    Args:
+        structure_id: ID of the structure
+        id_map: Mapping pattern, e.g., {"*": "*_<N>"}
+
+    Returns:
+        List of matching patterns (regex patterns or exact strings)
+    """
+    patterns = [structure_id]  # Always include exact match
+
+    # Handle the default recursive pattern {"*": "*_<N>"}
+    if "*" in id_map:
+        pattern = id_map["*"]
+        if pattern == "*_<N>":
+            # Recursive numeric suffix: matches structure_id_1, structure_id_1_1, etc.
+            # Build regex pattern: structure_id followed by one or more _<number> suffixes
+            escaped_id = re.escape(structure_id)
+            patterns.append(f"^{escaped_id}(_\\d+)+$")
+        elif pattern == "*":
+            # Exact match only (no transformation)
+            pass
+        else:
+            # Custom pattern - replace * with structure_id
+            custom_pattern = pattern.replace("*", structure_id)
+            patterns.append(custom_pattern)
+
+    return patterns
+
+
+def find_sequence_for_structure(structure_id: str, sequences: dict, id_map: dict = None) -> str:
+    """
+    Find the sequence for a given structure ID using id_map pattern.
 
     Handles various naming conventions:
     - Exact match: structure_id in sequences
-    - Prefix match: sequence_id starts with structure_id
-    - Source_id match: sequence has source_id field matching structure_id
+    - id_map pattern match: using recursive suffix matching
+    - Fallback prefix match: sequence_id starts with structure_id
 
     Args:
         structure_id: ID of the structure
         sequences: Dictionary mapping IDs to sequences
+        id_map: ID mapping pattern, e.g., {"*": "*_<N>"} for recursive suffixes.
+               Default: {"*": "*_<N>"}
 
     Returns:
         Sequence string or None if not found
     """
-    # Exact match
+    if id_map is None:
+        id_map = {"*": "*_<N>"}
+
+    # Get matching patterns from id_map
+    patterns = apply_id_map(structure_id, id_map)
+
+    # First: exact match (always first priority)
     if structure_id in sequences:
         return sequences[structure_id]
 
-    # Try prefix match (e.g., "design_1" matches "design_1_seq_0")
+    # Second: try regex patterns from id_map
+    for pattern in patterns:
+        if pattern == structure_id:
+            continue  # Skip exact match, already checked
+        try:
+            regex = re.compile(pattern)
+            for seq_id, sequence in sequences.items():
+                if regex.match(seq_id):
+                    return sequence
+        except re.error:
+            # Not a regex, try exact match
+            if pattern in sequences:
+                return sequences[pattern]
+
+    # Third: fallback prefix match (e.g., "design_1" matches "design_1_seq_0")
     for seq_id, sequence in sequences.items():
         if seq_id.startswith(structure_id + "_"):
             return sequence
 
-    # Try suffix match (structure might have extra prefix)
+    # Fourth: suffix match (structure might have extra prefix)
     for seq_id, sequence in sequences.items():
         if structure_id.endswith("_" + seq_id) or structure_id == seq_id:
             return sequence
@@ -304,7 +369,9 @@ def import_structures(
     binder_min: int,
     binder_max: int,
     sequences_csv: str = None,
-    ligand_csv: str = None
+    ligand_csv: str = None,
+    id_map: dict = None,
+    ligand_name: str = "LIG"
 ) -> dict:
     """
     Import structures into BoltzGen format.
@@ -319,10 +386,15 @@ def import_structures(
         binder_max: Maximum binder length
         sequences_csv: Path to sequences CSV (for inverse_folding mode)
         ligand_csv: Path to ligand compounds CSV
+        id_map: ID mapping pattern for matching structure IDs to sequence IDs.
+               Default {"*": "*_<N>"} handles recursive numeric suffixes.
+        ligand_name: Residue name for ligand in output (default: "LIG")
 
     Returns:
         Dictionary with import statistics
     """
+    if id_map is None:
+        id_map = {"*": "*_<N>"}
     stats = {
         'processed': 0,
         'success': 0,
@@ -376,7 +448,7 @@ def import_structures(
         # Find sequence for this structure (if in inverse_folding mode)
         sequence = None
         if mode == "inverse_folding" and sequences:
-            sequence = find_sequence_for_structure(struct_id, sequences)
+            sequence = find_sequence_for_structure(struct_id, sequences, id_map)
             if sequence is None:
                 stats['missing_sequences'] += 1
                 print(f"  Warning: No sequence found for {struct_id}")
@@ -386,7 +458,8 @@ def import_structures(
             struct_path, output_cif,
             protein_chain=protein_chain,
             ligand_chain=ligand_chain,
-            new_sequence=sequence
+            new_sequence=sequence,
+            ligand_name=ligand_name
         )
 
         if success:
@@ -453,8 +526,27 @@ def main():
         '--ligand-csv',
         help='CSV file with ligand info (smiles or ccd columns)'
     )
+    parser.add_argument(
+        '--id-map',
+        default='{"*": "*_<N>"}',
+        help='JSON string for ID mapping pattern (default: {"*": "*_<N>"}). '
+             'Maps structure IDs to sequence IDs with recursive numeric suffixes.'
+    )
+    parser.add_argument(
+        '--ligand-name',
+        default='LIG',
+        help='Residue name for ligand in output (default: LIG). '
+             'BoltzGen expects all ligands to be named "LIG".'
+    )
 
     args = parser.parse_args()
+
+    # Parse id_map from JSON string
+    try:
+        id_map = json.loads(args.id_map)
+    except json.JSONDecodeError as e:
+        print(f"Error parsing --id-map JSON: {e}")
+        sys.exit(1)
 
     # Validate arguments
     if args.mode == 'inverse_folding' and not args.sequences:
@@ -467,6 +559,8 @@ def main():
     print(f"Output: {args.output}")
     print(f"Chains: protein={args.protein_chain}, ligand={args.ligand_chain}")
     print(f"Binder spec: {args.binder_min}-{args.binder_max}")
+    print(f"Ligand name: {args.ligand_name}")
+    print(f"ID map: {id_map}")
     if args.sequences:
         print(f"Sequences: {args.sequences}")
     if args.ligand_csv:
@@ -481,7 +575,9 @@ def main():
         binder_min=args.binder_min,
         binder_max=args.binder_max,
         sequences_csv=args.sequences,
-        ligand_csv=args.ligand_csv
+        ligand_csv=args.ligand_csv,
+        id_map=id_map,
+        ligand_name=args.ligand_name
     )
 
     print("\n" + "=" * 60)

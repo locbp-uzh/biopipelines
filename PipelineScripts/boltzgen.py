@@ -1267,6 +1267,8 @@ class BoltzGenImport(BaseConfig):
                  binder_spec: Union[str, Dict[str, Any]] = None,
                  ligand_chain: str = "B",
                  protein_chain: str = "A",
+                 id_map: Dict[str, str] = {"*": "*_<N>"},
+                 ligand_name: str = "LIG",
                  **kwargs):
         """
         Initialize BoltzGenImport configuration.
@@ -1284,6 +1286,12 @@ class BoltzGenImport(BaseConfig):
                         Used for design_spec generation.
             ligand_chain: Chain ID for ligand in output (default: "B")
             protein_chain: Chain ID for protein in output (default: "A")
+            id_map: ID mapping pattern for matching structure IDs to sequence IDs.
+                   Default {"*": "*_<N>"} handles recursive numeric suffixes:
+                   - Structure "design_1" matches sequence "design_1_1", "design_1_1_1", etc.
+                   - Set to {"*": "*"} for exact ID matching.
+            ligand_name: Residue name for ligand in output (default: "LIG").
+                        BoltzGen expects ligand to be named "LIG".
             **kwargs: Additional parameters passed to BaseConfig
         """
         self.designs = designs
@@ -1292,6 +1300,8 @@ class BoltzGenImport(BaseConfig):
         self.binder_spec = binder_spec
         self.ligand_chain = ligand_chain
         self.protein_chain = protein_chain
+        self.id_map = id_map
+        self.ligand_name = ligand_name
 
         # Paths to be resolved in configure_inputs
         self.design_structures = []  # List of PDB/CIF paths
@@ -1460,6 +1470,10 @@ class BoltzGenImport(BaseConfig):
         with open(steps_yaml_file, 'w') as f:
             f.write(steps_content)
 
+        # Serialize id_map as JSON string for passing to script
+        import json
+        id_map_json = json.dumps(self.id_map)
+
         # Build command arguments
         cmd_args = [
             f'--structures "{structures_list_file}"',
@@ -1469,6 +1483,8 @@ class BoltzGenImport(BaseConfig):
             f'--ligand-chain {self.ligand_chain}',
             f'--binder-min {binder_min}',
             f'--binder-max {binder_max}',
+            f'--ligand-name {self.ligand_name}',
+            f"--id-map '{id_map_json}'",
         ]
 
         if self.sequences_csv:
@@ -1530,6 +1546,8 @@ fi
         config_lines.append(f"INPUT STRUCTURES: {len(self.design_structures)} files")
         config_lines.append(f"BINDER SPEC: {self.binder_spec}")
         config_lines.append(f"CHAINS: protein={self.protein_chain}, ligand={self.ligand_chain}")
+        config_lines.append(f"LIGAND NAME: {self.ligand_name}")
+        config_lines.append(f"ID MAP: {self.id_map}")
         if self.sequences_csv:
             config_lines.append(f"SEQUENCES CSV: {os.path.basename(self.sequences_csv)}")
         if self.ligand_compounds_csv:
