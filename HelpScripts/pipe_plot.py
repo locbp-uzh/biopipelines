@@ -131,7 +131,8 @@ class PlotBuilder:
         x_tick_rotation = op.get("x_tick_rotation", 0)
         y_tick_rotation = op.get("y_tick_rotation", 0)
         grid = op.get("grid", True)
-        legend_loc = op.get("legend_loc", "upper right")
+        color_legend_loc = op.get("color_legend_loc", "upper right")
+        color_legend_outside = op.get("color_legend_outside", False)
 
         df = self._resolve_data_source(data_ref)
 
@@ -153,7 +154,11 @@ class PlotBuilder:
                 ax.scatter(df.loc[mask, x_col], df.loc[mask, y_col],
                           c=[c], label=str(group), alpha=0.7, edgecolors='white', linewidth=0.5)
 
-            ax.legend(title=color_col, fontsize=9, title_fontsize=10, loc=legend_loc)
+            if color_legend_outside:
+                ax.legend(title=color_col, fontsize=9, title_fontsize=10,
+                         loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=True)
+            else:
+                ax.legend(title=color_col, fontsize=9, title_fontsize=10, loc=color_legend_loc)
         else:
             # Simple scatter
             ax.scatter(df[x_col], df[y_col], c='#1f77b4', alpha=0.7,
@@ -294,13 +299,12 @@ class PlotBuilder:
 
     def execute_column(self, op: Dict[str, Any], output_path: str):
         """
-        Execute Column operation - create Prism-style column plot.
+        Execute Column operation - create column plot with configurable style.
 
-        Displays grouped columns with error bars and overlaid individual data points,
-        commonly used for comparing metrics between conditions or tools.
+        Supports multiple styles: column (bars+points), simple_bar, scatter, box, floating_bar.
 
         Args:
-            op: Operation dict with data (list), y, labels, etc.
+            op: Operation dict with data (list), y, labels, style, etc.
             output_path: Path to save the plot
         """
         data_refs = op.get("data", [])
@@ -309,14 +313,14 @@ class PlotBuilder:
         title = op.get("title")
         xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), "")
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
-        show_points = op.get("show_points", True)
-        show_mean = op.get("show_mean", True)
+        style = op.get("style", "column")
         show_error = op.get("show_error", "sd")
         figsize = tuple(op.get("figsize", [8, 6]))
         color_groups = op.get("color_groups")
         explicit_colors = op.get("colors")
-        legend_title = op.get("legend_title")
-        legend_loc = op.get("legend_loc", "upper right")
+        color_legend_title = op.get("color_legend_title")
+        color_legend_loc = op.get("color_legend_loc", "upper right")
+        color_legend_outside = op.get("color_legend_outside", False)
         x_tick_rotation = op.get("x_tick_rotation", 0)
         y_tick_rotation = op.get("y_tick_rotation", 0)
         grid = op.get("grid", True)
@@ -364,58 +368,108 @@ class PlotBuilder:
         x_positions = np.arange(len(dataframes))
         bar_width = 0.6
 
-        for i, (df, label, color) in enumerate(zip(dataframes, group_labels, colors)):
-            values = df[y_col].dropna()
-            mean_val = values.mean()
-            n = len(values)
+        # Box plot style - handled separately
+        if style == "box":
+            box_data = [df[y_col].dropna().values for df in dataframes]
+            bp = ax.boxplot(box_data, positions=x_positions, widths=bar_width * 0.8,
+                           patch_artist=True, showfliers=True)
+            for patch, color in zip(bp['boxes'], colors):
+                patch.set_facecolor(color)
+                patch.set_alpha(0.6)
+            for element in ['whiskers', 'caps', 'medians']:
+                plt.setp(bp[element], color='black')
+        else:
+            # Other styles: column, simple_bar, scatter, floating_bar
+            for i, (df, label, color) in enumerate(zip(dataframes, group_labels, colors)):
+                values = df[y_col].dropna()
+                mean_val = values.mean()
+                n = len(values)
 
-            # Calculate error
-            if show_error == "sd":
-                error = values.std()
-            elif show_error == "sem":
-                error = values.std() / np.sqrt(n) if n > 0 else 0
-            elif show_error == "ci":
-                # 95% confidence interval
-                error = 1.96 * values.std() / np.sqrt(n) if n > 0 else 0
-            else:
-                error = 0
+                # Calculate error
+                if show_error == "sd":
+                    error = values.std()
+                elif show_error == "sem":
+                    error = values.std() / np.sqrt(n) if n > 0 else 0
+                elif show_error == "ci":
+                    error = 1.96 * values.std() / np.sqrt(n) if n > 0 else 0
+                else:
+                    error = 0
 
-            # Draw bar with error bars
-            if show_mean:
-                ax.bar(x_positions[i], mean_val, bar_width, color=color, alpha=0.6,
-                      edgecolor='black', linewidth=1)
+                if style == "column":
+                    # Bars with error bars and overlaid points
+                    ax.bar(x_positions[i], mean_val, bar_width, color=color, alpha=0.6,
+                          edgecolor='black', linewidth=1)
+                    if error > 0:
+                        ax.errorbar(x_positions[i], mean_val, yerr=error, fmt='none',
+                                  color='black', capsize=5, capthick=1.5, linewidth=1.5)
+                    jitter = (np.random.rand(len(values)) - 0.5) * 0.3
+                    ax.scatter(x_positions[i] + jitter, values, color=color, alpha=0.8,
+                              edgecolors='black', linewidth=0.5, s=30, zorder=5)
 
-                if error > 0:
-                    ax.errorbar(x_positions[i], mean_val, yerr=error, fmt='none',
-                              color='black', capsize=5, capthick=1.5, linewidth=1.5)
+                elif style == "simple_bar":
+                    # Just bars with error bars
+                    ax.bar(x_positions[i], mean_val, bar_width, color=color, alpha=0.8,
+                          edgecolor='black', linewidth=1)
+                    if error > 0:
+                        ax.errorbar(x_positions[i], mean_val, yerr=error, fmt='none',
+                                  color='black', capsize=5, capthick=1.5, linewidth=1.5)
 
-            # Overlay individual points with jitter
-            if show_points:
-                jitter = (np.random.rand(len(values)) - 0.5) * 0.3
-                ax.scatter(x_positions[i] + jitter, values, color=color, alpha=0.8,
-                          edgecolors='black', linewidth=0.5, s=30, zorder=5)
+                elif style == "scatter":
+                    # Just scattered points
+                    jitter = (np.random.rand(len(values)) - 0.5) * 0.4
+                    ax.scatter(x_positions[i] + jitter, values, color=color, alpha=0.7,
+                              edgecolors='black', linewidth=0.5, s=40, zorder=5)
+                    # Add mean line
+                    ax.hlines(mean_val, x_positions[i] - 0.25, x_positions[i] + 0.25,
+                             colors='black', linewidth=2, zorder=6)
 
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(group_labels)
+                elif style == "floating_bar":
+                    # Floating bars showing mean ± error (no baseline)
+                    if error > 0:
+                        ax.barh(x_positions[i], 2 * error, left=mean_val - error,
+                               height=bar_width * 0.5, color=color, alpha=0.6,
+                               edgecolor='black', linewidth=1)
+                        ax.plot(mean_val, x_positions[i], 'k|', markersize=15, markeredgewidth=2)
+                    else:
+                        ax.plot(mean_val, x_positions[i], 'o', color=color, markersize=8)
 
-        # Add sample size annotations
-        for i, df in enumerate(dataframes):
-            n = len(df[y_col].dropna())
-            ax.text(x_positions[i], ax.get_ylim()[0] - 0.05 * (ax.get_ylim()[1] - ax.get_ylim()[0]),
-                   f'n={n}', ha='center', fontsize=8, color='gray')
+        # For floating_bar, swap axes labels
+        if style == "floating_bar":
+            ax.set_yticks(x_positions)
+            ax.set_yticklabels(group_labels)
+            if xlabel:
+                ax.set_ylabel(xlabel)
+            if ylabel:
+                ax.set_xlabel(ylabel)
+        else:
+            ax.set_xticks(x_positions)
+            ax.set_xticklabels(group_labels)
 
-        self._apply_style(ax, title, xlabel, ylabel,
+            # Add sample size annotations (not for floating_bar)
+            for i, df in enumerate(dataframes):
+                n = len(df[y_col].dropna())
+                ax.text(x_positions[i], ax.get_ylim()[0] - 0.05 * (ax.get_ylim()[1] - ax.get_ylim()[0]),
+                       f'n={n}', ha='center', fontsize=8, color='gray')
+
+        self._apply_style(ax, title,
+                         xlabel if style != "floating_bar" else None,
+                         ylabel if style != "floating_bar" else None,
                          x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
                          grid=grid)
 
         # Add legend for color groups
         if color_groups and group_color_map:
             legend_handles = [mpatches.Patch(color=group_color_map[g], label=g) for g in unique_groups]
-            ax.legend(handles=legend_handles, title=legend_title, loc=legend_loc,
-                     fontsize=9, title_fontsize=10)
+            if color_legend_outside:
+                ax.legend(handles=legend_handles, title=color_legend_title,
+                         loc='center left', bbox_to_anchor=(1.02, 0.5),
+                         fontsize=9, title_fontsize=10, frameon=True)
+            else:
+                ax.legend(handles=legend_handles, title=color_legend_title, loc=color_legend_loc,
+                         fontsize=9, title_fontsize=10)
 
         # Add error bar type annotation if showing error (but no color group legend)
-        if show_error and show_mean and not color_groups:
+        if show_error and style in ["column", "simple_bar", "floating_bar"] and not color_groups:
             error_label = {"sd": "SD", "sem": "SEM", "ci": "95% CI"}.get(show_error, "")
             if error_label:
                 ax.text(0.02, 0.98, f"Error bars: {error_label}",
@@ -425,12 +479,12 @@ class PlotBuilder:
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
         plt.close()
 
-        print(f"  Created column plot: {output_path}")
+        print(f"  Created column plot ({style}): {output_path}")
 
         # Record metadata
         self.metadata.append({
             "filename": os.path.basename(output_path),
-            "type": "column",
+            "type": f"column ({style})",
             "title": title or "",
             "x_column": "",
             "y_column": y_col,

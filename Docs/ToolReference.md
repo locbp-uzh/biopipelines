@@ -79,3 +79,4 @@ Tools for loading data, fetching structures, and visualization.
 - [PDB](Tool/Utilities.md#pdb) - Protein structure fetching
 - [Ligand](Tool/Utilities.md#ligand) - Small molecule fetching
 - [PyMOL](Tool/Utilities.md#pymol) - Session creation and visualization
+- [Plot](Tool/Utilities.md#plot) - Publication-ready plots from CSV data

@@ -96,7 +96,8 @@ class Plot(BaseConfig):
                 x_tick_rotation: float = 0,
                 y_tick_rotation: float = 0,
                 grid: bool = True,
-                legend_loc: str = "upper right") -> PlotOperation:
+                color_legend_loc: str = "upper right",
+                color_legend_outside: bool = False) -> PlotOperation:
         """
         Create X vs Y scatter plot, optionally colored by a third column.
 
@@ -114,7 +115,8 @@ class Plot(BaseConfig):
             x_tick_rotation: Rotation angle for x-axis tick labels in degrees
             y_tick_rotation: Rotation angle for y-axis tick labels in degrees
             grid: Show grid lines (default True)
-            legend_loc: Legend location ("upper right", "upper left", etc.)
+            color_legend_loc: Color legend location ("upper right", "upper left", etc.)
+            color_legend_outside: Place legend outside plot area to the right (default False)
 
         Returns:
             PlotOperation for scatter plot
@@ -123,7 +125,8 @@ class Plot(BaseConfig):
                             title=title, xlabel=xlabel, ylabel=ylabel,
                             x_name=x_name, y_name=y_name, figsize=figsize,
                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
-                            grid=grid, legend_loc=legend_loc)
+                            grid=grid, color_legend_loc=color_legend_loc,
+                            color_legend_outside=color_legend_outside)
 
     @staticmethod
     def Histogram(data: Union[StandardizedOutput, ToolOutput, TableInfo],
@@ -196,22 +199,22 @@ class Plot(BaseConfig):
                ylabel: str = None,
                x_name: str = None,
                y_name: str = None,
-               show_points: bool = True,
-               show_mean: bool = True,
+               style: str = "column",
                show_error: str = "sd",
                figsize: Tuple[float, float] = (8, 6),
                color_groups: List[str] = None,
                colors: List[str] = None,
-               legend_title: str = None,
-               legend_loc: str = "upper right",
+               color_legend_title: str = None,
+               color_legend_loc: str = "upper right",
+               color_legend_outside: bool = False,
                x_tick_rotation: float = 0,
                y_tick_rotation: float = 0,
                grid: bool = True) -> PlotOperation:
         """
-        Create Prism-style column plot comparing same metric across multiple data sources.
+        Create column plot comparing same metric across multiple data sources.
 
-        Displays grouped columns with error bars and optionally overlaid individual
-        data points, commonly used for comparing metrics between conditions or tools.
+        Displays grouped data with configurable style, commonly used for comparing
+        metrics between conditions or tools.
 
         Args:
             data: List of data sources [tool1.tables.x, tool2.tables.x, ...]
@@ -222,14 +225,15 @@ class Plot(BaseConfig):
             ylabel: Y axis label (defaults to y_name or column name)
             x_name: Display name for X axis (alternative to xlabel)
             y_name: Display name for Y variable (alternative to ylabel)
-            show_points: Overlay individual data points on bars
-            show_mean: Show mean line/bar
+            style: Plot style - "column" (bars+points), "simple_bar" (bars only),
+                   "scatter" (points only), "box" (box and whiskers), "floating_bar" (mean±error bars)
             show_error: Error bar type: "sd" (std dev), "sem" (std error), "ci" (95% CI), or None
             figsize: Figure size as (width, height) in inches
             color_groups: List of group names for coloring (e.g., protein names). Same color for same group.
             colors: Explicit list of colors (hex or named). If not provided, uses a color palette.
-            legend_title: Title for the color legend (e.g., "Protein")
-            legend_loc: Legend location ("upper right", "upper left", "lower right", "lower left", etc.)
+            color_legend_title: Title for the color legend (e.g., "Protein")
+            color_legend_loc: Color legend location ("upper right", "upper left", "lower right", "lower left", etc.)
+            color_legend_outside: Place legend outside plot area to the right (default False)
             x_tick_rotation: Rotation angle for x-axis tick labels in degrees
             y_tick_rotation: Rotation angle for y-axis tick labels in degrees
             grid: Show grid lines (default True)
@@ -240,10 +244,10 @@ class Plot(BaseConfig):
         return PlotOperation("column", data=data, y=y, labels=labels,
                             title=title, xlabel=xlabel, ylabel=ylabel,
                             x_name=x_name, y_name=y_name,
-                            show_points=show_points, show_mean=show_mean,
-                            show_error=show_error, figsize=figsize,
+                            style=style, show_error=show_error, figsize=figsize,
                             color_groups=color_groups, colors=colors,
-                            legend_title=legend_title, legend_loc=legend_loc,
+                            color_legend_title=color_legend_title, color_legend_loc=color_legend_loc,
+                            color_legend_outside=color_legend_outside,
                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
                             grid=grid)
 

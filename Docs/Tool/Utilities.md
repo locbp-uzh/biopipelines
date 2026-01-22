@@ -409,3 +409,141 @@ PyMOL("domain_visualization",
 ```
 
 ---
+
+### Plot
+
+Creates publication-ready plots from CSV tables using a declarative operation-based API. Supports multiple plot types including scatter, histogram, bar, column (Prism-style), and heatmap.
+
+**Environment**: None (uses matplotlib/seaborn at SLURM runtime)
+
+**Operations**:
+- `Scatter(data, x, y, ...)` - X vs Y scatter plot with optional color grouping
+- `Histogram(data, x, ...)` - Distribution histogram with statistics
+- `Bar(data, x, y, ...)` - Categorical bar chart
+- `Column(data, y, ...)` - Prism-style column plot comparing multiple data sources
+- `HeatMap(data, ...)` - Correlation matrix or pivot table heatmap
+
+These operations are accessible as static methods with `Plot.<operation>` (see examples).
+
+**Common Parameters** (all operations):
+- `data`: Data source (ToolOutput, TableInfo, or list for Column)
+- `title`: str = None - Plot title
+- `xlabel`, `ylabel`: str = None - Axis labels
+- `figsize`: Tuple[float, float] = (8, 6) - Figure size in inches
+
+**Plot.Scatter Parameters**:
+- `x`: str (required) - Column name for X axis
+- `y`: str (required) - Column name for Y axis
+- `color`: str = None - Column name for color grouping
+- `x_tick_rotation`: float = 0 - X-axis label rotation in degrees
+- `y_tick_rotation`: float = 0 - Y-axis label rotation in degrees
+- `grid`: bool = True - Show grid lines
+- `color_legend_loc`: str = "upper right" - Legend location
+- `color_legend_outside`: bool = False - Place legend outside plot to the right
+
+**Plot.Column Parameters**:
+- `y`: str (required) - Column name to compare across sources
+- `labels`: List[str] = None - X-axis labels for each data source
+- `style`: str = "column" - Plot style:
+  - `"column"` - Bars with error bars and overlaid scatter points (default)
+  - `"simple_bar"` - Just bars with error bars
+  - `"scatter"` - Just scattered points with mean line
+  - `"box"` - Box and whiskers plot
+  - `"floating_bar"` - Horizontal bars showing mean ± error
+- `show_error`: str = "sd" - Error bar type ("sd", "sem", "ci", or None)
+- `color_groups`: List[str] = None - Group names for coloring (same group = same color)
+- `colors`: List[str] = None - Explicit color list (hex or named)
+- `color_legend_title`: str = None - Title for color legend
+- `color_legend_loc`: str = "upper right" - Legend location
+- `color_legend_outside`: bool = False - Place legend outside plot to the right
+- `x_tick_rotation`: float = 0 - X-axis label rotation in degrees
+- `y_tick_rotation`: float = 0 - Y-axis label rotation in degrees
+- `grid`: bool = True - Show grid lines
+
+**Plot.HeatMap Parameters**:
+- Pivot mode: `x`, `y`, `value` columns for pivot table
+- Correlation mode: `columns` list for correlation matrix
+- `cmap`: str = "viridis" - Colormap name
+- `annotate`: bool = True - Show values in cells
+
+**Outputs**:
+- PNG plot files in output folder
+- `tables.metadata`: Summary of generated plots
+
+**Examples**:
+```python
+from PipelineScripts.plot import Plot
+from PipelineScripts.load_output import LoadOutputs
+
+# Load multiple AlphaFold outputs
+folded = LoadOutputs(path="/path/to/job/", tool="AlphaFold")
+
+# Extract metadata from output names
+exps = [(k.split('_')[2], k.split('_')[3]) for k in folded.keys()]  # (protein, analyte)
+proteins = [protein for protein, analyte in exps]
+analytes = [analyte for protein, analyte in exps]
+confidences = [v.tables.confidence for k, v in folded.items()]
+
+# Column plot with color grouping and legend outside
+Plot(
+    Plot.Column(
+        data=confidences,
+        y="plddt",
+        labels=analytes,              # X-axis shows analyte names
+        color_groups=proteins,        # Color by protein
+        color_legend_title="Protein",
+        color_legend_outside=True,    # Legend outside plot area
+        xlabel="Analyte",
+        ylabel="pLDDT",
+        x_tick_rotation=45,
+        grid=False
+    )
+)
+
+# Box plot style
+Plot(
+    Plot.Column(
+        data=confidences,
+        y="plddt",
+        labels=analytes,
+        style="box",                  # Box and whiskers
+        color_groups=proteins,
+        color_legend_title="Protein",
+        color_legend_outside=True
+    )
+)
+
+# Simple scatter style (points only)
+Plot(
+    Plot.Column(
+        data=confidences,
+        y="plddt",
+        labels=analytes,
+        style="scatter",
+        color_groups=proteins
+    )
+)
+
+# Scatter plot with color grouping from table column
+Plot(
+    Plot.Scatter(
+        data=analysis.tables.results,
+        x="pLDDT",
+        y="affinity",
+        color="source",
+        title="pLDDT vs Affinity",
+        grid=True
+    )
+)
+
+# Correlation heatmap
+Plot(
+    Plot.HeatMap(
+        data=results,
+        columns=["pLDDT", "affinity", "contacts"],
+        title="Metric Correlations"
+    )
+)
+```
+
+---
