@@ -180,6 +180,66 @@ def create_summary(all_interactions: List[Dict[str, Any]]) -> Dict[str, Any]:
     return summary
 
 
+def create_summary_csv(all_interactions: List[Dict[str, Any]], structures: List[str], output_csv: str):
+    """
+    Create a summary CSV with aggregated interaction counts per structure.
+
+    Args:
+        all_interactions: List of all interaction data
+        structures: List of structure file paths
+        output_csv: Output CSV file path
+    """
+    # Map interaction types to column names
+    type_mapping = {
+        'hydrogen_bond': 'hbonds',
+        'salt_bridge': 'saltbridges',
+        'hydrophobic_interaction': 'hydrophobic',
+        'pi_stacking': 'pistacking',
+        'pi_cation_interaction': 'pication',
+        'halogen_bond': 'halogen',
+        'metal_complexation': 'metal',
+        'water_bridge': 'waterbridges'
+    }
+
+    # Initialize results for all structures
+    results = []
+    for structure_path in structures:
+        structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+        results.append({
+            'id': structure_id,
+            'structure': structure_path,
+            'hbonds': 0,
+            'saltbridges': 0,
+            'hydrophobic': 0,
+            'pistacking': 0,
+            'pication': 0,
+            'halogen': 0,
+            'metal': 0,
+            'waterbridges': 0,
+            'total_interactions': 0
+        })
+
+    # Create lookup dict for faster access
+    results_dict = {r['id']: r for r in results}
+
+    # Aggregate interaction counts
+    for interaction in all_interactions:
+        structure_id = interaction.get('structure_id', '')
+        interaction_type = interaction.get('interaction_type', '')
+
+        if structure_id in results_dict:
+            column_name = type_mapping.get(interaction_type)
+            if column_name and column_name in results_dict[structure_id]:
+                results_dict[structure_id][column_name] += 1
+            results_dict[structure_id]['total_interactions'] += 1
+
+    # Create DataFrame and save
+    df = pd.DataFrame(results)
+    os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+    df.to_csv(output_csv, index=False)
+    print(f"Saved summary CSV with {len(results)} structures to {output_csv}")
+
+
 def copy_additional_outputs(raw_dir: str, processed_dir: str, structures: List[str]):
     """
     Copy additional PLIP outputs (PyMOL files, images) to processed directory.
@@ -221,6 +281,7 @@ def main():
     parser.add_argument('--structures', required=True, help='Comma-separated list of structure file paths')
     parser.add_argument('--raw_dir', required=True, help='Directory containing PLIP raw outputs')
     parser.add_argument('--output_csv', required=True, help='Output CSV file for interactions')
+    parser.add_argument('--summary_csv', required=True, help='Output CSV file for aggregated counts per structure')
     parser.add_argument('--summary_txt', required=True, help='Output text file for summary')
     parser.add_argument('--ligand', default='', help='Specific ligand ID to analyze (empty = all)')
     parser.add_argument('--processed_dir', required=True, help='Directory for processed outputs')
@@ -265,6 +326,9 @@ def main():
         ])
         os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
         empty_df.to_csv(args.output_csv, index=False)
+
+    # Create summary CSV with aggregated counts per structure
+    create_summary_csv(all_interactions, structures, args.summary_csv)
 
     # Create summary
     summary = create_summary(all_interactions)

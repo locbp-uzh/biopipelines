@@ -94,6 +94,7 @@ class PLIP(BaseConfig):
     def _initialize_file_paths(self):
         """Initialize common file paths used throughout the class."""
         self.results_csv = None
+        self.summary_csv = None
         self.summary_txt = None
         self.plip_container = None
         self.helper_script = None
@@ -105,11 +106,12 @@ class PLIP(BaseConfig):
 
         # Core output files
         self.results_csv = os.path.join(self.output_folder, f"{job_base}_interactions.csv")
+        self.summary_csv = os.path.join(self.output_folder, f"{job_base}_summary.csv")
         self.summary_txt = os.path.join(self.output_folder, f"{job_base}_summary.txt")
 
         # Tool paths (only set if folders are available)
         if hasattr(self, 'folders') and self.folders:
-            self.plip_container = os.path.join(self.folders["containers"], "plip.simg")
+            self.plip_container = os.path.join(self.folders["containers"], "plip_3.0.0.simg")
             self.helper_script = os.path.join(self.folders["HelpScripts"], "pipe_plip_analysis.py")
         else:
             # Temporary placeholders when folders aren't available yet
@@ -285,8 +287,8 @@ for pdb_file in "${{PDB_FILES[@]}}"; do
     output_dir="{self.output_folder}/raw_outputs/$pdb_name"
     mkdir -p "$output_dir"
 
-    # Run PLIP singularity container
-    singularity exec {self.plip_container} plip -f "$pdb_file" {plip_opts_str} --outdir "$output_dir"
+    # Run PLIP apptainer container
+    apptainer exec {self.plip_container} plip -f "$pdb_file" {plip_opts_str} --outdir "$output_dir"
 
     if [ $? -eq 0 ]; then
         echo "PLIP analysis completed for $pdb_name"
@@ -312,6 +314,7 @@ python {self.helper_script} \\
     --structures "{structure_files_str}" \\
     --raw_dir "{self.output_folder}/raw_outputs" \\
     --output_csv "{self.results_csv}" \\
+    --summary_csv "{self.summary_csv}" \\
     --summary_txt "{self.summary_txt}" \\
     --ligand {ligand_param} \\
     --processed_dir "{self.output_folder}/processed"
@@ -348,11 +351,19 @@ echo "PLIP output processing completed"
                     columns=["id", "ligand_id", "interaction_type", "residue", "distance", "angle", "energy"],
                     description="Protein-ligand interaction analysis results from PLIP",
                     count=len(structure_ids)  # Approximate
+                ),
+                "summary": TableInfo(
+                    name="summary",
+                    path=self.summary_csv,
+                    columns=["id", "structure", "hbonds", "saltbridges", "hydrophobic", "pistacking", "pication", "halogen", "metal", "total_interactions"],
+                    description="Aggregated interaction counts per structure",
+                    count=len(structure_ids)
                 )
             },
             "output_folder": self.output_folder,
             # Additional PLIP-specific outputs
             "interactions_csv": [self.results_csv],
+            "summary_csv": [self.summary_csv],
             "summary_txt": [self.summary_txt],
             "raw_outputs": [os.path.join(self.output_folder, "raw_outputs")],
             "processed": [os.path.join(self.output_folder, "processed")]

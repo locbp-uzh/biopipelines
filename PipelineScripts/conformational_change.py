@@ -44,7 +44,7 @@ class ConformationalChange(BaseConfig):
     def __init__(self,
                  reference_structures: Union[str, ToolOutput, StandardizedOutput],
                  target_structures: Union[ToolOutput, StandardizedOutput],
-                 selection: Union[str, ToolOutput],
+                 selection: Union[str, ToolOutput, None] = None,
                  alignment: str = "align",
                  **kwargs):
         """
@@ -55,9 +55,10 @@ class ConformationalChange(BaseConfig):
                                 - Single PDB file path (string)
                                 - ToolOutput/StandardizedOutput (single or multiple structures)
             target_structures: Target structures from previous tool (ToolOutput or StandardizedOutput)
-            selection: Region specification - string or table column reference
+            selection: Region specification - string, table column reference, or None for all residues
                       String format: '10-20+30-40' (residue ranges)
                       Table format: <tool_output>.tables.<table_name>.<column_name>
+                      None: Compare all CA atoms (whole structure RMSD)
             alignment: Alignment method - "align", "super", or "cealign" (default: "align")
             **kwargs: Additional parameters
 
@@ -66,6 +67,7 @@ class ConformationalChange(BaseConfig):
             - '10-20' → residues 10 to 20
             - '10-20+30-40' → residues 10-20 and 30-40
             - '145+147+150' → specific residues 145, 147, and 150
+            - None → all CA atoms
 
             Table format:
             - boltz_results.tables.structures.designed → use 'designed' column values
@@ -76,6 +78,13 @@ class ConformationalChange(BaseConfig):
             - "cealign": PyMOL cealign (combinatorial extension alignment)
 
         Examples:
+            # Whole structure RMSD (no selection)
+            conf_analysis = pipeline.add(ConformationalChange(
+                reference_structures=design,
+                target_structures=refolded,
+                alignment='cealign'
+            ))
+
             # Analyze conformational change with fixed selection
             conf_analysis = pipeline.add(ConformationalChange(
                 reference_structures="reference.pdb",
@@ -120,8 +129,7 @@ class ConformationalChange(BaseConfig):
         if not isinstance(self.target_input, (ToolOutput, StandardizedOutput)):
             raise ValueError("Target structures input must be a ToolOutput or StandardizedOutput object")
 
-        if not self.selection_spec:
-            raise ValueError("Selection specification cannot be empty")
+        # selection can be None (whole structure RMSD), string, or table reference
 
         if self.alignment_method not in ["align", "super", "cealign"]:
             raise ValueError(f"Alignment method must be 'align', 'super', or 'cealign', got: {self.alignment_method}")
@@ -176,9 +184,12 @@ class ConformationalChange(BaseConfig):
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
-        selection_display = str(self.selection_spec)
-        if hasattr(self.selection_spec, 'table_path'):
+        if self.selection_spec is None:
+            selection_display = "All CA atoms (whole structure)"
+        elif hasattr(self.selection_spec, 'table_path'):
             selection_display = f"From table: {self.selection_spec.table_path}"
+        else:
+            selection_display = str(self.selection_spec)
 
         config_lines.extend([
             f"REFERENCE STRUCTURES: {len(getattr(self, 'reference_structures', []))} files",
@@ -212,7 +223,10 @@ class ConformationalChange(BaseConfig):
 
         # Handle selection input
         selection_config = None
-        if isinstance(self.selection_spec, str):
+        if self.selection_spec is None:
+            # No selection = compare all CA atoms
+            selection_config = {"type": "all"}
+        elif isinstance(self.selection_spec, str):
             selection_config = {"type": "fixed", "value": self.selection_spec}
         elif isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
             # Tuple format: (TableInfo, column_name)

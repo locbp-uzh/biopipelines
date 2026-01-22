@@ -32,12 +32,17 @@ def align_structures(ref_obj: str, target_obj: str, selection: str, alignment_me
     Args:
         ref_obj: Reference PyMOL object name
         target_obj: Target PyMOL object name (will be aligned to reference)
-        selection: Selection specification for alignment
+        selection: Selection specification for alignment, or None/"all" for whole structure
         alignment_method: "align", "super", or "cealign"
     """
     # Create selection strings
-    ref_sel = f"{ref_obj} and resi {selection} and name CA"
-    target_sel = f"{target_obj} and resi {selection} and name CA"
+    if selection is None or selection == "all":
+        # Use all CA atoms
+        ref_sel = f"{ref_obj} and name CA"
+        target_sel = f"{target_obj} and name CA"
+    else:
+        ref_sel = f"{ref_obj} and resi {selection} and name CA"
+        target_sel = f"{target_obj} and resi {selection} and name CA"
 
     if alignment_method == "align":
         # Sequence-dependent alignment
@@ -61,14 +66,18 @@ def calculate_metrics(ref_obj: str, target_obj: str, selection: str) -> Dict[str
     Args:
         ref_obj: Reference PyMOL object name
         target_obj: Target PyMOL object name
-        selection: Selection specification for analysis
+        selection: Selection specification for analysis, or None/"all" for whole structure
 
     Returns:
         Dictionary with metrics: num_residues, RMSD, max_distance, mean_distance, sum_over_square_root
     """
     # Fetch Cα atoms for selection in each object
-    ref_model = cmd.get_model(f"{ref_obj} and resi {selection} and name CA")
-    target_model = cmd.get_model(f"{target_obj} and resi {selection} and name CA")
+    if selection is None or selection == "all":
+        ref_model = cmd.get_model(f"{ref_obj} and name CA")
+        target_model = cmd.get_model(f"{target_obj} and name CA")
+    else:
+        ref_model = cmd.get_model(f"{ref_obj} and resi {selection} and name CA")
+        target_model = cmd.get_model(f"{target_obj} and resi {selection} and name CA")
 
     # Index target atoms by (chain, resi) for quick lookup
     target_coords = {(a.chain, a.resi): np.array([a.coord[0], a.coord[1], a.coord[2]])
@@ -242,7 +251,15 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
 
     # Handle selection
     selection_map = {}
-    if selection_config['type'] == 'fixed':
+    use_all_selection = False
+    if selection_config['type'] == 'all':
+        # Use all CA atoms (whole structure RMSD)
+        print("Using all CA atoms (whole structure RMSD)")
+        use_all_selection = True
+        for target_path in target_structures:
+            structure_id = os.path.splitext(os.path.basename(target_path))[0]
+            selection_map[structure_id] = "all"
+    elif selection_config['type'] == 'fixed':
         # Fixed selection for all structures
         fixed_selection = selection_config['value']
         print(f"Using fixed selection: {fixed_selection}")
