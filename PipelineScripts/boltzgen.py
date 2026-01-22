@@ -1100,6 +1100,9 @@ class BoltzGenMerge(BaseConfig):
             "pipe_boltzgen_merge.py"
         )
 
+        # Reset source_paths to avoid accumulation if configure_inputs is called multiple times
+        self.source_paths = []
+
         # Extract paths from sources
         for source in self.sources:
             if isinstance(source, StandardizedOutput):
@@ -1155,6 +1158,14 @@ if [ $? -eq 0 ]; then
 else
     echo "Error: BoltzGenMerge failed"
     exit 1
+fi
+
+# Copy design_spec.yaml from first source for reuse compatibility
+if [ -f "{first_source}/design_spec.yaml" ]; then
+    cp "{first_source}/design_spec.yaml" "{design_spec_dest}"
+    echo "Copied design_spec.yaml from first source"
+else
+    echo "Warning: No design_spec.yaml found in first source directory"
 fi
 
 {self.generate_completion_check_footer()}
