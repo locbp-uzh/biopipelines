@@ -30,8 +30,8 @@ Tools for designing and manipulating protein sequences.
 Tools for predicting protein and complex structures.
 
 - [AlphaFold](Tool/StructurePrediction.md#alphafold) - AlphaFold2 structure prediction
-- [GhostFold](Tool/StructurePrediction.md#ghostfold) - Database-free prediction with synthetic MSAs
-- [ESMFold](Tool/StructurePrediction.md#esmfold) - Fast single-sequence prediction
+- [GhostFold](Tool/StructurePrediction.md#ghostfold) - Database-free prediction with synthetic MSAs (under development)
+- [ESMFold](Tool/StructurePrediction.md#esmfold) - Fast single-sequence prediction (under development)
 - [Boltz2](Tool/StructurePrediction.md#boltz2) - Biomolecular complex prediction
 - [RF3](Tool/StructurePrediction.md#rf3) - RoseTTAFold3 prediction (under development)
 - [OnionNet](Tool/StructurePrediction.md#onionnet) - Binding affinity prediction (under development)
@@ -46,7 +46,7 @@ Tools for analyzing structures, interactions, and mutations.
 - [PLIP (Protein-Ligand Interaction Profiler)](Tool/Analysis.md#plip-protein-ligand-interaction-profiler) - Interaction analysis (under development)
 - [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based residue selection
 - [SelectionEditor](Tool/Analysis.md#selectioneditor) - Selection string manipulation
-- [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural change quantification (under development)
+- [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural change quantification
 - [MutationProfiler](Tool/Analysis.md#mutationprofiler) - Mutation pattern analysis
 - [SequenceMetricCorrelation](Tool/Analysis.md#sequencemetriccorrelation) - Mutation-metric correlations
 - [BayesianAdjuster](Tool/Analysis.md#bayesianadjuster) - Correlation-based frequency adjustment

@@ -1085,9 +1085,9 @@ def Resources(**kwargs):
     Must be called within a Pipeline context manager.
 
     Args:
-        gpu: GPU memory ("L4", "V100", "A100", "H100", "H200", "24GB", "32GB", "80GB", "96GB", "32GB|80GB|96GB", "!L4", "gpu", "high-memory", None))
+        gpu: GPU memory ("T4", "L4", "V100", "A100", "H100", "H200", "16GB", "24GB", "32GB", "80GB", "96GB", "32GB|80GB|96GB", "!L4", "gpu", "high-memory", None))
         memory: System RAM (e.g., "16GB", "32GB")
-        time: Wall time limit (e.g., "24:00:00", "2:00:00")
+        time: Wall time limit (e.g., "24:00:00", "2:00:00", "1-00:00:00")
 
     Example:
         with Pipeline("Test", "Job", "Description"):

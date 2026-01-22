@@ -37,6 +37,7 @@ environments:
   # Structure prediction and design tools
   Boltz2: "Boltz2Env"
   BoltzGen: "boltzgen"
+  BoltzGenMerge: "boltzgen"
   RF3: "modelforge"
   ESMFold: "esmfold"
   RFdiffusion: "ProteinEnv"
