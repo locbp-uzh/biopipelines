@@ -29,6 +29,7 @@ def extract_sequence_from_structure(structure_file):
     try:
         from Bio import PDB
         from Bio.PDB import MMCIFParser, PDBParser
+        from Bio.PDB.Polypeptide import protein_letters_3to1
     except ImportError:
         print("Error: BioPython is required for sequence extraction")
         print("Install with: pip install biopython")
@@ -53,7 +54,8 @@ def extract_sequence_from_structure(structure_file):
             seq = ""
             for residue in chain:
                 if PDB.is_aa(residue, standard=True):
-                    seq += PDB.Polypeptide.three_to_one(residue.get_resname())
+                    resname = residue.get_resname()
+                    seq += protein_letters_3to1[resname]
             if seq:
                 sequences.append(seq)
                 break  # Only take first chain with sequence
