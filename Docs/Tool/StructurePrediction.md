@@ -10,7 +10,15 @@ Predicts protein structures from amino acid sequences using AlphaFold2. Generate
 
 **Resources**: GPU. H100 NVL is not compatible.
 
-**Environment**: `biopipelines`
+**Environment**: `localcolabfold` and `biopipelines`
+
+**Installation**:
+```bash
+cd data
+wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/install_colabbatch_linux.sh
+bash install_colabbatch_linux.sh
+rm install_colabbatch_linux.sh
+```
 
 **Parameters**:
 - `sequences`: Union[str, List[str], ToolOutput, Dict[str, Any]] (required) - Input sequences or dict with sequences
@@ -47,7 +55,9 @@ af = AlphaFold(
 
 ### GhostFold
 
-Database-free protein structure prediction using synthetic MSAs. GhostFold generates structure-aware multiple sequence alignments from single sequences using ProstT5, eliminating the need for large sequence databases while maintaining prediction accuracy. Uses ColabFold for the actual structure prediction.
+**UNDER DEVELOPMENT**
+
+GhostFold predicts the MSA from the structure, and then uses localfold (AF2) for structure prediction. 
 
 **References**: https://github.com/brineylab/ghostfold
 
@@ -63,10 +73,13 @@ mamba create -n ghostfold python=3.10
 mamba activate ghostfold
 
 # Install dependencies
-mamba install pytorch torchvision torchaudio -c pytorch
+srun --mem=16GB --time=1:00:00 --pty bash
+mamba install "pytorch>=2.6" torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
 mamba install transformers sentencepiece -c conda-forge
-
-pip install rich biopython
+mamba install -c conda-forge biopython numpy matplotlib scikit-learn 
+#rich
+pip install rich
+pip install --upgrade triton
 # Login to HuggingFace for ProstT5 model access
 huggingface-cli login
 ```
@@ -140,18 +153,31 @@ with Pipeline("MyProject", "MSAOnly", "Generate synthetic MSAs"):
 
 ### ESMFold
 
+**UNDER DEVELOPMENT**
+
 Predicts protein structures using Meta's ESM-2 with ESMFold. Fast single-sequence prediction without requiring MSAs. Models are cached in shared folder for reuse.
 
 **References**: https://github.com/facebookresearch/esm
 
 **Installation**: 
 ```bash
-mamba create -n esmfold python=3.12
+srun --mem=16GB --time=1:00:00 --pty bash
+module load cuda/11.8.0
+nvcc --version
+
+mamba create -n esmfold python=3.9
 mamba activate esmfold
-pip install 
+
+mamba install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+
+pip install "fair-esm[esmfold]"
+
+pip install 'dllogger @ git+https://github.com/NVIDIA/dllogger.git'
+pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059694619831a7db195b7e0988fc4ff3a307'
+
 ```
 
-**Environment**: `ProteinEnv`
+**Environment**: `esmfold`
 
 **Parameters**:
 - `sequences`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Input sequences
@@ -239,7 +265,7 @@ boltz_holo = Boltz2(
 
 ### RF3
 
-**UNDER DEVELOPMENT** - This tool is still being tested and refined.
+**UNDER DEVELOPMENT**
 
 Predicts biomolecular structures using RoseTTAFold3. Supports protein-only and protein-ligand complex prediction with batch processing capabilities.
 

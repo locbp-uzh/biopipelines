@@ -355,7 +355,8 @@ find "{self.output_folder}/predictions" -name "*_rank_001_*.pdb" -type f 2>/dev/
 done
 
 # Also check Folding folder (if GhostFold puts them there)
-for file in "{self.folding_folder}"/*_rank_001_*.pdb 2>/dev/null; do
+shopt -s nullglob
+for file in "{self.folding_folder}"/*_rank_001_*.pdb; do
     if [ -f "$file" ]; then
         basename_file=$(basename "$file")
         if [[ "$basename_file" == *"_relaxed_rank_"* ]]; then
