@@ -146,7 +146,9 @@ distances = ResidueAtomDistance(
 
 Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydrophobic contacts, salt bridges, and other interaction types.
 
-**Environment**: `ProteinEnv`
+**Environment**: `biopipelines`
+
+**Installation**: requires to download a singularity image in the containers folder.
 
 **Note**: This tool is not fully debugged yet and may require adjustments.
 

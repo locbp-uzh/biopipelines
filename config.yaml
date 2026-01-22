@@ -50,7 +50,7 @@ environments:
 
   # Analysis and utility tools
   MMseqs2: "biopipelines"
-  PLIP: "PlipEnv"
+  PLIP: "biopipelines"
   PyMOL: "ProteinEnv"
   OnionNet: "OnionNetEnv"
   OnionNet2: "OnionNet2Env"
