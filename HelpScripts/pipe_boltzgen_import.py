@@ -217,6 +217,7 @@ def convert_and_reassign_chains(
     model.add_chain(g_ligand)
 
     st_out.add_model(model)
+    print(f"    Entities: {len(st_out.entities)}")
 
     # Now setup entities – crucial order
     st_out.setup_entities()
@@ -240,9 +241,9 @@ def convert_and_reassign_chains(
 
     if atom_count == 0:
         print("  Still 0 atoms – dumping structure info:")
-        print(f"    Models: {len(st_out.models)}")
-        if st_out.models:
-            m = st_out.models[0]
+        print(f"    Entities: {len(st_out.entities)}")
+        if st_out.entities:
+            m = st_out.entities[0]
             print(f"    Chains in model: {len(m)}")
             for ch in m:
                 print(f"      Chain {ch.name}: {len(ch)} residues, "
