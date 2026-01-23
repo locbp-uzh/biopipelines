@@ -224,17 +224,12 @@ def convert_and_reassign_chains(
     # Optional: ensure minimal required categories
     st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
-    # ── Insert this ───────────────────────────────────────
-    import tempfile
-    import os
-
-    with tempfile.NamedTemporaryFile(suffix='.pdb', delete=False) as tmp:
+    with open(f'{output_path[:-3]}pdb','w') as tmp:
         tmp_path = tmp.name
         st_out.write_pdb(tmp_path)        
 
     # Read back → Gemmi now "knows" the flat atom list
     st_round = gemmi.read_structure(tmp_path)
-    os.unlink(tmp_path)  # clean up
 
     doc = st_round.make_mmcif_document()
 
