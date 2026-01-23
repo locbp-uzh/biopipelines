@@ -230,7 +230,7 @@ def convert_and_reassign_chains(
 
     with tempfile.NamedTemporaryFile(suffix='.pdb', delete=False) as tmp:
         tmp_path = tmp.name
-        st_out.write_pdb(st_out, tmp_path)          # or st_out.make_pdb_string() → write yourself
+        st_out.write_pdb(tmp_path)        
 
     # Read back → Gemmi now "knows" the flat atom list
     st_round = gemmi.read_structure(tmp_path)
