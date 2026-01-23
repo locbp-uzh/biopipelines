@@ -106,7 +106,7 @@ def write_cif_with_gemmi(structure, output_path):
         for i, res in enumerate(chain, start=1):
             gres = gemmi.Residue()
             gres.name = res.resname
-            gres.seqid = gemmi.SeqId(i,"") #no chain break, start at 1
+            gres.seqid = gemmi.SeqId(str(i)) #no chain break, start at 1
             for atom in res:
                 a = gemmi.Atom()
                 a.name = atom.name
