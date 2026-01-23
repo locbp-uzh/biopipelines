@@ -232,15 +232,12 @@ def convert_and_reassign_chains(
 
     # Ligand chain re-creation (ligands often get simple seqid)
     if len(g_ligand) > 0:
-        new_ligand_chain = gemmi.Chain(g_ligand.name or "B")
+        new_ligand_chain = gemmi.Chain("B")
         for res in g_ligand:
             new_res = gemmi.Residue()
             new_res.name = res.name
-            # For ligands: usually force seqid 1 or keep original if meaningful
-            if res.seqid:
-                new_res.seqid = gemmi.SeqId(res.seqid.num, res.seqid.icode)
-            else:
-                new_res.seqid = gemmi.SeqId(1, '')
+            # For ligands: usually force seqid 1
+            new_res.seqid = gemmi.SeqId("1")
             
             for atom in res:
                 new_atom = atom.clone()
