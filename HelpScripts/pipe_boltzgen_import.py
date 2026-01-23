@@ -167,6 +167,8 @@ def convert_and_reassign_chains(
 
     # Ligand part
     n_ligand_atoms = 0
+    n_ligand_atoms_with_h = 0
+    ligand_atom_elements = []
     if ligand_residues:
         gres_lig = gemmi.Residue()           # many tools put ligand as SINGLE residue
         gres_lig.name = "LIG"                # "LIG"
@@ -175,9 +177,20 @@ def convert_and_reassign_chains(
         for orig_res in ligand_residues:
             for atom in orig_res:
                 gres_lig.add_atom(atom.clone())
-                n_ligand_atoms += 1
+                n_ligand_atoms_with_h += 1
+                ligand_atom_elements.append(atom.element.name)
+                # BoltzGen tokenizer excludes hydrogen atoms
+                if atom.element.name != 'H':
+                    n_ligand_atoms += 1
 
         g_ligand.add_residue(gres_lig)
+
+        # Debug: show ligand atoms
+        print(f"  Ligand atom elements: {ligand_atom_elements}")
+        from collections import Counter
+        element_counts = Counter(ligand_atom_elements)
+        print(f"  Ligand element counts: {dict(element_counts)}")
+        print(f"  Ligand atoms (excluding H): {n_ligand_atoms} (with H: {n_ligand_atoms_with_h})")
 
     print(f"  Final stats → protein: {n_protein_res} res, ligand: {n_ligand_atoms} atoms")
 
@@ -239,6 +252,19 @@ def convert_and_reassign_chains(
         n_atoms = sum(1 for res in chain for atom in res)
         first_res = chain[0].name if chain else "—"
         print(f"      Chain {chain_id}: {n_res} residues, {n_atoms} atoms, first={first_res}")
+
+        # For ligand chain, show detailed atom info
+        if chain_id == ligand_chain and n_res > 0:
+            lig_res = chain[0]
+            lig_elements = [atom.element.name for atom in lig_res]
+            from collections import Counter
+            lig_element_counts = Counter(lig_elements)
+            print(f"        Ligand atoms in PDB: {lig_elements}")
+            print(f"        Ligand element counts in PDB: {dict(lig_element_counts)}")
+
+            # Count non-hydrogen atoms (what BoltzGen likely tokenizes)
+            non_h_count = sum(1 for atom in lig_res if atom.element.name != 'H')
+            print(f"        Non-hydrogen atoms: {non_h_count}")
 
     """
     # Read back → Gemmi now "knows" the flat atom list
