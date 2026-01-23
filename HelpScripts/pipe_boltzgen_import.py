@@ -203,63 +203,82 @@ def convert_and_reassign_chains(
         print("  !!! No residues to write → will produce empty file")
         return False, 0, 0
 
-    # Create clean output structure
+    # After building g_protein and g_ligand as before...
+
+    # ── New writing block ────────────────────────────────────────────────────────
+
     st_out = gemmi.Structure()
     st_out.name = "imported"
+    st_out.spacegroup_hm = "P 1"           # minimal, avoids some complaints
 
-    # Create model
     model = gemmi.Model("1")
     st_out.add_model(model)
 
-    # Add chains **after** model is attached to structure
+    # Add chains – but force re-parenting / copying to ensure ownership
     if len(g_protein) > 0:
-        model.add_chain(g_protein)
-        print("  Added protein chain A to model")
-    if len(g_ligand) > 0:
-        model.add_chain(g_ligand)
-        print("  Added ligand chain B to model")
+        new_protein_chain = gemmi.Chain(g_protein.name or "A")
+        for res in g_protein:
+            new_res = gemmi.Residue()
+            new_res.name = res.name
+            new_res.seqid = res.seqid.clone() if res.seqid else gemmi.SeqId()
+            for atom in res:
+                new_atom = atom.clone()
+                new_res.add_atom(new_atom)
+            new_protein_chain.add_residue(new_res)
+        model.add_chain(new_protein_chain)
+        print("  Added re-created protein chain")
 
-    # VERY IMPORTANT ORDER:
-    # 1. Chains must be in the model
-    # 2. Then setup entities (this creates _entity, _entity_poly, _entity_poly_seq, etc.)
+    if len(g_ligand) > 0:
+        new_ligand_chain = gemmi.Chain(g_ligand.name or "B")
+        for res in g_ligand:
+            new_res = gemmi.Residue()
+            new_res.name = res.name
+            new_res.seqid = gemmi.SeqId("1")  # ligands often seqid=1
+            for atom in res:
+                new_atom = atom.clone()
+                new_res.add_atom(new_atom)
+            new_ligand_chain.add_residue(new_res)
+        model.add_chain(new_ligand_chain)
+        print("  Added re-created ligand chain")
+
+    # Now setup entities – crucial order
     st_out.setup_entities()
 
-    # Optional: force re-perception if entities look wrong
-    # st_out.deduce_het_flags()
-    # st_out.deduce_entity_het_flags()
+    # Optional: ensure minimal required categories
+    st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
-    # Create mmCIF document
     doc = st_out.make_mmcif_document()
 
-    # Debug: count atoms directly in the document
+    # Your existing atom count check in doc...
     atom_count = 0
-    block = doc.sole_block()  # usually the only block
+    block = doc.sole_block()
     if block:
-        atom_loop = block.find_loop("_atom_site.")
-        if atom_loop:
-            # each row has several tags → divide by number of columns
-            n_tags = len(atom_loop.tags)
-            if n_tags > 0:
-                atom_count = len(atom_loop) // n_tags
+        loop = block.find_loop("_atom_site.")
+        if loop and loop.tags:
+            atom_count = len(loop) // len(loop.tags)
 
-    print(f"  mmCIF document prepared → {atom_count} atoms detected in _atom_site")
+    print(f"  mmCIF document prepared → {atom_count} atoms in _atom_site")
 
     if atom_count == 0:
-        print("  !!! No atoms in document - writing would produce empty/meaningless CIF")
-        # Write a debug file anyway so we can inspect
-        debug_path = output_path + ".DEBUG_EMPTY.cif"
-        doc.write_file(debug_path)
-        print(f"  Wrote empty debug file: {debug_path}")
-        return False, len(g_protein), sum(len(res) for res in g_ligand)
+        print("  Still 0 atoms – dumping structure info:")
+        print(f"    Models: {len(st_out.models)}")
+        if st_out.models:
+            m = st_out.models[0]
+            print(f"    Chains in model: {len(m)}")
+            for ch in m:
+                print(f"      Chain {ch.name}: {len(ch)} residues, "
+                    f"{sum(len(r) for r in ch)} atoms")
+        # Write raw structure debug if needed
+        gemmi.write_structure(st_out, "debug_st_out.mmcif")   # ← try PDB-style too
+        return False, len(g_protein), sum(len(r) for r in g_ligand)
 
-    # Actually write
     try:
         doc.write_file(output_path)
-        print(f"  Successfully wrote: {output_path}")
-        return True, len(g_protein), sum(len(res) for res in g_ligand)
+        print(f"  Wrote: {output_path}")
+        return True, len(g_protein), sum(len(r) for r in g_ligand)
     except Exception as e:
-        print(f"  Write failed: {e}")
-        return False, len(g_protein), sum(len(res) for res in g_ligand)
+        print(f"  write_file failed: {str(e)}")
+        return False, ...
 
 def load_sequences(sequences_csv: str) -> dict:
     """
