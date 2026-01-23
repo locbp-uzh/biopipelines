@@ -243,11 +243,8 @@ def convert_and_reassign_chains(
         print("  Still 0 atoms – dumping structure info:")
         print(f"    Entities: {len(st_out.entities)}")
         if st_out.entities:
-            m = st_out.entities[0]
-            print(f"    Chains in model: {len(m)}")
-            for ch in m:
-                print(f"      Chain {ch.name}: {len(ch)} residues, "
-                    f"{sum(len(r) for r in ch)} atoms")
+            for m in st_out.entities:
+                print(m)
         # Write raw structure debug if needed
         gemmi.write_structure(st_out, "debug_st_out.mmcif")   # ← try PDB-style too
         return False, len(g_protein), sum(len(r) for r in g_ligand)
