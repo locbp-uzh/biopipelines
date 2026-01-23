@@ -146,7 +146,6 @@ def convert_and_reassign_chains(
     for i, res in enumerate(protein_residues, 1):
         gres = gemmi.Residue()
         gres.name = res.name
-        gres.chain = gemmi.Chain("A")
         gres.seqid = gemmi.SeqId(str(i))
 
         if new_sequence and i-1 < len(new_sequence):
@@ -171,7 +170,6 @@ def convert_and_reassign_chains(
     if ligand_residues:
         gres_lig = gemmi.Residue()           # many tools put ligand as SINGLE residue
         gres_lig.name = "LIG"                # "LIG"
-        gres_lig.chain = gemmi.Chain("B")
         gres_lig.seqid = gemmi.SeqId("1")
 
         for orig_res in ligand_residues:
@@ -217,7 +215,7 @@ def convert_and_reassign_chains(
     
     model.add_chain(g_protein)
     model.add_chain(g_ligand)
-    
+
     st_out.add_model(model)
 
     # Now setup entities – crucial order
