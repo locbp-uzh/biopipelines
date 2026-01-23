@@ -151,8 +151,9 @@ def convert_and_reassign_chains(
     for i, ch in enumerate(chains, 1):
         res_count = len(ch)
         first_res = ch[0].name if ch else "—"
-        print(f"    chain {i}: id={ch.id:>2}, {res_count:3d} residues, first res={first_res}")
-
+        chain_id = ch.name if hasattr(ch, 'name') else ch.label_asym_id if hasattr(ch, 'label_asym_id') else '?'
+        print(f"    chain {i}: id={chain_id:>2}, {res_count:3d} residues, first res={first_res}")
+    
     # Sort by number of residues (descending)
     chains.sort(key=lambda ch: -len(ch))
 
