@@ -1554,3 +1554,123 @@ fi
             config_lines.append(f"LIGAND CSV: {os.path.basename(self.ligand_compounds_csv)}")
         return config_lines
 
+
+# =============================================================================
+# BOLTZGEN INTERNAL FORMAT DOCUMENTATION
+# =============================================================================
+# This section documents the internal file formats used by BoltzGen, extracted
+# from the boltzgen package source code (v0.1.4). This information is needed
+# when importing external structures (e.g., from RFdiffusion) into BoltzGen
+# filesystem format.
+#
+# Source: boltzgen/task/predict/data_from_generated.py
+#         boltzgen/data/const.py
+#
+# -----------------------------------------------------------------------------
+# NPZ METADATA FILES
+# -----------------------------------------------------------------------------
+# BoltzGen expects each CIF structure file to have a corresponding NPZ metadata
+# file with the same base name (e.g., design_spec_0.cif -> design_spec_0.npz).
+#
+# The NPZ file contains per-token arrays where N_tokens = N_protein_residues + N_ligand_atoms
+#
+# REQUIRED FIELDS:
+# ----------------
+# design_mask : np.ndarray, dtype=float32, shape=(N_tokens,)
+#     Indicates which tokens are designable (part of the binder).
+#     Values: 1.0 = designable (binder protein residues)
+#             0.0 = fixed (target/ligand atoms)
+#
+# OPTIONAL FIELDS (may cause issues if missing):
+# ----------------------------------------------
+# inverse_fold_design_mask : np.ndarray or object
+#     Same as design_mask, or can be overridden for inverse folding.
+#     Used when use_new_design_mask=True in BoltzGen.
+#     Can be object type for complex specifications.
+#
+# ss_type : np.ndarray, dtype=int64, shape=(N_tokens,)
+#     Secondary structure type per token.
+#     Values (from boltzgen/data/const.py):
+#         0 = UNSPECIFIED
+#         1 = LOOP
+#         2 = HELIX
+#         3 = SHEET
+#
+# binding_type : np.ndarray, dtype=int64 or float32, shape=(N_tokens,)
+#     Binding type per token.
+#     Values (from boltzgen/data/const.py):
+#         0 = UNSPECIFIED
+#         1 = BINDING
+#         2 = NOT_BINDING
+#
+# token_resolved_mask : np.ndarray, dtype=float32, shape=(N_tokens,)
+#     Indicates which tokens have resolved coordinates.
+#     Values: 1.0 = resolved (has coordinates)
+#             0.0 = unresolved
+#
+# NOTE: mol_type is NOT loaded from NPZ - it's computed by the tokenizer from
+# the structure. Chain types are:
+#     0 = PROTEIN
+#     1 = DNA
+#     2 = RNA
+#     3 = NONPOLYMER (ligands)
+#
+# -----------------------------------------------------------------------------
+# EXAMPLE NPZ GENERATION (for BoltzGenImport)
+# -----------------------------------------------------------------------------
+# For a structure with N protein residues and M ligand atoms:
+#
+#     import numpy as np
+#
+#     n_tokens = n_protein_residues + n_ligand_atoms
+#
+#     # Design mask: 1.0 for protein (designed), 0.0 for ligand (fixed)
+#     design_mask = np.concatenate([
+#         np.ones(n_protein_residues, dtype=np.float32),
+#         np.zeros(n_ligand_atoms, dtype=np.float32)
+#     ])
+#
+#     # Secondary structure: all unspecified
+#     ss_type = np.zeros(n_tokens, dtype=np.int64)
+#
+#     # Binding type: all unspecified
+#     binding_type = np.zeros(n_tokens, dtype=np.int64)
+#
+#     # Token resolved mask: all resolved
+#     token_resolved_mask = np.ones(n_tokens, dtype=np.float32)
+#
+#     np.savez(
+#         output_npz_path,
+#         design_mask=design_mask,
+#         inverse_fold_design_mask=design_mask,  # Same as design_mask
+#         ss_type=ss_type,
+#         binding_type=binding_type,
+#         token_resolved_mask=token_resolved_mask
+#     )
+#
+# -----------------------------------------------------------------------------
+# FILESYSTEM STRUCTURE
+# -----------------------------------------------------------------------------
+# BoltzGen expects the following directory structure:
+#
+# <output_folder>/
+# ├── design_spec.yaml              # Design specification (entities, bindings)
+# ├── steps.yaml                    # Completed pipeline steps
+# ├── config/                       # Step configuration files
+# │   ├── design.yaml
+# │   └── inverse_folding.yaml
+# ├── intermediate_designs/         # Output from "design" step
+# │   ├── design_spec_0.cif
+# │   ├── design_spec_0.npz         # <-- Required metadata
+# │   ├── design_spec_1.cif
+# │   ├── design_spec_1.npz
+# │   └── ...
+# └── intermediate_designs_inverse_folded/  # Output from "inverse_folding" step
+#     ├── design_spec_0.cif
+#     ├── design_spec_0.npz         # <-- Required metadata
+#     ├── design_spec_1.cif
+#     ├── design_spec_1.npz
+#     └── ...
+#
+# =============================================================================
+

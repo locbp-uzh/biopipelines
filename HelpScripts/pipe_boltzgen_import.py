@@ -7,6 +7,7 @@ Converts external structures into BoltzGen filesystem format:
 2. Reassigns chains (protein to A, ligand to B)
 3. Optionally assigns sequences and zeros sidechain coordinates
 4. Generates design_spec.yaml from ligand info and binder spec
+5. Generates NPZ metadata files required by BoltzGen dataloader
 
 This enables use of downstream BoltzGen steps (folding, analysis, filtering)
 on structures from external tools like RFdiffusion.
@@ -17,6 +18,7 @@ import sys
 import re
 import argparse
 import json
+import numpy as np
 import pandas as pd
 from pathlib import Path
 
@@ -57,7 +59,7 @@ def convert_and_reassign_chains(
     ligand_chain: str = "B",
     new_sequence: str = None,
     ligand_name: str = "LIG"
-) -> bool:
+) -> tuple:
     """
     Convert structure to CIF and reassign chains.
 
@@ -74,14 +76,14 @@ def convert_and_reassign_chains(
                     BoltzGen expects ligand to be named "LIG".
 
     Returns:
-        True if successful, False otherwise
+        Tuple of (success: bool, n_protein_residues: int, n_ligand_atoms: int)
     """
     try:
         from Bio.PDB import PDBParser, MMCIFParser, MMCIFIO, Structure, Model, Chain
         from Bio.PDB.Polypeptide import is_aa
     except ImportError:
         print("Error: BioPython is required. Install with: pip install biopython")
-        return False
+        return (False, 0, 0)
 
     try:
         # Parse input structure
@@ -135,7 +137,8 @@ def convert_and_reassign_chains(
 
             protein_chain_obj.add(residue)
 
-        # Add ligand residues to ligand chain
+        # Add ligand residues to ligand chain and count atoms
+        n_ligand_atoms = 0
         for i, residue in enumerate(ligand_residues):
             # Keep original residue ID or renumber
             new_id = residue.id
@@ -147,6 +150,8 @@ def convert_and_reassign_chains(
             # BoltzGen expects all ligands to be named "LIG"
             residue.resname = ligand_name
             ligand_chain_obj.add(residue)
+            # Count atoms in ligand (each atom becomes a token in BoltzGen)
+            n_ligand_atoms += len(list(residue.get_atoms()))
 
         # Add chains to model
         if len(protein_chain_obj) > 0:
@@ -154,17 +159,20 @@ def convert_and_reassign_chains(
         if len(ligand_chain_obj) > 0:
             new_model.add(ligand_chain_obj)
 
+        # Count protein residues (each residue is one token)
+        n_protein_residues = len(protein_residues)
+
         # Write output CIF
         io = MMCIFIO()
         io.set_structure(new_structure)
         io.save(output_path)
-        return True
+        return (True, n_protein_residues, n_ligand_atoms)
 
     except Exception as e:
         print(f"Error processing {input_path}: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        return (False, 0, 0)
 
 
 def load_sequences(sequences_csv: str) -> dict:
@@ -360,6 +368,67 @@ def generate_design_spec(
     return design_spec_path
 
 
+def generate_npz_metadata(
+    output_path: str,
+    n_protein_residues: int,
+    n_ligand_atoms: int
+) -> bool:
+    """
+    Generate NPZ metadata file required by BoltzGen dataloader.
+
+    BoltzGen expects each CIF structure file to have a corresponding NPZ file
+    with per-token metadata arrays.
+
+    Args:
+        output_path: Output NPZ file path
+        n_protein_residues: Number of protein residues (each is one token)
+        n_ligand_atoms: Number of ligand atoms (each is one token)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        n_tokens = n_protein_residues + n_ligand_atoms
+
+        if n_tokens == 0:
+            print(f"Warning: No tokens to write for {output_path}")
+            return False
+
+        # design_mask: 1.0 for protein (designed), 0.0 for ligand (fixed)
+        design_mask = np.concatenate([
+            np.ones(n_protein_residues, dtype=np.float32),
+            np.zeros(n_ligand_atoms, dtype=np.float32)
+        ])
+
+        # inverse_fold_design_mask: same as design_mask
+        inverse_fold_design_mask = design_mask.copy()
+
+        # ss_type: all UNSPECIFIED (0)
+        ss_type = np.zeros(n_tokens, dtype=np.int64)
+
+        # binding_type: all UNSPECIFIED (0)
+        binding_type = np.zeros(n_tokens, dtype=np.int64)
+
+        # token_resolved_mask: all resolved (1.0)
+        token_resolved_mask = np.ones(n_tokens, dtype=np.float32)
+
+        np.savez(
+            output_path,
+            design_mask=design_mask,
+            inverse_fold_design_mask=inverse_fold_design_mask,
+            ss_type=ss_type,
+            binding_type=binding_type,
+            token_resolved_mask=token_resolved_mask
+        )
+        return True
+
+    except Exception as e:
+        print(f"Error generating NPZ metadata {output_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def import_structures(
     structures_file: str,
     output_dir: str,
@@ -454,7 +523,7 @@ def import_structures(
                 print(f"  Warning: No sequence found for {struct_id}")
 
         # Convert and reassign chains
-        success = convert_and_reassign_chains(
+        success, n_protein, n_ligand = convert_and_reassign_chains(
             struct_path, output_cif,
             protein_chain=protein_chain,
             ligand_chain=ligand_chain,
@@ -463,7 +532,14 @@ def import_structures(
         )
 
         if success:
-            stats['success'] += 1
+            # Generate NPZ metadata file alongside CIF
+            output_npz = output_cif.replace('.cif', '.npz')
+            npz_success = generate_npz_metadata(output_npz, n_protein, n_ligand)
+            if npz_success:
+                stats['success'] += 1
+            else:
+                stats['failed'] += 1
+                print(f"  Failed NPZ generation: {struct_id}")
         else:
             stats['failed'] += 1
             print(f"  Failed: {struct_id}")
