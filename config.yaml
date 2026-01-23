@@ -38,6 +38,7 @@ environments:
   Boltz2: "Boltz2Env"
   BoltzGen: "boltzgen"
   BoltzGenMerge: "boltzgen"
+  BoltzGenImport: "boltzgen"
   RF3: "modelforge"
   ESMFold: "esmfold"
   RFdiffusion: "ProteinEnv"
