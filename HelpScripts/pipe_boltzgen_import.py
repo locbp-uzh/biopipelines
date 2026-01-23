@@ -213,10 +213,10 @@ def convert_and_reassign_chains(
     model.add_chain(g_ligand)
 
     st_out.add_model(model)
-    print(f"    Entities: {len(st_out.entities)}")
 
     # Now setup entities – crucial order
     st_out.setup_entities()
+    print(f"    Entities: {len(st_out.entities)}")
     # Optional: ensure minimal required categories
     st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
@@ -224,6 +224,7 @@ def convert_and_reassign_chains(
         tmp_path = tmp.name
         st_out.write_pdb(tmp_path)        
 
+    """
     # Read back → Gemmi now "knows" the flat atom list
     st_round = gemmi.read_structure(tmp_path)
 
@@ -234,7 +235,7 @@ def convert_and_reassign_chains(
     block = doc.sole_block()
     loop = block.find_loop("_atom_site.")
     doc.write_file(output_path)
-
+    """
     return True, len(g_protein), sum(len(r) for r in g_ligand)
 
 
