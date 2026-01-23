@@ -96,7 +96,7 @@ _entity_poly_seq.mon_id
         f.write(content)
 
 #### for writing cif with gemmi
-def write_cif_with_gemmi(structure, output_path):
+def write_cif(structure, output_path):
     st = gemmi.Structure()
     st.name = "imported"
     model = gemmi.Model("1")
@@ -128,120 +128,82 @@ def convert_and_reassign_chains(
     new_sequence: str = None,
     ligand_name: str = "LIG"
 ) -> tuple:
-    """
-    Convert structure to CIF and reassign chains.
+    st_in = gemmi.read_structure(input_path)
+    if not st_in:
+        raise ValueError(f"Could not read structure: {input_path}")
 
-    Input structures (e.g., from RFdiffusion) may have protein+ligand in chain A.
-    This function separates them: protein -> protein_chain, ligand -> ligand_chain.
+    st = gemmi.Structure()
+    st.name = "imported"
+    model = gemmi.Model("1")
+    st.add_model(model)
 
-    Args:
-        input_path: Input structure file (PDB or CIF)
-        output_path: Output CIF file path
-        protein_chain: Target chain ID for protein (default: "A")
-        ligand_chain: Target chain ID for ligand (default: "B")
-        new_sequence: Optional new sequence to assign (zeros sidechains)
-        ligand_name: Residue name for ligand in output (default: "LIG").
-                    BoltzGen expects ligand to be named "LIG".
+    g_protein = gemmi.Chain(protein_chain)
+    g_ligand  = gemmi.Chain(ligand_chain)
 
-    Returns:
-        Tuple of (success: bool, n_protein_residues: int, n_ligand_atoms: int)
-    """
-    from Bio.PDB import PDBParser, MMCIFParser, MMCIFIO, Structure, Model, Chain
-    from Bio.PDB.Polypeptide import is_aa
+    n_protein_res = 0
+    n_ligand_atoms = 0
 
-    try:
-        # Parse input structure
-        if input_path.endswith('.cif'):
-            parser = MMCIFParser(QUIET=True)
+    # Simple heuristic: longest chain = protein, others = ligands
+    # Or: look at polymer type if entities already present
+    chains = list(st_in[0])
+    if not chains:
+        raise ValueError("No chains in input")
+
+    # Sort by number of residues (heuristic)
+    chains.sort(key=lambda ch: -len(ch))
+
+    # Treat first (longest) as protein
+    protein_input_chain = chains[0]
+    for i, res in enumerate(protein_input_chain, 1):
+        gres = gemmi.Residue()
+        gres.name = res.name
+        gres.seqid = gemmi.SeqId(str(i))
+
+        # Optional: apply new sequence & zero sidechains
+        if new_sequence and i-1 < len(new_sequence):
+            new_aa = new_sequence[i-1]
+            gres.name = AA_1TO3.get(new_aa.upper(), 'ALA')
+
+            # We'll rebuild atoms → only keep backbone if mutating
+            for atom in res:
+                if atom.name in {'N','CA','C','O','CB'}:
+                    gres.add_atom(atom.clone())  # keep original backbone coords
+                # sidechains get zeroed implicitly by not adding them
+
         else:
-            parser = PDBParser(QUIET=True)
+            # copy all atoms
+            for atom in res:
+                gres.add_atom(atom.clone())
 
-        structure = parser.get_structure('structure', input_path)
+        g_protein.add_residue(gres)
+        n_protein_res += 1
 
-        # Create new structure with reassigned chains
-        new_structure = Structure.Structure('imported')
-        new_model = Model.Model(0)
-        new_structure.add(new_model)
+    # All other chains → ligand chain (concatenate)
+    for input_chain in chains[1:]:
+        for res in input_chain:
+            gres = gemmi.Residue()
+            gres.name = ligand_name
+            # keep original seqid or renumber — up to you
+            # gres.seqid = res.seqid.clone()   # preserve
+            # or renumber sequentially
+            # but for ligands seqid often ignored
 
-        protein_chain_obj = Chain.Chain(protein_chain)
-        ligand_chain_obj = Chain.Chain(ligand_chain)
+            for atom in res:
+                gres.add_atom(atom.clone())
+                n_ligand_atoms += 1
 
-        protein_residues = []
-        ligand_residues = []
+            g_ligand.add_residue(gres)
 
-        # Separate protein and ligand residues from all chains
-        for model in structure:
-            for chain in model:
-                for residue in chain:
-                    resname = residue.get_resname()
-                    # Check if it's a standard amino acid
-                    if is_aa(residue, standard=True):
-                        protein_residues.append(residue.copy())
-                    elif resname not in ['HOH', 'WAT']:  # Skip water
-                        # It's a ligand/hetero atom
-                        ligand_residues.append(residue.copy())
-            break  # Only process first model
+    if n_protein_res > 0:
+        model.add_chain(g_protein)
+    if n_ligand_atoms > 0:
+        model.add_chain(g_ligand)
 
-        # Add protein residues to protein chain with sequential numbering
-        for i, residue in enumerate(protein_residues):
-            # Create new residue ID with sequential numbering
-            new_id = (' ', i + 1, ' ')
-            residue.id = new_id
+    st.setup_entities()
+    doc = st.make_mmcif_document()
+    doc.write_file(output_path)
 
-            # If new sequence provided, mutate and zero sidechains
-            if new_sequence and i < len(new_sequence):
-                new_aa = new_sequence[i]
-                new_resname = AA_1TO3.get(new_aa, 'ALA')
-                residue.resname = new_resname
-
-                # Zero sidechain coordinates
-                for atom in residue:
-                    if atom.name not in BACKBONE_ATOMS:
-                        atom.set_coord((0.0, 0.0, 0.0))
-
-            protein_chain_obj.add(residue)
-
-        # Add ligand residues to ligand chain and count atoms
-        n_ligand_atoms = 0
-        for i, residue in enumerate(ligand_residues):
-            # Keep original residue ID or renumber
-            new_id = residue.id
-            if new_id[1] in [r.id[1] for r in ligand_chain_obj]:
-                # Renumber to avoid conflicts
-                new_id = (' ', i + 1, ' ')
-            residue.id = new_id
-            # Rename ligand residue to the specified name (default: LIG)
-            # BoltzGen expects all ligands to be named "LIG"
-            residue.resname = ligand_name
-            ligand_chain_obj.add(residue)
-            # Count atoms in ligand (each atom becomes a token in BoltzGen)
-            n_ligand_atoms += len(list(residue.get_atoms()))
-
-        # Add chains to model
-        if len(protein_chain_obj) > 0:
-            new_model.add(protein_chain_obj)
-        if len(ligand_chain_obj) > 0:
-            new_model.add(ligand_chain_obj)
-
-        # Count protein residues (each residue is one token)
-        n_protein_residues = len(protein_residues)
-
-        # Write output CIF
-        """
-        io = MMCIFIO()
-        io.set_structure(new_structure)
-        io.save(output_path)
-        inject_entity_poly_seq(output_path,protein_chain) ###
-        """
-        write_cif_with_gemmi(new_structure, output_path)
-
-        return (True, n_protein_residues, n_ligand_atoms)
-
-    except Exception as e:
-        print(f"Error processing {input_path}: {e}")
-        import traceback
-        traceback.print_exc()
-        return (False, 0, 0)
+    return (True, n_protein_res, n_ligand_atoms)
 
 
 def load_sequences(sequences_csv: str) -> dict:
