@@ -24,7 +24,7 @@ from pathlib import Path
 import gemmi
 
 # Backbone atom names (coordinates preserved)
-BACKBONE_ATOMS = {'N', 'CA', 'C', 'O', 'CB'}
+BACKBONE_ATOMS = {'N', 'CA', 'C', 'O'}
 
 # Standard amino acid 3-letter to 1-letter mapping
 AA_3TO1 = {
@@ -157,7 +157,7 @@ def convert_and_reassign_chains(
                 a = atom.clone()               # copy name, element, occupancy, etc.
                 if not atom.name in BACKBONE_ATOMS:
                     a.pos = gemmi.Position(0.0, 0.0, 0.0)
-                gres.add_atom(atom.clone())
+                gres.add_atom(a)
         else:
             for atom in res:
                 gres.add_atom(atom.clone())
@@ -178,10 +178,6 @@ def convert_and_reassign_chains(
                 n_ligand_atoms += 1
 
         g_ligand.add_residue(gres_lig)
-
-    # Final check before writing
-    total_res = n_protein_res + len(g_ligand)
-    total_atoms = sum(len(res) for res in g_protein) + n_ligand_atoms
 
     print(f"  Final stats → protein: {n_protein_res} res, ligand: {n_ligand_atoms} atoms")
 
@@ -235,12 +231,9 @@ def convert_and_reassign_chains(
 
     block = doc.sole_block()
     loop = block.find_loop("_atom_site.")
-    num_atoms = len(loop)/len(loop.tags) if loop else 0
-    print(f"→ now has {num_atoms} atoms")
     doc.write_file(output_path)
 
-
-    return num_atoms>0, len(g_protein), sum(len(r) for r in g_ligand)
+    return True, len(g_protein), sum(len(r) for r in g_ligand)
 
 
 def load_sequences(sequences_csv: str) -> dict:
