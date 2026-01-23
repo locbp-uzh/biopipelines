@@ -224,9 +224,20 @@ def convert_and_reassign_chains(
     # Optional: ensure minimal required categories
     st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
-    st_out.transform(gemmi.Transform())
-    
-    doc = st_out.make_mmcif_document()
+    # ── Insert this ───────────────────────────────────────
+    import tempfile
+    import os
+
+    with tempfile.NamedTemporaryFile(suffix='.pdb', delete=False) as tmp:
+        tmp_path = tmp.name
+        gemmi.write_pdb(st_out, tmp_path)          # or st_out.make_pdb_string() → write yourself
+
+    # Read back → Gemmi now "knows" the flat atom list
+    st_round = gemmi.read_structure(tmp_path)
+    os.unlink(tmp_path)  # clean up
+
+    doc = st_round.make_mmcif_document()
+
     block = doc.sole_block()
     loop = block.find_loop("_atom_site.")
     num_atoms = len(loop)/len(loop.tags) if loop else 0
