@@ -192,61 +192,74 @@ def convert_and_reassign_chains(
     #    g_protein  (Chain "A" with 170 residues)
     #    g_ligand   (Chain "B" with 1 residue, 25 atoms)
 
+        # ── Debug: show what we have ─────────────────────────────────────────────
     print(f"  Before writing:")
-    print(f"    Protein chain A: {len(g_protein)} residues")
-    print(f"    Ligand chain B:  {len(g_ligand)} residues, {sum(len(r) for r in g_ligand)} atoms")
+    print(f"    Protein chain A: {len(g_protein)} residues, "
+          f"{sum(1 for res in g_protein for _ in res)} atoms")
+    print(f"    Ligand chain B:  {len(g_ligand)} residues, "
+          f"{sum(1 for res in g_ligand for _ in res)} atoms")
 
     if len(g_protein) == 0 and len(g_ligand) == 0:
-        print("  !!! No chains/residues to write → empty file !!!")
+        print("  !!! No residues to write → will produce empty file")
         return False, 0, 0
 
-    # Create fresh structure for output
+    # Create clean output structure
     st_out = gemmi.Structure()
-    st_out.name = "imported_from_" + os.path.basename(input_path)
-    
+    st_out.name = "imported"
+
+    # Create model
     model = gemmi.Model("1")
     st_out.add_model(model)
 
-    added = False
+    # Add chains **after** model is attached to structure
     if len(g_protein) > 0:
         model.add_chain(g_protein)
-        added = True
+        print("  Added protein chain A to model")
     if len(g_ligand) > 0:
         model.add_chain(g_ligand)
-        added = True
+        print("  Added ligand chain B to model")
 
-    if not added:
-        print("  WARNING: no chains were added to the output model")
-
-    # Important: call setup_entities *after* chains are added
+    # VERY IMPORTANT ORDER:
+    # 1. Chains must be in the model
+    # 2. Then setup entities (this creates _entity, _entity_poly, _entity_poly_seq, etc.)
     st_out.setup_entities()
-    
-    # Optional but very helpful for debugging
-    st_out.make_mmcif_document().write_file("debug_before_write.cif")
-    print("  Wrote debug_before_write.cif for inspection")
 
-    # Now create document and write
+    # Optional: force re-perception if entities look wrong
+    # st_out.deduce_het_flags()
+    # st_out.deduce_entity_het_flags()
+
+    # Create mmCIF document
     doc = st_out.make_mmcif_document()
 
-    # Quick sanity check
-    atom_count_in_doc = 0
-    for block in doc:
-        if block.name == "data_imported":
-            atom_loop = block.find_loop("_atom_site.")
-            if atom_loop:
-                atom_count_in_doc = len(atom_loop) // len(atom_loop.tags)
+    # Debug: count atoms directly in the document
+    atom_count = 0
+    block = doc.sole_block()  # usually the only block
+    if block:
+        atom_loop = block.find_loop("_atom_site.")
+        if atom_loop:
+            # each row has several tags → divide by number of columns
+            n_tags = len(atom_loop.tags)
+            if n_tags > 0:
+                atom_count = len(atom_loop) // n_tags
 
-    print(f"  Document prepared with ~{atom_count_in_doc} atoms")
+    print(f"  mmCIF document prepared → {atom_count} atoms detected in _atom_site")
 
-    success = doc.write_file(output_path)
-    if not success:
-        print("  !!! doc.write_file() returned failure !!!")
+    if atom_count == 0:
+        print("  !!! No atoms in document - writing would produce empty/meaningless CIF")
+        # Write a debug file anyway so we can inspect
+        debug_path = output_path + ".DEBUG_EMPTY.cif"
+        doc.write_file(debug_path)
+        print(f"  Wrote empty debug file: {debug_path}")
+        return False, len(g_protein), sum(len(res) for res in g_ligand)
 
-    print(f"  Wrote final file: {output_path}")
-
-    # Final stats (use what you already calculated)
-    return True, len(g_protein), sum(len(r) for r in g_ligand) * 1  # or your n_ligand_atoms
-
+    # Actually write
+    try:
+        doc.write_file(output_path)
+        print(f"  Successfully wrote: {output_path}")
+        return True, len(g_protein), sum(len(res) for res in g_ligand)
+    except Exception as e:
+        print(f"  Write failed: {e}")
+        return False, len(g_protein), sum(len(res) for res in g_ligand)
 
 def load_sequences(sequences_csv: str) -> dict:
     """
