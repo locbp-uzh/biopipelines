@@ -21,7 +21,7 @@ import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-
+import gemmi
 
 # Backbone atom names (coordinates preserved)
 BACKBONE_ATOMS = {'N', 'CA', 'C', 'O', 'CB'}
@@ -51,7 +51,7 @@ def is_amino_acid(resname: str) -> bool:
     """Check if residue is a standard amino acid."""
     return resname in AA_3TO1
 
-
+# for writing cif with io
 def inject_entity_poly_seq(cif_path, chain_id="A"):
     with open(cif_path, "r") as f:
         content = f.read()
@@ -95,6 +95,33 @@ _entity_poly_seq.mon_id
     with open(cif_path, "w") as f:
         f.write(content)
 
+#### for writing cif with gemmi
+def write_cif_with_gemmi(structure, output_path):
+    st = gemmi.Structure()
+    st.name = "imported"
+    model = gemmi.Model("1")
+    st.add_model(model)
+
+    for chain in structure[0]:
+        gchain = gemmi.Chain(chain.id)
+        for res in chain:
+            gres = gemmi.Residue()
+            gres.name = res.resname
+            gres.seqid = gemmi.SeqId(res.id[1])
+            for atom in res:
+                a = gemmi.Atom()
+                a.name = atom.name
+                a.pos = gemmi.Position(*atom.coord)
+                a.element = gemmi.Element(atom.element)
+                gres.add_atom(a)
+            gchain.add_residue(gres)
+        model.add_chain(gchain)
+
+    st.setup_entities()  # ← THIS creates _entity_poly_seq
+    doc = gemmi.cif.Document()
+    doc.add_new_block("imported").write_structure(st)
+    doc.write_file(output_path)
+
 def convert_and_reassign_chains(
     input_path: str,
     output_path: str,
@@ -121,12 +148,8 @@ def convert_and_reassign_chains(
     Returns:
         Tuple of (success: bool, n_protein_residues: int, n_ligand_atoms: int)
     """
-    try:
-        from Bio.PDB import PDBParser, MMCIFParser, MMCIFIO, Structure, Model, Chain
-        from Bio.PDB.Polypeptide import is_aa
-    except ImportError:
-        print("Error: BioPython is required. Install with: pip install biopython")
-        return (False, 0, 0)
+    from Bio.PDB import PDBParser, MMCIFParser, MMCIFIO, Structure, Model, Chain
+    from Bio.PDB.Polypeptide import is_aa
 
     try:
         # Parse input structure
@@ -206,10 +229,14 @@ def convert_and_reassign_chains(
         n_protein_residues = len(protein_residues)
 
         # Write output CIF
+        """
         io = MMCIFIO()
         io.set_structure(new_structure)
         io.save(output_path)
         inject_entity_poly_seq(output_path,protein_chain) ###
+        """
+        write_cif_with_gemmi(new_structure, output_path)
+
         return (True, n_protein_residues, n_ligand_atoms)
 
     except Exception as e:
