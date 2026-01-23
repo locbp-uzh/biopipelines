@@ -212,8 +212,7 @@ def convert_and_reassign_chains(
     st_out.spacegroup_hm = "P 1"           # minimal, avoids some complaints
 
     model = gemmi.Model("1")
-    st_out.add_model(model)
-
+    
     # Protein chain re-creation
     if len(g_protein) > 0:
         new_protein_chain = gemmi.Chain(g_protein.name or "A")
@@ -245,6 +244,8 @@ def convert_and_reassign_chains(
             new_ligand_chain.add_residue(new_res)
         model.add_chain(new_ligand_chain)
         print("  Added re-created ligand chain B")
+
+    st_out.add_model(model)
 
     # Now setup entities – crucial order
     st_out.setup_entities()
