@@ -221,10 +221,11 @@ def convert_and_reassign_chains(
 
     # Now setup entities – crucial order
     st_out.setup_entities()
-    st_out.transform(gemmi.Transform())
     # Optional: ensure minimal required categories
     st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
+    st_out.transform(gemmi.Transform())
+    
     doc = st_out.make_mmcif_document()
     block = doc.sole_block()
     loop = block.find_loop("_atom_site.")
