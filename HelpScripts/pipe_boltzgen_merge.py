@@ -24,6 +24,8 @@ import sys
 import argparse
 import shutil
 import re
+import gzip
+import pickle
 import pandas as pd
 
 
@@ -55,6 +57,7 @@ def find_design_files(source_dir: str) -> dict:
         'cif': [],      # Structure files
         'npz': [],      # Metadata files
         'csv': [],      # Metrics files
+        'pkl': [],      # Pickle files (e.g., ca_coords_sequences.pkl.gz)
         'other': []     # Other files to copy as-is
     }
 
@@ -84,8 +87,10 @@ def find_design_files(source_dir: str) -> dict:
                 files['npz'].append(rel_path)
             elif entry.endswith('.csv'):
                 files['csv'].append(rel_path)
+            elif entry.endswith('.pkl.gz') or entry.endswith('.pkl'):
+                files['pkl'].append(rel_path)
 
-    # CSV files in intermediate_designs_inverse_folded root
+    # CSV and pkl files in intermediate_designs_inverse_folded root
     inv_folded_dir = os.path.join(source_dir, 'intermediate_designs_inverse_folded')
     if os.path.exists(inv_folded_dir):
         for entry in os.listdir(inv_folded_dir):
@@ -93,6 +98,10 @@ def find_design_files(source_dir: str) -> dict:
                 rel_path = os.path.join('intermediate_designs_inverse_folded', entry)
                 if rel_path not in files['csv']:
                     files['csv'].append(rel_path)
+            elif entry.endswith('.pkl.gz') or entry.endswith('.pkl'):
+                rel_path = os.path.join('intermediate_designs_inverse_folded', entry)
+                if rel_path not in files['pkl']:
+                    files['pkl'].append(rel_path)
 
     return files
 
@@ -153,6 +162,63 @@ def merge_csv_files_pandas(csv_files: list, output_path: str) -> None:
     merged_df.to_csv(output_path, index=False)
 
 
+def merge_pkl_files_pandas(pkl_files: list, output_path: str) -> None:
+    """
+    Merge multiple pickle (.pkl.gz) files containing pandas DataFrames.
+
+    These files (like ca_coords_sequences.pkl.gz) contain DataFrames with
+    design IDs that need to be prefixed to avoid collisions.
+
+    Args:
+        pkl_files: List of (source_pkl_path, prefix) tuples
+        output_path: Output merged pickle path
+    """
+    if not pkl_files:
+        return
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # Pattern for matching design IDs
+    pattern = re.compile(r'(design_spec_\d+(?:_model_\d+)?)')
+
+    dfs = []
+    for pkl_path, prefix in pkl_files:
+        # Read pickle file (handle both .pkl and .pkl.gz)
+        if pkl_path.endswith('.gz'):
+            with gzip.open(pkl_path, 'rb') as f:
+                df = pickle.load(f)
+        else:
+            with open(pkl_path, 'rb') as f:
+                df = pickle.load(f)
+
+        # If it's a DataFrame, update design IDs in string columns
+        if isinstance(df, pd.DataFrame):
+            for col in df.columns:
+                if df[col].dtype == 'object':  # String columns
+                    df[col] = df[col].apply(lambda x: update_id_with_prefix(x, prefix, pattern))
+            # Also check index if it contains design IDs
+            if df.index.dtype == 'object':
+                df.index = df.index.map(lambda x: update_id_with_prefix(x, prefix, pattern))
+            dfs.append(df)
+        else:
+            print(f"  Warning: {pkl_path} is not a DataFrame, skipping")
+            continue
+
+    if not dfs:
+        return
+
+    # Concatenate all dataframes
+    merged_df = pd.concat(dfs, ignore_index=True)
+
+    # Save to pickle (use same compression as input)
+    if output_path.endswith('.gz'):
+        with gzip.open(output_path, 'wb') as f:
+            pickle.dump(merged_df, f)
+    else:
+        with open(output_path, 'wb') as f:
+            pickle.dump(merged_df, f)
+
+
 def rename_file_with_prefix(source_path: str, dest_dir: str, prefix: str) -> str:
     """
     Copy a file while renaming design IDs in the filename using regex.
@@ -197,7 +263,8 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
         'sources': len(sources),
         'files_copied': 0,
         'ids_renamed': 0,
-        'csvs_merged': {}
+        'csvs_merged': {},
+        'pkls_merged': {}
     }
 
     # Create output directory structure
@@ -210,8 +277,9 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
                        'config']:
             os.makedirs(os.path.join(output_dir, subdir), exist_ok=True)
 
-    # Track CSV files to merge: csv_name -> list of (source_path, prefix)
+    # Track CSV and pickle files to merge: name -> list of (source_path, prefix)
     csv_files_to_merge = {}
+    pkl_files_to_merge = {}
 
     for i, source in enumerate(sources):
         prefix = get_source_prefix(source, i, id_template)
@@ -259,6 +327,15 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
                 csv_files_to_merge[csv_name] = {'rel_path': rel_path, 'files': []}
             csv_files_to_merge[csv_name]['files'].append((source_path, prefix))
 
+        # Collect pickle files with their prefixes
+        for rel_path in files['pkl']:
+            source_path = os.path.join(source, rel_path)
+            pkl_name = os.path.basename(rel_path)
+
+            if pkl_name not in pkl_files_to_merge:
+                pkl_files_to_merge[pkl_name] = {'rel_path': rel_path, 'files': []}
+            pkl_files_to_merge[pkl_name]['files'].append((source_path, prefix))
+
     # Merge CSV files using pandas
     if verbose:
         print(f"\nMerging CSV files with pandas...")
@@ -272,6 +349,21 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
 
             if verbose:
                 print(f"  {csv_name}: merged {len(file_list)} files")
+
+    # Merge pickle files using pandas
+    if pkl_files_to_merge:
+        if verbose:
+            print(f"\nMerging pickle files...")
+
+        for pkl_name, pkl_info in pkl_files_to_merge.items():
+            file_list = pkl_info['files']
+            if file_list:
+                output_path = os.path.join(output_dir, pkl_info['rel_path'])
+                merge_pkl_files_pandas(file_list, output_path)
+                stats['pkls_merged'][pkl_name] = len(file_list)
+
+                if verbose:
+                    print(f"  {pkl_name}: merged {len(file_list)} files")
 
     # Copy config and other files from first source (unless csv_only)
     if not csv_only:
@@ -365,6 +457,10 @@ def main():
     print(f"CSV files merged: {len(stats['csvs_merged'])}")
     for csv_name, count in stats['csvs_merged'].items():
         print(f"  - {csv_name}: {count} sources")
+    if stats.get('pkls_merged'):
+        print(f"Pickle files merged: {len(stats['pkls_merged'])}")
+        for pkl_name, count in stats['pkls_merged'].items():
+            print(f"  - {pkl_name}: {count} sources")
     print("=" * 60)
 
     return 0
