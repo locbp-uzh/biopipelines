@@ -147,17 +147,22 @@ def convert_and_reassign_chains(
         print("  → No chains at all → empty output")
         return (False, 0, 0)
 
+    def get_chain_id(ch):
+        return ch.name if hasattr(ch, 'name') else ch.label_asym_id if hasattr(ch, 'label_asym_id') else '?'
     # ── very important ──
     for i, ch in enumerate(chains, 1):
         res_count = len(ch)
         first_res = ch[0].name if ch else "—"
-        chain_id = ch.name if hasattr(ch, 'name') else ch.label_asym_id if hasattr(ch, 'label_asym_id') else '?'
+        chain_id = get_chain_id(ch)
         print(f"    chain {i}: id={chain_id:>2}, {res_count:3d} residues, first res={first_res}")
     
     # Sort by number of residues (descending)
     chains.sort(key=lambda ch: -len(ch))
 
-    print(f"  → Longest chain selected as protein: chain {chains[0].id}, "
+    
+    longest_chain_id = get_chain_id(chains[0])
+        
+    print(f"  → Longest chain selected as protein: chain {longest_chain_id}, "
           f"{len(chains[0])} residues")
 
     g_protein = gemmi.Chain(protein_chain)
@@ -197,7 +202,8 @@ def convert_and_reassign_chains(
     print(f"  Building ligand chain '{ligand_chain}' from {len(chains)-1} input chain(s)...")
 
     for input_chain in chains[1:]:
-        print(f"    ← Adding input chain {input_chain.id} ({len(input_chain)} res)")
+        input_chain_id = get_chain_id(input_chain)
+        print(f"    ← Adding input chain {input_chain_id} ({len(input_chain)} res)")
         for res in input_chain:
             gres = gemmi.Residue()
             gres.name = ligand_name
@@ -209,7 +215,7 @@ def convert_and_reassign_chains(
                 n_ligand_atoms += 1
 
             if len(gres) == 0:
-                print(f"      WARNING: empty residue copied from {input_chain.id}")
+                print(f"      WARNING: empty residue copied from {input_chain_id}")
 
             g_ligand.add_residue(gres)
 
