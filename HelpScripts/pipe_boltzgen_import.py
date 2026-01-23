@@ -117,8 +117,7 @@ def write_cif_with_gemmi(structure, output_path):
         model.add_chain(gchain)
 
     st.setup_entities()  # ← THIS creates _entity_poly_seq
-    doc = gemmi.cif.Document()
-    doc.add_new_block("imported").write_structure(st)
+    doc = st.make_mmcif_document()          # ← this creates a complete mmCIF document
     doc.write_file(output_path)
 
 def convert_and_reassign_chains(
