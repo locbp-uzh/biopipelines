@@ -214,32 +214,40 @@ def convert_and_reassign_chains(
     model = gemmi.Model("1")
     st_out.add_model(model)
 
-    # Add chains – but force re-parenting / copying to ensure ownership
+    # Protein chain re-creation
     if len(g_protein) > 0:
         new_protein_chain = gemmi.Chain(g_protein.name or "A")
         for res in g_protein:
             new_res = gemmi.Residue()
             new_res.name = res.name
-            new_res.seqid = res.seqid.clone() if res.seqid else gemmi.SeqId()
+            # FIXED: no .clone()
+            new_res.seqid = gemmi.SeqId(res.seqid.num, res.seqid.icode) if res.seqid else gemmi.SeqId()
+            
             for atom in res:
                 new_atom = atom.clone()
                 new_res.add_atom(new_atom)
             new_protein_chain.add_residue(new_res)
         model.add_chain(new_protein_chain)
-        print("  Added re-created protein chain")
+        print("  Added re-created protein chain A")
 
+    # Ligand chain re-creation (ligands often get simple seqid)
     if len(g_ligand) > 0:
         new_ligand_chain = gemmi.Chain(g_ligand.name or "B")
         for res in g_ligand:
             new_res = gemmi.Residue()
             new_res.name = res.name
-            new_res.seqid = gemmi.SeqId("1")  # ligands often seqid=1
+            # For ligands: usually force seqid 1 or keep original if meaningful
+            if res.seqid:
+                new_res.seqid = gemmi.SeqId(res.seqid.num, res.seqid.icode)
+            else:
+                new_res.seqid = gemmi.SeqId(1, '')
+            
             for atom in res:
                 new_atom = atom.clone()
                 new_res.add_atom(new_atom)
             new_ligand_chain.add_residue(new_res)
         model.add_chain(new_ligand_chain)
-        print("  Added re-created ligand chain")
+        print("  Added re-created ligand chain B")
 
     # Now setup entities – crucial order
     st_out.setup_entities()
