@@ -227,6 +227,8 @@ def convert_and_reassign_chains(
     # Read back → Gemmi now "knows" the flat atom list
     st_round = gemmi.read_structure(tmp_path)
 
+    os.remove(tmp_path)
+
     doc = st_round.make_mmcif_document()
 
     block = doc.sole_block()
