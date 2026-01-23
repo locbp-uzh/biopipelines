@@ -103,37 +103,40 @@ def substitute_segments(template: str, substitutions: Dict[str, str],
     Returns:
         New sequence with substitutions applied
     """
-    # Parse all position ranges and sort by start position (descending)
-    replacements = []
+    # Convert template to list for character-by-character replacement
+    result = list(template)
+
+    # Process each substitution
     for pos_range, replacement in substitutions.items():
         ranges = parse_position_range(pos_range)
-        overall_start = ranges[0][0]
-        overall_end = ranges[-1][1]
-        replacements.append((overall_start, overall_end, ranges, replacement))
 
-    # Sort by start position descending (process from end first)
-    replacements.sort(key=lambda x: x[0], reverse=True)
+        # Build list of all positions (PDB residue numbers) to replace
+        positions = []
+        for start, end in ranges:
+            positions.extend(range(start, end + 1))
 
-    result = template
-    for overall_start, overall_end, ranges, replacement in replacements:
+        # Map PDB residue numbers to string indices
         if residue_mapping is not None:
             # Use PDB residue numbers via mapping
-            if overall_start not in residue_mapping:
-                raise ValueError(f"PDB residue {overall_start} not found in structure. "
-                               f"Available residue numbers: {min(residue_mapping.keys())}-{max(residue_mapping.keys())}")
-            if overall_end not in residue_mapping:
-                raise ValueError(f"PDB residue {overall_end} not found in structure. "
-                               f"Available residue numbers: {min(residue_mapping.keys())}-{max(residue_mapping.keys())}")
-            start_idx = residue_mapping[overall_start]
-            end_idx = residue_mapping[overall_end] + 1  # +1 because we want inclusive end
+            indices = []
+            for pos in positions:
+                if pos not in residue_mapping:
+                    raise ValueError(f"PDB residue {pos} not found in structure. "
+                                   f"Available residue numbers: {min(residue_mapping.keys())}-{max(residue_mapping.keys())}")
+                indices.append(residue_mapping[pos])
         else:
-            # Fall back to 1-indexed positions (legacy behavior)
-            start_idx = overall_start - 1
-            end_idx = overall_end
+            # 1-indexed positions -> 0-indexed string indices
+            indices = [pos - 1 for pos in positions]
 
-        result = result[:start_idx] + replacement + result[end_idx:]
+        # Replace each position with corresponding character from replacement sequence
+        for idx in indices:
+            if idx < 0 or idx >= len(result):
+                raise ValueError(f"Index {idx} out of range for sequence of length {len(result)}")
+            if idx >= len(replacement):
+                raise ValueError(f"Index {idx} out of range for replacement sequence of length {len(replacement)}")
+            result[idx] = replacement[idx]
 
-    return result
+    return ''.join(result)
 
 
 def load_sequences_from_csv(csv_path: str) -> Dict[str, str]:
