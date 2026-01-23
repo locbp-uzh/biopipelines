@@ -52,6 +52,49 @@ def is_amino_acid(resname: str) -> bool:
     return resname in AA_3TO1
 
 
+def inject_entity_poly_seq(cif_path, chain_id="A"):
+    with open(cif_path, "r") as f:
+        content = f.read()
+
+    # Skip if already present
+    if "_entity_poly_seq.entity_id" in content:
+        return
+
+    entity_block = f"""
+#
+_entity.id 1
+_entity.type polymer
+_entity.pdbx_description "protein"
+#
+_entity_poly.entity_id 1
+_entity_poly.type polypeptide(L)
+_entity_poly.pdbx_strand_id {chain_id}
+#
+loop_
+_entity_poly_seq.entity_id
+_entity_poly_seq.num
+_entity_poly_seq.mon_id
+"""
+
+    # Extract sequence from _atom_site
+    residues = []
+    for line in content.splitlines():
+        if line.startswith("ATOM"):
+            parts = line.split()
+            resname = parts[5]
+            resseq = parts[8]
+            if not residues or residues[-1][1] != resseq:
+                residues.append((resname, resseq))
+
+    for i, (resname, _) in enumerate(residues, 1):
+        entity_block += f"1 {i} {resname}\n"
+
+    # Insert before atom_site loop
+    content = entity_block + content
+
+    with open(cif_path, "w") as f:
+        f.write(content)
+
 def convert_and_reassign_chains(
     input_path: str,
     output_path: str,
@@ -166,6 +209,7 @@ def convert_and_reassign_chains(
         io = MMCIFIO()
         io.set_structure(new_structure)
         io.save(output_path)
+        inject_entity_poly_seq(output_path,protein_chain) ###
         return (True, n_protein_residues, n_ligand_atoms)
 
     except Exception as e:
@@ -549,7 +593,6 @@ def import_structures(
             print(f"  Processed {stats['processed']}/{len(structures)} structures...")
 
     return stats
-
 
 def main():
     parser = argparse.ArgumentParser(
