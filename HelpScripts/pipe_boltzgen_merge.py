@@ -11,6 +11,12 @@ Usage:
         --sources /path/to/run1 /path/to/run2 ... \
         --output /path/to/merged \
         --id_template "batch{i:03d}_"
+
+    # CSV-only mode for quick re-merging:
+    python pipe_boltzgen_merge.py \
+        --sources /path/to/run1 /path/to/run2 ... \
+        --output /path/to/merged \
+        --csv
 """
 
 import os
@@ -18,6 +24,7 @@ import sys
 import argparse
 import shutil
 import re
+import pandas as pd
 
 
 def get_source_prefix(source_path: str, index: int, id_template: str) -> str:
@@ -90,58 +97,30 @@ def find_design_files(source_dir: str) -> dict:
     return files
 
 
-def update_csv_ids_regex(content: str, prefix: str) -> str:
+def update_id_with_prefix(value, prefix: str, pattern: re.Pattern) -> str:
     """
-    Update all design IDs in CSV content using a single regex replacement.
-
-    Since CSV files contain only filenames (not paths), we can use a regex
-    pattern to match all design IDs and prepend the prefix in one pass.
+    Update a single value by prepending prefix to design IDs.
 
     Args:
-        content: CSV file content as string
-        prefix: Prefix to prepend to all design IDs
+        value: The value to update (can be any type)
+        prefix: Prefix to prepend to design IDs
+        pattern: Compiled regex pattern for matching design IDs
 
     Returns:
-        Updated content with renamed IDs
+        Updated value as string, or original value if not a string
     """
-    # Pattern matches design IDs like: design_spec_001, design_spec_001_model_0, etc.
-    # The pattern captures the full ID to preserve suffixes like _model_0
-    pattern = r'(design_spec_\d+(?:_model_\d+)?)'
-    return re.sub(pattern, prefix + r'\1', content)
+    if pd.isna(value):
+        return value
+    if not isinstance(value, str):
+        return value
+    return pattern.sub(prefix + r'\1', value)
 
 
-def collect_csv_headers(csv_files: list) -> list:
+def merge_csv_files_pandas(csv_files: list, output_path: str) -> None:
     """
-    Collect all unique headers from multiple CSV files, preserving order.
+    Merge multiple CSV files into one using pandas for proper type handling.
 
-    Args:
-        csv_files: List of (source_path, prefix) tuples
-
-    Returns:
-        List of all unique column names in order of first appearance
-    """
-    all_columns = []
-    seen = set()
-
-    for csv_path, _ in csv_files:
-        with open(csv_path, 'r') as f:
-            header_line = f.readline().strip()
-            if header_line:
-                columns = header_line.split(',')
-                for col in columns:
-                    if col not in seen:
-                        seen.add(col)
-                        all_columns.append(col)
-
-    return all_columns
-
-
-def merge_csv_files_with_headers(csv_files: list, output_path: str) -> None:
-    """
-    Merge multiple CSV files into one, handling different headers.
-
-    Collects all unique headers across files, then merges rows with
-    proper column alignment. Missing columns get empty values.
+    Uses pandas concat to preserve data types and handle different headers.
 
     Args:
         csv_files: List of (source_csv_path, prefix) tuples
@@ -152,44 +131,26 @@ def merge_csv_files_with_headers(csv_files: list, output_path: str) -> None:
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    # First pass: collect all unique headers
-    all_columns = collect_csv_headers(csv_files)
+    # Pattern for matching design IDs
+    pattern = re.compile(r'(design_spec_\d+(?:_model_\d+)?)')
 
-    with open(output_path, 'w') as out_f:
-        # Write unified header
-        out_f.write(','.join(all_columns) + '\n')
+    dfs = []
+    for csv_path, prefix in csv_files:
+        # Read CSV with pandas, letting it infer types
+        df = pd.read_csv(csv_path, low_memory=False)
 
-        # Second pass: merge data with proper column alignment
-        for csv_path, prefix in csv_files:
-            with open(csv_path, 'r') as in_f:
-                content = in_f.read()
+        # Update design IDs in all string columns
+        for col in df.columns:
+            if df[col].dtype == 'object':  # String columns
+                df[col] = df[col].apply(lambda x: update_id_with_prefix(x, prefix, pattern))
 
-            # Apply ID renaming with single regex
-            content = update_csv_ids_regex(content, prefix)
+        dfs.append(df)
 
-            lines = content.strip().split('\n')
-            if not lines:
-                continue
+    # Concatenate all dataframes
+    merged_df = pd.concat(dfs, ignore_index=True)
 
-            # Parse header to get column indices
-            file_columns = lines[0].split(',')
-            col_to_idx = {col: idx for idx, col in enumerate(file_columns)}
-
-            # Process data rows
-            for line in lines[1:]:
-                if not line.strip():
-                    continue
-
-                values = line.split(',')
-                # Build row with proper column alignment
-                row = []
-                for col in all_columns:
-                    if col in col_to_idx and col_to_idx[col] < len(values):
-                        row.append(values[col_to_idx[col]])
-                    else:
-                        row.append('')  # Empty for missing columns
-
-                out_f.write(','.join(row) + '\n')
+    # Save to CSV
+    merged_df.to_csv(output_path, index=False)
 
 
 def rename_file_with_prefix(source_path: str, dest_dir: str, prefix: str) -> str:
@@ -216,20 +177,18 @@ def rename_file_with_prefix(source_path: str, dest_dir: str, prefix: str) -> str
 
 
 def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
-                           verbose: bool = True) -> dict:
+                           verbose: bool = True, csv_only: bool = False) -> dict:
     """
     Merge multiple BoltzGen outputs with ID renaming.
 
-    Optimized implementation:
-    - Uses single regex for ID renaming instead of per-ID string replacement
-    - Merges CSV files directly without temp files
-    - Handles different CSV headers by collecting all columns first
+    Uses pandas for CSV handling to preserve data types properly.
 
     Args:
         sources: List of source directory paths
         output_dir: Output directory for merged results
         id_template: Template for generating ID prefixes
         verbose: Print progress information
+        csv_only: If True, only merge CSV files (skip structure files)
 
     Returns:
         Dictionary with merge statistics
@@ -243,12 +202,13 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
 
     # Create output directory structure
     os.makedirs(output_dir, exist_ok=True)
-    for subdir in ['intermediate_designs',
-                   'intermediate_designs_inverse_folded',
-                   'intermediate_designs_inverse_folded/refold_cif',
-                   'intermediate_designs_inverse_folded/refold_design_cif',
-                   'config']:
-        os.makedirs(os.path.join(output_dir, subdir), exist_ok=True)
+    if not csv_only:
+        for subdir in ['intermediate_designs',
+                       'intermediate_designs_inverse_folded',
+                       'intermediate_designs_inverse_folded/refold_cif',
+                       'intermediate_designs_inverse_folded/refold_design_cif',
+                       'config']:
+            os.makedirs(os.path.join(output_dir, subdir), exist_ok=True)
 
     # Track CSV files to merge: csv_name -> list of (source_path, prefix)
     csv_files_to_merge = {}
@@ -263,26 +223,34 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
         unique_ids = set()
 
         # Process structure files (cif, npz) with regex-based renaming
-        for file_type in ['cif', 'npz']:
-            for rel_path in files[file_type]:
-                source_path = os.path.join(source, rel_path)
-                filename = os.path.basename(rel_path)
+        if not csv_only:
+            for file_type in ['cif', 'npz']:
+                for rel_path in files[file_type]:
+                    source_path = os.path.join(source, rel_path)
+                    filename = os.path.basename(rel_path)
 
-                # Extract ID for counting (optional, for stats)
-                match = re.search(r'design_spec_\d+(?:_model_\d+)?', filename)
-                if match:
-                    unique_ids.add(match.group(0))
+                    # Extract ID for counting (optional, for stats)
+                    match = re.search(r'design_spec_\d+(?:_model_\d+)?', filename)
+                    if match:
+                        unique_ids.add(match.group(0))
 
-                # Determine destination directory
-                dest_subdir = os.path.dirname(rel_path)
-                dest_dir = os.path.join(output_dir, dest_subdir)
+                    # Determine destination directory
+                    dest_subdir = os.path.dirname(rel_path)
+                    dest_dir = os.path.join(output_dir, dest_subdir)
 
-                rename_file_with_prefix(source_path, dest_dir, prefix)
-                stats['files_copied'] += 1
+                    rename_file_with_prefix(source_path, dest_dir, prefix)
+                    stats['files_copied'] += 1
 
-        stats['ids_renamed'] += len(unique_ids)
+            stats['ids_renamed'] += len(unique_ids)
 
-        # Collect CSV files with their prefixes (no temp files needed)
+            if verbose:
+                print(f"  Copied {len(files['cif'])} CIF files, {len(files['npz'])} NPZ files")
+                print(f"  Found {len(unique_ids)} unique design IDs")
+        else:
+            if verbose:
+                print(f"  CSV-only mode: skipping structure files")
+
+        # Collect CSV files with their prefixes
         for rel_path in files['csv']:
             source_path = os.path.join(source, rel_path)
             csv_name = os.path.basename(rel_path)
@@ -291,43 +259,40 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
                 csv_files_to_merge[csv_name] = {'rel_path': rel_path, 'files': []}
             csv_files_to_merge[csv_name]['files'].append((source_path, prefix))
 
-        if verbose:
-            print(f"  Copied {len(files['cif'])} CIF files, {len(files['npz'])} NPZ files")
-            print(f"  Found {len(unique_ids)} unique design IDs")
-
-    # Merge CSV files with header alignment
+    # Merge CSV files using pandas
     if verbose:
-        print(f"\nMerging CSV files...")
+        print(f"\nMerging CSV files with pandas...")
 
     for csv_name, csv_info in csv_files_to_merge.items():
         file_list = csv_info['files']
         if file_list:
             output_path = os.path.join(output_dir, csv_info['rel_path'])
-            merge_csv_files_with_headers(file_list, output_path)
+            merge_csv_files_pandas(file_list, output_path)
             stats['csvs_merged'][csv_name] = len(file_list)
 
             if verbose:
                 print(f"  {csv_name}: merged {len(file_list)} files")
 
-    # Copy config and other files from first source
-    first_source = sources[0]
-    config_dir = os.path.join(first_source, 'config')
-    if os.path.exists(config_dir):
-        for entry in os.listdir(config_dir):
-            src = os.path.join(config_dir, entry)
-            dst = os.path.join(output_dir, 'config', entry)
-            if os.path.isfile(src):
-                shutil.copy2(src, dst)
+    # Copy config and other files from first source (unless csv_only)
+    if not csv_only:
+        first_source = sources[0]
+        config_dir = os.path.join(first_source, 'config')
+        if os.path.exists(config_dir):
+            for entry in os.listdir(config_dir):
+                src = os.path.join(config_dir, entry)
+                dst = os.path.join(output_dir, 'config', entry)
+                if os.path.isfile(src):
+                    shutil.copy2(src, dst)
 
-    # Copy design_spec.yaml if exists
-    design_spec = os.path.join(first_source, 'design_spec.yaml')
-    if os.path.exists(design_spec):
-        shutil.copy2(design_spec, os.path.join(output_dir, 'design_spec.yaml'))
+        # Copy design_spec.yaml if exists
+        design_spec = os.path.join(first_source, 'design_spec.yaml')
+        if os.path.exists(design_spec):
+            shutil.copy2(design_spec, os.path.join(output_dir, 'design_spec.yaml'))
 
-    # Copy steps.yaml if exists
-    steps_yaml = os.path.join(first_source, 'steps.yaml')
-    if os.path.exists(steps_yaml):
-        shutil.copy2(steps_yaml, os.path.join(output_dir, 'steps.yaml'))
+        # Copy steps.yaml if exists
+        steps_yaml = os.path.join(first_source, 'steps.yaml')
+        if os.path.exists(steps_yaml):
+            shutil.copy2(steps_yaml, os.path.join(output_dir, 'steps.yaml'))
 
     return stats
 
@@ -354,6 +319,12 @@ def main():
              '{name} for source folder name. Default: "batch{i:03d}_"'
     )
     parser.add_argument(
+        '--csv',
+        action='store_true',
+        help='CSV-only mode: only merge CSV files, skip copying structure files. '
+             'Useful for quick re-merging when structure files are already in place.'
+    )
+    parser.add_argument(
         '--quiet',
         action='store_true',
         help='Suppress progress output'
@@ -373,20 +344,24 @@ def main():
     print(f"Sources: {len(args.sources)} directories")
     print(f"Output: {args.output}")
     print(f"ID template: {args.id_template}")
+    if args.csv:
+        print(f"Mode: CSV-only (skipping structure files)")
 
     stats = merge_boltzgen_outputs(
         sources=args.sources,
         output_dir=args.output,
         id_template=args.id_template,
-        verbose=not args.quiet
+        verbose=not args.quiet,
+        csv_only=args.csv
     )
 
     print("\n" + "=" * 60)
     print("Merge Summary")
     print("=" * 60)
     print(f"Sources processed: {stats['sources']}")
-    print(f"Files copied: {stats['files_copied']}")
-    print(f"IDs renamed: {stats['ids_renamed']}")
+    if not args.csv:
+        print(f"Files copied: {stats['files_copied']}")
+        print(f"IDs renamed: {stats['ids_renamed']}")
     print(f"CSV files merged: {len(stats['csvs_merged'])}")
     for csv_name, count in stats['csvs_merged'].items():
         print(f"  - {csv_name}: {count} sources")
