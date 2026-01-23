@@ -188,24 +188,64 @@ def convert_and_reassign_chains(
     if n_protein_res == 0 and n_ligand_atoms == 0:
         print("  !!! NOTHING WAS COPIED → WILL WRITE EMPTY CIF !!!")
 
-    # ── Write ────────────────────────────────────────────────────────────────
-    st = gemmi.Structure()
-    st.name = "imported"
+    # ── At this point you should already have ──
+    #    g_protein  (Chain "A" with 170 residues)
+    #    g_ligand   (Chain "B" with 1 residue, 25 atoms)
+
+    print(f"  Before writing:")
+    print(f"    Protein chain A: {len(g_protein)} residues")
+    print(f"    Ligand chain B:  {len(g_ligand)} residues, {sum(len(r) for r in g_ligand)} atoms")
+
+    if len(g_protein) == 0 and len(g_ligand) == 0:
+        print("  !!! No chains/residues to write → empty file !!!")
+        return False, 0, 0
+
+    # Create fresh structure for output
+    st_out = gemmi.Structure()
+    st_out.name = "imported_from_" + os.path.basename(input_path)
+    
     model = gemmi.Model("1")
-    st.add_model(model)
+    st_out.add_model(model)
 
-    if n_protein_res > 0:
+    added = False
+    if len(g_protein) > 0:
         model.add_chain(g_protein)
-    if n_ligand_atoms > 0:
+        added = True
+    if len(g_ligand) > 0:
         model.add_chain(g_ligand)
+        added = True
 
-    st.setup_entities()
-    doc = st.make_mmcif_document()
-    doc.write_file(output_path)
+    if not added:
+        print("  WARNING: no chains were added to the output model")
 
-    print(f"  Wrote: {output_path}  ({total_atoms} atoms total)\n")
+    # Important: call setup_entities *after* chains are added
+    st_out.setup_entities()
+    
+    # Optional but very helpful for debugging
+    st_out.make_mmcif_document().write_file("debug_before_write.cif")
+    print("  Wrote debug_before_write.cif for inspection")
 
-    return (True, n_protein_res, n_ligand_atoms)
+    # Now create document and write
+    doc = st_out.make_mmcif_document()
+
+    # Quick sanity check
+    atom_count_in_doc = 0
+    for block in doc:
+        if block.name == "data_imported":
+            atom_loop = block.find_loop("_atom_site.")
+            if atom_loop:
+                atom_count_in_doc = len(atom_loop) // len(atom_loop.tags)
+
+    print(f"  Document prepared with ~{atom_count_in_doc} atoms")
+
+    success = doc.write_file(output_path)
+    if not success:
+        print("  !!! doc.write_file() returned failure !!!")
+
+    print(f"  Wrote final file: {output_path}")
+
+    # Final stats (use what you already calculated)
+    return True, len(g_protein), sum(len(r) for r in g_ligand) * 1  # or your n_ligand_atoms
 
 
 def load_sequences(sequences_csv: str) -> dict:
