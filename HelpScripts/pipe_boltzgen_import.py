@@ -128,14 +128,36 @@ def convert_and_reassign_chains(
     new_sequence: str = None,
     ligand_name: str = "LIG"
 ) -> tuple:
+
+    print(f"→ Processing: {input_path}")
+
     st_in = gemmi.read_structure(input_path)
     if not st_in:
-        raise ValueError(f"Could not read structure: {input_path}")
+        print("  ERROR: gemmi.read_structure() returned None/empty")
+        return (False, 0, 0)
 
-    st = gemmi.Structure()
-    st.name = "imported"
-    model = gemmi.Model("1")
-    st.add_model(model)
+    if not st_in[0]:
+        print("  ERROR: No model 1 in structure")
+        return (False, 0, 0)
+
+    chains = list(st_in[0])
+    print(f"  Found {len(chains)} chains in input")
+
+    if not chains:
+        print("  → No chains at all → empty output")
+        return (False, 0, 0)
+
+    # ── very important ──
+    for i, ch in enumerate(chains, 1):
+        res_count = len(ch)
+        first_res = ch[0].name if ch else "—"
+        print(f"    chain {i}: id={ch.id:>2}, {res_count:3d} residues, first res={first_res}")
+
+    # Sort by number of residues (descending)
+    chains.sort(key=lambda ch: -len(ch))
+
+    print(f"  → Longest chain selected as protein: chain {chains[0].id}, "
+          f"{len(chains[0])} residues")
 
     g_protein = gemmi.Chain(protein_chain)
     g_ligand  = gemmi.Chain(ligand_chain)
@@ -143,56 +165,69 @@ def convert_and_reassign_chains(
     n_protein_res = 0
     n_ligand_atoms = 0
 
-    # Simple heuristic: longest chain = protein, others = ligands
-    # Or: look at polymer type if entities already present
-    chains = list(st_in[0])
-    if not chains:
-        raise ValueError("No chains in input")
-
-    # Sort by number of residues (heuristic)
-    chains.sort(key=lambda ch: -len(ch))
-
-    # Treat first (longest) as protein
+    # Protein chain =================================================================
     protein_input_chain = chains[0]
+    print(f"  Building protein chain '{protein_chain}' ...")
+
     for i, res in enumerate(protein_input_chain, 1):
         gres = gemmi.Residue()
         gres.name = res.name
         gres.seqid = gemmi.SeqId(str(i))
 
-        # Optional: apply new sequence & zero sidechains
         if new_sequence and i-1 < len(new_sequence):
             new_aa = new_sequence[i-1]
-            gres.name = AA_1TO3.get(new_aa.upper(), 'ALA')
-
-            # We'll rebuild atoms → only keep backbone if mutating
+            new_3letter = AA_1TO3.get(new_aa.upper(), 'ALA')
+            print(f"    Mutating res {i:3d}  {res.name} → {new_3letter}  (only backbone kept)")
+            gres.name = new_3letter
             for atom in res:
-                if atom.name in {'N','CA','C','O','CB'}:
-                    gres.add_atom(atom.clone())  # keep original backbone coords
-                # sidechains get zeroed implicitly by not adding them
-
+                if atom.name in BACKBONE_ATOMS:          # ← note: you had {'CB'} here
+                    gres.add_atom(atom.clone())
         else:
-            # copy all atoms
+            # copy everything
             for atom in res:
                 gres.add_atom(atom.clone())
 
         g_protein.add_residue(gres)
         n_protein_res += 1
 
-    # All other chains → ligand chain (concatenate)
+    print(f"  → Protein chain built: {n_protein_res} residues")
+
+    # Ligand chain(s) ===============================================================
+    print(f"  Building ligand chain '{ligand_chain}' from {len(chains)-1} input chain(s)...")
+
     for input_chain in chains[1:]:
+        print(f"    ← Adding input chain {input_chain.id} ({len(input_chain)} res)")
         for res in input_chain:
             gres = gemmi.Residue()
             gres.name = ligand_name
-            # keep original seqid or renumber — up to you
-            # gres.seqid = res.seqid.clone()   # preserve
-            # or renumber sequentially
-            # but for ligands seqid often ignored
+            # gres.seqid = ...  (you can decide)
 
+            atom_count_before = len(gres)
             for atom in res:
                 gres.add_atom(atom.clone())
                 n_ligand_atoms += 1
 
+            if len(gres) == 0:
+                print(f"      WARNING: empty residue copied from {input_chain.id}")
+
             g_ligand.add_residue(gres)
+
+    print(f"  → Ligand chain built: {n_ligand_atoms} atoms")
+
+    # Final check before writing
+    total_res = n_protein_res + len(g_ligand)
+    total_atoms = sum(len(res) for res in g_protein) + n_ligand_atoms
+
+    print(f"  Final stats → protein: {n_protein_res} res, ligand: {n_ligand_atoms} atoms")
+
+    if n_protein_res == 0 and n_ligand_atoms == 0:
+        print("  !!! NOTHING WAS COPIED → WILL WRITE EMPTY CIF !!!")
+
+    # ── Write ────────────────────────────────────────────────────────────────
+    st = gemmi.Structure()
+    st.name = "imported"
+    model = gemmi.Model("1")
+    st.add_model(model)
 
     if n_protein_res > 0:
         model.add_chain(g_protein)
@@ -202,6 +237,8 @@ def convert_and_reassign_chains(
     st.setup_entities()
     doc = st.make_mmcif_document()
     doc.write_file(output_path)
+
+    print(f"  Wrote: {output_path}  ({total_atoms} atoms total)\n")
 
     return (True, n_protein_res, n_ligand_atoms)
 
