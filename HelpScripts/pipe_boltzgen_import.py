@@ -221,41 +221,20 @@ def convert_and_reassign_chains(
 
     # Now setup entities – crucial order
     st_out.setup_entities()
-
+    st_out.transform(gemmi.Transform())
     # Optional: ensure minimal required categories
     st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
     doc = st_out.make_mmcif_document()
-
-    print(doc)
-
-    # Your existing atom count check in doc...
-    atom_count = 0
     block = doc.sole_block()
-    if block:
-        loop = block.find_loop("_atom_site.")
-        if loop and loop.tags:
-            atom_count = len(loop) // len(loop.tags)
+    loop = block.find_loop("_atom_site.")
+    num_atoms = len(loop)/len(loop.tags) if loop else 0
+    print(f"→ now has {num_atoms} atoms")
+    doc.write_file(output_path)
 
-    print(f"  mmCIF document prepared → {atom_count} atoms in _atom_site")
 
-    if atom_count == 0:
-        print("  Still 0 atoms – dumping structure info:")
-        print(f"    Entities: {len(st_out.entities)}")
-        if st_out.entities:
-            for m in st_out.entities:
-                print(m)
-        # Write raw structure debug if needed
-        gemmi.write_structure(st_out, "debug_st_out.mmcif")   # ← try PDB-style too
-        return False, len(g_protein), sum(len(r) for r in g_ligand)
+    return num_atoms>0, len(g_protein), sum(len(r) for r in g_ligand)
 
-    try:
-        doc.write_file(output_path)
-        print(f"  Wrote: {output_path}")
-        return True, len(g_protein), sum(len(r) for r in g_ligand)
-    except Exception as e:
-        print(f"  write_file failed: {str(e)}")
-        return False, ...
 
 def load_sequences(sequences_csv: str) -> dict:
     """
