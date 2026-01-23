@@ -667,8 +667,9 @@ def import_structures(
 
         if success:
             # Generate NPZ metadata file alongside PDB
+            # NOTE: Exclude ligand from NPZ - BoltzGen doesn't tokenize ligand chain
             output_npz = output_pdb.replace('.pdb', '.npz')
-            npz_success = generate_npz_metadata(output_npz, n_protein, n_ligand)
+            npz_success = generate_npz_metadata(output_npz, n_protein, 0)  # ligand atoms = 0
             if npz_success:
                 stats['success'] += 1
             else:
