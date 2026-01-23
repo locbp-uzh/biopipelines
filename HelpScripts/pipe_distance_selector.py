@@ -261,6 +261,9 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
         pdb_name = os.path.basename(pdb_file)
         pdb_base = os.path.splitext(pdb_name)[0]
 
+        # Track attempted IDs for error reporting
+        attempted_ids = [pdb_name]
+
         # Find matching row - try multiple lookup strategies in order:
         # 1. Try pdb filename match
         matching_rows = df[df['pdb'] == pdb_name]
@@ -268,6 +271,7 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
         # 2. Apply id_map to get candidate IDs and try each in priority order
         if matching_rows.empty and id_map:
             candidate_ids = map_table_ids_to_ids(pdb_base, id_map)
+            attempted_ids.extend(candidate_ids)
             for candidate_id in candidate_ids:
                 matching_rows = df[df['id'] == candidate_id]
                 if not matching_rows.empty:
@@ -278,6 +282,8 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
         # 3. If no id_map or no match yet, try original structure ID
         if matching_rows.empty:
             matching_rows = df[df['id'] == pdb_base]
+            if pdb_base not in attempted_ids:
+                attempted_ids.append(pdb_base)
 
         if not matching_rows.empty:
             row = matching_rows.iloc[0]
@@ -286,9 +292,6 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
             print(f"Restricting to {len(residues)} residues: {format_ligandmpnn_selection_from_list(residues)}")
             return residues
         else:
-            attempted_ids = [pdb_name, table_id]
-            if id_map and table_id != pdb_base:
-                attempted_ids.append(pdb_base)
             print(f"ERROR: No restriction table entry found. Tried: {', '.join(attempted_ids)}")
             print(f"ERROR: This means the restriction cannot be applied!")
             return []
@@ -575,8 +578,8 @@ def main():
             result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff, restrict_spec, id_map, include_reference)
             results.append(result)
 
-            print(f"  Within {distance_cutoff}Å: {len(result['within'].split('+')) if result['within'] else 0} residues")
-            print(f"  Beyond {distance_cutoff}Å: {len(result['beyond'].split('+')) if result['beyond'] else 0} residues")
+            print(f"  Within {distance_cutoff}Å: {len(result['within'].split('+')) if result['within'] else 0} segments")
+            print(f"  Beyond {distance_cutoff}Å: {len(result['beyond'].split('+')) if result['beyond'] else 0} segments")
 
         except Exception as e:
             print(f"Error analyzing {pdb_file}: {e}")
