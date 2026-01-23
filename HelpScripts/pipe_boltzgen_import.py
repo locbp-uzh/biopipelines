@@ -51,51 +51,6 @@ def is_amino_acid(resname: str) -> bool:
     """Check if residue is a standard amino acid."""
     return resname in AA_3TO1
 
-# for writing cif with io
-def inject_entity_poly_seq(cif_path, chain_id="A"):
-    with open(cif_path, "r") as f:
-        content = f.read()
-
-    # Skip if already present
-    if "_entity_poly_seq.entity_id" in content:
-        return
-
-    entity_block = f"""
-#
-_entity.id 1
-_entity.type polymer
-_entity.pdbx_description "protein"
-#
-_entity_poly.entity_id 1
-_entity_poly.type polypeptide(L)
-_entity_poly.pdbx_strand_id {chain_id}
-#
-loop_
-_entity_poly_seq.entity_id
-_entity_poly_seq.num
-_entity_poly_seq.mon_id
-"""
-
-    # Extract sequence from _atom_site
-    residues = []
-    for line in content.splitlines():
-        if line.startswith("ATOM"):
-            parts = line.split()
-            resname = parts[5]
-            resseq = parts[8]
-            if not residues or residues[-1][1] != resseq:
-                residues.append((resname, resseq))
-
-    for i, (resname, _) in enumerate(residues, 1):
-        entity_block += f"1 {i} {resname}\n"
-
-    # Insert before atom_site loop
-    content = entity_block + content
-
-    with open(cif_path, "w") as f:
-        f.write(content)
-
-#### for writing cif with gemmi
 def write_cif(structure, output_path):
     st = gemmi.Structure()
     st.name = "imported"
@@ -171,55 +126,58 @@ def convert_and_reassign_chains(
     n_protein_res = 0
     n_ligand_atoms = 0
 
-    # Protein chain =================================================================
+    # =================================================================
     protein_input_chain = chains[0]
-    print(f"  Building protein chain '{protein_chain}' ...")
+    ligand_residues = []
 
-    for i, res in enumerate(protein_input_chain, 1):
+    # Heuristic: last residues that are NOT standard amino acids → ligand
+    protein_residues = []
+    for res in protein_input_chain:
+        if is_amino_acid(res.name.strip()):          # ← use your existing is_amino_acid()
+            protein_residues.append(res)
+        else:
+            ligand_residues.append(res)
+
+    print(f"  Detected {len(protein_residues)} standard AA residues → protein")
+    print(f"  Detected {len(ligand_residues)} non-standard residues → ligand")
+
+    # Now build protein from protein_residues only
+    n_protein_res = 0
+    for i, res in enumerate(protein_residues, 1):
         gres = gemmi.Residue()
         gres.name = res.name
         gres.seqid = gemmi.SeqId(str(i))
 
         if new_sequence and i-1 < len(new_sequence):
-            new_aa = new_sequence[i-1]
-            new_3letter = AA_1TO3.get(new_aa.upper(), 'ALA')
-            print(f"    Mutating res {i:3d}  {res.name} → {new_3letter}  (only backbone kept)")
+            new_aa = new_sequence[i-1].upper()
+            new_3letter = AA_1TO3.get(new_aa, '???')
             gres.name = new_3letter
+            # only backbone
             for atom in res:
-                if atom.name in BACKBONE_ATOMS:          # ← note: you had {'CB'} here
-                    gres.add_atom(atom.clone())
+                a = atom.clone()               # copy name, element, occupancy, etc.
+                if not atom.name in BACKBONE_ATOMS:
+                    a.pos = gemmi.Position(0.0, 0.0, 0.0)
+                gres.add_atom(atom.clone())
         else:
-            # copy everything
             for atom in res:
                 gres.add_atom(atom.clone())
 
         g_protein.add_residue(gres)
         n_protein_res += 1
 
-    print(f"  → Protein chain built: {n_protein_res} residues")
+    # Ligand part
+    n_ligand_atoms = 0
+    if ligand_residues:
+        gres_lig = gemmi.Residue()           # many tools put ligand as SINGLE residue
+        gres_lig.name = ligand_name          # "LIG"
+        # gres_lig.seqid = ...               # optional
 
-    # Ligand chain(s) ===============================================================
-    print(f"  Building ligand chain '{ligand_chain}' from {len(chains)-1} input chain(s)...")
-
-    for input_chain in chains[1:]:
-        input_chain_id = get_chain_id(input_chain)
-        print(f"    ← Adding input chain {input_chain_id} ({len(input_chain)} res)")
-        for res in input_chain:
-            gres = gemmi.Residue()
-            gres.name = ligand_name
-            # gres.seqid = ...  (you can decide)
-
-            atom_count_before = len(gres)
-            for atom in res:
-                gres.add_atom(atom.clone())
+        for orig_res in ligand_residues:
+            for atom in orig_res:
+                gres_lig.add_atom(atom.clone())
                 n_ligand_atoms += 1
 
-            if len(gres) == 0:
-                print(f"      WARNING: empty residue copied from {input_chain_id}")
-
-            g_ligand.add_residue(gres)
-
-    print(f"  → Ligand chain built: {n_ligand_atoms} atoms")
+        g_ligand.add_residue(gres_lig)
 
     # Final check before writing
     total_res = n_protein_res + len(g_ligand)
