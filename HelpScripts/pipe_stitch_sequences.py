@@ -449,28 +449,43 @@ def stitch_matched_sequences(
         if skip:
             continue
 
-        # Build option lists for Cartesian product
-        template_list = list(template_seqs.items())
-        sub_option_lists = [list(sub_seqs.items()) for sub_seqs in sub_seqs_for_base]
-
-        # Generate index ranges for each substitution (1-indexed)
-        sub_index_ranges = [range(1, len(opts) + 1) for opts in sub_option_lists]
-
-        # Generate all combinations
+        # Match sequences by ID: extract suffix from template_id and find matching substitution sequences
         combo_count = 0
-        for template_id, template_seq in template_list:
-            for index_combo in product(*sub_index_ranges):
-                combo_count += 1
-                subs = {}
-                for i, idx in enumerate(index_combo):
-                    _, opt_seq = sub_option_lists[i][idx - 1]  # Convert to 0-indexed for list access
-                    subs[positions_for_base[i]] = opt_seq
+        for template_id, template_seq in template_seqs.items():
+            # Extract the suffix from template_id (everything after base_id)
+            # Example: "Test_1_1" with base_id "Test_1" -> suffix "_1"
+            if template_id.startswith(base_id + "_"):
+                suffix = template_id[len(base_id) + 1:]  # +1 to skip the underscore
+            else:
+                # No suffix, skip this template
+                print(f"    Warning: template_id '{template_id}' doesn't match base_id '{base_id}'")
+                continue
 
-                stitched = substitute_segments(template_seq, subs, residue_mapping)
-                # Format: <basename>_<A>_<B>_... where A, B are indices per substitution
-                suffix = "_".join(str(idx) for idx in index_combo)
-                output_id = f"{base_id}_{suffix}"
-                results.append({'id': output_id, 'sequence': stitched})
+            # Try to find matching substitution sequences with the same suffix
+            matched_subs = []
+            all_found = True
+            for sub_seqs in sub_seqs_for_base:
+                # Look for sequence with ID = base_id + "_" + suffix
+                target_id = f"{base_id}_{suffix}"
+                if target_id in sub_seqs:
+                    matched_subs.append(sub_seqs[target_id])
+                else:
+                    print(f"    Warning: no matching substitution sequence for '{target_id}'")
+                    all_found = False
+                    break
+
+            if not all_found:
+                continue
+
+            # Apply substitutions
+            subs = {}
+            for i, sub_seq in enumerate(matched_subs):
+                subs[positions_for_base[i]] = sub_seq
+
+            stitched = substitute_segments(template_seq, subs, residue_mapping)
+            output_id = template_id
+            results.append({'id': output_id, 'sequence': stitched})
+            combo_count += 1
 
         print(f"    Generated {combo_count} combinations")
 

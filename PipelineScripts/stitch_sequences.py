@@ -336,7 +336,7 @@ fi
         }
 
     def _predict_output_sequence_ids(self) -> List[str]:
-        """Predict output sequence IDs based on Cartesian product of all options."""
+        """Predict output sequence IDs based on matched template IDs."""
         import re
         from itertools import product
 
@@ -353,46 +353,32 @@ fi
         else:
             template_ids = ["seq"]
 
-        # Get counts for each substitution region
-        substitution_counts = []
-        for options in self.substitutions.values():
-            if isinstance(options, list):
-                substitution_counts.append(len(options))
-            elif isinstance(options, (ToolOutput, StandardizedOutput)):
-                if hasattr(options, 'sequence_ids'):
-                    seq_ids = options.sequence_ids
-                    base_ids = set()
-                    for seq_id in seq_ids:
-                        match = re.match(r'^(.+)_\d+$', seq_id)
-                        base_ids.add(match.group(1) if match else seq_id)
-                    if base_ids:
-                        avg_per_base = len(seq_ids) // len(base_ids)
-                        substitution_counts.append(max(1, avg_per_base))
-                    else:
-                        substitution_counts.append(1)
+        # Check if all substitutions are raw lists with fixed positions
+        all_positions_fixed = all(isinstance(k, str) for k in self.substitutions.keys())
+        all_subs_raw = all(isinstance(v, list) for v in self.substitutions.values())
+
+        if all_positions_fixed and all_subs_raw:
+            # Raw substitutions with fixed positions - Cartesian product applies
+            substitution_counts = [len(v) for v in self.substitutions.values()]
+            predicted_ids = []
+            for template_id in template_ids:
+                match = re.match(r'^(.+)_\d+$', template_id)
+                base_id = match.group(1) if match else template_id
+
+                if substitution_counts:
+                    # Generate all combinations of indices
+                    index_ranges = [range(1, count + 1) for count in substitution_counts]
+                    for combo in product(*index_ranges):
+                        suffix = "_".join(str(idx) for idx in combo)
+                        predicted_ids.append(f"{base_id}_{suffix}")
                 else:
-                    substitution_counts.append(1)
-            else:
-                substitution_counts.append(1)
-
-        # Generate predicted IDs using Cartesian product of indices
-        # Format: <basename>_<A>_<B>_... where A, B, ... are 1-indexed per substitution
-        predicted_ids = []
-        for template_id in template_ids:
-            match = re.match(r'^(.+)_\d+$', template_id)
-            base_id = match.group(1) if match else template_id
-
-            if substitution_counts:
-                # Generate all combinations of indices
-                index_ranges = [range(1, count + 1) for count in substitution_counts]
-                for combo in product(*index_ranges):
-                    suffix = "_".join(str(idx) for idx in combo)
-                    predicted_ids.append(f"{base_id}_{suffix}")
-            else:
-                # No substitutions, just use template ID
-                predicted_ids.append(base_id)
-
-        return predicted_ids
+                    # No substitutions, just use template ID
+                    predicted_ids.append(base_id)
+            return predicted_ids
+        else:
+            # Matched sequences - output IDs match template IDs (1:1 matching)
+            # Each template sequence is matched with corresponding substitution sequences by ID
+            return template_ids
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
