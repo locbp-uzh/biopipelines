@@ -3,12 +3,11 @@
 BoltzGenImport helper script.
 
 Converts external structures into BoltzGen filesystem format:
-1. Reads PDB files manually
+1. Converts PDB files to CIF format
 2. Reassigns chains (protein to A, ligand to B)
 3. Optionally assigns sequences and zeros sidechain coordinates
 4. Generates design_spec.yaml from ligand info and binder spec
 5. Generates NPZ metadata files required by BoltzGen dataloader
-6. Writes output as PDB files (not CIF)
 
 This enables use of downstream BoltzGen steps (folding, analysis, filtering)
 on structures from external tools like RFdiffusion.
@@ -22,7 +21,7 @@ import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from collections import defaultdict
+import gemmi
 
 # Backbone atom names (coordinates preserved)
 BACKBONE_ATOMS = {'N', 'CA', 'C', 'O'}
@@ -52,92 +51,29 @@ def is_amino_acid(resname: str) -> bool:
     """Check if residue is a standard amino acid."""
     return resname in AA_3TO1
 
+def write_cif(structure, output_path):
+    st = gemmi.Structure()
+    st.name = "imported"
+    model = gemmi.Model("1")
+    st.add_model(model)
+    for chain in structure[0]:
+        gchain = gemmi.Chain(chain.id)
+        for i, res in enumerate(chain, start=1):
+            gres = gemmi.Residue()
+            gres.name = res.resname
+            gres.seqid = gemmi.SeqId(str(i)) #no chain break, start at 1
+            for atom in res:
+                a = gemmi.Atom()
+                a.name = atom.name
+                a.pos = gemmi.Position(*atom.coord)
+                a.element = gemmi.Element(atom.element)
+                gres.add_atom(a)
+            gchain.add_residue(gres)
+        model.add_chain(gchain)
 
-class PDBAtom:
-    """Represents a PDB ATOM/HETATM record."""
-    def __init__(self, line):
-        self.record = line[0:6].strip()
-        self.serial = int(line[6:11].strip())
-        self.name = line[12:16].strip()
-        self.altloc = line[16:17].strip()
-        self.resname = line[17:20].strip()
-        self.chain = line[21:22].strip()
-        self.resseq = int(line[22:26].strip())
-        self.icode = line[26:27].strip()
-        self.x = float(line[30:38].strip())
-        self.y = float(line[38:46].strip())
-        self.z = float(line[46:54].strip())
-        self.occupancy = float(line[54:60].strip()) if line[54:60].strip() else 1.0
-        self.tempfactor = float(line[60:66].strip()) if line[60:66].strip() else 0.0
-        self.element = line[76:78].strip() if len(line) > 76 else self.name[0]
-
-    def to_pdb_line(self, serial, chain, resname, resseq):
-        """Convert atom back to PDB format line."""
-        return (
-            f"{self.record:<6}{serial:>5} "
-            f"{self.name:<4}{self.altloc:1}{resname:>3} "
-            f"{chain:1}{resseq:>4}{self.icode:1}   "
-            f"{self.x:>8.3f}{self.y:>8.3f}{self.z:>8.3f}"
-            f"{self.occupancy:>6.2f}{self.tempfactor:>6.2f}          "
-            f"{self.element:>2}\n"
-        )
-
-
-def read_pdb(pdb_path: str):
-    """
-    Read PDB file manually and organize by chain and residue.
-
-    Returns:
-        dict: {chain_id: {resseq: [atoms]}}
-    """
-    structure = defaultdict(lambda: defaultdict(list))
-
-    with open(pdb_path, 'r') as f:
-        for line in f:
-            if line.startswith(('ATOM  ', 'HETATM')):
-                atom = PDBAtom(line)
-                structure[atom.chain][atom.resseq].append(atom)
-
-    return structure
-
-
-def write_pdb(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', ligand_chain='B'):
-    """
-    Write PDB file with protein and ligand chains.
-
-    Args:
-        output_path: Output PDB file path
-        protein_atoms: List of (resname, resseq, [atoms]) for protein
-        ligand_atoms: List of atoms for ligand
-        protein_chain: Chain ID for protein (default: A)
-        ligand_chain: Chain ID for ligand (default: B)
-    """
-    with open(output_path, 'w') as f:
-        serial = 1
-
-        # Write protein chain
-        for resname, resseq, atoms in protein_atoms:
-            for atom in atoms:
-                f.write(atom.to_pdb_line(serial, protein_chain, resname, resseq))
-                serial += 1
-
-        # Write TER card after protein
-        if protein_atoms:
-            f.write(f"TER   {serial:>5}      {resname:>3} {protein_chain}{resseq:>4}\n")
-            serial += 1
-
-        # Write ligand chain
-        if ligand_atoms:
-            for atom in ligand_atoms:
-                f.write(atom.to_pdb_line(serial, ligand_chain, 'LIG', 1))
-                serial += 1
-
-            # Write TER card after ligand
-            f.write(f"TER   {serial:>5}      LIG {ligand_chain}   1\n")
-
-        # Write END card
-        f.write("END\n")
-
+    st.setup_entities()  # ← THIS creates _entity_poly_seq
+    doc = st.make_mmcif_document()          # ← this creates a complete mmCIF document
+    doc.write_file(output_path)
 
 def convert_and_reassign_chains(
     input_path: str,
@@ -147,158 +83,202 @@ def convert_and_reassign_chains(
     new_sequence: str = None,
     ligand_name: str = "LIG"
 ) -> tuple:
-    """
-    Convert PDB structure: reassign chains, optionally apply sequence.
 
-    Args:
-        input_path: Input PDB file path
-        output_path: Output PDB file path
-        protein_chain: Target chain ID for protein
-        ligand_chain: Target chain ID for ligand
-        new_sequence: Optional new sequence to apply (inverse folding mode)
-        ligand_name: Residue name for ligand (default: LIG)
-
-    Returns:
-        (success, n_protein_residues, n_ligand_atoms)
-    """
     print(f"→ Processing: {input_path}")
 
-    # Read structure
-    structure = read_pdb(input_path)
-
-    if not structure:
-        print("  ERROR: No atoms found in structure")
+    st_in = gemmi.read_structure(input_path)
+    if not st_in:
+        print("  ERROR: gemmi.read_structure() returned None/empty")
         return (False, 0, 0)
 
-    print(f"  Found {len(structure)} chains in input")
+    if not st_in[0]:
+        print("  ERROR: No model 1 in structure")
+        return (False, 0, 0)
 
-    # Organize residues by chain
-    all_chains = []
-    for chain_id, residues in structure.items():
-        chain_residues = []
-        for resseq in sorted(residues.keys()):
-            atoms = residues[resseq]
-            resname = atoms[0].resname
-            chain_residues.append((resname, resseq, atoms))
-        all_chains.append((chain_id, chain_residues))
-        print(f"    chain {len(all_chains)}: id={chain_id:>2}, {len(chain_residues):3d} residues, first res={chain_residues[0][0] if chain_residues else '—'}")
+    chains = list(st_in[0])
+    print(f"  Found {len(chains)} chains in input")
 
-    # Sort by number of residues (descending) - longest is protein
-    all_chains.sort(key=lambda x: -len(x[1]))
+    if not chains:
+        print("  → No chains at all → empty output")
+        return (False, 0, 0)
 
-    longest_chain_id, longest_chain_residues = all_chains[0]
-    print(f"  → Longest chain selected as protein: chain {longest_chain_id}, {len(longest_chain_residues)} residues")
+    def get_chain_id(ch):
+        return ch.name if hasattr(ch, 'name') else ch.label_asym_id if hasattr(ch, 'label_asym_id') else '?'
+    # ── very important ──
+    for i, ch in enumerate(chains, 1):
+        res_count = len(ch)
+        first_res = ch[0].name if ch else "—"
+        chain_id = get_chain_id(ch)
+        print(f"    chain {i}: id={chain_id:>2}, {res_count:3d} residues, first res={first_res}")
+    
+    # Sort by number of residues (descending)
+    chains.sort(key=lambda ch: -len(ch))
 
-    # Separate protein and ligand residues
-    protein_residues = []
+    
+    longest_chain_id = get_chain_id(chains[0])
+        
+    print(f"  → Longest chain selected as protein: chain {longest_chain_id}, "
+          f"{len(chains[0])} residues")
+
+    g_protein = gemmi.Chain(protein_chain)
+    g_ligand  = gemmi.Chain(ligand_chain)
+
+    n_protein_res = 0
+    n_ligand_atoms = 0
+
+    # =================================================================
+    protein_input_chain = chains[0]
     ligand_residues = []
 
-    for resname, resseq, atoms in longest_chain_residues:
-        if is_amino_acid(resname.strip()):
-            protein_residues.append((resname, resseq, atoms))
+    # Heuristic: last residues that are NOT standard amino acids → ligand
+    protein_residues = []
+    for res in protein_input_chain:
+        if is_amino_acid(res.name.strip()):          # ← use your existing is_amino_acid()
+            protein_residues.append(res)
         else:
-            ligand_residues.extend(atoms)
+            ligand_residues.append(res)
 
     print(f"  Detected {len(protein_residues)} standard AA residues → protein")
-    print(f"  Detected {len(longest_chain_residues) - len(protein_residues)} non-standard residues → ligand")
+    print(f"  Detected {len(ligand_residues)} non-standard residues → ligand")
 
-    # Build output protein chain
-    output_protein = []
+    # Now build protein from protein_residues only
     n_protein_res = 0
+    for i, res in enumerate(protein_residues, 1):
+        gres = gemmi.Residue()
+        gres.name = res.name
+        gres.seqid = gemmi.SeqId(str(i))
 
-    for i, (resname, resseq, atoms) in enumerate(protein_residues, 1):
-        # Determine output residue name
-        if new_sequence and i - 1 < len(new_sequence):
-            new_aa = new_sequence[i - 1].upper()
-            out_resname = AA_1TO3.get(new_aa, resname)
+        if new_sequence and i-1 < len(new_sequence):
+            new_aa = new_sequence[i-1].upper()
+            new_3letter = AA_1TO3.get(new_aa, '???')
+            gres.name = new_3letter
+            # only backbone
+            for atom in res:
+                a = atom.clone()               # copy name, element, occupancy, etc.
+                if not atom.name in BACKBONE_ATOMS:
+                    a.pos = gemmi.Position(0.0, 0.0, 0.0)
+                gres.add_atom(a)
         else:
-            out_resname = resname
+            for atom in res:
+                gres.add_atom(atom.clone())
 
-        # Process atoms
-        out_atoms = []
-        for atom in atoms:
-            # Clone atom
-            out_atom = PDBAtom.__new__(PDBAtom)
-            out_atom.__dict__.update(atom.__dict__)
-
-            # Zero non-backbone coordinates if sequence is applied
-            if new_sequence and i - 1 < len(new_sequence):
-                if atom.name not in BACKBONE_ATOMS:
-                    out_atom.x = 0.0
-                    out_atom.y = 0.0
-                    out_atom.z = 0.0
-
-            out_atoms.append(out_atom)
-
-        output_protein.append((out_resname, i, out_atoms))
+        g_protein.add_residue(gres)
         n_protein_res += 1
 
-    # Build output ligand chain
-    output_ligand = []
+    # Ligand part
     n_ligand_atoms = 0
     n_ligand_atoms_with_h = 0
     ligand_atom_elements = []
+    if ligand_residues:
+        gres_lig = gemmi.Residue()           # many tools put ligand as SINGLE residue
+        gres_lig.name = "LIG"                # "LIG"
+        gres_lig.seqid = gemmi.SeqId("1")
 
-    for atom in ligand_residues:
-        # Clone atom
-        out_atom = PDBAtom.__new__(PDBAtom)
-        out_atom.__dict__.update(atom.__dict__)
+        for orig_res in ligand_residues:
+            for atom in orig_res:
+                gres_lig.add_atom(atom.clone())
+                n_ligand_atoms_with_h += 1
+                ligand_atom_elements.append(atom.element.name)
+                # BoltzGen tokenizer excludes hydrogen atoms
+                if atom.element.name != 'H':
+                    n_ligand_atoms += 1
 
-        ligand_atom_elements.append(out_atom.element)
-        n_ligand_atoms_with_h += 1
+        g_ligand.add_residue(gres_lig)
 
-        # BoltzGen tokenizer excludes hydrogen atoms
-        if out_atom.element != 'H':
-            output_ligand.append(out_atom)
-            n_ligand_atoms += 1
-
-    print(f"  Ligand atom elements: {ligand_atom_elements}")
-    from collections import Counter
-    element_counts = Counter(ligand_atom_elements)
-    print(f"  Ligand element counts: {dict(element_counts)}")
-    print(f"  Ligand atoms (excluding H): {n_ligand_atoms} (with H: {n_ligand_atoms_with_h})")
+        # Debug: show ligand atoms
+        print(f"  Ligand atom elements: {ligand_atom_elements}")
+        from collections import Counter
+        element_counts = Counter(ligand_atom_elements)
+        print(f"  Ligand element counts: {dict(element_counts)}")
+        print(f"  Ligand atoms (excluding H): {n_ligand_atoms} (with H: {n_ligand_atoms_with_h})")
 
     print(f"  Final stats → protein: {n_protein_res} res, ligand: {n_ligand_atoms} atoms")
 
     if n_protein_res == 0 and n_ligand_atoms == 0:
-        print("  !!! NOTHING TO WRITE !!!")
+        print("  !!! NOTHING WAS COPIED → WILL WRITE EMPTY CIF !!!")
+
+    # ── At this point you should already have ──
+    #    g_protein  (Chain "A" with 170 residues)
+    #    g_ligand   (Chain "B" with 1 residue, 25 atoms)
+
+        # ── Debug: show what we have ─────────────────────────────────────────────
+    print(f"  Before writing:")
+    print(f"    Protein chain A: {len(g_protein)} residues, "
+          f"{sum(1 for res in g_protein for _ in res)} atoms")
+    print(f"    Ligand chain B:  {len(g_ligand)} residues, "
+          f"{sum(1 for res in g_ligand for _ in res)} atoms")
+
+    if len(g_protein) == 0 and len(g_ligand) == 0:
+        print("  !!! No residues to write → will produce empty file")
         return False, 0, 0
 
-    # Write output PDB
-    write_pdb(output_path, output_protein, output_ligand, protein_chain, ligand_chain)
+    # After building g_protein and g_ligand as before...
 
-    # Verify output
-    print(f"  Before writing:")
-    print(f"    Protein chain {protein_chain}: {n_protein_res} residues, {sum(len(atoms) for _, _, atoms in output_protein)} atoms")
-    print(f"    Ligand chain {ligand_chain}:  1 residues, {n_ligand_atoms} atoms")
+    # ── New writing block ────────────────────────────────────────────────────────
 
-    # Read back and verify
-    verify_structure = read_pdb(output_path)
-    total_residues = sum(len(residues) for residues in verify_structure.values())
-    total_atoms = sum(len(atoms) for residues in verify_structure.values() for atoms in residues.values())
+    st_out = gemmi.Structure()
+    st_out.name = "imported"
+    st_out.spacegroup_hm = "P 1"           # minimal, avoids some complaints
 
-    print(f"  [PDB VERIFY] Written PDB file: {os.path.basename(output_path)}")
-    print(f"    Total chains: {len(verify_structure)}")
+    model = gemmi.Model("1")
+    
+    model.add_chain(g_protein)
+    model.add_chain(g_ligand)
+
+    st_out.add_model(model)
+
+    # Now setup entities – crucial order
+    st_out.setup_entities()
+    print(f"    Entities: {len(st_out.entities)}")
+    # Optional: ensure minimal required categories
+    st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
+
+    pdb_path = f'{output_path[:-3]}pdb'
+    st_out.write_pdb(pdb_path)
+
+    # Read back to verify what was written
+    st_verify = gemmi.read_structure(pdb_path)
+    total_atoms = sum(1 for chain in st_verify[0] for res in chain for atom in res)
+    total_residues = sum(len(chain) for chain in st_verify[0])
+
+    print(f"  [PDB VERIFY] Written PDB file: {os.path.basename(pdb_path)}")
+    print(f"    Total chains: {len(st_verify[0])}")
     print(f"    Total residues: {total_residues}")
     print(f"    Total atoms: {total_atoms}")
 
-    for chain_id, residues in sorted(verify_structure.items()):
-        n_res = len(residues)
-        n_atoms = sum(len(atoms) for atoms in residues.values())
-        first_res = list(residues.values())[0][0].resname if residues else "—"
+    for chain in st_verify[0]:
+        chain_id = chain.name if hasattr(chain, 'name') else '?'
+        n_res = len(chain)
+        n_atoms = sum(1 for res in chain for atom in res)
+        first_res = chain[0].name if chain else "—"
         print(f"      Chain {chain_id}: {n_res} residues, {n_atoms} atoms, first={first_res}")
 
         # For ligand chain, show detailed atom info
         if chain_id == ligand_chain and n_res > 0:
-            lig_atoms = list(residues.values())[0]
-            lig_elements = [atom.element for atom in lig_atoms]
+            lig_res = chain[0]
+            lig_elements = [atom.element.name for atom in lig_res]
+            from collections import Counter
             lig_element_counts = Counter(lig_elements)
             print(f"        Ligand atoms in PDB: {lig_elements}")
             print(f"        Ligand element counts in PDB: {dict(lig_element_counts)}")
-            non_h_count = sum(1 for atom in lig_atoms if atom.element != 'H')
+
+            # Count non-hydrogen atoms (what BoltzGen likely tokenizes)
+            non_h_count = sum(1 for atom in lig_res if atom.element.name != 'H')
             print(f"        Non-hydrogen atoms: {non_h_count}")
 
-    return True, n_protein_res, n_ligand_atoms
+    """
+    # Read back → Gemmi now "knows" the flat atom list
+    st_round = gemmi.read_structure(tmp_path)
+
+    os.remove(tmp_path)
+
+    doc = st_round.make_mmcif_document()
+
+    block = doc.sole_block()
+    loop = block.find_loop("_atom_site.")
+    doc.write_file(output_path)
+    """
+    return True, len(g_protein), sum(len(r) for r in g_ligand)
 
 
 def load_sequences(sequences_csv: str) -> dict:
@@ -502,7 +482,7 @@ def generate_npz_metadata(
     """
     Generate NPZ metadata file required by BoltzGen dataloader.
 
-    BoltzGen expects each PDB structure file to have a corresponding NPZ file
+    BoltzGen expects each CIF structure file to have a corresponding NPZ file
     with per-token metadata arrays.
 
     Args:
@@ -644,9 +624,10 @@ def import_structures(
         stats['processed'] += 1
         struct_id = extract_structure_id(struct_path)
 
-        # BoltzGen naming: design_spec_<N>.pdb
-        output_name = f"design_spec_{stats['processed'] - 1}.pdb"
-        output_pdb = os.path.join(out_subdir, output_name)
+        # BoltzGen naming: design_spec_<N>.cif
+        # Extract number from struct_id if possible, or use index
+        output_name = f"design_spec_{stats['processed'] - 1}.cif"
+        output_cif = os.path.join(out_subdir, output_name)
 
         # Find sequence for this structure (if in inverse_folding mode)
         sequence = None
@@ -658,7 +639,7 @@ def import_structures(
 
         # Convert and reassign chains
         success, n_protein, n_ligand = convert_and_reassign_chains(
-            struct_path, output_pdb,
+            struct_path, output_cif,
             protein_chain=protein_chain,
             ligand_chain=ligand_chain,
             new_sequence=sequence,
@@ -666,8 +647,8 @@ def import_structures(
         )
 
         if success:
-            # Generate NPZ metadata file alongside PDB
-            output_npz = output_pdb.replace('.pdb', '.npz')
+            # Generate NPZ metadata file alongside CIF
+            output_npz = output_cif.replace('.cif', '.npz')
             npz_success = generate_npz_metadata(output_npz, n_protein, n_ligand)
             if npz_success:
                 stats['success'] += 1
