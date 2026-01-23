@@ -37,6 +37,43 @@ AA_3TO1 = {
 
 AA_1TO3 = {v: k for k, v in AA_3TO1.items()}
 
+# Standard amino acid atom templates (backbone + sidechain atoms in order)
+# Backbone atoms will get real coordinates, sidechain atoms get (0,0,0)
+AA_ATOMS = {
+    'ALA': ['N', 'CA', 'C', 'O', 'CB'],
+    'ARG': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'NE', 'CZ', 'NH1', 'NH2'],
+    'ASN': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'OD1', 'ND2'],
+    'ASP': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'OD1', 'OD2'],
+    'CYS': ['N', 'CA', 'C', 'O', 'CB', 'SG'],
+    'GLN': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'OE1', 'NE2'],
+    'GLU': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'OE1', 'OE2'],
+    'GLY': ['N', 'CA', 'C', 'O'],
+    'HIS': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'ND1', 'CD2', 'CE1', 'NE2'],
+    'ILE': ['N', 'CA', 'C', 'O', 'CB', 'CG1', 'CG2', 'CD1'],
+    'LEU': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2'],
+    'LYS': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'CE', 'NZ'],
+    'MET': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'SD', 'CE'],
+    'PHE': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ'],
+    'PRO': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD'],
+    'SER': ['N', 'CA', 'C', 'O', 'CB', 'OG'],
+    'THR': ['N', 'CA', 'C', 'O', 'CB', 'OG1', 'CG2'],
+    'TRP': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2', 'NE1', 'CE2', 'CE3', 'CZ2', 'CZ3', 'CH2'],
+    'TYR': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ', 'OH'],
+    'VAL': ['N', 'CA', 'C', 'O', 'CB', 'CG1', 'CG2'],
+}
+
+# Element mapping for common atom names
+ATOM_ELEMENTS = {
+    'N': 'N', 'CA': 'C', 'C': 'C', 'O': 'O',
+    'CB': 'C', 'CG': 'C', 'CG1': 'C', 'CG2': 'C',
+    'CD': 'C', 'CD1': 'C', 'CD2': 'C',
+    'CE': 'C', 'CE1': 'C', 'CE2': 'C', 'CE3': 'C',
+    'CZ': 'C', 'CZ2': 'C', 'CZ3': 'C', 'CH2': 'C',
+    'ND1': 'N', 'ND2': 'N', 'NE': 'N', 'NE1': 'N', 'NE2': 'N', 'NZ': 'N', 'NH1': 'N', 'NH2': 'N',
+    'OD1': 'O', 'OD2': 'O', 'OE1': 'O', 'OE2': 'O', 'OG': 'O', 'OG1': 'O', 'OH': 'O',
+    'SD': 'S', 'SG': 'S',
+}
+
 
 def extract_structure_id(filepath: str) -> str:
     """Extract structure ID from filepath."""
@@ -214,21 +251,53 @@ def convert_and_reassign_chains(
         else:
             out_resname = resname
 
-        # Process atoms
-        out_atoms = []
-        for atom in atoms:
-            # Clone atom
-            out_atom = PDBAtom.__new__(PDBAtom)
-            out_atom.__dict__.update(atom.__dict__)
+        # Build atom map from input atoms
+        atom_map = {atom.name: atom for atom in atoms}
 
-            # Zero non-backbone coordinates if sequence is applied
-            if new_sequence and i - 1 < len(new_sequence):
-                if atom.name not in BACKBONE_ATOMS:
+        # Process atoms based on the NEW residue type template
+        out_atoms = []
+
+        if new_sequence and i - 1 < len(new_sequence):
+            # Use template for the NEW amino acid type
+            atom_template = AA_ATOMS.get(out_resname, ['N', 'CA', 'C', 'O'])
+
+            for atom_name in atom_template:
+                # Create new atom
+                out_atom = PDBAtom.__new__(PDBAtom)
+
+                # Set basic properties
+                out_atom.record = 'ATOM'
+                out_atom.serial = 1  # Will be set during writing
+                out_atom.name = atom_name
+                out_atom.altloc = ''
+                out_atom.resname = out_resname
+                out_atom.chain = ''  # Will be set during writing
+                out_atom.resseq = i
+                out_atom.icode = ''
+                out_atom.occupancy = 1.0
+                out_atom.tempfactor = 0.0
+                out_atom.element = ATOM_ELEMENTS.get(atom_name, atom_name[0])
+
+                # Set coordinates: backbone from input, sidechain at (0,0,0)
+                if atom_name in BACKBONE_ATOMS and atom_name in atom_map:
+                    # Copy backbone coordinates from input
+                    input_atom = atom_map[atom_name]
+                    out_atom.x = input_atom.x
+                    out_atom.y = input_atom.y
+                    out_atom.z = input_atom.z
+                else:
+                    # Sidechain or missing backbone: set to (0,0,0)
                     out_atom.x = 0.0
                     out_atom.y = 0.0
                     out_atom.z = 0.0
 
-            out_atoms.append(out_atom)
+                out_atoms.append(out_atom)
+        else:
+            # No mutation: copy all atoms as-is
+            for atom in atoms:
+                out_atom = PDBAtom.__new__(PDBAtom)
+                out_atom.__dict__.update(atom.__dict__)
+                out_atoms.append(out_atom)
 
         output_protein.append((out_resname, i, out_atoms))
         n_protein_res += 1
