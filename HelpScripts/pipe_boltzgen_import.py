@@ -146,6 +146,7 @@ def convert_and_reassign_chains(
     for i, res in enumerate(protein_residues, 1):
         gres = gemmi.Residue()
         gres.name = res.name
+        gres.chain = gemmi.Chain("A")
         gres.seqid = gemmi.SeqId(str(i))
 
         if new_sequence and i-1 < len(new_sequence):
@@ -169,8 +170,9 @@ def convert_and_reassign_chains(
     n_ligand_atoms = 0
     if ligand_residues:
         gres_lig = gemmi.Residue()           # many tools put ligand as SINGLE residue
-        gres_lig.name = ligand_name          # "LIG"
-        # gres_lig.seqid = ...               # optional
+        gres_lig.name = "LIG"                # "LIG"
+        gres_lig.chain = gemmi.Chain("B")
+        gres_lig.seqid = gemmi.SeqId("1")
 
         for orig_res in ligand_residues:
             for atom in orig_res:
@@ -213,38 +215,9 @@ def convert_and_reassign_chains(
 
     model = gemmi.Model("1")
     
-    # Protein chain re-creation
-    if len(g_protein) > 0:
-        new_protein_chain = gemmi.Chain(g_protein.name or "A")
-        for res in g_protein:
-            new_res = gemmi.Residue()
-            new_res.name = res.name
-            # FIXED: no .clone()
-            new_res.seqid = gemmi.SeqId(res.seqid.num, res.seqid.icode) if res.seqid else gemmi.SeqId()
-            
-            for atom in res:
-                new_atom = atom.clone()
-                new_res.add_atom(new_atom)
-            new_protein_chain.add_residue(new_res)
-        model.add_chain(new_protein_chain)
-        print("  Added re-created protein chain A")
-
-    # Ligand chain re-creation (ligands often get simple seqid)
-    if len(g_ligand) > 0:
-        new_ligand_chain = gemmi.Chain("B")
-        for res in g_ligand:
-            new_res = gemmi.Residue()
-            new_res.name = res.name
-            # For ligands: usually force seqid 1
-            new_res.seqid = gemmi.SeqId("1")
-            
-            for atom in res:
-                new_atom = atom.clone()
-                new_res.add_atom(new_atom)
-            new_ligand_chain.add_residue(new_res)
-        model.add_chain(new_ligand_chain)
-        print("  Added re-created ligand chain B")
-
+    model.add_chain(g_protein)
+    model.add_chain(g_ligand)
+    
     st_out.add_model(model)
 
     # Now setup entities – crucial order
@@ -254,6 +227,8 @@ def convert_and_reassign_chains(
     st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
     doc = st_out.make_mmcif_document()
+
+    print(doc)
 
     # Your existing atom count check in doc...
     atom_count = 0
