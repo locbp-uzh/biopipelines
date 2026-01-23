@@ -203,6 +203,8 @@ class Boltz2(BaseConfig):
         self.queries_csv = os.path.join(self.output_folder, f"{self.job_name}_queries.csv")
         self.queries_fasta = os.path.join(self.output_folder, f"{self.job_name}_queries.fasta")
         self.expanded_library_csv = os.path.join(self.output_folder, "expanded_smiles_library.csv")
+        # Input list file (avoids "Argument list too long" with many fasta files)
+        self.fasta_files_list_file = os.path.join(self.output_folder, ".input_fasta_files.txt")
         
         # Output files
         self.library_scores_csv = os.path.join(self.library_folder, "library_scores.csv")
@@ -856,7 +858,10 @@ python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_p
         elif self.input_fasta_files:
             # Convert FASTA files to separate YAML configs
             config_files_dir = os.path.join(self.output_folder, "config_files")
-            fasta_files_str = ",".join(self.input_fasta_files)
+            # Write fasta paths to list file (avoids "Argument list too long" error)
+            with open(self.fasta_files_list_file, 'w') as f:
+                for fasta_file in self.input_fasta_files:
+                    f.write(f"{fasta_file}\n")
             # Handle ligand parameter extraction
             ligand_param = "None"
             if self.ligands:
@@ -909,7 +914,7 @@ EOF
             script_content += f"""
 echo "Converting FASTA files to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_protein_ligand_configs_py} "{fasta_files_str}" "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag}
+python {self.boltz_protein_ligand_configs_py} "{self.fasta_files_list_file}" "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag}
 
 """
             base_config_file = self.queries_csv

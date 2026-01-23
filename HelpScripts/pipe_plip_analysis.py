@@ -278,7 +278,7 @@ def copy_additional_outputs(raw_dir: str, processed_dir: str, structures: List[s
 
 def main():
     parser = argparse.ArgumentParser(description='Process PLIP outputs into standardized format')
-    parser.add_argument('--structures', required=True, help='Comma-separated list of structure file paths')
+    parser.add_argument('--structures', required=True, help='File containing list of structure file paths (one per line)')
     parser.add_argument('--raw_dir', required=True, help='Directory containing PLIP raw outputs')
     parser.add_argument('--output_csv', required=True, help='Output CSV file for interactions')
     parser.add_argument('--summary_csv', required=True, help='Output CSV file for aggregated counts per structure')
@@ -288,11 +288,12 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse structure list
-    structures = [s.strip() for s in args.structures.split(',') if s.strip()]
+    # Read structure list from file (one path per line)
+    with open(args.structures, 'r') as f:
+        structures = [line.strip() for line in f if line.strip()]
 
     if not structures:
-        print("Error: No structures provided")
+        print(f"Error: No structures found in: {args.structures}")
         sys.exit(1)
 
     print(f"Processing PLIP outputs for {len(structures)} structures")

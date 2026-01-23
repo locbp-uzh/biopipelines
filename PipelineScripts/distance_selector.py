@@ -136,6 +136,8 @@ class DistanceSelector(BaseConfig):
         """Set up all file paths after output_folder is known."""
         # Output files
         self.selections_csv = os.path.join(self.output_folder, "selections.csv")
+        # Input list file (avoids "Argument list too long" with many structures)
+        self.structures_list_file = os.path.join(self.output_folder, ".input_structures.txt")
 
         # Helper script paths (only set if folders are available)
         if hasattr(self, 'folders') and self.folders:
@@ -253,10 +255,13 @@ class DistanceSelector(BaseConfig):
         # Get specific structure files
         if hasattr(self, 'input_sources') and "structures" in self.input_sources:
             structure_files = self.input_sources["structures"]
-            # Convert to comma-separated string for passing to script
-            structure_files_str = ",".join(structure_files)
         else:
             raise ValueError("No structure sources found")
+
+        # Write structure paths to list file (avoids "Argument list too long" error)
+        with open(self.structures_list_file, 'w') as f:
+            for struct in structure_files:
+                f.write(f"{struct}\n")
 
         # Determine reference specification
         if self.reference == "ligand":
@@ -286,7 +291,7 @@ echo "Include reference: {self.include_reference}"
 {restrict_echo}
 
 # Run distance analysis
-python {self.distance_selector_py} "{structure_files_str}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}' {include_reference_str}
+python {self.distance_selector_py} "{self.structures_list_file}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}' {include_reference_str}
 
 echo "Distance analysis completed"
 echo "Selections saved to: {self.selections_csv}"

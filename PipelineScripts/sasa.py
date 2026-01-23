@@ -95,6 +95,8 @@ class SASA(BaseConfig):
     def _setup_file_paths(self):
         """Set up output file paths."""
         self.results_csv = os.path.join(self.output_folder, "sasa_analysis.csv")
+        # Input list file (avoids "Argument list too long" with many structures)
+        self.structures_list_file = os.path.join(self.output_folder, ".input_structures.txt")
         self.helper_script = os.path.join(self.folders.get('HelpScripts', 'HelpScripts'), 'pipe_sasa.py')
 
     def get_config_display(self) -> List[str]:
@@ -113,7 +115,11 @@ class SASA(BaseConfig):
         os.makedirs(self.output_folder, exist_ok=True)
 
         structure_files = self.input_sources["structures"]
-        structure_files_str = ",".join(structure_files)
+
+        # Write structure paths to list file (avoids "Argument list too long" error)
+        with open(self.structures_list_file, 'w') as f:
+            for struct in structure_files:
+                f.write(f"{struct}\n")
 
         # Normalize ligand code (remove colons for PyMOL selection)
         ligand_resn = self.ligand.replace(":", "")
@@ -130,7 +136,7 @@ echo "Ligand: {self.ligand}"
 echo "Output: {self.results_csv}"
 
 python "{self.helper_script}" \\
-    --structures "{structure_files_str}" \\
+    --structures "{self.structures_list_file}" \\
     --ligand "{ligand_resn}" \\
     --output_csv "{self.results_csv}" \\
     --dot_density {self.dot_density}

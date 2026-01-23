@@ -6,13 +6,13 @@ This script processes a table containing columns id, fixed, designed, direct pos
 ligand-based design to create a bash script with LigandMPNN position arguments.
 
 Usage:
-    python pipe_lmpnn_runtime_positions.py <input_dir> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>
+    python pipe_lmpnn_runtime_positions.py <structures_list_file> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>
 
 Arguments:
-    input_dir: Directory containing PDB files
+    structures_list_file: File containing list of PDB file paths (one per line)
     input_source: "table" (e.g. RFdiffusion table), "selection" (use direct positions), or "ligand" (ligand-based)
     input_table: Path to table file (or "-" if not using table)
-    fixed_positions: PyMOL selection for fixed positions (or "-")  
+    fixed_positions: PyMOL selection for fixed positions (or "-")
     designed_positions: PyMOL selection for designed positions (or "-")
     ligand: Ligand identifier
     design_within: Distance cutoff for ligand-based design
@@ -224,22 +224,23 @@ def create_ligandmpnn_bash_script(positions_data, output_file):
 
 def main():
     if len(sys.argv) != 9:
-        print("Usage: python pipe_lmpnn_runtime_positions.py <structure_files> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>")
+        print("Usage: python pipe_lmpnn_runtime_positions.py <structures_list_file> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>")
         sys.exit(1)
-    
-    structure_files_str = sys.argv[1]
+
+    structures_list_file = sys.argv[1]
     input_source = sys.argv[2]
     input_table = sys.argv[3]
     fixed_positions = sys.argv[4]
-    designed_positions = sys.argv[5] 
+    designed_positions = sys.argv[5]
     ligand = sys.argv[6]
     design_within = float(sys.argv[7])
     output_file = sys.argv[8]
-    
-    # Parse comma-separated list of structure files
-    pdb_files = [f.strip() for f in structure_files_str.split(",") if f.strip()]
+
+    # Read structure files from list file (one path per line)
+    with open(structures_list_file, 'r') as f:
+        pdb_files = [line.strip() for line in f if line.strip()]
     if not pdb_files:
-        raise ValueError(f"No structure files provided: {structure_files_str}")
+        raise ValueError(f"No structure files found in: {structures_list_file}")
     
     print(f"Processing {len(pdb_files)} PDB files with input_source='{input_source}'")
     

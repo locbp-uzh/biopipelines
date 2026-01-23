@@ -128,7 +128,7 @@ def main():
     parser.add_argument(
         "--structures",
         required=True,
-        help="Comma-separated list of structure file paths"
+        help="File containing list of structure file paths (one per line)"
     )
     parser.add_argument(
         "--ligand",
@@ -149,11 +149,12 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse structure paths
-    structure_paths = [p.strip() for p in args.structures.split(",") if p.strip()]
+    # Read structure paths from file (one path per line)
+    with open(args.structures, 'r') as f:
+        structure_paths = [line.strip() for line in f if line.strip()]
 
     if not structure_paths:
-        print("Error: No structure files provided")
+        print(f"Error: No structures found in: {args.structures}")
         sys.exit(1)
 
     # Initialize PyMOL in quiet mode

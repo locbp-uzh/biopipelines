@@ -7,10 +7,10 @@ a specified distance from a reference (ligand, atoms, or residues), generating
 PyMOL-formatted selections for use in downstream tools like LigandMPNN.
 
 Usage:
-    python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map>
+    python pipe_distance_selector.py <structures_list_file> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map>
 
 Arguments:
-    structure_files: Comma-separated list of PDB file paths
+    structures_list_file: File containing list of PDB file paths (one per line)
     reference_spec: Reference specification in format "type:selection"
                    - "ligand:LIG" - Use ligand with name LIG
                    - "atoms:resname ATP" - Use PyMOL atom selection
@@ -520,10 +520,10 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
 def main():
     if len(sys.argv) != 8:
-        print("Usage: python pipe_distance_selector.py <structure_files> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map> <include_reference>")
+        print("Usage: python pipe_distance_selector.py <structures_list_file> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map> <include_reference>")
         print("")
         print("Arguments:")
-        print("  structure_files: Comma-separated list of PDB file paths")
+        print("  structures_list_file: File containing list of PDB file paths (one per line)")
         print("  reference_spec: Reference specification (e.g., 'ligand:LIG', 'residues:87-100')")
         print("  distance: Distance cutoff in Angstroms")
         print("  restrict_spec: Restriction specification (table reference, direct selection, or empty string)")
@@ -532,7 +532,7 @@ def main():
         print("  include_reference: 'true' or 'false' - whether to include reference residues in 'within'")
         sys.exit(1)
 
-    structure_files_str = sys.argv[1]
+    structures_list_file = sys.argv[1]
     reference_spec = sys.argv[2]
     distance_cutoff = float(sys.argv[3])
     restrict_spec = sys.argv[4]
@@ -540,10 +540,11 @@ def main():
     id_map_str = sys.argv[6]
     include_reference_str = sys.argv[7]
 
-    # Parse comma-separated list of structure files
-    structure_files = [f.strip() for f in structure_files_str.split(",") if f.strip()]
+    # Read structure files from list file (one path per line)
+    with open(structures_list_file, 'r') as f:
+        structure_files = [line.strip() for line in f if line.strip()]
     if not structure_files:
-        raise ValueError(f"No structure files provided: {structure_files_str}")
+        raise ValueError(f"No structure files found in: {structures_list_file}")
 
     # Parse id_map JSON string
     import json

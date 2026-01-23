@@ -16,7 +16,7 @@ import hashlib
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Generate Boltz2 config files for protein-ligand combinations')
-    parser.add_argument('proteins_csv', help='Path to proteins CSV file (id,sequence format)')
+    parser.add_argument('proteins_csv', help='Path to proteins CSV file (id,sequence format) or file containing list of CSV paths (one per line)')
     parser.add_argument('ligands_csv', help='Path to ligands CSV file or "None" if no ligands')
     parser.add_argument('output_dir', help='Directory to write config files')
     parser.add_argument('--affinity', action='store_true', help='Enable affinity calculation')
@@ -24,16 +24,37 @@ def parse_arguments():
     parser.add_argument('--global-msa-cache', action='store_true', help='Use global MSA cache lookup')
     parser.add_argument('--msa-folder', help='Path to MSAs folder for global cache lookup')
     parser.add_argument('--job-name', help='Pipeline job name to use for single protein-ligand configs')
-    
+
     return parser.parse_args()
 
 def load_proteins(proteins_csv):
-    """Load proteins from CSV file."""
+    """Load proteins from CSV file or from a file containing list of CSV paths."""
     try:
-        df = pd.read_csv(proteins_csv)
-        if 'id' not in df.columns or 'sequence' not in df.columns:
-            raise ValueError("Proteins CSV must have 'id' and 'sequence' columns")
-        return df.to_dict('records')
+        # Check if the file is a list file (contains paths, one per line)
+        # by trying to read it and checking if the first line is a valid path
+        with open(proteins_csv, 'r') as f:
+            first_line = f.readline().strip()
+
+        # If first line looks like a file path (not a CSV header), treat as list file
+        if first_line and (first_line.endswith('.csv') or first_line.endswith('.fasta') or first_line.endswith('.fa')):
+            with open(proteins_csv, 'r') as f:
+                csv_paths = [line.strip() for line in f if line.strip()]
+            if not csv_paths:
+                raise ValueError(f"No CSV paths found in list file: {proteins_csv}")
+            # Use the first CSV file (concatenate multiple if needed)
+            all_proteins = []
+            for csv_path in csv_paths:
+                df = pd.read_csv(csv_path)
+                if 'id' not in df.columns or 'sequence' not in df.columns:
+                    raise ValueError(f"Proteins CSV {csv_path} must have 'id' and 'sequence' columns")
+                all_proteins.extend(df.to_dict('records'))
+            return all_proteins
+        else:
+            # Direct CSV file
+            df = pd.read_csv(proteins_csv)
+            if 'id' not in df.columns or 'sequence' not in df.columns:
+                raise ValueError("Proteins CSV must have 'id' and 'sequence' columns")
+            return df.to_dict('records')
     except Exception as e:
         print(f"Error loading proteins CSV {proteins_csv}: {e}")
         sys.exit(1)

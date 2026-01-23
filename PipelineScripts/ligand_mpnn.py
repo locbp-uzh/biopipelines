@@ -134,6 +134,8 @@ class LigandMPNN(BaseConfig):
         self.seqs_folder = os.path.join(self.output_folder, "seqs")
         self.queries_csv = os.path.join(self.output_folder, f"{job_base}_queries.csv")
         self.queries_fasta = os.path.join(self.output_folder, f"{job_base}_queries.fasta")
+        # Input list file (avoids "Argument list too long" with many structures)
+        self.structures_list_file = os.path.join(self.output_folder, ".input_structures.txt")
 
         # Generated script paths - defined once, used throughout
         self.commands_file = os.path.join(self.output_folder, "lmpnn_commands.sh")
@@ -254,13 +256,22 @@ class LigandMPNN(BaseConfig):
     def generate_script(self, script_path: str) -> str:
         """
         Generate LigandMPNN execution script.
-        
+
         Args:
             script_path: Path where script should be written
-            
+
         Returns:
             Script content as string
         """
+        # Write structure paths to list file (avoids "Argument list too long" error)
+        if "structures" in self.input_sources:
+            structure_files = self.input_sources["structures"]
+            with open(self.structures_list_file, 'w') as f:
+                for struct in structure_files:
+                    f.write(f"{struct}\n")
+        else:
+            raise ValueError("No structure sources found")
+
         # Generate script content following modular pattern
         script_content = "#!/bin/bash\n"
         script_content += "# LigandMPNN execution script\n"
@@ -270,19 +281,11 @@ class LigandMPNN(BaseConfig):
         script_content += self.generate_script_run_ligandmpnn()
         script_content += self.generate_script_convert_outputs()
         script_content += self.generate_completion_check_footer()
-        
+
         return script_content
     
     def generate_script_setup_positions(self) -> str:
         """Generate the position setup and script modification part."""
-        # Get specific structure files instead of directory
-        if "structures" in self.input_sources:
-            structure_files = self.input_sources["structures"]
-            # Convert to comma-separated string for passing to script
-            structure_files_str = ",".join(structure_files)
-        else:
-            raise ValueError("No structure sources found")
-        
         # Determine fixed positions approach - prioritize explicit positions over tables
         if self.fixed_positions is not None or self.designed_positions is not None:
             # Use directly specified positions (highest priority) - includes empty strings
@@ -336,14 +339,6 @@ cd {self.lmpnn_folder}
     
     def generate_script_run_ligandmpnn(self) -> str:
         """Generate the LigandMPNN execution part of the script."""
-        # Get specific structure files instead of directory
-        if "structures" in self.input_sources:
-            structure_files = self.input_sources["structures"]
-            # Convert to comma-separated string for passing to script
-            structure_files_str = ",".join(structure_files)
-        else:
-            raise ValueError("No structure sources found")
-            
         # Determine fixed positions approach - prioritize explicit positions over tables
         if self.fixed_positions is not None or self.designed_positions is not None:
             # Use directly specified positions (highest priority) - includes empty strings
@@ -418,7 +413,7 @@ chmod +x {self.commands_file}
 
 # Use existing HelpScript to create position replacement script
 echo "Creating position replacement script..."
-python {self.runtime_positions_py} "{structure_files_str}" "{input_source}" "{input_table}" "{resolved_fixed}" "{resolved_designed}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
+python {self.runtime_positions_py} "{self.structures_list_file}" "{input_source}" "{input_table}" "{resolved_fixed}" "{resolved_designed}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
 
 # Run the replacement script on the commands file (not this script)
 echo "Running position replacement script on commands file: {self.commands_file}"
