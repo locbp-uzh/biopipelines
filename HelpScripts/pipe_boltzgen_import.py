@@ -101,13 +101,12 @@ def write_cif_with_gemmi(structure, output_path):
     st.name = "imported"
     model = gemmi.Model("1")
     st.add_model(model)
-
     for chain in structure[0]:
         gchain = gemmi.Chain(chain.id)
-        for res in chain:
+        for i, res in enumerate(chain, start=1):
             gres = gemmi.Residue()
             gres.name = res.resname
-            gres.seqid = gemmi.SeqId(res.id[1])
+            gres.seqid = gemmi.SeqId(i) #no chain break, start at 1
             for atom in res:
                 a = gemmi.Atom()
                 a.name = atom.name
