@@ -220,9 +220,25 @@ def convert_and_reassign_chains(
     # Optional: ensure minimal required categories
     st_out.make_mmcif_headers()   # adds _entry, _cell etc if missing
 
-    with open(f'{output_path[:-3]}pdb','w') as tmp:
-        tmp_path = tmp.name
-        st_out.write_pdb(tmp_path)        
+    pdb_path = f'{output_path[:-3]}pdb'
+    st_out.write_pdb(pdb_path)
+
+    # Read back to verify what was written
+    st_verify = gemmi.read_structure(pdb_path)
+    total_atoms = sum(1 for chain in st_verify[0] for res in chain for atom in res)
+    total_residues = sum(len(chain) for chain in st_verify[0])
+
+    print(f"  [PDB VERIFY] Written PDB file: {os.path.basename(pdb_path)}")
+    print(f"    Total chains: {len(st_verify[0])}")
+    print(f"    Total residues: {total_residues}")
+    print(f"    Total atoms: {total_atoms}")
+
+    for chain in st_verify[0]:
+        chain_id = chain.name if hasattr(chain, 'name') else '?'
+        n_res = len(chain)
+        n_atoms = sum(1 for res in chain for atom in res)
+        first_res = chain[0].name if chain else "—"
+        print(f"      Chain {chain_id}: {n_res} residues, {n_atoms} atoms, first={first_res}")
 
     """
     # Read back → Gemmi now "knows" the flat atom list
@@ -458,6 +474,12 @@ def generate_npz_metadata(
             print(f"Warning: No tokens to write for {output_path}")
             return False
 
+        print(f"  [NPZ DEBUG] Creating NPZ metadata:")
+        print(f"    n_protein_residues: {n_protein_residues}")
+        print(f"    n_ligand_atoms: {n_ligand_atoms}")
+        print(f"    n_tokens (total): {n_tokens}")
+        print(f"    Output: {os.path.basename(output_path)}")
+
         # design_mask: 1.0 for protein (designed), 0.0 for ligand (fixed)
         design_mask = np.concatenate([
             np.ones(n_protein_residues, dtype=np.float32),
@@ -475,6 +497,9 @@ def generate_npz_metadata(
 
         # token_resolved_mask: all resolved (1.0)
         token_resolved_mask = np.ones(n_tokens, dtype=np.float32)
+
+        print(f"    design_mask shape: {design_mask.shape}")
+        print(f"    design_mask nonzero (protein tokens): {np.sum(design_mask)}")
 
         np.savez(
             output_path,
