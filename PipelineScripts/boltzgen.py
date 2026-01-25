@@ -1269,7 +1269,7 @@ class BoltzGenImport(BaseConfig):
                  ligand_chain: str = "B",
                  protein_chain: str = "A",
                  id_map: Dict[str, str] = {"*": "*_<N>"},
-                 ligand_name: str = "LIG0",
+                 ligand_name: str = "LIG1",
                  num_designs: int = None,
                  **kwargs):
         """
@@ -1294,8 +1294,8 @@ class BoltzGenImport(BaseConfig):
                    Default {"*": "*_<N>"} handles recursive numeric suffixes:
                    - Structure "design_1" matches sequence "design_1_1", "design_1_1_1", etc.
                    - Set to {"*": "*"} for exact ID matching.
-            ligand_name: Residue name for ligand in output (default: "LIG0").
-                        BoltzGen expects ligands to match pattern ^LIG\\d+ (e.g., LIG0, LIG1).
+            ligand_name: Residue name for ligand in output (default: "LIG1").
+                        BoltzGen expects ligands to match pattern ^LIG\\d+ (e.g., LIG1, LIG2).
             num_designs: Number of designs being imported (auto-detected if None).
                         Used for consistent naming with BoltzGen conventions.
             **kwargs: Additional parameters passed to BaseConfig
