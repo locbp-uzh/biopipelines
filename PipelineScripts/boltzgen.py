@@ -1265,10 +1265,12 @@ class BoltzGenImport(BaseConfig):
                  # Design spec parameters (same as BoltzGen)
                  ligand: Union[ToolOutput, StandardizedOutput] = None,
                  binder_spec: Union[str, Dict[str, Any]] = None,
+                 protocol: str = "protein-small_molecule",
                  ligand_chain: str = "B",
                  protein_chain: str = "A",
                  id_map: Dict[str, str] = {"*": "*_<N>"},
                  ligand_name: str = "LIG",
+                 num_designs: int = None,
                  **kwargs):
         """
         Initialize BoltzGenImport configuration.
@@ -1284,6 +1286,8 @@ class BoltzGenImport(BaseConfig):
                    Used to get SMILES/CCD for the design specification.
             binder_spec: Binder length specification (e.g., "140-180" or {"length": [140, 180]}).
                         Used for design_spec generation.
+            protocol: BoltzGen protocol (default: "protein-small_molecule").
+                     Used when running minimal design step to generate molecule pickle.
             ligand_chain: Chain ID for ligand in output (default: "B")
             protein_chain: Chain ID for protein in output (default: "A")
             id_map: ID mapping pattern for matching structure IDs to sequence IDs.
@@ -1292,16 +1296,20 @@ class BoltzGenImport(BaseConfig):
                    - Set to {"*": "*"} for exact ID matching.
             ligand_name: Residue name for ligand in output (default: "LIG").
                         BoltzGen expects ligand to be named "LIG".
+            num_designs: Number of designs being imported (auto-detected if None).
+                        Used for consistent naming with BoltzGen conventions.
             **kwargs: Additional parameters passed to BaseConfig
         """
         self.designs = designs
         self.sequences = sequences
         self.ligand = ligand
         self.binder_spec = binder_spec
+        self.protocol = protocol
         self.ligand_chain = ligand_chain
         self.protein_chain = protein_chain
         self.id_map = id_map
         self.ligand_name = ligand_name
+        self.num_designs = num_designs
 
         # Paths to be resolved in configure_inputs
         self.design_structures = []  # List of PDB/CIF paths
@@ -1495,6 +1503,88 @@ class BoltzGenImport(BaseConfig):
 
         cmd_str = ' \\\n    '.join(cmd_args)
 
+        # Determine target directory for molecules
+        if self.mode == "inverse_folding":
+            molecules_target_dir = os.path.join(intermediate_inverse_folded, "molecules_out_dir")
+        else:
+            molecules_target_dir = os.path.join(intermediate_designs, "molecules_out_dir")
+
+        # Build molecule generation command if ligand is provided
+        molecule_gen_section = ""
+        if self.ligand_compounds_csv:
+            temp_design_dir = os.path.join(self.output_folder, ".temp_molecule_gen")
+            design_spec_yaml = os.path.join(self.output_folder, "design_spec.yaml")
+            molecule_gen_section = f'''
+# Step 1: Generate design_spec.yaml for molecule generation
+echo "Generating design_spec.yaml for molecule pickle generation..."
+python -c "
+import pandas as pd
+
+# Load ligand info from CSV
+df = pd.read_csv('{self.ligand_compounds_csv}')
+ligand_info = {{}}
+if 'smiles' in df.columns and pd.notna(df['smiles'].iloc[0]):
+    ligand_info['smiles'] = str(df['smiles'].iloc[0])
+elif 'ccd' in df.columns and pd.notna(df['ccd'].iloc[0]):
+    ligand_info['ccd'] = str(df['ccd'].iloc[0])
+
+# Generate design_spec.yaml
+lines = ['entities:']
+lines.append('- protein:')
+lines.append('    id: {self.protein_chain}')
+lines.append('    sequence: {binder_min}..{binder_max}')
+if ligand_info:
+    lines.append('- ligand:')
+    lines.append('    id: {self.ligand_chain}')
+    if 'smiles' in ligand_info:
+        lines.append(f'    smiles: {{ligand_info[\"smiles\"]}}')
+    elif 'ccd' in ligand_info:
+        lines.append(f'    ccd: {{ligand_info[\"ccd\"]}}')
+
+with open('{design_spec_yaml}', 'w') as f:
+    f.write('\\n'.join(lines) + '\\n')
+print(f'Generated design_spec.yaml with ligand: {{ligand_info}}')
+"
+
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to generate design_spec.yaml"
+    exit 1
+fi
+
+# Step 2: Generate molecule pickle by running minimal BoltzGen design
+echo "Generating molecule pickle via BoltzGen design step..."
+TEMP_MOL_DIR="{temp_design_dir}"
+mkdir -p "$TEMP_MOL_DIR"
+
+# Run BoltzGen with 1 design to generate the molecule pickle
+boltzgen run "{design_spec_yaml}" \\
+    --output "$TEMP_MOL_DIR" \\
+    --protocol {self.protocol} \\
+    --num_designs 1 \\
+    --steps design
+
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to generate molecule pickle"
+    exit 1
+fi
+
+# Copy molecule pickle to target directory
+MOLECULES_SOURCE="$TEMP_MOL_DIR/intermediate_designs/molecules_out_dir"
+MOLECULES_TARGET="{molecules_target_dir}"
+mkdir -p "$MOLECULES_TARGET"
+
+if [ -d "$MOLECULES_SOURCE" ]; then
+    echo "Copying molecule pickles from $MOLECULES_SOURCE to $MOLECULES_TARGET"
+    cp -r "$MOLECULES_SOURCE"/* "$MOLECULES_TARGET"/
+else
+    echo "Warning: No molecules_out_dir found in BoltzGen output"
+fi
+
+# Cleanup temp directory
+rm -rf "$TEMP_MOL_DIR"
+echo "Molecule pickle generation complete"
+'''
+
         script_content = f"""#!/bin/bash
 # BoltzGenImport execution script
 # Generated by BioPipelines pipeline system
@@ -1508,8 +1598,9 @@ echo "Output: {self.output_folder}"
 echo "Binder spec: {binder_min}-{binder_max}"
 {"echo 'Sequences CSV: " + self.sequences_csv + "'" if self.sequences_csv else ""}
 {"echo 'Ligand CSV: " + self.ligand_compounds_csv + "'" if self.ligand_compounds_csv else ""}
-
-# Run import helper
+{molecule_gen_section}
+# Step 3: Run import helper to convert structures
+echo "Converting structures to BoltzGen format..."
 python "{self.import_helper_py}" \\
     {cmd_str}
 
@@ -1543,6 +1634,7 @@ fi
         """Get configuration display lines."""
         config_lines = super().get_config_display()
         config_lines.append(f"MODE: {self.mode}")
+        config_lines.append(f"PROTOCOL: {self.protocol}")
         config_lines.append(f"INPUT STRUCTURES: {len(self.design_structures)} files")
         config_lines.append(f"BINDER SPEC: {self.binder_spec}")
         config_lines.append(f"CHAINS: protein={self.protein_chain}, ligand={self.ligand_chain}")
