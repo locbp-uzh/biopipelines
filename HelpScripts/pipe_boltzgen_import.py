@@ -9,7 +9,7 @@ Converts external structures into BoltzGen filesystem format:
 4. Generates design_spec.yaml from ligand info and binder spec
 5. Generates NPZ metadata files required by BoltzGen dataloader
 6. Writes output as CIF files (not PDB) because:
-   - CIF allows longer residue names (LIG0) unlike PDB's 3-char limit
+   - CIF allows longer residue names (LIG1) unlike PDB's 3-char limit
    - BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution,
      while parse_pdb does not
 
@@ -141,11 +141,11 @@ def read_pdb(pdb_path: str):
     return structure
 
 
-def write_cif(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', ligand_chain='B', ligand_name='LIG0'):
+def write_cif(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', ligand_chain='B', ligand_name='LIG1'):
     """
-    Write mmCIF file with protein and ligand chains.
+    Write mmCIF file with protein and ligand chains in BoltzGen-compatible format.
 
-    CIF format allows longer residue names (like LIG0) unlike PDB's 3-char limit.
+    CIF format allows longer residue names (like LIG1) unlike PDB's 3-char limit.
     Also, BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution,
     while parse_pdb does not.
 
@@ -155,14 +155,96 @@ def write_cif(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', 
         ligand_atoms: List of atoms for ligand
         protein_chain: Chain ID for protein (default: A)
         ligand_chain: Chain ID for ligand (default: B)
-        ligand_name: Residue name for ligand (default: LIG0)
+        ligand_name: Residue name for ligand (default: LIG1)
     """
+    # Build one-letter sequence from protein residues
+    sequence = ""
+    for resname, resseq, atoms in protein_atoms:
+        one_letter = AA_3TO1.get(resname, 'X')
+        sequence += one_letter
+
+    # Collect unique atom type symbols
+    atom_types = set()
+    for resname, resseq, atoms in protein_atoms:
+        for atom in atoms:
+            element = atom.element if atom.element else atom.name[0]
+            atom_types.add(element)
+    if ligand_atoms:
+        for atom in ligand_atoms:
+            element = atom.element if atom.element else atom.name[0]
+            atom_types.add(element)
+    atom_types = sorted(atom_types)
+
     with open(output_path, 'w') as f:
         # Write header
-        f.write("data_structure\n")
-        f.write("#\n")
+        f.write("data_model\n")
+        f.write("_entry.id model\n")
+        f.write("\n")
 
-        # Write atom_site category header
+        # Write cell parameters
+        f.write("_cell.entry_id model\n")
+        f.write("_cell.length_a 1\n")
+        f.write("_cell.length_b 1\n")
+        f.write("_cell.length_c 1\n")
+        f.write("_cell.angle_alpha 90\n")
+        f.write("_cell.angle_beta 90\n")
+        f.write("_cell.angle_gamma 90\n")
+        f.write("\n")
+
+        # Write symmetry
+        f.write("_symmetry.entry_id model\n")
+        f.write("_symmetry.space_group_name_H-M ''\n")
+        f.write("\n")
+
+        # Write entity loop
+        f.write("loop_\n")
+        f.write("_entity.id\n")
+        f.write("_entity.type\n")
+        f.write("1 polymer\n")
+        if ligand_atoms:
+            f.write("2 non-polymer\n")
+        f.write("\n")
+
+        # Write entity_poly loop
+        f.write("loop_\n")
+        f.write("_entity_poly.entity_id\n")
+        f.write("_entity_poly.type\n")
+        f.write("_entity_poly.pdbx_strand_id\n")
+        f.write("_entity_poly.pdbx_seq_one_letter_code\n")
+        f.write(f"1 polypeptide(L) ? {sequence}\n")
+        f.write("\n")
+        f.write("\n")
+        f.write("\n")
+
+        # Write struct_asym loop
+        f.write("loop_\n")
+        f.write("_struct_asym.id\n")
+        f.write("_struct_asym.entity_id\n")
+        f.write(f"{protein_chain} 1\n")
+        if ligand_atoms:
+            f.write(f"{ligand_chain} 2\n")
+        f.write("\n")
+        f.write("\n")
+        f.write("\n")
+        f.write("\n")
+
+        # Write atom_type loop
+        f.write("loop_\n")
+        f.write("_atom_type.symbol\n")
+        for atype in atom_types:
+            f.write(f"{atype}\n")
+        f.write("\n")
+
+        # Write entity_poly_seq loop
+        f.write("loop_\n")
+        f.write("_entity_poly_seq.entity_id\n")
+        f.write("_entity_poly_seq.num\n")
+        f.write("_entity_poly_seq.mon_id\n")
+        for resname, resseq, atoms in protein_atoms:
+            f.write(f"1 {resseq} {resname}\n")
+        f.write("\n")
+
+        # Write atom_site loop
         f.write("loop_\n")
         f.write("_atom_site.group_PDB\n")
         f.write("_atom_site.id\n")
@@ -179,10 +261,9 @@ def write_cif(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', 
         f.write("_atom_site.Cartn_z\n")
         f.write("_atom_site.occupancy\n")
         f.write("_atom_site.B_iso_or_equiv\n")
+        f.write("_atom_site.pdbx_formal_charge\n")
         f.write("_atom_site.auth_seq_id\n")
-        f.write("_atom_site.auth_comp_id\n")
         f.write("_atom_site.auth_asym_id\n")
-        f.write("_atom_site.auth_atom_id\n")
         f.write("_atom_site.pdbx_PDB_model_num\n")
 
         serial = 1
@@ -192,31 +273,79 @@ def write_cif(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', 
             for atom in atoms:
                 group = "ATOM"
                 element = atom.element if atom.element else atom.name[0]
-                alt_id = atom.altloc if atom.altloc else "."
-                ins_code = atom.icode if atom.icode else "?"
+                alt_id = "."
+                ins_code = "?"
+                # B_iso_or_equiv: 1 for backbone (real coords), 100 for sidechain (zeroed)
+                b_factor = 1 if atom.name in BACKBONE_ATOMS else 100
                 f.write(f"{group} {serial} {element} {atom.name} {alt_id} {resname} "
                        f"{protein_chain} 1 {resseq} {ins_code} "
-                       f"{atom.x:.3f} {atom.y:.3f} {atom.z:.3f} "
-                       f"{atom.occupancy:.2f} {atom.tempfactor:.2f} "
-                       f"{resseq} {resname} {protein_chain} {atom.name} 1\n")
+                       f"{atom.x} {atom.y} {atom.z} "
+                       f"1 {b_factor} {ins_code} {resseq} {protein_chain} 1\n")
                 serial += 1
 
         # Write ligand atoms (entity 2)
         if ligand_atoms:
             for atom in ligand_atoms:
-                group = "HETATM"
+                group = "ATOM"
                 element = atom.element if atom.element else atom.name[0]
-                alt_id = atom.altloc if atom.altloc else "."
+                alt_id = "."
                 ins_code = "?"
-                # For ligands, label_seq_id is typically "." (non-polymer)
+                # Ligand atoms: label_seq_id is 1, B_iso is 0
                 f.write(f"{group} {serial} {element} {atom.name} {alt_id} {ligand_name} "
-                       f"{ligand_chain} 2 . {ins_code} "
-                       f"{atom.x:.3f} {atom.y:.3f} {atom.z:.3f} "
-                       f"{atom.occupancy:.2f} {atom.tempfactor:.2f} "
-                       f"1 {ligand_name} {ligand_chain} {atom.name} 1\n")
+                       f"{ligand_chain} 2 1 {ins_code} "
+                       f"{atom.x} {atom.y} {atom.z} "
+                       f"1 0 {ins_code} 1 {ligand_chain} 1\n")
                 serial += 1
 
-        f.write("#\n")
+        f.write("\n")
+
+        # Write pdbx_poly_seq_scheme loop
+        f.write("loop_\n")
+        f.write("_pdbx_poly_seq_scheme.asym_id\n")
+        f.write("_pdbx_poly_seq_scheme.entity_id\n")
+        f.write("_pdbx_poly_seq_scheme.seq_id\n")
+        f.write("_pdbx_poly_seq_scheme.mon_id\n")
+        f.write("_pdbx_poly_seq_scheme.pdb_seq_num\n")
+        f.write("_pdbx_poly_seq_scheme.auth_seq_num\n")
+        f.write("_pdbx_poly_seq_scheme.pdb_mon_id\n")
+        f.write("_pdbx_poly_seq_scheme.auth_mon_id\n")
+        f.write("_pdbx_poly_seq_scheme.pdb_strand_id\n")
+        f.write("_pdbx_poly_seq_scheme.pdb_ins_code\n")
+        f.write("_pdbx_poly_seq_scheme.hetero\n")
+        for resname, resseq, atoms in protein_atoms:
+            f.write(f"{protein_chain} 1 {resseq} {resname} {resseq} {resseq} {resname} {resname} {protein_chain} . n\n")
+        f.write("\n")
+
+        # Write ma_qa_metric loop (pLDDT metadata)
+        f.write("loop_\n")
+        f.write("_ma_qa_metric.id\n")
+        f.write("_ma_qa_metric.name\n")
+        f.write("_ma_qa_metric.description\n")
+        f.write("_ma_qa_metric.type\n")
+        f.write("_ma_qa_metric.mode\n")
+        f.write("_ma_qa_metric.type_other_details\n")
+        f.write("_ma_qa_metric.software_group_id\n")
+        f.write("1 pLDDT 'Predicted lddt' pLDDT local . .\n")
+        f.write("\n")
+
+        # Write ma_qa_metric_local loop (per-residue pLDDT)
+        f.write("loop_\n")
+        f.write("_ma_qa_metric_local.ordinal_id\n")
+        f.write("_ma_qa_metric_local.model_id\n")
+        f.write("_ma_qa_metric_local.label_asym_id\n")
+        f.write("_ma_qa_metric_local.label_seq_id\n")
+        f.write("_ma_qa_metric_local.label_comp_id\n")
+        f.write("_ma_qa_metric_local.metric_id\n")
+        f.write("_ma_qa_metric_local.metric_value\n")
+        ordinal = 1
+        # Protein residues get pLDDT of 60.000
+        for resname, resseq, atoms in protein_atoms:
+            f.write(f"{ordinal} 1 {protein_chain} {resseq} {resname} 1 60.000\n")
+            ordinal += 1
+        # Ligand gets pLDDT of 80.000
+        if ligand_atoms:
+            f.write(f"{ordinal} 1 {ligand_chain} 1 {ligand_name} 1 80.000\n")
+        f.write("\n")
 
 
 def convert_and_reassign_chains(
@@ -225,7 +354,7 @@ def convert_and_reassign_chains(
     protein_chain: str = "A",
     ligand_chain: str = "B",
     new_sequence: str = None,
-    ligand_name: str = "LIG0"
+    ligand_name: str = "LIG1"
 ) -> tuple:
     """
     Convert PDB structure: reassign chains, optionally apply sequence.
@@ -236,7 +365,7 @@ def convert_and_reassign_chains(
         protein_chain: Target chain ID for protein
         ligand_chain: Target chain ID for ligand
         new_sequence: Optional new sequence to apply (inverse folding mode)
-        ligand_name: Residue name for ligand (default: LIG0, must match BoltzGen pattern ^LIG\\d+)
+        ligand_name: Residue name for ligand (default: LIG1, must match BoltzGen pattern ^LIG\\d+)
 
     Returns:
         (success, n_protein_residues, n_ligand_atoms)
@@ -376,7 +505,7 @@ def convert_and_reassign_chains(
         print("  !!! NOTHING TO WRITE !!!")
         return False, 0, 0
 
-    # Write output CIF (not PDB - CIF allows longer residue names like LIG0,
+    # Write output CIF (not PDB - CIF allows longer residue names like LIG1,
     # and BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution)
     write_cif(output_path, output_protein, output_ligand, protein_chain, ligand_chain, ligand_name)
 
@@ -733,7 +862,7 @@ def import_structures(
 
         # BoltzGen naming: design_spec_<N>.cif
         # Using CIF format because:
-        # 1. CIF allows longer residue names (LIG0) unlike PDB's 3-char limit
+        # 1. CIF allows longer residue names (LIG1) unlike PDB's 3-char limit
         # 2. BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution
         output_name = f"design_spec_{stats['processed'] - 1}.cif"
         output_cif = os.path.join(out_subdir, output_name)
@@ -872,9 +1001,9 @@ def main():
     )
     parser.add_argument(
         '--ligand-name',
-        default='LIG0',
-        help='Residue name for ligand in output (default: LIG0). '
-             'BoltzGen expects ligands to match pattern ^LIG\\d+ (e.g., LIG0, LIG1).'
+        default='LIG1',
+        help='Residue name for ligand in output (default: LIG1). '
+             'BoltzGen expects ligands to match pattern ^LIG\\d+ (e.g., LIG1, LIG2).'
     )
 
     args = parser.parse_args()
