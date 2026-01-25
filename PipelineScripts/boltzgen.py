@@ -1560,9 +1560,8 @@ else
     echo "Warning: No molecules_out_dir found in BoltzGen output"
 fi
 
-# Cleanup temp directory
-rm -rf "$TEMP_MOL_DIR"
-echo "Molecule pickle generation complete"
+# Keep temp directory for debugging (contains molecule pickle generation output)
+echo "Molecule pickle generation complete (temp files preserved in $TEMP_MOL_DIR)"
 '''
 
         script_content = f"""#!/bin/bash

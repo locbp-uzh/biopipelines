@@ -8,7 +8,10 @@ Converts external structures into BoltzGen filesystem format:
 3. Optionally assigns sequences and zeros sidechain coordinates
 4. Generates design_spec.yaml from ligand info and binder spec
 5. Generates NPZ metadata files required by BoltzGen dataloader
-6. Writes output as PDB files (not CIF)
+6. Writes output as CIF files (not PDB) because:
+   - CIF allows longer residue names (LIG0) unlike PDB's 3-char limit
+   - BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution,
+     while parse_pdb does not
 
 This enables use of downstream BoltzGen steps (folding, analysis, filtering)
 on structures from external tools like RFdiffusion.
@@ -138,12 +141,16 @@ def read_pdb(pdb_path: str):
     return structure
 
 
-def write_pdb(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', ligand_chain='B', ligand_name='LIG0'):
+def write_cif(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', ligand_chain='B', ligand_name='LIG0'):
     """
-    Write PDB file with protein and ligand chains.
+    Write mmCIF file with protein and ligand chains.
+
+    CIF format allows longer residue names (like LIG0) unlike PDB's 3-char limit.
+    Also, BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution,
+    while parse_pdb does not.
 
     Args:
-        output_path: Output PDB file path
+        output_path: Output CIF file path
         protein_atoms: List of (resname, resseq, [atoms]) for protein
         ligand_atoms: List of atoms for ligand
         protein_chain: Chain ID for protein (default: A)
@@ -151,31 +158,65 @@ def write_pdb(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', 
         ligand_name: Residue name for ligand (default: LIG0)
     """
     with open(output_path, 'w') as f:
+        # Write header
+        f.write("data_structure\n")
+        f.write("#\n")
+
+        # Write atom_site category header
+        f.write("loop_\n")
+        f.write("_atom_site.group_PDB\n")
+        f.write("_atom_site.id\n")
+        f.write("_atom_site.type_symbol\n")
+        f.write("_atom_site.label_atom_id\n")
+        f.write("_atom_site.label_alt_id\n")
+        f.write("_atom_site.label_comp_id\n")
+        f.write("_atom_site.label_asym_id\n")
+        f.write("_atom_site.label_entity_id\n")
+        f.write("_atom_site.label_seq_id\n")
+        f.write("_atom_site.pdbx_PDB_ins_code\n")
+        f.write("_atom_site.Cartn_x\n")
+        f.write("_atom_site.Cartn_y\n")
+        f.write("_atom_site.Cartn_z\n")
+        f.write("_atom_site.occupancy\n")
+        f.write("_atom_site.B_iso_or_equiv\n")
+        f.write("_atom_site.auth_seq_id\n")
+        f.write("_atom_site.auth_comp_id\n")
+        f.write("_atom_site.auth_asym_id\n")
+        f.write("_atom_site.auth_atom_id\n")
+        f.write("_atom_site.pdbx_PDB_model_num\n")
+
         serial = 1
 
-        # Write protein chain
+        # Write protein atoms (entity 1)
         for resname, resseq, atoms in protein_atoms:
             for atom in atoms:
-                f.write(atom.to_pdb_line(serial, protein_chain, resname, resseq))
+                group = "ATOM"
+                element = atom.element if atom.element else atom.name[0]
+                alt_id = atom.altloc if atom.altloc else "."
+                ins_code = atom.icode if atom.icode else "?"
+                f.write(f"{group} {serial} {element} {atom.name} {alt_id} {resname} "
+                       f"{protein_chain} 1 {resseq} {ins_code} "
+                       f"{atom.x:.3f} {atom.y:.3f} {atom.z:.3f} "
+                       f"{atom.occupancy:.2f} {atom.tempfactor:.2f} "
+                       f"{resseq} {resname} {protein_chain} {atom.name} 1\n")
                 serial += 1
 
-        # Write TER card after protein
-        if protein_atoms:
-            f.write(f"TER   {serial:>5}      {resname:>3} {protein_chain}{resseq:>4}\n")
-            serial += 1
-
-        # Write ligand chain
-        # Use ligand_name (default: LIG0) to match BoltzGen's internal naming convention (^LIG\d+)
+        # Write ligand atoms (entity 2)
         if ligand_atoms:
             for atom in ligand_atoms:
-                f.write(atom.to_pdb_line(serial, ligand_chain, ligand_name, 1))
+                group = "HETATM"
+                element = atom.element if atom.element else atom.name[0]
+                alt_id = atom.altloc if atom.altloc else "."
+                ins_code = "?"
+                # For ligands, label_seq_id is typically "." (non-polymer)
+                f.write(f"{group} {serial} {element} {atom.name} {alt_id} {ligand_name} "
+                       f"{ligand_chain} 2 . {ins_code} "
+                       f"{atom.x:.3f} {atom.y:.3f} {atom.z:.3f} "
+                       f"{atom.occupancy:.2f} {atom.tempfactor:.2f} "
+                       f"1 {ligand_name} {ligand_chain} {atom.name} 1\n")
                 serial += 1
 
-            # Write TER card after ligand
-            f.write(f"TER   {serial:>5}     {ligand_name:>4} {ligand_chain}   1\n")
-
-        # Write END card
-        f.write("END\n")
+        f.write("#\n")
 
 
 def convert_and_reassign_chains(
@@ -335,39 +376,14 @@ def convert_and_reassign_chains(
         print("  !!! NOTHING TO WRITE !!!")
         return False, 0, 0
 
-    # Write output PDB
-    write_pdb(output_path, output_protein, output_ligand, protein_chain, ligand_chain, ligand_name)
+    # Write output CIF (not PDB - CIF allows longer residue names like LIG0,
+    # and BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution)
+    write_cif(output_path, output_protein, output_ligand, protein_chain, ligand_chain, ligand_name)
 
-    # Verify output
-    print(f"  Before writing:")
+    # Log what was written
+    print(f"  Written CIF file: {os.path.basename(output_path)}")
     print(f"    Protein chain {protein_chain}: {n_protein_res} residues, {sum(len(atoms) for _, _, atoms in output_protein)} atoms")
-    print(f"    Ligand chain {ligand_chain}:  1 residues, {n_ligand_atoms} atoms")
-
-    # Read back and verify
-    verify_structure = read_pdb(output_path)
-    total_residues = sum(len(residues) for residues in verify_structure.values())
-    total_atoms = sum(len(atoms) for residues in verify_structure.values() for atoms in residues.values())
-
-    print(f"  [PDB VERIFY] Written PDB file: {os.path.basename(output_path)}")
-    print(f"    Total chains: {len(verify_structure)}")
-    print(f"    Total residues: {total_residues}")
-    print(f"    Total atoms: {total_atoms}")
-
-    for chain_id, residues in sorted(verify_structure.items()):
-        n_res = len(residues)
-        n_atoms = sum(len(atoms) for atoms in residues.values())
-        first_res = list(residues.values())[0][0].resname if residues else "—"
-        print(f"      Chain {chain_id}: {n_res} residues, {n_atoms} atoms, first={first_res}")
-
-        # For ligand chain, show detailed atom info
-        if chain_id == ligand_chain and n_res > 0:
-            lig_atoms = list(residues.values())[0]
-            lig_elements = [atom.element for atom in lig_atoms]
-            lig_element_counts = Counter(lig_elements)
-            print(f"        Ligand atoms in PDB: {lig_elements}")
-            print(f"        Ligand element counts in PDB: {dict(lig_element_counts)}")
-            non_h_count = sum(1 for atom in lig_atoms if atom.element != 'H')
-            print(f"        Non-hydrogen atoms: {non_h_count}")
+    print(f"    Ligand chain {ligand_chain}: 1 residue ({ligand_name}), {n_ligand_atoms} atoms")
 
     return True, n_protein_res, n_ligand_atoms
 
@@ -715,9 +731,12 @@ def import_structures(
         stats['processed'] += 1
         struct_id = extract_structure_id(struct_path)
 
-        # BoltzGen naming: design_spec_<N>.pdb
-        output_name = f"design_spec_{stats['processed'] - 1}.pdb"
-        output_pdb = os.path.join(out_subdir, output_name)
+        # BoltzGen naming: design_spec_<N>.cif
+        # Using CIF format because:
+        # 1. CIF allows longer residue names (LIG0) unlike PDB's 3-char limit
+        # 2. BoltzGen's parse_mmcif accepts the mols dictionary for ligand resolution
+        output_name = f"design_spec_{stats['processed'] - 1}.cif"
+        output_cif = os.path.join(out_subdir, output_name)
 
         # Find sequence for this structure (if in inverse_folding mode)
         sequence = None
@@ -729,7 +748,7 @@ def import_structures(
 
         # Convert and reassign chains
         success, n_protein, n_ligand = convert_and_reassign_chains(
-            struct_path, output_pdb,
+            struct_path, output_cif,
             protein_chain=protein_chain,
             ligand_chain=ligand_chain,
             new_sequence=sequence,
@@ -737,9 +756,9 @@ def import_structures(
         )
 
         if success:
-            # Generate NPZ metadata file alongside PDB
+            # Generate NPZ metadata file alongside CIF
             # Include ligand atoms in NPZ - BoltzGen tokenizes ligand atoms for co-folding
-            output_npz = output_pdb.replace('.pdb', '.npz')
+            output_npz = output_cif.replace('.cif', '.npz')
             npz_success = generate_npz_metadata(output_npz, n_protein, n_ligand)
             if npz_success:
                 stats['success'] += 1
