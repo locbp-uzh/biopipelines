@@ -1517,34 +1517,14 @@ class BoltzGenImport(BaseConfig):
             molecule_gen_section = f'''
 # Step 1: Generate design_spec.yaml for molecule generation
 echo "Generating design_spec.yaml for molecule pickle generation..."
-python -c "
-import pandas as pd
-
-# Load ligand info from CSV
-df = pd.read_csv('{self.ligand_compounds_csv}')
-ligand_info = {{}}
-if 'smiles' in df.columns and pd.notna(df['smiles'].iloc[0]):
-    ligand_info['smiles'] = str(df['smiles'].iloc[0])
-elif 'ccd' in df.columns and pd.notna(df['ccd'].iloc[0]):
-    ligand_info['ccd'] = str(df['ccd'].iloc[0])
-
-# Generate design_spec.yaml
-lines = ['entities:']
-lines.append('- protein:')
-lines.append('    id: {self.protein_chain}')
-lines.append('    sequence: {binder_min}..{binder_max}')
-if ligand_info:
-    lines.append('- ligand:')
-    lines.append('    id: {self.ligand_chain}')
-    if 'smiles' in ligand_info:
-        lines.append(f'    smiles: {{ligand_info[\"smiles\"]}}')
-    elif 'ccd' in ligand_info:
-        lines.append(f'    ccd: {{ligand_info[\"ccd\"]}}')
-
-with open('{design_spec_yaml}', 'w') as f:
-    f.write('\\n'.join(lines) + '\\n')
-print(f'Generated design_spec.yaml with ligand: {{ligand_info}}')
-"
+python "{self.import_helper_py}" \\
+    --generate-design-spec \\
+    --ligand-csv "{self.ligand_compounds_csv}" \\
+    --output "{design_spec_yaml}" \\
+    --protein-chain {self.protein_chain} \\
+    --ligand-chain {self.ligand_chain} \\
+    --binder-min {binder_min} \\
+    --binder-max {binder_max}
 
 if [ $? -ne 0 ]; then
     echo "Error: Failed to generate design_spec.yaml"

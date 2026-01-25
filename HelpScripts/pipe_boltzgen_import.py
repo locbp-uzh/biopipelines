@@ -754,19 +754,57 @@ def import_structures(
 
     return stats
 
+def generate_design_spec_only(args):
+    """Generate only the design_spec.yaml file (for molecule pickle generation)."""
+    print("=" * 60)
+    print("Generating design_spec.yaml")
+    print("=" * 60)
+
+    # Load ligand info
+    ligand_info = {}
+    if args.ligand_csv and os.path.exists(args.ligand_csv):
+        ligand_info = load_ligand_info(args.ligand_csv)
+        print(f"Loaded ligand info: {ligand_info}")
+
+    # Generate the design_spec.yaml
+    output_path = generate_design_spec(
+        output_dir=os.path.dirname(args.output),
+        binder_min=args.binder_min,
+        binder_max=args.binder_max,
+        protein_chain=args.protein_chain,
+        ligand_chain=args.ligand_chain,
+        ligand_info=ligand_info
+    )
+
+    # If output path differs from default, rename
+    if output_path != args.output:
+        import shutil
+        shutil.move(output_path, args.output)
+
+    print(f"Generated: {args.output}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Import structures into BoltzGen filesystem format'
     )
+
+    # Mode flag for design_spec generation only
+    parser.add_argument(
+        '--generate-design-spec',
+        action='store_true',
+        help='Only generate design_spec.yaml (for molecule pickle generation)'
+    )
+
     parser.add_argument(
         '--structures',
-        required=True,
         help='File containing list of structure paths (one per line)'
     )
     parser.add_argument(
         '--output',
         required=True,
-        help='Output directory for BoltzGen format'
+        help='Output directory for BoltzGen format (or output file for --generate-design-spec)'
     )
     parser.add_argument(
         '--mode',
@@ -819,6 +857,14 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Handle design_spec generation mode
+    if args.generate_design_spec:
+        return generate_design_spec_only(args)
+
+    # Regular import mode requires --structures
+    if not args.structures:
+        parser.error("--structures is required when not using --generate-design-spec")
 
     # Parse id_map from JSON string
     try:
