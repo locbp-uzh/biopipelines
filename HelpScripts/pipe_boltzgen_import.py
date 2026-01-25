@@ -138,7 +138,7 @@ def read_pdb(pdb_path: str):
     return structure
 
 
-def write_pdb(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', ligand_chain='B'):
+def write_pdb(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', ligand_chain='B', ligand_name='LIG0'):
     """
     Write PDB file with protein and ligand chains.
 
@@ -148,6 +148,7 @@ def write_pdb(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', 
         ligand_atoms: List of atoms for ligand
         protein_chain: Chain ID for protein (default: A)
         ligand_chain: Chain ID for ligand (default: B)
+        ligand_name: Residue name for ligand (default: LIG0)
     """
     with open(output_path, 'w') as f:
         serial = 1
@@ -164,13 +165,14 @@ def write_pdb(output_path: str, protein_atoms, ligand_atoms, protein_chain='A', 
             serial += 1
 
         # Write ligand chain
+        # Use ligand_name (default: LIG0) to match BoltzGen's internal naming convention (^LIG\d+)
         if ligand_atoms:
             for atom in ligand_atoms:
-                f.write(atom.to_pdb_line(serial, ligand_chain, 'LIG', 1))
+                f.write(atom.to_pdb_line(serial, ligand_chain, ligand_name, 1))
                 serial += 1
 
             # Write TER card after ligand
-            f.write(f"TER   {serial:>5}      LIG {ligand_chain}   1\n")
+            f.write(f"TER   {serial:>5}     {ligand_name:>4} {ligand_chain}   1\n")
 
         # Write END card
         f.write("END\n")
@@ -182,7 +184,7 @@ def convert_and_reassign_chains(
     protein_chain: str = "A",
     ligand_chain: str = "B",
     new_sequence: str = None,
-    ligand_name: str = "LIG"
+    ligand_name: str = "LIG0"
 ) -> tuple:
     """
     Convert PDB structure: reassign chains, optionally apply sequence.
@@ -193,7 +195,7 @@ def convert_and_reassign_chains(
         protein_chain: Target chain ID for protein
         ligand_chain: Target chain ID for ligand
         new_sequence: Optional new sequence to apply (inverse folding mode)
-        ligand_name: Residue name for ligand (default: LIG)
+        ligand_name: Residue name for ligand (default: LIG0, must match BoltzGen pattern ^LIG\\d+)
 
     Returns:
         (success, n_protein_residues, n_ligand_atoms)
@@ -334,7 +336,7 @@ def convert_and_reassign_chains(
         return False, 0, 0
 
     # Write output PDB
-    write_pdb(output_path, output_protein, output_ligand, protein_chain, ligand_chain)
+    write_pdb(output_path, output_protein, output_ligand, protein_chain, ligand_chain, ligand_name)
 
     # Verify output
     print(f"  Before writing:")
@@ -736,9 +738,9 @@ def import_structures(
 
         if success:
             # Generate NPZ metadata file alongside PDB
-            # NOTE: Exclude ligand from NPZ - BoltzGen doesn't tokenize ligand chain
+            # Include ligand atoms in NPZ - BoltzGen tokenizes ligand atoms for co-folding
             output_npz = output_pdb.replace('.pdb', '.npz')
-            npz_success = generate_npz_metadata(output_npz, n_protein, 0)  # ligand atoms = 0
+            npz_success = generate_npz_metadata(output_npz, n_protein, n_ligand)
             if npz_success:
                 stats['success'] += 1
             else:
@@ -851,9 +853,9 @@ def main():
     )
     parser.add_argument(
         '--ligand-name',
-        default='LIG',
-        help='Residue name for ligand in output (default: LIG). '
-             'BoltzGen expects all ligands to be named "LIG".'
+        default='LIG0',
+        help='Residue name for ligand in output (default: LIG0). '
+             'BoltzGen expects ligands to match pattern ^LIG\\d+ (e.g., LIG0, LIG1).'
     )
 
     args = parser.parse_args()
