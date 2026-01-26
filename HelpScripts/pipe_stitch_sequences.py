@@ -109,12 +109,14 @@ def apply_substitutions(template: str, substitutions: Dict[str, str],
     for sub_idx, (pos_range, replacement_seq) in enumerate(substitutions.items()):
         # Validate equal length
         if len(replacement_seq) != template_len:
+            position_table_key = debug_info.get(f'sub_{sub_idx}_position_table_key') if debug_info else None
             raise ValueError(
                 f"Substitution sequence length mismatch:\n"
                 f"  Template length: {template_len}\n"
                 f"  Substitution sequence length: {len(replacement_seq)}\n"
                 f"  Template ID: {debug_info.get('template_id', 'N/A') if debug_info else 'N/A'}\n"
                 f"  Substitution ID: {debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'}\n"
+                f"  Position table key: {position_table_key if position_table_key else 'N/A'}\n"
                 f"  For position-to-position substitution, sequences must be equal length."
             )
 
@@ -140,28 +142,42 @@ def apply_substitutions(template: str, substitutions: Dict[str, str],
             mask[idx] = replacement_seq[idx]
             result[idx] = replacement_seq[idx]
 
-        # Show alignment around the substitution region with context
+        # Show full alignment
         if positions:
-            first_idx = min(positions) - 1
-            last_idx = max(positions) - 1
-            context = 10
-            start_idx = max(0, first_idx - context)
-            end_idx = min(template_len, last_idx + context + 1)
-
-            template_slice = template[start_idx:end_idx]
-            mask_slice = ''.join(mask[start_idx:end_idx])
+            template_str = template
+            mask_str = ''.join(mask)
 
             # Create match line
             match_line = ''.join(
                 '|' if mask[i] != '-' and template[i] == mask[i] else
                 '*' if mask[i] != '-' else ' '
-                for i in range(start_idx, end_idx)
+                for i in range(template_len)
             )
 
-            print(f"\n    Alignment (positions {start_idx + 1}-{end_idx}, 1-indexed):")
-            print(f"    Template:     {template_slice}")
-            print(f"    Match:        {match_line}")
-            print(f"    Substitution: {mask_slice}")
+            # Create numbering lines (mark every 5th position)
+            fives_line = []
+            tens_line = []
+            hundreds_line = []
+            for i in range(template_len):
+                pos = i + 1  # 1-indexed position
+                if pos % 5 == 0:
+                    fives_line.append(str(pos % 10))
+                    tens_line.append(str((pos // 10) % 10))
+                    hundreds_line.append(str((pos // 100) % 10) if pos >= 100 else ' ')
+                else:
+                    fives_line.append(' ')
+                    tens_line.append(' ')
+                    hundreds_line.append(' ')
+
+            print(f"\n    Alignment (1-{template_len}):")
+            if template_len >= 100:
+                print(f"              {''.join(hundreds_line)}")
+            if template_len >= 10:
+                print(f"              {''.join(tens_line)}")
+            print(f"              {''.join(fives_line)}")
+            print(f"    Template: {template_str}")
+            print(f"              {match_line}")
+            print(f"    Substitut:{mask_str}")
 
     print(f"\n  Result length after substitutions: {len(result)}")
     print(f"{'='*80}\n")
