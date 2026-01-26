@@ -41,7 +41,6 @@ class StitchSequences(BaseConfig):
                  template: Union[str, ToolOutput, StandardizedOutput],
                  substitutions: Dict[str, Union[List[str], ToolOutput, StandardizedOutput]] = None,
                  id_map: Dict[str, str] = {"*": "*_<N>"},
-                 debug: bool = False,
                  **kwargs):
         """
         Initialize StitchSequences configuration.
@@ -54,7 +53,6 @@ class StitchSequences(BaseConfig):
                 - Keys: Position strings like "11-19" or "31-44+50-55"
                 - Values: List of raw sequences OR ToolOutput with sequences
             id_map: ID mapping pattern for matching table IDs to sequence IDs
-            debug: If True, print detailed alignment visualization for each stitch
             **kwargs: Additional parameters
 
         Position Syntax:
@@ -105,7 +103,6 @@ class StitchSequences(BaseConfig):
         self.template = template
         self.substitutions = substitutions or {}
         self.id_map = id_map
-        self.debug = debug
 
         # Validate substitution keys are position strings or table references
         for pos_key in self.substitutions.keys():
@@ -273,8 +270,7 @@ class StitchSequences(BaseConfig):
             "template": self.template_info,
             "substitutions": self.substitution_infos,
             "id_map": self.id_map,
-            "output_csv": output_csv,
-            "debug": self.debug
+            "output_csv": output_csv
         }
 
         os.makedirs(os.path.dirname(config_file), exist_ok=True)
@@ -417,8 +413,7 @@ fi
             "tool_params": {
                 "template": template_summary,
                 "substitutions": substitutions_summary,
-                "id_map": self.id_map,
-                "debug": self.debug
+                "id_map": self.id_map
             }
         })
         return base_dict
