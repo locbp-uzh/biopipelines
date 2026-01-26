@@ -89,7 +89,9 @@ def build_residue_mapping(pdb_path: str) -> Dict[int, int]:
 
 
 def substitute_segments(template: str, substitutions: Dict[str, str],
-                        residue_mapping: Dict[int, int] = None) -> str:
+                        residue_mapping: Dict[int, int] = None,
+                        debug: bool = False,
+                        debug_info: Dict[str, Any] = None) -> str:
     """
     Replace segments of template sequence at specified positions.
 
@@ -99,15 +101,27 @@ def substitute_segments(template: str, substitutions: Dict[str, str],
         residue_mapping: Optional dict mapping PDB residue numbers to string indices.
                         If provided, positions are interpreted as PDB residue numbers.
                         If None, positions are interpreted as 1-indexed sequence positions.
+        debug: If True, print alignment visualization for each substitution.
+        debug_info: Optional dict with IDs for debug output.
 
     Returns:
         New sequence with substitutions applied
     """
     # Convert template to list for character-by-character replacement
     result = list(template)
+    template_len = len(template)
+
+    if debug and debug_info:
+        print(f"\n{'='*80}")
+        print(f"STITCH DEBUG: {debug_info.get('template_id', 'unknown')}")
+        print(f"  Template ID: {debug_info.get('template_id', 'N/A')}")
+        print(f"  Template length: {template_len}")
+        if residue_mapping:
+            print(f"  Residue mapping: PDB {min(residue_mapping.keys())}-{max(residue_mapping.keys())} -> idx 0-{len(residue_mapping)-1}")
+        print(f"{'='*80}")
 
     # Process each substitution
-    for pos_range, replacement in substitutions.items():
+    for sub_idx, (pos_range, replacement) in enumerate(substitutions.items()):
         ranges = parse_position_range(pos_range)
 
         # Build list of all positions (PDB residue numbers) to replace
@@ -128,13 +142,61 @@ def substitute_segments(template: str, substitutions: Dict[str, str],
             # 1-indexed positions -> 0-indexed string indices
             indices = [pos - 1 for pos in positions]
 
-        # Replace each position with corresponding character from replacement sequence
+        # Build masked replacement sequence: same length as template, with '-' except at substitution positions
+        masked_replacement = ['-'] * template_len
+
+        # Validate lengths match before building masked sequence
+        if len(indices) != len(replacement):
+            raise ValueError(
+                f"Length mismatch for substitution at '{pos_range}':\n"
+                f"  Selection spans {len(indices)} positions (indices {indices[0]}-{indices[-1]})\n"
+                f"  But replacement sequence has {len(replacement)} characters\n"
+                f"  PDB positions: {positions[0]}-{positions[-1]}\n"
+                f"  Template ID: {debug_info.get('template_id', 'N/A') if debug_info else 'N/A'}\n"
+                f"  Substitution ID: {debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'}"
+            )
+
+        # Place replacement characters at the correct template indices
+        for i, idx in enumerate(indices):
+            if idx < 0 or idx >= template_len:
+                raise ValueError(f"Index {idx} out of range for template of length {template_len}")
+            masked_replacement[idx] = replacement[i]
+
+        if debug:
+            sub_id = debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'
+            print(f"\n  Substitution {sub_idx + 1}: '{pos_range}'")
+            print(f"    Substitution source ID: {sub_id}")
+            print(f"    PDB positions: {positions[0]}-{positions[-1]} ({len(positions)} residues)")
+            print(f"    Template indices: {indices[0]}-{indices[-1]} ({len(indices)} positions)")
+            print(f"    Replacement length: {len(replacement)}")
+
+            # Show alignment around the substitution region with context
+            context = 10
+            start_idx = max(0, indices[0] - context)
+            end_idx = min(template_len, indices[-1] + context + 1)
+
+            template_slice = template[start_idx:end_idx]
+            masked_slice = ''.join(masked_replacement[start_idx:end_idx])
+
+            # Create match line
+            match_line = ''.join(
+                '|' if masked_replacement[i] != '-' and template[i] == masked_replacement[i] else
+                '*' if masked_replacement[i] != '-' else ' '
+                for i in range(start_idx, end_idx)
+            )
+
+            print(f"\n    Alignment (positions {start_idx}-{end_idx-1}, 0-indexed):")
+            print(f"    Template:    {template_slice}")
+            print(f"    Match:       {match_line}")
+            print(f"    Replacement: {masked_slice}")
+
+        # Apply substitution: replace template positions with non-'-' characters from masked sequence
         for idx in indices:
-            if idx < 0 or idx >= len(result):
-                raise ValueError(f"Index {idx} out of range for sequence of length {len(result)}")
-            if idx >= len(replacement):
-                raise ValueError(f"Index {idx} out of range for replacement sequence of length {len(replacement)}")
-            result[idx] = replacement[idx]
+            result[idx] = masked_replacement[idx]
+
+    if debug:
+        print(f"\n  Final stitched sequence length: {len(result)}")
+        print(f"{'='*80}\n")
 
     return ''.join(result)
 
@@ -269,6 +331,7 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
     substitutions_info = config_data.get('substitutions', {})
     id_map = config_data.get('id_map', {"*": "*_<N>"})
     output_csv = config_data['output_csv']
+    debug = config_data.get('debug', False)
 
     print("Loading template sequences...")
     template_sequences = load_sequences_from_info(template_info)
@@ -312,10 +375,10 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 
     if all_positions_fixed and all_subs_raw:
         # Raw substitutions with fixed positions - apply to all templates
-        results = stitch_with_raw_substitutions(template_sequences, substitutions, residue_mappings)
+        results = stitch_with_raw_substitutions(template_sequences, substitutions, residue_mappings, debug=debug)
     else:
         # Complex case: match sequences by base ID
-        results = stitch_matched_sequences(template_sequences, substitutions, id_map, residue_mappings)
+        results = stitch_matched_sequences(template_sequences, substitutions, id_map, residue_mappings, debug=debug)
 
     # Save results
     if results:
@@ -338,7 +401,8 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 def stitch_with_raw_substitutions(
     template_sequences: Dict[str, str],
     substitutions: List[Dict],
-    residue_mappings: Dict[str, Dict[int, int]] = None
+    residue_mappings: Dict[str, Dict[int, int]] = None,
+    debug: bool = False
 ) -> List[Dict[str, Any]]:
     """Stitch templates with raw substitutions at fixed positions using Cartesian product."""
     results = []
@@ -346,11 +410,14 @@ def stitch_with_raw_substitutions(
 
     # Build option lists for Cartesian product (just the sequences, ignore their IDs)
     option_lists = []
+    option_ids = []
     pos_ranges = []
     for sub in substitutions:
         pos_ranges.append(sub['position_key']['positions'])
-        # Only use the sequences, not the IDs (raw sequences have generic IDs)
-        option_lists.append(list(sub['sequences'].values()))
+        # Store both sequences and their IDs for debug output
+        seq_items = list(sub['sequences'].items())
+        option_ids.append([item[0] for item in seq_items])
+        option_lists.append([item[1] for item in seq_items])
 
     for template_id, template_seq in template_sequences.items():
         if not option_lists:
@@ -369,10 +436,13 @@ def stitch_with_raw_substitutions(
         for index_combo in product(*index_ranges):
             # Build substitutions using the indices
             subs = {}
+            debug_info = {'template_id': template_id}
             for i, idx in enumerate(index_combo):
                 subs[pos_ranges[i]] = option_lists[i][idx - 1]  # Convert to 0-indexed for list access
+                debug_info[f'sub_{i}_id'] = option_ids[i][idx - 1]
+                debug_info[f'sub_{i}_positions'] = pos_ranges[i]
 
-            stitched = substitute_segments(template_seq, subs, residue_mapping)
+            stitched = substitute_segments(template_seq, subs, residue_mapping, debug=debug, debug_info=debug_info)
             # Format: <basename>_<A>_<B>_... where A, B are indices per substitution
             suffix = "_".join(str(idx) for idx in index_combo)
             output_id = f"{base_id}_{suffix}"
@@ -386,7 +456,8 @@ def stitch_matched_sequences(
     template_sequences: Dict[str, str],
     substitutions: List[Dict],
     id_map: Dict[str, str],
-    residue_mappings: Dict[str, Dict[int, int]] = None
+    residue_mappings: Dict[str, Dict[int, int]] = None,
+    debug: bool = False
 ) -> List[Dict[str, Any]]:
     """Stitch sequences by matching base IDs, with support for table-based positions."""
     results = []
@@ -466,12 +537,14 @@ def stitch_matched_sequences(
 
             # Try to find matching substitution sequences with the same suffix
             matched_subs = []
+            matched_sub_ids = []
             all_found = True
             for sub_seqs in sub_seqs_for_base:
                 # Look for sequence with ID = base_id + "_" + suffix
                 target_id = f"{base_id}_{suffix}"
                 if target_id in sub_seqs:
                     matched_subs.append(sub_seqs[target_id])
+                    matched_sub_ids.append(target_id)
                 else:
                     print(f"    Warning: no matching substitution sequence for '{target_id}'")
                     all_found = False
@@ -482,10 +555,13 @@ def stitch_matched_sequences(
 
             # Apply substitutions
             subs = {}
+            debug_info = {'template_id': template_id}
             for i, sub_seq in enumerate(matched_subs):
                 subs[positions_for_base[i]] = sub_seq
+                debug_info[f'sub_{i}_id'] = matched_sub_ids[i]
+                debug_info[f'sub_{i}_positions'] = positions_for_base[i]
 
-            stitched = substitute_segments(template_seq, subs, residue_mapping)
+            stitched = substitute_segments(template_seq, subs, residue_mapping, debug=debug, debug_info=debug_info)
             output_id = template_id
             results.append({'id': output_id, 'sequence': stitched})
             combo_count += 1
