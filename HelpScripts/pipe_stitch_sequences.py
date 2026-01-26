@@ -125,8 +125,11 @@ def apply_substitutions(template: str, substitutions: Dict[str, str],
         mask = ['-'] * template_len
 
         sub_id = debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'
+        position_table_key = debug_info.get(f'sub_{sub_idx}_position_table_key') if debug_info else None
         print(f"\n  Substitution {sub_idx + 1}: '{pos_range}'")
         print(f"    Substitution source ID: {sub_id}")
+        if position_table_key:
+            print(f"    Position table key: {position_table_key}")
         print(f"    Positions to replace: {len(positions)} residues")
 
         # Apply: for each position, copy from replacement_seq to result
@@ -198,8 +201,11 @@ def apply_indels(template: str, indels: Dict[str, str],
         segments = sele_to_segments(pos_range)
 
         indel_id = debug_info.get(f'indel_{indel_idx}_id', 'N/A') if debug_info else 'N/A'
+        position_table_key = debug_info.get(f'indel_{indel_idx}_position_table_key') if debug_info else None
         print(f"\n  Indel {indel_idx + 1}: '{pos_range}'")
         print(f"    Indel source ID: {indel_id}")
+        if position_table_key:
+            print(f"    Position table key: {position_table_key}")
         print(f"    Replacement sequence: '{replacement}' ({len(replacement)} chars)")
         print(f"    Segments to replace: {segments}")
 
@@ -544,12 +550,15 @@ def stitch_matched_sequences(
 
         # Get substitution positions for this base ID
         sub_positions_for_base = []
+        sub_position_table_keys = []
         for pos_key, pos_map in sub_position_maps:
             if pos_key['type'] == 'fixed':
                 sub_positions_for_base.append(pos_key['positions'])
+                sub_position_table_keys.append(None)
             else:
                 if base_id in pos_map:
                     sub_positions_for_base.append(pos_map[base_id])
+                    sub_position_table_keys.append(base_id)
                 else:
                     print(f"    Skipping: no substitution position data for {base_id}")
                     skip = True
@@ -560,12 +569,15 @@ def stitch_matched_sequences(
 
         # Get indel positions for this base ID
         indel_positions_for_base = []
+        indel_position_table_keys = []
         for pos_key, pos_map in indel_position_maps:
             if pos_key['type'] == 'fixed':
                 indel_positions_for_base.append(pos_key['positions'])
+                indel_position_table_keys.append(None)
             else:
                 if base_id in pos_map:
                     indel_positions_for_base.append(pos_map[base_id])
+                    indel_position_table_keys.append(base_id)
                 else:
                     print(f"    Skipping: no indel position data for {base_id}")
                     skip = True
@@ -626,6 +638,7 @@ def stitch_matched_sequences(
                     positions_str = sub_positions_for_base[i]
                     subs[positions_str] = sub_seq
                     debug_info[f'sub_{i}_id'] = matched_sub_ids[i]
+                    debug_info[f'sub_{i}_position_table_key'] = sub_position_table_keys[i]
                 current_seq = apply_substitutions(current_seq, subs, debug_info=debug_info)
 
             # Apply indels second
@@ -635,6 +648,7 @@ def stitch_matched_sequences(
                     positions_str = indel_positions_for_base[i]
                     indel_ops[positions_str] = indel_seq
                     debug_info[f'indel_{i}_id'] = matched_indel_ids[i]
+                    debug_info[f'indel_{i}_position_table_key'] = indel_position_table_keys[i]
                 current_seq = apply_indels(current_seq, indel_ops, debug_info=debug_info)
 
             results.append({'id': template_id, 'sequence': current_seq})
