@@ -165,7 +165,7 @@ def apply_substitutions(template: str, substitutions: Dict[str, str],
                 pos = i + 1  # 1-indexed position
                 if pos % 5 == 0:
                     fives_line.append(str(pos % 10))
-                    tens_line.append(str((pos // 10) % 10))
+                    tens_line.append(str((pos // 10) % 10) if pos >= 10 else ' ')
                     hundreds_line.append(str((pos // 100) % 10) if pos >= 100 else ' ')
                 else:
                     fives_line.append(' ')
