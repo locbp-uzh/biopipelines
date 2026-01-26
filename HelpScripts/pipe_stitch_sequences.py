@@ -23,178 +23,200 @@ from typing import Dict, List, Any, Tuple
 from itertools import product
 
 
-def parse_position_range(pos_range: str) -> List[Tuple[int, int]]:
+def sele_to_list(s: str) -> List[int]:
     """
-    Parse position range string into list of (start, end) tuples.
+    Convert a PyMOL-style selection string to a list of 1-indexed positions.
 
     Args:
-        pos_range: Position string like '10-20' or '10-20+30-40'
+        s: Selection string like '10-20' or '10-20+30-40' or '5+10+15'
 
     Returns:
-        List of (start, end) tuples (PDB residue numbers, inclusive)
+        List of 1-indexed positions
     """
-    ranges = []
-    parts = pos_range.split('+')
+    def contiguous_sele_to_list(pp):
+        if '-' in pp:
+            min_val, max_val = pp.split('-')
+            return [ri for ri in range(int(min_val), int(max_val) + 1)]
+        else:
+            return [int(pp)]
 
+    a = []
+    if s == "":
+        return a
+    elif '+' in s:
+        plus_parts = s.split('+')
+        for pp in plus_parts:
+            a.extend(contiguous_sele_to_list(pp))
+    else:
+        a.extend(contiguous_sele_to_list(s))
+    return a
+
+
+def sele_to_segments(s: str) -> List[Tuple[int, int]]:
+    """
+    Parse selection string into list of (start, end) tuples for contiguous segments.
+
+    Args:
+        s: Selection string like '10-20' or '6-7+9-10+17-18'
+
+    Returns:
+        List of (start, end) tuples (1-indexed, inclusive)
+    """
+    segments = []
+    if s == "":
+        return segments
+
+    parts = s.split('+')
     for part in parts:
         part = part.strip()
         if '-' in part:
             start, end = map(int, part.split('-'))
-            ranges.append((start, end))
+            segments.append((start, end))
         else:
             pos = int(part)
-            ranges.append((pos, pos))
+            segments.append((pos, pos))
 
-    return sorted(ranges, key=lambda x: x[0])
-
-
-def build_residue_mapping(pdb_path: str) -> Dict[int, int]:
-    """
-    Build a mapping from PDB residue numbers to sequence string indices.
-
-    Args:
-        pdb_path: Path to PDB file
-
-    Returns:
-        Dict mapping PDB residue number -> string index (0-based)
-    """
-    from pdb_parser import parse_pdb_file
-
-    # Standard amino acid codes
-    aa_codes = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
-
-    atoms = parse_pdb_file(pdb_path)
-
-    # Collect unique residues (chain, res_num) for standard amino acids
-    residues = {}
-    for atom in atoms:
-        if atom.res_name in aa_codes:
-            key = (atom.chain, atom.res_num)
-            if key not in residues:
-                residues[key] = atom.res_num
-
-    # Sort by chain and residue number (same order as get_protein_sequence)
-    sorted_residues = sorted(residues.keys(), key=lambda x: (x[0], x[1]))
-
-    # Build mapping: PDB residue number -> string index
-    # Note: This concatenates all chains, matching get_protein_sequence behavior
-    mapping = {}
-    for idx, (chain, res_num) in enumerate(sorted_residues):
-        mapping[res_num] = idx
-
-    return mapping
+    return segments
 
 
-def substitute_segments(template: str, substitutions: Dict[str, str],
-                        residue_mapping: Dict[int, int] = None,
+def apply_substitutions(template: str, substitutions: Dict[str, str],
                         debug_info: Dict[str, Any] = None) -> str:
     """
-    Replace segments of template sequence at specified positions.
+    Apply position-to-position substitutions from equal-length sequences.
+
+    For each position in the selection, copy the residue at that position from the
+    substitution sequence to the template. Template and substitution must be same length.
 
     Args:
         template: Base sequence string
-        substitutions: Dict mapping position ranges to replacement sequences
-        residue_mapping: Optional dict mapping PDB residue numbers to string indices.
-                        If provided, positions are interpreted as PDB residue numbers.
-                        If None, positions are interpreted as 1-indexed sequence positions.
+        substitutions: Dict mapping position ranges to full replacement sequences.
+                       Positions are 1-indexed (PyMOL style).
         debug_info: Optional dict with IDs for debug output.
 
     Returns:
         New sequence with substitutions applied
     """
-    # Convert template to list for character-by-character replacement
     result = list(template)
     template_len = len(template)
 
     if debug_info:
         print(f"\n{'='*80}")
-        print(f"STITCH: {debug_info.get('template_id', 'unknown')}")
+        print(f"SUBSTITUTIONS: {debug_info.get('template_id', 'unknown')}")
         print(f"  Template ID: {debug_info.get('template_id', 'N/A')}")
         print(f"  Template length: {template_len}")
-        if residue_mapping:
-            print(f"  Residue mapping: PDB {min(residue_mapping.keys())}-{max(residue_mapping.keys())} -> idx 0-{len(residue_mapping)-1}")
         print(f"{'='*80}")
 
-    # Process each substitution
-    for sub_idx, (pos_range, replacement) in enumerate(substitutions.items()):
-        ranges = parse_position_range(pos_range)
-
-        # Build list of all positions (PDB residue numbers) to replace
-        positions = []
-        for start, end in ranges:
-            positions.extend(range(start, end + 1))
-
-        # Map PDB residue numbers to string indices
-        if residue_mapping is not None:
-            # Use PDB residue numbers via mapping
-            indices = []
-            for pos in positions:
-                if pos not in residue_mapping:
-                    raise ValueError(f"PDB residue {pos} not found in structure. "
-                                   f"Available residue numbers: {min(residue_mapping.keys())}-{max(residue_mapping.keys())}")
-                indices.append(residue_mapping[pos])
-        else:
-            # 1-indexed positions -> 0-indexed string indices
-            indices = [pos - 1 for pos in positions]
-
-        # Build masked replacement sequence: same length as template, with '-' except at substitution positions
-        masked_replacement = ['-'] * template_len
-
-        # Validate lengths match before building masked sequence
-        if len(indices) != len(replacement):
+    for sub_idx, (pos_range, replacement_seq) in enumerate(substitutions.items()):
+        # Validate equal length
+        if len(replacement_seq) != template_len:
             raise ValueError(
-                f"Length mismatch for substitution at '{pos_range}':\n"
-                f"  Selection spans {len(indices)} positions (indices {indices[0]}-{indices[-1]})\n"
-                f"  But replacement sequence has {len(replacement)} characters\n"
-                f"  PDB positions: {positions[0]}-{positions[-1]}\n"
+                f"Substitution sequence length mismatch:\n"
+                f"  Template length: {template_len}\n"
+                f"  Substitution sequence length: {len(replacement_seq)}\n"
                 f"  Template ID: {debug_info.get('template_id', 'N/A') if debug_info else 'N/A'}\n"
-                f"  Substitution ID: {debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'}"
+                f"  Substitution ID: {debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'}\n"
+                f"  For position-to-position substitution, sequences must be equal length."
             )
 
-        # Place replacement characters at the correct template indices
-        for i, idx in enumerate(indices):
-            if idx < 0 or idx >= template_len:
-                raise ValueError(f"Index {idx} out of range for template of length {template_len}")
-            masked_replacement[idx] = replacement[i]
+        # Get list of 1-indexed positions to substitute
+        positions = sele_to_list(pos_range)
+
+        # Build a mask showing what will be replaced (for debug output)
+        mask = ['-'] * template_len
 
         sub_id = debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'
         print(f"\n  Substitution {sub_idx + 1}: '{pos_range}'")
         print(f"    Substitution source ID: {sub_id}")
-        print(f"    PDB positions: {positions[0]}-{positions[-1]} ({len(positions)} residues)")
-        print(f"    Template indices: {indices[0]}-{indices[-1]} ({len(indices)} positions)")
-        print(f"    Replacement length: {len(replacement)}")
+        print(f"    Positions to replace: {len(positions)} residues")
+
+        # Apply: for each position, copy from replacement_seq to result
+        for pos in positions:
+            idx = pos - 1  # Convert 1-indexed to 0-indexed
+            if idx < 0 or idx >= template_len:
+                raise ValueError(f"Position {pos} out of range for sequence of length {template_len}")
+            mask[idx] = replacement_seq[idx]
+            result[idx] = replacement_seq[idx]
 
         # Show alignment around the substitution region with context
-        context = 10
-        start_idx = max(0, indices[0] - context)
-        end_idx = min(template_len, indices[-1] + context + 1)
+        if positions:
+            first_idx = min(positions) - 1
+            last_idx = max(positions) - 1
+            context = 10
+            start_idx = max(0, first_idx - context)
+            end_idx = min(template_len, last_idx + context + 1)
 
-        template_slice = template[start_idx:end_idx]
-        masked_slice = ''.join(masked_replacement[start_idx:end_idx])
+            template_slice = template[start_idx:end_idx]
+            mask_slice = ''.join(mask[start_idx:end_idx])
 
-        # Create match line
-        match_line = ''.join(
-            '|' if masked_replacement[i] != '-' and template[i] == masked_replacement[i] else
-            '*' if masked_replacement[i] != '-' else ' '
-            for i in range(start_idx, end_idx)
-        )
+            # Create match line
+            match_line = ''.join(
+                '|' if mask[i] != '-' and template[i] == mask[i] else
+                '*' if mask[i] != '-' else ' '
+                for i in range(start_idx, end_idx)
+            )
 
-        print(f"\n    Alignment (positions {start_idx}-{end_idx-1}, 0-indexed):")
-        print(f"    Template:    {template_slice}")
-        print(f"    Match:       {match_line}")
-        print(f"    Replacement: {masked_slice}")
+            print(f"\n    Alignment (positions {start_idx + 1}-{end_idx}, 1-indexed):")
+            print(f"    Template:     {template_slice}")
+            print(f"    Match:        {match_line}")
+            print(f"    Substitution: {mask_slice}")
 
-        # Apply substitution: replace template positions with non-'-' characters from masked sequence
-        for idx in indices:
-            result[idx] = masked_replacement[idx]
-
-    print(f"\n  Final stitched sequence length: {len(result)}")
+    print(f"\n  Result length after substitutions: {len(result)}")
     print(f"{'='*80}\n")
 
     return ''.join(result)
+
+
+def apply_indels(template: str, indels: Dict[str, str],
+                 debug_info: Dict[str, Any] = None) -> str:
+    """
+    Apply segment replacements (insertions/deletions) to a sequence.
+
+    Each contiguous segment in the selection is replaced with the given sequence.
+    For example, "6-7+9-10+17-18": "GP" replaces segments 6-7, 9-10, and 17-18 each with "GP".
+
+    Indels are processed from end to start to preserve position indices.
+
+    Args:
+        template: Base sequence string
+        indels: Dict mapping position ranges to replacement sequences.
+                Each contiguous segment is replaced with the full replacement.
+        debug_info: Optional dict with IDs for debug output.
+
+    Returns:
+        New sequence with indels applied
+    """
+    result = template
+
+    if debug_info:
+        print(f"\n{'='*80}")
+        print(f"INDELS: {debug_info.get('template_id', 'unknown')}")
+        print(f"  Template ID: {debug_info.get('template_id', 'N/A')}")
+        print(f"  Initial length: {len(template)}")
+        print(f"{'='*80}")
+
+    for indel_idx, (pos_range, replacement) in enumerate(indels.items()):
+        segments = sele_to_segments(pos_range)
+
+        indel_id = debug_info.get(f'indel_{indel_idx}_id', 'N/A') if debug_info else 'N/A'
+        print(f"\n  Indel {indel_idx + 1}: '{pos_range}'")
+        print(f"    Indel source ID: {indel_id}")
+        print(f"    Replacement sequence: '{replacement}' ({len(replacement)} chars)")
+        print(f"    Segments to replace: {segments}")
+
+        # Process segments from end to start to preserve indices
+        for start, end in sorted(segments, reverse=True):
+            start_idx = start - 1  # Convert to 0-indexed
+            end_idx = end          # end is inclusive, so end_idx = end for slicing
+
+            old_segment = result[start_idx:end_idx]
+            result = result[:start_idx] + replacement + result[end_idx:]
+
+            print(f"      Replaced [{start}-{end}] '{old_segment}' -> '{replacement}'")
+
+    print(f"\n  Result length after indels: {len(result)}")
+    print(f"{'='*80}\n")
+
+    return result
 
 
 def load_sequences_from_csv(csv_path: str) -> Dict[str, str]:
@@ -263,47 +285,6 @@ def load_sequences_from_info(info: Dict[str, Any]) -> Dict[str, str]:
         raise ValueError(f"Unknown source type: {source_type}")
 
 
-def load_residue_mapping_from_info(info: Dict[str, Any]) -> Dict[str, Dict[int, int]]:
-    """
-    Load residue mappings from template info if structure files are available.
-
-    Args:
-        info: Template info dictionary
-
-    Returns:
-        Dict mapping sequence ID to residue mapping (PDB res num -> string index).
-        Empty dict if no structure files available.
-    """
-    if info.get("type") != "tool_output":
-        return {}
-
-    structure_files = info.get("structure_files", [])
-    structure_ids = info.get("structure_ids", [])
-
-    if not structure_files:
-        return {}
-
-    mappings = {}
-    for i, struct_file in enumerate(structure_files):
-        if not os.path.exists(struct_file):
-            print(f"  Warning: Structure file not found: {struct_file}")
-            continue
-
-        # Get ID for this structure
-        struct_id = structure_ids[i] if i < len(structure_ids) else f"struct_{i+1}"
-
-        try:
-            mapping = build_residue_mapping(struct_file)
-            mappings[struct_id] = mapping
-            first_res = min(mapping.keys())
-            last_res = max(mapping.keys())
-            print(f"  Built residue mapping for {struct_id}: residues {first_res}-{last_res} -> indices 0-{len(mapping)-1}")
-        except Exception as e:
-            print(f"  Warning: Could not build residue mapping for {struct_file}: {e}")
-
-    return mappings
-
-
 def extract_base_id(seq_id: str) -> str:
     """Extract base ID by stripping trailing _N suffix."""
     match = re.match(r'^(.+)_\d+$', seq_id)
@@ -325,20 +306,13 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
     """Stitch sequences based on configuration."""
     template_info = config_data['template']
     substitutions_info = config_data.get('substitutions', {})
+    indels_info = config_data.get('indels', {})
     id_map = config_data.get('id_map', {"*": "*_<N>"})
     output_csv = config_data['output_csv']
 
     print("Loading template sequences...")
     template_sequences = load_sequences_from_info(template_info)
     print(f"  Loaded {len(template_sequences)} template sequences")
-
-    # Load residue mappings if structure files are available
-    print("Loading residue mappings from structure files...")
-    residue_mappings = load_residue_mapping_from_info(template_info)
-    if residue_mappings:
-        print(f"  Loaded residue mappings for {len(residue_mappings)} structures")
-    else:
-        print("  No structure files available, using 1-indexed positions")
 
     # Load substitution options and positions for each region
     print(f"\nLoading substitutions for {len(substitutions_info)} regions...")
@@ -357,23 +331,48 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
             'sequences': sequences
         })
 
+    # Load indel options and positions for each region
+    print(f"\nLoading indels for {len(indels_info)} regions...")
+    indels = []
+    for key_str, indel_info in indels_info.items():
+        pos_key_info = indel_info['position_key']
+        seq_info = indel_info['sequences']
+
+        # Load sequences for this indel
+        sequences = load_sequences_from_info(seq_info)
+        print(f"  {key_str}: {len(sequences)} sequence options")
+
+        indels.append({
+            'key_str': key_str,
+            'position_key': pos_key_info,
+            'sequences': sequences
+        })
+
     # Determine stitching strategy
-    template_is_raw = template_info.get("type") in ("raw", "raw_list")
     all_positions_fixed = all(
         sub['position_key']['type'] == 'fixed'
         for sub in substitutions
-    )
+    ) if substitutions else True
     all_subs_raw = all(
         sub_info['sequences'].get("type") in ("raw", "raw_list")
         for sub_info in substitutions_info.values()
-    )
+    ) if substitutions_info else True
 
-    if all_positions_fixed and all_subs_raw:
-        # Raw substitutions with fixed positions - apply to all templates
-        results = stitch_with_raw_substitutions(template_sequences, substitutions, residue_mappings)
+    all_indel_positions_fixed = all(
+        indel['position_key']['type'] == 'fixed'
+        for indel in indels
+    ) if indels else True
+    all_indels_raw = all(
+        indel_info['sequences'].get("type") in ("raw", "raw_list")
+        for indel_info in indels_info.values()
+    ) if indels_info else True
+
+    if all_positions_fixed and all_subs_raw and all_indel_positions_fixed and all_indels_raw:
+        # Raw substitutions/indels with fixed positions - apply to all templates
+        results = stitch_with_raw_operations(template_sequences, substitutions, indels)
     else:
         # Complex case: match sequences by base ID
-        results = stitch_matched_sequences(template_sequences, substitutions, id_map, residue_mappings)
+        results = stitch_matched_sequences(template_sequences, substitutions, indels, id_map)
 
     # Save results
     if results:
@@ -393,54 +392,76 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         raise ValueError("No stitched sequences generated")
 
 
-def stitch_with_raw_substitutions(
+def stitch_with_raw_operations(
     template_sequences: Dict[str, str],
     substitutions: List[Dict],
-    residue_mappings: Dict[str, Dict[int, int]] = None
+    indels: List[Dict]
 ) -> List[Dict[str, Any]]:
-    """Stitch templates with raw substitutions at fixed positions using Cartesian product."""
+    """Stitch templates with raw substitutions and indels at fixed positions using Cartesian product."""
     results = []
-    residue_mappings = residue_mappings or {}
 
-    # Build option lists for Cartesian product (just the sequences, ignore their IDs)
-    option_lists = []
-    option_ids = []
-    pos_ranges = []
+    # Build option lists for substitutions
+    sub_option_lists = []
+    sub_option_ids = []
+    sub_pos_ranges = []
     for sub in substitutions:
-        pos_ranges.append(sub['position_key']['positions'])
-        # Store both sequences and their IDs for debug output
+        sub_pos_ranges.append(sub['position_key']['positions'])
         seq_items = list(sub['sequences'].items())
-        option_ids.append([item[0] for item in seq_items])
-        option_lists.append([item[1] for item in seq_items])
+        sub_option_ids.append([item[0] for item in seq_items])
+        sub_option_lists.append([item[1] for item in seq_items])
+
+    # Build option lists for indels
+    indel_option_lists = []
+    indel_option_ids = []
+    indel_pos_ranges = []
+    for indel in indels:
+        indel_pos_ranges.append(indel['position_key']['positions'])
+        seq_items = list(indel['sequences'].items())
+        indel_option_ids.append([item[0] for item in seq_items])
+        indel_option_lists.append([item[1] for item in seq_items])
 
     for template_id, template_seq in template_sequences.items():
-        if not option_lists:
-            results.append({'id': template_id, 'sequence': template_seq})
-            continue
-
-        # Get base ID from template
         base_id = extract_base_id(template_id)
 
-        # Get residue mapping for this template (try exact match, then base_id)
-        residue_mapping = residue_mappings.get(template_id) or residue_mappings.get(base_id)
+        # Generate index ranges for substitutions and indels
+        sub_index_ranges = [range(1, len(opts) + 1) for opts in sub_option_lists] if sub_option_lists else [range(1, 2)]
+        indel_index_ranges = [range(1, len(opts) + 1) for opts in indel_option_lists] if indel_option_lists else [range(1, 2)]
 
-        # Generate index ranges for each substitution (1-indexed)
-        index_ranges = [range(1, len(opts) + 1) for opts in option_lists]
+        # Combine all index ranges for Cartesian product
+        all_index_ranges = sub_index_ranges + indel_index_ranges
 
-        for index_combo in product(*index_ranges):
-            # Build substitutions using the indices
-            subs = {}
+        for index_combo in product(*all_index_ranges):
+            sub_indices = index_combo[:len(sub_option_lists)] if sub_option_lists else ()
+            indel_indices = index_combo[len(sub_option_lists):] if indel_option_lists else ()
+
+            current_seq = template_seq
             debug_info = {'template_id': template_id}
-            for i, idx in enumerate(index_combo):
-                subs[pos_ranges[i]] = option_lists[i][idx - 1]  # Convert to 0-indexed for list access
-                debug_info[f'sub_{i}_id'] = option_ids[i][idx - 1]
-                debug_info[f'sub_{i}_positions'] = pos_ranges[i]
 
-            stitched = substitute_segments(template_seq, subs, residue_mapping, debug_info=debug_info)
-            # Format: <basename>_<A>_<B>_... where A, B are indices per substitution
-            suffix = "_".join(str(idx) for idx in index_combo)
-            output_id = f"{base_id}_{suffix}"
-            results.append({'id': output_id, 'sequence': stitched})
+            # Apply substitutions first (position-to-position, same length)
+            if sub_option_lists:
+                subs = {}
+                for i, idx in enumerate(sub_indices):
+                    subs[sub_pos_ranges[i]] = sub_option_lists[i][idx - 1]
+                    debug_info[f'sub_{i}_id'] = sub_option_ids[i][idx - 1]
+                current_seq = apply_substitutions(current_seq, subs, debug_info=debug_info)
+
+            # Apply indels second (segment replacement, can change length)
+            if indel_option_lists:
+                indel_ops = {}
+                for i, idx in enumerate(indel_indices):
+                    indel_ops[indel_pos_ranges[i]] = indel_option_lists[i][idx - 1]
+                    debug_info[f'indel_{i}_id'] = indel_option_ids[i][idx - 1]
+                current_seq = apply_indels(current_seq, indel_ops, debug_info=debug_info)
+
+            # Build output ID suffix
+            all_indices = list(sub_indices) + list(indel_indices)
+            if all_indices:
+                suffix = "_".join(str(idx) for idx in all_indices)
+                output_id = f"{base_id}_{suffix}"
+            else:
+                output_id = template_id
+
+            results.append({'id': output_id, 'sequence': current_seq})
 
     print(f"\nGenerated {len(results)} stitched sequences")
     return results
@@ -449,41 +470,50 @@ def stitch_with_raw_substitutions(
 def stitch_matched_sequences(
     template_sequences: Dict[str, str],
     substitutions: List[Dict],
-    id_map: Dict[str, str],
-    residue_mappings: Dict[str, Dict[int, int]] = None
+    indels: List[Dict],
+    id_map: Dict[str, str]
 ) -> List[Dict[str, Any]]:
     """Stitch sequences by matching base IDs, with support for table-based positions."""
     results = []
-    residue_mappings = residue_mappings or {}
 
     # Group templates by base ID
     template_grouped = group_by_base_id(template_sequences)
 
     # Group substitution sequences by base ID and load table positions if needed
     sub_grouped = []
-    position_maps = []
+    sub_position_maps = []
     for sub in substitutions:
         grouped = group_by_base_id(sub['sequences'])
         sub_grouped.append(grouped)
 
-        # Load position map for table-based positions
         pos_key = sub['position_key']
         if pos_key['type'] == 'table':
             pos_map = load_positions_from_table(pos_key['table_path'], pos_key['column'])
-            print(f"  Loaded positions from table for {len(pos_map)} structures")
+            print(f"  Loaded substitution positions from table for {len(pos_map)} structures")
         else:
-            # Fixed positions - same for all
             pos_map = None
-        position_maps.append((pos_key, pos_map))
+        sub_position_maps.append((pos_key, pos_map))
+
+    # Group indel sequences by base ID and load table positions if needed
+    indel_grouped = []
+    indel_position_maps = []
+    for indel in indels:
+        grouped = group_by_base_id(indel['sequences'])
+        indel_grouped.append(grouped)
+
+        pos_key = indel['position_key']
+        if pos_key['type'] == 'table':
+            pos_map = load_positions_from_table(pos_key['table_path'], pos_key['column'])
+            print(f"  Loaded indel positions from table for {len(pos_map)} structures")
+        else:
+            pos_map = None
+        indel_position_maps.append((pos_key, pos_map))
 
     print(f"\nProcessing {len(template_grouped)} base structure IDs...")
 
     for base_id in sorted(template_grouped.keys()):
         template_seqs = template_grouped[base_id]
         print(f"\n  Base ID: {base_id} ({len(template_seqs)} template sequences)")
-
-        # Get residue mapping for this base ID
-        residue_mapping = residue_mappings.get(base_id)
 
         # Check if all substitutions have sequences for this base ID
         sub_seqs_for_base = []
@@ -499,41 +529,65 @@ def stitch_matched_sequences(
         if skip:
             continue
 
-        # Get positions for this base ID
-        positions_for_base = []
-        for pos_key, pos_map in position_maps:
-            if pos_key['type'] == 'fixed':
-                positions_for_base.append(pos_key['positions'])
+        # Check if all indels have sequences for this base ID
+        indel_seqs_for_base = []
+        for i, grouped in enumerate(indel_grouped):
+            if base_id in grouped:
+                indel_seqs_for_base.append(grouped[base_id])
             else:
-                # Table-based: look up by base_id
+                print(f"    Skipping: no sequences in indel {i}")
+                skip = True
+                break
+
+        if skip:
+            continue
+
+        # Get substitution positions for this base ID
+        sub_positions_for_base = []
+        for pos_key, pos_map in sub_position_maps:
+            if pos_key['type'] == 'fixed':
+                sub_positions_for_base.append(pos_key['positions'])
+            else:
                 if base_id in pos_map:
-                    positions_for_base.append(pos_map[base_id])
+                    sub_positions_for_base.append(pos_map[base_id])
                 else:
-                    print(f"    Skipping: no position data for {base_id}")
+                    print(f"    Skipping: no substitution position data for {base_id}")
                     skip = True
                     break
 
         if skip:
             continue
 
-        # Match sequences by ID: extract suffix from template_id and find matching substitution sequences
+        # Get indel positions for this base ID
+        indel_positions_for_base = []
+        for pos_key, pos_map in indel_position_maps:
+            if pos_key['type'] == 'fixed':
+                indel_positions_for_base.append(pos_key['positions'])
+            else:
+                if base_id in pos_map:
+                    indel_positions_for_base.append(pos_map[base_id])
+                else:
+                    print(f"    Skipping: no indel position data for {base_id}")
+                    skip = True
+                    break
+
+        if skip:
+            continue
+
+        # Match sequences by ID
         combo_count = 0
         for template_id, template_seq in template_seqs.items():
-            # Extract the suffix from template_id (everything after base_id)
-            # Example: "Test_1_1" with base_id "Test_1" -> suffix "_1"
             if template_id.startswith(base_id + "_"):
-                suffix = template_id[len(base_id) + 1:]  # +1 to skip the underscore
+                suffix = template_id[len(base_id) + 1:]
             else:
-                # No suffix, skip this template
                 print(f"    Warning: template_id '{template_id}' doesn't match base_id '{base_id}'")
                 continue
 
-            # Try to find matching substitution sequences with the same suffix
+            # Find matching substitution sequences
             matched_subs = []
             matched_sub_ids = []
             all_found = True
             for sub_seqs in sub_seqs_for_base:
-                # Look for sequence with ID = base_id + "_" + suffix
                 target_id = f"{base_id}_{suffix}"
                 if target_id in sub_seqs:
                     matched_subs.append(sub_seqs[target_id])
@@ -546,17 +600,44 @@ def stitch_matched_sequences(
             if not all_found:
                 continue
 
-            # Apply substitutions
-            subs = {}
-            debug_info = {'template_id': template_id}
-            for i, sub_seq in enumerate(matched_subs):
-                subs[positions_for_base[i]] = sub_seq
-                debug_info[f'sub_{i}_id'] = matched_sub_ids[i]
-                debug_info[f'sub_{i}_positions'] = positions_for_base[i]
+            # Find matching indel sequences
+            matched_indels = []
+            matched_indel_ids = []
+            for indel_seqs in indel_seqs_for_base:
+                target_id = f"{base_id}_{suffix}"
+                if target_id in indel_seqs:
+                    matched_indels.append(indel_seqs[target_id])
+                    matched_indel_ids.append(target_id)
+                else:
+                    print(f"    Warning: no matching indel sequence for '{target_id}'")
+                    all_found = False
+                    break
 
-            stitched = substitute_segments(template_seq, subs, residue_mapping, debug_info=debug_info)
-            output_id = template_id
-            results.append({'id': output_id, 'sequence': stitched})
+            if not all_found:
+                continue
+
+            current_seq = template_seq
+            debug_info = {'template_id': template_id}
+
+            # Apply substitutions first
+            if matched_subs:
+                subs = {}
+                for i, sub_seq in enumerate(matched_subs):
+                    positions_str = sub_positions_for_base[i]
+                    subs[positions_str] = sub_seq
+                    debug_info[f'sub_{i}_id'] = matched_sub_ids[i]
+                current_seq = apply_substitutions(current_seq, subs, debug_info=debug_info)
+
+            # Apply indels second
+            if matched_indels:
+                indel_ops = {}
+                for i, indel_seq in enumerate(matched_indels):
+                    positions_str = indel_positions_for_base[i]
+                    indel_ops[positions_str] = indel_seq
+                    debug_info[f'indel_{i}_id'] = matched_indel_ids[i]
+                current_seq = apply_indels(current_seq, indel_ops, debug_info=debug_info)
+
+            results.append({'id': template_id, 'sequence': current_seq})
             combo_count += 1
 
         print(f"    Generated {combo_count} combinations")

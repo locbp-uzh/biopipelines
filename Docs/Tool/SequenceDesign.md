@@ -237,22 +237,32 @@ fused = Fuse(
 
 ### StitchSequences
 
-Combines a template sequence with substitutions at specific regions, generating all Cartesian product combinations. Supports both raw sequences and ToolOutput objects, with fixed or table-based position specifications.
+Combines a template sequence with two types of modifications: **substitutions** (position-to-position copying from equal-length sequences) and **indels** (segment replacement that can change sequence length). Generates all Cartesian product combinations.
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
 - `template`: Union[str, ToolOutput, StandardizedOutput] - Base sequence (raw string or tool output). Optional if using concatenation mode.
-- `substitutions`: Dict[str, Union[List[str], ToolOutput]] = None - Position ranges mapped to replacement options:
-  - Keys: Position strings like `"11-19"` or `"10-20+30-40"`, table references, or integers for concatenation mode
-  - Values: List of raw sequences or ToolOutput with sequences
+- `substitutions`: Dict[str, Union[List[str], ToolOutput]] = None - Position-to-position substitutions from equal-length sequences. For each position in the selection, the residue at that position in the substitution sequence replaces the residue at that position in the template.
+  - Keys: Position strings like `"11-19"` or `"11-19+31-44"`, or table references
+  - Values: ToolOutput with sequences (must be same length as template)
+- `indels`: Dict[str, Union[List[str], ToolOutput]] = None - Segment replacements where each contiguous segment is replaced with the given sequence. Can change sequence length.
+  - Keys: Position strings like `"50-55"` or `"6-7+9-10+17-18"`, or integers for concatenation mode
+  - Values: List of raw sequences (each segment replaced with full sequence)
 - `id_map`: Dict[str, str] = {"*": "*_<N>"} - ID mapping pattern for matching sequences
 
 **Position Syntax**:
 - `"10-20"` → positions 10 to 20 (inclusive, 1-indexed)
 - `"10-20+30-40"` → positions 10-20 and 30-40
+- `"145+147+150"` → specific positions 145, 147, and 150
 
-**Concatenation Mode**: When `template` is omitted and keys are integers (1, 2, 3...), sequences are concatenated in order. Each key represents a segment position, and all combinations are generated.
+**Processing Order**:
+1. Substitutions are applied first (position-to-position, same length)
+2. Indels are applied second (segment replacement, can change length)
+
+**Indel Segment Behavior**: For discontinuous selections like `"6-7+9-10+17-18"`, each contiguous segment is replaced with the full replacement sequence. So `"6-7+9-10": "GP"` replaces segment 6-7 with "GP" AND segment 9-10 with "GP".
+
+**Concatenation Mode**: When `template` is omitted and `indels` keys are integers (1, 2, 3...), sequences are concatenated in order.
 
 **Outputs**:
 - `sequences`: CSV file with stitched sequences
@@ -265,15 +275,44 @@ Combines a template sequence with substitutions at specific regions, generating 
 ```python
 from PipelineScripts.stitch_sequences import StitchSequences
 
-# Raw sequences with fixed positions
+# Position-to-position substitution from ToolOutput
+# Both template and substitution sequences are 180 residues
 stitched = StitchSequences(
-    template="MKTAYIAKQRQISFVKSHFS...",
+    template=pmpnn,
     substitutions={
-        "11-19": ["AAAAAAAA", "BBBBBBBB", "CCCCCCCC"],
-        "31-44": ["DDDDDDDDDDDDDD", "EEEEEEEEEEEEEE"]
+        "11-19+31-44": lmpnn  # Copy residues at these positions from lmpnn
     }
 )
-# Output: 3 × 2 = 6 combinations
+
+# Segment replacement with indels
+stitched = StitchSequences(
+    template="MKTAYIAKQRQISFVKSHFS...",
+    indels={
+        "11-15": ["AAAAA", "GGGGG"],  # Replace segment with 5-char options
+        "20-22": ["XX", "YYY", "ZZZZ"]  # Can change length
+    }
+)
+# Output: 2 × 3 = 6 combinations
+
+# Combined: substitutions then indels
+stitched = StitchSequences(
+    template=pmpnn,
+    substitutions={
+        "6-12+19+21": lmpnn  # Position-to-position from lmpnn
+    },
+    indels={
+        "50-55": ["LINKER", "GGG"]  # Replace segment 50-55
+    }
+)
+
+# Discontinuous indel: replace multiple segments with same sequence
+stitched = StitchSequences(
+    template="ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    indels={
+        "3-4+7-8+11-12": ["XX", "YY"]  # Each segment replaced with "XX" or "YY"
+    }
+)
+# "3-4+7-8+11-12": "XX" -> "ABXXEFXXIJXXMNOPQRSTUVWXYZ"
 
 # ToolOutput with table-based positions
 stitched = StitchSequences(
@@ -283,9 +322,9 @@ stitched = StitchSequences(
     }
 )
 
-# Concatenation mode (no template, integer keys)
+# Concatenation mode (no template, integer keys in indels)
 stitched = StitchSequences(
-    substitutions={
+    indels={
         1: ["AAAA", "BBBB"],         # First segment
         2: ["CCCC"],                 # Second segment
         3: ["DDDD", "EEEE", "FFFF"]  # Third segment
