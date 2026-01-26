@@ -107,18 +107,16 @@ def apply_substitutions(template: str, substitutions: Dict[str, str],
         print(f"{'='*80}")
 
     for sub_idx, (pos_range, replacement_seq) in enumerate(substitutions.items()):
-        # Validate equal length
+        # Warn if lengths mismatch
         if len(replacement_seq) != template_len:
             position_table_key = debug_info.get(f'sub_{sub_idx}_position_table_key') if debug_info else None
-            raise ValueError(
-                f"Substitution sequence length mismatch:\n"
-                f"  Template length: {template_len}\n"
-                f"  Substitution sequence length: {len(replacement_seq)}\n"
-                f"  Template ID: {debug_info.get('template_id', 'N/A') if debug_info else 'N/A'}\n"
-                f"  Substitution ID: {debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'}\n"
-                f"  Position table key: {position_table_key if position_table_key else 'N/A'}\n"
-                f"  For position-to-position substitution, sequences must be equal length."
-            )
+            print(f"  WARNING: Substitution sequence length mismatch:")
+            print(f"    Template length: {template_len}")
+            print(f"    Substitution sequence length: {len(replacement_seq)}")
+            print(f"    Template ID: {debug_info.get('template_id', 'N/A') if debug_info else 'N/A'}")
+            print(f"    Substitution ID: {debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'}")
+            print(f"    Position table key: {position_table_key if position_table_key else 'N/A'}")
+            print(f"    Proceeding with available positions...")
 
         # Get list of 1-indexed positions to substitute
         positions = sele_to_list(pos_range)
@@ -135,10 +133,15 @@ def apply_substitutions(template: str, substitutions: Dict[str, str],
         print(f"    Positions to replace: {len(positions)} residues")
 
         # Apply: for each position, copy from replacement_seq to result
+        replacement_len = len(replacement_seq)
         for pos in positions:
             idx = pos - 1  # Convert 1-indexed to 0-indexed
             if idx < 0 or idx >= template_len:
-                raise ValueError(f"Position {pos} out of range for sequence of length {template_len}")
+                print(f"    WARNING: Position {pos} out of range for template of length {template_len}, skipping")
+                continue
+            if idx >= replacement_len:
+                print(f"    WARNING: Position {pos} out of range for substitution sequence of length {replacement_len}, skipping")
+                continue
             mask[idx] = replacement_seq[idx]
             result[idx] = replacement_seq[idx]
 
