@@ -34,6 +34,8 @@ from .pymol import PyMOL
 from .fuse import Fuse
 from .plot import Plot
 from .ghostfold import GhostFold
+from .mmseqs2 import MMseqs2, MMseqs2Server
+from .mmseqs2_lcf import MMseqs2LCF, MMseqs2ServerLCF
 from .converters import *
 
 __all__ = [
@@ -73,6 +75,10 @@ __all__ = [
     'Fuse',
     'Plot',
     'GhostFold',
+    'MMseqs2',
+    'MMseqs2Server',
+    'MMseqs2LCF',
+    'MMseqs2ServerLCF',
 
     # Utility functions
     'pdb_to_jsonl',

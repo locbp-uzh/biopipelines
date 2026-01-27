@@ -100,7 +100,8 @@ class FolderManager:
             "GhostFold": os.path.join(self._folders["data"], tool_data_config.get('GhostFold', 'ghostfold')),
             "ESMFold": os.path.join(self._folders["data"], tool_data_config.get('ESMFold', 'esmfold')),
             "BioPipelines": os.path.join(self._folders["user"], "BioPipelines"),
-            "MMseqs2Server": os.path.join(self._folders["user"], "BioPipelines", "MMseqs2Server")})
+            "MMseqs2Server": os.path.join(self._folders["user"], "BioPipelines", "MMseqs2Server"),
+            "MMseqs2LCFServer": os.path.join(self._folders["user"], "BioPipelines", "MMseqs2LCFServer")})
         self._folders.update({
             "project": os.path.join(self._folders["BioPipelines"],project) if not debug else "Debug"})
 

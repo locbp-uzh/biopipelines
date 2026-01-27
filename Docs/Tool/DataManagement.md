@@ -329,3 +329,67 @@ averaged = AverageByTable(
 ```
 
 ---
+
+
+### SelectionEditor
+
+Modifies PyMOL-formatted selection strings (e.g., "3-45+58-60") with structure-aware operations. Validates all operations against actual PDB residue numbering and automatically merges overlapping/adjacent ranges.
+
+**Installation**: Requires an environment containing pandas (e.g. biopipelines).
+
+**Parameters**:
+- `selection`: tuple (required) - Table column reference (e.g., `tool.tables.structures.designed`)
+- `structures`: Optional[Union[ToolOutput, List[str]]] = None - Input structures (auto-detected from selection source if not provided)
+- `expand`: int = 0 - Number of residues to add on each side of intervals
+- `shrink`: int = 0 - Number of residues to remove from each side of intervals
+- `shift`: int = 0 - Number of residues to shift all intervals (+/-)
+- `invert`: bool = False - Whether to invert the selection (select complement)
+
+**Outputs**:
+- `tables.selections`:
+
+  | id | pdb | {column_name} | original_{column_name} |
+  |----|-----|---------------|------------------------|
+
+**Example**:
+```python
+from PipelineScripts.selection_editor import SelectionEditor
+from PipelineScripts.distance_selector import DistanceSelector
+from PipelineScripts.ligand_mpnn import LigandMPNN
+
+# Expand binding site selection by 2 residues
+distances = DistanceSelector(
+    structures=rfdaa,
+    ligand="LIG",
+    distance=5
+)
+
+expanded = SelectionEditor(
+    selection=distances.tables.selections.within,
+    expand=2
+)
+
+# Use expanded selection with LigandMPNN
+lmpnn = LigandMPNN(
+    structures=rfdaa,
+    ligand="LIG",
+    redesigned=expanded.tables.selections.within
+)
+
+# Invert selection to get everything except binding site
+fixed_region = SelectionEditor(
+    selection=distances.tables.selections.within,
+    invert=True
+)
+
+# Shrink selection
+tighter = SelectionEditor(
+    selection=distances.tables.selections.within,
+    shrink=1
+)
+```
+
+**Key Features**:
+- **Structure-aware**: Validates against actual PDB residue numbers (handles gaps, non-sequential numbering)
+- **Range merging**: Automatically merges overlapping/adjacent intervals (e.g., "1-4+6-10" with expand=1 becomes "1-11")
+- **Auto-detection**: Structures parameter is optional; can auto-detect from selection source

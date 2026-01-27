@@ -339,7 +339,7 @@ stitched = StitchSequences(
 
 Splits concatenated single-chain sequences into multi-chain sequences. Takes sequences where multiple protein chains have been fused into a single sequence and separates them into individual chains based on specified split positions. Useful for preparing multi-chain inputs for structure prediction tools.
 
-**Environment**: None (pure Python)
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `sequences`: Union[ToolOutput, StandardizedOutput] (required) - Input sequences containing concatenated chains

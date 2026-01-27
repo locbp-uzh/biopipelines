@@ -46,7 +46,6 @@ Tools for analyzing structures, interactions, and mutations.
 - [ResidueAtomDistance](Tool/Analysis.md#residueatomdistance) - Distance measurements
 - [PLIP (Protein-Ligand Interaction Profiler)](Tool/Analysis.md#plip-protein-ligand-interaction-profiler) - Interaction analysis (under development)
 - [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based residue selection
-- [SelectionEditor](Tool/Analysis.md#selectioneditor) - Selection string manipulation
 - [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural change quantification
 - [MutationProfiler](Tool/Analysis.md#mutationprofiler) - Mutation pattern analysis
 - [SequenceMetricCorrelation](Tool/Analysis.md#sequencemetriccorrelation) - Mutation-metric correlations
@@ -68,6 +67,7 @@ Tools for filtering, ranking, and manipulating data tables.
 - [SliceTable](Tool/DataManagement.md#slicetable) - Row/column extraction
 - [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric aggregation
 - [AverageByTable](Tool/DataManagement.md#averagebytable) - Grouped averaging
+- [SelectionEditor](Tool/Analysis.md#selectioneditor) - Selection string manipulation
 
 ### [Utilities](Tool/Utilities.md)
 

@@ -28,64 +28,73 @@ folders:
     containers: "containers"
     BoltzCache: "models/Boltz"
     BoltzGenCache: "models/BoltzGen"
+    ColabFoldDatabases: "models/colabfold_databases"
 
 # Default Environments
 # Each tool can have a default conda environment specified here
 # If no specific model is used, the default is biopipelines containing pyyaml and pandas (it is automatically created when submitting via submit)
 # If the tool itsef manages the change to an environment (e.g. when it needs more than one environment), set it to null
 environments:
-  # Structure prediction and design tools
-  Boltz2: "Boltz2Env"
-  BoltzGen: "boltzgen"
-  BoltzGenMerge: "boltzgen"
-  BoltzGenImport: "boltzgen"
-  RF3: "modelforge"
-  ESMFold: "esmfold"
+  # Structure generation
   RFdiffusion: "ProteinEnv"
   RFdiffusionAllAtom: "ProteinEnv"
   RFdiffusion3: "foundry"
+  BoltzGen: "boltzgen"
+  BoltzGenMerge: "boltzgen"
+  BoltzGenImport: "boltzgen"
+
+  # Sequence design
   ProteinMPNN: "ProteinEnv"
   LigandMPNN: "ligandmpnn_env"
+  MutationComposer: "MutationEnv"
+  SDM: "MutationEnv"
+  Fuse: "biopipelines"
+  StitchSequences: "biopipelines"
+  SplitChains: "biopipelines"
+  DNAEncoder: "biopipelines"
+
+  # Structure prediction
   AlphaFold: "biopipelines"
   GhostFold: "ghostfold"
-
-  # Analysis and utility tools
-  MMseqs2: "biopipelines"
-  PLIP: "biopipelines"
-  PyMOL: "ProteinEnv"
+  ESMFold: "esmfold"
+  Boltz2: "Boltz2Env"
+  RF3: "modelforge"
   OnionNet: "OnionNetEnv"
   OnionNet2: "OnionNet2Env"
-  DynamicBind: null
 
-  # Data manipulation tools
+  # Analysis 
+  DynamicBind: "biopipelines"
+  ResidueAtomDistance: "biopipelines"
+  PLIP: "biopipelines"
+  DistanceSelector: "biopipelines"
+  ConformationalChange: "ProteinEnv"
+  MutationProfiler: "MutationEnv"
+  SequenceMetricCorrelation: "MutationEnv"
+  BayesianAdjuster: "MutationEnv"
+  SequenceMetricAnalysis: "MutationEnv"
+  ProteinLigandContacts: "ProteinEnv"
+  PoseDistance: "ProteinEnv"
+
+  # Data management
   Filter: "biopipelines"
   Rank: "biopipelines"
   SelectBest: "biopipelines"
+  RemoveDuplicates: "biopipelines"
   MergeTables: "biopipelines"
   ConcatenateTables: "biopipelines"
-  RemoveDuplicates: "biopipelines"
   SliceTable: "biopipelines"
-  AverageByTable: "biopipelines"
   ExtractMetrics: "biopipelines"
+  AverageByTable: "biopipelines"
+  SelectinEditor: "ProteinEnv"
+
+  # Utilities
   LoadOutput: "biopipelines"
-
-  # Mutation and design tools
-  MutationComposer: "MutationEnv"
-  MutationProfiler: "MutationEnv"
-  SequenceMetricCorrelation: "MutationEnv"
-  SiteDirectedMutagenesis: "MutationEnv"
-  StitchSequences: "biopipelines"
-  Fuse: "biopipelines"
-
-  # Analysis tools
-  ProteinLigandContacts: "ProteinEnv"
-  ResidueAtomDistance: "biopipelines"
-  DistanceSelector: "biopipelines"
-  ConformationalChange: "ProteinEnv"
-  Confidence: "biopipelines"
-
-  # Library and compound tools
+  MMseqs2: "biopipelines"
+  MMseqs2Server: "biopipelines"
+  MMseqs2LCF: "biopipelines"
+  MMseqs2ServerLCF: "biopipelines"
   CompoundLibrary: "biopipelines"
   PDB: "biopipelines"
   Ligand: "biopipelines"
-  DNAEncoder: "biopipelines"
+  PyMOL: "ProteinEnv"
+  Plot: "biopipelines"
