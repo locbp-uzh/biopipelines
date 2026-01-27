@@ -96,6 +96,9 @@ class Pipeline:
         self.batch_start_indices = []  # Tool indices where each batch starts
         self.current_batch = -1  # Current batch index (-1 means no Resources() called yet)
 
+        # External job dependencies
+        self.external_dependencies = []  # List of external SLURM job IDs to depend on
+
         # Context manager state
         self._explicit_save_called = False  # Track if Save() was explicitly called
 
@@ -623,12 +626,19 @@ echo "GPU Type: $gpu_type"
             sbatch_lines.append(f"#SBATCH --{slurm_param}={value}")
         return "\n" + "\n".join(sbatch_lines)
 
+    def _generate_dependency_line(self, job_ids: List[str]) -> str:
+        """Generate SBATCH dependency line from list of job IDs."""
+        if not job_ids:
+            return ""
+        return f"\n#SBATCH --dependency=afterok:{':'.join(job_ids)}"
+
     def _generate_single_batch_slurm(self, email_line):
         """Generate single SLURM script for single batch pipeline."""
         resources = self.batch_resources[0]
         gpu_line = self._generate_gpu_line(resources["gpu"])
         gpu_setup = self._generate_gpu_setup(resources["gpu"])
         additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
+        dependency_line = self._generate_dependency_line(self.external_dependencies)
         module_load = "module load miniforge3 apptainer"
 
         slurm_content = f"""#!/usr/bin/bash
@@ -636,7 +646,7 @@ echo "GPU Type: $gpu_type"
 #SBATCH --mem={resources["memory"]}
 #SBATCH --time={resources["time"]}
 #SBATCH --output=job.out
-#SBATCH --begin=now+0hour{additional_sbatch_lines}
+#SBATCH --begin=now+0hour{additional_sbatch_lines}{dependency_line}
 {email_line}
 
 # Make all files group-writable by default
@@ -691,8 +701,13 @@ umask 002
             gpu_setup = self._generate_gpu_setup(resources["gpu"])
             additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
 
-            # Add dependency line for batch 2+
-            dependency_line = "\n#SBATCH --dependency=afterok:<JOBID>" if batch_idx > 0 else ""
+            # Add dependency line for batch 2+ (internal) and batch 1 (external)
+            if batch_idx > 0:
+                dependency_line = "\n#SBATCH --dependency=afterok:<JOBID>"
+            elif self.external_dependencies:
+                dependency_line = self._generate_dependency_line(self.external_dependencies)
+            else:
+                dependency_line = ""
 
             batch_slurm_content = f"""#!/usr/bin/bash
 {gpu_line}
@@ -819,6 +834,21 @@ umask 002
             script_lines.extend(["echo", "echo All jobs complete", f"echo Results in:", f"echo {self.folders['output']}"])
 
         return "\n".join(script_lines)
+
+    def set_dependencies(self, job_ids: Union[str, List[str]]):
+        """
+        Set external SLURM job dependencies.
+
+        The first batch of this pipeline will wait for these jobs to complete
+        successfully before starting.
+
+        Args:
+            job_ids: Single job ID string or list of job ID strings
+                    e.g., "12345678" or ["12345678", "12345679"]
+        """
+        if isinstance(job_ids, str):
+            job_ids = [job_ids]
+        self.external_dependencies.extend(job_ids)
 
     def resources(self, gpu: str = None, memory: str = None, time: str = None, **slurm_options):
         """
@@ -1162,3 +1192,40 @@ def Save():
     pipeline.save()
     # Mark that save was explicitly called to prevent auto-submit
     pipeline._explicit_save_called = True
+
+
+def Dependencies(job_ids: Union[str, List[str]]):
+    """
+    Set external SLURM job dependencies for the active pipeline.
+
+    The first batch of this pipeline will wait for the specified jobs to
+    complete successfully before starting.
+
+    Must be called within a Pipeline context manager.
+
+    Args:
+        job_ids: Single job ID string or list of job ID strings
+                e.g., "12345678" or ["12345678", "12345679"]
+
+    Example:
+        with Pipeline("Test", "Job", "Description"):
+            Dependencies("12345678")  # Wait for job 12345678
+            Resources(gpu="A100", memory="16GB", time="24:00:00")
+            tool1 = SomeTool(...)
+
+        # Or with multiple dependencies:
+        with Pipeline("Test", "Job", "Description"):
+            Dependencies(["12345678", "12345679"])
+            Resources(gpu="A100", memory="16GB", time="24:00:00")
+            tool1 = SomeTool(...)
+
+    Raises:
+        RuntimeError: If called outside a Pipeline context
+    """
+    pipeline = Pipeline.get_active_pipeline()
+    if pipeline is None:
+        raise RuntimeError(
+            "Dependencies() must be called within a Pipeline context. "
+            "Use: with Pipeline(...): Dependencies(...)"
+        )
+    pipeline.set_dependencies(job_ids)

@@ -246,6 +246,17 @@ for beta in [0, 1, 10, 100]:
 ```
 Running `./submit MyPipelines/beta_test.py` will then result in the submission of four jobs, *Rhodamine_Beta0*, *Rhodamine_Beta1*, *Rhodamine_Beta10*, *Rhodamine_Beta100*.
 
+**External dependencies**
+Use `Dependencies()` to make a pipeline wait for other SLURM jobs to complete before starting:
+
+```python
+with Pipeline("Project", "Job", "Description"):
+    Dependencies("12345678")                    # Single job ID
+    Dependencies(["12345678", "12345679"])      # Multiple job IDs
+    Resources(gpu="V100", time="4:00:00")
+    tool1 = RFdiffusion(...)
+```
+
 **Batch dependencies**
 Calling `Resources()` multiple times within a pipeline creates sequential batches with automatic dependency management. Each batch waits for the previous one to complete successfully before starting:
 

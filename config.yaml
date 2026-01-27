@@ -1,34 +1,64 @@
 # BioPipelines Configuration
 # This file defines folder paths and default environments for pipeline execution
 # Users can customize this file to match their local setup
+#
+# Placeholder syntax: <key> references another folder key
+# Resolution order: base -> infrastructure -> shared_overrides (if shared) -> tool_data -> cache -> derived -> server
+# Runtime placeholders: <user>, <cwd>, <shared_user> are injected at runtime
 
 # Folder Configuration
 folders:
-  # Base system folders
-  group: "/shares/locbp.chem.uzh"
+  # Base paths (resolved first)
+  # Runtime placeholders: <username>, <cwd>
+  # - <username>: actual username (e.g., gquarg)
+  # - <cwd>: current working directory
+  base:
+    group: "/shares/locbp.chem.uzh"
+    home: "/home/<username>"
+    data: "<home>/data"
+    scratch: "/scratch/<username>"
+    notebooks: "<cwd>"
+    user: "<group>/<username>"
 
-  # Tool-specific data folders (relative to /home/{username}/data)
+  # Infrastructure paths
+  infrastructure:
+    HelpScripts: "<notebooks>/HelpScripts"
+    MMseqs2: "<notebooks>/MMseqs2"
+    PDBs: "<notebooks>/PDBs"
+    Ligands: "<notebooks>/Ligands"
+    models: "<group>/models"
+    containers: "<group>/containers"
+
+  # Tool data paths
   tool_data:
-    RFdiffusion: "RFdiffusion"
-    RFdiffusionAllAtom: "rf_diffusion_all_atom"
-    RFdiffusion3: "rfdiffusion3"
-    ProteinMPNN: "ProteinMPNN"
-    AlphaFold: "localcolabfold"
-    OmegaFold: "OmegaFold"
-    Boltz: "boltz"
-    BoltzGen: "boltzgen"
-    GhostFold: "ghostfold"
-    ESMFold: "esmfold"
-    DynamicBind: "DynamicBind"
-    ModelForge: "modelforge"
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RFdiffusion3: "<data>/rfdiffusion3"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    AlphaFold: "<data>/localcolabfold"
+    OmegaFold: "<data>/OmegaFold"
+    Boltz: "<data>/boltz"
+    BoltzGen: "<data>/boltzgen"
+    GhostFold: "<data>/ghostfold"
+    ESMFold: "<data>/esmfold"
+    DynamicBind: "<data>/DynamicBind"
+    ModelForge: "<data>/modelforge"
 
-  # Shared model and container folders (relative to group folder)
-  shared:
-    models: "models"
-    containers: "containers"
-    BoltzCache: "models/Boltz"
-    BoltzGenCache: "models/BoltzGen"
-    ColabFoldDatabases: "models/colabfold_databases"
+  # Cache paths (shared on group storage)
+  cache:
+    BoltzCache: "<group>/models/Boltz"
+    BoltzGenCache: "<group>/models/BoltzGen"
+    ColabFoldDatabases: "<group>/models/colabfold_databases"
+
+  # Derived paths (depend on tool_data)
+  derived:
+    DynamicBindWeights: "<DynamicBind>/workdir"
+
+  # Server paths
+  server:
+    BioPipelines: "<user>/BioPipelines"
+    MMseqs2Server: "<BioPipelines>/MMseqs2Server"
+    MMseqs2LCFServer: "<BioPipelines>/MMseqs2LCFServer"
 
 # Default Environments
 # Each tool can have a default conda environment specified here

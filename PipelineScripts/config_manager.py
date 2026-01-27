@@ -76,6 +76,15 @@ class ConfigManager:
                 if section not in config:
                     raise ValueError(f"config.yaml missing required section: {section}")
 
+            # Validate folder subsections
+            folders = config.get('folders', {})
+            required_folder_sections = ['base', 'infrastructure', 'tool_data']
+            for folder_section in required_folder_sections:
+                if folder_section not in folders:
+                    raise ValueError(
+                        f"config.yaml folders section missing required subsection: {folder_section}"
+                    )
+
             return config
 
         except yaml.YAMLError as e:
