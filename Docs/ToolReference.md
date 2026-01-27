@@ -23,6 +23,7 @@ Tools for designing and manipulating protein sequences.
 - [SDM (SiteDirectedMutagenesis)](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic amino acid substitutions
 - [Fuse](Tool/SequenceDesign.md#fuse) - Fusion protein creation with linkers
 - [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Cartesian product sequence combinations
+- [SplitChains](Tool/SequenceDesign.md#splitchains) - Split concatenated sequences into chains
 - [DNAEncoder](Tool/SequenceDesign.md#dnaencoder) - Codon-optimized reverse translation
 
 ### [Structure Prediction](Tool/StructurePrediction.md)

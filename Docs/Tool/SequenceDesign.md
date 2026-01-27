@@ -335,6 +335,47 @@ stitched = StitchSequences(
 
 ---
 
+### SplitChains
+
+Splits concatenated single-chain sequences into multi-chain sequences. Takes sequences where multiple protein chains have been fused into a single sequence and separates them into individual chains based on specified split positions. Useful for preparing multi-chain inputs for structure prediction tools.
+
+**Environment**: None (pure Python)
+
+**Parameters**:
+- `sequences`: Union[ToolOutput, StandardizedOutput] (required) - Input sequences containing concatenated chains
+- `split_positions`: List[int] (required) - Positions where to split sequences (1-indexed). For example, [197] splits at position 197 creating chains seq[0:197] and seq[197:]
+- `chain_names`: Optional[List[str]] = None - Names for the chains (e.g., ["ChainA", "ChainB"]). If not provided, uses numeric suffixes (_1, _2, etc.)
+
+**Outputs**:
+- `sequences`: CSV file with split chain sequences
+- `tables.sequences`:
+
+  | id | sequence | source_id | complex_id | chain_index | chain_name | chain_length |
+  |----|----------|-----------|------------|-------------|------------|--------------|
+
+Note: `complex_id` is an alias for `source_id` and is used by Boltz2 to group chains belonging to the same multi-chain complex.
+
+**Example**:
+```python
+from PipelineScripts.split_chains import SplitChains
+
+# Split a 400-residue fusion into two chains at position 200
+split = SplitChains(
+    sequences=fused_sequences,
+    split_positions=[200],
+    chain_names=["Heavy", "Light"]
+)
+
+# Split into three chains
+split = SplitChains(
+    sequences=lmpnn,
+    split_positions=[150, 300],
+    chain_names=["A", "B", "C"]
+)
+```
+
+---
+
 ### DNAEncoder
 
 Reverse-translates protein sequences to DNA with organism-specific codon optimization. Uses thresholded weighted codon sampling based on CoCoPUTs genome frequency tables.

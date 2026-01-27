@@ -6,6 +6,7 @@ ligand binding affinity calculation, and comprehensive analysis.
 """
 
 import os
+import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -50,6 +51,19 @@ class Boltz2(BaseConfig):
                  recycling_steps: Optional[int] = None,
                  diffusion_samples: Optional[int] = None,
                  use_potentials: bool = False,
+                 # Template parameters
+                 template: Optional[str] = None,
+                 template_chain_ids: Optional[List[str]] = None,
+                 template_force: bool = True,
+                 template_threshold: float = 5.0,
+                 # Pocket constraint parameters
+                 pocket_residues: Optional[List[int]] = None,
+                 pocket_max_distance: float = 7.0,
+                 pocket_force: bool = True,
+                 # Glycosylation parameters
+                 glycosylation: Optional[Dict[str, List[int]]] = None,
+                 # Covalent linkage parameters
+                 covalent_linkage: Optional[Dict[str, Any]] = None,
                  **kwargs):
         """
         Initialize Boltz2 configuration.
@@ -70,6 +84,15 @@ class Boltz2(BaseConfig):
             recycling_steps: Number of recycling steps (default: Boltz2 default 3)
             diffusion_samples: Number of diffusion samples (default: Boltz2 default 1)
             use_potentials: Enable potentials for improved structure prediction
+            template: Path to PDB template file for structure guidance
+            template_chain_ids: List of chain IDs to apply template to (e.g., ["A", "B"])
+            template_force: Whether to force template usage (default: True)
+            template_threshold: RMSD threshold for template matching (default: 5.0)
+            pocket_residues: List of residue positions defining binding pocket (e.g., [50, 51, 52])
+            pocket_max_distance: Maximum distance for pocket constraint (default: 7.0)
+            pocket_force: Whether to force pocket constraint (default: True)
+            glycosylation: Dict mapping chain IDs to Asn positions for N-glycosylation (e.g., {"A": [164]})
+            covalent_linkage: Dict specifying covalent attachment (e.g., {"chain": "A", "position": 50, "protein_atom": "SG", "ligand_atom": "C1"})
             **kwargs: Additional parameters
         """
         # Initialize default values
@@ -137,6 +160,19 @@ class Boltz2(BaseConfig):
         self.recycling_steps = recycling_steps
         self.diffusion_samples = diffusion_samples
         self.use_potentials = use_potentials
+        # Template parameters
+        self.template = template
+        self.template_chain_ids = template_chain_ids
+        self.template_force = template_force
+        self.template_threshold = template_threshold
+        # Pocket constraint parameters
+        self.pocket_residues = pocket_residues
+        self.pocket_max_distance = pocket_max_distance
+        self.pocket_force = pocket_force
+        # Glycosylation parameters
+        self.glycosylation = glycosylation
+        # Covalent linkage parameters
+        self.covalent_linkage = covalent_linkage
         
         # Track input source type and files (tool-agnostic)
         self.input_yaml_entities = None
@@ -610,14 +646,51 @@ fi
                         return seq
         
         return ""
-    
+
+    def _generate_extra_config_params(self) -> str:
+        """
+        Generate extra CLI parameters for pipe_boltz_protein_ligand_configs.py.
+
+        Returns:
+            String with extra CLI arguments for template, pocket, glycosylation, covalent linkage
+        """
+        extra_params = []
+
+        # Template parameters
+        if self.template:
+            extra_params.append(f'--template "{self.template}"')
+            if self.template_chain_ids:
+                extra_params.append(f'--template-chains "{",".join(self.template_chain_ids)}"')
+            if self.template_force:
+                extra_params.append('--template-force')
+            extra_params.append(f'--template-threshold {self.template_threshold}')
+
+        # Pocket constraint parameters
+        if self.pocket_residues:
+            extra_params.append(f'--pocket-residues "{self.pocket_residues}"')
+            extra_params.append(f'--pocket-max-distance {self.pocket_max_distance}')
+            if self.pocket_force:
+                extra_params.append('--pocket-force')
+
+        # Glycosylation parameters
+        if self.glycosylation:
+            glyco_json = json.dumps(self.glycosylation)
+            extra_params.append(f"--glycosylation '{glyco_json}'")
+
+        # Covalent linkage parameters
+        if self.covalent_linkage:
+            covalent_json = json.dumps(self.covalent_linkage)
+            extra_params.append(f"--covalent-linkage '{covalent_json}'")
+
+        return " ".join(extra_params)
+
     def generate_script(self, script_path: str) -> str:
         """
         Generate bash script for Boltz2 execution.
-        
+
         Args:
             script_path: Path where script should be written
-            
+
         Returns:
             Script content as string
         """
@@ -752,13 +825,16 @@ EOF
                     msa_param = f'--msa-table "{msa_table}"'
             elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
                 msa_param = f'--global-msa-cache --msa-folder "{self.msa_cache_folder}"'
-            
+
             # Add job name parameter
             job_name_param = f'--job-name "{config_name}"' if config_name != "prediction" else ""
-            
+
+            # Add extra config parameters (template, pocket, glycosylation, covalent)
+            extra_params = self._generate_extra_config_params()
+
             script_content += f"""
 # Generate config files for all protein-ligand combinations
-python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_param}" {config_files_dir} {affinity_flag} {msa_param} {job_name_param}
+python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_param}" {config_files_dir} {affinity_flag} {msa_param} {job_name_param} {extra_params}
 
 """
         elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
@@ -848,10 +924,13 @@ EOF
                     # Direct CSV path
                     msa_table_flag = f'--msa-table "{self.msas}"'
 
+            # Add extra config parameters (template, pocket, glycosylation, covalent)
+            extra_params = self._generate_extra_config_params()
+
             script_content += f"""
 echo "Converting CSV to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag}
+python {self.boltz_protein_ligand_configs_py} {self.queries_csv_file} "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag} {extra_params}
 
 """
         
@@ -911,10 +990,13 @@ EOF
                     # Direct CSV path
                     msa_table_flag = f'--msa-table "{self.msas}"'
 
+            # Add extra config parameters (template, pocket, glycosylation, covalent)
+            extra_params = self._generate_extra_config_params()
+
             script_content += f"""
 echo "Converting FASTA files to YAML configuration"
 mkdir -p {config_files_dir}
-python {self.boltz_protein_ligand_configs_py} "{self.fasta_files_list_file}" "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag}
+python {self.boltz_protein_ligand_configs_py} "{self.fasta_files_list_file}" "{ligand_param}" {config_files_dir} {affinity_flag} {msa_table_flag} {extra_params}
 
 """
             base_config_file = self.queries_csv
@@ -997,16 +1079,19 @@ EOF
                     msa_param = f'--msa-table "{msa_table}"'
             elif hasattr(self, '_needs_global_msa_cache') and self._needs_global_msa_cache:
                 msa_param = f'--global-msa-cache --msa-folder "{self.msa_cache_folder}"'
-            
+
             # Add job name parameter
             job_name_param = f'--job-name "{config_name}"' if config_name != "prediction" else ""
-            
+
+            # Add extra config parameters (template, pocket, glycosylation, covalent)
+            extra_params = self._generate_extra_config_params()
+
             script_content += f"""
 # Generate config files for all protein-ligand combinations
-python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_param}" {config_files_dir} {affinity_flag} {msa_param} {job_name_param}
+python {self.boltz_protein_ligand_configs_py} {proteins_csv} "{final_ligand_param}" {config_files_dir} {affinity_flag} {msa_param} {job_name_param} {extra_params}
 
 """
-        
+
         # Run Boltz2 prediction
         boltz_options = f"--cache {boltz_cache_folder} --out_dir {self.output_folder}{msa_option} --output_format {self.output_format}"
         
@@ -1807,6 +1892,24 @@ echo "Post-processing completed - structures renamed with sequence IDs"
         if self.use_potentials:
             config_lines.append(f"Use potentials: {self.use_potentials}")
 
+        # Template parameters
+        if self.template:
+            config_lines.append(f"Template: {os.path.basename(self.template)}")
+            if self.template_chain_ids:
+                config_lines.append(f"Template chains: {', '.join(self.template_chain_ids)}")
+
+        # Pocket constraint parameters
+        if self.pocket_residues:
+            config_lines.append(f"Pocket residues: {self.pocket_residues}")
+
+        # Glycosylation parameters
+        if self.glycosylation:
+            config_lines.append(f"Glycosylation: {self.glycosylation}")
+
+        # Covalent linkage parameters
+        if self.covalent_linkage:
+            config_lines.append(f"Covalent linkage: {self.covalent_linkage}")
+
         return config_lines
     
     def to_dict(self) -> Dict[str, Any]:
@@ -1827,7 +1930,16 @@ echo "Post-processing completed - structures renamed with sequence IDs"
                 "msa_server": self.msa_server,
                 "recycling_steps": self.recycling_steps,
                 "diffusion_samples": self.diffusion_samples,
-                "use_potentials": self.use_potentials
+                "use_potentials": self.use_potentials,
+                "template": self.template,
+                "template_chain_ids": self.template_chain_ids,
+                "template_force": self.template_force,
+                "template_threshold": self.template_threshold,
+                "pocket_residues": self.pocket_residues,
+                "pocket_max_distance": self.pocket_max_distance,
+                "pocket_force": self.pocket_force,
+                "glycosylation": self.glycosylation,
+                "covalent_linkage": self.covalent_linkage
             }
         })
         return base_dict

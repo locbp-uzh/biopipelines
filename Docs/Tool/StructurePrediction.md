@@ -253,6 +253,15 @@ pip install boltz[cuda] -U
 - `recycling_steps`: Optional[int] = None - Number of recycling steps (default: model-specific)
 - `diffusion_samples`: Optional[int] = None - Number of diffusion samples (default: model-specific)
 - `use_potentials`: bool = False - Enable external potentials
+- `template`: Optional[str] = None - Path to PDB template file for structure guidance
+- `template_chain_ids`: Optional[List[str]] = None - Chain IDs to apply template to (e.g., ["A", "B"])
+- `template_force`: bool = True - Force template usage
+- `template_threshold`: float = 5.0 - RMSD threshold for template matching
+- `pocket_residues`: Optional[List[int]] = None - Residue positions defining binding pocket (e.g., [50, 51, 52])
+- `pocket_max_distance`: float = 7.0 - Maximum distance for pocket constraint
+- `pocket_force`: bool = True - Force pocket constraint
+- `glycosylation`: Optional[Dict[str, List[int]]] = None - N-glycosylation sites per chain (e.g., {"A": [164]})
+- `covalent_linkage`: Optional[Dict[str, Any]] = None - Covalent attachment specification (see examples)
 
 **Outputs**:
 - `structures`: List of predicted complex PDB files
@@ -270,6 +279,7 @@ pip install boltz[cuda] -U
 ```python
 from PipelineScripts.boltz2 import Boltz2
 
+# Basic apo and holo prediction
 boltz_apo = Boltz2(proteins=lmpnn)
 boltz_holo = Boltz2(
     proteins=lmpnn,
@@ -277,6 +287,45 @@ boltz_holo = Boltz2(
     msas=boltz_apo,  # Pass entire ToolOutput
     affinity=True
 )
+
+# With template guidance
+boltz_template = Boltz2(
+    proteins=lmpnn,
+    ligands=compounds,
+    template="reference.pdb",
+    template_chain_ids=["A"]
+)
+
+# With pocket constraint
+boltz_pocket = Boltz2(
+    proteins=lmpnn,
+    ligands=compounds,
+    pocket_residues=[50, 51, 52, 80, 81, 82],
+    pocket_max_distance=7.0
+)
+
+# With N-glycosylation (adds NAG at Asn-164)
+boltz_glyco = Boltz2(
+    proteins=lmpnn,
+    ligands=compounds,
+    glycosylation={"A": [164]}
+)
+
+# With covalent ligand attachment (e.g., to Cys-50)
+boltz_covalent = Boltz2(
+    proteins=lmpnn,
+    ligands=covalent_inhibitor,
+    covalent_linkage={
+        "chain": "A",
+        "position": 50,
+        "protein_atom": "SG",  # Cysteine sulfur
+        "ligand_atom": "C1"    # Ligand attachment atom
+    }
+)
+
+# Multi-chain complex from SplitChains
+split = SplitChains(sequences=fused, split_positions=[200])
+boltz_complex = Boltz2(proteins=split, ligands=compounds)
 ```
 
 ---

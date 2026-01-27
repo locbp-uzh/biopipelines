@@ -23,6 +23,7 @@ from .folders import FolderManager
 from .conformational_change import ConformationalChange
 from .protein_ligand_contacts import ProteinLigandContacts
 from .stitch_sequences import StitchSequences
+from .split_chains import SplitChains
 from .dynamic_bind import DynamicBind
 from .dna_encoder import DNAEncoder
 from .load_output import LoadOutput, LoadOutputs
@@ -60,11 +61,12 @@ __all__ = [
     'ConformationalChange',
     'ProteinLigandContacts',
     'StitchSequences',
+    'SplitChains',
     'DynamicBind',
     'DNAEncoder',
     'LoadOutput',
     'LoadOutputs',
-    'SequenceMetricsCorrelation',
+    'SequenceMetricCorrelation',
     'Filter',
     'Rank',
     'PyMOL',
