@@ -18,6 +18,18 @@ except ImportError:
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
 
+class PDBOperation:
+    """Base class for PDB operations applied after loading structures."""
+
+    def __init__(self, op_type: str, **kwargs):
+        self.op_type = op_type
+        self.params = kwargs
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert operation to dictionary for serialization."""
+        return {"op": self.op_type, **self.params}
+
+
 class PDB(BaseConfig):
     """
     Pipeline tool for fetching protein structures from local folders or RCSB PDB.
@@ -25,14 +37,58 @@ class PDB(BaseConfig):
     Implements priority-based lookup: checks local_folder (if provided), then PDBs/
     folder, then downloads from RCSB. Downloaded structures are saved to both PDBs/
     folder (for reuse) and tool output folder.
+
+    Supports operations that are applied to structures after loading, similar to
+    PyMOL and Plot tools. Operations are passed as positional arguments.
+
+    Example:
+        # Simple fetch
+        pdb = PDB(pdbs="4ufc")
+
+        # Fetch with ligand renaming (for RFdiffusion3 compatibility)
+        pdb = PDB(
+            pdbs="rifampicin.pdb",
+            PDB.Rename("LIG", ":L:")
+        )
+
+        # Multiple operations
+        pdb = PDB(
+            pdbs="structure.pdb",
+            PDB.Rename("LIG", ":L:"),
+            PDB.Rename("HOH", ":W:")
+        )
     """
 
     # Tool identification
     TOOL_NAME = "PDB"
-    
-    
+
+    # --- Static methods for creating operations ---
+
+    @staticmethod
+    def Rename(old: str, new: str) -> PDBOperation:
+        """
+        Rename a residue/ligand in the structure.
+
+        Useful for renaming CCD ligand codes to non-CCD names for compatibility
+        with tools like RFdiffusion3 that have issues with certain CCD codes.
+
+        Args:
+            old: Current residue name (e.g., "LIG", "ATP")
+            new: New residue name (e.g., ":L:", "ATP1")
+
+        Returns:
+            PDBOperation for renaming
+
+        Example:
+            PDB(pdbs="structure.pdb", PDB.Rename("LIG", ":L:"))
+        """
+        return PDBOperation("rename", old=old, new=new)
+
+    # --- Instance methods ---
+
     def __init__(self,
                  pdbs: Union[str, List[str]],
+                 *args,
                  ids: Optional[Union[str, List[str]]] = None,
                  format: str = "pdb",
                  local_folder: Optional[str] = None,
@@ -46,6 +102,7 @@ class PDB(BaseConfig):
             pdbs: PDB ID(s) to fetch, or a folder path containing PDB files.
                   Can be single string, list of strings (e.g. "4ufc" or ["4ufc","1abc"]),
                   or a folder path (absolute or relative to PDBs folder)
+            *args: Operations to apply after loading (e.g., PDB.Rename("LIG", ":L:"))
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
             format: File format ("pdb" or "cif", default: "pdb")
             local_folder: Custom local folder to check first (before PDBs/). Default: None
@@ -96,7 +153,21 @@ class PDB(BaseConfig):
                 biological_assembly=True,
                 remove_waters=False
             ))
+
+            # Rename ligand for RFdiffusion3 compatibility
+            pdb = pipeline.add(PDB(
+                pdbs="structure.pdb",
+                PDB.Rename("LIG", ":L:")
+            ))
         """
+        # Extract operations from args
+        self.operations = []
+        for arg in args:
+            if isinstance(arg, PDBOperation):
+                self.operations.append(arg)
+            else:
+                raise ValueError(f"Unexpected positional argument: {arg}. Expected PDBOperation (e.g., PDB.Rename(...))")
+
         # Check if pdbs is a folder path and load all files from it
         if isinstance(pdbs, str) and self._is_folder_path(pdbs):
             self.pdb_ids = self._load_files_from_folder(pdbs, format)
@@ -439,6 +510,16 @@ class PDB(BaseConfig):
             f"REMOVE_WATERS: {self.remove_waters}"
         ])
 
+        # Add operations if any
+        if self.operations:
+            op_summaries = []
+            for op in self.operations:
+                if op.op_type == "rename":
+                    op_summaries.append(f"Rename({op.params['old']} → {op.params['new']})")
+                else:
+                    op_summaries.append(op.op_type)
+            config_lines.append(f"OPERATIONS: {', '.join(op_summaries)}")
+
         # Add status of files found/not found
         if hasattr(self, 'found_locally') and self.found_locally:
             config_lines.append(f"FOUND_LOCALLY: {', '.join([pdb_id for pdb_id, _ in self.found_locally])}")
@@ -490,7 +571,8 @@ class PDB(BaseConfig):
             "structures_table": structures_table,
             "sequences_table": sequences_table,
             "failed_table": failed_table,
-            "compounds_table": compounds_table
+            "compounds_table": compounds_table,
+            "operations": [op.to_dict() for op in self.operations]
         }
 
         import json
@@ -603,7 +685,8 @@ fi
                 "format": self.format,
                 "local_folder": self.local_folder,
                 "biological_assembly": self.biological_assembly,
-                "remove_waters": self.remove_waters
+                "remove_waters": self.remove_waters,
+                "operations": [op.to_dict() for op in self.operations]
             }
         })
         return base_dict

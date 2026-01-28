@@ -34,9 +34,9 @@ class Ligand(BaseConfig):
     
 
     def __init__(self,
-                 ids: Union[str, List[str]],
+                 lookup: Union[str, List[str]],
+                 ids: Optional[Union[str, List[str]]] = None,
                  codes: Optional[Union[str, List[str]]] = None,
-                 lookup: Optional[Union[str, List[str]]] = None,
                  source: Optional[str] = None,
                  local_folder: Optional[str] = None,
                  output_format: str = "pdb",
@@ -45,15 +45,15 @@ class Ligand(BaseConfig):
         Initialize Ligand tool.
 
         Args:
-            ids: Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb)
-            codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
-                   Defaults to lookup value (truncated to 3 chars, uppercased).
             lookup: Lookup value(s) for fetching. Can be:
                     - RCSB CCD codes: "ATP", "GDP", "HEM"
                     - PubChem CID: "2244"
                     - PubChem CAS: "50-78-2"
                     - PubChem name: "aspirin", "caffeine"
-                    Defaults to codes if not provided (backward compatibility).
+            ids: Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb).
+                 If not provided, defaults to lookup values.
+            codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
+                   If not provided, defaults to lookup[:3].upper().
             source: Force source ("rcsb" or "pubchem"). If None, auto-detects:
                     - 1-3 uppercase alphanumeric -> RCSB (CCD)
                     - Purely numeric -> PubChem (CID)
@@ -71,57 +71,59 @@ class Ligand(BaseConfig):
             3. Download from RCSB or PubChem (saved to both Ligands/ and output folder)
 
         Examples:
-            # RCSB ligand by CCD code (auto-detect)
-            lig = Ligand(ids="atp_ligand", lookup="ATP")
+            # Simplest: just lookup (ids and codes derived automatically)
+            lig = Ligand("ATP")  # ids=["ATP"], codes=["ATP"]
+
+            # Multiple ligands with just lookup
+            lig = Ligand(["ATP", "GDP"])  # ids=["ATP", "GDP"], codes=["ATP", "GDP"]
+
+            # With custom id
+            lig = Ligand("ATP", ids="atp_ligand")
 
             # PubChem ligand by compound name
-            lig = Ligand(ids="aspirin_lig", lookup="aspirin", codes="ASP")
+            lig = Ligand("aspirin", ids="aspirin_lig", codes="ASP")
 
             # PubChem by CID
-            lig = Ligand(ids="caffeine", lookup="2157", codes="CAF")
+            lig = Ligand("2157", ids="caffeine", codes="CAF")
 
             # PubChem by CAS number
-            lig = Ligand(ids="ibuprofen", lookup="15687-27-1", codes="IBU")
+            lig = Ligand("15687-27-1", ids="ibuprofen", codes="IBU")
 
-            # Multiple ligands
+            # Multiple ligands with explicit ids and codes
             lig = Ligand(
+                ["ATP", "aspirin"],
                 ids=["lig1", "lig2"],
-                lookup=["ATP", "aspirin"],
                 codes=["ATP", "LIG"]
             )
 
             # Force source
-            lig = Ligand(ids="test", lookup="ATP", source="pubchem")
+            lig = Ligand("ATP", source="pubchem")
         """
-        # Normalize ids to list
-        if isinstance(ids, str):
-            self.custom_ids = [ids]
+        # Handle lookup (required)
+        if isinstance(lookup, str):
+            self.lookup_values = [lookup]
         else:
-            self.custom_ids = list(ids)
+            self.lookup_values = list(lookup)
 
-        # Handle lookup - default to codes if not provided
-        if lookup is None and codes is not None:
-            if isinstance(codes, str):
-                self.lookup_values = [codes]
+        # Handle ids - default to lookup if not provided
+        if ids is not None:
+            if isinstance(ids, str):
+                self.custom_ids = [ids]
             else:
-                self.lookup_values = list(codes)
-        elif lookup is not None:
-            if isinstance(lookup, str):
-                self.lookup_values = [lookup]
-            else:
-                self.lookup_values = list(lookup)
+                self.custom_ids = list(ids)
         else:
-            raise ValueError("At least one of 'codes' or 'lookup' must be provided")
+            # Default ids to lookup values
+            self.custom_ids = self.lookup_values.copy()
 
-        # Handle codes - default to lookup if not provided
-        if codes is None:
-            # Default codes to lookup values (truncated to 3 chars, uppercased)
-            self.residue_codes = [lv.upper()[:3] for lv in self.lookup_values]
-        else:
+        # Handle codes - default to lookup[:3].upper() if not provided
+        if codes is not None:
             if isinstance(codes, str):
                 self.residue_codes = [codes.upper()]
             else:
                 self.residue_codes = [c.upper() for c in codes]
+        else:
+            # Default codes to lookup values (truncated to 3 chars, uppercased)
+            self.residue_codes = [lv.upper()[:3] for lv in self.lookup_values]
 
         # Validate lengths
         if len(self.custom_ids) != len(self.lookup_values):

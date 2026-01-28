@@ -19,7 +19,7 @@ folders:
     group: "/shares/locbp.chem.uzh"
     user: "<group>/<username>"
     biopipelines: "<cwd>"
-    biopipelines_output: "<user>/biopipelines_output"
+    biopipelines_output: "<user>/BioPipelines"
 
   # Infrastructure paths
   infrastructure:

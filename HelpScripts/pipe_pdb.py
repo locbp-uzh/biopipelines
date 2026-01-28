@@ -72,6 +72,86 @@ def convert_cif_to_pdb(cif_content: str) -> str:
         raise Exception(f"CIF to PDB conversion failed: {str(e)}")
 
 
+def apply_operations(content: str, format: str, operations: List[Dict[str, Any]]) -> str:
+    """
+    Apply a sequence of operations to structure content.
+
+    Args:
+        content: Structure file content
+        format: File format ("pdb" or "cif")
+        operations: List of operation dictionaries with 'op' key and parameters
+
+    Returns:
+        Modified structure content
+    """
+    for op in operations:
+        op_type = op.get("op")
+        if op_type == "rename":
+            content = apply_rename_operation(content, format, op["old"], op["new"])
+        else:
+            print(f"Warning: Unknown operation type '{op_type}', skipping")
+
+    return content
+
+
+def apply_rename_operation(content: str, format: str, old_name: str, new_name: str) -> str:
+    """
+    Rename a residue/ligand in the structure.
+
+    For PDB format, modifies columns 18-20 (residue name) in ATOM/HETATM records.
+    The new name is padded/truncated to fit the 3-character field, unless it's
+    a special format like ":L:" which uses the full field width.
+
+    Args:
+        content: Structure file content
+        format: File format ("pdb" or "cif")
+        old_name: Current residue name (e.g., "LIG")
+        new_name: New residue name (e.g., ":L:")
+
+    Returns:
+        Structure content with renamed residues
+    """
+    if format != "pdb":
+        print(f"Warning: Rename operation not yet implemented for CIF format")
+        return content
+
+    lines = content.split('\n')
+    modified_lines = []
+    rename_count = 0
+
+    for line in lines:
+        if line.startswith(('ATOM', 'HETATM')):
+            # PDB format: columns 18-20 (0-indexed: 17-20) contain residue name
+            # The field is 3 characters, right-justified with spaces
+            current_res_name = line[17:20].strip()
+
+            if current_res_name == old_name:
+                # Format new name to fit in 3-character field
+                # Right-justify, but for special names like ":L:" use as-is
+                if len(new_name) <= 3:
+                    formatted_name = new_name.rjust(3)
+                else:
+                    # For longer names, truncate (though this shouldn't normally happen)
+                    formatted_name = new_name[:3]
+                    print(f"Warning: Truncating residue name '{new_name}' to '{formatted_name}'")
+
+                # Reconstruct the line with new residue name
+                modified_line = line[:17] + formatted_name + line[20:]
+                modified_lines.append(modified_line)
+                rename_count += 1
+            else:
+                modified_lines.append(line)
+        else:
+            modified_lines.append(line)
+
+    if rename_count > 0:
+        print(f"  Renamed {rename_count} atoms: {old_name} → {new_name}")
+    else:
+        print(f"  Warning: No atoms found with residue name '{old_name}'")
+
+    return '\n'.join(modified_lines)
+
+
 def remove_waters_from_content(content: str, format: str) -> str:
     """
     Remove water molecules from structure content.
@@ -287,7 +367,7 @@ def find_local_structure(pdb_id: str, format: str, local_folder: str,
 
 def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
                         source_format: str, target_format: str, remove_waters: bool,
-                        output_folder: str) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
+                        output_folder: str, operations: List[Dict[str, Any]] = None) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Copy local structure file to output folder with optional format conversion.
 
@@ -299,10 +379,14 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         target_format: Desired output format ("pdb" or "cif")
         remove_waters: Whether to remove water molecules
         output_folder: Directory to save the structure
+        operations: List of operations to apply (e.g., rename)
 
     Returns:
         Tuple of (success: bool, file_path: str, sequence: str, ligands: List[Dict], metadata: dict)
     """
+    if operations is None:
+        operations = []
+
     try:
         with open(source_path, 'r') as f:
             content = f.read()
@@ -318,6 +402,10 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
 
         if remove_waters:
             content = remove_waters_from_content(content, target_format)
+
+        # Apply operations (e.g., rename)
+        if operations:
+            content = apply_operations(content, target_format, operations)
 
         extension = ".pdb" if target_format == "pdb" else ".cif"
         filename = f"{custom_id}{extension}"
@@ -369,7 +457,8 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
 
 
 def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_assembly: bool,
-                   remove_waters: bool, output_folder: str, repo_pdbs_folder: str) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
+                   remove_waters: bool, output_folder: str, repo_pdbs_folder: str,
+                   operations: List[Dict[str, Any]] = None) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Download a single structure from RCSB PDB and save to both PDBs/ and output folder.
 
@@ -383,10 +472,14 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         remove_waters: Whether to remove water molecules
         output_folder: Directory to save the structure
         repo_pdbs_folder: Repository PDBs folder for caching
+        operations: List of operations to apply (e.g., rename)
 
     Returns:
         Tuple of (success: bool, file_path: str, sequence: str, ligands: List[Dict], metadata: dict)
     """
+    if operations is None:
+        operations = []
+
     pdb_id = pdb_id.upper()
 
     # Validate RCSB PDB ID format before attempting download
@@ -478,6 +571,10 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         if remove_waters:
             content = remove_waters_from_content(content, format)
 
+        # Apply operations (e.g., rename)
+        if operations:
+            content = apply_operations(content, format, operations)
+
         # Validate file content (basic check - use target format)
         if format == "pdb":
             if not (content.startswith("HEADER") or content.startswith("ATOM") or content.startswith("MODEL") or content.startswith("REMARK")):
@@ -556,6 +653,10 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 # Remove waters if requested
                 if remove_waters:
                     content = remove_waters_from_content(content, "pdb")
+
+                # Apply operations (e.g., rename)
+                if operations:
+                    content = apply_operations(content, "pdb", operations)
 
                 # Cache the CIF file
                 os.makedirs(repo_pdbs_folder, exist_ok=True)
@@ -648,6 +749,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     sequences_table = config_data['sequences_table']
     failed_table = config_data['failed_table']
     compounds_table = config_data.get('compounds_table', os.path.join(output_folder, 'compounds.csv'))
+    operations = config_data.get('operations', [])
 
     print(f"Fetching {len(pdb_ids)} structures in {format.upper()} format")
     print(f"Priority: {'local_folder -> ' if local_folder else ''}PDBs/ -> RCSB download")
@@ -655,6 +757,14 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         print("Including biological assemblies")
     if remove_waters:
         print("Water molecules will be removed")
+    if operations:
+        op_summaries = []
+        for op in operations:
+            if op.get("op") == "rename":
+                op_summaries.append(f"Rename({op['old']} → {op['new']})")
+            else:
+                op_summaries.append(op.get("op", "unknown"))
+        print(f"Operations: {', '.join(op_summaries)}")
 
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
@@ -676,14 +786,14 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
             # Copy from local (may need conversion)
             local_path, source_format = local_result
             success, file_path, sequence, ligands, metadata = copy_local_structure(
-                pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder
+                pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations
             )
         else:
             # Download from RCSB (with automatic CIF fallback if PDB fails)
             print(f"{pdb_id} not found locally, downloading from RCSB")
             success, file_path, sequence, ligands, metadata = download_from_rcsb(
                 pdb_id, custom_id, format, biological_assembly, remove_waters,
-                output_folder, repo_pdbs_folder
+                output_folder, repo_pdbs_folder, operations
             )
 
         if success:
