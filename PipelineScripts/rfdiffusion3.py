@@ -650,7 +650,8 @@ python "{self.table_py_file}" \\
     --num_designs {self.num_designs} \\
     --num_models {self.num_models} \\
     --table_path "{self.main_table}" \\
-    --design_startnum {self.design_startnum}
+    --design_startnum {self.design_startnum} \\
+    --specifications_csv "{self.specifications_csv}"
 
 """
 
@@ -719,8 +720,8 @@ python "{self.table_py_file}" \\
             "structures": TableInfo(
                 name="structures",
                 path=self.main_table,
-                columns=["id", "design", "model", "pdb", "contig", "length", "time", "status"],
-                description="RFdiffusion3 structure generation results",
+                columns=["id", "design", "model", "pdb", "fixed", "designed", "contig", "length", "time", "status"],
+                description="RFdiffusion3 structure generation results with fixed/designed regions",
                 count=total_structures
             ),
             "metrics": TableInfo(

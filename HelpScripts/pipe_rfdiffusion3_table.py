@@ -3,7 +3,8 @@
 Create RFdiffusion3 results table.
 
 This script processes RFdiffusion3 output to create a standardized CSV table
-that tracks design information for pipeline integration.
+that tracks design information for pipeline integration, including fixed/designed
+regions parsed from the sampled_contig in specifications.
 """
 
 import argparse
@@ -11,6 +12,96 @@ import pandas as pd
 import json
 import os
 import sys
+import re
+
+
+def list_to_sele(a):
+    """Convert list of residue numbers to PyMOL selection string."""
+    if not a:
+        return ""
+
+    s = ""
+    i = 0
+    while i < len(a):
+        if i > 0:
+            s += "+"
+        s += f"{a[i]}"
+        # Represent consecutive indices with a dash
+        if i < len(a) - 1:
+            if int(a[i])+1 == int(a[i+1]):
+                s += "-"
+                j = i + 2
+                while j < len(a):
+                    if int(a[j]) != int(a[j-1])+1:
+                        break
+                    j += 1
+                i = j - 1
+                s += f"{a[i]}"
+        i += 1
+    return s
+
+
+def parse_sampled_contig(sampled_contig, total_length):
+    """
+    Parse sampled_contig to determine fixed and designed residue regions.
+
+    RFdiffusion3 sampled_contig format examples:
+    - "17,A9-140" -> 17 designed residues (1-17), then fixed A9-140 mapped to 18-149
+    - "A1-50,20,A60-100" -> fixed A1-50 (1-50), 20 designed (51-70), fixed A60-100 (71-111)
+
+    Args:
+        sampled_contig: The sampled contig string from specifications
+        total_length: Total length of the protein (for validation)
+
+    Returns:
+        Tuple of (fixed_selection, designed_selection) as PyMOL selection strings
+    """
+    if not sampled_contig:
+        return "", ""
+
+    fixed_residues = []
+    designed_residues = []
+    current_pos = 1
+
+    # Split by comma to get segments
+    segments = [s.strip() for s in sampled_contig.split(',')]
+
+    for segment in segments:
+        # Check if segment is a chain reference (e.g., "A9-140" or "A1-50")
+        chain_match = re.match(r'^([A-Z])(\d+)-(\d+)$', segment)
+        if chain_match:
+            # Fixed region from input structure
+            chain = chain_match.group(1)
+            start = int(chain_match.group(2))
+            end = int(chain_match.group(3))
+            num_residues = end - start + 1
+
+            # These residues are fixed
+            for i in range(num_residues):
+                fixed_residues.append(current_pos + i)
+            current_pos += num_residues
+
+        # Check if segment is just a number (de novo designed)
+        elif segment.isdigit():
+            num_residues = int(segment)
+            # These residues are designed
+            for i in range(num_residues):
+                designed_residues.append(current_pos + i)
+            current_pos += num_residues
+
+        # Check for range without chain (e.g., "15-25" in original contig means variable length)
+        # In sampled_contig this should be resolved to a specific number
+        else:
+            # Try to parse as a single chain reference without range (e.g., "A50")
+            single_match = re.match(r'^([A-Z])(\d+)$', segment)
+            if single_match:
+                # Single residue from chain - fixed
+                fixed_residues.append(current_pos)
+                current_pos += 1
+            else:
+                print(f"Warning: Could not parse segment '{segment}' in sampled_contig")
+
+    return list_to_sele(fixed_residues), list_to_sele(designed_residues)
 
 
 def get_pdb_length(pdb_file):
@@ -81,6 +172,34 @@ def extract_metadata_from_json(json_file):
 
     except Exception as e:
         print(f"Warning: Could not parse JSON metadata: {e}")
+        return {}
+
+
+def load_specifications(specs_csv):
+    """
+    Load specifications CSV to get sampled_contig per structure.
+
+    Args:
+        specs_csv: Path to specifications CSV file
+
+    Returns:
+        Dictionary mapping structure_id to sampled_contig
+    """
+    if not os.path.exists(specs_csv):
+        print(f"Warning: Specifications CSV not found: {specs_csv}")
+        return {}
+
+    try:
+        df = pd.read_csv(specs_csv)
+        specs_dict = {}
+        for _, row in df.iterrows():
+            structure_id = row.get('id', '')
+            sampled_contig = row.get('sampled_contig', '')
+            if structure_id:
+                specs_dict[structure_id] = sampled_contig
+        return specs_dict
+    except Exception as e:
+        print(f"Warning: Could not load specifications CSV: {e}")
         return {}
 
 
@@ -162,11 +281,23 @@ def main():
         default=1,
         help="Starting design number"
     )
+    parser.add_argument(
+        '--specifications_csv',
+        required=False,
+        default=None,
+        help="Path to specifications CSV for sampled_contig data"
+    )
 
     args = parser.parse_args()
 
     # Extract metadata from JSON
     metadata = extract_metadata_from_json(args.json_file)
+
+    # Load specifications for sampled_contig data
+    specs_csv = args.specifications_csv
+    if specs_csv is None:
+        specs_csv = os.path.join(args.output_folder, "rfdiffusion3_specifications.csv")
+    specs_dict = load_specifications(specs_csv)
 
     # Parse log file for timing (optional)
     timing_info = parse_rfd3_log(
@@ -193,6 +324,13 @@ def main():
             # Get actual length from PDB
             actual_length = get_pdb_length(pdb_path)
 
+            # Get sampled_contig for this structure and parse fixed/designed
+            sampled_contig = specs_dict.get(structure_id, "")
+            fixed_sele, designed_sele = parse_sampled_contig(
+                sampled_contig,
+                actual_length if actual_length else 0
+            )
+
             # Determine status
             if os.path.exists(pdb_path):
                 status = "success"
@@ -204,6 +342,8 @@ def main():
                 "design": design_num,
                 "model": model_num,
                 "pdb": pdb_file,
+                "fixed": fixed_sele,
+                "designed": designed_sele,
                 "contig": metadata.get("contig", ""),
                 "length": actual_length if actual_length else metadata.get("length", ""),
                 "time": timing_info.get(i, None),
