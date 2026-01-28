@@ -35,7 +35,7 @@ class MutationProfiler(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationProfiler"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self,
                  original: Union[ToolOutput, StandardizedOutput],

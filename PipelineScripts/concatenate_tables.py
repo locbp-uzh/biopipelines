@@ -28,7 +28,7 @@ class ConcatenateTables(BaseConfig):
     """
     
     TOOL_NAME = "ConcatenateTables"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self,
                  tables: List[Any],

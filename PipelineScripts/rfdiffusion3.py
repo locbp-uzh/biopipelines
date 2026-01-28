@@ -113,7 +113,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  contig: str = "",
@@ -351,9 +351,9 @@ class RFdiffusion3(BaseConfig):
         # Helper script and checkpoint paths
         if hasattr(self, 'folders') and self.folders:
             # Checkpoint directory
-            tool_data_folder = self.folders.get("tool_data", {})
-            if isinstance(tool_data_folder, dict):
-                checkpoint_base = tool_data_folder.get("RFdiffusion3", "rfdiffusion3")
+            repositories_folder = self.folders.get("repositories", {})
+            if isinstance(repositories_folder, dict):
+                checkpoint_base = repositories_folder.get("RFdiffusion3", "rfdiffusion3")
             else:
                 checkpoint_base = "rfdiffusion3"
 

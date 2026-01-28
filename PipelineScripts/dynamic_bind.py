@@ -29,7 +29,7 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  proteins: Union[str, List[str], ToolOutput, StandardizedOutput],

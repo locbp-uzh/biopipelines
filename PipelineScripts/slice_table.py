@@ -29,7 +29,7 @@ class SliceTable(BaseConfig):
     """
 
     TOOL_NAME = "SliceTable"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  input: Union[ToolOutput, StandardizedOutput],

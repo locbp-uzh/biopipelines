@@ -26,7 +26,7 @@ class ESMFold(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold"
-    DEFAULT_ENV = "ProteinEnv"
+    
 
     def __init__(self,
                  sequences: Union[str, List[str], ToolOutput, StandardizedOutput],

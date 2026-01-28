@@ -28,7 +28,7 @@ class RemoveDuplicates(BaseConfig):
     """
     
     TOOL_NAME = "RemoveDuplicates"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self,
                  pool: Union[ToolOutput, StandardizedOutput, TableInfo, str],

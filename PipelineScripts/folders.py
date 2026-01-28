@@ -26,7 +26,7 @@ class FolderResolutionError(Exception):
 PLACEHOLDER_PATTERN = re.compile(r'<([a-zA-Z_][a-zA-Z0-9_]*)>')
 
 # Order in which config sections are resolved
-SECTION_ORDER = ['base', 'infrastructure', 'tool_data', 'cache', 'derived', 'server']
+SECTION_ORDER = ['base', 'infrastructure', 'repositories', 'cache', 'derived', 'server']
 
 
 class FolderManager:

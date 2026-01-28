@@ -29,7 +29,7 @@ class AlphaFold(BaseConfig):
     """
     
     TOOL_NAME = "AlphaFold"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     # Valid MSA mode options for ColabFold
     VALID_MSA_MODES = ["mmseqs2_uniref_env", "mmseqs2_uniref", "single_sequence"]

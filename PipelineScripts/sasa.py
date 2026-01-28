@@ -33,7 +33,7 @@ class SASA(BaseConfig):
     """
 
     TOOL_NAME = "SASA"
-    DEFAULT_ENV = None  # Uses PyMOL
+    
 
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput, StandardizedOutput],

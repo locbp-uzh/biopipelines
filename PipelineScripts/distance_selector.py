@@ -27,7 +27,7 @@ class DistanceSelector(BaseConfig):
     """
 
     TOOL_NAME = "DistanceSelector"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput] = None,

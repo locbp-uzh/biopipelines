@@ -27,7 +27,7 @@ class PLIP(BaseConfig):
     """
 
     TOOL_NAME = "PLIP"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput, StandardizedOutput],

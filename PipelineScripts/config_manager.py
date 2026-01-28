@@ -78,7 +78,7 @@ class ConfigManager:
 
             # Validate folder subsections
             folders = config.get('folders', {})
-            required_folder_sections = ['base', 'infrastructure', 'tool_data']
+            required_folder_sections = ['base', 'infrastructure', 'repositories']
             for folder_section in required_folder_sections:
                 if folder_section not in folders:
                     raise ValueError(

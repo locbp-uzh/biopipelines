@@ -28,7 +28,7 @@ class RF3(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "RF3"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  # Primary input parameters

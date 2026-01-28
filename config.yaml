@@ -3,7 +3,7 @@
 # Users can customize this file to match their local setup
 #
 # Placeholder syntax: <key> references another folder key
-# Resolution order: base -> infrastructure -> shared_overrides (if shared) -> tool_data -> cache -> derived -> server
+# Resolution order: base -> infrastructure -> shared_overrides (if shared) -> repositories -> cache -> derived -> server
 # Runtime placeholders: <user>, <cwd>, <shared_user> are injected at runtime
 
 # Folder Configuration
@@ -29,8 +29,8 @@ folders:
     models: "<group>/models"
     containers: "<group>/containers"
 
-  # Tool data paths
-  tool_data:
+  # Installation files
+  repositories:
     RFdiffusion: "<data>/RFdiffusion"
     RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
     RFdiffusion3: "<data>/rfdiffusion3"
@@ -46,13 +46,9 @@ folders:
 
   # Cache paths (shared on group storage)
   cache:
-    BoltzCache: "<group>/models/Boltz"
-    BoltzGenCache: "<group>/models/BoltzGen"
-    ColabFoldDatabases: "<group>/models/colabfold_databases"
-
-  # Derived paths (depend on tool_data)
-  derived:
-    DynamicBindWeights: "<DynamicBind>/workdir"
+    BoltzCache: "<models>/Boltz"
+    BoltzGenCache: "<models>/BoltzGen"
+    ColabFoldDatabases: "<models>/colabfold_databases"
 
   # Server paths
   server:

@@ -27,7 +27,7 @@ class LigandMPNN(BaseConfig):
     """
     
     TOOL_NAME = "LigandMPNN"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self,
                  structures: Union[str, List[str], ToolOutput],

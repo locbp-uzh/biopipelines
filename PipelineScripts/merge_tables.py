@@ -28,7 +28,7 @@ class MergeTables(BaseConfig):
     """
     
     TOOL_NAME = "MergeTables"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self,
                  tables: List[Any],

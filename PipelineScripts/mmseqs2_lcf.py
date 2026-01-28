@@ -42,7 +42,7 @@ class MMseqs2LCF(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2LCF"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self, sequences: Union[str, List[str], ToolOutput, StandardizedOutput],
                  timeout: int = 3600,
@@ -391,7 +391,7 @@ class MMseqs2ServerLCF(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2ServerLCF"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  threads: int = None,

@@ -33,7 +33,7 @@ class BaseConfig(ABC):
 
     # Tool-specific defaults (override in subclasses)
     TOOL_NAME = "base"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     @overload
     def __new__(cls: Type[T], *args, **kwargs) -> T:
@@ -101,8 +101,7 @@ class BaseConfig(ABC):
         self.pipeline = kwargs.get('pipeline', None)
 
         # Environment and resources - use config.yaml if available
-        default_env = self._get_default_environment()
-        self.environment = kwargs.get('env', default_env)
+        self.environment = kwargs.get('env', 'biopipelines')
         self.resources = kwargs.get('resources', {})
         
         # Pipeline integration
@@ -124,23 +123,6 @@ class BaseConfig(ABC):
 
         # Validate configuration
         self.validate_params()
-    
-    
-    def _get_default_environment(self) -> Optional[str]:
-        """
-        Get default environment from config.yaml, falling back to class DEFAULT_ENV.
-
-        Returns:
-            Environment name from config or class default
-        """
-        try:
-            config_manager = ConfigManager()
-            config_env = config_manager.get_environment(self.TOOL_NAME)
-            # Return config environment if it exists, otherwise use class default
-            return config_env if config_env is not None else self.DEFAULT_ENV
-        except Exception:
-            # If config loading fails, fall back to class default
-            return self.DEFAULT_ENV
 
     @abstractmethod
     def validate_params(self):
@@ -290,7 +272,8 @@ fi
 
 # Environment diagnostics
 echo "=== Environment Check ==="
-echo "CONDA_DEFAULT_ENV: $CONDA_DEFAULT_ENV"
+echo "Environment: $CONDA_DEFAULT_ENV"
+echo "Location: $CONDA_PREFIX"
 echo "Python: $(which python)"
 echo "Python version: $(python --version 2>&1)"
 echo "========================="

@@ -1,5 +1,5 @@
 I want to change how folders are managed. I don't like the absence of modularity that is due to the folders.py
   having most of the keys hardcoded in there. Rather, one should have the filesystem in the config file and
   folders.py simply parse the config to retrieve. As an example, there shouldn't be someting like "RFdiffusion":
-  os.path.join(self._folders["data"], tool_data_config.get('RFdiffusion', 'RFdiffusion')). Rather in the config one
+  os.path.join(self._folders["data"], repositories_config.get('RFdiffusion', 'RFdiffusion')). Rather in the config one
   specifies RFdiffusion: <data>/RFdiffusion, and somewhere what <data> is, also in config, and that's enough.

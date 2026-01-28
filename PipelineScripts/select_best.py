@@ -28,7 +28,7 @@ class SelectBest(BaseConfig):
     """
     
     TOOL_NAME = "SelectBest"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self,
                  pool: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]],

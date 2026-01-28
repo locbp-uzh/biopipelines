@@ -397,7 +397,7 @@ Create a new tool called ProteinAnalyzer in PipelineScripts/protein_analyzer.py:
 1. Inherit from BaseConfig
 2. Accept structures parameter (Union[ToolOutput, StandardizedOutput])
 3. Accept analysis_type parameter (str, must be one of: "surface", "volume", "charge")
-4. DEFAULT_ENV = "ProteinEnv"
+
 5. Generate analysis CSV with columns: id, source_structure, {analysis_type}_value
 6. Follow the pattern from residue_atom_distance.py for:
    - Parameter validation
@@ -568,7 +568,7 @@ All tools inherit from `BaseConfig` which provides:
 ```python
 class MyTool(BaseConfig):
     TOOL_NAME = "MyTool"           # Tool identifier
-    DEFAULT_ENV = "ProteinEnv"     # Default conda environment
+    
 ```
 
 #### Instance Attributes (Automatic)
@@ -721,7 +721,7 @@ class MyTool(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "MyTool"
-    DEFAULT_ENV = "ProteinEnv"
+    
 
     def __init__(self,
                  structures: Union[ToolOutput, StandardizedOutput],
@@ -1338,7 +1338,7 @@ def configure_inputs(self, pipeline_folders: Dict[str, str]):
 
 - [ ] Create tool file in `PipelineScripts/`
 - [ ] Inherit from `BaseConfig`
-- [ ] Set `TOOL_NAME` and `DEFAULT_ENV`
+- [ ] Set `TOOL_NAME`
 - [ ] Implement `validate_params()`
 - [ ] Implement `configure_inputs()`
 - [ ] Implement `generate_script()`

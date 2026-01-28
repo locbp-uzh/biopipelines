@@ -32,7 +32,7 @@ class PoseDistance(BaseConfig):
     """
 
     TOOL_NAME = "PoseDistance"
-    DEFAULT_ENV = "ProteinEnv"
+    
 
     def __init__(self,
                  reference_structure: Union[str, ToolOutput, StandardizedOutput],

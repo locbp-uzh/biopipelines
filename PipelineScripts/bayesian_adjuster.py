@@ -45,7 +45,7 @@ class BayesianAdjuster(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BayesianAdjuster"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  frequencies: Union[TableInfo, str],

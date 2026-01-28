@@ -33,7 +33,7 @@ class GhostFold(BaseConfig):
     """
 
     TOOL_NAME = "GhostFold"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self, sequences: Union[str, List[str], ToolOutput, Dict[str, Any]] = None,
                  name: str = "",

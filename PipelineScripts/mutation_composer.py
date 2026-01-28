@@ -34,7 +34,7 @@ class MutationComposer(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationComposer"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self,
                  frequencies: Union[List[Union[ToolOutput, StandardizedOutput, TableInfo, str]],

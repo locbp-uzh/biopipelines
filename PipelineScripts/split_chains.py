@@ -27,7 +27,7 @@ class SplitChains(BaseConfig):
     """
 
     TOOL_NAME = "SplitChains"
-    DEFAULT_ENV = None  # Pure Python, no conda env needed
+    
 
     def __init__(self,
                  sequences: Union[ToolOutput, StandardizedOutput],

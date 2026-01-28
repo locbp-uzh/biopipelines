@@ -31,7 +31,7 @@ class Ligand(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Ligand"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  ids: Union[str, List[str]],

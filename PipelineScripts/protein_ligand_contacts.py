@@ -40,7 +40,7 @@ class ProteinLigandContacts(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "ProteinLigandContacts"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  structures: Union[ToolOutput, StandardizedOutput],

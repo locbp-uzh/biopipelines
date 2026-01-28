@@ -38,7 +38,7 @@ class BoltzGen(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BoltzGen"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  # Design specification - Option 1: Manual YAML/dict
@@ -263,11 +263,11 @@ class BoltzGen(BaseConfig):
             self.boltzgen_helper_py = os.path.join(
                 self.folders["HelpScripts"], "pipe_boltzgen.py"
             )
-            # Use tool_data folder for cache if user didn't specify custom cache_dir
+            # Use repositories folder for cache if user didn't specify custom cache_dir
             if self.cache_dir is None:
-                tool_data_folder = self.folders.get("tool_data", {})
-                if isinstance(tool_data_folder, dict):
-                    cache_base = tool_data_folder.get("BoltzGen", "boltzgen")
+                repositories_folder = self.folders.get("repositories", {})
+                if isinstance(repositories_folder, dict):
+                    cache_base = repositories_folder.get("BoltzGen", "boltzgen")
                 else:
                     cache_base = "boltzgen"
                 self.cache_dir = os.path.join(
@@ -1225,7 +1225,7 @@ class BoltzGenMerge(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenMerge"
-    DEFAULT_ENV = None  # Uses same env as BoltzGen
+    
 
     def __init__(self,
                  sources: List[Union[ToolOutput, StandardizedOutput, str]] = None,
@@ -1429,7 +1429,6 @@ class BoltzGenImport(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenImport"
-    DEFAULT_ENV = None
 
     def __init__(self,
                  designs: Union[ToolOutput, StandardizedOutput] = None,

@@ -27,7 +27,7 @@ class OnionNet(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "OnionNet"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  # Primary input parameters
@@ -236,7 +236,7 @@ class OnionNet2(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "OnionNet2"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  # Primary input parameters

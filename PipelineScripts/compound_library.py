@@ -31,7 +31,7 @@ class CompoundLibrary(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "CompoundLibrary"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
     
     def __init__(self, 
                  library: Union[str, Dict[str, Union[str, List[str]]]],

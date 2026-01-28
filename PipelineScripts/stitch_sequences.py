@@ -38,7 +38,7 @@ class StitchSequences(BaseConfig):
     """
 
     TOOL_NAME = "StitchSequences"
-    DEFAULT_ENV = None
+    
 
     def __init__(self,
                  template: Union[str, ToolOutput, StandardizedOutput],

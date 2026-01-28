@@ -35,7 +35,7 @@ class AverageByTable(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "AverageByTable"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  tables: List[Union[str, Dict, ToolOutput, StandardizedOutput]],

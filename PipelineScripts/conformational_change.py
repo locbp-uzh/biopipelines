@@ -39,7 +39,7 @@ class ConformationalChange(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "ConformationalChange"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  reference_structures: Union[str, ToolOutput, StandardizedOutput],

@@ -28,7 +28,7 @@ class SelectionEditor(BaseConfig):
     """
 
     TOOL_NAME = "SelectionEditor"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  structures: Union[ToolOutput, StandardizedOutput, List[str]],

@@ -30,7 +30,7 @@ class Rank(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Rank"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  data: Union[ToolOutput, StandardizedOutput, TableInfo] = None,

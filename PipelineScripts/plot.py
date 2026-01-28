@@ -78,7 +78,7 @@ class Plot(BaseConfig):
     """
 
     TOOL_NAME = "Plot"
-    DEFAULT_ENV = None
+    
 
     # --- Static methods for creating operations ---
 

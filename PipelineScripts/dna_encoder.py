@@ -37,7 +37,7 @@ class DNAEncoder(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "DNAEncoder"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  sequences: Union[ToolOutput, StandardizedOutput],

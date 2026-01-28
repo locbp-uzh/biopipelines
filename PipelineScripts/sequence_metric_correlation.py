@@ -38,7 +38,7 @@ class SequenceMetricCorrelation(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "SequenceMetricCorrelation"
-    DEFAULT_ENV = None  # Loaded from config.yaml
+    
 
     def __init__(self,
                  mutants: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput, TableInfo, str]]],

@@ -49,7 +49,7 @@ class PyMOL(BaseConfig):
     """
 
     TOOL_NAME = "PyMOL"
-    DEFAULT_ENV = None
+    
 
     # --- Static methods for creating operations ---
 
