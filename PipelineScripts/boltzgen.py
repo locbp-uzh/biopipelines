@@ -403,7 +403,7 @@ class BoltzGen(BaseConfig):
                     spec_path = self.design_spec
                 else:
                     # Try relative to project folders
-                    spec_path = os.path.join(pipeline_folders.get("notebooks", "."), self.design_spec)
+                    spec_path = os.path.join(pipeline_folders.get("biopipelines", "."), self.design_spec)
 
                 if not os.path.exists(spec_path):
                     raise ValueError(f"Design specification file not found: {self.design_spec}")

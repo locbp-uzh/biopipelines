@@ -36,7 +36,7 @@ Tool2 -> <tool2>.sh -> <job folder>/<Execution order>_<Tool name>/<output files>
 #### File Organization Patterns
 
 ### Execution Environments
-The notebooks are designed for University of Zürich's cluster computing environment with:
+The biopipelines are designed for University of Zürich's cluster computing environment with:
 - GPU allocation: L4, V100, A100, H100, H200 options
 - SLURM job scheduling integration
 - Shared storage at `/shares/locbp.chem.uzh`

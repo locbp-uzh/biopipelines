@@ -230,18 +230,18 @@ def check_and_resubmit_server(server_dir):
             f.write(time.strftime("%H:%M:%S"))
         log(f"Created submission timestamp at {GPU_SUBMITTING}")
 
-        # Find notebooks directory (go up from HelpScripts to repo root)
+        # Find biopipelines directory (go up from HelpScripts to repo root)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(script_dir)
-        notebooks_dir = repo_root
+        biopipelines_dir = repo_root
         log(f"Repo root: {repo_root}")
 
         try:
             # Submit server job
-            log(f"Submitting server from: {notebooks_dir}")
+            log(f"Submitting server from: {biopipelines_dir}")
             result = subprocess.run(
                 ["./submit", "ExamplePipelines/mmseqs2_lcf_server.py"],
-                cwd=notebooks_dir,
+                cwd=biopipelines_dir,
                 capture_output=True,
                 text=True
             )

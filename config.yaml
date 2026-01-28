@@ -13,19 +13,20 @@ folders:
   # - <username>: actual username (e.g., gquarg)
   # - <cwd>: current working directory
   base:
-    group: "/shares/locbp.chem.uzh"
     home: "/home/<username>"
     data: "<home>/data"
     scratch: "/scratch/<username>"
-    notebooks: "<cwd>"
+    group: "/shares/locbp.chem.uzh"
     user: "<group>/<username>"
+    biopipelines: "<cwd>"
+    biopipelines_output: "<user>/biopipelines_output"
 
   # Infrastructure paths
   infrastructure:
-    HelpScripts: "<notebooks>/HelpScripts"
-    MMseqs2: "<notebooks>/MMseqs2"
-    PDBs: "<notebooks>/PDBs"
-    Ligands: "<notebooks>/Ligands"
+    HelpScripts: "<biopipelines>/HelpScripts"
+    MMseqs2: "<biopipelines>/MMseqs2"
+    PDBs: "<biopipelines>/PDBs"
+    Ligands: "<biopipelines>/Ligands"
     models: "<group>/models"
     containers: "<group>/containers"
 
@@ -52,9 +53,8 @@ folders:
 
   # Server paths
   server:
-    BioPipelines: "<user>/BioPipelines"
-    MMseqs2Server: "<BioPipelines>/MMseqs2Server"
-    MMseqs2LCFServer: "<BioPipelines>/MMseqs2LCFServer"
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
+    MMseqs2LCFServer: "<biopipelines_output>/MMseqs2LCFServer"
 
 # Default Environments
 # Each tool can have a default conda environment specified here

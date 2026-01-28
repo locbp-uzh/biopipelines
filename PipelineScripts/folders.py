@@ -2,7 +2,7 @@
 Folder management utilities for pipeline execution.
 
 Handles automatic creation and organization of all pipeline-related directories
-following the established conventions from the Jupyter notebooks.
+following the established conventions from the Jupyter biopipelines.
 """
 
 import os
@@ -34,7 +34,7 @@ class FolderManager:
     Manages folder structure for pipeline execution.
 
     Creates and maintains the standard directory hierarchy used by all tools,
-    following conventions established in the Jupyter notebooks.
+    following conventions established in the Jupyter biopipelines.
     """
 
     def __init__(self, project: str, job: str, debug: bool=False):
@@ -64,15 +64,15 @@ class FolderManager:
 
     def _inject_runtime_values(self):
         """Inject runtime values that are computed from the environment."""
-        notebooks_folder = os.getcwd() if not self._debug else "biopipelines"
-        user_name = os.path.basename(os.path.dirname(notebooks_folder)) if not self._debug else "USER"
+        biopipelines_folder = os.getcwd() if not self._debug else "biopipelines"
+        user_name = os.path.basename(os.path.dirname(biopipelines_folder)) if not self._debug else "USER"
         self.user_name = user_name
 
         # These are the runtime placeholders available in config
         # - username: actual username (e.g., gquarg)
         # - cwd: current working directory
         self._folders["username"] = user_name
-        self._folders["cwd"] = notebooks_folder
+        self._folders["cwd"] = biopipelines_folder
 
     def _resolve_config_sections(self, folder_config: Dict):
         """Resolve all config sections in the defined order."""
@@ -125,12 +125,12 @@ class FolderManager:
         """Setup runtime paths that depend on project/job names."""
         # Project path
         if not self._debug:
-            self._folders["project"] = os.path.join(self._folders["BioPipelines"], project)
+            self._folders["project"] = os.path.join(self._folders["biopipelines_output"], project)
         else:
             self._folders["project"] = "Debug"
 
         # Create necessary directories
-        for folder_key in ["user", "BioPipelines", "PDBs", "Ligands"]:
+        for folder_key in ["user", "biopipelines_output", "PDBs", "Ligands"]:
             if not self._debug:
                 os.makedirs(self._folders[folder_key], exist_ok=True)
         os.makedirs(self._folders["project"], exist_ok=True)
@@ -168,7 +168,7 @@ class FolderManager:
         """
         Generate unique filename/foldername to avoid conflicts.
 
-        Based on the unique_name function from notebooks.
+        Based on the unique_name function from biopipelines.
 
         Args:
             directory: Directory to check for existing files
