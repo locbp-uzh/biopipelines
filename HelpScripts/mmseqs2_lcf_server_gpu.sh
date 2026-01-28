@@ -23,7 +23,8 @@ RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2LCFServer/results"
 TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2LCFServer/tmp"
 
 # Database directory (ColabFold databases setup with setup_databases.sh)
-DB_DIR="/shares/locbp.chem.uzh/models/colabfold_databases"
+# Use environment variable from pipeline, with fallback for manual execution
+DB_DIR="${COLABFOLD_DB_DIR:-/shares/locbp.chem.uzh/models/colabfold_databases}"
 UNIREF_DB="uniref30_2302_db"
 ENVDB="colabfold_envdb_202108_db"
 

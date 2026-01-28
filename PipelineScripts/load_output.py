@@ -585,13 +585,13 @@ class LoadOutput(BaseConfig):
         if not original_job:
             original_job = 'unknown'
         
-        script_content = f"""#!/bin/bash
-# LoadOutput script - loading results from {original_tool}
-# Original job: {original_job}
-# Result file: {self.result_file}
-
-{self.generate_completion_check_header()}
-
+        script_content = "#!/bin/bash\n"
+        script_content += f"# LoadOutput script - loading results from {original_tool}\n"
+        script_content += f"# Original job: {original_job}\n"
+        script_content += f"# Result file: {self.result_file}\n"
+        script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
+        script_content += f"""
 echo "Loading output from previous {original_tool} execution"
 echo "Original job: {original_job}"
 echo "Result file: {self.result_file}"
@@ -657,8 +657,8 @@ echo "Filtered tables created successfully"
 echo "LoadOutput complete"
 echo "Files loaded from {original_tool} are ready for use"
 
-{self.generate_completion_check_footer()}
 """
+        script_content += self.generate_completion_check_footer()
 
         return script_content
     

@@ -265,6 +265,7 @@ class CompoundLibrary(BaseConfig):
         script_content = "#!/bin/bash\n"
         script_content += "# CompoundLibrary processing script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
         script_content += "echo \"Processing compound library\"\n"
         
         # Create output directories

@@ -251,6 +251,7 @@ class AlphaFold(BaseConfig):
         script_content = "#!/bin/bash\n"
         script_content += "# AlphaFold execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
         script_content += self.generate_script_prepare_sequences()
         script_content += self.generate_script_run_alphafold()
         script_content += self.generate_script_extract_best_rank()

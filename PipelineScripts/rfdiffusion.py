@@ -232,7 +232,6 @@ class RFdiffusion(BaseConfig):
         Returns:
             Script content as string
         """
-        runtime_folder = os.path.dirname(script_path)
         rfd_job_folder = self.output_folder
         os.makedirs(rfd_job_folder, exist_ok=True)
         
@@ -240,6 +239,7 @@ class RFdiffusion(BaseConfig):
         script_content = "#!/bin/bash\n"
         script_content += "# RFdiffusion execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
         script_content += self.generate_script_run_rfdiffusion()
         script_content += self.generate_script_create_table()
         script_content += self.generate_completion_check_footer()

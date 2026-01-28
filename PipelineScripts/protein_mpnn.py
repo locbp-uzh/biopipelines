@@ -331,6 +331,7 @@ class ProteinMPNN(BaseConfig):
         script_content = "#!/bin/bash\n"
         script_content += "# ProteinMPNN execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
         script_content += self.generate_script_prepare_inputs()
         script_content += self.generate_script_run_proteinmpnn()
         script_content += self.generate_script_create_table()

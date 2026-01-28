@@ -27,7 +27,7 @@ folders:
     MMseqs2: "<biopipelines>/MMseqs2"
     PDBs: "<biopipelines>/PDBs"
     Ligands: "<biopipelines>/Ligands"
-    models: "<group>/models"
+    cache: "<group>/cache"
     containers: "<group>/containers"
 
   # Installation files
@@ -47,9 +47,10 @@ folders:
 
   # Cache paths (shared on group storage)
   cache:
-    BoltzCache: "<models>/Boltz"
-    BoltzGenCache: "<models>/BoltzGen"
-    ColabFoldDatabases: "<models>/colabfold_databases"
+    BoltzCache: "<cache>/Boltz"
+    BoltzGenCache: "<cache>/BoltzGen"
+    ColabFoldDatabases: "<group>/models/colabfold_databases"
+    MMseqs2Databases: "<group>/models/mmseqs2_databases/gpu"
 
   # Server paths
   server:
@@ -88,8 +89,10 @@ environments:
   OnionNet: "OnionNetEnv"
   OnionNet2: "OnionNet2Env"
 
-  # Analysis 
-  DynamicBind: "biopipelines"
+  # Analysis
+  DynamicBind:
+    - "dynamicbind"
+    - "relax"
   ResidueAtomDistance: "biopipelines"
   PLIP: "biopipelines"
   DistanceSelector: "biopipelines"
@@ -124,3 +127,9 @@ environments:
   Ligand: "biopipelines"
   PyMOL: "ProteinEnv"
   Plot: "biopipelines"
+
+# Containers
+# Singularity/Apptainer container images for tools that use containerized execution
+containers:
+  # Add container paths here as needed
+  # Example: ToolName: "<containers>/tool.sif"

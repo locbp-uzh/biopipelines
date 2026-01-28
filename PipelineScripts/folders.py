@@ -2,7 +2,7 @@
 Folder management utilities for pipeline execution.
 
 Handles automatic creation and organization of all pipeline-related directories
-following the established conventions from the Jupyter biopipelines.
+following the established conventions from the biopipelines.
 """
 
 import os
@@ -34,7 +34,7 @@ class FolderManager:
     Manages folder structure for pipeline execution.
 
     Creates and maintains the standard directory hierarchy used by all tools,
-    following conventions established in the Jupyter biopipelines.
+    following conventions established in the biopipelines.
     """
 
     def __init__(self, project: str, job: str, debug: bool=False):

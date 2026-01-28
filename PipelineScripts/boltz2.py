@@ -704,6 +704,7 @@ fi
         script_content = "#!/bin/bash\n"
         script_content += "# Boltz2 execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
         
         # Create basic folder structure
         script_content += f"""# Create output folders

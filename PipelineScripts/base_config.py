@@ -100,8 +100,8 @@ class BaseConfig(ABC):
         # Pipeline reference for getting job name
         self.pipeline = kwargs.get('pipeline', None)
 
-        # Environment and resources - use config.yaml if available
-        self.environment = kwargs.get('env', 'biopipelines')
+        # Environment(s) from config.yaml
+        self._load_environments()
         self.resources = kwargs.get('resources', {})
         
         # Pipeline integration
@@ -123,6 +123,67 @@ class BaseConfig(ABC):
 
         # Validate configuration
         self.validate_params()
+
+    def _load_environments(self):
+        """
+        Load environment(s) for this tool from config.yaml.
+
+        The environments section in config.yaml can specify either:
+        - A single environment string: "ProteinEnv"
+        - A list of environments: ["dynamicbind", "relax"]
+
+        Tools that need multiple environments (like DynamicBind) can access
+        them via activate_environment(index=N).
+        """
+        config_manager = ConfigManager()
+        env_config = config_manager.get_environment(self.TOOL_NAME)
+
+        if env_config is None:
+            # Default to biopipelines if not configured
+            self.environments = ["biopipelines"]
+        elif isinstance(env_config, list):
+            # Multiple environments specified
+            self.environments = env_config
+        else:
+            # Single environment string
+            self.environments = [env_config]
+
+    def activate_environment(self, index: int = 0, name: Optional[str] = None) -> str:
+        """
+        Generate bash script snippet to activate a conda environment.
+
+        Args:
+            index: Index of the environment to activate (default: 0, the first/primary environment)
+            name: Optional explicit environment name (overrides index-based lookup)
+
+        Returns:
+            Bash script content for activating the environment with diagnostics
+
+        Raises:
+            IndexError: If index is out of range for configured environments
+        """
+        if name is not None:
+            env_name = name
+        else:
+            if index >= len(self.environments):
+                raise IndexError(
+                    f"Environment index {index} out of range for {self.TOOL_NAME}. "
+                    f"Available environments: {self.environments}"
+                )
+            env_name = self.environments[index]
+
+        return f"""# Activate environment: {env_name}
+echo "=== Activating Environment ==="
+echo "Requested: {env_name}"
+eval "$(mamba shell hook --shell bash)"
+mamba activate {env_name}
+echo "Environment: $CONDA_DEFAULT_ENV"
+echo "Location: $CONDA_PREFIX"
+echo "Python: $(which python)"
+echo "Python version: $(python --version 2>&1)"
+echo "=============================="
+
+"""
 
     @abstractmethod
     def validate_params(self):
@@ -236,7 +297,7 @@ class BaseConfig(ABC):
         return {
             'tool_name': self.tool_name,
             'job_name': self.job_name,
-            'environment': self.environment,
+            'environments': self.environments,
             'resources': self.resources,
             'dependencies': len(self.dependencies),
             'execution_order': self.execution_order
@@ -250,7 +311,7 @@ class BaseConfig(ABC):
     def generate_completion_check_header(self) -> str:
         """
         Generate bash script header that checks for completion status.
-        
+
         Returns:
             Bash script content for checking completion
         """
@@ -261,25 +322,17 @@ class BaseConfig(ABC):
             completed_file = f"{step_number}_{self.TOOL_NAME}_COMPLETED"
         else:
             completed_file = f"{self.TOOL_NAME}_COMPLETED"
-        
+
         parent_dir = os.path.dirname(self.output_folder)
-        
+
         return f"""# Check if already completed
 if [ -f "{parent_dir}/{completed_file}" ]; then
     echo "{self.TOOL_NAME} already completed, skipping..."
     exit 0
 fi
 
-# Environment diagnostics
-echo "=== Environment Check ==="
-echo "Environment: $CONDA_DEFAULT_ENV"
-echo "Location: $CONDA_PREFIX"
-echo "Python: $(which python)"
-echo "Python version: $(python --version 2>&1)"
-echo "========================="
-
 """
-    
+
     def generate_completion_check_footer(self) -> str:
         """
         Generate bash script footer that checks outputs and creates status files.
@@ -412,7 +465,7 @@ fi
     
     def __str__(self) -> str:
         """String representation of configuration."""
-        return f"{self.TOOL_NAME}(env={self.environment}, order={self.execution_order})"
+        return f"{self.TOOL_NAME}(envs={self.environments}, order={self.execution_order})"
     
     def __repr__(self) -> str:
         return self.__str__()
@@ -1162,7 +1215,7 @@ class ToolOutput:
         """Initialize with reference to tool configuration."""
         self.config = config
         self.tool_type = config.TOOL_NAME
-        self.environment = config.environment
+        self.environments = config.environments
         self.output_folder = config.output_folder
         self.execution_order = config.execution_order
         

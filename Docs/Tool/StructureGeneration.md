@@ -237,26 +237,17 @@ pip install boltzgen
 - `cache_dir`: Optional[str] = None - Model download location
 
 **Outputs**:
-- `structures`: Final designed structure files (in `final_ranked_designs/final_<budget>_designs/`)
-- `tables.all_metrics`:
+Tables are only predicted if the appropriate step is chosen. There are many columns, please refer to the repository for more info.
 
-  | id | RMSD | hydrogen_bonds | packing_quality | interface_contacts | binding_energy | design_plddt |
-  |----|------|----------------|-----------------|-------------------|----------------|--------------|
-
-- `tables.final_metrics`:
-
-  | id | RMSD | hydrogen_bonds | packing_quality | interface_contacts | binding_energy | design_plddt | rank |
-  |----|------|----------------|-----------------|-------------------|----------------|--------------|------|
+After analysis you can access:
 
 - `tables.aggregate_metrics`:
-
-  | metric | mean | std | min | max |
-  |--------|------|-----|-----|-----|
-
 - `tables.per_target_metrics`:
 
-  | target_id | num_designs | avg_rmsd | avg_plddt |
-  |-----------|-------------|----------|-----------|
+After filtering you can access:
+
+- `tables.all_designs_metrics`:
+- `tables.final_metrics`:
 
 **Notes**:
 - **Residue indexing**: All residue indices start at 1 and use canonical mmcif `label_asym_id`, not `auth_asym_id`

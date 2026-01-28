@@ -250,6 +250,7 @@ class DistanceSelector(BaseConfig):
         script_content = "#!/bin/bash\n"
         script_content += "# DistanceSelector execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
 
         # Get specific structure files
         if hasattr(self, 'input_sources') and "structures" in self.input_sources:

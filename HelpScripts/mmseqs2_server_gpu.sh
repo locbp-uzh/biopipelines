@@ -19,7 +19,8 @@ nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheade
 USER=${USER:-$(whoami)}
 JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/job_queue"
 RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/results"
-DB_DIR="/shares/locbp.chem.uzh/models/mmseqs2_databases/gpu"
+# Use environment variable from pipeline, with fallback for manual execution
+DB_DIR="${MMSEQS2_DB_DIR:-/shares/locbp.chem.uzh/models/mmseqs2_databases/gpu}"
 
 TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp"
 GPU_TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp/gpu"

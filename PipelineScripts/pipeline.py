@@ -80,10 +80,6 @@ class Pipeline:
         # Suffix for tool folder naming
         self.current_suffix = ""
 
-        # Environment tracking
-        self.environments_used = set()
-        self.environment_groups = defaultdict(list)
-
         # Script generation
         self.pipeline_script = ""
         self.slurm_script = ""
@@ -169,13 +165,12 @@ class Pipeline:
         """
         self.current_suffix = suffix
     
-    def add(self, tool_config: BaseConfig, env: str = None, **kwargs):
+    def add(self, tool_config: BaseConfig, **kwargs):
         """
         Add a tool to the pipeline.
 
         Args:
             tool_config: Configured tool instance (e.g., RFdiffusion())
-            env: Environment override
             **kwargs: Additional pipeline-specific options
 
         Returns:
@@ -188,14 +183,12 @@ class Pipeline:
                 "Use: with Pipeline(...): Resources(...); tool = Tool(...)"
             )
 
-        if env is not None: tool_config.environment = env
-
         # Merge current batch resources with tool resources
         current_resources = self.batch_resources[self.current_batch]
         for key, value in current_resources.items():
             if value is not None:
                 tool_config.resources[key] = value
-        
+
         # Set execution order and create step-numbered folder immediately
         self.execution_order += 1
         if self.current_suffix:
@@ -209,13 +202,9 @@ class Pipeline:
         tool_config.set_pipeline_context(
             self, self.execution_order, tool_output_folder, self.current_suffix
         )
-        
+
         # Configure inputs immediately so tool outputs are properly set
         tool_config.configure_inputs(self.folders)
-        
-        # Track environment usage
-        self.environments_used.add(tool_config.environment)
-        self.environment_groups[tool_config.environment].append(tool_config)
         
         # Add to pipeline
         self.tools.append(tool_config)
@@ -280,10 +269,6 @@ class Pipeline:
         # Configure inputs immediately
         tool_config.configure_inputs(self.folders)
 
-        # Track environment usage
-        self.environments_used.add(tool_config.environment)
-        self.environment_groups[tool_config.environment].append(tool_config)
-
         # Add to pipeline
         self.tools.append(tool_config)
 
@@ -324,11 +309,7 @@ class Pipeline:
                             f"Tool {tool.TOOL_NAME} depends on {dep.TOOL_NAME} "
                             f"which hasn't been added yet"
                         )
-        # Check environment compatibility
-        for env in self.environments_used:
-            env_tools = [t.TOOL_NAME for t in self.environment_groups[env]]
-            print(f"Environment {env}: {', '.join(env_tools)}")
-        
+
         return True
     
     def save(self, debug=False) -> str:
@@ -418,7 +399,7 @@ class Pipeline:
         for i, tool in enumerate(self.tools, 1):
             config_lines.extend([
                 f'echo "Step {i}: {tool.TOOL_NAME}"',
-                f'echo "  Environment: {tool.environment}"'
+                f'echo "  Environments: {tool.environments}"'
             ])
             
             # Add tool-specific parameters (will be implemented in each tool)
@@ -446,40 +427,14 @@ class Pipeline:
             "",
             "# Initialize mamba for environment activation",
             'eval "$(mamba shell hook --shell bash)"',
-            ""
-        ]
-
-        # Determine primary environment (most common)
-        env_counts = {}
-        for tool in self.tools:
-            env_counts[tool.environment] = env_counts.get(tool.environment, 0) + 1
-        primary_env = max(env_counts, key=env_counts.get)
-
-        # Activate primary environment (if one is needed)
-        if primary_env is not None:
-            script_lines.extend([
-                f"mamba activate {primary_env}",
-                "echo"
-            ])
-
-        script_lines.extend([
+            "",
             "echo Configuration",
             f"{config_script} | tee {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
             "echo"
-        ])
-        
-        # Add each tool execution
-        current_env = primary_env
-        
+        ]
+
+        # Add each tool execution (each tool handles its own environment activation)
         for i, tool in enumerate(self.tools, 1):
-            # Environment switch if needed
-            if tool.environment != current_env and tool.environment is not None:
-                script_lines.extend([
-                    f"mamba activate {tool.environment}",
-                    "echo"
-                ])
-                current_env = tool.environment
-            
             # Generate tool-specific script
             # Include suffix in script name if present
             if hasattr(tool, 'suffix') and tool.suffix:
@@ -765,7 +720,7 @@ umask 002
         for i, tool in enumerate(batch_tools, start=start_tool_idx + 1):
             config_lines.extend([
                 f'echo "Step {i}: {tool.TOOL_NAME}"',
-                f'echo "  Environment: {tool.environment}"'
+                f'echo "  Environments: {tool.environments}"'
             ])
             tool_config = tool.get_config_display()
             for config_line in tool_config:
@@ -790,32 +745,14 @@ umask 002
             "",
             "# Initialize mamba for environment activation",
             'eval "$(mamba shell hook --shell bash)"',
-            ""
-        ]
-
-        # Determine primary environment for this batch
-        env_counts = {}
-        for tool in batch_tools:
-            env_counts[tool.environment] = env_counts.get(tool.environment, 0) + 1
-        primary_env = max(env_counts, key=env_counts.get) if env_counts else None
-
-        # Activate primary environment
-        if primary_env is not None:
-            script_lines.extend([f"mamba activate {primary_env}", "echo"])
-
-        script_lines.extend([
+            "",
             "echo Configuration",
             f"{config_script} | tee -a {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
             "echo"
-        ])
+        ]
 
-        # Add each tool execution
-        current_env = primary_env
+        # Add each tool execution (each tool handles its own environment activation)
         for i, tool in enumerate(batch_tools, start=start_tool_idx + 1):
-            if tool.environment != current_env and tool.environment is not None:
-                script_lines.extend([f"mamba activate {tool.environment}", "echo"])
-                current_env = tool.environment
-
             # Tool script path
             if hasattr(tool, 'suffix') and tool.suffix:
                 tool_script_path = os.path.join(self.folders["runtime"], f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.sh")
@@ -941,15 +878,14 @@ umask 002
         summary = [
             f"Pipeline: {self.project}",
             f"Tools: {len(self.tools)}",
-            f"Environments: {len(self.environments_used)}",
             ""
         ]
-        
+
         for i, tool in enumerate(self.tools, 1):
             summary.append(
-                f"{i}. {tool.TOOL_NAME} ({tool.environment}) -> {tool.job_name}"
+                f"{i}. {tool.TOOL_NAME} ({tool.environments}) -> {tool.job_name}"
             )
-        
+
         return "\n".join(summary)
     
     def _export_tool_outputs(self):
@@ -989,7 +925,7 @@ umask 002
                     "tool_class": tool.__class__.__name__,
                     "job_name": tool.job_name,
                     "execution_order": i,
-                    "environment": tool.environment,
+                    "environments": tool.environments,
                     "output_structure": output_structure,
                     "configuration": {
                         "tool_parameters": tool.to_dict(),

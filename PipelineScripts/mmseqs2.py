@@ -208,6 +208,7 @@ class MMseqs2(BaseConfig):
         script_content = "#!/bin/bash\n"
         script_content += "# MMseqs2 client script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
         script_content += self.generate_script_run_mmseqs2()
         script_content += self.generate_completion_check_footer()
 
@@ -636,6 +637,7 @@ class MMseqs2Server(BaseConfig):
         script_content = "#!/bin/bash\n"
         script_content += f"# MMseqs2Server {self.mode.upper()} script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
         script_content += self.generate_script_run_server()
         script_content += self.generate_completion_check_footer()
 
@@ -718,6 +720,7 @@ bash {cpu_script_path}
             f"export MMSEQS2_POLL_INTERVAL={self.poll_interval}",
             f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
             f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log",
+            f"export MMSEQS2_DB_DIR={self.folders['MMseqs2Databases']}",
             "export CUDA_VISIBLE_DEVICES=0",
             "export CUDA_CACHE_MAXSIZE=2147483648",
             "export CUDA_CACHE_DISABLE=0"

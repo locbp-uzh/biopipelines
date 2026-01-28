@@ -244,6 +244,10 @@ git reset --hard HEAD~1
 
 ### Best Practices
 
+#### 1. Make sure both Claude and you understand the repository structure and principles before starting
+
+When starting a session, open code in the biopipelines folder and always start by writing prompt.txt --> Claude will read and execute the instructions present in prompt.txt, which will give it a general understanding of the repository, and what to do and not do.
+
 #### 1. Use Plan Mode When Possible
 
 **Always start complex tasks in plan mode** to review what will be done before execution:
