@@ -461,8 +461,67 @@ fi
                     predicted_ids.append(base_id)
             return predicted_ids
         else:
-            # Matched sequences - output IDs match template IDs (1:1 matching)
-            return template_ids
+            # Matched sequences from tool outputs - match IDs using id_map pattern
+            return self._predict_matched_sequence_ids(template_ids)
+
+    def _predict_matched_sequence_ids(self, template_ids: List[str]) -> List[str]:
+        """
+        Predict output IDs when substitutions/indels come from tool outputs.
+
+        Mirrors the ID matching logic in pipe_stitch_sequences.py:
+        - Groups substitution/indel IDs by matching them to template IDs using id_map
+        - Generates cartesian product of matched IDs per template
+        - Output ID = template_id + "_" + suffix from matched substitution indices
+        """
+        from itertools import product
+
+        # Get sequence_ids from each substitution source
+        sub_ids_list = []
+        for options in self.substitutions.values():
+            if isinstance(options, (ToolOutput, StandardizedOutput)):
+                sub_ids_list.append(options.sequence_ids)
+
+        # Get sequence_ids from each indel source
+        indel_ids_list = []
+        for options in self.indels.values():
+            if isinstance(options, (ToolOutput, StandardizedOutput)):
+                indel_ids_list.append(options.sequence_ids)
+
+        # Build regex pattern from id_map for matching
+        pattern_template = self.id_map.get("*", "*_<N>")
+
+        predicted_ids = []
+        for template_id in template_ids:
+            # Build regex to match IDs for this template
+            regex_pattern = pattern_template.replace("*", re.escape(template_id)).replace("<N>", r"\d+")
+            regex = re.compile(f"^{regex_pattern}$")
+
+            # Find matching IDs from each substitution source
+            sub_matched = []
+            for sub_ids in sub_ids_list:
+                matched = [sid for sid in sub_ids if regex.match(sid)]
+                sub_matched.append(matched)
+
+            # Find matching IDs from each indel source
+            indel_matched = []
+            for indel_ids in indel_ids_list:
+                matched = [iid for iid in indel_ids if regex.match(iid)]
+                indel_matched.append(matched)
+
+            # Combine all matched ID lists
+            all_matched = sub_matched + indel_matched
+
+            if not all_matched:
+                predicted_ids.append(template_id)
+                continue
+
+            # Generate cartesian product of indices (1-based)
+            index_ranges = [range(len(m)) for m in all_matched]
+            for index_combo in product(*index_ranges):
+                suffix = "_".join(str(idx + 1) for idx in index_combo)
+                predicted_ids.append(f"{template_id}_{suffix}")
+
+        return predicted_ids
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
