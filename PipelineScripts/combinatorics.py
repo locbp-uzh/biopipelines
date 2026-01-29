@@ -311,10 +311,17 @@ def predict_output_ids(
     for name, value in named_inputs.items():
         if value is None:
             continue
-        mode, sources = _unwrap_sources(value)
-        ids = load_ids_from_sources(sources)
-        if not ids:
-            ids = [name]  # Default to axis name if no IDs found
+        mode, _ = _unwrap_sources(value)
+
+        # Get IDs directly from source object
+        unwrapped = value.sources[0] if isinstance(value, (Bundle, Each)) else value
+        if name == "proteins":
+            ids = list(unwrapped.sequence_ids)
+        elif name == "ligands":
+            ids = list(unwrapped.compound_ids)
+        else:
+            raise ValueError(f"Unknown axis name: {name}")
+
         axes_info.append((name, mode, ids))
 
     if not axes_info:

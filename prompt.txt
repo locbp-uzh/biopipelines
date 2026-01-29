@@ -1,2 +1,8 @@
-Read Docs/UserManual.md. Understand the difference between pipeline and slurm runtime. Understand the organization of the repository and the relationship between PipelineScripts and HelpScripts. Understand the folder configuration on the cluster. This session is run on a local computer, not on the cluster, so home, data, scratch, shares are not accessible, the environments are not set, and no tool requiring a gpu can run.
-Make sure you don't leave tmpclaude-XXXX-cwd files behind in the repository. Remember to not implement unnecessary fallback methods nor to assign arbitrary default values to variables. Remember that tools shouldn't write python code, only bash code, and python code to run at slurm runtime should be in HelpScripts (pipe scripts).
+Read Docs/UserManual.md. 
+Understand the difference between pipeline and slurm runtime. 
+Understand the organization of the repository and the relationship between PipelineScripts and HelpScripts. 
+Understand the folder configuration on the cluster. 
+This session is run on a local computer, not on the cluster, so home, data, scratch, shares are not accessible, the environments are not set, and no tool requiring a gpu can run.
+Do not implement unnecessary fallback methods nor to assign arbitrary default values to variables. 
+Remember that tools shouldn't write python code, only bash code, and python code meant to run at slurm runtime should be in HelpScripts (pipe scripts).
+Make sure you don't leave tmpclaude-XXXX-cwd files behind in the repository. 

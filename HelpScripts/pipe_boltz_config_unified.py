@@ -332,7 +332,29 @@ def generate_configs(
 
     configs = []
 
-    if proteins_mode == 'bundle' and ligands_mode == 'bundle':
+    # No ligands axis - proteins only (apo mode)
+    if ligands_mode is None:
+        if proteins_mode == 'bundle':
+            # Single config with all proteins bundled
+            config = {'sequences': []}
+            for idx, protein in enumerate(proteins):
+                chain_id = chr(65 + idx)
+                msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
+                config['sequences'].append(build_protein_entry(protein, chain_id, msa_file))
+            config = add_template_to_config(config, args)
+            config = add_glycosylation_to_config(config, glycosylation)
+            configs.append(('bundled_complex', config))
+        else:  # proteins_mode == 'each'
+            # One config per protein
+            for prot_idx, protein in enumerate(proteins):
+                config = {'sequences': []}
+                msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
+                config['sequences'].append(build_protein_entry(protein, 'A', msa_file))
+                config = add_template_to_config(config, args)
+                config = add_glycosylation_to_config(config, glycosylation)
+                configs.append((protein_ids[prot_idx], config))
+
+    elif proteins_mode == 'bundle' and ligands_mode == 'bundle':
         # Single config with all proteins and ligands
         config = {'sequences': []}
 
@@ -481,17 +503,20 @@ def main():
     axes = comb_config.get('axes', {})
 
     # Extract proteins and ligands axes
-    proteins_axis = axes.get('proteins', {'mode': 'each', 'sources': []})
-    ligands_axis = axes.get('ligands', {'mode': 'each', 'sources': []})
+    if 'proteins' not in axes:
+        print("Error: proteins axis is required")
+        sys.exit(1)
+    proteins_axis = axes['proteins']
+    ligands_axis = axes.get('ligands')  # None if no ligands
 
     proteins_mode = proteins_axis.get('mode', 'each')
-    ligands_mode = ligands_axis.get('mode', 'each')
+    ligands_mode = ligands_axis.get('mode', 'each') if ligands_axis else None
 
     print(f"Combinatorics modes: proteins={proteins_mode}, ligands={ligands_mode}")
 
     # Load data
     proteins = load_axis_data(proteins_axis)
-    ligands = load_axis_data(ligands_axis)
+    ligands = load_axis_data(ligands_axis) if ligands_axis else []
 
     print(f"Loaded {len(proteins)} proteins, {len(ligands)} ligands")
 
