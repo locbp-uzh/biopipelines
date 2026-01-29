@@ -11,14 +11,27 @@ from typing import Dict, List, Any, Optional, Union
 
 try:
     from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
-    from .combinatorics import generate_combinatorics_config, get_mode, CombinatoricsConfig, predict_output_ids
+    from .combinatorics import generate_combinatorics_config, get_mode, CombinatoricsConfig, predict_output_ids, Bundle, Each
 except ImportError:
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
-    from combinatorics import generate_combinatorics_config, get_mode, CombinatoricsConfig, predict_output_ids
+    from combinatorics import generate_combinatorics_config, get_mode, CombinatoricsConfig, predict_output_ids, Bundle, Each
+
+
+def _unwrap_combinatorics(value):
+    """
+    Unwrap Bundle/Each wrappers to get the underlying source.
+
+    Returns the first source inside the wrapper, or the value itself if not wrapped.
+    """
+    if isinstance(value, (Bundle, Each)):
+        if value.sources:
+            # Recursively unwrap in case of nested wrappers
+            return _unwrap_combinatorics(value.sources[0])
+    return value
 
 
 class Boltz2(BaseConfig):
@@ -110,41 +123,43 @@ class Boltz2(BaseConfig):
         self._proteins_mode = get_mode(proteins)
         self._ligands_mode = get_mode(ligands)
 
+        # Unwrap Bundle/Each to get the underlying source for type checking
+        unwrapped_proteins = _unwrap_combinatorics(proteins)
+        unwrapped_ligands = _unwrap_combinatorics(ligands)
+
         # Handle explicit parameter inputs from previous tools
-        if isinstance(proteins, StandardizedOutput):
-            # Explicit: proteins=tool
-            self.input_sequences = proteins.sequences
-            self.input_tables = getattr(proteins, 'tables', {})
+        if isinstance(unwrapped_proteins, StandardizedOutput):
+            # Explicit: proteins=tool (possibly wrapped in Bundle/Each)
+            self.input_sequences = unwrapped_proteins.sequences
+            self.input_tables = getattr(unwrapped_proteins, 'tables', {})
             self.input_is_tool_output = False
-            self.standardized_input = proteins
-            # Keep proteins as StandardizedOutput reference
-        elif isinstance(proteins, ToolOutput):
+            self.standardized_input = unwrapped_proteins
+        elif isinstance(unwrapped_proteins, ToolOutput):
             # ToolOutput for proteins
-            self.input_sequences = proteins
-            self.input_tables = proteins.get_output_files("tables")
+            self.input_sequences = unwrapped_proteins
+            self.input_tables = unwrapped_proteins.get_output_files("tables")
             self.input_is_tool_output = True
             self.standardized_input = None
-            self.dependencies.append(proteins.config)
-        elif isinstance(ligands, (StandardizedOutput, ToolOutput)):
+            self.dependencies.append(unwrapped_proteins.config)
+        elif isinstance(unwrapped_ligands, (StandardizedOutput, ToolOutput)):
             # Explicit: ligands=compounds from previous tool
-            if isinstance(ligands, StandardizedOutput):
-                self.input_compounds = getattr(ligands, 'compounds', [])
-                self.input_tables = getattr(ligands, 'tables', {})
+            if isinstance(unwrapped_ligands, StandardizedOutput):
+                self.input_compounds = getattr(unwrapped_ligands, 'compounds', [])
+                self.input_tables = getattr(unwrapped_ligands, 'tables', {})
             else:  # ToolOutput
-                self.input_compounds = ligands.get_output_files("compounds")
-                self.input_tables = ligands.get_output_files("tables")
+                self.input_compounds = unwrapped_ligands.get_output_files("compounds")
+                self.input_tables = unwrapped_ligands.get_output_files("tables")
                 # Add dependency for ToolOutput
-                self.dependencies.append(ligands.config)
-            # Keep ligands as tool reference
+                self.dependencies.append(unwrapped_ligands.config)
         elif isinstance(msas, StandardizedOutput):
             # Explicit: msas=previous_boltz
             self.input_tables = getattr(msas, 'tables', {})
         else:
             # Direct inputs (strings, lists, etc.)
-            self.input_sequences = self.proteins
+            self.input_sequences = unwrapped_proteins
             self.input_compounds = []
             self.input_tables = {}
-            self.input_is_tool_output = isinstance(self.proteins, ToolOutput)
+            self.input_is_tool_output = isinstance(unwrapped_proteins, ToolOutput)
             self.standardized_input = None
         
         # Store other Boltz2-specific parameters
@@ -326,10 +341,12 @@ class Boltz2(BaseConfig):
         """Configure input sequences from various sources (tool-agnostic)."""
         self.folders = pipeline_folders
         self._setup_file_paths()  # Set up all file paths now that we have folders
-        
+
         # Determine primary input source (prioritize config, then proteins, then input_sequences)
-        primary_input = self.config or self.proteins or self.input_sequences
-        
+        # Unwrap Bundle/Each wrappers to get the actual source for configuration
+        raw_primary_input = self.config or self.proteins or self.input_sequences
+        primary_input = _unwrap_combinatorics(raw_primary_input)
+
         if self.input_is_tool_output:
             # Input from previous tool (any upstream tool via ToolOutput)
             tool_output: ToolOutput = primary_input
