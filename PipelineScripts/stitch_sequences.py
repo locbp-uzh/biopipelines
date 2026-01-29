@@ -8,6 +8,7 @@ sequences, generating all combinations (Cartesian product).
 import os
 import json
 from typing import Dict, List, Any, Union
+import re
 
 try:
     from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
