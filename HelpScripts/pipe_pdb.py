@@ -72,6 +72,23 @@ def convert_cif_to_pdb(cif_content: str) -> str:
         raise Exception(f"CIF to PDB conversion failed: {str(e)}")
 
 
+def build_rename_mapping(operations: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Build a mapping from old residue names to new names based on rename operations.
+
+    Args:
+        operations: List of operation dictionaries
+
+    Returns:
+        Dict mapping old_name -> new_name for rename operations
+    """
+    mapping = {}
+    for op in operations:
+        if op.get("op") == "rename":
+            mapping[op["old"]] = op["new"]
+    return mapping
+
+
 def apply_operations(content: str, format: str, operations: List[Dict[str, Any]]) -> str:
     """
     Apply a sequence of operations to structure content.
@@ -403,6 +420,10 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         if remove_waters:
             content = remove_waters_from_content(content, target_format)
 
+        # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
+        original_ligand_codes = extract_ligands_from_structure(content, target_format)
+        rename_mapping = build_rename_mapping(operations) if operations else {}
+
         # Apply operations (e.g., rename)
         if operations:
             content = apply_operations(content, target_format, operations)
@@ -417,19 +438,21 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         file_size = os.path.getsize(output_path)
         sequence = extract_sequence_from_structure(content, target_format)
 
-        # Extract ligands and fetch SMILES
-        ligand_codes = extract_ligands_from_structure(content, target_format)
+        # Build ligands list using original codes for SMILES lookup, renamed codes for output
         ligands = []
-        if ligand_codes:
-            print(f"  Found {len(ligand_codes)} ligand(s) in structure: {', '.join(ligand_codes)}")
-            for ligand_code in ligand_codes:
-                smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
+        if original_ligand_codes:
+            print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
+            for original_code in original_ligand_codes:
+                # Use original code for SMILES fetch from RCSB
+                smiles = fetch_ligand_smiles_from_rcsb(original_code)
+                # Use renamed code (if any) for output
+                output_code = rename_mapping.get(original_code, original_code)
                 ligands.append({
-                    'id': f"{custom_id}_{ligand_code}",
-                    'code': ligand_code,
+                    'id': f"{custom_id}_{output_code}",
+                    'code': output_code,
                     'format': 'smiles' if smiles else '',
                     'smiles': smiles if smiles else '',
-                    'ccd': ligand_code  # CCD code is the 3-letter code
+                    'ccd': original_code  # Keep original CCD code for reference
                 })
 
         source_info = f"local ({source_format.upper()})"
@@ -571,6 +594,10 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         if remove_waters:
             content = remove_waters_from_content(content, format)
 
+        # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
+        original_ligand_codes = extract_ligands_from_structure(content, format)
+        rename_mapping = build_rename_mapping(operations) if operations else {}
+
         # Apply operations (e.g., rename)
         if operations:
             content = apply_operations(content, format, operations)
@@ -596,19 +623,21 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         # Extract sequence from structure
         sequence = extract_sequence_from_structure(content, format)
 
-        # Extract ligands and fetch SMILES
-        ligand_codes = extract_ligands_from_structure(content, format)
+        # Build ligands list using original codes for SMILES lookup, renamed codes for output
         ligands = []
-        if ligand_codes:
-            print(f"  Found {len(ligand_codes)} ligand(s) in structure: {', '.join(ligand_codes)}")
-            for ligand_code in ligand_codes:
-                smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
+        if original_ligand_codes:
+            print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
+            for original_code in original_ligand_codes:
+                # Use original code for SMILES fetch from RCSB
+                smiles = fetch_ligand_smiles_from_rcsb(original_code)
+                # Use renamed code (if any) for output
+                output_code = rename_mapping.get(original_code, original_code)
                 ligands.append({
-                    'id': f"{custom_id}_{ligand_code}",
-                    'code': ligand_code,
+                    'id': f"{custom_id}_{output_code}",
+                    'code': output_code,
                     'format': 'smiles' if smiles else '',
                     'smiles': smiles if smiles else '',
-                    'ccd': ligand_code  # CCD code is the 3-letter code
+                    'ccd': original_code  # Keep original CCD code for reference
                 })
 
         source_info = f"rcsb_download ({download_format.upper()})"
@@ -654,6 +683,10 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 if remove_waters:
                     content = remove_waters_from_content(content, "pdb")
 
+                # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
+                original_ligand_codes = extract_ligands_from_structure(content, "pdb")
+                rename_mapping = build_rename_mapping(operations) if operations else {}
+
                 # Apply operations (e.g., rename)
                 if operations:
                     content = apply_operations(content, "pdb", operations)
@@ -673,19 +706,21 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 file_size = os.path.getsize(output_path)
                 sequence = extract_sequence_from_structure(content, "pdb")
 
-                # Extract ligands
-                ligand_codes = extract_ligands_from_structure(content, "pdb")
+                # Build ligands list using original codes for SMILES lookup, renamed codes for output
                 ligands = []
-                if ligand_codes:
-                    print(f"  Found {len(ligand_codes)} ligand(s) in structure: {', '.join(ligand_codes)}")
-                    for ligand_code in ligand_codes:
-                        smiles = fetch_ligand_smiles_from_rcsb(ligand_code)
+                if original_ligand_codes:
+                    print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
+                    for original_code in original_ligand_codes:
+                        # Use original code for SMILES fetch from RCSB
+                        smiles = fetch_ligand_smiles_from_rcsb(original_code)
+                        # Use renamed code (if any) for output
+                        output_code = rename_mapping.get(original_code, original_code)
                         ligands.append({
-                            'id': f"{custom_id}_{ligand_code}",
-                            'code': ligand_code,
+                            'id': f"{custom_id}_{output_code}",
+                            'code': output_code,
                             'format': 'smiles' if smiles else '',
                             'smiles': smiles if smiles else '',
-                            'ccd': ligand_code
+                            'ccd': original_code  # Keep original CCD code for reference
                         })
 
                 metadata = {
