@@ -340,7 +340,27 @@ def predict_output_ids(
         return each_axes[0][1]
 
     # Multiple "each" axes: cartesian product
-    # Start with first axis
+    # Special case: if one axis has only 1 element, use the other axis's IDs directly
+    # This matches the behavior in pipe_boltz_config_unified.py generate_config_id()
+    if len(each_axes) == 2:
+        name0, ids0 = each_axes[0]
+        name1, ids1 = each_axes[1]
+
+        if len(ids0) == 1:
+            # Single protein, multiple ligands: use ligand IDs
+            return ids1
+        elif len(ids1) == 1:
+            # Multiple proteins, single ligand: use protein IDs
+            return ids0
+        else:
+            # Multiple proteins, multiple ligands: cartesian product
+            result_ids = []
+            for id0 in ids0:
+                for id1 in ids1:
+                    result_ids.append(f"{id0}_{id1}")
+            return result_ids
+
+    # General case: cartesian product of all axes
     result_ids = each_axes[0][1]
 
     # Combine with remaining axes

@@ -282,8 +282,12 @@ def load_positions_from_table(table_path: str, column_name: str) -> Dict[str, st
     for _, row in df.iterrows():
         seq_id = str(row[id_column])
         pos_value = row[column_name]
-        if pd.notna(pos_value) and pos_value != '':
+        # Include empty strings - they result in empty position lists (no substitution)
+        # This is different from missing the ID entirely (which would skip the sequence)
+        if pd.notna(pos_value):
             positions_map[seq_id] = str(pos_value)
+        else:
+            positions_map[seq_id] = ''
 
     return positions_map
 
