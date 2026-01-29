@@ -5,8 +5,9 @@ Unified pipeline system for protein modeling workflows.
 Provides tool configurations, pipeline orchestration, and seamless integration.
 """
 
-from .pipeline import Pipeline
+from .pipeline import Pipeline, Bundle, Each
 from .base_config import BaseConfig, ToolOutput
+from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .rfdiffusion import RFdiffusion
 from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .protein_mpnn import ProteinMPNN
@@ -44,6 +45,13 @@ __all__ = [
     'BaseConfig',
     'ToolOutput',
     'FolderManager',
+
+    # Combinatorics for input handling
+    'Bundle',
+    'Each',
+    'CombinatoricsConfig',
+    'generate_combinatorics_config',
+    'get_mode',
 
     # Modeling tools
     'RFdiffusion',
