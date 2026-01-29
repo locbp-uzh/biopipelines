@@ -170,6 +170,44 @@ def load_selection_from_table(table_path: str, column_name: str) -> Dict[str, st
     return selection_map
 
 
+def lookup_selection_with_base_id(structure_id: str, selection_map: Dict[str, str]) -> Optional[str]:
+    """
+    Look up selection for a structure ID, recursively stripping _N suffixes if not found.
+
+    This handles cases where target structures have IDs with additional suffixes
+    (e.g., RFD3_5_Test_007_1_1_1) but the selection table has base IDs
+    (e.g., RFD3_5_Test_007_1).
+
+    Args:
+        structure_id: Structure ID to look up (e.g., "RFD3_5_Test_007_1_1_1")
+        selection_map: Dictionary mapping IDs to selection strings
+
+    Returns:
+        Selection string if found, None otherwise
+    """
+    import re
+
+    # Try exact match first
+    if structure_id in selection_map:
+        return selection_map[structure_id]
+
+    # Recursively strip trailing _N suffixes and try again
+    current_id = structure_id
+    while True:
+        # Try to strip trailing _N suffix (where N is one or more digits)
+        match = re.match(r'^(.+)_\d+$', current_id)
+        if not match:
+            # No more suffixes to strip
+            break
+
+        current_id = match.group(1)
+        if current_id in selection_map:
+            print(f"  - Matched {structure_id} to base ID {current_id}")
+            return selection_map[current_id]
+
+    return None
+
+
 def analyze_conformational_change(ref_path: str, target_path: str, selection: str,
                                   alignment_method: str) -> Optional[Dict[str, Any]]:
     """
@@ -312,10 +350,11 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         # Extract structure ID from target filename
         structure_id = os.path.splitext(os.path.basename(target_path))[0]
 
-        # Get selection for this structure
-        selection = selection_map.get(structure_id)
+        # Get selection for this structure (with recursive base ID lookup)
+        selection = lookup_selection_with_base_id(structure_id, selection_map)
         if not selection:
             print(f"  - Warning: No selection found for structure ID: {structure_id}")
+            print(f"    Available IDs in selection map: {list(selection_map.keys())[:5]}...")
             continue
 
         # Analyze conformational change
