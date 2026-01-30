@@ -8,6 +8,10 @@ Provides tool configurations, pipeline orchestration, and seamless integration.
 from .pipeline import Pipeline, Bundle, Each
 from .base_config import BaseConfig, ToolOutput
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
+from .datastream import DataStream, create_map_table
+from .datastream_resolver import DataStreamResolver, resolve_to_datastream
+from .file_paths import Path
+from .table_utils import get_table, get_table_path, list_tables, table_exists
 from .rfdiffusion import RFdiffusion
 from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .protein_mpnn import ProteinMPNN
@@ -45,6 +49,21 @@ __all__ = [
     'BaseConfig',
     'ToolOutput',
     'FolderManager',
+
+    # DataStream I/O
+    'DataStream',
+    'create_map_table',
+    'DataStreamResolver',
+    'resolve_to_datastream',
+
+    # File path descriptor
+    'Path',
+
+    # Table utilities
+    'get_table',
+    'get_table_path',
+    'list_tables',
+    'table_exists',
 
     # Combinatorics for input handling
     'Bundle',
