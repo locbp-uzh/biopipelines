@@ -48,6 +48,7 @@ def parse_sampled_contig(sampled_contig, total_length):
     RFdiffusion3 sampled_contig format examples:
     - "17,A9-140" -> 17 designed residues (1-17), then fixed A9-140 mapped to 18-149
     - "A1-50,20,A60-100" -> fixed A1-50 (1-50), 20 designed (51-70), fixed A60-100 (71-111)
+    - "160" -> 160 designed residues (de novo design with only length specified)
 
     Args:
         sampled_contig: The sampled contig string from specifications
@@ -58,6 +59,9 @@ def parse_sampled_contig(sampled_contig, total_length):
     """
     if not sampled_contig:
         return "", ""
+
+    # Ensure sampled_contig is a string (may be int/float from pandas)
+    sampled_contig = str(sampled_contig)
 
     fixed_residues = []
     designed_residues = []
@@ -196,7 +200,8 @@ def load_specifications(specs_csv):
             structure_id = row.get('id', '')
             sampled_contig = row.get('sampled_contig', '')
             if structure_id:
-                specs_dict[structure_id] = sampled_contig
+                # Ensure sampled_contig is a string (pandas may parse pure numbers as int/float)
+                specs_dict[structure_id] = str(sampled_contig) if pd.notna(sampled_contig) else ''
         return specs_dict
     except Exception as e:
         print(f"Warning: Could not load specifications CSV: {e}")

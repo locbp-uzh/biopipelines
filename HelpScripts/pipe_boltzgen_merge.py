@@ -264,7 +264,8 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
         'files_copied': 0,
         'ids_renamed': 0,
         'csvs_merged': {},
-        'pkls_merged': {}
+        'pkls_merged': {},
+        'molecules_copied': False
     }
 
     # Create output directory structure
@@ -386,6 +387,24 @@ def merge_boltzgen_outputs(sources: list, output_dir: str, id_template: str,
         if os.path.exists(steps_yaml):
             shutil.copy2(steps_yaml, os.path.join(output_dir, 'steps.yaml'))
 
+        # Copy molecules_out_dir from first source (contains ligand pickle files)
+        # BoltzGen's parse_mmcif requires these pickles for ligand resolution during analysis
+        # The ligand is the same across all runs, so we only need to copy from first source
+        # but we need to copy to both directories since BoltzGen may look in either
+        for parent_dir in ['intermediate_designs', 'intermediate_designs_inverse_folded']:
+            molecules_src = os.path.join(first_source, parent_dir, 'molecules_out_dir')
+            if os.path.exists(molecules_src) and os.path.isdir(molecules_src):
+                molecules_dst = os.path.join(output_dir, parent_dir, 'molecules_out_dir')
+                if verbose:
+                    print(f"\nCopying molecules_out_dir to {parent_dir}...")
+                if os.path.exists(molecules_dst):
+                    shutil.rmtree(molecules_dst)
+                shutil.copytree(molecules_src, molecules_dst)
+                if verbose:
+                    pkl_files = [f for f in os.listdir(molecules_dst) if f.endswith('.pkl')]
+                    print(f"  Copied {len(pkl_files)} molecule pickle files")
+                stats['molecules_copied'] = True
+
     return stats
 
 
@@ -461,6 +480,8 @@ def main():
         print(f"Pickle files merged: {len(stats['pkls_merged'])}")
         for pkl_name, count in stats['pkls_merged'].items():
             print(f"  - {pkl_name}: {count} sources")
+    if stats.get('molecules_copied'):
+        print(f"Molecule pickles: copied from first source")
     print("=" * 60)
 
     return 0
