@@ -24,7 +24,7 @@ so you don't need to specify {"*": "*_<N>_<N>"} or similar patterns.
 """
 
 import re
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Union
 
 
 def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
@@ -203,8 +203,226 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     return candidates
 
 
+def get_mapped_ids(
+    source_ids: List[str],
+    target_ids: List[str],
+    id_map: Dict[str, str] = None,
+    unique: bool = True
+) -> Union[Dict[str, Optional[str]], Dict[str, List[str]]]:
+    """
+    Match source IDs to target IDs using id_map patterns.
+
+    For each source_id, finds target_ids that match according to the id_map.
+    Matching uses a priority-based strategy:
+    1. Exact match: source_id == target_id (highest priority)
+    2. Target is derived from source: target_id = source_id + suffix
+    3. Source is derived from target: source_id = target_id + suffix
+    4. Common ancestor: both source and target derive from same base
+
+    Args:
+        source_ids: List of source IDs to match from
+        target_ids: List of target IDs to match against
+        id_map: ID mapping pattern (default: {"*": "*_<N>"})
+                Supports recursive suffix matching
+        unique: If True (default), return the single most specific match or None.
+                If False, return list of all matches.
+
+    Returns:
+        If unique=True: Dict mapping each source_id to best matching target_id (or None)
+        If unique=False: Dict mapping each source_id to list of matching target_ids
+
+    Priority order (when unique=True):
+        1. Exact match (source_id == target_id)
+        2. Child match (target derives from source, closest first)
+        3. Parent match (source derives from target, closest first)
+        4. Sibling match (common ancestor, closest combined distance first)
+
+    Examples:
+        >>> # Exact match
+        >>> get_mapped_ids(["protein_1"], ["protein_1"])
+        {'protein_1': 'protein_1'}
+
+        >>> # Child match (target = source + _N)
+        >>> get_mapped_ids(["protein_1"], ["protein_1_1", "protein_1_2"])
+        {'protein_1': 'protein_1_1'}
+
+        >>> # Parent match (source = target + _N)
+        >>> get_mapped_ids(["protein_1_1"], ["protein_1"])
+        {'protein_1_1': 'protein_1'}
+
+        >>> # Sibling match (common ancestor)
+        >>> get_mapped_ids(["protein_1_1"], ["protein_1_2"])
+        {'protein_1_1': 'protein_1_2'}
+
+        >>> # unique=False - returns all matches
+        >>> get_mapped_ids(["protein_1"], ["protein_1_1", "protein_1_2"], unique=False)
+        {'protein_1': ['protein_1_1', 'protein_1_2']}
+    """
+    if id_map is None:
+        id_map = {"*": "*_<N>"}
+
+    target_set = set(target_ids)
+    result = {}
+
+    # Pre-compute base forms for all targets (for sibling matching)
+    target_bases_cache = {}
+    for target_id in target_ids:
+        target_bases_cache[target_id] = map_table_ids_to_ids(target_id, id_map)
+
+    for source_id in source_ids:
+        # Priority 1: Exact match
+        if source_id in target_set:
+            if unique:
+                result[source_id] = source_id
+            else:
+                # Collect exact match + all other matches
+                matches = [source_id]
+                for target_id in target_ids:
+                    if target_id == source_id:
+                        continue
+                    if source_id in target_bases_cache[target_id]:
+                        matches.append(target_id)
+                result[source_id] = matches
+            continue
+
+        # Priority 2: Target is a "child" of source (target = source + suffix)
+        child_matches = []
+        for target_id in target_ids:
+            target_bases = target_bases_cache[target_id]
+            if source_id in target_bases:
+                distance = target_bases.index(source_id)
+                child_matches.append((target_id, distance))
+
+        if child_matches:
+            child_matches.sort(key=lambda x: x[1])
+            if unique:
+                result[source_id] = child_matches[0][0]
+            else:
+                result[source_id] = [m[0] for m in child_matches]
+            continue
+
+        # Priority 3: Source is a "child" of target (source = target + suffix)
+        source_bases = map_table_ids_to_ids(source_id, id_map)
+        parent_matches = []
+        for i, base in enumerate(source_bases[1:], start=1):
+            if base in target_set:
+                parent_matches.append((base, i))
+
+        if parent_matches:
+            parent_matches.sort(key=lambda x: x[1])
+            if unique:
+                result[source_id] = parent_matches[0][0]
+            else:
+                result[source_id] = [m[0] for m in parent_matches]
+            continue
+
+        # Priority 4: Sibling match (source and target share common ancestor)
+        # Find targets that share any base with source
+        source_bases_set = set(source_bases)
+        sibling_matches = []
+        for target_id in target_ids:
+            target_bases = target_bases_cache[target_id]
+            # Find common ancestors
+            common = source_bases_set & set(target_bases)
+            if common:
+                # Find the most specific common ancestor (closest to both)
+                for common_base in common:
+                    source_dist = source_bases.index(common_base)
+                    target_dist = target_bases.index(common_base)
+                    # Combined distance: prefer matches where both are close to ancestor
+                    combined_dist = source_dist + target_dist
+                    sibling_matches.append((target_id, combined_dist, source_dist))
+
+        if sibling_matches:
+            # Sort by combined distance, then by source distance
+            sibling_matches.sort(key=lambda x: (x[1], x[2]))
+            if unique:
+                result[source_id] = sibling_matches[0][0]
+            else:
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_matches = []
+                for m in sibling_matches:
+                    if m[0] not in seen:
+                        seen.add(m[0])
+                        unique_matches.append(m[0])
+                result[source_id] = unique_matches
+            continue
+
+        # No match found
+        if unique:
+            result[source_id] = None
+        else:
+            result[source_id] = []
+
+    return result
+
+
+def get_mapped_ids_grouped(
+    source_ids: list,
+    target_ids: list,
+    id_map: Dict[str, str] = None
+) -> Dict[str, Dict[str, list]]:
+    """
+    Match source IDs to target IDs, grouped by their common base.
+
+    Similar to get_mapped_ids but returns results grouped by the common
+    ancestor ID, which is useful when you need to know the relationship
+    hierarchy.
+
+    Args:
+        source_ids: List of source IDs to match from
+        target_ids: List of target IDs to match against
+        id_map: ID mapping pattern (default: {"*": "*_<N>"})
+
+    Returns:
+        Dict with structure: {base_id: {"sources": [...], "targets": [...]}}
+
+    Example:
+        >>> get_mapped_ids_grouped(
+        ...     ["protein_1", "protein_2"],
+        ...     ["protein_1_1", "protein_1_2", "protein_2_1"],
+        ...     {"*": "*_<N>"}
+        ... )
+        {
+            'protein_1': {'sources': ['protein_1'], 'targets': ['protein_1_1', 'protein_1_2']},
+            'protein_2': {'sources': ['protein_2'], 'targets': ['protein_2_1']}
+        }
+    """
+    if id_map is None:
+        id_map = {"*": "*_<N>"}
+
+    # Build base-to-ids mapping for both source and target
+    source_by_base = {}
+    for sid in source_ids:
+        bases = map_table_ids_to_ids(sid, id_map)
+        root = bases[-1] if bases else sid  # Most stripped version
+        if root not in source_by_base:
+            source_by_base[root] = []
+        source_by_base[root].append(sid)
+
+    target_by_base = {}
+    for tid in target_ids:
+        bases = map_table_ids_to_ids(tid, id_map)
+        root = bases[-1] if bases else tid
+        if root not in target_by_base:
+            target_by_base[root] = []
+        target_by_base[root].append(tid)
+
+    # Combine into result
+    all_bases = set(source_by_base.keys()) | set(target_by_base.keys())
+    result = {}
+    for base in all_bases:
+        result[base] = {
+            "sources": source_by_base.get(base, []),
+            "targets": target_by_base.get(base, [])
+        }
+
+    return result
+
+
 if __name__ == "__main__":
-    # Test cases - now expecting lists of candidates
+    # Test cases for map_table_ids_to_ids - expecting lists of candidates
     test_cases = [
         ("rifampicin_1", {"*": "*_<N>"}, ["rifampicin_1", "rifampicin"]),
         ("rifampicin_1_2", {"*": "*_<N>"}, ["rifampicin_1_2", "rifampicin_1", "rifampicin"]),
@@ -234,7 +452,160 @@ if __name__ == "__main__":
         print(f"  Expected: {expected}")
 
     if all_passed:
-        print("\nAll tests passed!")
+        print("\nAll map_table_ids_to_ids tests passed!")
     else:
-        print("\nSome tests failed!")
+        print("\nSome map_table_ids_to_ids tests failed!")
         exit(1)
+
+    # Test cases for get_mapped_ids with unique=True (default)
+    print("\n" + "="*60)
+    print("Running get_mapped_ids tests (unique=True)...")
+
+    get_mapped_unique_tests = [
+        # (source_ids, target_ids, id_map, expected)
+        # Case 1: Exact match - same IDs on both sides
+        (
+            ["protein_1", "protein_2"],
+            ["protein_1", "protein_2"],
+            {"*": "*_<N>"},
+            {"protein_1": "protein_1", "protein_2": "protein_2"}
+        ),
+        # Case 2: Target is child of source (target = source + _N) - returns first/most specific
+        (
+            ["protein_1", "protein_2"],
+            ["protein_1_1", "protein_1_2", "protein_2_1"],
+            {"*": "*_<N>"},
+            {"protein_1": "protein_1_1", "protein_2": "protein_2_1"}
+        ),
+        # Case 3: Source is child of target (source = target + _N)
+        (
+            ["protein_1_1", "protein_2_1"],
+            ["protein_1", "protein_2"],
+            {"*": "*_<N>"},
+            {"protein_1_1": "protein_1", "protein_2_1": "protein_2"}
+        ),
+        # Case 4: Mixed - some exact, some parent-child
+        (
+            ["protein_1", "protein_2_1"],
+            ["protein_1", "protein_2"],
+            {"*": "*_<N>"},
+            {"protein_1": "protein_1", "protein_2_1": "protein_2"}
+        ),
+        # Case 5: No matches - returns None
+        (
+            ["alpha_1", "alpha_2"],
+            ["beta_1", "beta_2"],
+            {"*": "*_<N>"},
+            {"alpha_1": None, "alpha_2": None}
+        ),
+        # Case 6: Deep nesting - returns most specific parent match
+        (
+            ["protein_1_2_3"],
+            ["protein_1", "protein_1_2"],
+            {"*": "*_<N>"},
+            {"protein_1_2_3": "protein_1_2"}
+        ),
+        # Case 7: Sibling match - both derive from same ancestor
+        (
+            ["protein_1_1"],
+            ["protein_1_2"],
+            {"*": "*_<N>"},
+            {"protein_1_1": "protein_1_2"}
+        ),
+        # Case 8: Sibling match - prefer closer sibling
+        (
+            ["protein_1_1"],
+            ["protein_1_2", "protein_2_1"],
+            {"*": "*_<N>"},
+            {"protein_1_1": "protein_1_2"}
+        ),
+        # Case 9: Deep sibling - common ancestor at different levels
+        (
+            ["protein_1_1_1"],
+            ["protein_1_1_2", "protein_1_2"],
+            {"*": "*_<N>"},
+            {"protein_1_1_1": "protein_1_1_2"}  # Closer sibling (distance 1+1=2 vs 2+1=3)
+        ),
+    ]
+
+    all_passed = True
+    for source_ids, target_ids, id_map, expected in get_mapped_unique_tests:
+        result = get_mapped_ids(source_ids, target_ids, id_map, unique=True)
+        passed = result == expected
+        all_passed = all_passed and passed
+
+        status = "PASS" if passed else "FAIL"
+        print(f"[{status}] sources={source_ids}, targets={target_ids}")
+        if not passed:
+            print(f"  Result:   {result}")
+            print(f"  Expected: {expected}")
+
+    if all_passed:
+        print("\nAll get_mapped_ids (unique=True) tests passed!")
+    else:
+        print("\nSome get_mapped_ids (unique=True) tests failed!")
+        exit(1)
+
+    # Test cases for get_mapped_ids with unique=False
+    print("\n" + "="*60)
+    print("Running get_mapped_ids tests (unique=False)...")
+
+    get_mapped_list_tests = [
+        # (source_ids, target_ids, id_map, expected)
+        # Case 1: Exact match - includes exact + children
+        (
+            ["protein_1"],
+            ["protein_1", "protein_1_1", "protein_1_2"],
+            {"*": "*_<N>"},
+            {"protein_1": ["protein_1", "protein_1_1", "protein_1_2"]}
+        ),
+        # Case 2: Target is child of source (target = source + _N)
+        (
+            ["protein_1", "protein_2"],
+            ["protein_1_1", "protein_1_2", "protein_2_1"],
+            {"*": "*_<N>"},
+            {"protein_1": ["protein_1_1", "protein_1_2"], "protein_2": ["protein_2_1"]}
+        ),
+        # Case 3: Source is child of target - returns all parent matches
+        (
+            ["protein_1_2_3"],
+            ["protein_1", "protein_1_2"],
+            {"*": "*_<N>"},
+            {"protein_1_2_3": ["protein_1_2", "protein_1"]}
+        ),
+        # Case 4: No matches - returns empty list
+        (
+            ["alpha_1"],
+            ["beta_1"],
+            {"*": "*_<N>"},
+            {"alpha_1": []}
+        ),
+        # Case 5: Sibling match - returns siblings sorted by distance
+        (
+            ["protein_1_1"],
+            ["protein_1_2", "protein_1_3"],
+            {"*": "*_<N>"},
+            {"protein_1_1": ["protein_1_2", "protein_1_3"]}
+        ),
+    ]
+
+    all_passed_list = True
+    for source_ids, target_ids, id_map, expected in get_mapped_list_tests:
+        result = get_mapped_ids(source_ids, target_ids, id_map, unique=False)
+        passed = result == expected
+        all_passed_list = all_passed_list and passed
+
+        status = "PASS" if passed else "FAIL"
+        print(f"[{status}] sources={source_ids}, targets={target_ids}")
+        if not passed:
+            print(f"  Result:   {result}")
+            print(f"  Expected: {expected}")
+
+    if all_passed_list:
+        print("\nAll get_mapped_ids (unique=False) tests passed!")
+    else:
+        print("\nSome get_mapped_ids (unique=False) tests failed!")
+        exit(1)
+
+    print("\n" + "="*60)
+    print("All tests passed!")

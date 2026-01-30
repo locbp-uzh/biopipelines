@@ -22,6 +22,13 @@ import pandas as pd
 from typing import Dict, List, Any, Tuple
 from itertools import product
 
+# Import ID mapping utilities
+# Handle both direct execution and import from other directories
+try:
+    from id_map_utils import get_mapped_ids, map_table_ids_to_ids
+except ImportError:
+    from HelpScripts.id_map_utils import get_mapped_ids, map_table_ids_to_ids
+
 
 def sele_to_list(s: str) -> List[int]:
     """
@@ -314,48 +321,24 @@ def load_sequences_from_info(info: Dict[str, Any]) -> Dict[str, str]:
         raise ValueError(f"Unknown source type: {source_type}")
 
 
-def extract_base_id(seq_id: str) -> str:
-    """Extract base ID by stripping trailing _N suffix."""
-    match = re.match(r'^(.+)_\d+$', seq_id)
-    return match.group(1) if match else seq_id
-
-
-def group_by_base_id(sequences: Dict[str, str]) -> Dict[str, Dict[str, str]]:
-    """Group sequences by their base ID."""
-    grouped = {}
-    for seq_id, sequence in sequences.items():
-        base_id = extract_base_id(seq_id)
-        if base_id not in grouped:
-            grouped[base_id] = {}
-        grouped[base_id][seq_id] = sequence
-    return grouped
-
-
-def apply_id_map(template_id: str, id_map: Dict[str, str]) -> str:
+def extract_base_id(seq_id: str, id_map: Dict[str, str] = None) -> str:
     """
-    Apply ID mapping pattern to convert template ID to expected substitution ID pattern.
-
-    The id_map uses patterns where:
-    - "*" matches the template ID
-    - "<N>" represents a numeric suffix that will be matched
+    Extract the most stripped base ID from a sequence ID.
 
     Args:
-        template_id: The template sequence ID (e.g., "RFD3_5_Test_002_1")
-        id_map: Mapping pattern (e.g., {"*": "*_<N>"} means substitution IDs are template_id + "_N")
+        seq_id: The sequence ID to strip
+        id_map: ID mapping pattern (default: {"*": "*_<N>"})
 
     Returns:
-        Regex pattern to match substitution IDs for this template
+        The base ID after recursively stripping suffixes
     """
-    # Default pattern: substitution ID = template_id + "_" + number
-    pattern = id_map.get("*", "*_<N>")
-
-    # Replace * with the template_id and <N> with a number pattern
-    regex_pattern = pattern.replace("*", re.escape(template_id)).replace("<N>", r"\d+")
-
-    return regex_pattern
+    if id_map is None:
+        id_map = {"*": "*_<N>"}
+    bases = map_table_ids_to_ids(seq_id, id_map)
+    return bases[-1] if bases else seq_id
 
 
-def group_by_template_with_id_map(
+def group_sequences_by_template(
     sequences: Dict[str, str],
     template_ids: List[str],
     id_map: Dict[str, str]
@@ -363,41 +346,34 @@ def group_by_template_with_id_map(
     """
     Group sequences by matching them to template IDs using id_map pattern.
 
+    Uses get_mapped_ids from id_map_utils for flexible matching that supports:
+    - Exact match (source == target)
+    - Child match (target = source + suffix)
+    - Parent match (source = target + suffix)
+    - Sibling match (common ancestor)
+
     Args:
         sequences: Dict of sequence ID -> sequence
         template_ids: List of template IDs to match against
         id_map: ID mapping pattern (e.g., {"*": "*_<N>"})
 
     Returns:
-        Dict mapping template_id -> {seq_id: sequence} for matching sequences
+        Dict mapping template_id -> {matched_seq_id: sequence}
     """
+    seq_ids = list(sequences.keys())
+
+    # Use get_mapped_ids to find matches for each template
+    # Here template_ids are sources, seq_ids are targets
+    matches = get_mapped_ids(template_ids, seq_ids, id_map, unique=False)
+
     grouped = {}
-
-    # Build regex patterns for each template ID
-    template_patterns = []
     for template_id in template_ids:
-        pattern = apply_id_map(template_id, id_map)
-        template_patterns.append((template_id, re.compile(f"^{pattern}$")))
-
-    # Sort by template ID length (longest first) to match most specific first
-    template_patterns.sort(key=lambda x: len(x[0]), reverse=True)
-
-    for seq_id, sequence in sequences.items():
-        matched = False
-        for template_id, pattern in template_patterns:
-            if pattern.match(seq_id):
-                if template_id not in grouped:
-                    grouped[template_id] = {}
-                grouped[template_id][seq_id] = sequence
-                matched = True
-                break
-
-        if not matched:
-            # Fall back to base_id grouping for backward compatibility
-            base_id = extract_base_id(seq_id)
-            if base_id not in grouped:
-                grouped[base_id] = {}
-            grouped[base_id][seq_id] = sequence
+        matched_seq_ids = matches.get(template_id, [])
+        if matched_seq_ids:
+            grouped[template_id] = {
+                seq_id: sequences[seq_id]
+                for seq_id in matched_seq_ids
+            }
 
     return grouped
 
@@ -469,7 +445,7 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 
     if all_positions_fixed and all_subs_raw and all_indel_positions_fixed and all_indels_raw:
         # Raw substitutions/indels with fixed positions - apply to all templates
-        results = stitch_with_raw_operations(template_sequences, substitutions, indels)
+        results = stitch_with_raw_operations(template_sequences, substitutions, indels, id_map)
     else:
         # Complex case: match sequences by base ID
         results = stitch_matched_sequences(template_sequences, substitutions, indels, id_map)
@@ -495,7 +471,8 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 def stitch_with_raw_operations(
     template_sequences: Dict[str, str],
     substitutions: List[Dict],
-    indels: List[Dict]
+    indels: List[Dict],
+    id_map: Dict[str, str]
 ) -> List[Dict[str, Any]]:
     """Stitch templates with raw substitutions and indels at fixed positions using Cartesian product."""
     results = []
@@ -521,7 +498,7 @@ def stitch_with_raw_operations(
         indel_option_lists.append([item[1] for item in seq_items])
 
     for template_id, template_seq in template_sequences.items():
-        base_id = extract_base_id(template_id)
+        base_id = extract_base_id(template_id, id_map)
 
         # Generate index ranges for substitutions and indels
         sub_index_ranges = [range(1, len(opts) + 1) for opts in sub_option_lists] if sub_option_lists else [range(1, 2)]
@@ -583,7 +560,7 @@ def stitch_matched_sequences(
     sub_grouped = []
     sub_position_maps = []
     for sub in substitutions:
-        grouped = group_by_template_with_id_map(sub['sequences'], all_template_ids, id_map)
+        grouped = group_sequences_by_template(sub['sequences'], all_template_ids, id_map)
         sub_grouped.append(grouped)
 
         pos_key = sub['position_key']
@@ -598,7 +575,7 @@ def stitch_matched_sequences(
     indel_grouped = []
     indel_position_maps = []
     for indel in indels:
-        grouped = group_by_template_with_id_map(indel['sequences'], all_template_ids, id_map)
+        grouped = group_sequences_by_template(indel['sequences'], all_template_ids, id_map)
         indel_grouped.append(grouped)
 
         pos_key = indel['position_key']
@@ -614,7 +591,7 @@ def stitch_matched_sequences(
     # Process each template sequence directly
     for template_id, template_seq in sorted(template_sequences.items()):
         template_combo_count = 0
-        base_id = extract_base_id(template_id)
+        base_id = extract_base_id(template_id, id_map)
         print(f"\n  Template: {template_id}")
 
         # Check if all substitutions have sequences for this template ID
@@ -644,7 +621,7 @@ def stitch_matched_sequences(
         if skip:
             continue
 
-        # Get substitution positions for this template (use base_id for table lookup)
+        # Get substitution positions for this template using id_map matching
         sub_positions_for_template = []
         sub_position_table_keys = []
         for pos_key, pos_map in sub_position_maps:
@@ -652,22 +629,22 @@ def stitch_matched_sequences(
                 sub_positions_for_template.append(pos_key['positions'])
                 sub_position_table_keys.append(None)
             else:
-                # Try template_id first, then base_id for position lookup
-                if template_id in pos_map:
-                    sub_positions_for_template.append(pos_map[template_id])
-                    sub_position_table_keys.append(template_id)
-                elif base_id in pos_map:
-                    sub_positions_for_template.append(pos_map[base_id])
-                    sub_position_table_keys.append(base_id)
+                # Use get_mapped_ids for flexible matching
+                pos_map_ids = list(pos_map.keys())
+                match_result = get_mapped_ids([template_id], pos_map_ids, id_map, unique=True)
+                matched_key = match_result.get(template_id)
+                if matched_key:
+                    sub_positions_for_template.append(pos_map[matched_key])
+                    sub_position_table_keys.append(matched_key)
                 else:
-                    print(f"    Skipping: no substitution position data for '{template_id}' or '{base_id}'")
+                    print(f"    Skipping: no substitution position data matching '{template_id}'")
                     skip = True
                     break
 
         if skip:
             continue
 
-        # Get indel positions for this template (use base_id for table lookup)
+        # Get indel positions for this template using id_map matching
         indel_positions_for_template = []
         indel_position_table_keys = []
         for pos_key, pos_map in indel_position_maps:
@@ -675,15 +652,15 @@ def stitch_matched_sequences(
                 indel_positions_for_template.append(pos_key['positions'])
                 indel_position_table_keys.append(None)
             else:
-                # Try template_id first, then base_id for position lookup
-                if template_id in pos_map:
-                    indel_positions_for_template.append(pos_map[template_id])
-                    indel_position_table_keys.append(template_id)
-                elif base_id in pos_map:
-                    indel_positions_for_template.append(pos_map[base_id])
-                    indel_position_table_keys.append(base_id)
+                # Use get_mapped_ids for flexible matching
+                pos_map_ids = list(pos_map.keys())
+                match_result = get_mapped_ids([template_id], pos_map_ids, id_map, unique=True)
+                matched_key = match_result.get(template_id)
+                if matched_key:
+                    indel_positions_for_template.append(pos_map[matched_key])
+                    indel_position_table_keys.append(matched_key)
                 else:
-                    print(f"    Skipping: no indel position data for '{template_id}' or '{base_id}'")
+                    print(f"    Skipping: no indel position data matching '{template_id}'")
                     skip = True
                     break
 

@@ -17,6 +17,17 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
 
+# Import ID mapping utilities from HelpScripts
+try:
+    from HelpScripts.id_map_utils import get_mapped_ids
+except ImportError:
+    # Fallback for when running from different directory
+    import sys
+    help_scripts_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'HelpScripts')
+    if help_scripts_path not in sys.path:
+        sys.path.insert(0, help_scripts_path)
+    from id_map_utils import get_mapped_ids
+
 
 class StitchSequences(BaseConfig):
     """
@@ -469,10 +480,13 @@ fi
         """
         Predict output IDs when substitutions/indels come from tool outputs.
 
-        Mirrors the ID matching logic in pipe_stitch_sequences.py:
-        - Groups substitution/indel IDs by matching them to template IDs using id_map
-        - Generates cartesian product of matched IDs per template
-        - Output ID = template_id + "_" + suffix from matched substitution indices
+        Uses get_mapped_ids for flexible matching that supports:
+        - Exact match (source == target)
+        - Child match (target = source + suffix)
+        - Parent match (source = target + suffix)
+        - Sibling match (common ancestor)
+
+        Mirrors the ID matching logic in pipe_stitch_sequences.py.
         """
         from itertools import product
 
@@ -488,29 +502,29 @@ fi
             if isinstance(options, (ToolOutput, StandardizedOutput)):
                 indel_ids_list.append(options.sequence_ids)
 
-        # Build regex pattern from id_map for matching
-        pattern_template = self.id_map.get("*", "*_<N>")
-
         predicted_ids = []
         for template_id in template_ids:
-            # Build regex to match IDs for this template
-            regex_pattern = pattern_template.replace("*", re.escape(template_id)).replace("<N>", r"\d+")
-            regex = re.compile(f"^{regex_pattern}$")
-
-            # Find matching IDs from each substitution source
+            # Find matching IDs from each substitution source using get_mapped_ids
             sub_matched = []
             for sub_ids in sub_ids_list:
-                matched = [sid for sid in sub_ids if regex.match(sid)]
+                matches = get_mapped_ids([template_id], sub_ids, self.id_map, unique=False)
+                matched = matches.get(template_id, [])
                 sub_matched.append(matched)
 
-            # Find matching IDs from each indel source
+            # Find matching IDs from each indel source using get_mapped_ids
             indel_matched = []
             for indel_ids in indel_ids_list:
-                matched = [iid for iid in indel_ids if regex.match(iid)]
+                matches = get_mapped_ids([template_id], indel_ids, self.id_map, unique=False)
+                matched = matches.get(template_id, [])
                 indel_matched.append(matched)
 
             # Combine all matched ID lists
             all_matched = sub_matched + indel_matched
+
+            # Check if any source has no matches
+            if any(len(m) == 0 for m in all_matched):
+                # Skip this template - no valid combinations possible
+                continue
 
             if not all_matched:
                 predicted_ids.append(template_id)
