@@ -149,6 +149,16 @@ with Pipeline(project="RefactorTest",
     )
     print(f"[10] Panda.groupby output: {grouped}")
 
+    # ========== Test 11: Average by source (replaces AverageByTable) ==========
+    averaged = Panda(
+        tables=[boltz1.tables.structures, boltz2.tables.structures],
+        operations=[
+            Panda.concat(fill="", add_source=True),
+            Panda.average_by_source()
+        ]
+    )
+    print(f"[11] Panda.average_by_source output: {averaged}")
+
     print("\n=== Panda Test Summary ===")
-    print("Panda replaces: Filter, Rank, SelectBest, MergeTables, ConcatenateTables, RemoveDuplicates")
+    print("Panda replaces: Filter, Rank, SelectBest, MergeTables, ConcatenateTables, RemoveDuplicates, AverageByTable")
     print("Additional features: calculate, groupby, pivot, melt, sample, fillna, rename, select/drop columns")

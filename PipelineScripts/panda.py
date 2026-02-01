@@ -410,6 +410,33 @@ class Panda(BaseConfig):
             "var_name": var_name, "value_name": value_name
         })
 
+    @staticmethod
+    def average_by_source(source_col: str = "source_table") -> Operation:
+        """
+        Average all numeric columns per source table (replaces AverageByTable).
+
+        This operation is typically used after concat to compute the mean of all
+        numeric columns for each input table. Each source table becomes one row
+        in the output.
+
+        Args:
+            source_col: Column name identifying the source table (default: "source_table")
+
+        Returns:
+            Operation to average by source
+
+        Example:
+            # Replaces AverageByTable
+            Panda(
+                tables=[cycle0.tables.merged, cycle1.tables.merged, cycle2.tables.merged],
+                operations=[
+                    Panda.concat(add_source=True),
+                    Panda.average_by_source()
+                ]
+            )
+        """
+        return Operation(type="average_by_source", params={"source_col": source_col})
+
     # ========== Tool implementation ==========
 
     def __init__(self,
@@ -491,7 +518,8 @@ class Panda(BaseConfig):
         valid_types = {
             "filter", "head", "tail", "sample", "drop_duplicates",
             "sort", "rank", "select_columns", "drop_columns", "rename",
-            "calculate", "fillna", "merge", "concat", "groupby", "pivot", "melt"
+            "calculate", "fillna", "merge", "concat", "groupby", "pivot", "melt",
+            "average_by_source"
         }
 
         for op in self.operations:

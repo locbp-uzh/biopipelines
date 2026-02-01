@@ -315,6 +315,44 @@ def execute_melt(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
                    var_name=var_name, value_name=value_name)
 
 
+def execute_average_by_source(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Average all numeric columns per source table.
+
+    This replaces AverageByTable functionality. After concat with add_source=True,
+    this groups by source_table and computes the mean of all numeric columns.
+    """
+    source_col = params.get("source_col", "source_table")
+
+    if source_col not in df.columns:
+        print(f"  Warning: source column '{source_col}' not found. Run concat with add_source=True first.")
+        return df
+
+    print(f"  Average by source: grouping by '{source_col}'")
+
+    # Get numeric columns only
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+
+    # Remove the source column from numeric cols if present
+    if source_col in numeric_cols:
+        numeric_cols.remove(source_col)
+
+    if not numeric_cols:
+        print(f"  Warning: No numeric columns found to average")
+        return df.groupby(source_col, as_index=False).first()
+
+    print(f"  Averaging columns: {numeric_cols}")
+
+    # Group by source and compute mean of numeric columns
+    result = df.groupby(source_col, as_index=False)[numeric_cols].mean()
+
+    # Add a table_name column based on source index
+    result['table_name'] = [f"table_{i}" for i in result[source_col]]
+
+    print(f"    -> {len(result)} rows (one per source table)")
+    return result
+
+
 def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool):
     """
     Execute a single operation.
@@ -367,6 +405,7 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
         "groupby": execute_groupby,
         "pivot": execute_pivot,
         "melt": execute_melt,
+        "average_by_source": execute_average_by_source,
     }
 
     func = operation_funcs.get(op_type)
