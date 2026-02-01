@@ -6,19 +6,19 @@ and ligands, returning contact count and normalized distance sum.
 Outputs CSV with contact metrics for all structures.
 """
 
-import numpy as np
-from typing import Dict, List, Any, Optional, Union, Tuple
-
 import os
+from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class ProteinLigandContacts(BaseConfig):
@@ -40,11 +40,15 @@ class ProteinLigandContacts(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "ProteinLigandContacts"
-    
+
+    # Lazy path descriptors
+    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_contacts.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_config.json"))
+    contacts_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_protein_ligand_contacts.py"))
 
     def __init__(self,
-                 structures: Union[ToolOutput, StandardizedOutput],
-                 selections: Union[str, ToolOutput] = None,
+                 structures: Union[DataStream, StandardizedOutput],
+                 selections: Optional[str] = None,
                  ligand: str = None,
                  contact_threshold: float = 5.0,
                  contact_metric_name: str = None,
@@ -54,89 +58,50 @@ class ProteinLigandContacts(BaseConfig):
         Initialize protein-ligand contact analysis tool.
 
         Args:
-            structures: Input structures from previous tool (ToolOutput or StandardizedOutput)
-            selections: Protein region selections - string, table reference, or None for all protein
+            structures: Input structures as DataStream or StandardizedOutput
+            selections: Protein region selections string or None for all protein
                        String format: '10-20+30-40' (residue ranges)
-                       Table format: <tool_output>.tables.<table_name>.<column_name>
                        None: analyze all protein residues (default)
             ligand: Ligand residue name (3-letter code, e.g., 'LIG', 'ATP', 'GDP')
             contact_threshold: Distance threshold for counting contacts (default: 5.0 Å)
             contact_metric_name: Custom name for contact count column (default: "contacts")
-            id_map: ID mapping pattern for matching structure IDs to table IDs (default: {"*": "*_<N>"})
-                  - Used when table IDs don't match structure IDs
-                  - Pattern syntax: "*" represents base ID, "<N>" represents numeric suffix
-                  - Examples:
-                    * {"*": "*_<N>"} strips "_123" → "rifampicin_1" from "rifampicin_1_2"
-                    * {"*": "*_<N>_<N>"} strips "_1_2" → "rifampicin" from "rifampicin_1_2"
-                    * {"*": "*-seq-<N>"} strips "-seq-42" → "protein" from "protein-seq-42"
+            id_map: ID mapping pattern for matching structure IDs to table IDs
             **kwargs: Additional parameters
-
-        Selection Syntax:
-            String format:
-            - '10-20' → residues 10 to 20
-            - '10-20+30-40' → residues 10-20 and 30-40
-            - '145+147+150' → specific residues 145, 147, and 150
-
-            Table format:
-            - rfdaa.tables.results.designed → use 'designed' column values
-            - None → all protein residues (excluding ligands)
 
         Examples:
             # Analyze protein-ligand contacts with specific protein regions
-            contact_analysis = pipeline.add(ProteinLigandContacts(
+            contact_analysis = ProteinLigandContacts(
                 structures=boltz_holo,
                 selections='10-20+30-40',
                 ligand='LIG',
-                contact_threshold=4.0,
-                contact_metric_name='close_contacts'
-            ))
-
-            # Use selections from table (e.g., designed residues)
-            contact_analysis = pipeline.add(ProteinLigandContacts(
-                structures=boltz_holo,
-                selections=rfdaa.tables.results.designed,
-                ligand='ATP',
-                contact_threshold=5.0
-            ))
-
-            # Analyze all protein residues (if selections not specified)
-            contact_analysis = pipeline.add(ProteinLigandContacts(
-                structures=boltz_holo,
-                ligand='GDP'
-            ))
+                contact_threshold=4.0
+            )
         """
-        self.structures_input = structures
+        # Resolve input to DataStream
+        if isinstance(structures, StandardizedOutput):
+            self.structures_stream: DataStream = structures.structures
+        elif isinstance(structures, DataStream):
+            self.structures_stream = structures
+        else:
+            raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
+
         self.protein_selections = selections
         self.ligand_name = ligand
         self.contact_threshold = contact_threshold
         self.custom_contact_metric_name = contact_metric_name
         self.id_map = id_map
 
-        # Initialize base class
         super().__init__(**kwargs)
-
-        # Set up dependencies
-        if hasattr(structures, 'config'):
-            self.dependencies.append(structures.config)
-        if hasattr(selections, 'config'):
-            self.dependencies.append(selections.config)
 
     def get_contact_metric_name(self) -> str:
         """Get the contact count metric name."""
-        if self.custom_contact_metric_name:
-            return self.custom_contact_metric_name
-        return "contacts"
-
-    def get_analysis_csv_path(self) -> str:
-        """Get the path for the analysis CSV file - defined once, used everywhere."""
-        return os.path.join(self.output_folder, "protein_ligand_contacts.csv")
+        return self.custom_contact_metric_name if self.custom_contact_metric_name else "contacts"
 
     def validate_params(self):
         """Validate ProteinLigandContacts parameters."""
-        if not isinstance(self.structures_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("Structures input must be a ToolOutput or StandardizedOutput object")
+        if not self.structures_stream or len(self.structures_stream) == 0:
+            raise ValueError("structures cannot be empty")
 
-        # selections can be None (analyze all protein)
         if self.protein_selections is not None and not self.protein_selections:
             raise ValueError("Protein selections specification cannot be empty string (use None for all protein)")
 
@@ -147,39 +112,17 @@ class ProteinLigandContacts(BaseConfig):
             raise ValueError("Contact threshold must be a positive number")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input structures from previous tool."""
+        """Configure input structures."""
         self.folders = pipeline_folders
-
-        # Predict input structures paths
-        self.input_structures = []
-        if hasattr(self.structures_input, 'structures'):
-            if isinstance(self.structures_input.structures, list):
-                self.input_structures = self.structures_input.structures
-            else:
-                self.input_structures = [self.structures_input.structures]
-        elif hasattr(self.structures_input, 'output_folder'):
-            # Predict structure files in output folder
-            output_folder = self.structures_input.output_folder
-            predicted_structures = [
-                os.path.join(output_folder, "predicted_structures.pdb"),
-                os.path.join(output_folder, "structures.pdb"),
-                os.path.join(output_folder, "output.pdb")
-            ]
-            self.input_structures = predicted_structures
-
-        if not self.input_structures:
-            raise ValueError(f"Could not predict input structure paths from: {self.structures_input}")
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
         selections_display = "All protein residues" if self.protein_selections is None else str(self.protein_selections)
-        if hasattr(self.protein_selections, 'table_path'):
-            selections_display = f"From table: {self.protein_selections.table_path}"
 
         config_lines.extend([
-            f"STRUCTURES: {len(getattr(self, 'input_structures', []))} files",
+            f"STRUCTURES: {len(self.structures_stream)} files",
             f"PROTEIN SELECTIONS: {selections_display}",
             f"LIGAND: {self.ligand_name}",
             f"CONTACT THRESHOLD: {self.contact_threshold} Å",
@@ -203,97 +146,56 @@ class ProteinLigandContacts(BaseConfig):
 
     def generate_script_run_protein_ligand_contacts(self) -> str:
         """Generate the protein-ligand contact analysis part of the script."""
-        # Output CSV path - defined once in get_analysis_csv_path()
-        analysis_csv = self.get_analysis_csv_path()
-
-        # Create config file for protein-ligand contact calculation
-        config_file = os.path.join(self.output_folder, "protein_ligand_config.json")
+        import json
 
         # Handle protein selections input
-        selections_config = None
         if self.protein_selections is None:
             selections_config = {"type": "all_protein"}
-        elif isinstance(self.protein_selections, str):
-            selections_config = {"type": "fixed", "value": self.protein_selections}
-        elif isinstance(self.protein_selections, tuple) and len(self.protein_selections) == 2:
-            # Tuple format: (TableInfo, column_name)
-            table_info, column_name = self.protein_selections
-            selections_config = {
-                "type": "table",
-                "table_path": table_info.path if hasattr(table_info, 'path') else '',
-                "column_name": column_name
-            }
         else:
-            # Table reference with attributes
-            selections_config = {
-                "type": "table",
-                "table_path": getattr(self.protein_selections, 'table_path', ''),
-                "column_name": getattr(self.protein_selections, 'column_name', 'selections')
-            }
+            selections_config = {"type": "fixed", "value": self.protein_selections}
 
         config_data = {
-            "input_structures": self.input_structures,
+            "input_structures": self.structures_stream.files,
             "protein_selections": selections_config,
             "ligand_name": self.ligand_name,
             "contact_threshold": self.contact_threshold,
             "contact_metric_name": self.get_contact_metric_name(),
             "id_map": self.id_map,
-            "output_csv": analysis_csv
+            "output_csv": self.analysis_csv
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Running protein-ligand contact analysis"
-echo "Structures: {len(self.input_structures)}"
+echo "Structures: {len(self.structures_stream)}"
 echo "Protein selections: {self.protein_selections if self.protein_selections is not None else 'All protein residues'}"
 echo "Ligand: {self.ligand_name}"
 echo "Contact threshold: {self.contact_threshold} Å"
-echo "Output: {analysis_csv}"
+echo "Output: {self.analysis_csv}"
 
-# Run Python analysis script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_protein_ligand_contacts.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Protein-ligand contact analysis completed successfully"
-    echo "Results written to: {analysis_csv}"
-else
-    echo "Error: Protein-ligand contact analysis failed"
-    exit 1
-fi
+python "{self.contacts_py}" --config "{self.config_file}"
 
 """
 
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after protein-ligand contact analysis.
-
-        Returns:
-            Dictionary with output file paths
-        """
-        analysis_csv = self.get_analysis_csv_path()
-
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after protein-ligand contact analysis."""
         tables = {
             "contact_analysis": TableInfo(
                 name="contact_analysis",
-                path=analysis_csv,
+                path=self.analysis_csv,
                 columns=["id", "source_structure", "selections", "ligand",
                         self.get_contact_metric_name(), "min_distance", "max_distance",
                         "mean_distance", "sum_distances_sqrt_normalized"],
                 description=f"Protein-ligand contact analysis: {self.ligand_name} contacts with selected protein regions",
-                count=len(getattr(self, 'input_structures', []))
+                count=len(self.structures_stream)
             )
         }
 
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

@@ -9,7 +9,6 @@ from .pipeline import Pipeline, Bundle, Each
 from .base_config import BaseConfig, ToolOutput
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .datastream import DataStream, create_map_table
-from .datastream_resolver import DataStreamResolver, resolve_to_datastream
 from .file_paths import Path
 from .table_utils import get_table, get_table_path, list_tables, table_exists
 from .rfdiffusion import RFdiffusion
@@ -38,7 +37,7 @@ from .rank import Rank
 from .pymol import PyMOL
 from .fuse import Fuse
 from .plot import Plot
-from .ghostfold import GhostFold
+from .panda import Panda
 from .mmseqs2 import MMseqs2, MMseqs2Server
 from .mmseqs2_lcf import MMseqs2LCF, MMseqs2ServerLCF
 from .converters import *
@@ -101,7 +100,7 @@ __all__ = [
     'PyMOL',
     'Fuse',
     'Plot',
-    'GhostFold',
+    'Panda',
     'MMseqs2',
     'MMseqs2Server',
     'MMseqs2LCF',

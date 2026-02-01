@@ -22,7 +22,7 @@
 - [x] AlphaFold
 - [x] GhostFold (removed)
 - [x] ESMFold
-- [ ] Boltz2 (don't refactor as of now)
+- [x] Boltz2
 - [x] RF3 (removed)
 - [x] OnionNet
 

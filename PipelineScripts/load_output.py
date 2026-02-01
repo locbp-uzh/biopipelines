@@ -377,14 +377,9 @@ class LoadOutput(BaseConfig):
             updated_compound_ids = []
             for compound_file in output_structure['compounds']:
                 if isinstance(compound_file, str) and os.path.exists(compound_file) and compound_file.endswith('.csv'):
-                    try:
-                        df = pd.read_csv(compound_file)
-                        if 'id' in df.columns:
-                            updated_compound_ids.extend(df['id'].tolist())
-                    except Exception as e:
-                        # If we can't read the file, keep the original IDs
-                        print(f"Warning: Could not read compound file {compound_file}: {e}")
-                        continue
+                    df = pd.read_csv(compound_file)
+                    if 'id' in df.columns:
+                        updated_compound_ids.extend(df['id'].tolist())
 
             if updated_compound_ids:
                 output_structure['compound_ids'] = updated_compound_ids
@@ -394,14 +389,9 @@ class LoadOutput(BaseConfig):
             updated_sequence_ids = []
             for sequence_file in output_structure['sequences']:
                 if isinstance(sequence_file, str) and os.path.exists(sequence_file) and sequence_file.endswith('.csv'):
-                    try:
-                        df = pd.read_csv(sequence_file)
-                        if 'id' in df.columns:
-                            updated_sequence_ids.extend(df['id'].tolist())
-                    except Exception as e:
-                        # If we can't read the file, keep the original IDs
-                        print(f"Warning: Could not read sequence file {sequence_file}: {e}")
-                        continue
+                    df = pd.read_csv(sequence_file)
+                    if 'id' in df.columns:
+                        updated_sequence_ids.extend(df['id'].tolist())
 
             if updated_sequence_ids:
                 output_structure['sequence_ids'] = updated_sequence_ids
@@ -456,21 +446,15 @@ class LoadOutput(BaseConfig):
 
         # Read the missing.csv file
         if not os.path.exists(missing_path):
-            print(f"Warning: missing table referenced but file not found: {missing_path}")
-            return set()
+            raise FileNotFoundError(f"Missing table referenced but file not found: {missing_path}")
 
-        try:
-            missing_df = pd.read_csv(missing_path)
-            if 'id' in missing_df.columns:
-                missing_ids = set(missing_df['id'].tolist())
-                print(f"LoadOutput: Excluding {len(missing_ids)} IDs from missing.csv")
-                return missing_ids
-            else:
-                print(f"Warning: missing.csv does not have 'id' column")
-                return set()
-        except Exception as e:
-            print(f"Warning: Could not read missing.csv: {e}")
-            return set()
+        missing_df = pd.read_csv(missing_path)
+        if 'id' not in missing_df.columns:
+            raise ValueError(f"missing.csv does not have required 'id' column: {missing_path}")
+
+        missing_ids = set(missing_df['id'].tolist())
+        print(f"LoadOutput: Excluding {len(missing_ids)} IDs from missing.csv")
+        return missing_ids
 
     def get_output_files(self) -> Dict[str, Any]:
         """

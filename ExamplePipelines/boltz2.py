@@ -42,8 +42,8 @@ with Pipeline(project="Examples",
 
     boltz_1 = Boltz2(proteins="MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
     ligands=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@@]34[C@@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C", #use r prefix to avoid misinterpretation of \
-    affinity=True, # this is set to True as default when there is a ligand, and false otherwise. So it only makes sense to override when there is a ligand, and you don't want the affinity
-    global_msas_cache=True)
+    affinity=True # this is set to True as default when there is a ligand, and false otherwise. So it only makes sense to override when there is a ligand, and you don't want the affinity
+    )
 
     """
     Boltz run with protein sequence fetched from pdb
@@ -53,8 +53,7 @@ with Pipeline(project="Examples",
     HaloTag = PDB("6U32","HT")
 
     boltz_2 = Boltz2(proteins=HaloTag,
-    ligands=boltz_1, # output of Boltz contains a csv file with the smiles of the ligands used.
-    global_msas_cache=True)
+    ligands=boltz_1)
 
     """
     Boltz run with multiple ligands
@@ -69,8 +68,7 @@ with Pipeline(project="Examples",
     )
 
     boltz_3 = Boltz2(proteins=HaloTag,
-    ligands=compounds,
-    global_msas_cache=True)
+    ligands=compounds)
 
     """
     Boltz with an expandable ligand library
@@ -90,8 +88,7 @@ with Pipeline(project="Examples",
     )
 
     boltz_4 = Boltz2(proteins=HaloTag,
-    ligands=expanded_library,
-    global_msas_cache=True)
+    ligands=expanded_library)
 
     """
     Boltz with msas from MMseqs2

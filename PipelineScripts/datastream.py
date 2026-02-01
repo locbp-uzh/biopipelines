@@ -137,10 +137,7 @@ class DataStream:
     def _get_map_data(self) -> Optional[pd.DataFrame]:
         """Lazily load map_table data."""
         if self._map_data is None and self.map_table and os.path.exists(self.map_table):
-            try:
-                self._map_data = pd.read_csv(self.map_table)
-            except Exception:
-                self._map_data = None
+            self._map_data = pd.read_csv(self.map_table)
         return self._map_data
 
     def get_file(self, item_id: str) -> Optional[str]:

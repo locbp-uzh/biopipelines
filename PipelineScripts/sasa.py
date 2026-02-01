@@ -9,14 +9,18 @@ delta_SASA = SASA_ligand_alone - SASA_ligand_in_complex
 """
 
 import os
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class SASA(BaseConfig):
@@ -33,10 +37,14 @@ class SASA(BaseConfig):
     """
 
     TOOL_NAME = "SASA"
-    
+
+    # Lazy path descriptors
+    results_csv = Path(lambda self: os.path.join(self.output_folder, "sasa_analysis.csv"))
+    structures_list_file = Path(lambda self: os.path.join(self.output_folder, ".input_structures.txt"))
+    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_sasa.py"))
 
     def __init__(self,
-                 structures: Union[str, List[str], ToolOutput, StandardizedOutput],
+                 structures: Union[DataStream, StandardizedOutput],
                  ligand: str,
                  dot_density: int = 4,
                  **kwargs):
@@ -44,99 +52,70 @@ class SASA(BaseConfig):
         Initialize SASA configuration.
 
         Args:
-            structures: Input structures (PDB/CIF files or ToolOutput from previous tool)
+            structures: Input structures as DataStream or StandardizedOutput
             ligand: Ligand identifier/code (e.g., ":X:", "LIG", "AMX")
             dot_density: Dot density for SASA calculation (1-4, higher = more accurate)
             **kwargs: Additional parameters
         """
-        self.input_structures = structures
+        # Resolve input to DataStream
+        if isinstance(structures, StandardizedOutput):
+            self.structures_stream: DataStream = structures.structures
+        elif isinstance(structures, DataStream):
+            self.structures_stream = structures
+        else:
+            raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
+
         self.ligand = ligand
         self.dot_density = dot_density
 
-        self.input_is_tool_output = isinstance(structures, (ToolOutput, StandardizedOutput))
-
         super().__init__(**kwargs)
-
-        self._initialize_file_paths()
 
     def validate_params(self):
         """Validate SASA parameters."""
-        if not self.input_structures:
-            raise ValueError("structures parameter is required")
+        if not self.structures_stream or len(self.structures_stream) == 0:
+            raise ValueError("structures parameter is required and must not be empty")
         if not self.ligand:
             raise ValueError("ligand parameter is required")
         if self.dot_density < 1 or self.dot_density > 4:
             raise ValueError("dot_density must be between 1 and 4")
 
-    def _initialize_file_paths(self):
-        """Initialize file paths."""
-        self.results_csv = None
-        self.helper_script = None
-
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input structures from previous tools."""
+        """Configure input structures."""
         self.folders = pipeline_folders
-
-        self.input_sources = {"structures": []}
-
-        if isinstance(self.input_structures, str):
-            self.input_sources["structures"] = [self.input_structures]
-        elif isinstance(self.input_structures, list):
-            self.input_sources["structures"] = self.input_structures
-        elif hasattr(self.input_structures, 'structures'):
-            structs = self.input_structures.structures
-            if isinstance(structs, list):
-                self.input_sources["structures"] = structs
-            else:
-                self.input_sources["structures"] = [structs]
-
-        self._setup_file_paths()
-
-    def _setup_file_paths(self):
-        """Set up output file paths."""
-        self.results_csv = os.path.join(self.output_folder, "sasa_analysis.csv")
-        # Input list file (avoids "Argument list too long" with many structures)
-        self.structures_list_file = os.path.join(self.output_folder, ".input_structures.txt")
-        self.helper_script = os.path.join(self.folders.get('HelpScripts', 'HelpScripts'), 'pipe_sasa.py')
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
         config_lines.extend([
-            f"INPUT STRUCTURES: {len(self.input_sources.get('structures', []))} files",
+            f"INPUT STRUCTURES: {len(self.structures_stream)} files",
             f"LIGAND: {self.ligand}",
-            f"DOT DENSITY: {self.dot_density}",
-            f"OUTPUT: {self.results_csv}"
+            f"DOT DENSITY: {self.dot_density}"
         ])
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
         """Generate SASA execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
+        # Write structure paths to list file (avoids "Argument list too long" error)
+        with open(self.structures_list_file, 'w') as f:
+            for struct_path in self.structures_stream.files:
+                f.write(f"{struct_path}\n")
 
         script_content = "#!/bin/bash\n"
         script_content += "# SASA execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += self.generate_script_run_sasa()
+        script_content += self._generate_script_run_sasa()
         script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def generate_script_run_sasa(self) -> str:
+    def _generate_script_run_sasa(self) -> str:
         """Generate the SASA execution part of the script."""
-        structure_files = self.input_sources["structures"]
-
-        # Write structure paths to list file (avoids "Argument list too long" error)
-        with open(self.structures_list_file, 'w') as f:
-            for struct in structure_files:
-                f.write(f"{struct}\n")
-
         # Normalize ligand code (remove colons for PyMOL selection)
         ligand_resn = self.ligand.replace(":", "")
 
         return f"""echo "Running SASA analysis"
-echo "Structures: {len(structure_files)} files"
+echo "Structures: {len(self.structures_stream)} files"
 echo "Ligand: {self.ligand}"
 echo "Output: {self.results_csv}"
 
@@ -158,49 +137,31 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after SASA execution."""
-        if not hasattr(self, 'results_csv') or self.results_csv is None:
-            self._setup_file_paths()
-
-        structure_ids = self._predict_structure_ids()
-
         tables = {
             "sasa": TableInfo(
                 name="sasa",
                 path=self.results_csv,
                 columns=["id", "structure", "sasa_ligand_alone", "sasa_ligand_complex", "delta_sasa"],
                 description="Solvent accessible surface area analysis",
-                count=len(structure_ids)
+                count=len(self.structures_stream)
             )
         }
 
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }
-
-    def _predict_structure_ids(self) -> List[str]:
-        """Predict structure IDs from input sources."""
-        structure_ids = []
-        if hasattr(self, 'input_sources') and "structures" in self.input_sources:
-            for pdb_path in self.input_sources["structures"]:
-                pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-                structure_ids.append(pdb_base)
-        return structure_ids
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
         base_dict.update({
-            "tool_params": {
+            "sasa_params": {
                 "ligand": self.ligand,
-                "dot_density": self.dot_density,
-                "input_type": "tool_output" if self.input_is_tool_output else "direct"
+                "dot_density": self.dot_density
             }
         })
         return base_dict

@@ -9,19 +9,23 @@ import os
 import json
 from typing import Dict, List, Any, Union
 import re
+from itertools import product
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 # Import ID mapping utilities from HelpScripts
 try:
     from HelpScripts.id_map_utils import get_mapped_ids
 except ImportError:
-    # Fallback for when running from different directory
     import sys
     help_scripts_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'HelpScripts')
     if help_scripts_path not in sys.path:
@@ -50,12 +54,16 @@ class StitchSequences(BaseConfig):
     """
 
     TOOL_NAME = "StitchSequences"
-    
+
+    # Lazy path descriptors
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "stitch_config.json"))
+    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_stitch_sequences.py"))
 
     def __init__(self,
-                 template: Union[str, ToolOutput, StandardizedOutput],
-                 substitutions: Dict[str, Union[List[str], ToolOutput, StandardizedOutput]] = None,
-                 indels: Dict[str, Union[List[str], ToolOutput, StandardizedOutput]] = None,
+                 template: Union[str, DataStream, StandardizedOutput],
+                 substitutions: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
+                 indels: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
                  id_map: Dict[str, str] = {"*": "*_<N>"},
                  **kwargs):
         """
@@ -64,12 +72,12 @@ class StitchSequences(BaseConfig):
         Args:
             template: Base sequence - can be:
                 - Raw sequence string
-                - ToolOutput/StandardizedOutput with sequences
+                - DataStream/StandardizedOutput with sequences
             substitutions: Position-to-position substitutions from equal-length sequences.
                 For each position in the selection, the residue at that position in the
                 substitution sequence replaces the residue at that position in the template.
                 - Keys: Position strings like "11-19" or "11-19+31-44"
-                - Values: ToolOutput with sequences (must be same length as template)
+                - Values: DataStream/StandardizedOutput with sequences (must be same length as template)
             indels: Segment replacements where each contiguous segment is replaced.
                 For example, "6-7+9-10": "GP" replaces both segments 6-7 and 9-10 with "GP".
                 - Keys: Position strings like "50-55" or "6-7+9-10+17-18"
@@ -85,45 +93,6 @@ class StitchSequences(BaseConfig):
         Processing Order:
             1. Substitutions are applied first (same-length, position-to-position)
             2. Indels are applied second (can change sequence length)
-
-        Examples:
-            # Position-to-position substitution from ToolOutput
-            stitched = StitchSequences(
-                template=pmpnn,  # e.g., 180 residue sequences
-                substitutions={
-                    "11-19+31-44": lmpnn  # Also 180 residue sequences
-                }
-            )
-            # Residues at positions 11-19 and 31-44 are copied from lmpnn
-
-            # Segment replacement with indels
-            stitched = StitchSequences(
-                template="MKTAYIAKQRQISFVKSHFS...",
-                indels={
-                    "11-15": ["AAAAA", "GGGGG"],  # Replace segment with 5-char options
-                    "20-22": ["XX", "YYY", "ZZZZ"]  # Can change length
-                }
-            )
-
-            # Combined: substitutions then indels
-            stitched = StitchSequences(
-                template=pmpnn,
-                substitutions={
-                    "6-12+19+21": lmpnn  # Position-to-position from lmpnn
-                },
-                indels={
-                    "50-55": ["LINKER", "GGG"]  # Replace segment 50-55
-                }
-            )
-
-            # Concatenation mode (no template, integer keys)
-            stitched = StitchSequences(
-                indels={
-                    1: ["AAAA", "BBBB"],      # First segment options
-                    2: ["CCCC", "DDDD", "EEEE"]  # Second segment options
-                }
-            )
-            # Output: 2 × 3 = 6 concatenated sequences
         """
         # Handle concatenation mode: no template, integer keys in indels
         if template is None and indels:
@@ -140,6 +109,21 @@ class StitchSequences(BaseConfig):
         self.indels = indels or {}
         self.id_map = id_map
 
+        # Resolve template to DataStream if needed
+        self.template_stream = None
+        self.template_sequence = None
+        if isinstance(template, str):
+            self.template_sequence = template
+        elif isinstance(template, StandardizedOutput):
+            if template.sequences and len(template.sequences) > 0:
+                self.template_stream = template.sequences
+            else:
+                raise ValueError("StandardizedOutput has no sequences for template")
+        elif isinstance(template, DataStream):
+            self.template_stream = template
+        else:
+            raise ValueError(f"template must be str, DataStream, or StandardizedOutput, got {type(template)}")
+
         # Validate substitution keys are position strings or table references
         for pos_key in self.substitutions.keys():
             if not isinstance(pos_key, (str, tuple)):
@@ -152,21 +136,6 @@ class StitchSequences(BaseConfig):
 
         # Initialize base class
         super().__init__(**kwargs)
-
-        # Set up dependencies
-        if isinstance(self.template, (ToolOutput, StandardizedOutput)):
-            if hasattr(self.template, 'config'):
-                self.dependencies.append(self.template.config)
-
-        for options in self.substitutions.values():
-            if isinstance(options, (ToolOutput, StandardizedOutput)):
-                if hasattr(options, 'config'):
-                    self.dependencies.append(options.config)
-
-        for options in self.indels.values():
-            if isinstance(options, (ToolOutput, StandardizedOutput)):
-                if hasattr(options, 'config'):
-                    self.dependencies.append(options.config)
 
     def validate_params(self):
         """Validate StitchSequences parameters."""
@@ -262,12 +231,30 @@ class StitchSequences(BaseConfig):
                 "source_name": "raw_sequences"
             }
 
-        elif isinstance(source, (ToolOutput, StandardizedOutput)):
+        elif isinstance(source, DataStream):
+            if source.map_table:
+                return {
+                    "type": "tool_output",
+                    "sequences_file": source.map_table,
+                    "source_name": "DataStream",
+                    "sequence_ids": source.ids or []
+                }
+            elif source.files:
+                return {
+                    "type": "tool_output",
+                    "sequences_file": source.files[0],
+                    "source_name": "DataStream",
+                    "sequence_ids": source.ids or []
+                }
+            else:
+                raise ValueError(f"{name}: DataStream has no files or map_table")
+
+        elif isinstance(source, StandardizedOutput):
             if not hasattr(source, 'tables'):
-                raise ValueError(f"{name}: ToolOutput must have tables")
+                raise ValueError(f"{name}: StandardizedOutput must have tables")
 
             if not hasattr(source.tables, 'sequences'):
-                raise ValueError(f"{name}: ToolOutput must have tables.sequences")
+                raise ValueError(f"{name}: StandardizedOutput must have tables.sequences")
 
             sequences_table = source.tables.sequences
             if hasattr(sequences_table, 'path'):
@@ -281,13 +268,13 @@ class StitchSequences(BaseConfig):
                 "type": "tool_output",
                 "sequences_file": sequences_file,
                 "source_name": source.__class__.__name__,
-                "sequence_ids": getattr(source, 'sequence_ids', [])
+                "sequence_ids": source.sequences.ids if source.sequences else []
             }
 
             # Include structure files if available (for PDB residue number mapping)
-            if hasattr(source, 'structures') and source.structures:
-                result["structure_files"] = source.structures
-                result["structure_ids"] = getattr(source, 'structure_ids', [])
+            if source.structures and len(source.structures) > 0:
+                result["structure_files"] = source.structures.files
+                result["structure_ids"] = source.structures.ids or []
 
             return result
 
@@ -300,7 +287,7 @@ class StitchSequences(BaseConfig):
 
         if isinstance(self.template, str):
             template_display = f"raw sequence ({len(self.template)} chars)"
-        elif isinstance(self.template, (ToolOutput, StandardizedOutput)):
+        elif isinstance(self.template, (DataStream, StandardizedOutput)):
             template_display = self.template.__class__.__name__
         else:
             template_display = str(type(self.template))
@@ -319,7 +306,7 @@ class StitchSequences(BaseConfig):
 
                 if isinstance(options, list):
                     options_display = f"{len(options)} raw sequences"
-                elif isinstance(options, (ToolOutput, StandardizedOutput)):
+                elif isinstance(options, (DataStream, StandardizedOutput)):
                     options_display = options.__class__.__name__
                 else:
                     options_display = str(type(options))
@@ -337,7 +324,7 @@ class StitchSequences(BaseConfig):
 
                 if isinstance(options, list):
                     options_display = f"{len(options)} raw sequences"
-                elif isinstance(options, (ToolOutput, StandardizedOutput)):
+                elif isinstance(options, (DataStream, StandardizedOutput)):
                     options_display = options.__class__.__name__
                 else:
                     options_display = str(type(options))
@@ -349,32 +336,23 @@ class StitchSequences(BaseConfig):
         """Generate StitchSequences execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
-        script_content = "#!/bin/bash\n"
-        script_content += "# StitchSequences execution script\n"
-        script_content += self.generate_completion_check_header()
-        script_content += self.activate_environment()
-        script_content += self.generate_script_run_stitch_sequences()
-        script_content += self.generate_completion_check_footer()
-
-        return script_content
-
-    def generate_script_run_stitch_sequences(self) -> str:
-        """Generate the sequence stitching execution part of the script."""
-        output_csv = os.path.join(self.output_folder, "sequences.csv")
-        config_file = os.path.join(self.output_folder, "stitch_config.json")
-
         config_data = {
             "template": self.template_info,
             "substitutions": self.substitution_infos,
             "indels": self.indel_infos,
             "id_map": self.id_map,
-            "output_csv": output_csv
+            "output_csv": self.sequences_csv
         }
 
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        script_content = f"""echo "Running sequence stitching"
+        script_content = "#!/bin/bash\n"
+        script_content += "# StitchSequences execution script\n"
+        script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
+
+        script_content += f"""echo "Running sequence stitching"
 echo "Template: {self.template_info['source_name']}"
 echo "Substitution regions: {len(self.substitutions)}"
 echo "Indel regions: {len(self.indels)}"
@@ -386,64 +364,63 @@ echo "Indel regions: {len(self.indels)}"
         for key_str, info in self.indel_infos.items():
             script_content += f'echo "  Indel {key_str}: {info["sequences"]["source_name"]}"\n'
 
-        script_content += f"""echo "Output: {output_csv}"
+        script_content += f"""echo "Output: {self.sequences_csv}"
 
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_stitch_sequences.py')}" \\
-  --config "{config_file}"
+python "{self.helper_script}" \\
+  --config "{self.config_file}"
 
 if [ $? -eq 0 ]; then
     echo "Sequence stitching completed successfully"
-    echo "Results written to: {output_csv}"
+    echo "Results written to: {self.sequences_csv}"
 else
     echo "Error: Sequence stitching failed"
     exit 1
 fi
 
 """
+        script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def get_output_files(self) -> Dict[str, List[str]]:
+    def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after sequence stitching."""
-        sequences_csv = os.path.join(self.output_folder, "sequences.csv")
         predicted_ids = self._predict_output_sequence_ids()
 
         tables = {
             "sequences": TableInfo(
                 name="sequences",
-                path=sequences_csv,
+                path=self.sequences_csv,
                 columns=["id", "sequence"],
                 description="Stitched sequences with segment substitutions",
                 count=len(predicted_ids)
             )
         }
 
+        sequences = DataStream(
+            name="sequences",
+            ids=predicted_ids,
+            files=[self.sequences_csv],
+            map_table=self.sequences_csv,
+            format="csv"
+        )
+
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [sequences_csv],
-            "sequence_ids": predicted_ids,
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": sequences,
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }
 
     def _predict_output_sequence_ids(self) -> List[str]:
         """Predict output sequence IDs based on matched template IDs."""
-        import re
-        from itertools import product
-
         # Get template sequence IDs
         if isinstance(self.template, str):
             template_ids = ["seq"]
         elif isinstance(self.template, list):
             template_ids = [f"seq_{i+1}" for i in range(len(self.template))]
-        elif isinstance(self.template, (ToolOutput, StandardizedOutput)):
-            if hasattr(self.template, 'sequence_ids'):
-                template_ids = self.template.sequence_ids
-            else:
-                template_ids = ["seq"]
+        elif self.template_stream:
+            template_ids = self.template_stream.ids or ["seq"]
         else:
             template_ids = ["seq"]
 
@@ -477,30 +454,22 @@ fi
             return self._predict_matched_sequence_ids(template_ids)
 
     def _predict_matched_sequence_ids(self, template_ids: List[str]) -> List[str]:
-        """
-        Predict output IDs when substitutions/indels come from tool outputs.
-
-        Uses get_mapped_ids for flexible matching that supports:
-        - Exact match (source == target)
-        - Child match (target = source + suffix)
-        - Parent match (source = target + suffix)
-        - Sibling match (common ancestor)
-
-        Mirrors the ID matching logic in pipe_stitch_sequences.py.
-        """
-        from itertools import product
-
+        """Predict output IDs when substitutions/indels come from tool outputs."""
         # Get sequence_ids from each substitution source
         sub_ids_list = []
         for options in self.substitutions.values():
-            if isinstance(options, (ToolOutput, StandardizedOutput)):
-                sub_ids_list.append(options.sequence_ids)
+            if isinstance(options, StandardizedOutput):
+                sub_ids_list.append(options.sequences.ids if options.sequences else [])
+            elif isinstance(options, DataStream):
+                sub_ids_list.append(options.ids or [])
 
         # Get sequence_ids from each indel source
         indel_ids_list = []
         for options in self.indels.values():
-            if isinstance(options, (ToolOutput, StandardizedOutput)):
-                indel_ids_list.append(options.sequence_ids)
+            if isinstance(options, StandardizedOutput):
+                indel_ids_list.append(options.sequences.ids if options.sequences else [])
+            elif isinstance(options, DataStream):
+                indel_ids_list.append(options.ids or [])
 
         predicted_ids = []
         for template_id in template_ids:
@@ -544,7 +513,7 @@ fi
 
         if isinstance(self.template, str):
             template_summary = f"raw_sequence({len(self.template)} chars)"
-        elif isinstance(self.template, (ToolOutput, StandardizedOutput)):
+        elif isinstance(self.template, (DataStream, StandardizedOutput)):
             template_summary = self.template.__class__.__name__
         else:
             template_summary = str(type(self.template))
@@ -560,7 +529,7 @@ fi
 
             if isinstance(options, list):
                 substitutions_summary[key_str] = f"{len(options)} raw sequences"
-            elif isinstance(options, (ToolOutput, StandardizedOutput)):
+            elif isinstance(options, (DataStream, StandardizedOutput)):
                 substitutions_summary[key_str] = options.__class__.__name__
             else:
                 substitutions_summary[key_str] = str(type(options))
@@ -576,7 +545,7 @@ fi
 
             if isinstance(options, list):
                 indels_summary[key_str] = f"{len(options)} raw sequences"
-            elif isinstance(options, (ToolOutput, StandardizedOutput)):
+            elif isinstance(options, (DataStream, StandardizedOutput)):
                 indels_summary[key_str] = options.__class__.__name__
             else:
                 indels_summary[key_str] = str(type(options))

@@ -38,6 +38,7 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv):
         # PDB:  <id>_unrelaxed_rank_001_alphafold2_ptm_model_2_seed_000.pdb
         # JSON: <id>_scores_rank_001_alphafold2_ptm_model_2_seed_000.json
         # Replace _unrelaxed_ or _relaxed_ with _scores_ to get JSON filename
+        ##### ERROR THREE DEFINITIONS
         json_file = pdb_file.replace('.pdb', '.json')
         json_file = json_file.replace('_unrelaxed_', '_scores_')
         json_file = json_file.replace('_relaxed_', '_scores_')

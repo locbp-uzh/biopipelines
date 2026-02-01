@@ -6,33 +6,42 @@ best structure/sequence/compound for use in iterative optimization cycles.
 """
 
 import os
-import pandas as pd
+import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class SelectBest(BaseConfig):
     """
     Tool for selecting the single best item from analysis results.
-    
+
     Takes analysis tables and applies selection criteria to return exactly
     one best structure/sequence/compound with its associated data.
     """
-    
+
     TOOL_NAME = "SelectBest"
-    
-    
+
+    # Lazy path descriptors
+    selected_csv = Path(lambda self: os.path.join(self.output_folder, "selected_best.csv"))
+    selected_structure = Path(lambda self: os.path.join(self.output_folder, f"{self.output_name}.pdb"))
+    selected_compound = Path(lambda self: os.path.join(self.output_folder, f"{self.output_name}_compound.sdf"))
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "select_best_config.json"))
+    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_select_best.py"))
+
     def __init__(self,
-                 pool: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]],
-                 tables: Union[List[Union[ToolOutput, StandardizedOutput, TableInfo, str]], List[str]],
+                 pool: Union[StandardizedOutput, List[StandardizedOutput]],
+                 tables: Union[List[Union[StandardizedOutput, TableInfo, str]], StandardizedOutput, TableInfo, str],
                  metric: str,
                  mode: str = "max",
                  weights: Optional[Dict[str, float]] = None,
@@ -42,9 +51,9 @@ class SelectBest(BaseConfig):
                  **kwargs):
         """
         Initialize SelectBest tool.
-        
+
         Args:
-            pool: Single or list of tool outputs to select structures from
+            pool: Single or list of StandardizedOutput to select structures from
             tables: Single or list of tables to evaluate for selection
             metric: Primary metric to optimize for selection
             mode: "max" or "min" the metric
@@ -53,7 +62,7 @@ class SelectBest(BaseConfig):
             composite_function: How to combine metrics ("weighted_sum", "product", "min", "max")
             name: Name for the output structure file (default: "best")
             **kwargs: Additional parameters
-            
+
         Examples:
             # Compare across multiple pools (e.g., engineered vs original)
             best = pipeline.add(SelectBest(
@@ -62,7 +71,7 @@ class SelectBest(BaseConfig):
                 metric="binding_affinity",
                 mode="max"
             ))
-            
+
             # Single pool selection
             best = pipeline.add(SelectBest(
                 pool=boltz,
@@ -70,7 +79,7 @@ class SelectBest(BaseConfig):
                 metric="pLDDT",
                 mode="max"
             ))
-            
+
             # Multi-objective with weights
             best = pipeline.add(SelectBest(
                 pool=combined_results,
@@ -85,92 +94,79 @@ class SelectBest(BaseConfig):
             self.pool_outputs = pool
         else:
             self.pool_outputs = [pool]
-        
+
         # Handle tables - always expect list, convert if single
         if isinstance(tables, list):
-            self.tables = tables
+            self.tables_input = tables
         else:
-            self.tables = [tables]
-        
-        # Set up dependencies
-        dependencies = []
-        for p in self.pool_outputs:
-            if hasattr(p, 'config'):
-                dependencies.append(p.config)
-        for ds in self.tables:
-            if hasattr(ds, 'config'):
-                dependencies.append(ds.config)
-            
+            self.tables_input = [tables]
+
         self.metric = metric
         self.mode = mode
         self.weights = weights or {}
         self.tie_breaker = tie_breaker
         self.composite_function = composite_function
         self.output_name = name
-        
+
         # Validate parameters
         self._validate_selection_params()
-        
+
         # Initialize base class
         super().__init__(**kwargs)
-        
-        # Set up dependencies (already handled above in each case)
-        for dep in dependencies:
-            self.dependencies.append(dep)
-    
+
     def _validate_selection_params(self):
         """Validate selection parameters."""
         if self.mode not in ["max", "min"]:
             raise ValueError("mode must be 'max' or 'min'")
-        
+
         if self.tie_breaker not in ["first", "random"] and not isinstance(self.tie_breaker, str):
             raise ValueError("tie_breaker must be 'first', 'random', or a metric name")
-        
+
         if self.composite_function not in ["weighted_sum", "product", "min", "max"]:
             raise ValueError("composite_function must be one of: weighted_sum, product, min, max")
-        
+
         if not self.metric:
             raise ValueError("metric cannot be empty")
-    
+
     def validate_params(self):
         """Validate SelectBest parameters."""
         # Validate pool outputs
         if not self.pool_outputs:
             raise ValueError("pool must be provided")
-        
+
         for i, pool_output in enumerate(self.pool_outputs):
-            if not isinstance(pool_output, (ToolOutput, StandardizedOutput)):
-                raise ValueError(f"pool[{i}] is {type(pool_output)}, must be a ToolOutput or StandardizedOutput object. Value: {pool_output}")
-        
+            if not isinstance(pool_output, StandardizedOutput):
+                raise ValueError(f"pool[{i}] is {type(pool_output)}, must be a StandardizedOutput object. Value: {pool_output}")
+
         # Validate tables
-        if not self.tables:
+        if not self.tables_input:
             raise ValueError("tables must be provided")
-        
-        if len(self.tables) != len(self.pool_outputs):
-            raise ValueError(f"Number of tables ({len(self.tables)}) must match number of pools ({len(self.pool_outputs)})")
-        
-        for i, table in enumerate(self.tables):
-            if not isinstance(table, (ToolOutput, StandardizedOutput, TableInfo, str)):
-                raise ValueError(f"table[{i}] is {type(table)}, must be a ToolOutput, StandardizedOutput, TableInfo, or str object. Value: {table}")
-    
+
+        if len(self.tables_input) != len(self.pool_outputs):
+            raise ValueError(f"Number of tables ({len(self.tables_input)}) must match number of pools ({len(self.pool_outputs)})")
+
+        for i, table in enumerate(self.tables_input):
+            if not isinstance(table, (StandardizedOutput, TableInfo, str)):
+                raise ValueError(f"table[{i}] is {type(table)}, must be a StandardizedOutput, TableInfo, or str object. Value: {table}")
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input table from previous tool."""
         self.folders = pipeline_folders
         self._configure_pool_mode()
-    
+
     def _configure_pool_mode(self):
         """Configure inputs for pool + tables selection."""
         # Extract pool folders and table paths
         self.pool_folders = []
         self.table_paths = []
-        
+
         for pool in self.pool_outputs:
             if hasattr(pool, 'output_folder'):
                 self.pool_folders.append(pool.output_folder)
             else:
                 raise ValueError(f"Pool {pool} must have output_folder")
-        
-        for table in self.tables:
+
+        for table in self.tables_input:
             # Handle different table input types - check TableInfo first
             if hasattr(table, 'path') and hasattr(table, 'name') and hasattr(table, 'columns'):
                 # TableInfo object - use path directly
@@ -179,7 +175,7 @@ class SelectBest(BaseConfig):
                 # String path - use directly
                 self.table_paths.append(table)
             elif hasattr(table, 'tables'):
-                # ToolOutput object - extract table path
+                # StandardizedOutput object - extract table path
                 ds_obj = table.tables
                 table_path = None
 
@@ -199,121 +195,116 @@ class SelectBest(BaseConfig):
                 self.table_paths.append(table_path)
             else:
                 raise ValueError(f"Unsupported table type: {type(table)}")
-    
+
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
-        
+
         config_lines.extend([
             f"POOLS: {len(self.pool_outputs)}",
-            f"DATASHEETS: {len(self.tables)}",
+            f"DATASHEETS: {len(self.tables_input)}",
             f"METRIC: {self.metric} ({self.mode})"
         ])
-        
+
         return config_lines
-    
+
     def generate_script(self, script_path: str) -> str:
         """Generate SelectBest execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
-        script_content = "#!/bin/bash\n"
-        script_content += "# SelectBest execution script\n"
-        script_content += self.generate_completion_check_header()
-        script_content += self.activate_environment()
-        script_content += self.generate_script_run_select_best()
-        script_content += self.generate_completion_check_footer()
-
-        return script_content
-
-    def generate_script_run_select_best(self) -> str:
-        """Generate the selection execution part of the script."""
-        # Output files
-        selected_csv = os.path.join(self.output_folder, "selected_best.csv")
-        selected_structure = os.path.join(self.output_folder, f"{self.output_name}.pdb")
-
         # Create config file for selection
-        config_file = os.path.join(self.output_folder, "select_best_config.json")
         config_data = {
             "selection_metric": self.metric,
             "selection_mode": self.mode,
             "weights": self.weights,
             "tie_breaker": self.tie_breaker,
             "composite_function": self.composite_function,
-            "output_csv": selected_csv,
-            "output_structure": selected_structure,
-            "output_sequences": os.path.join(self.output_folder, "sequences.csv"),
+            "output_csv": self.selected_csv,
+            "output_structure": self.selected_structure,
+            "output_sequences": self.sequences_csv,
             "pool_folders": self.pool_folders,
             "table_paths": self.table_paths
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""echo "Selecting best item from {len(self.table_paths)} tables"
-echo "Selection metric: {self.metric} ({self.mode})"
-echo "Output: {selected_structure}"
+        script_content = "#!/bin/bash\n"
+        script_content += "# SelectBest execution script\n"
+        script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
 
-# Run Python selection script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_select_best.py')}" \\
-  --config "{config_file}"
+        script_content += f"""echo "Selecting best item from {len(self.table_paths)} tables"
+echo "Selection metric: {self.metric} ({self.mode})"
+echo "Output: {self.selected_structure}"
+
+python "{self.helper_script}" \\
+  --config "{self.config_file}"
 
 if [ $? -eq 0 ]; then
     echo "Successfully selected best item"
-    echo "Selected structure: {selected_structure}"
-    echo "Selected data: {selected_csv}"
+    echo "Selected structure: {self.selected_structure}"
+    echo "Selected data: {self.selected_csv}"
 else
     echo "Error: Failed to select best item"
     exit 1
 fi
 
 """
-    
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after selection.
-        
-        Returns:
-            Dictionary with output file paths for selected item
-        """
-        selected_csv = os.path.join(self.output_folder, "selected_best.csv")
-        selected_structure = os.path.join(self.output_folder, f"{self.output_name}.pdb")
-        selected_compound = os.path.join(self.output_folder, f"{self.output_name}_compound.sdf")
-        selected_sequence = os.path.join(self.output_folder, "sequences.csv")
-        
+        script_content += self.generate_completion_check_footer()
+
+        return script_content
+
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after selection."""
         # Use output name as the selected ID
         selected_id = self.output_name
-        
+
         # Define tables that will be created
         tables = {
-            "selected": {
-                "path": selected_csv,
-                "columns": ["id", self.metric],  # Basic columns
-                "description": f"Best item selected using {self.metric}",
-                "count": 1
-            },
-            "sequences": {
-                "path": selected_sequence,
-                "columns": ["id", "sequence"],  # Standard sequence format
-                "description": "Selected best sequence",
-                "count": 1
-            }
+            "selected": TableInfo(
+                name="selected",
+                path=self.selected_csv,
+                columns=["id", self.metric],
+                description=f"Best item selected using {self.metric}",
+                count=1
+            ),
+            "sequences": TableInfo(
+                name="sequences",
+                path=self.sequences_csv,
+                columns=["id", "sequence"],
+                description="Selected best sequence",
+                count=1
+            )
         }
-        
-        # Only predict files we're certain will be created
-        # Structures are always created (extracted from pools)
-        # Compounds and sequences are only created if they exist in source pools
+
+        # Create DataStreams for output
+        structures = DataStream(
+            name="structures",
+            ids=[selected_id],
+            files=[self.selected_structure],
+            format="pdb"
+        )
+
+        sequences = DataStream(
+            name="sequences",
+            ids=[selected_id],
+            files=[self.sequences_csv],
+            map_table=self.sequences_csv,
+            format="csv"
+        )
+
+        # Compounds only created if available in source pools
+        compounds = DataStream.empty("compounds", "sdf")
+
         return {
-            "structures": [selected_structure],
-            "structure_ids": [selected_id],
-            "compounds": [],  # Only created if available in source pools
-            "compound_ids": [],
-            "sequences": [selected_sequence],  # Include sequences CSV  
-            "sequence_ids": [selected_id],
+            "structures": structures,
+            "sequences": sequences,
+            "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder
         }
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()

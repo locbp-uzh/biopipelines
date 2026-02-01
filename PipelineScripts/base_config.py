@@ -744,16 +744,8 @@ class TableContainer:
         """Get table path by name with legacy 'main' support."""
         if key in self._tables:
             return self._tables[key].path
-        
-        # Legacy support: if asking for "main" and it doesn't exist,
-        # try to find the most appropriate table
-        if key == "main":
-            # Try common table types in order of preference
-            for fallback_key in ['sequences', 'structures', 'compounds']:
-                if fallback_key in self._tables:
-                    return self._tables[fallback_key].path
-        
-        return ""
+
+        raise KeyError(f"No table named '{key}' in tables")
     
     def __getattr__(self, name: str) -> TableInfo:
         """Get TableInfo object by name via dot notation."""
@@ -780,19 +772,15 @@ class TableContainer:
         return self._tables.get(name)
     
     def __contains__(self, key: str) -> bool:
-        """Support 'in' operator: 'main' in tables"""
-        if key in self._tables:
-            return True
-        
-        # Legacy support for "main" - consider it present if any table exists
-        if key == "main":
-            return bool(self._tables)
-        
-        return False
+        """Support 'in' operator: 'table_name' in tables"""
+        return key in self._tables
     
     def get(self, key: str, default: str = "") -> str:
         """Get table path with default (like dict.get())."""
-        return self.__getitem__(key) or default
+        try:
+            return self.__getitem__(key)
+        except KeyError:
+            return default
     
     def __str__(self) -> str:
         if not self._tables:
@@ -1160,15 +1148,11 @@ class ToolOutput:
         """
         # If no cached outputs, delegate to config
         if not self._output_files and hasattr(self.config, 'get_output_files'):
-            try:
-                config_outputs = self.config.get_output_files()
-                if output_type is None:
-                    return config_outputs
-                return config_outputs.get(output_type, [])
-            except:
-                # Fallback if config method fails
-                pass
-        
+            config_outputs = self.config.get_output_files()
+            if output_type is None:
+                return config_outputs
+            return config_outputs.get(output_type, [])
+
         # Use cached outputs
         if output_type is None:
             return self._output_files
@@ -1205,14 +1189,12 @@ class ToolOutput:
         if hasattr(self.config, 'tables'):
             return self.config.tables
 
-        # Fallback: create TableContainer from get_output_files if available
-        try:
+        # Create TableContainer from get_output_files if available
+        if hasattr(self.config, 'get_output_files'):
             output_files = self.config.get_output_files()
             tables_dict = output_files.get('tables', {})
             if tables_dict:
                 return TableContainer(tables_dict)
-        except:
-            pass
 
         # Return empty container if nothing available
         return TableContainer({})

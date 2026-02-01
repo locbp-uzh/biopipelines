@@ -166,13 +166,10 @@ python "{self.concatenate_py}" --config "{self.config_file}"
     
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after concatenation."""
-        # Try to determine output columns from input tables
+        # Determine output columns from input tables
         expected_columns = ["id", "source_table"]
         if self.tables and hasattr(self.tables[0], 'columns'):
-            try:
-                expected_columns = list(self.tables[0].columns) + ["source_table"]
-            except:
-                expected_columns = ["id", "source_table"]
+            expected_columns = list(self.tables[0].columns) + ["source_table"]
 
         tables = {
             "concatenated": TableInfo(

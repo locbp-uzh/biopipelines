@@ -6,42 +6,44 @@ commonly used for ligand-protein binding site analysis and interaction validatio
 Outputs CSV with distance metrics for all structures.
 """
 
-import numpy as np
-from typing import Dict, List, Any, Optional, Union, Tuple
-
 import os
+import json
+from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class ResidueAtomDistance(BaseConfig):
     """
     Pipeline tool for analyzing structures to calculate distances between atoms and residues.
-    
+
     Takes structures as input and outputs CSV with distance metrics for all structures.
-    
-    Generates CSV with distance metrics for all input structures.
-    
+
     Commonly used for:
     - Ligand-protein binding site analysis
-    - Metal coordination analysis  
+    - Metal coordination analysis
     - Catalytic site geometry verification
     - Interaction distance measurements
     """
-    
-    # Tool identification
+
     TOOL_NAME = "ResidueAtomDistance"
-    
-    
+
+    # Lazy path descriptors
+    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "analysis.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "distance_config.json"))
+    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_residue_atom_distance.py"))
+
     def __init__(self,
-                 structures: Union[ToolOutput, StandardizedOutput],
+                 structures: Union[DataStream, StandardizedOutput],
                  atom: Union[str, List[str], None] = None,
                  residue: Union[str, List[str], None] = None,
                  method: str = "min",
@@ -51,12 +53,11 @@ class ResidueAtomDistance(BaseConfig):
         Initialize atom-residue distance analysis tool.
 
         Args:
-            structures: Input structures from previous tool (ToolOutput or StandardizedOutput)
+            structures: Input structures as DataStream or StandardizedOutput
             atom: Atom selection string, list of two selections, or None
             residue: Residue selection string, list of two selections, or None
             method: How to calculate distance ("min", "max", "mean", "closest")
             metric_name: Custom name for the distance column (default: "distance")
-            **kwargs: Additional parameters
 
         Selection Modes:
             1. Atom-Residue mode: atom=str, residue=str
@@ -65,45 +66,27 @@ class ResidueAtomDistance(BaseConfig):
 
         Selection Syntax:
             Atom selections:
-            - 'LIG.Cl' → ligand chlorine atoms
-            - 'HAL.Br' → halogen bromine atoms
-            - 'name CA' → all alpha carbon atoms
+            - 'LIG.Cl' -> ligand chlorine atoms
+            - 'HAL.Br' -> halogen bromine atoms
+            - 'name CA' -> all alpha carbon atoms
 
             Residue selections:
-            - 'D in IGDWG' → aspartic acid in sequence context
-            - '145' → residue number 145
-            - '145-150' → residue range 145 to 150
-            - '145+147+150' → specific residues 145, 147, and 150
-            - '-1' → last residue (C-terminus)
-            - '-2' → second-to-last residue
-            - '1' → first residue (N-terminus)
-
-        Examples:
-            # Atom-Residue: ligand chlorine distance to specific aspartic acids
-            distance_analysis = ResidueAtomDistance(
-                structures=boltz_results,
-                atom='LIG.Cl',
-                residue='D in IGDWG',
-                metric_name='chlorine_distance'
-            )
-
-            # Residue-Residue: distance between N and C termini
-            termini_distance = ResidueAtomDistance(
-                structures=af_results,
-                atom=None,
-                residue=['1', '-1'],  # First and last residue
-                metric_name='termini_distance'
-            )
-
-            # Atom-Atom: distance between two ligand atoms
-            ligand_internal = ResidueAtomDistance(
-                structures=structure_tool,
-                atom=['LIG.Cl', 'LIG.Br'],
-                residue=None,
-                metric_name='cl_br_distance'
-            )
+            - 'D in IGDWG' -> aspartic acid in sequence context
+            - '145' -> residue number 145
+            - '145-150' -> residue range 145 to 150
+            - '145+147+150' -> specific residues 145, 147, and 150
+            - '-1' -> last residue (C-terminus)
+            - '-2' -> second-to-last residue
+            - '1' -> first residue (N-terminus)
         """
-        self.distance_input = structures
+        # Resolve input to DataStream
+        if isinstance(structures, StandardizedOutput):
+            self.structures_stream: DataStream = structures.structures
+        elif isinstance(structures, DataStream):
+            self.structures_stream = structures
+        else:
+            raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
+
         self.atom_selection = atom
         self.residue_selection = residue
         self.distance_metric = method
@@ -129,58 +112,27 @@ class ResidueAtomDistance(BaseConfig):
         if method not in ["min", "max", "mean", "closest"]:
             raise ValueError(f"Invalid method: {method}. Options: min, max, mean, closest")
 
-        # Initialize base class
         super().__init__(**kwargs)
 
-        # Set up dependency
-        if hasattr(structures, 'config'):
-            self.dependencies.append(structures.config)
-
-
     def get_metric_name(self) -> str:
-        """Get the default metric name.""" 
+        """Get the default metric name."""
         if self.custom_metric_name:
             return self.custom_metric_name
         return "distance"
-    
-    def get_analysis_csv_path(self) -> str:
-        """Get the path for the analysis CSV file - defined once, used everywhere."""
-        return os.path.join(self.output_folder, "analysis.csv")
-    
+
     def validate_params(self):
         """Validate ResidueAtomDistance parameters."""
-        if not isinstance(self.distance_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("Input must be a ToolOutput or StandardizedOutput object")
+        if not self.structures_stream or len(self.structures_stream) == 0:
+            raise ValueError("structures parameter is required and must not be empty")
 
         # At least one of atom or residue must be specified
         if self.atom_selection is None and self.residue_selection is None:
             raise ValueError("At least one of atom or residue must be specified")
-    
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input structures from previous tool."""
+        """Configure input structures."""
         self.folders = pipeline_folders
-        
-        # Predict input structures paths
-        self.input_structures = []
-        if hasattr(self.distance_input, 'structures'):
-            if isinstance(self.distance_input.structures, list):
-                self.input_structures = self.distance_input.structures
-            else:
-                self.input_structures = [self.distance_input.structures]
-        elif hasattr(self.distance_input, 'output_folder'):
-            # Predict structure files in output folder (don't check existence)
-            output_folder = self.distance_input.output_folder
-            # Predict common structure file patterns that tools would generate
-            predicted_structures = [
-                os.path.join(output_folder, "predicted_structures.pdb"),
-                os.path.join(output_folder, "structures.pdb"),
-                os.path.join(output_folder, "output.pdb")
-            ]
-            self.input_structures = predicted_structures
-        
-        if not self.input_structures:
-            raise ValueError(f"Could not predict input structure paths from: {self.distance_input}")
-    
+
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
@@ -208,90 +160,76 @@ class ResidueAtomDistance(BaseConfig):
         ])
 
         return config_lines
-    
+
     def generate_script(self, script_path: str) -> str:
         """Generate ResidueAtomDistance execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# ResidueAtomDistance execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += self.generate_script_run_distance_analysis()
+        script_content += self._generate_script_run_distance_analysis()
         script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def generate_script_run_distance_analysis(self) -> str:
+    def _generate_script_run_distance_analysis(self) -> str:
         """Generate the distance analysis execution part of the script."""
-        # Output CSV path - defined once in get_analysis_csv_path()
-        analysis_csv = self.get_analysis_csv_path()
-
-        # Create config file for distance calculation
-        config_file = os.path.join(self.output_folder, "distance_config.json")
+        # Create config data
         config_data = {
-            "input_structures": self.input_structures,
+            "input_structures": self.structures_stream.files,
+            "structure_ids": self.structures_stream.ids,
             "atom_selection": self.atom_selection,
             "residue_selection": self.residue_selection,
             "distance_metric": self.distance_metric,
             "metric_name": self.get_metric_name(),
-            "output_csv": analysis_csv
+            "output_csv": self.analysis_csv
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        # Write config file at pipeline time
+        os.makedirs(self.output_folder, exist_ok=True)
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Running distance analysis"
 echo "Atom selection: {self.atom_selection}"
 echo "Residue selection: {self.residue_selection}"
 echo "Distance metric: {self.distance_metric}"
-echo "Output: {analysis_csv}"
+echo "Output: {self.analysis_csv}"
 
 # Run Python analysis script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_residue_atom_distance.py')}" \\
-  --config "{config_file}"
+python "{self.helper_script}" \\
+  --config "{self.config_file}"
 
 if [ $? -eq 0 ]; then
     echo "Distance analysis completed successfully"
-    echo "Results written to: {analysis_csv}"
+    echo "Results written to: {self.analysis_csv}"
 else
     echo "Error: Distance analysis failed"
     exit 1
 fi
 
 """
-    
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after distance analysis.
-        
-        Returns:
-            Dictionary with output file paths
-        """
-        analysis_csv = self.get_analysis_csv_path()
-        
+
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after distance analysis."""
         tables = {
             "analysis": TableInfo(
-                name="analysis", 
-                path=analysis_csv,
+                name="analysis",
+                path=self.analysis_csv,
                 columns=["id", "source_structure", self.get_metric_name()],
                 description=f"Distance analysis: {self.atom_selection} to {self.residue_selection}",
-                count=len(self.input_structures) if hasattr(self, 'input_structures') else 0
+                count=len(self.structures_stream)
             )
         }
-        
+
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
@@ -305,7 +243,7 @@ fi
             mode = "atom-residue"
 
         base_dict.update({
-            "tool_params": {
+            "residue_atom_distance_params": {
                 "mode": mode,
                 "atom_selection": self.atom_selection,
                 "residue_selection": self.residue_selection,

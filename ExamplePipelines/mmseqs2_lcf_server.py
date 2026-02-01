@@ -15,7 +15,7 @@ with Pipeline(project="MMseqs2LCFServer",
               job="GPU",
               description="Runs MMseqs2 LCF server with GPU acceleration using colabfold_search for UniRef30 + ColabFoldDB"):
 
-    Resources(gpu="80GB",
+    Resources(gpu="80GB|96GB",
               time="4:00:00",
               memory="32GB",
               cpus=16)

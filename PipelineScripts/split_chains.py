@@ -8,14 +8,18 @@ split positions.
 
 import os
 import json
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class SplitChains(BaseConfig):
@@ -27,10 +31,14 @@ class SplitChains(BaseConfig):
     """
 
     TOOL_NAME = "SplitChains"
-    
+
+    # Lazy path descriptors
+    output_sequences_csv = Path(lambda self: os.path.join(self.output_folder, "split_sequences.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "split_config.json"))
+    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_split_chains.py"))
 
     def __init__(self,
-                 sequences: Union[ToolOutput, StandardizedOutput],
+                 sequences: Union[DataStream, StandardizedOutput],
                  split_positions: List[int],
                  chain_names: Optional[List[str]] = None,
                  **kwargs):
@@ -38,7 +46,7 @@ class SplitChains(BaseConfig):
         Initialize SplitChains configuration.
 
         Args:
-            sequences: Input sequences (ToolOutput or StandardizedOutput)
+            sequences: Input sequences as DataStream or StandardizedOutput
             split_positions: List of positions where to split sequences.
                            For example, [197] splits at position 197 creating 2 chains:
                            seq[0:197] and seq[197:]
@@ -46,34 +54,25 @@ class SplitChains(BaseConfig):
                         If not provided, uses numeric suffixes (_1, _2, etc.)
             **kwargs: Additional parameters
         """
-        # Store parameters before calling super().__init__() which calls validate_params()
-        self.sequences_input = sequences
+        # Resolve input to DataStream
+        if isinstance(sequences, StandardizedOutput):
+            self.sequences_stream: DataStream = sequences.sequences
+        elif isinstance(sequences, DataStream):
+            self.sequences_stream = sequences
+        else:
+            raise ValueError(f"sequences must be DataStream or StandardizedOutput, got {type(sequences)}")
+
         self.split_positions = split_positions
         self.chain_names = chain_names
 
-        # Now call parent constructor (which will call validate_params)
+        # Initialize base class
         super().__init__(**kwargs)
-
-        # Handle StandardizedOutput or ToolOutput
-        if isinstance(sequences, StandardizedOutput):
-            if hasattr(sequences, 'sequences') and sequences.sequences:
-                self.input_sequences_file = sequences.sequences[0]
-                if hasattr(sequences, 'tool_config'):
-                    self.dependencies.append(sequences.tool_config)
-            else:
-                raise ValueError("No sequences found in StandardizedOutput")
-        elif isinstance(sequences, ToolOutput):
-            seq_files = sequences.get_output_files("sequences")
-            if seq_files:
-                self.input_sequences_file = seq_files[0]
-                self.dependencies.append(sequences.config)
-            else:
-                raise ValueError("No sequences found in ToolOutput")
-        else:
-            raise TypeError("sequences must be StandardizedOutput or ToolOutput")
 
     def validate_params(self):
         """Validate SplitChains parameters."""
+        if not self.sequences_stream or len(self.sequences_stream) == 0:
+            raise ValueError("sequences parameter is required and must not be empty")
+
         # Validate split positions
         if not self.split_positions:
             raise ValueError("split_positions must be a non-empty list")
@@ -91,16 +90,20 @@ class SplitChains(BaseConfig):
             raise ValueError(f"Number of chain names ({len(self.chain_names)}) must match number of chains ({num_chains})")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure inputs - called by pipeline during setup."""
+        """Configure inputs."""
         self.folders = pipeline_folders
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
+
+        # Get input file for display
+        input_file = self.sequences_stream.map_table or (self.sequences_stream.files[0] if self.sequences_stream.files else "N/A")
+
         config_lines.extend([
+            f"INPUT SEQUENCES: {len(self.sequences_stream)} sequences",
             f"SPLIT POSITIONS: {self.split_positions}",
-            f"NUMBER OF CHAINS: {len(self.split_positions) + 1}",
-            f"INPUT SEQUENCES: {os.path.basename(self.input_sequences_file)}"
+            f"NUMBER OF CHAINS: {len(self.split_positions) + 1}"
         ])
         if self.chain_names:
             config_lines.append(f"CHAIN NAMES: {', '.join(self.chain_names)}")
@@ -110,84 +113,91 @@ class SplitChains(BaseConfig):
         """Generate the execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
-        script_content = "#!/bin/bash\n"
-        script_content += "# SplitChains execution script\n"
-        script_content += self.generate_completion_check_header()
-        script_content += self.activate_environment()
-        script_content += self.generate_script_run_split()
-        script_content += self.generate_completion_check_footer()
-
-        return script_content
-
-    def generate_script_run_split(self) -> str:
-        """Generate the SplitChains execution part of the script."""
-        output_sequences_file = os.path.join(self.output_folder, "split_sequences.csv")
+        # Get input sequences file
+        input_file = self.sequences_stream.map_table or (self.sequences_stream.files[0] if self.sequences_stream.files else None)
+        if not input_file:
+            raise ValueError("No input sequences file available")
 
         # Create config file for the split operation
-        config_file = os.path.join(self.output_folder, "split_config.json")
         config_data = {
-            "input_csv": self.input_sequences_file,
-            "output_csv": output_sequences_file,
+            "input_csv": input_file,
+            "output_csv": self.output_sequences_csv,
             "split_positions": self.split_positions,
             "chain_names": self.chain_names
         }
 
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""echo "Splitting sequences into multiple chains"
-echo "Input: {self.input_sequences_file}"
-echo "Split positions: {self.split_positions}"
-echo "Output: {output_sequences_file}"
+        script_content = "#!/bin/bash\n"
+        script_content += "# SplitChains execution script\n"
+        script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
 
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_split_chains.py')}" \\
-  --config "{config_file}"
+        script_content += f"""echo "Splitting sequences into multiple chains"
+echo "Input: {input_file}"
+echo "Split positions: {self.split_positions}"
+echo "Output: {self.output_sequences_csv}"
+
+python "{self.helper_script}" \\
+  --config "{self.config_file}"
 
 if [ $? -eq 0 ]; then
-    echo "Results written to: {output_sequences_file}"
+    echo "Results written to: {self.output_sequences_csv}"
 else
     echo "Error: Splitting failed"
     exit 1
 fi
 
 """
+        script_content += self.generate_completion_check_footer()
 
-    def get_output_files(self) -> Dict[str, List[str]]:
+        return script_content
+
+    def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files."""
-        output_sequences_file = os.path.join(self.output_folder, "split_sequences.csv")
-
         # Build columns list
         columns = ['id', 'sequence', 'source_id', 'complex_id', 'chain_index', 'chain_name', 'chain_length']
 
         tables = {
             "sequences": TableInfo(
                 name="sequences",
-                path=output_sequences_file,
+                path=self.output_sequences_csv,
                 columns=columns,
                 description="Split chain sequences with source tracking",
                 count="variable"
             )
         }
 
+        # Create sequences DataStream (IDs will be populated at runtime)
+        sequences = DataStream(
+            name="sequences",
+            ids=[],  # Will be populated at runtime
+            files=[self.output_sequences_csv],
+            map_table=self.output_sequences_csv,
+            format="csv"
+        )
+
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [output_sequences_file],
-            "sequence_ids": [],  # Will be populated at runtime
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": sequences,
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }
 
-    def to_dict(self) -> Dict[str, any]:
+    def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
+
+        # Get input file for serialization
+        input_file = self.sequences_stream.map_table or (self.sequences_stream.files[0] if self.sequences_stream.files else None)
+
         base_dict.update({
             "tool_params": {
                 "split_positions": self.split_positions,
                 "chain_names": self.chain_names,
-                "input_sequences_file": self.input_sequences_file
+                "input_sequences_file": input_file
             }
         })
         return base_dict

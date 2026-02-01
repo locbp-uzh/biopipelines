@@ -6,16 +6,18 @@ various class-based strategies for comprehensive mutagenesis studies.
 """
 
 import os
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class SDM(BaseConfig):
@@ -27,9 +29,8 @@ class SDM(BaseConfig):
     amino acid class substitutions.
     """
 
-    # Tool identification
     TOOL_NAME = "SDM"
-    
+
     AMINO_ACID_CLASSES = {
         "saturation": "ACDEFGHIKLMNPQRSTVWY",  # All 20 amino acids
         "hydrophobic": "AFILMVWY",
@@ -43,8 +44,13 @@ class SDM(BaseConfig):
         "negative": "DE"
     }
 
+    # Lazy path descriptors
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    missing_sequences_csv = Path(lambda self: os.path.join(self.output_folder, "missing_sequences.csv"))
+    sdm_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_site_directed_mutagenesis.py"))
+
     def __init__(self,
-                 original: Union[str, ToolOutput, StandardizedOutput],
+                 original: Union[str, DataStream, StandardizedOutput],
                  position: int,
                  mode: str = "saturation",
                  include_original: bool = False,
@@ -55,8 +61,8 @@ class SDM(BaseConfig):
         Initialize Site-Directed Mutagenesis tool.
 
         Args:
-            original: Input structure/sequence - can be:
-                - ToolOutput or StandardizedOutput (with sequence_id)
+            original: Input sequence - can be:
+                - DataStream or StandardizedOutput containing sequences
                 - Direct protein sequence string
             position: Target position for mutagenesis (1-indexed)
             mode: Mutagenesis strategy - one of:
@@ -88,39 +94,37 @@ class SDM(BaseConfig):
                                   mode="charged", exclude="H"))
         """
         # Store SDM-specific parameters
-        self.original = original
         self.position = position
         self.mode = mode
         self.include_original = include_original
-        self.exclude = exclude.upper()  # Ensure uppercase for consistency
+        self.exclude = exclude.upper()
         self.prefix = prefix
 
         # Handle different input types
-        self.input_is_tool_output = False
         self.input_sequence = None
         self.input_sequence_id = None
+        self.sequences_stream = None
 
-        if isinstance(original, (ToolOutput, StandardizedOutput)):
-            self.input_is_tool_output = True
-            if isinstance(original, ToolOutput):
-                # Add dependency for ToolOutput
-                self.dependencies = [original.config]
-            # Sequence and ID will be extracted in configure_inputs
+        if isinstance(original, StandardizedOutput):
+            if original.sequences and len(original.sequences) > 0:
+                self.sequences_stream = original.sequences
+                self.input_sequence_id = original.sequences.ids[0] if original.sequences.ids else "sequence"
+            else:
+                raise ValueError("StandardizedOutput has no sequences")
+        elif isinstance(original, DataStream):
+            if len(original) == 0:
+                raise ValueError("DataStream is empty")
+            self.sequences_stream = original
+            self.input_sequence_id = original.ids[0] if original.ids else "sequence"
         elif isinstance(original, str):
             # Direct sequence string
             self.input_sequence = original.upper()
             self.input_sequence_id = prefix if prefix else "sequence"
         else:
-            raise ValueError(f"Invalid original input type: {type(original)}. "
-                           "Must be ToolOutput, StandardizedOutput, or string sequence.")
+            raise ValueError(f"original must be DataStream, StandardizedOutput, or string, got {type(original)}")
 
         # Initialize base class
         super().__init__(**kwargs)
-
-        # Initialize file paths
-        self.sequences_csv = None
-        self.sdm_helper_py = None
-
 
     def validate_params(self):
         """Validate SDM-specific parameters."""
@@ -147,55 +151,11 @@ class SDM(BaseConfig):
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files and dependencies."""
         self.folders = pipeline_folders
-        self._setup_file_paths()
-
-        # Extract sequence information from tool outputs
-        if self.input_is_tool_output:
-            if isinstance(self.original, StandardizedOutput):
-                # StandardizedOutput case
-                if hasattr(self.original, 'sequences') and self.original.sequences:
-                    # We'll read the sequence from the file at runtime
-                    self.input_sources = {"sequences": self.original.sequences[0]}
-                    if hasattr(self.original, 'sequence_ids') and self.original.sequence_ids:
-                        self.input_sequence_id = self.original.sequence_ids[0]
-                    else:
-                        self.input_sequence_id = "sequence"
-                else:
-                    raise ValueError("No sequences found in StandardizedOutput")
-            else:  # ToolOutput
-                # ToolOutput case
-                sequences = self.original.get_output_files("sequences")
-                if sequences:
-                    self.input_sources = {"sequences": sequences[0]}
-                    # Try to get sequence IDs
-                    sequence_ids = self.original.get_output_files("sequence_ids")
-                    if sequence_ids:
-                        self.input_sequence_id = sequence_ids[0] if isinstance(sequence_ids[0], str) else "sequence"
-                    else:
-                        self.input_sequence_id = "sequence"
-                else:
-                    raise ValueError("No sequences found in ToolOutput")
-        else:
-            # Direct sequence - no additional configuration needed
-            self.input_sources = {}
-
-    def _setup_file_paths(self):
-        """Set up all file paths after output_folder is known."""
-        # Output files
-        self.sequences_csv = os.path.join(self.output_folder, "sequences.csv")
-        self.missing_sequences_csv = os.path.join(self.output_folder, "missing_sequences.csv")
-
-        # Helper script paths
-        if hasattr(self, 'folders') and self.folders:
-            self.sdm_helper_py = os.path.join(self.folders["HelpScripts"], "pipe_site_directed_mutagenesis.py")
-        else:
-            self.sdm_helper_py = None
 
     def generate_script(self, script_path: str) -> str:
         """Generate SDM execution script."""
         script_content = "#!/bin/bash\n"
         script_content += "# Site-Directed Mutagenesis execution script\n"
-        script_content += "# Generated by BioPipelines pipeline system\n\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
 
@@ -206,18 +166,18 @@ class SDM(BaseConfig):
             sequence_id_param = f'"{self.input_sequence_id}"'
             sequence_source = "direct"
         else:
-            # Sequence from file
-            sequence_param = f'"{list(self.input_sources.values())[0]}"'
+            # Sequence from DataStream file
+            sequence_param = f'"{self.sequences_stream.files[0]}"'
             sequence_id_param = f'"{self.input_sequence_id}"'
             sequence_source = "file"
 
-        script_content += self.generate_script_run_sdm(sequence_source, sequence_param, sequence_id_param)
-        script_content += self.generate_script_missing_sequences()
+        script_content += self._generate_script_run_sdm(sequence_source, sequence_param, sequence_id_param)
+        script_content += self._generate_script_missing_sequences()
         script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def generate_script_run_sdm(self, sequence_source: str, sequence_param: str, sequence_id_param: str) -> str:
+    def _generate_script_run_sdm(self, sequence_source: str, sequence_param: str, sequence_id_param: str) -> str:
         """Generate the SDM execution part of the script."""
         return f"""echo "Running Site-Directed Mutagenesis"
 echo "Position: {self.position}"
@@ -241,7 +201,7 @@ echo "Generated sequences saved to: {self.sequences_csv}"
 
 """
 
-    def generate_script_missing_sequences(self) -> str:
+    def _generate_script_missing_sequences(self) -> str:
         """Generate the missing sequences creation part of the script."""
         return f"""# Generate missing sequences CSV if original is excluded
 if [ "{str(self.include_original).lower()}" = "false" ]; then
@@ -297,11 +257,10 @@ fi
         num_mutants = len(amino_acids)
 
         # Generate sequence IDs
+        base_id = self.input_sequence_id
         if self.input_sequence:
-            base_id = self.input_sequence_id
             original_aa = self.input_sequence[self.position - 1]
         else:
-            base_id = self.input_sequence_id
             original_aa = "X"  # Will be determined at runtime
 
         sequence_ids = []
@@ -330,13 +289,19 @@ fi
                 count=1
             )
 
+        # Create sequences DataStream
+        sequences = DataStream(
+            name="sequences",
+            ids=sequence_ids,
+            files=[self.sequences_csv],
+            map_table=self.sequences_csv,
+            format="csv"
+        )
+
         return {
-            "sequences": [self.sequences_csv],
-            "sequence_ids": sequence_ids,
-            "structures": [],  # SDM doesn't produce structures
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": sequences,
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }
@@ -346,15 +311,15 @@ fi
         config_lines = super().get_config_display()
 
         if self.input_sequence:
-            config_lines.append(f"Input: Direct sequence ({len(self.input_sequence)} aa)")
+            config_lines.append(f"INPUT: Direct sequence ({len(self.input_sequence)} aa)")
         else:
-            config_lines.append(f"Input: {type(self.original).__name__}")
+            config_lines.append(f"INPUT: {len(self.sequences_stream)} sequences from DataStream")
 
         config_lines.extend([
-            f"Position: {self.position}",
-            f"Mode: {self.mode}",
-            f"Include original: {self.include_original}",
-            f"Exclude: {self.exclude if self.exclude else 'None'}"
+            f"POSITION: {self.position}",
+            f"MODE: {self.mode}",
+            f"INCLUDE ORIGINAL: {self.include_original}",
+            f"EXCLUDE: {self.exclude if self.exclude else 'None'}"
         ])
 
         return config_lines

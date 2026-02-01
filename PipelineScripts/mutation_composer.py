@@ -9,13 +9,15 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class MutationComposer(BaseConfig):
@@ -34,11 +36,16 @@ class MutationComposer(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationComposer"
-    
-    
+
+    # Lazy path descriptors
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    sequences_fasta = Path(lambda self: os.path.join(self.output_folder, "sequences.fasta"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "mutation_composer_config.json"))
+    composer_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutation_composer.py"))
+
     def __init__(self,
-                 frequencies: Union[List[Union[ToolOutput, StandardizedOutput, TableInfo, str]],
-                                  Union[ToolOutput, StandardizedOutput, TableInfo, str]],
+                 frequencies: Union[List[Union[StandardizedOutput, TableInfo, str]],
+                                  Union[StandardizedOutput, TableInfo, str]],
                  num_sequences: int = 10,
                  mode: str = "single_point",
                  min_frequency: float = 0.01,
@@ -53,7 +60,7 @@ class MutationComposer(BaseConfig):
 
         Args:
             frequencies: Input table(s) with mutation frequencies. Can be:
-                - Single table: ToolOutput, StandardizedOutput, TableInfo, or str
+                - Single table: StandardizedOutput, TableInfo, or str
                 - Multiple tables: List of the above types
             num_sequences: Number of sequences to generate
             mode: Generation strategy:
@@ -75,20 +82,20 @@ class MutationComposer(BaseConfig):
 
         Examples:
             # Generate single-point mutations from single table
-            composer = pipeline.add(MutationComposer(
+            composer = MutationComposer(
                 frequencies=profiler.tables.absolute_frequencies,
                 num_sequences=20,
                 mode="single_point"
-            ))
+            )
 
             # Generate sequences with one mutation from each enantiomer
-            composer = pipeline.add(MutationComposer(
+            composer = MutationComposer(
                 frequencies=[profiler_R.tables.absolute_frequencies,
                            profiler_S.tables.absolute_frequencies],
                 num_sequences=50,
                 mode="single_point",
                 combination_strategy="stack"
-            ))
+            )
         """
         # Normalize frequencies to list for consistent handling
         if isinstance(frequencies, list):
@@ -104,38 +111,32 @@ class MutationComposer(BaseConfig):
         self.random_seed = random_seed
         self.prefix = prefix
         self.hotspot_count = hotspot_count
-        
-        # Validate mode
-        valid_modes = ["single_point", "weighted_random", "hotspot_focused", "top_mutations"]
-        if mode not in valid_modes:
-            raise ValueError(f"Invalid mode: {mode}. Valid options: {', '.join(valid_modes)}")
 
-        # Validate combination strategy
-        valid_strategies = ["average", "maximum", "stack", "round_robin"]
-        if combination_strategy not in valid_strategies:
-            raise ValueError(f"Invalid combination_strategy: {combination_strategy}. Valid options: {', '.join(valid_strategies)}")
-        
-        # Initialize base class
         super().__init__(**kwargs)
-
-        # Set up dependencies if inputs are from tools
-        for mutation_input in self.mutation_inputs:
-            if hasattr(mutation_input, 'config'):
-                self.dependencies.append(mutation_input.config)
 
     def validate_params(self):
         """Validate MutationComposer parameters."""
+        # Validate mode
+        valid_modes = ["single_point", "weighted_random", "hotspot_focused", "top_mutations"]
+        if self.mode not in valid_modes:
+            raise ValueError(f"Invalid mode: {self.mode}. Valid options: {', '.join(valid_modes)}")
+
+        # Validate combination strategy
+        valid_strategies = ["average", "maximum", "stack", "round_robin"]
+        if self.combination_strategy not in valid_strategies:
+            raise ValueError(f"Invalid combination_strategy: {self.combination_strategy}. Valid options: {', '.join(valid_strategies)}")
+
         # Validate each mutation input
         for i, mutation_input in enumerate(self.mutation_inputs):
-            if not isinstance(mutation_input, (ToolOutput, StandardizedOutput, TableInfo, str)):
-                raise ValueError(f"frequencies[{i}] must be a ToolOutput, StandardizedOutput, TableInfo, or str object")
-        
+            if not isinstance(mutation_input, (StandardizedOutput, TableInfo, str)):
+                raise ValueError(f"frequencies[{i}] must be a StandardizedOutput, TableInfo, or str")
+
         if self.num_sequences <= 0:
             raise ValueError("num_sequences must be positive")
-        
+
         if self.min_frequency < 0 or self.min_frequency > 1:
             raise ValueError("min_frequency must be between 0 and 1")
-        
+
         if self.max_mutations is not None and self.max_mutations <= 0:
             raise ValueError("max_mutations must be positive or None")
     
@@ -147,31 +148,19 @@ class MutationComposer(BaseConfig):
         self.frequency_table_paths = []
 
         for i, mutation_input in enumerate(self.mutation_inputs):
-            if hasattr(mutation_input, 'path'):
-                # TableInfo object
+            if isinstance(mutation_input, TableInfo):
                 frequency_path = mutation_input.path
             elif isinstance(mutation_input, str):
-                # Direct file path
                 frequency_path = mutation_input
-            elif hasattr(mutation_input, 'tables'):
-                # ToolOutput - look for absolute_frequencies or similar
+            elif isinstance(mutation_input, StandardizedOutput):
+                # StandardizedOutput - look for absolute_frequencies or similar
                 tables = mutation_input.tables
-
                 if hasattr(tables, 'absolute_frequencies'):
                     frequency_path = tables.absolute_frequencies.path
                 elif hasattr(tables, 'frequencies'):
                     frequency_path = tables.frequencies.path
-                elif hasattr(tables, '_tables'):
-                    # Look for frequency-related table
-                    frequency_path = None
-                    for name, info in tables._tables.items():
-                        if 'frequenc' in name.lower() or 'mutation' in name.lower():
-                            frequency_path = info.path
-                            break
-                    if frequency_path is None:
-                        raise ValueError(f"No frequency table found in frequencies[{i}]")
                 else:
-                    raise ValueError(f"Could not find frequency table in frequencies[{i}]")
+                    raise ValueError(f"No frequency table found in frequencies[{i}]")
             else:
                 raise ValueError(f"Unsupported input type for frequencies[{i}]: {type(mutation_input)}")
 
@@ -209,14 +198,9 @@ class MutationComposer(BaseConfig):
 
     def generate_script_run_composer(self) -> str:
         """Generate the mutation composer execution part of the script."""
-        output_folder = self.output_folder
-
-        # Output files
-        sequences_csv = os.path.join(output_folder, "sequences.csv")
-        sequences_fasta = os.path.join(output_folder, "sequences.fasta")
+        import json
 
         # Create config file for mutation composer
-        config_file = os.path.join(output_folder, "mutation_composer_config.json")
         config_data = {
             "frequency_tables": self.frequency_table_paths,
             "combination_strategy": self.combination_strategy,
@@ -227,12 +211,11 @@ class MutationComposer(BaseConfig):
             "random_seed": self.random_seed,
             "prefix": self.prefix,
             "hotspot_count": self.hotspot_count,
-            "sequences_output": sequences_csv,
-            "sequences_fasta": sequences_fasta
+            "sequences_output": self.sequences_csv,
+            "sequences_fasta": self.sequences_fasta
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Generating sequences from mutation profiles"
@@ -240,66 +223,49 @@ echo "Input frequencies: {len(self.frequency_table_paths)} table(s)"
 echo "Combination strategy: {self.combination_strategy}"
 echo "Mode: {self.mode}"
 echo "Sequences to generate: {self.num_sequences}"
-echo "Output: {sequences_csv}"
+echo "Output: {self.sequences_csv}"
 
-# Run Python mutation composer script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_mutation_composer.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully generated {self.num_sequences} sequences"
-    echo "Sequences CSV: {sequences_csv}"
-    echo "Sequences FASTA: {sequences_fasta}"
-else
-    echo "Error: Failed to generate sequences"
-    exit 1
-fi
+python "{self.composer_py}" --config "{self.config_file}"
 
 """
     
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after sequence generation.
-        
-        Returns:
-            Dictionary with output file paths and table information
-        """
-        sequences_csv = os.path.join(self.output_folder, "sequences.csv")
-        sequences_fasta = os.path.join(self.output_folder, "sequences.fasta")
-        
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after sequence generation."""
         # Generate sequence IDs based on prefix or mode
         if self.prefix:
-            # Use provided prefix
             sequence_ids = [f"{self.prefix}_{i:03d}" for i in range(1, self.num_sequences + 1)]
         else:
-            # Use default prefixes based on mode
-            if self.mode == "single_point":
-                sequence_ids = [f"mut_{i:03d}" for i in range(1, self.num_sequences + 1)]
-            elif self.mode == "weighted_random":
-                sequence_ids = [f"rand_{i:03d}" for i in range(1, self.num_sequences + 1)]
-            elif self.mode == "hotspot_focused":
-                sequence_ids = [f"hotspot_{i:03d}" for i in range(1, self.num_sequences + 1)]
-            else:  # top_mutations
-                sequence_ids = [f"top_{i:03d}" for i in range(1, self.num_sequences + 1)]
-        
-        # Define tables that will be created
+            mode_prefixes = {
+                "single_point": "mut",
+                "weighted_random": "rand",
+                "hotspot_focused": "hotspot",
+                "top_mutations": "top"
+            }
+            prefix = mode_prefixes.get(self.mode, "seq")
+            sequence_ids = [f"{prefix}_{i:03d}" for i in range(1, self.num_sequences + 1)]
+
+        sequences = DataStream(
+            name="sequences",
+            ids=sequence_ids,
+            files=[self.sequences_fasta],
+            map_table=self.sequences_csv,
+            format="fasta"
+        )
+
         tables = {
             "sequences": TableInfo(
                 name="sequences",
-                path=sequences_csv,
+                path=self.sequences_csv,
                 columns=["id", "sequence", "mutations", "mutation_positions"],
                 description=f"Generated sequences using {self.mode} mode",
                 count=self.num_sequences
             )
         }
-        
+
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [sequences_csv, sequences_fasta],
-            "sequence_ids": sequence_ids,
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": sequences,
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

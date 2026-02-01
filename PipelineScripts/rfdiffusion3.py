@@ -3,7 +3,7 @@ RFdiffusion3 configuration for all-atom protein design via foundry framework.
 
 Third-generation diffusion model for fast, all-atom protein design with support
 for hotspot-driven binder design, partial diffusion, and flexible structure control.
-Approximately 10× faster than RFdiffusion2 with higher success rates.
+Approximately 10x faster than RFdiffusion2 with higher success rates.
 """
 
 import os
@@ -12,12 +12,15 @@ import re
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream, create_map_table
 except ImportError:
-    # Fallback for direct execution
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream, create_map_table
 
 
 class RFdiffusion3(BaseConfig):
@@ -29,7 +32,7 @@ class RFdiffusion3(BaseConfig):
     hotspot-driven binder design, enzyme design, and symmetric assemblies.
 
     Requirements:
-        - Python ≥3.12
+        - Python >=3.12
         - foundry environment: pip install "rc-foundry[all]"
         - Checkpoints at: /home/$USER/data/rfdiffusion3/
         - Environment variable: FOUNDRY_CHECKPOINT_DIRS (optional override)
@@ -65,9 +68,9 @@ class RFdiffusion3(BaseConfig):
         contig (str): Contig specification for motif-based design (requires input PDB).
             Use '\\0' for chain breaks. Chain letters reference input structure.
             Example: "A50-100,80-100,\\0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
-        pdb (str or ToolOutput): Input PDB structure (required when using contig)
+        pdb (DataStream or StandardizedOutput): Input PDB structure (required when using contig)
         ligand_code (str): Ligand three-letter code identifying the molecule in input structure
-        ligand_structure (ToolOutput): Output from Ligand tool providing ligand PDB file.
+        ligand_structure (DataStream or StandardizedOutput): Output from Ligand tool providing ligand PDB file.
             When provided, this PDB becomes the input structure for design.
         num_designs (int): Number of designs to generate (default: 1)
         num_models (int): Number of models per design (default: 1).
@@ -92,11 +95,11 @@ class RFdiffusion3(BaseConfig):
         design_startnum (int): Starting number for design numbering (default: 1)
 
     Outputs:
-        structures: List of PDB files ({prefix}_d{D}_m{M}.pdb, ...)
+        structures: DataStream of PDB files ({prefix}_d{D}_m{M}.pdb, ...)
         tables.structures: CSV with columns: id, design, model, pdb, contig, length, time, status
 
     Notes:
-        - 10× faster than RFdiffusion/RFdiffusionAllAtom
+        - 10x faster than RFdiffusion/RFdiffusionAllAtom
         - All-atom model (4 backbone + 10 sidechain atoms)
         - Use 'length' for de novo design, 'contig' for motif-based design
         - 'contig' requires input PDB, even for numeric ranges
@@ -113,14 +116,31 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    
+
+    # Lazy path descriptors
+    json_file = Path(lambda self: os.path.join(self.output_folder, f"{self._get_prefix()}_rfd3_input.json"))
+    main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_results.csv"))
+    metrics_csv = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_metrics.csv"))
+    specifications_csv = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_specifications.csv"))
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_sequences.csv"))
+    raw_output_folder = Path(lambda self: os.path.join(self.output_folder, "raw_output"))
+    rfd_log_file = Path(lambda self: os.path.join(
+        os.path.dirname(self.output_folder), "Logs",
+        f"{os.path.basename(self.output_folder).split('_')[0] if '_' in os.path.basename(self.output_folder) else '000'}_RFdiffusion3.log"
+    ))
+    checkpoint_dir = Path(lambda self: os.path.join(
+        os.path.expanduser("~"), "data",
+        self.folders["repositories"]["RFdiffusion3"]
+    ))
+    table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_table.py"))
+    postprocess_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_postprocess.py"))
 
     def __init__(self,
                  contig: str = "",
                  length: Union[str, int] = None,
-                 pdb: Union[str, ToolOutput, StandardizedOutput] = "",
+                 pdb: Optional[Union[DataStream, StandardizedOutput]] = None,
                  ligand_code: str = "",
-                 ligand_structure: Union[ToolOutput, StandardizedOutput] = None,
+                 ligand_structure: Optional[Union[DataStream, StandardizedOutput]] = None,
                  num_designs: int = 1,
                  num_models: int = 1,
                  prefix: str = None,
@@ -139,7 +159,7 @@ class RFdiffusion3(BaseConfig):
         Args:
             contig: Contig specification (use '\\0' for chain breaks)
             length: Length constraint (str "min-max" or int)
-            pdb: Input PDB structure (optional)
+            pdb: Input PDB structure as DataStream or StandardizedOutput (optional)
             ligand_code: Ligand CCD code identifying the molecule
             ligand_structure: Output from Ligand tool providing ligand PDB file
             num_designs: Number of designs to generate
@@ -156,12 +176,37 @@ class RFdiffusion3(BaseConfig):
             design_startnum: Starting number for design IDs
             **kwargs: Additional parameters passed to BaseConfig
         """
+        # Resolve PDB input
+        self.input_pdb_file: Optional[str] = None
+
+        # Handle ligand structure (takes precedence over pdb)
+        if ligand_structure is not None:
+            if isinstance(ligand_structure, StandardizedOutput):
+                self.input_pdb_file = ligand_structure.structures.files[0]
+                # Auto-extract ligand code from compound_ids if not provided
+                if not ligand_code and hasattr(ligand_structure, 'compounds') and ligand_structure.compounds:
+                    ligand_code = ligand_structure.compounds.ids[0] if ligand_structure.compounds.ids else ""
+            elif isinstance(ligand_structure, DataStream):
+                self.input_pdb_file = ligand_structure.files[0]
+            else:
+                raise ValueError(f"ligand_structure must be DataStream or StandardizedOutput, got {type(ligand_structure)}")
+        # Handle PDB input (only if ligand_structure not provided)
+        elif pdb is not None:
+            if isinstance(pdb, StandardizedOutput):
+                self.input_pdb_file = pdb.structures.files[0]
+                if len(pdb.structures.files) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb.structures.files)}), using first: {pdb.structures.files[0]}")
+            elif isinstance(pdb, DataStream):
+                self.input_pdb_file = pdb.files[0]
+                if len(pdb.files) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb.files)}), using first: {pdb.files[0]}")
+            else:
+                raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
+
         # Store parameters
         self.contig = contig
         self.length = length
-        self.pdb = pdb
         self.ligand_code = ligand_code
-        self.ligand_structure = ligand_structure
         self.num_designs = num_designs
         self.num_models = num_models
         self.prefix = prefix
@@ -174,54 +219,12 @@ class RFdiffusion3(BaseConfig):
         self.json_config = json_config
         self.design_startnum = design_startnum
 
-        # Handle PDB input from tool outputs
-        self.pdb_is_tool_output = False
-        self.pdb_source_file = None
-
-        # Handle ligand structure from Ligand tool (takes precedence over pdb)
-        self.ligand_structure_is_tool_output = False
-        self.ligand_pdb_file = None
-
-        if isinstance(ligand_structure, StandardizedOutput):
-            self.ligand_structure_is_tool_output = True
-            if hasattr(ligand_structure, 'structures') and ligand_structure.structures:
-                self.ligand_pdb_file = ligand_structure.structures[0]
-            # Auto-extract ligand code from compound_ids if not provided
-            if not self.ligand_code and hasattr(ligand_structure, 'compound_ids') and ligand_structure.compound_ids:
-                self.ligand_code = ligand_structure.compound_ids[0]
-        elif isinstance(ligand_structure, ToolOutput):
-            self.ligand_structure_is_tool_output = True
-            structures = ligand_structure.get_output_files("structures")
-            if structures:
-                self.ligand_pdb_file = structures[0]
-                self.dependencies.append(ligand_structure.config)
-            # Auto-extract ligand code from compound_ids if not provided
-            compound_ids = ligand_structure.get_output_files("compound_ids")
-            if not self.ligand_code and compound_ids:
-                self.ligand_code = compound_ids[0]
-
-        if isinstance(pdb, StandardizedOutput):
-            # StandardizedOutput from upstream tool
-            self.pdb_is_tool_output = True
-            if hasattr(pdb, 'structures') and pdb.structures:
-                self.pdb_source_file = pdb.structures[0]
-                if len(pdb.structures) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.structures)}), using first: {pdb.structures[0]}")
-        elif isinstance(pdb, ToolOutput):
-            # Direct ToolOutput
-            self.pdb_is_tool_output = True
-            structures = pdb.get_output_files("structures")
-            if structures:
-                self.pdb_source_file = structures[0]
-                self.dependencies.append(pdb.config)
-                if len(structures) > 1:
-                    print(f"Warning: Multiple structures from {pdb.tool_type}, using first")
-
         # Initialize base class
         super().__init__(**kwargs)
 
-        # Initialize file paths (will be set properly in configure_inputs)
-        self._initialize_file_paths()
+    def _get_prefix(self) -> str:
+        """Get the prefix to use for output files."""
+        return self.prefix if self.prefix else self.pipeline_name
 
     def validate_params(self):
         """Validate RFdiffusion3-specific parameters."""
@@ -278,141 +281,18 @@ class RFdiffusion3(BaseConfig):
             if not isinstance(self.select_hbond_acceptor, dict):
                 raise ValueError("select_hbond_acceptor must be dict")
 
-    def _initialize_file_paths(self):
-        """Initialize file path placeholders."""
-        self.pipeline_name = None
-        self.json_file = None
-        self.main_table = None
-        self.metrics_csv = None
-        self.specifications_csv = None
-        self.sequences_csv = None
-        self.rfd_log_file = None
-        self.checkpoint_dir = None
-        self.table_py_file = None
-        self.postprocess_py_file = None
-        self.input_pdb_file = None
-        self.raw_output_folder = None
-
-    def _extract_pipeline_name(self) -> str:
-        """Extract pipeline/job name from output folder structure."""
-        # Structure: .../JobName_NNN/NNN_RFdiffusion3 -> JobName_NNN
-        folder_parts = self.output_folder.split(os.sep)
-        for i, part in enumerate(folder_parts):
-            if "_RFdiffusion3" in part or part.endswith("_RFdiffusion3"):
-                if i == 0:
-                    raise ValueError(f"Invalid output folder structure: {self.output_folder}")
-                return folder_parts[i-1]
-
-        raise ValueError(f"Could not extract pipeline name from: {self.output_folder}")
-
-    def _setup_file_paths(self):
-        """Set up all file paths after output_folder is known."""
-        # Extract pipeline name
-        self.pipeline_name = self._extract_pipeline_name()
-
-        # Use provided prefix or default to pipeline name
-        if self.prefix is None:
-            self.prefix = self.pipeline_name
-
-        # Core files
-        self.json_file = os.path.join(
-            self.output_folder,
-            f"{self.prefix}_rfd3_input.json"
-        )
-        self.main_table = os.path.join(
-            self.output_folder,
-            "rfdiffusion3_results.csv"
-        )
-        self.metrics_csv = os.path.join(
-            self.output_folder,
-            "rfdiffusion3_metrics.csv"
-        )
-        self.specifications_csv = os.path.join(
-            self.output_folder,
-            "rfdiffusion3_specifications.csv"
-        )
-        self.sequences_csv = os.path.join(
-            self.output_folder,
-            "rfdiffusion3_sequences.csv"
-        )
-
-        # Raw output folder for CIF.gz files
-        self.raw_output_folder = os.path.join(
-            self.output_folder,
-            "raw_output"
-        )
-
-        # Log file in parent Logs folder
-        parent_dir = os.path.dirname(self.output_folder)
-        folder_name = os.path.basename(self.output_folder)
-        index = folder_name.split('_')[0] if '_' in folder_name else "000"
-        self.rfd_log_file = os.path.join(parent_dir, "Logs", f"{index}_RFdiffusion3.log")
-
-        # Helper script and checkpoint paths
-        if hasattr(self, 'folders') and self.folders:
-            # Checkpoint directory
-            repositories_folder = self.folders.get("repositories", {})
-            if isinstance(repositories_folder, dict):
-                checkpoint_base = repositories_folder.get("RFdiffusion3", "rfdiffusion3")
-            else:
-                checkpoint_base = "rfdiffusion3"
-
-            self.checkpoint_dir = os.path.join(
-                os.path.expanduser("~"),
-                "data",
-                checkpoint_base
-            )
-
-            # HelpScript paths
-            self.table_py_file = os.path.join(
-                self.folders["HelpScripts"],
-                "pipe_rfdiffusion3_table.py"
-            )
-            self.postprocess_py_file = os.path.join(
-                self.folders["HelpScripts"],
-                "pipe_rfdiffusion3_postprocess.py"
-            )
-
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """
-        Configure input sources from pipeline context.
-
-        Args:
-            pipeline_folders: Dictionary of pipeline folder paths
-        """
+        """Configure input files."""
         self.folders = pipeline_folders
-        self._setup_file_paths()
-
-        # Handle ligand structure (takes precedence over pdb for small molecule binder design)
-        if self.ligand_structure_is_tool_output:
-            self.input_sources["ligand_pdb"] = self.ligand_pdb_file
-            # For SM binder design, ligand PDB is the main input
-            self.input_pdb_file = self.ligand_pdb_file
-
-        # Handle PDB input (only if ligand_structure not provided)
-        if self.pdb_is_tool_output and not self.ligand_structure_is_tool_output:
-            # File path already extracted in __init__
-            self.input_sources["pdb"] = self.pdb_source_file
-            self.input_pdb_file = self.pdb_source_file
-        elif self.pdb and not self.ligand_structure_is_tool_output:
-            # String filename - look in PDBs folder
-            pdb_filename = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
-            pdb_source = os.path.join(pipeline_folders["PDBs"], pdb_filename)
-
-            if os.path.exists(pdb_source):
-                self.input_sources["pdb"] = pdb_source
-                self.input_pdb_file = pdb_source
-            else:
-                raise FileNotFoundError(f"PDB file not found: {pdb_source}")
 
     def _format_hotspots(self) -> Dict[str, str]:
         """
         Convert hotspots to JSON format.
 
         Formats:
-            - Dict: {"A45": "CA,CB", "A67": ""} → return as-is
-            - String: "A45,A67" → {"A45": "", "A67": ""}
-            - String with atoms: "A45:CA,CB;A67:NE" → {"A45": "CA,CB", "A67": "NE"}
+            - Dict: {"A45": "CA,CB", "A67": ""} -> return as-is
+            - String: "A45,A67" -> {"A45": "", "A67": ""}
+            - String with atoms: "A45:CA,CB;A67:NE" -> {"A45": "CA,CB", "A67": "NE"}
 
         Returns:
             Dictionary mapping residue IDs to atom names
@@ -457,8 +337,7 @@ class RFdiffusion3(BaseConfig):
                 return json.loads(self.json_config)
 
         # Build config from parameters
-        # Use prefix (which defaults to pipeline_name if not set)
-        prefix = self.prefix if self.prefix else self.pipeline_name
+        prefix = self._get_prefix()
 
         # Create single design entry (n_batches and diffusion_batch_size control multiplicity)
         config = {}
@@ -508,14 +387,9 @@ class RFdiffusion3(BaseConfig):
         """Get RFdiffusion3 configuration display lines."""
         config_lines = super().get_config_display()
 
-        # Input information - ligand structure takes precedence
-        if self.ligand_structure_is_tool_output:
-            config_lines.append(f"LIGAND STRUCTURE: {os.path.basename(self.ligand_pdb_file)}")
-            config_lines.append("MODE: Small molecule binder design")
-        elif self.pdb_is_tool_output:
-            config_lines.append(f"INPUT PDB: {os.path.basename(self.pdb_source_file)}")
-        elif self.pdb:
-            config_lines.append(f"INPUT PDB: {self.pdb}")
+        # Input information
+        if self.input_pdb_file:
+            config_lines.append(f"INPUT PDB: {os.path.basename(self.input_pdb_file)}")
         else:
             config_lines.append("INPUT: De novo design")
 
@@ -588,6 +462,7 @@ EOF
 
     def generate_script_run_rfdiffusion3(self) -> str:
         """Generate RFdiffusion3 execution bash code."""
+        prefix = self._get_prefix()
         return f"""echo "Starting RFdiffusion3"
 echo "JSON config: {self.json_file}"
 echo "Output folder: {self.output_folder}"
@@ -612,7 +487,7 @@ fi
 rfd3 design \\
     out_dir="{self.raw_output_folder}" \\
     inputs="{self.json_file}" \\
-    global_prefix="{self.prefix}" \\
+    global_prefix="{prefix}" \\
     n_batches={self.num_designs} \\
     diffusion_batch_size={self.num_models}
 
@@ -624,13 +499,14 @@ rfd3 design \\
         Converts CIF.gz outputs to PDB format and extracts metrics from JSON files.
         Runs in biopipelines environment (has BioPython, pandas).
         """
+        prefix = self._get_prefix()
         return f"""echo "Post-processing RFdiffusion3 outputs"
 
 # Process CIF.gz files: decompress, convert to PDB, extract metrics and sequences
 mamba run -n biopipelines python "{self.postprocess_py_file}" \\
     --raw_folder "{self.raw_output_folder}" \\
     --output_folder "{self.output_folder}" \\
-    --prefix "{self.prefix}" \\
+    --prefix "{prefix}" \\
     --num_designs {self.num_designs} \\
     --num_models {self.num_models} \\
     --design_startnum {self.design_startnum} \\
@@ -642,11 +518,12 @@ mamba run -n biopipelines python "{self.postprocess_py_file}" \\
 
     def generate_script_create_table(self) -> str:
         """Generate table creation bash code."""
+        prefix = self._get_prefix()
         return f"""echo "Creating results table"
 python "{self.table_py_file}" \\
     --output_folder "{self.output_folder}" \\
     --json_file "{self.json_file}" \\
-    --pipeline_name "{self.prefix}" \\
+    --pipeline_name "{prefix}" \\
     --num_designs {self.num_designs} \\
     --num_models {self.num_models} \\
     --table_path "{self.main_table}" \\
@@ -678,24 +555,23 @@ python "{self.table_py_file}" \\
 
         return script_content
 
-    def get_output_files(self) -> Dict[str, List[str]]:
+    def get_output_files(self) -> Dict[str, Any]:
         """
         Get expected output files after RFdiffusion3 execution.
 
         Uses pure path construction - no filesystem access.
 
         Returns:
-            Dictionary mapping output types to file paths with standard keys:
-            - structures: PDB structure files
-            - structure_ids: Structure identifiers
-            - tables: TableInfo objects
+            Dictionary with DataStream objects:
+            - structures: DataStream of PDB structure files
+            - sequences: DataStream (references sequences CSV)
+            - compounds: Empty DataStream
+            - tables: Dict of TableInfo objects
             - output_folder: Tool's output directory
         """
-        # Ensure file paths are set up
-        if not hasattr(self, 'pipeline_name') or self.pipeline_name is None:
-            self._setup_file_paths()
+        prefix = self._get_prefix()
 
-        # Generate expected structure paths
+        # Generate expected structure paths and IDs
         design_pdbs = []
         structure_ids = []
 
@@ -707,15 +583,27 @@ python "{self.table_py_file}" \\
 
                 # Conditional naming: include model suffix only if num_models > 1
                 if self.num_models > 1:
-                    structure_id = f"{self.prefix}_d{design_num}_m{model_num}"
+                    structure_id = f"{prefix}_d{design_num}_m{model_num}"
                 else:
-                    structure_id = f"{self.prefix}_{design_num}"
+                    structure_id = f"{prefix}_{design_num}"
 
                 structure_path = os.path.join(self.output_folder, f"{structure_id}.pdb")
                 design_pdbs.append(structure_path)
                 structure_ids.append(structure_id)
 
-        # Define table structure
+        # Create map_table for structures
+        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        create_map_table(structures_map, structure_ids, files=design_pdbs)
+
+        structures = DataStream(
+            name="structures",
+            ids=structure_ids,
+            files=design_pdbs,
+            map_table=structures_map,
+            format="pdb"
+        )
+
+        # Define table structures
         tables = {
             "structures": TableInfo(
                 name="structures",
@@ -758,30 +646,16 @@ python "{self.table_py_file}" \\
         }
 
         return {
-            "structures": design_pdbs,
-            "structure_ids": structure_ids,
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [self.sequences_csv],
-            "sequence_ids": structure_ids.copy(),
+            "structures": structures,
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
-            "output_folder": self.output_folder,
-            # Legacy aliases for backward compatibility
-            "pdbs": design_pdbs,
-            "main": self.main_table
+            "output_folder": self.output_folder
         }
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration including RFdiffusion3-specific parameters."""
         base_dict = super().to_dict()
-
-        # Determine input type
-        if self.ligand_structure_is_tool_output:
-            input_type = "ligand_tool_output"
-        elif self.pdb_is_tool_output:
-            input_type = "pdb_tool_output"
-        else:
-            input_type = "direct"
 
         base_dict.update({
             "rfd3_params": {
@@ -799,7 +673,7 @@ python "{self.table_py_file}" \\
                 "select_hbond_acceptor": self.select_hbond_acceptor,
                 "has_json_config": self.json_config is not None,
                 "design_startnum": self.design_startnum,
-                "input_type": input_type
+                "input_pdb_file": self.input_pdb_file
             }
         })
         return base_dict
