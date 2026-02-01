@@ -113,8 +113,25 @@ class DataStream:
                 for item_id in self.ids:
                     yield (item_id, "")
 
-    def __getitem__(self, index: int) -> Tuple[str, str]:
-        """Get item by index as (id, file_or_value) tuple."""
+    def __getitem__(self, index):
+        """Get item by index or slice.
+
+        For integer index: returns (id, file_or_value) tuple.
+        For slice: returns new DataStream with sliced items.
+        """
+        if isinstance(index, slice):
+            # Handle slicing - return a new DataStream with sliced items
+            sliced_ids = self.ids[index]
+            sliced_files = self.files[index] if self.files else []
+            return DataStream(
+                name=self.name,
+                ids=sliced_ids,
+                files=sliced_files,
+                map_table=self.map_table,
+                format=self.format
+            )
+
+        # Integer indexing
         if index < 0 or index >= len(self.ids):
             raise IndexError(f"Index {index} out of range for DataStream with {len(self.ids)} items")
 
