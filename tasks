@@ -1,0 +1,3 @@
+1. combinatorics should be agnostic of proteins and ligands, only handle datastreams - create it from ligand smiles
+2. better way to separate tables (sequences) from filesystem (datastreams). also, how to include dna/rna
+3. provide standardized functions for navigating tables and filesystem also at runtime

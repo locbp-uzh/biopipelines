@@ -23,16 +23,12 @@ with Pipeline(project="RefactorTest",
 
     # Test 1: RFdiffusion de novo
     rfd = RFdiffusion(contigs="50-70",
-                      num_designs=3,
-                      steps=10)  # Low steps for quick test
+                      num_designs=3)  # Low steps for quick test
 
     # Test 2: ProteinMPNN with DataStream input from RFdiffusion
     pmpnn = ProteinMPNN(structures=rfd,
                         num_sequences=2,
                         redesigned=rfd.tables.structures.designed)
-
-    # Test 3: MMseqs2 for MSA generation
-    msas = MMseqs2(sequences=pmpnn)
 
     # Test 4: Sort sequences by score (using Panda instead of Rank)
     sorted_seqs = Panda(

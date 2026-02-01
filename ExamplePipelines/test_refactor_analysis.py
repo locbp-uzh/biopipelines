@@ -18,9 +18,9 @@ with Pipeline(project="RefactorTest",
               job="Analysis",
               description="Test analysis tools: PLIP, MergeTables, ConcatenateTables"):
 
-    Resources(gpu="A100",
+    Resources(gpu="any",
               time="4:00:00",
-              memory="32GB")
+              memory="16GB")
 
     # Create two separate Boltz2 runs to test table operations
     lysozyme = PDB("1AKI", "LYZ")
