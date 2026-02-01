@@ -319,12 +319,18 @@ def predict_output_ids(
             # DataStream refactor: sequences.ids instead of sequence_ids
             if hasattr(unwrapped, 'sequences') and unwrapped.sequences:
                 ids = list(unwrapped.sequences.ids)
+            elif isinstance(unwrapped, str):
+                # Direct sequence string - single ID
+                ids = ["protein"]
             else:
                 raise ValueError(f"No sequences found in {name} input")
         elif name == "ligands":
             # DataStream refactor: compounds.ids instead of compound_ids
             if hasattr(unwrapped, 'compounds') and unwrapped.compounds:
                 ids = list(unwrapped.compounds.ids)
+            elif isinstance(unwrapped, str):
+                # Direct SMILES string - single ligand, bundled by default
+                ids = ["ligand"]
             else:
                 raise ValueError(f"No compounds found in {name} input")
         else:
