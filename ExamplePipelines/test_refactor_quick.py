@@ -10,7 +10,6 @@ from PipelineScripts.pipeline import *
 from PipelineScripts.pdb import PDB
 from PipelineScripts.rfdiffusion import RFdiffusion
 from PipelineScripts.protein_mpnn import ProteinMPNN
-from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.filter import Filter
 from PipelineScripts.select_best import SelectBest
@@ -39,34 +38,30 @@ with Pipeline(project="RefactorTest",
     )
     print(f"[2] ProteinMPNN output: {pmpnn}")
 
-    # 3. MMseqs2: MSA generation
-    msas = MMseqs2(sequences=pmpnn)
-    print(f"[3] MMseqs2 output: {msas}")
-
-    # 4. Boltz2: structure prediction
+    # 3. Boltz2: structure prediction with ligand (skips MMseqs2 for quick test)
     boltz = Boltz2(
         proteins=pmpnn,
-        msas=msas,
+        ligands="CCO",  # Ethanol - simple ligand to trigger affinity mode
         num_seeds=1,
         num_recycles=1
     )
-    print(f"[4] Boltz2 output: {boltz}")
+    print(f"[3] Boltz2 output: {boltz}")
 
-    # 5. Filter: expression-based filtering
+    # 4. Filter: expression-based filtering
     filtered = Filter(
         data=boltz,
         expression="confidence > 0.5"
     )
-    print(f"[5] Filter output: {filtered}")
+    print(f"[4] Filter output: {filtered}")
 
-    # 6. SelectBest: top selection
+    # 5. SelectBest: top selection
     best = SelectBest(
         data=boltz,
         n=1,
         metric="confidence",
         ascending=False
     )
-    print(f"[6] SelectBest output: {best}")
+    print(f"[5] SelectBest output: {best}")
 
     print("\n=== Quick Smoke Test Complete ===")
     print("All DataStream I/O connections verified at pipeline time.")

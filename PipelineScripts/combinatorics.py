@@ -316,9 +316,17 @@ def predict_output_ids(
         # Get IDs directly from source object
         unwrapped = value.sources[0] if isinstance(value, (Bundle, Each)) else value
         if name == "proteins":
-            ids = list(unwrapped.sequence_ids)
+            # DataStream refactor: sequences.ids instead of sequence_ids
+            if hasattr(unwrapped, 'sequences') and unwrapped.sequences:
+                ids = list(unwrapped.sequences.ids)
+            else:
+                raise ValueError(f"No sequences found in {name} input")
         elif name == "ligands":
-            ids = list(unwrapped.compound_ids)
+            # DataStream refactor: compounds.ids instead of compound_ids
+            if hasattr(unwrapped, 'compounds') and unwrapped.compounds:
+                ids = list(unwrapped.compounds.ids)
+            else:
+                raise ValueError(f"No compounds found in {name} input")
         else:
             raise ValueError(f"Unknown axis name: {name}")
 
