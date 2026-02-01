@@ -56,10 +56,10 @@ with Pipeline(project="RefactorTest",
 
     # 5. SelectBest: top selection
     best = SelectBest(
-        data=boltz,
-        n=1,
+        pool=boltz,
+        tables=boltz.tables.structures,
         metric="confidence",
-        ascending=False
+        mode="max"
     )
     print(f"[5] SelectBest output: {best}")
 
