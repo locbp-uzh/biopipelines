@@ -9,13 +9,15 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class PDBOperation:
@@ -59,8 +61,15 @@ class PDB(BaseConfig):
         )
     """
 
-    # Tool identification
     TOOL_NAME = "PDB"
+
+    # Lazy path descriptors
+    structures_csv = Path(lambda self: os.path.join(self.output_folder, "structures.csv"))
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
+    failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
+    pdb_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pdb.py"))
 
     # --- Static methods for creating operations ---
 
@@ -543,22 +552,14 @@ class PDB(BaseConfig):
 
     def generate_script_run_pdb(self) -> str:
         """Generate the PDB fetching execution part of the script."""
-        output_folder = self.output_folder
-
-        # Output files
-        structures_table = os.path.join(output_folder, "structures.csv")
-        sequences_table = os.path.join(output_folder, "sequences.csv")
-        failed_table = os.path.join(output_folder, "failed_downloads.csv")
-        compounds_table = os.path.join(output_folder, "compounds.csv")
+        import json
 
         # Get PDBs folder path from folder manager
         repo_pdbs_folder = self.folders['PDBs']
 
-        # Create config file for fetching
         # If folder_source is set (from folder loading), use it as local_folder for the runtime script
         effective_local_folder = getattr(self, 'folder_source', None) or self.local_folder
 
-        config_file = os.path.join(output_folder, "fetch_config.json")
         config_data = {
             "pdb_ids": self.pdb_ids,
             "custom_ids": self.custom_ids,
@@ -567,16 +568,15 @@ class PDB(BaseConfig):
             "repo_pdbs_folder": repo_pdbs_folder,
             "biological_assembly": self.biological_assembly,
             "remove_waters": self.remove_waters,
-            "output_folder": output_folder,
-            "structures_table": structures_table,
-            "sequences_table": sequences_table,
-            "failed_table": failed_table,
-            "compounds_table": compounds_table,
+            "output_folder": self.output_folder,
+            "structures_table": self.structures_csv,
+            "sequences_table": self.sequences_csv,
+            "failed_table": self.failed_csv,
+            "compounds_table": self.compounds_csv,
             "operations": [op.to_dict() for op in self.operations]
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Fetching {len(self.pdb_ids)} structures"
@@ -584,93 +584,81 @@ echo "Format: {self.format.upper()}"
 echo "PDB IDs: {', '.join(self.pdb_ids)}"
 echo "Custom IDs: {', '.join(self.custom_ids)}"
 echo "Priority: {'local_folder -> ' if self.local_folder else ''}PDBs/ -> RCSB download"
-echo "Output folder: {output_folder}"
+echo "Output folder: {self.output_folder}"
 
-# Run Python structure fetching script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_pdb.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully fetched structures"
-    echo "Structures table: {structures_table}"
-    echo "Sequences table: {sequences_table}"
-    if [ -f "{failed_table}" ]; then
-        echo "Failed downloads logged: {failed_table}"
-    fi
-else
-    echo "Error: Failed to fetch structures"
-    exit 1
-fi
+python "{self.pdb_py}" --config "{self.config_file}"
 
 """
     
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after structure fetching.
-        
-        Returns:
-            Dictionary with output file paths and table information
-        """
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after structure fetching."""
         # Generate structure file paths using custom IDs
         extension = ".pdb" if self.format == "pdb" else ".cif"
-        structure_files = []
-        for custom_id in self.custom_ids:
-            structure_files.append(os.path.join(self.output_folder, f"{custom_id}{extension}"))
+        structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
+                          for custom_id in self.custom_ids]
 
-        # Structure IDs are the custom IDs
-        structure_ids = self.custom_ids.copy()
-
-        # Sequence IDs are also the custom IDs
-        sequence_ids = self.custom_ids.copy()
-        
-        # Output tables
-        structures_csv = os.path.join(self.output_folder, "structures.csv")
-        sequences_csv = os.path.join(self.output_folder, "sequences.csv")
-        failed_csv = os.path.join(self.output_folder, "failed_downloads.csv")
-        compounds_csv = os.path.join(self.output_folder, "compounds.csv")
-
-        # Define tables that will be created
         tables = {
             "structures": TableInfo(
                 name="structures",
-                path=structures_csv,
+                path=self.structures_csv,
                 columns=["id", "pdb_id", "file_path", "format", "file_size", "source"],
                 description="Successfully fetched structure files",
-                count=len(self.pdb_ids)  # May be fewer if some downloads fail
+                count=len(self.pdb_ids)
             ),
             "sequences": TableInfo(
                 name="sequences",
-                path=sequences_csv,
+                path=self.sequences_csv,
                 columns=["id", "sequence"],
                 description="Protein sequences extracted from structures",
-                count=len(self.pdb_ids)  # May be fewer if some downloads fail
+                count=len(self.pdb_ids)
             ),
             "compounds": TableInfo(
                 name="compounds",
-                path=compounds_csv,
+                path=self.compounds_csv,
                 columns=["id", "code", "format", "smiles", "ccd"],
                 description="Ligands extracted from PDB structures (SMILES from RCSB)",
                 count="variable"
             ),
             "failed": TableInfo(
                 name="failed",
-                path=failed_csv,
+                path=self.failed_csv,
                 columns=["pdb_id", "error_message", "source", "attempted_path"],
                 description="Failed structure fetches with error details",
                 count="variable"
             )
         }
 
+        # Create DataStreams
+        structures = DataStream(
+            name="structures",
+            ids=self.custom_ids.copy(),
+            files=structure_files,
+            map_table=self.structures_csv,
+            format=self.format
+        )
+
+        sequences = DataStream(
+            name="sequences",
+            ids=self.custom_ids.copy(),
+            files=[self.sequences_csv],
+            map_table=self.sequences_csv,
+            format="csv"
+        )
+
         # Get predicted compound IDs if available (set during configure_inputs)
         compound_ids = getattr(self, 'predicted_compound_ids', [])
+        compounds = DataStream(
+            name="compounds",
+            ids=compound_ids,
+            files=[self.compounds_csv],
+            map_table=self.compounds_csv,
+            format="csv"
+        )
 
         return {
-            "structures": structure_files,
-            "structure_ids": structure_ids,
-            "compounds": [compounds_csv],
-            "compound_ids": compound_ids,  # Populated from RCSB API query at pipeline runtime
-            "sequences": [sequences_csv],
-            "sequence_ids": sequence_ids,
+            "structures": structures,
+            "sequences": sequences,
+            "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder
         }

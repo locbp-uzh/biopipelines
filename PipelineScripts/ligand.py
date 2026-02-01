@@ -11,13 +11,15 @@ import re
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class Ligand(BaseConfig):
@@ -29,9 +31,13 @@ class Ligand(BaseConfig):
     Ligands/ folder, then downloads from RCSB or PubChem based on lookup type.
     """
 
-    # Tool identification
     TOOL_NAME = "Ligand"
-    
+
+    # Lazy path descriptors
+    compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
+    failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
+    ligand_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_ligand.py"))
 
     def __init__(self,
                  lookup: Union[str, List[str]],
@@ -268,11 +274,10 @@ class Ligand(BaseConfig):
 
     def generate_script_run_ligand(self) -> str:
         """Generate the ligand fetching part of the script."""
-        compounds_table = os.path.join(self.output_folder, "compounds.csv")
-        failed_table = os.path.join(self.output_folder, "failed_downloads.csv")
+        import json
+
         repo_ligands_folder = self.folders['Ligands']
 
-        config_file = os.path.join(self.output_folder, "fetch_config.json")
         config_data = {
             "custom_ids": self.custom_ids,
             "residue_codes": self.residue_codes,
@@ -282,12 +287,11 @@ class Ligand(BaseConfig):
             "output_format": self.output_format,
             "repo_ligands_folder": repo_ligands_folder,
             "output_folder": self.output_folder,
-            "compounds_table": compounds_table,
-            "failed_table": failed_table
+            "compounds_table": self.compounds_csv,
+            "failed_table": self.failed_csv
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Fetching {len(self.lookup_values)} ligands"
@@ -298,65 +302,54 @@ echo "Source: {self.source if self.source else 'auto-detect'}"
 echo "Priority: {'local_folder -> ' if self.local_folder else ''}Ligands/ -> download"
 echo "Output folder: {self.output_folder}"
 
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_ligand.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully fetched ligands"
-    echo "Compounds table: {compounds_table}"
-    if [ -f "{failed_table}" ]; then
-        echo "Failed downloads logged: {failed_table}"
-    fi
-else
-    echo "Error: Failed to fetch ligands"
-    exit 1
-fi
+python "{self.ligand_py}" --config "{self.config_file}"
 
 """
 
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after ligand fetching.
-
-        Returns:
-            Dictionary with output file paths and table information
-        """
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after ligand fetching."""
         # Generate structure file paths using custom IDs
         ext = self.output_format  # "pdb" or "cif"
-        structure_files = []
-        for custom_id in self.custom_ids:
-            structure_files.append(os.path.join(self.output_folder, f"{custom_id}.{ext}"))
+        structure_files = [os.path.join(self.output_folder, f"{custom_id}.{ext}")
+                          for custom_id in self.custom_ids]
 
-        # Structure IDs are the custom IDs
-        structure_ids = self.custom_ids.copy()
-
-        # Output tables
-        compounds_csv = os.path.join(self.output_folder, "compounds.csv")
-        failed_csv = os.path.join(self.output_folder, "failed_downloads.csv")
-
-        # Define tables that will be created
         tables = {
             "compounds": TableInfo(
                 name="compounds",
-                path=compounds_csv,
+                path=self.compounds_csv,
                 columns=["id", "format", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"],
                 description="Successfully fetched ligand files with metadata",
                 count=len(self.lookup_values)
             ),
             "failed": TableInfo(
                 name="failed",
-                path=failed_csv,
+                path=self.failed_csv,
                 columns=["lookup", "error_message", "source", "attempted_path"],
                 description="Failed ligand fetches with error details",
                 count="variable"
             )
         }
 
+        # Create DataStreams
+        structures = DataStream(
+            name="structures",
+            ids=self.custom_ids.copy(),
+            files=structure_files,
+            format=self.output_format
+        )
+
+        compounds = DataStream(
+            name="compounds",
+            ids=self.custom_ids.copy(),
+            files=[self.compounds_csv],
+            map_table=self.compounds_csv,
+            format="csv"
+        )
+
         return {
-            "structures": structure_files,
-            "structure_ids": structure_ids,
-            "compounds": [compounds_csv],
-            "compound_ids": structure_ids,  # Same as structure_ids
+            "structures": structures,
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder
         }

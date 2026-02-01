@@ -6,17 +6,18 @@ compounds, sequences, and tables for cyclic pipeline operations.
 """
 
 import os
-import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class ConcatenateTables(BaseConfig):
@@ -28,8 +29,12 @@ class ConcatenateTables(BaseConfig):
     """
     
     TOOL_NAME = "ConcatenateTables"
-    
-    
+
+    # Lazy path descriptors
+    concatenated_csv = Path(lambda self: os.path.join(self.output_folder, "concatenated.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "concatenate_config.json"))
+    concatenate_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_concatenate_tables.py"))
+
     def __init__(self,
                  tables: List[Any],
                  fill: Optional[str] = None,
@@ -64,13 +69,7 @@ class ConcatenateTables(BaseConfig):
         if not self.tables:
             raise ValueError("At least one table must be provided")
         
-        # Initialize base class
         super().__init__(**kwargs)
-        
-        # Set up dependencies - tables can be tool outputs or direct table references
-        for table in self.tables:
-            if hasattr(table, 'config'):
-                self.dependencies.append(table.config)
     
     def validate_params(self):
         """Validate ConcatenateTables parameters."""
@@ -144,83 +143,51 @@ class ConcatenateTables(BaseConfig):
 
     def generate_script_run_concatenate(self) -> str:
         """Generate the concatenation execution part of the script."""
-        output_folder = self.output_folder
+        import json
 
-        # Output paths - only what we actually need
-        concatenated_csv = os.path.join(output_folder, "concatenated.csv")
-
-        # Create config file for concatenation
-        config_file = os.path.join(output_folder, "concatenate_config.json")
         config_data = {
             "table_configs": self.table_configs,
             "fill": self.fill,
-            "output_csv": concatenated_csv,
-            "output_folder": output_folder
+            "output_csv": self.concatenated_csv,
+            "output_folder": self.output_folder
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Concatenating tables"
 echo "Input tables: {len(self.tables)}"
 echo "Fill strategy: {self.fill if self.fill is not None else 'remove non-common columns'}"
-echo "Output: {output_folder}"
+echo "Output: {self.output_folder}"
 
-# Run Python concatenation script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_concatenate_tables.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully concatenated {len(self.tables)} tables"
-    echo "Output written to: {output_folder}"
-else
-    echo "Error: Failed to concatenate tables"
-    exit 1
-fi
+python "{self.concatenate_py}" --config "{self.config_file}"
 
 """
     
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after concatenation.
-        
-        Returns:
-            Dictionary with output file paths
-        """
-        # ConcatenateTables is a table-only operation like MergeTables
-        # It combines tables from multiple tools but doesn't handle structures/compounds
-        
-        concatenated_csv = os.path.join(self.output_folder, "concatenated.csv")
-        
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after concatenation."""
         # Try to determine output columns from input tables
         expected_columns = ["id", "source_table"]
         if self.tables and hasattr(self.tables[0], 'columns'):
-            # Try to get columns from first table if available
             try:
                 expected_columns = list(self.tables[0].columns) + ["source_table"]
             except:
-                # Fallback to default columns
                 expected_columns = ["id", "source_table"]
-        
+
         tables = {
             "concatenated": TableInfo(
-                name="concatenated", 
-                path=concatenated_csv,
+                name="concatenated",
+                path=self.concatenated_csv,
                 columns=expected_columns,
-                description="concatenated results from multiple tool outputs",
+                description="Concatenated results from multiple tool outputs",
                 count="variable"
             )
         }
-        
-        # ConcatenateTables operates only on tables - return empty lists like MergeTables
+
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

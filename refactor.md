@@ -1,5 +1,69 @@
 # Tool Refactoring Guide
 
+## Refactoring Checklist
+
+### Structure Generation
+- [x] RFdiffusion
+- [x] RFdiffusionAllAtom
+- [x] RFdiffusion3
+- [x] BoltzGen (+ BoltzGenMerge, BoltzGenImport)
+
+### Sequence Design
+- [x] ProteinMPNN
+- [x] LigandMPNN
+- [x] MutationComposer
+- [x] SDM (SiteDirectedMutagenesis)
+- [x] Fuse
+- [x] StitchSequences
+- [x] SplitChains
+- [x] DNAEncoder
+
+### Structure Prediction
+- [x] AlphaFold
+- [x] GhostFold (removed)
+- [x] ESMFold
+- [ ] Boltz2 (don't refactor as of now)
+- [x] RF3 (removed)
+- [x] OnionNet
+
+### Analysis
+- [x] DynamicBind
+- [x] ResidueAtomDistance
+- [x] PLIP
+- [x] DistanceSelector
+- [x] ConformationalChange
+- [x] MutationProfiler
+- [x] SequenceMetricCorrelation
+- [x] BayesianAdjuster
+- [x] ProteinLigandContacts
+- [x] PoseDistance
+- [x] SASA
+- [x] SelectionEditor
+
+### Data Management
+- [x] Filter
+- [x] Rank
+- [x] SelectBest
+- [x] RemoveDuplicates
+- [X] MergeTables
+- [x] ConcatenateTables
+- [x] SliceTable
+- [x] ExtractMetrics
+- [x] AverageByTable
+
+### Utilities
+- [x] LoadOutput / LoadOutputs (legacy support retained)
+- [x] MMseqs2
+- [x] MMseqs2Server
+- [x] MMseqs2LCF (+ MMseqs2ServerLCF)
+- [x] CompoundLibrary
+- [x] PDB
+- [x] Ligand
+- [x] PyMOL
+- [x] Plot
+
+---
+
 ## New Classes
 
 ### `DataStream` (datastream.py)
@@ -26,18 +90,17 @@ class MyTool(BaseConfig):
 
 ## Input Rules
 
-1. **No string inputs** - use `PDB("path")` or similar converters
 2. **No fallbacks** - code crashes if input is wrong
 3. **No legacy support** - remove all deprecated parameters
-4. Inputs are `DataStream` or `StandardizedOutput` only
+4. Structure and sequence inputs are `DataStream` or `StandardizedOutput` only
 
 ## Tool Migration Steps
 
 1. **Remove** `_initialize_file_paths()`, `_setup_file_paths()`, `_extract_pipeline_name()`
 2. **Remove** all calls to these methods
 3. **Remove** `ToolOutput` handling - only accept `DataStream` or `StandardizedOutput`
-4. **Remove** string/list/folder input handling
-5. **Remove** all fallback logic and legacy parameters
+4. **Remove** string/list/folder input handling for pdb/structure arguments, except the PDB tool
+5. **Remove** all fallback logic and legacy parameters, including 'main' table
 6. **Add** `Path` descriptors at class level for all file paths
 7. **Simplify** `configure_inputs` to just `self.folders = pipeline_folders`
 8. **Update** `get_output_files()` to return `DataStream` objects

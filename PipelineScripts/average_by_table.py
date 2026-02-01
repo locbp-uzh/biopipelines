@@ -10,13 +10,15 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class AverageByTable(BaseConfig):
@@ -33,18 +35,21 @@ class AverageByTable(BaseConfig):
     - Summarizing results from multiple experimental runs
     """
 
-    # Tool identification
     TOOL_NAME = "AverageByTable"
-    
+
+    # Lazy path descriptors
+    averages_csv = Path(lambda self: os.path.join(self.output_folder, "averages.csv"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "average_by_table_config.json"))
+    average_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_average_by_table.py"))
 
     def __init__(self,
-                 tables: List[Union[str, Dict, ToolOutput, StandardizedOutput]],
+                 tables: List[Union[str, TableInfo]],
                  **kwargs):
         """
         Initialize AverageByTable tool.
 
         Args:
-            tables: List of tables to average across
+            tables: List of tables to average across (TableInfo or path strings)
             **kwargs: Additional parameters
 
         Examples:
@@ -57,13 +62,7 @@ class AverageByTable(BaseConfig):
         """
         self.tables_input = tables
 
-        # Initialize base class
         super().__init__(**kwargs)
-
-        # Set up dependencies
-        for ds in tables:
-            if hasattr(ds, 'config'):
-                self.dependencies.append(ds.config)
 
     def validate_params(self):
         """Validate AverageByTable parameters."""
@@ -83,19 +82,11 @@ class AverageByTable(BaseConfig):
             path = self._extract_table_path(ds, f"table_{i}")
             self.table_paths.append(path)
 
-    def _extract_table_path(self, input_obj: Union[str, Dict, ToolOutput, StandardizedOutput], input_type: str) -> str:
+    def _extract_table_path(self, input_obj: Union[str, TableInfo], input_type: str) -> str:
         """Extract table path from various input formats."""
         if isinstance(input_obj, str):
-            # Direct file path
             return input_obj
-        elif isinstance(input_obj, dict):
-            # Dictionary with path
-            if 'path' in input_obj:
-                return input_obj['path']
-            else:
-                raise ValueError(f"Dictionary input for {input_type} must have 'path' key")
-        elif hasattr(input_obj, 'path'):
-            # TableInfo object
+        elif isinstance(input_obj, TableInfo):
             return input_obj.path
         else:
             raise ValueError(f"Could not extract path from {input_type}: {type(input_obj)}")
@@ -126,62 +117,40 @@ class AverageByTable(BaseConfig):
 
     def generate_script_run_average(self) -> str:
         """Generate the averaging part of the script."""
-        averages_csv = os.path.join(self.output_folder, "averages.csv")
+        import json
 
-        config_file = os.path.join(self.output_folder, "average_by_table_config.json")
         config_data = {
             "tables": self.table_paths,
-            "output": averages_csv
+            "output": self.averages_csv
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Computing averages across tables"
 echo "Number of tables: {len(self.table_paths)}"
-echo "Output: {averages_csv}"
+echo "Output: {self.averages_csv}"
 
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_average_by_table.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully computed averages"
-    echo "Output file: {averages_csv}"
-else
-    echo "Error: Failed to compute averages"
-    exit 1
-fi
+python "{self.average_py}" --config "{self.config_file}"
 
 """
 
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after averaging.
-
-        Returns:
-            Dictionary with output file paths and table information
-        """
-        averages_csv = os.path.join(self.output_folder, "averages.csv")
-
-        # Define table that will be created
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after averaging."""
         tables = {
             "averages": TableInfo(
                 name="averages",
-                path=averages_csv,
-                columns=["table_name"] + ["avg_*"],  # Will be determined at runtime
+                path=self.averages_csv,
+                columns=["table_name"],
                 description="Average values for each numeric column across all tables",
-                count=len(self.tables_input)  # One row per input table
+                count=len(self.tables_input)
             )
         }
 
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

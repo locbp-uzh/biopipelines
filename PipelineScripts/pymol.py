@@ -11,11 +11,15 @@ import json
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class PyMOLOperation:
@@ -49,7 +53,11 @@ class PyMOL(BaseConfig):
     """
 
     TOOL_NAME = "PyMOL"
-    
+
+    # Lazy path descriptors
+    config_file = Path(lambda self: os.path.join(self.output_folder, "pymol_config.json"))
+    session_file = Path(lambda self: os.path.join(self.output_folder, f"{self.session_name}.pse"))
+    pymol_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pymol.py"))
 
     # --- Static methods for creating operations ---
 
@@ -73,7 +81,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("names", prefix=prefix, basename=basename, suffix=suffix)
 
     @staticmethod
-    def Load(structures: Union[StandardizedOutput, ToolOutput]) -> PyMOLOperation:
+    def Load(structures: Union[StandardizedOutput, DataStream]) -> PyMOLOperation:
         """
         Load structures into PyMOL with current naming.
 
@@ -90,7 +98,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("load", structures=structures)
 
     @staticmethod
-    def Color(structures: Union[StandardizedOutput, ToolOutput],
+    def Color(structures: Union[StandardizedOutput, DataStream],
               selection: Union[Tuple[TableInfo, str], str],
               color: str) -> PyMOLOperation:
         """
@@ -113,7 +121,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("color", structures=structures, selection=selection, color=color)
 
     @staticmethod
-    def ColorAF(structures: Union[StandardizedOutput, ToolOutput],
+    def ColorAF(structures: Union[StandardizedOutput, DataStream],
                 upper: float = 100) -> PyMOLOperation:
         """
         Color structures by AlphaFold pLDDT (B-factor spectrum).
@@ -147,7 +155,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("align", method=method, target=target)
 
     @staticmethod
-    def Show(structures: Union[StandardizedOutput, ToolOutput, None] = None,
+    def Show(structures: Union[StandardizedOutput, DataStream, None] = None,
              representation: str = "cartoon",
              selection: Optional[Union[Tuple[TableInfo, str], str]] = None) -> PyMOLOperation:
         """
@@ -164,7 +172,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("show", structures=structures, representation=representation, selection=selection)
 
     @staticmethod
-    def Hide(structures: Union[StandardizedOutput, ToolOutput, None] = None,
+    def Hide(structures: Union[StandardizedOutput, DataStream, None] = None,
              representation: str = "everything",
              selection: Optional[Union[Tuple[TableInfo, str], str]] = None) -> PyMOLOperation:
         """
@@ -332,57 +340,34 @@ class PyMOL(BaseConfig):
 
     def generate_script_run_pymol(self) -> str:
         """Generate the PyMOL session creation part of the script."""
-        # Create config file with all operations
         config = {
             "operations": [self._serialize_operation(op) for op in self.operations],
             "session_name": self.session_name,
             "output_folder": self.output_folder
         }
 
-        config_file = os.path.join(self.output_folder, "pymol_config.json")
-        session_file = os.path.join(self.output_folder, f"{self.session_name}.pse")
-
-        # Get HelpScripts path
-        help_scripts = self.folders.get("HelpScripts", "HelpScripts")
-        pymol_script = os.path.join(help_scripts, "pipe_pymol.py")
-
         return f"""echo "Creating PyMOL session..."
-echo "Output: {session_file}"
+echo "Output: {self.session_file}"
 
-# Create output directory
 mkdir -p "{self.output_folder}"
 
-# Write configuration
-cat > "{config_file}" << 'PYMOL_CONFIG_EOF'
+cat > "{self.config_file}" << 'PYMOL_CONFIG_EOF'
 {json.dumps(config, indent=2)}
 PYMOL_CONFIG_EOF
 
-# Run PyMOL session creation
-python "{pymol_script}" --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "PyMOL session created successfully"
-else
-    echo "ERROR: Failed to create PyMOL session"
-    exit 1
-fi
+python "{self.pymol_py}" --config "{self.config_file}"
 
 """
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files."""
-        session_file = os.path.join(self.output_folder, f"{self.session_name}.pse")
-
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": {},
             "output_folder": self.output_folder,
-            "session_file": session_file
+            "session_file": self.session_file
         }
 
     def get_config_display(self) -> List[str]:
