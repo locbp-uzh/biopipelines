@@ -1,6 +1,6 @@
 """
 Test pipeline for refactored tools - Basic tests
-Tests: RFdiffusion, ProteinMPNN, MMseqs2, Filter, SelectBest
+Tests: RFdiffusion, ProteinMPNN, MMseqs2, Filter, Panda
 """
 
 import os, sys
@@ -11,8 +11,7 @@ from PipelineScripts.rfdiffusion import RFdiffusion
 from PipelineScripts.protein_mpnn import ProteinMPNN
 from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.filter import Filter
-from PipelineScripts.select_best import SelectBest
-from PipelineScripts.rank import Rank
+from PipelineScripts.panda import Panda
 
 with Pipeline(project="RefactorTest",
               job="Basic",
@@ -35,20 +34,26 @@ with Pipeline(project="RefactorTest",
     # Test 3: MMseqs2 for MSA generation
     msas = MMseqs2(sequences=pmpnn)
 
-    # Test 4: Rank sequences by score
-    ranked = Rank(data=pmpnn,
-                  sort_by="score",
-                  ascending=False)
+    # Test 4: Sort sequences by score (using Panda instead of Rank)
+    sorted_seqs = Panda(
+        table=pmpnn.tables.sequences,
+        operations=[
+            Panda.sort("score", ascending=False)
+        ]
+    )
 
     # Test 5: Filter by score threshold
     filtered = Filter(data=pmpnn,
                       expression="score > -2.0")
 
-    # Test 6: SelectBest from filtered
-    best = SelectBest(data=filtered,
-                      n=2,
-                      metric="score",
-                      ascending=False)
+    # Test 6: Select top 2 (using Panda instead of SelectBest)
+    best = Panda(
+        table=pmpnn.tables.sequences,
+        operations=[
+            Panda.sort("score", ascending=False),
+            Panda.head(2)
+        ]
+    )
 
     print("=== Output Summary ===")
     print(f"RFdiffusion structures: {len(rfd.structures.ids)}")
