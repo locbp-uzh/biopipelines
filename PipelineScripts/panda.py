@@ -87,6 +87,7 @@ class Panda(BaseConfig):
     config_file = Path(lambda self: os.path.join(self.output_folder, "panda_config.json"))
     panda_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_panda.py"))
     missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
 
     # ========== Static methods for creating operations ==========
 
@@ -863,10 +864,13 @@ fi
                 files=updated_compounds,
                 format="sdf"
             )
+            # For sequences, use the result CSV as map_table (contains id and sequence columns)
+            # This allows Boltz2 and other tools to read sequences from the filtered result
             sequences = DataStream(
                 name="sequences",
                 ids=seq_ids,
                 files=updated_sequences,
+                map_table=self.output_csv,  # Result CSV serves as sequence map
                 format="fasta"
             )
 

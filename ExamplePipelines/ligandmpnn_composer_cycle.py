@@ -62,17 +62,18 @@ with Pipeline(project="Examples",
                                     mode="weighted_random",
                                     max_mutations=3)
 
-        # Remove duplicates using Panda drop_duplicates
+        # Remove duplicates using Panda drop_duplicates with pool mode to preserve sequences
         if all_sequences_seen is None:
             # First cycle - just deduplicate within current batch
             unique_new_sequences = Panda(
                 table=composer.tables.sequences,
-                operations=[Panda.drop_duplicates(subset="sequence", keep="first")]
+                operations=[Panda.drop_duplicates(subset="sequence", keep="first")],
+                pool=composer  # Pool mode copies sequence files for filtered IDs
             )
-            # Initialize history
+            # Initialize history (table only, no pool needed)
             all_sequences_seen = Panda(
                 table=unique_new_sequences.tables.result,
-                operations=[]  # Just copy the table
+                operations=[]
             )
         else:
             # Subsequent cycles - concatenate with history and remove duplicates
@@ -84,10 +85,11 @@ with Pipeline(project="Examples",
                 table=combined.tables.result,
                 operations=[
                     Panda.drop_duplicates(subset="sequence", keep="first"),
-                    Panda.filter("source_table == 'table_0'")  # Keep only new sequences
-                ]
+                    Panda.filter("source_table == 0")  # Keep only new sequences (source_table is int)
+                ],
+                pool=composer  # Pool mode copies sequence files for filtered IDs
             )
-            # Update history with all unique sequences
+            # Update history (table only, no pool needed)
             all_sequences_seen = Panda(
                 table=combined.tables.result,
                 operations=[Panda.drop_duplicates(subset="sequence", keep="first")]
