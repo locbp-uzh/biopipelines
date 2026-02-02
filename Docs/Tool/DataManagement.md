@@ -10,7 +10,11 @@ Unified tool for pandas-style table transformations. Supports filtering, sorting
 
 **Replaces**: Filter, Rank, SelectBest, MergeTables, ConcatenateTables, SliceTable
 
-**Environment**: `ProteinEnv`
+**Does NOT replace**:
+- **RemoveDuplicates**: Use for cross-table deduplication (filter current pool against history)
+- **ExtractMetrics**: Use for creating separate CSV files per metric for statistical software
+
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `table`: Union[TableInfo, StandardizedOutput, str] - Single table input (mutually exclusive with `tables`)
@@ -114,29 +118,41 @@ complex_result = Panda(
 
 ### RemoveDuplicates
 
-Removes duplicate structures or sequences from a pool. Supports deduplication by sequence, structure similarity, or ID matching.
+**Cross-table deduplication** tool for iterative design cycles. Filters sequences from a current pool that already exist in historical data, preventing recomputation of identical sequences across cycles.
 
-**Environment**: `ProteinEnv`
+**When to use RemoveDuplicates vs Panda.drop_duplicates()**:
+- Use **RemoveDuplicates** for cross-table deduplication (filter current pool against history from previous cycles)
+- Use **Panda.drop_duplicates()** for within-table deduplication (remove duplicates from a single table)
+
+**Environment**: `biopipelines`
 
 **Parameters**:
-- `pool`: Union[ToolOutput, StandardizedOutput] (required) - Items to deduplicate
-- `history`: Optional[Union[ToolOutput, StandardizedOutput, List]] = None - Previous tables for cross-cycle deduplication
-- `compare`: str = "sequence" - Comparison method (sequence, structure, id)
-- `similarity_threshold`: float = 1.0 - Similarity threshold for structure comparison (1.0 = exact match)
+- `pool`: Union[StandardizedOutput, TableInfo, str] (required) - Current cycle sequences to check for duplicates
+- `history`: Optional[Union[StandardizedOutput, TableInfo, str]] = None - Historical sequences from previous cycles (None for first cycle)
+- `compare`: str = "sequence" - Column name to compare for duplicates
 
 **Outputs**:
-- Deduplicated pool with same structure as input
-- `tables.removed`:
+- `tables.sequences`: Filtered unique sequences not present in history
+- `tables.missing`: Sequences filtered out due to duplication
 
-  | id | reason |
-  |----|--------|
+  | id | structure | msa |
+  |----|-----------|-----|
 
 **Example**:
 ```python
 from PipelineScripts.remove_duplicates import RemoveDuplicates
 
-unique = RemoveDuplicates(
-    pool=lmpnn,
+# First cycle - remove self-duplicates only
+unique_sequences = RemoveDuplicates(
+    pool=composer,
+    history=None,
+    compare="sequence"
+)
+
+# Subsequent cycles - filter against accumulated history
+unique_sequences = RemoveDuplicates(
+    pool=composer_current,
+    history=all_sequences_seen,
     compare="sequence"
 )
 ```
@@ -145,30 +161,43 @@ unique = RemoveDuplicates(
 
 ### ExtractMetrics
 
-Extracts and aggregates specific metrics from tables. Supports grouping and various aggregation functions for data summarization.
+**Specialized metrics extraction** tool for statistical analysis software. Extracts specific metric columns from multiple tables and creates **one CSV file per metric**, with each column representing a different table/condition. Output format is optimized for tools like GraphPad Prism.
 
-**Environment**: `ProteinEnv`
+**When to use ExtractMetrics vs Panda**:
+- Use **ExtractMetrics** when you need separate CSV files for each metric across multiple conditions (for Prism, etc.)
+- Use **Panda** for standard table transformations within the pipeline
+
+**Environment**: `biopipelines`
 
 **Parameters**:
-- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - Input tables
+- `tables`: List[Union[TableInfo, str]] (required) - Input tables (typically one per cycle/condition)
 - `metrics`: List[str] (required) - Metric column names to extract
-- `group_by`: Optional[str] = None - Column to group by for aggregation
-- `aggregation`: str = "mean" - Aggregation function (mean, median, min, max, sum, std)
-- `pivot`: bool = False - Pivot metrics to columns
+- `table_names`: Optional[List[str]] = None - Custom column names for output (defaults to Table_0, Table_1, ...)
 
 **Outputs**:
-- `tables.extracted`: Extracted metrics table
+- `tables.{metric_name}`: One CSV file per metric
+
+  | Table_0 | Table_1 | Table_2 | ... |
+  |---------|---------|---------|-----|
+  | value   | value   | value   | ... |
 
 **Example**:
 ```python
 from PipelineScripts.extract_metrics import ExtractMetrics
 
-metrics = ExtractMetrics(
-    tables=[boltz.tables.confidence],
-    metrics=["complex_plddt", "ptm"],
-    group_by="input_file",
-    aggregation="mean"
+# Extract multiple metrics across cycles for Prism analysis
+metrics_extract = ExtractMetrics(
+    tables=[cycle0.tables.merged,
+            cycle1.tables.merged,
+            cycle2.tables.merged],
+    metrics=["affinity_delta", "affinity_delta_R", "affinity_delta_S"],
+    table_names=["Cycle0", "Cycle1", "Cycle2"]
 )
+
+# Output files:
+# - affinity_delta.csv (columns: Cycle0, Cycle1, Cycle2)
+# - affinity_delta_R.csv (columns: Cycle0, Cycle1, Cycle2)
+# - affinity_delta_S.csv (columns: Cycle0, Cycle1, Cycle2)
 ```
 
 ---

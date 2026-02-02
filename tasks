@@ -1,3 +1,4 @@
-1. combinatorics should be agnostic of proteins and ligands, only handle datastreams - create it from ligand smiles
-2. better way to separate tables (sequences) from filesystem (datastreams). also, how to include dna/rna
-3. provide standardized functions for navigating tables and filesystem also at runtime
+1. better way to separate tables (e.g. sequences) from filesystem (datastreams). 
+2. provide standardized functions for navigating tables and filesystem also at runtime
+3. Boltz3 shouldn't have a separate completion check
+4. Alphafold sequences 

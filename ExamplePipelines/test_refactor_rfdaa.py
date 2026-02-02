@@ -20,41 +20,31 @@ with Pipeline(project="RefactorTest",
 
     Resources(gpu="A100",
               time="6:00:00",
-              memory="32GB")
+              memory="8GB")
 
     # Load HaloTag with ligand
-    halotag = PDB("6U32", "HT")
-
-    # Get ligand from the structure
-    lig = Ligand("TMR", source=halotag)
+    halotag_tmr = PDB("6U32", "HT")
 
     # Test RFdiffusionAllAtom
     rfdaa = RFdiffusionAllAtom(
-        pdb=halotag,
-        ligand=lig,
-        contigs="A1-100,0 B1-50",
-        num_designs=2,
-        steps=10
+        pdb=halotag_tmr,
+        ligand=halotag_tmr,
+        contigs="20-20,A5-300,20-20",
+        num_designs=2
     )
 
     # Test LigandMPNN with designed regions from RFDAA
     lmpnn = LigandMPNN(
         structures=rfdaa,
-        ligand="LIG",
+        ligand="TMR",
         num_sequences=2,
         redesigned=rfdaa.tables.structures.designed
     )
 
-    # Get MSAs
-    msas = MMseqs2(sequences=lmpnn)
-
     # Fold with Boltz2
     boltz = Boltz2(
         proteins=lmpnn,
-        ligands=lig,
-        msas=msas,
-        num_seeds=1,
-        num_recycles=1
+        ligands=halotag_tmr
     )
 
     print("=== RFdiffusionAA Test Summary ===")
