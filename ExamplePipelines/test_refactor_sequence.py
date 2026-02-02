@@ -24,7 +24,7 @@ with Pipeline(project="RefactorTest",
               memory="16GB")
 
     # Load a PDB with ligand for LigandMPNN test
-    halotag = PDB("6U32", "HT")
+    halotag = PDB("6U32", ids= "HT")
 
     # Test LigandMPNN
     lmpnn = LigandMPNN(
