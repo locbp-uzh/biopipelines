@@ -17,7 +17,7 @@ with Pipeline(project="RefactorTest",
 
     Resources(gpu="A100",
               time="4:00:00",
-              memory="8GB")
+              memory="16GB")
 
     # Test 1: Boltz2 with direct sequence
     boltz_seq = Boltz2(
