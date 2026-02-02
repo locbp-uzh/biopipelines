@@ -33,33 +33,16 @@ with Pipeline(project="RefactorTest",
         num_sequences=3
     )
 
-    # Test MutationComposer - generate mutation combinations
-    mutations = MutationComposer(
-        sequences=halotag,
-        positions="A10,A20,A30",
-        mutations="ALA,VAL"
-    )
-
     # Test SDM (Site-Directed Mutagenesis)
     sdm = SDM(
         sequences=halotag,
-        mutations="A10V,A20L"
+        position=14,
+        mode="charged"
     )
 
     # Test Fuse - combine chain sequences
     fused = Fuse(
-        sequences=halotag,
-        chains="A",
-        linker="GSGSGS"
-    )
-
-    # Test StitchSequences - combine sequences from different sources
-    stitched = StitchSequences(
-        sequences=[lmpnn, sdm],
-        mode="concatenate"
-    )
-
-    print("=== Sequence Design Test Summary ===")
-    print(f"LigandMPNN sequences: {len(lmpnn.sequences.ids)}")
-    print(f"MutationComposer sequences: {len(mutations.sequences.ids)}")
-    print(f"SDM sequences: {len(sdm.sequences.ids)}")
+        proteins=[halotag,halotag],
+        name="HTdimer",
+        linker_lengths=["4-5"]
+)
