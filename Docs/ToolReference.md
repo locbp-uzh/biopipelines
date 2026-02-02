@@ -1,74 +1,90 @@
 # BioPipelines Tool Reference
 
-This document contains the complete, verified tool reference with all parameters, default environments, and output specifications.
+Complete tool reference organized by category.
 
-## Index
+---
 
-### [Structure Generation](Tool/StructureGeneration.md)
+## [Utilities](Tool/Utilities.md)
 
-Tools for generating novel protein backbone structures and binders.
+Input entities and utility tools.
 
-- [RFdiffusion](Tool/StructureGeneration.md#rfdiffusion) - Diffusion-based backbone generation
-- [RFdiffusionAllAtom](Tool/StructureGeneration.md#rfdiffusionallatom) - All-atom diffusion with ligand modeling
-- [RFdiffusion3](Tool/StructureGeneration.md#rfdiffusion3) - Third-generation atomic-level design
-- [BoltzGen](Tool/StructureGeneration.md#boltzgen) - End-to-end binder design pipeline
+**Entity Types** (from `PipelineScripts.entities`):
+- [PDB](Tool/Utilities.md#pdb) - Fetch protein structures
+- [Sequence](Tool/Utilities.md#sequence) - Create sequences from strings
+- [Ligand](Tool/Utilities.md#ligand) - Fetch small molecules
+- [CompoundLibrary](Tool/Utilities.md#compoundlibrary) - Create compound collections
 
-### [Sequence Design](Tool/SequenceDesign.md)
+**Loading & MSA**:
+- [LoadOutput / LoadOutputs](Tool/Utilities.md#loadoutput) - Load previous outputs
+- [MMseqs2](Tool/Utilities.md#mmseqs2) - MSA generation
 
-Tools for designing and manipulating protein sequences.
+**Visualization**:
+- [PyMOL](Tool/Utilities.md#pymol) - Session creation
+- [Plot](Tool/Utilities.md#plot) - Publication-ready plots
 
-- [ProteinMPNN](Tool/SequenceDesign.md#proteinmpnn) - GNN-based sequence design for backbones
-- [LigandMPNN](Tool/SequenceDesign.md#ligandmpnn) - Sequence design optimized for ligand binding
-- [MutationComposer](Tool/SequenceDesign.md#mutationcomposer) - Combinatorial mutant generation
-- [SDM (SiteDirectedMutagenesis)](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic amino acid substitutions
-- [Fuse](Tool/SequenceDesign.md#fuse) - Fusion protein creation with linkers
-- [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Cartesian product sequence combinations
-- [SplitChains](Tool/SequenceDesign.md#splitchains) - Split concatenated sequences into chains
-- [DNAEncoder](Tool/SequenceDesign.md#dnaencoder) - Codon-optimized reverse translation
+---
 
-### [Structure Prediction](Tool/StructurePrediction.md)
+## [Structure Generation](Tool/StructureGeneration.md)
 
-Tools for predicting protein and complex structures.
+Generate novel protein structures.
 
-- [AlphaFold](Tool/StructurePrediction.md#alphafold) - AlphaFold2 structure prediction
-- [ESMFold](Tool/StructurePrediction.md#esmfold) - Fast single-sequence prediction (under development)
+- [RFdiffusion](Tool/StructureGeneration.md#rfdiffusion) - Backbone generation
+- [RFdiffusionAllAtom](Tool/StructureGeneration.md#rfdiffusionallatom) - All-atom with ligands
+- [RFdiffusion3](Tool/StructureGeneration.md#rfdiffusion3) - Third-generation design
+- [BoltzGen](Tool/StructureGeneration.md#boltzgen) - End-to-end binder design
+
+---
+
+## [Sequence Design](Tool/SequenceDesign.md)
+
+Design and manipulate sequences.
+
+- [ProteinMPNN](Tool/SequenceDesign.md#proteinmpnn) - Sequence design for backbones
+- [LigandMPNN](Tool/SequenceDesign.md#ligandmpnn) - Ligand-aware sequence design
+- [MutationComposer](Tool/SequenceDesign.md#mutationcomposer) - Combinatorial mutants
+- [SDM](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic substitutions
+- [Fuse](Tool/SequenceDesign.md#fuse) - Fusion proteins with linkers
+- [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Sequence combinations
+- [SplitChains](Tool/SequenceDesign.md#splitchains) - Split concatenated sequences
+- [DNAEncoder](Tool/SequenceDesign.md#dnaencoder) - Codon optimization
+
+---
+
+## [Structure Prediction](Tool/StructurePrediction.md)
+
+Predict protein and complex structures.
+
+- [AlphaFold](Tool/StructurePrediction.md#alphafold) - AlphaFold2 prediction
 - [Boltz2](Tool/StructurePrediction.md#boltz2) - Biomolecular complex prediction
-- [OnionNet2](Tool/StructurePrediction.md#onionnet2) - Improved affinity prediction (under development)
 
-### [Analysis](Tool/Analysis.md)
+---
 
-Tools for analyzing structures, interactions, and mutations.
+## [Analysis](Tool/Analysis.md)
 
-- [DynamicBind](Tool/Analysis.md#dynamicbind) - Ligand-specific conformations (under development)
+Analyze structures and interactions.
+
 - [ResidueAtomDistance](Tool/Analysis.md#residueatomdistance) - Distance measurements
-- [PLIP (Protein-Ligand Interaction Profiler)](Tool/Analysis.md#plip-protein-ligand-interaction-profiler) - Interaction analysis (under development)
-- [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based residue selection
-- [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural change quantification
-- [MutationProfiler](Tool/Analysis.md#mutationprofiler) - Mutation pattern analysis
-- [SequenceMetricCorrelation](Tool/Analysis.md#sequencemetriccorrelation) - Mutation-metric correlations
-- [BayesianAdjuster](Tool/Analysis.md#bayesianadjuster) - Correlation-based frequency adjustment
-- [SequenceMetricAnalysis](Tool/Analysis.md#sequencemetricanalysis) - Multi-metric mutation analysis
+- [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
+- [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
+- [MutationProfiler](Tool/Analysis.md#mutationprofiler) - Mutation patterns
 - [ProteinLigandContacts](Tool/Analysis.md#proteinligandcontacts) - Contact analysis
 - [PoseDistance](Tool/Analysis.md#posedistance) - Ligand pose comparison
 
-### [Data Management](Tool/DataManagement.md)
+---
 
-Tools for filtering, ranking, and manipulating data tables.
+## [Data Management](Tool/DataManagement.md)
 
-- [Panda](Tool/DataManagement.md#panda) - Unified pandas-style table transformations (filter, sort, merge, concat, rank, etc.)
-- [RemoveDuplicates](Tool/DataManagement.md#removeduplicates) - Deduplication
-- [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric aggregation
-- [SelectionEditor](Tool/Analysis.md#selectioneditor) - Selection string manipulation
+Filter, transform, and manipulate tables.
 
-### [Utilities](Tool/Utilities.md)
+- [Panda](Tool/DataManagement.md#panda) - Unified table transformations (filter, sort, merge, concat, rank)
+- [RemoveDuplicates](Tool/DataManagement.md#removeduplicates) - Cross-table deduplication
+- [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric extraction for Prism
+- [SelectionEditor](Tool/DataManagement.md#selectioneditor) - Selection string manipulation
 
-Tools for loading data, fetching structures, and visualization.
-
-- [LoadOutput / LoadOutputs](Tool/Utilities.md#loadoutput--loadoutputs) - Load previous pipeline outputs
-- [MMseqs2](Tool/Utilities.md#mmseqs2) - MSA generation
-- [MMseqs2Server](Tool/Utilities.md#mmseqs2server) - Local MSA server
-- [CompoundLibrary](Tool/Utilities.md#compoundlibrary) - Chemical compound management
-- [PDB](Tool/Utilities.md#pdb) - Protein structure fetching
-- [Ligand](Tool/Utilities.md#ligand) - Small molecule fetching
-- [PyMOL](Tool/Utilities.md#pymol) - Session creation and visualization
-- [Plot](Tool/Utilities.md#plot) - Publication-ready plots from CSV data
+## Under development
+- PLIP (Protein-Ligand Interaction Profiler) - Interaction analysis 
+- DynamicBind- Ligand-specific conformations
+- SequenceMetricCorrelation - Mutation-metric correlations
+- BayesianAdjuster - Correlation-based frequency adjustment
+- SequenceMetricAnalysis - Multi-metric mutation analysis
+- ESMFold - Fast single-sequence prediction (under development)

@@ -2,383 +2,405 @@
 
 ## Index
 
-### BioPipelines
-
-- [Architecture Overview](#architecture-overview)
-  - [What is BioPipelines?](#what-is-biopipelines)
-  - [Installation](#installation)
-  - [Repository Structure](#repository-structure)
-  - [Core Concepts](#core-concepts)
-  - [Resources](#resources)
-  - [Job Submission](#job-submission)
-  - [Filesystem Structure](#filesystem-structure)
-  - [Environment Management](#environment-management)
-- [Tool I/O Reference Guide](#tool-io-reference-guide)
-  - [Overview](#overview)
-  - [Table Organization](#table-organization)
+- [What is BioPipelines?](#what-is-biopipelines)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Core Concepts](#core-concepts)
+  - [Pipeline and SLURM Runtime](#pipeline-and-slurm-runtime)
+  - [Entity Types](#entity-types)
+  - [DataStream vs Tables](#datastream-vs-tables)
+  - [Combinatorics: Bundle and Each](#combinatorics-bundle-and-each)
   - [Table Column References](#table-column-references)
+- [Resources](#resources)
+- [Job Submission](#job-submission)
+- [Data Management with Panda](#data-management-with-panda)
+- [Filesystem Structure](#filesystem-structure)
 - [Troubleshooting](#troubleshooting)
-  - [Common Issues](#common-issues)
-  - [Debug Mode](#debug-mode)
 
-## Architecture Overview
+---
 
-### What is BioPipelines?
+## What is BioPipelines?
 
 BioPipelines is a Python framework that generates bash scripts for bioinformatics workflows. It does not execute computations directly - instead, it predicts the filesystem structure and creates scripts that will be executed on SLURM clusters.
 
-### Installation
+---
 
+## Installation
 Login to your cluster via terminal or the website ([S3IT Apps](https://apps.s3it.uzh.ch) > Clusters > Shell access). In your home directory, clone the biopipelines repository:
 ```bash
 git clone https://gitlab.uzh.ch/locbp/public/biopipelines
 ```
 
-### Repository Structure
+---
 
-The repository is organized as follows:
-
-```
-/biopipelines/
-├── Docs/                       # Markdown files with usage information
-│   ├── UserManual.md           # General biopipelines manual
-│   ├── ToolReference.md        # Reference for installation, input, and expected output from each tool
-├── Environments/               # Definition of most important and hard-to-replicate conda environments 
-├── ExamplePipelines/           # Usage cases
-├── HelpScripts/                # Scripts that run at slurm runtime.
-│   ├── pipe_<tool&function>.py # Generic pipe scripts. 
-├── Ligands/                    # Folder for ligand structural files. The tool Ligand will download here.
-├── MyPipelines/                # Folder for user-written pipelines.
-├── PDBs/                       # Folder for protein structural files. The tool PDB will download here.
-├── PipelineScripts/            # Scripts that run at pipeline runtime, thus generating and coordinating other scripts.
-│   ├── pipeline.py             # Contains fundamental elements like Pipeline, Resources, ...
-│   ├── base_config.py          # Base class for tools and tool outputs.
-│   ├── <tool>.py               # Definition and declaration of a tool.
-│   ├── ...                     # Other utilities like folders.py, config_manager.py, ...
-├── config.yaml                 # Here the user can choose which environments to use and define where the models are.
-├── [re]submit                  # Bash scripts for [re]submission of pipeline scripts
-
-```
-
-### Core Concepts
-
-**Pipeline**: The main coordinator that orchestrates tools, manages the folder structure, and switches environments. Pipelines can be used with context manager syntax (preferred) or traditional syntax. Both generate a unique folder /shares/*USER*/MyProject/JobName_*NNN* where all the output will be. **WARNING**: Don't include blank spaces in the project and job names.
+## Quick Start
 
 ```python
-# Context manager syntax (preferred)
 from PipelineScripts.pipeline import *
+from PipelineScripts.entities import *
+from PipelineScripts.boltz2 import Boltz2
 
 with Pipeline("MyProject", "JobName", "Description"):
-    Resources(gpu="V100", time="24:00:00", memory="16GB")
-    tool1 = Tool1(param1=value1,
-                  param2=value2)
-    tool2 = Tool2(input=tool1)
-# Auto generates SLURM script on exit
+    Resources(gpu="A100", time="4:00:00", memory="16GB")
 
-# Traditional syntax (equivalent, also supported)
-from PipelineScripts.pipeline import Pipeline
+    # Fetch a protein structure
+    protein = PDB("4ufc", ids="LYZ")
 
-pipeline = Pipeline("MyProject", "JobName", "Description")
-pipeline.resources(gpu="V100", time="24:00:00", memory="16GB")
-tool1 = pipeline.add(Tool1(param1=value1, param2=value2))
-tool2 = pipeline.add(Tool2(input=tool1))
-pipeline.slurm()
+    # Predict structure with a ligand
+    prediction = Boltz2(
+        proteins=protein,
+        ligands=Ligand("ATP")
+    )
+
+    print(prediction)
 ```
 
-**Tools**: Individual bioinformatics operations like running models (RFdiffusion, LigandMPNN, Boltz2, ...) or analyzing results (Panda, ...) that generate bash scripts and predict their outputs. Tools return an object containing predictions of the filesystem after SLURM execution. The prediction can be used as input in subsequent tools. One can access the prediction with the default `print(<prediction>)` method.
+---
+
+## Core Concepts
+
+### Pipeline and SLURM Runtime
+
+BioPipelines operates in two phases:
+
+| Phase | What Happens | Executer | Where |
+|-------|--------------|-------|-------|
+| **Pipeline time** | Generation of bash scripts, prediction of output paths and files | Python | Cluster |
+| **SLURM time** | Bash scripts execute, files are created | Slurm | Cluster |
+
+Tools predict their outputs before execution. These predictions enable chaining:
 
 ```python
-from PipelineScripts.pipeline import *
-from PipelineScripts.rfdiffusion import RFdiffusion
-with Pipeline("TestProject","Test","Some test"):
-  rfd = RFdiffusion(contigs="50-100", num_designs=5)
-  print(rfd)
-"""
-structures:
-    – '<output_folder>/Test_1.pdb'
-    – ...
-    – '<output_folder>/Test_5.pdb'
-structure_ids:
-    – Test_1
-    – ...
-    – Test_5
-tables:
-    $structures (id, source_id, pdb, fixed, designed, contigs, time, status):
-        – '<output_folder>/rfdiffusion_results.csv'
-output_folder:
-    – 'path/to/001_RFdiffusion'
-main:
-    – '<output_folder>/rfdiffusion_results.csv'
-#Aliases
-structures=pdbs
-"""
-```
-The predicted output can then be used by other tools as input, thus enabling further prediction prior to the actual generation of the files:
-```python
-from PipelineScripts.pipeline import *
-from PipelineScripts.rfdiffusion import RFdiffusion
-from PipelineScripts.protein_mpnn import ProteinMPNN
-with Pipeline("TestProject","Test","Some test"):
-  rfd = RFdiffusion(contigs="50-100", num_designs=5)
-  pmd = ProteinMPNN(structures=rfd,num_sequences=2)
-  print(pmd)
-"""
-sequences:
-    – '<output_folder>/Test_queries.csv'
-sequence_ids:
-    – Test_1_1
-    – Test_1_2
-    – ...
-    – Test_5_1
-    – Test_5_2
-tables:
-    $sequences (id, source_id, source_pdb, sequence, score, seq_recovery, rmsd):
-        – '<output_folder>/Test_queries.csv'
-output_folder:
-    – 'path/to/002_ProteinMPNN'
-fa_files:
-    – '<output_folder>/seqs/Test_sequences.fa'
-main:
-    – '<output_folder>/proteinmpnn_results.csv'
-queries_fasta:
-    – '<output_folder>/Test_queries.fasta'
-seqs_folder:
-    – '<output_folder>/seqs'
-#Aliases
-sequences=queries_csv
-"""
+rfd = RFdiffusion(contigs="50-100", num_designs=5)
+# rfd.structures contains predicted paths (files don't exist yet)
+mpnn = ProteinMPNN(structures=rfd, num_sequences=2)
+# mpnn uses rfd's predicted outputs
 ```
 
-All the outputs are standardized such that the identity of the previous tool is not needed for the prediction to be used as input, and in general tools have to be developed agnostic of previous tool identities. Furthermore, this systems allows:
+### Entity Types
 
-1. Verification of the success or failure of a given tool. At slurm runtime, after running a tool, the pipeline coordinator check for the presence of the predicted output and creates a file `<NNN>_<Tool>_COMPLETED` or `<NNN>_<Tool>_FAILED`. One can resubmit the same slurm bash script(for example, if the time ran out) and the completed steps will be skipped.
-2. Standardized saving and loading of tool outputs. All the predictions are saved in the folder `ToolOutputs` within the job folder, and can be loaded with `LoadOutput` (single file) or `LoadOutputs` (multiple files). In the following example, rfd behaves identically to the one in the previous snippet:
-```python
-from PipelineScripts.pipeline import *
-from PipelineScripts.load_output import LoadOutput, LoadOutputs
-from PipelineScripts.protein_mpnn import ProteinMPNN
+Basic input types can be imported conveniently from `PipelineScripts/entities.py`:
 
-with Pipeline("TestProject","Test","Some test"):
-  # Load single output
-  rfd = LoadOutput('/path/to/ToolOutputs/001_RFdiffusion.json')
-  pmd = ProteinMPNN(structures=rfd, num_sequences=2)
+| Entity | Purpose |
+|--------|---------|
+| `PDB` | Fetch protein structures |
+| `Sequence` | Defines proteins and polynucleotides from strings |
+| `Ligand` | Fetch small molecules |
+| `CompoundLibrary` | Create compound collections |
 
-  # Or load multiple outputs at once
-  # You can use suffix, in_suffix, not_in_suffix for more control
-  all_merge_tables = LoadOutputs('/path/to/job/' or '/path/to/ToolOutputs', tool="MergeTables")
-```
-
-### Resources
-
-Resources are set before using tools as follows:
+**PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/PDBs/` → RCSB download.
 
 ```python
-with Pipeline("Project", "Job", "Description"):
-    Resources(gpu="A100", memory="32GB", time="24:00:00")              # Specific model
-    Resources(gpu="32GB|80GB|96GB", memory="32GB", time="24:00:00")   # V100, A100, H100, or H200
-    Resources(memory="128GB", time="24:00:00", cpus=32)                # CPU-only
+# Simple fetch
+protein = PDB("4ufc")
+
+# Multiple with custom IDs
+proteins = PDB(["4ufc", "1aki"], ids=["POI1", "POI2"])
+
+# From folder
+proteins = PDB("/path/to/structures")
 ```
 
-**GPU parameter options:**
-- `"T4"`, `"L4"`, `"V100"`, `"A100"`, `"H100"`, `"H200"` - Specific GPU models
-- `"24GB"`, `"32GB"`, `"80GB"`, `"96GB"`, `"32GB|80GB|96GB"` - Memory-based selection
-- `"gpu"` or `"any"` - Any available GPU
-- `"high-memory"` - Equivalent to `"32GB|80GB|96GB"`
-- Omit parameter for CPU-only jobs
-
-### Job submission
-
-Login to your cluster via terminal or the website ([S3IT Apps](https://apps.s3it.uzh.ch) > Clusters > Shell access). Move to the biopipelines repository, then submit using the submit script:
-
-```bash
-cd biopipelines
-
-./submit /path/to/<pipeline.py>
-```
-
-The script will activate the biopipelines environment for proper execution of the pipeline. If not available or not up-to-date, it will install it. If installation fails due to memory errors (e.g. std::bad_alloc) you can first run a console with more memory, and then submit:
-
-```bash
-srun --mem=8G --time=1:00:00 --pty bash
-
-./submit /path/to/<pipeline.py>
-```
-
-If for any reason you want to resubmit a pipeline another time, use the resubmit script with the path to the slurm shell script:
-```bash
-cd biopipelines
-
-./resubmit /shares/<group>/<user>/BioPipelines/<project>/<job>/RunTime/slurm.sh
-```
-
-Alternatively, running the pipeline script with python will result in the following output:
-```bash
-"""
-==============================Job============================== # Suggested job name
-Pipeline: Test (002)
-==============================Slurm Script============================== # Slurm script for manual submission
-#!/usr/bin/bash
-#SBATCH --mem=16GB
-#SBATCH --time=24:00:00
-#SBATCH --output=job.out
-#SBATCH --begin=now+0hour
-# Make all files group-writable by default
-umask 002
-module load mamba singularityce
-# Execute pipeline
-path/to/RunTime/pipeline.sh    # Do not run this: it is part of the slurm script, it will most likely fail from console unless you have sufficient resources (e.g. GPU)
-==============================SBATCH============================== # Simple submission using sbatch command
-sbatch --job-name=Test --output path/to/RunTime/slurm.out path/to/RunTime/slurm.sh
-"""
-```
-
-**Multiple job submission**
-When submitting jobs with `./submit /path/to/<pipeline.py>`, all pipelines created within the script will be submitted. For example, one can test the influence of a given parameter on the pipeline as follows:
+**Sequence** - Creates sequences with auto-detection (protein/DNA/RNA):
 
 ```python
-#MyPipelines/beta_test.py
-#imports
-for beta in [0, 1, 10, 100]:
-  with Pipeline("Diffusion",
-                f"Rhodamine_Beta{beta}",
-                f"Run diffusion simulation with beta value {beta}"):
-      #tools
-```
-Running `./submit MyPipelines/beta_test.py` will then result in the submission of four jobs, *Rhodamine_Beta0*, *Rhodamine_Beta1*, *Rhodamine_Beta10*, *Rhodamine_Beta100*.
+# Single sequence
+seq = Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ", ids="my_protein")
 
-**External dependencies**
-Use `Dependencies()` to make a pipeline wait for other SLURM jobs to complete before starting:
+# Multiple sequences
+seqs = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
+```
+
+**Ligand** - Fetches from RCSB (CCD codes) or PubChem (names, CID, CAS):
 
 ```python
-with Pipeline("Project", "Job", "Description"):
-    Dependencies("12345678")                    # Single job ID
-    Dependencies(["12345678", "12345679"])      # Multiple job IDs
-    Resources(gpu="V100", time="4:00:00")
-    tool1 = RFdiffusion(...)
+# RCSB by CCD code
+atp = Ligand("ATP")
+
+# PubChem by name
+aspirin = Ligand("aspirin", codes="ASP")
+
+# Direct SMILES
+ethanol = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
 ```
 
-**Batch dependencies**
-Calling `Resources()` multiple times within a pipeline creates sequential batches with automatic dependency management. Each batch waits for the previous one to complete successfully before starting:
+**CompoundLibrary** - Creates compound collections:
 
 ```python
-with Pipeline("Project", "Job", "Description"):
-    Resources(gpu="V100", time="4:00:00")    # Batch 1: GPU tools
-    tool1 = RFdiffusion(...)
-    tool2 = ProteinMPNN(...)
+# Simple dictionary (no expansion)
+library = CompoundLibrary({
+    "aspirin": "CC(=O)OC1=CC=CC=C1C(=O)O",
+    "caffeine": "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"
+})
 
-    Resources(time="2:00:00")                # Batch 2: CPU-only analysis (waits for Batch 1)
-    tool3 = Panda(...)
-```
-
-The `./submit` script automatically chains batch jobs using `--dependency=afterok:<jobid>`, ensuring proper execution order and resource optimization.
-
-### Filesystem Structure
-
-After the execution, the filesystem will look somewhat like this:
-
-```
-/shares/<user>/BioPipelines/<project>/<job>_<NNN>/
-├── RunTime/                    # Execution scripts only
-│   ├── pipeline.sh             # Main orchestration script
-│   ├── 001_<tool 1>.sh         # Tool-specific script
-│   └── 002_<tool 2>.sh
-│   ├── ...
-├── Logs/                       # Execution logs
-│   ├── 001_<tool 1>.log
-│   └── 002_<tool 2>.log
-│   ├── ...
-├── ToolOutputs/                # Tool output predictions
-│   ├── 001_<tool 1>.json
-│   └── 002_<tool 2>.json
-│   ├── ...
-├── 001_<Tool 1>/               # Tool outputs only
-│   ├── <Some temporary folder>
-│   ├── structure_1.pdb
-│   ├── structure_2.pdb
-│   ├── ...
-│   └── <results>.csv
-├── 002_LigandMPNN/
-│   ├── <Some temporary folder>
-│   ├── <sequence queries>.csv
-│   └── <sequence queries>.fasta
-│   ├── ...
-```
-
-Base folder paths (like `/shares/<group>`, tool data folders, etc.) are configured in `config.yaml` at the repository root. Edit this file to match your cluster's filesystem layout.
-
-### Environment Management
-
-Most tools require a conda environment to run. Default environments are defined in `config.yaml` at the repository root. To change default environments edit the `environments` section in `config.yaml`. Overriding a specific tool in a given pipeline is not recommended, but can be done using the `env` parameter in `pipeline.add(...)`:
-
-```python
-# Use default environment from config.yaml
-tool1 =Tool1(...)
-# Override with custom environment
-tool2 = pipeline.add(Tool2(...), env="CustomEnv") #pipeline must be defined
-```
-
-Edit `config.yaml` in the repository root to change which conda environment each tool uses by default. Tools with `null` environments don't require conda activation.
-
-## Tool I/O Reference Guide
-
-### Overview
-All tools return outputs through a unified `StandardizedOutput` object with general structure:
-```python
-structures        # List[str] - File paths e.g. /path/to/structure_1.pdb, ...
-structure_ids     # List[str] - Structure identifiers e.g. structure_1, ...
-compounds         # [str]     - Path to csv file with columns id, format, smiles, ccd
-compound_ids      # List[str] - Compound identifiers
-sequences         # [str]     - Path to csv file with columns id, sequence, ...
-sequence_ids      # List[str] - Sequence identifiers
-msas              # [str]     - Path to csv file with columns id, sequence, msa, ...
-msa_ids           # List[str] - MSA identifiers
-tables            # List[DI]  – Contains objects of class TableInfo
-tool_folder       # [str]     – Path to output directory
-```
-
-### Table Organization
-Table names are tool-dependent. Accessing a table with dot notation will return the path to the csv file. For accessing the metadata, use the info function.
-
-```python
-# Simple path
-path = <tool output>.tables.analysis  # path/to/analysis.csv
-
-# Rich metadata access
-info = <tool output>.tables.info("analysis")
-print(info.path)         # path/to/analysis.csv
-print(info.columns)      # ["id", ...]
-print(info.description)  # "Results from ..."
-print(info.count)        # Number of entries
-```
-
-### Table Column References
-Tools can explicitly reference specific columns from upstream tables using dot notation <tool output>.tables.<table name>.<column name>, which returns the tuple (TableInfo,str). 
-
-```python
-lmpnn = LigandMPNN(
-    structures=rfdaa, #output from RFdiffusionAllAtom
-    ligand='LIG',
-    redesigned=rfdaa.tables.structures.designed     #structures has columns id, fixed, designed, ... 
+# With expansion using <key> placeholders
+library = CompoundLibrary(
+    library={
+        "scaffold": "<aryl><amide>",
+        "aryl": ["C1(=CC(F)=CC=C1)", "C1(=CC(O)=CC=C1)"],
+        "amide": ["C(=O)N","C(=O)NC","C(=O)NCC(F)(F)F"]
+    },
+    primary_key="scaffold"
 )
 ```
 
-## Troubleshooting
+### DataStream vs Tables
 
-### Common Issues
+Tools output two types of data containers:
 
-**Path errors**: Ensure running from BioPipelines root directory.
-
-**Environment issues**: Check conda environment availability and tool compatibility.
-
-**Resource limits**: Adjust GPU/memory requirements in `pipeline.resources()`.
-
-**Missing files**: Check logs in `Logs/<NNN>_<tool>.log` files.
-
-
-### Debug Mode
-
-You can test the filesystem prediction locally by instantiating the pipeline object with the debug flag set as True:
+**DataStream** - Unified container supporting IDs and associated files:
 
 ```python
-pipeline = Pipeline(..., debug=True)
+# Access structures from a tool
+for struct_id, pdb_path in boltz.structures:
+    print(f"{struct_id}: {pdb_path}")
+
+# Count items
+print(f"Generated {len(boltz.structures)} structures")
+
+# Filter by IDs
+filtered = boltz.structures.filter_by_ids(["id1", "id3"])
+```
+
+DataStream types:
+- `structures` - PDB/CIF files
+- `sequences` - FASTA files or CSV with sequence column
+- `compounds` - SDF files or CSV with SMILES column
+- `msas` - A3M or CSV files
+
+**Tables (TableInfo)** - Rich metadata about CSV files:
+
+```python
+# Access table path
+path = tool.tables.confidence  # Returns path string
+
+# Access table metadata
+info = tool.tables.info("confidence")
+print(info.path)        # /path/to/confidence.csv
+print(info.columns)     # ["id", ""pTM", "complex_plddt", ...]
+print(info.description) # "Confidence scores"
+print(info.count)       # Number of rows
+```
+
+### Combinatorics: Bundle and Each
+
+Control how multiple inputs combine in tools like Boltz2:
+
+| Mode | Behavior | Example |
+|------|----------|---------|
+| `Each` (default) | Cartesian product | 2 proteins × 3 ligands = 6 predictions |
+| `Bundle` | Group as one entity | 2 proteins bundled + 3 ligands = 3 predictions |
+
+```python
+from PipelineScripts.combinatorics import Bundle, Each
+
+# Default: Each protein with each ligand (6 predictions)
+boltz = Boltz2(
+    proteins=Each(protein_a, protein_b),
+    ligands=ligand_library  # 3 ligands
+)
+
+# Bundle ligands: Each protein with all ligands together (2 predictions)
+boltz = Boltz2(
+    proteins=Each(protein_a, protein_b),
+    ligands=Bundle(ligand_library)
+)
+
+# Nested: Each ligand bundled with a cofactor (3 predictions per protein)
+# Affinity calculated for library ligand (first in bundle)
+boltz = Boltz2(
+    proteins=protein_a,
+    ligands=Bundle(Each(ligand_library), cofactor)
+)
+```
+
+
+### Table Column References
+
+Reference columns from upstream tables using tuple syntax:
+
+```python
+# RFdiffusion outputs a table with 'designed' column
+rfd = RFdiffusion(contigs="50-100", num_designs=5)
+
+# Pass column reference to downstream tool
+lmpnn = LigandMPNN(
+    structures=rfd,
+    ligand="LIG",
+    redesigned=rfd.tables.structures.designed  # Tuple: (TableInfo, "designed")
+)
+```
+
+Hint: if you don't remember the table or column name, you can look it up in the ToolReference.
+
+At SLURM time, the column value is resolved per-structure by ID matching.
+
+---
+
+## Resources
+
+Set compute resources before tools:
+
+```python
+with Pipeline("Project", "Job", "Description"):
+    Resources(gpu="A100", memory="32GB", time="24:00:00")    # Specific GPU
+    Resources(gpu="32GB|80GB|96GB", memory="32GB", time="24:00:00")  # Memory-based
+    Resources(memory="128GB", time="24:00:00", cpus=32)      # CPU-only
+```
+
+GPU options: `"T4"`, `"L4"`, `"V100"`, `"A100"`, `"H100"`, `"H200"`, `"24GB"`, `"32GB"`, `"80GB"`, `"96GB"`, `"any"`, `"high-memory"`
+
+**Batch dependencies**: Multiple `Resources()` calls create sequential batches:
+
+```python
+with Pipeline("Project", "Job", "Description"):
+    Resources(gpu="V100", time="4:00:00")    # Batch 1
+    tool1 = RFdiffusion(...)
+
+    Resources(time="2:00:00")                # Batch 2 (waits for Batch 1)
+    tool2 = Panda(...)
+```
+
+---
+
+## Job Submission
+
+```bash
+cd biopipelines
+./submit /path/to/pipeline.py
+```
+
+For memory errors during submission (This usually happens during first submission as the environment biopipelines is created):
+
+```bash
+srun --mem=8G --time=1:00:00 --pty bash
+./submit /path/to/pipeline.py
+```
+
+Resubmit existing job:
+
+```bash
+./resubmit /path/to/job/RunTime/slurm.sh
+```
+
+**External dependencies** - Wait for other SLURM jobs:
+
+```python
+with Pipeline("Project", "Job", "Description"):
+    Dependencies("12345678")  # Wait for job ID. Also accepts lists
+    Resources(gpu="V100", time="4:00:00")
+    ...
+```
+
+---
+
+## Data Management with Panda
+
+Panda provides pandas-style table transformations:
+
+```python
+from PipelineScripts.panda import Panda
+
+# Filter rows
+filtered = Panda(
+    table=boltz.tables.confidence,
+    operations=[Panda.filter("pLDDT > 80")]
+)
+
+# Sort and take top N
+best = Panda(
+    table=boltz.tables.confidence,
+    operations=[
+        Panda.sort("confidence_score", ascending=False),
+        Panda.head(5)
+    ]
+)
+
+# Merge tables horizontally
+merged = Panda(
+    tables=[apo.tables.affinity, holo.tables.affinity],
+    operations=[
+        Panda.merge(on="id", prefixes=["apo_", "holo_"]),
+        Panda.calculate({"delta": "holo_affinity - apo_affinity"})
+    ]
+)
+
+# Concatenate tables vertically
+combined = Panda(
+    tables=[cycle0.tables.results, cycle1.tables.results],
+    operations=[Panda.concat(fill="", add_source=True)]
+)
+
+# Pool mode: copy structures matching filtered IDs
+filtered_with_files = Panda(
+    table=boltz.tables.confidence,
+    operations=[Panda.filter("pLDDT > 80")],
+    pool=boltz  # Copy matching structures
+)
+
+# Rename output IDs after sorting
+ranked = Panda(
+    table=boltz.tables.confidence,
+    operations=[Panda.sort("score", ascending=False)],
+    rename="best",  # Output: best_1, best_2, ...
+    pool=boltz
+)
+```
+
+Available operations: `filter`, `sort`, `head`, `tail`, `sample`, `rank`, `drop_duplicates`, `merge`, `concat`, `calculate`, `groupby`, `select_columns`, `drop_columns`, `rename`, `fillna`, `pivot`, `melt`, `average_by_source`
+
+---
+
+## Filesystem Structure
+
+```
+/shares/<user>/BioPipelines/<project>/<job>_<NNN>/
+├── RunTime/                    # Execution scripts
+│   ├── pipeline.sh
+│   ├── 001_<tool>.sh
+│   └── 002_<tool>.sh
+├── Logs/                       # Execution logs
+│   ├── 001_<tool>.log
+│   └── 002_<tool>.log
+├── ToolOutputs/                # Tool output predictions (JSON)
+│   ├── 001_<tool>.json
+│   └── 002_<tool>.json
+├── 001_<Tool>/                 # Tool outputs
+│   ├── structures/
+│   └── results.csv
+└── 002_<Tool>/
+    └── ...
+```
+
+Configure paths and environments in `config.yaml` at repository root.
+
+---
+
+## Troubleshooting
+
+**Path errors**: Run from BioPipelines root directory.
+
+**Environment issues**: Check conda environments in `config.yaml`.
+
+**Resource limits**: Adjust GPU/memory in `Resources()`.
+
+**Missing files**: Check `Logs/<NNN>_<tool>.log`.
+
+**Debug mode**: Test locally without SLURM:
+
+```python
+with Pipeline("Test", "Debug", "Testing", debug=True):
+    ...
+```
+
+**Load previous outputs**:
+
+```python
+from PipelineScripts.load_output import LoadOutput, LoadOutputs
+
+# Single output
+prev = LoadOutput("/path/to/ToolOutputs/001_Boltz2.json")
+
+# Multiple outputs by tool name
+all_boltz = LoadOutputs("/path/to/job/", tool="Boltz2")
 ```
