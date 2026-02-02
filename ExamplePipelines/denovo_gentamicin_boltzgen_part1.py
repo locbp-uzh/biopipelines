@@ -13,7 +13,7 @@ from PipelineScripts.boltzgen import BoltzGen
 
 #We run in parallel 10x 1000 designs -> 10 000 designs. Recommended is 10 to 20 thousands.
 for _ in range(10):
-    with Pipeline(project="DeNovo-Gentamicin-Sensor",
+    with Pipeline(project="Examples",
                 job="Gentamicin_BoltzGen_1000designs",
                 description="BoltzGen-based de novo protein binder design against gentamicin - analysis and filtering"):
         # GPU-heavy steps: design through affinity

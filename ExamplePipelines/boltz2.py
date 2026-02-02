@@ -11,7 +11,7 @@ from PipelineScripts.entities import *
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.mmseqs2 import MMseqs2
 
-with Pipeline(project="RefactorTest",
+with Pipeline(project="Examples",
               job="Boltz2",
               description="Test Boltz2 with various inputs"):
 

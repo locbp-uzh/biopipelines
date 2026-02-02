@@ -10,7 +10,7 @@ from PipelineScripts.pipeline import *
 from PipelineScripts.load_output import LoadOutput
 from PipelineScripts.boltzgen import BoltzGenMerge, BoltzGen
 
-with Pipeline(project="DeNovo-Gentamicin-Sensor",
+with Pipeline(project="Examples",
             job="Gentamicin_BoltzGen_10x1000designs_Filtering",
             description="BoltzGen-based de novo protein binder design against gentamicin - analysis and filtering"):   
     Dependencies([str(n) for n in range(517802,517812)])
@@ -18,7 +18,7 @@ with Pipeline(project="DeNovo-Gentamicin-Sensor",
     # Load results from 10 parallel batches
     boltzgens=[]
     for i in range(1,11):
-        jsonpath=f"/shares/locbp.chem.uzh/gquarg/BioPipelines/DeNovo-Gentamicin-Sensor/Gentamicin_BoltzGen_1000designs_{i:03d}/ToolOutputs/002_BoltzGen.json"
+        jsonpath=f"/shares/locbp.chem.uzh/$USER/BioPipelines/Examples/Gentamicin_BoltzGen_1000designs_{i:03d}/ToolOutputs/002_BoltzGen.json"
         boltzgens.append(LoadOutput(jsonpath,validate_files=False))
     # Run analysis
     analyzed = [BoltzGen(reuse=bg1000,

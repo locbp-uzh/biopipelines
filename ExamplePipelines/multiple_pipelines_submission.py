@@ -23,7 +23,7 @@ Cy5s = {
 }
 
 for cy5 in Cy5s.keys():
-    with Pipeline(project="Boltz",
+    with Pipeline(project="Examples",
                   job=f"HT_{cy5}",
                   description="Folding of HaloTag7 with Cy5 methyl amide, several enantiomers"):
         Resources(gpu="any",
