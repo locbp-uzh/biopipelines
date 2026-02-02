@@ -9,6 +9,8 @@ Key differences from standard MMseqs2:
 - Searches both UniRef30 and ColabFoldDB for more comprehensive MSAs
 - Outputs A3M format (native to ColabFold)
 - Requires localcolabfold installation with databases
+
+sbatch --mem=8GB --time=7-00:00:00 --wrap='export PATH="/home/gquarg/data/mmseqs/bin:$PATH" && GPU=1 /home/gquarg/setup_databases.sh /shares/locbp.chem.uzh/models/colabfold_databases'
 """
 
 import os
@@ -291,7 +293,7 @@ class MMseqs2ServerLCF(BaseConfig):
 
     ARCHITECTURE NOTE: MMseqs2ServerLCF is an exception to the standard BioPipelines pattern.
     Unlike other tools that generate bash scripts and call pipe_<tool>.py at SLURM runtime,
-    MMseqs2ServerLCF calls existing bash scripts from HelpScripts (mmseqs2_lcf_server_gpu.sh)
+    MMseqs2ServerLCF calls existing bash scripts from HelpScripts (_mmseqs2_lcf_server_gpu.sh)
     directly. This is necessary because MMseqs2ServerLCF manages pre-existing server
     infrastructure rather than generating new computational workflows.
     """
@@ -299,7 +301,7 @@ class MMseqs2ServerLCF(BaseConfig):
     TOOL_NAME = "MMseqs2ServerLCF"
 
     # Lazy path descriptors
-    server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_lcf_server_gpu.sh"))
+    server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "_mmseqs2_lcf_server_gpu.sh"))
     shared_server_folder = Path(lambda self: self._get_shared_server_folder())
 
     def __init__(self,

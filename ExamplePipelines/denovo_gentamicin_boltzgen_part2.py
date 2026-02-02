@@ -1,5 +1,5 @@
 """
-De novo antibiotic sensor design using BoltzGen.
+De novo antibiotic binding protein design using BoltzGen.
 """
 
 import os

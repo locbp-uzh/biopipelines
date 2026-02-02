@@ -1,5 +1,5 @@
 """
-De novo antibiotic sensor design using BoltzGen.
+De novo antibiotic binding protein design using BoltzGen.
 """
 
 import os
@@ -19,7 +19,7 @@ for _ in range(10):
         # GPU-heavy steps: design through affinity
         Resources(gpu="80GB|96GB", time="24:00:00", memory="16GB")
         designs = BoltzGen(
-            ligand=Ligand(lookup="gentamicin", ids="gentamicin", codes="LIG"),
+            ligand=Ligand(lookup="gentamicin", ids="gentamicin", codes="LIG"), # here we give a pdb in input
             binder_spec="140-180", # Preprint uses this range of lengths
             protocol="protein-small_molecule",
             num_designs=1000,

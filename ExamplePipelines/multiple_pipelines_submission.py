@@ -7,7 +7,7 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import *
 from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.pdb import PDB
+from PipelineScripts.entities import * # import PDB, Sequence, Ligand
 
 """
 when running via submit, all the sbatch commands generated in the python script will be submitted
@@ -26,9 +26,11 @@ for cy5 in Cy5s.keys():
     with Pipeline(project="Boltz",
                   job=f"HT_{cy5}",
                   description="Folding of HaloTag7 with Cy5 methyl amide, several enantiomers"):
-        Resources(gpu="V100",
+        Resources(gpu="any",
                   time="24:00:00",
                   memory="16GB")
-        HaloTag = PDB("6U32","HT")
+        HaloTag = PDB("6U32",ids="HT")
         Boltz2(proteins=HaloTag,
-        ligands=Cy5s[cy5])
+        ligands=Ligand(smiles=Cy5s[cy5])) # we never pass smiles directly
+
+        

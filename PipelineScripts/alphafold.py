@@ -26,12 +26,17 @@ class AlphaFold(BaseConfig):
     Configuration for AlphaFold2/ColabFold structure prediction.
 
     Predicts protein structures from amino acid sequences.
+
+    Example:
+        # Using Sequence tool
+        proteins = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
+        af = AlphaFold(proteins=proteins)
+
+        # Using output from another tool
+        af = AlphaFold(proteins=mpnn_output)
     """
 
     TOOL_NAME = "AlphaFold"
-
-    # Valid MSA mode options for ColabFold
-    VALID_MSA_MODES = ["mmseqs2_uniref_env", "mmseqs2_uniref", "single_sequence"]
 
     # Lazy path descriptors
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.csv"))
@@ -49,42 +54,40 @@ class AlphaFold(BaseConfig):
     alphafold_msas_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py"))
 
     def __init__(self,
-                 sequences: Union[DataStream, StandardizedOutput],
+                 proteins: Union[DataStream, StandardizedOutput],
                  num_relax: int = 0,
                  num_recycle: int = 3,
                  rand_seed: int = 0,
-                 msa_mode: Optional[str] = None,
                  **kwargs):
         """
         Initialize AlphaFold configuration.
 
         Args:
-            sequences: Input sequences as DataStream or StandardizedOutput
+            proteins: Input protein sequences as DataStream or StandardizedOutput.
+                      Use Sequence("MKTVRQ...") to create from raw sequence strings.
             num_relax: Number of best models to relax with AMBER
             num_recycle: Number of recycling iterations (default 3)
             rand_seed: Random seed for reproducible results (0 = random)
-            msa_mode: MSA generation mode - "mmseqs2_uniref_env" (default), "mmseqs2_uniref", or "single_sequence" (no MSA)
         """
         # Resolve input to DataStream
-        if isinstance(sequences, StandardizedOutput):
-            self.sequences_stream: DataStream = sequences.sequences
-        elif isinstance(sequences, DataStream):
-            self.sequences_stream = sequences
+        if isinstance(proteins, StandardizedOutput):
+            self.sequences_stream: DataStream = proteins.sequences
+        elif isinstance(proteins, DataStream):
+            self.sequences_stream = proteins
         else:
-            raise ValueError(f"sequences must be DataStream or StandardizedOutput, got {type(sequences)}")
+            raise ValueError(f"proteins must be DataStream or StandardizedOutput, got {type(proteins)}")
 
         # Store AlphaFold-specific parameters
         self.num_relax = num_relax
         self.num_recycle = num_recycle
         self.rand_seed = rand_seed
-        self.msa_mode = msa_mode
 
         super().__init__(**kwargs)
 
     def validate_params(self):
         """Validate AlphaFold-specific parameters."""
         if not self.sequences_stream or len(self.sequences_stream) == 0:
-            raise ValueError("sequences parameter is required and must not be empty")
+            raise ValueError("proteins parameter is required and must not be empty")
 
         if self.num_relax < 0:
             raise ValueError("num_relax cannot be negative")
@@ -95,9 +98,6 @@ class AlphaFold(BaseConfig):
         if self.rand_seed < 0:
             raise ValueError("rand_seed cannot be negative")
 
-        if self.msa_mode is not None and self.msa_mode not in self.VALID_MSA_MODES:
-            raise ValueError(f"msa_mode must be one of {self.VALID_MSA_MODES}, got: {self.msa_mode}")
-
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sequences."""
         self.folders = pipeline_folders
@@ -106,16 +106,13 @@ class AlphaFold(BaseConfig):
         """Get AlphaFold configuration display lines."""
         config_lines = super().get_config_display()
         config_lines.extend([
-            f"INPUT SEQUENCES: {len(self.sequences_stream)} sequences",
+            f"INPUT PROTEINS: {len(self.sequences_stream)} sequences",
             f"NUM RELAX: {self.num_relax}",
             f"NUM RECYCLE: {self.num_recycle}"
         ])
 
         if self.rand_seed > 0:
             config_lines.append(f"RAND SEED: {self.rand_seed}")
-
-        if self.msa_mode:
-            config_lines.append(f"MSA MODE: {self.msa_mode}")
 
         return config_lines
 
@@ -171,8 +168,6 @@ fi
             af_options += f" --num-recycle {self.num_recycle}"
         if self.rand_seed != 0:
             af_options += f" --random-seed {self.rand_seed}"
-        if self.msa_mode:
-            af_options += f" --msa-mode {self.msa_mode}"
 
         return f"""echo "Running AlphaFold2/ColabFold"
 echo "Options: {af_options}"
@@ -188,10 +183,7 @@ mkdir -p "{self.folding_folder}"
 
     def _generate_script_extract_best_rank(self) -> str:
         """Generate script to extract best rank structures."""
-        # MSA extraction section (only when not using single_sequence mode)
-        msa_section = ""
-        if self.msa_mode != "single_sequence":
-            msa_section = f"""
+        msa_section = f"""
 # Create MSAs subfolder
 mkdir -p "{self.msas_folder}"
 
@@ -252,12 +244,6 @@ python {self.alphafold_confidence_py} "{self.folding_folder}" "{self.output_fold
 
     def _generate_script_create_msas_table(self) -> str:
         """Generate script section to create MSAs CSV table."""
-        # Skip MSA table creation in single_sequence mode (no MSAs generated)
-        if self.msa_mode == "single_sequence":
-            return """echo "Skipping MSA table creation (single_sequence mode)"
-
-"""
-
         return f"""echo "Creating MSAs table"
 python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self.msa_csv}"
 
@@ -285,20 +271,19 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
             format="pdb"
         )
 
-        # MSA files (AlphaFold generates .a3m files, except in single_sequence mode)
+        # MSA files (AlphaFold generates .a3m files)
         msa_ids = []
         msa_files = []
-        if self.msa_mode != "single_sequence":
-            for seq_id in sequence_ids:
-                msa_file = os.path.join(self.msas_folder, f"{seq_id}.a3m")
-                msa_ids.append(seq_id)
-                msa_files.append(msa_file)
+        for seq_id in sequence_ids:
+            msa_file = os.path.join(self.msas_folder, f"{seq_id}.a3m")
+            msa_ids.append(seq_id)
+            msa_files.append(msa_file)
 
         msas = DataStream(
             name="msas",
             ids=msa_ids,
             files=msa_files,
-            map_table=self.msa_csv if self.msa_mode != "single_sequence" else "",
+            map_table=self.msa_csv,
             format="a3m"
         )
 
@@ -317,18 +302,15 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
                 columns=["id", "structure", "plddt", "max_pae", "ptm"],
                 description="AlphaFold confidence metrics extracted from best rank models",
                 count=len(sequence_ids)
-            )
-        }
-
-        # Add MSA table only if MSAs are generated
-        if self.msa_mode != "single_sequence":
-            tables["msas"] = TableInfo(
+            ),
+            "msas": TableInfo(
                 name="msas",
                 path=self.msa_csv,
                 columns=["id", "sequence_id", "sequence", "msa_file"],
                 description="MSA files for sequence recycling between predictions",
                 count=len(msa_files)
             )
+        }
 
         return {
             "structures": structures,
@@ -346,8 +328,7 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
             "af_params": {
                 "num_relax": self.num_relax,
                 "num_recycle": self.num_recycle,
-                "rand_seed": self.rand_seed,
-                "msa_mode": self.msa_mode
+                "rand_seed": self.rand_seed
             }
         })
         return base_dict

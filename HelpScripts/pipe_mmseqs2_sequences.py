@@ -124,7 +124,7 @@ def handle_server_error(server_dir):
 
         try:
             result = subprocess.run(
-                ["./submit", "ExamplePipelines/mmseqs2_server.py"],
+                ["./submit", "ExamplePipelines/_mmseqs2_server.py"],
                 cwd=repo_root,
                 capture_output=True,
                 text=True
@@ -247,7 +247,7 @@ def check_and_resubmit_server(server_dir):
             # Submit server job
             log(f"Submitting server from: {biopipelines_dir}")
             result = subprocess.run(
-                ["./submit", "ExamplePipelines/mmseqs2_server.py"],
+                ["./submit", "ExamplePipelines/_mmseqs2_server.py"],
                 cwd=biopipelines_dir,
                 capture_output=True,
                 text=True

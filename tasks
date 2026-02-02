@@ -1,5 +1,0 @@
-1. better way to separate tables (e.g. sequences) from filesystem (datastreams). 
-2. provide standardized functions for navigating tables and filesystem also at runtime
-3. Boltz3 shouldn't have a separate completion check
-4. Alphafold sequences 
-5. Boltz2 affinity is wrong
