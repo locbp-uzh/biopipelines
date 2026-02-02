@@ -14,8 +14,15 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+# Set environment for headless PyMOL before importing
+# This avoids libGL.so.1 errors on headless cluster nodes
+os.environ.setdefault('PYMOL_SYMMETRY_VIEWER', '0')
+os.environ.setdefault('DISPLAY', '')
+
 import pandas as pd
 import pymol
+pymol.pymol_argv = ['pymol', '-cq']  # -c: no GUI, -q: quiet
+pymol.finish_launching()
 from pymol import cmd
 
 
@@ -43,10 +50,7 @@ class PyMOLSessionBuilder:
         self.first_loaded_object: Optional[str] = None
 
     def setup_pymol(self):
-        """Initialize PyMOL in headless mode with standard settings."""
-        pymol.pymol_argv = ['pymol', '-c']  # -c for no GUI
-        pymol.finish_launching()
-
+        """Initialize PyMOL with standard settings (already launched at import time)."""
         # Standard visualization settings
         cmd.set("seq_view", 1)
         cmd.set("cartoon_gap_cutoff", 20)
