@@ -83,24 +83,108 @@ class PyMOLSessionBuilder:
         """
         Resolve structure reference to list of {id, path} dicts.
 
+        Note: When LoadOutput is used with validate_files=True (default), glob patterns
+        are already resolved at pipeline runtime. This method handles:
+        1. Standard: len(structures) == len(structure_ids), one file per ID
+        2. Legacy glob: structures contains glob pattern(s) - fallback for validate_files=False
+        3. Single file: one structure path with multiple IDs (expand by searching directory)
+
         Args:
             structures_ref: Serialized structure reference from config
 
         Returns:
             List of dicts with 'id' and 'path' keys
         """
+        import glob as glob_module
+
         ref_type = structures_ref.get("type", "")
         structures = structures_ref.get("structures", [])
         structure_ids = structures_ref.get("structure_ids", [])
 
         result = []
-        for i, path in enumerate(structures):
-            if i < len(structure_ids):
+
+        # Case 1: Standard format - one file per ID
+        if len(structures) == len(structure_ids) and len(structures) > 0:
+            for i, path in enumerate(structures):
                 struct_id = structure_ids[i]
+                result.append({"id": struct_id, "path": path})
+            return result
+
+        # Case 2: Legacy format - glob pattern(s) or fewer files than IDs
+        # Need to match structure_ids to actual files in the directory
+        if len(structures) > 0 and len(structure_ids) > 0:
+            # Get directory from first structure path
+            first_path = structures[0]
+
+            # Check if it's a glob pattern (contains * or ?)
+            if '*' in first_path or '?' in first_path:
+                # Expand glob pattern
+                expanded_files = sorted(glob_module.glob(first_path))
+                print(f"  Expanded glob pattern: {len(expanded_files)} files found")
+
+                # Try to match IDs to expanded files
+                for struct_id in structure_ids:
+                    matched_path = None
+                    for file_path in expanded_files:
+                        basename = os.path.splitext(os.path.basename(file_path))[0]
+                        # Match if ID is in filename or filename contains ID
+                        if struct_id in basename or basename in struct_id:
+                            matched_path = file_path
+                            break
+                        # Also try matching rank numbers (e.g., rank0001 -> rankNNNN_something)
+                        if struct_id.startswith("rank") and basename.startswith("rank"):
+                            # Extract rank number from both
+                            id_num = ''.join(filter(str.isdigit, struct_id))
+                            file_num = ''.join(filter(str.isdigit, basename.split('_')[0]))
+                            if id_num == file_num:
+                                matched_path = file_path
+                                break
+
+                    if matched_path:
+                        result.append({"id": struct_id, "path": matched_path})
+                    else:
+                        print(f"  Warning: No file found for ID '{struct_id}'")
+
             else:
-                # Extract ID from filename
-                struct_id = os.path.splitext(os.path.basename(path))[0]
-            result.append({"id": struct_id, "path": path})
+                # Not a glob - try to find files in the same directory
+                directory = os.path.dirname(first_path)
+                if os.path.isdir(directory):
+                    # List all structure files in directory
+                    extensions = ['.pdb', '.cif', '.mmcif']
+                    all_files = []
+                    for ext in extensions:
+                        all_files.extend(glob_module.glob(os.path.join(directory, f"*{ext}")))
+
+                    # Match IDs to files
+                    for struct_id in structure_ids:
+                        matched_path = None
+                        for file_path in all_files:
+                            basename = os.path.splitext(os.path.basename(file_path))[0]
+                            if struct_id in basename or basename == struct_id:
+                                matched_path = file_path
+                                break
+
+                        if matched_path:
+                            result.append({"id": struct_id, "path": matched_path})
+                        else:
+                            print(f"  Warning: No file found for ID '{struct_id}'")
+                else:
+                    # Just use what we have
+                    for i, path in enumerate(structures):
+                        if i < len(structure_ids):
+                            result.append({"id": structure_ids[i], "path": path})
+
+        # Case 3: Only structure_ids, no paths - try to infer from output_folder
+        elif len(structure_ids) > 0 and len(structures) == 0:
+            output_folder = structures_ref.get("output_folder", "")
+            if output_folder and os.path.isdir(output_folder):
+                extensions = ['.pdb', '.cif', '.mmcif']
+                for struct_id in structure_ids:
+                    for ext in extensions:
+                        potential_path = os.path.join(output_folder, f"{struct_id}{ext}")
+                        if os.path.exists(potential_path):
+                            result.append({"id": struct_id, "path": potential_path})
+                            break
 
         return result
 
@@ -492,6 +576,291 @@ class PyMOLSessionBuilder:
         except Exception as e:
             print(f"Error saving session: {e}")
 
+    def execute_orient(self, op: Dict[str, Any]):
+        """
+        Execute Orient operation - orient view to a selection.
+
+        Args:
+            op: Operation dict with selection and zoom flag
+        """
+        selection = op.get("selection", "all")
+        zoom = op.get("zoom", True)
+
+        try:
+            cmd.orient(selection)
+            if zoom:
+                cmd.zoom(selection, buffer=5)
+            print(f"Orient: Oriented view to '{selection}'")
+        except Exception as e:
+            print(f"Error orienting: {e}")
+
+    def execute_ray(self, op: Dict[str, Any]):
+        """
+        Execute Ray operation - ray trace the current view.
+
+        Args:
+            op: Operation dict with width and height
+        """
+        width = op.get("width", 1920)
+        height = op.get("height", 1080)
+
+        try:
+            cmd.ray(width, height)
+            print(f"Ray: Ray traced at {width}x{height}")
+        except Exception as e:
+            print(f"Error ray tracing: {e}")
+
+    def execute_png(self, op: Dict[str, Any]):
+        """
+        Execute PNG operation - save current view as PNG.
+
+        Args:
+            op: Operation dict with filename, dimensions, ray flag, and dpi
+        """
+        filename = op.get("filename", "render.png")
+        width = op.get("width", 1920)
+        height = op.get("height", 1080)
+        ray = op.get("ray", True)
+        dpi = op.get("dpi", 300)
+
+        # Make path absolute if relative
+        if not os.path.isabs(filename):
+            filename = os.path.join(self.output_folder, filename)
+
+        try:
+            if ray:
+                cmd.ray(width, height)
+            cmd.png(filename, width=width, height=height, dpi=dpi)
+            print(f"PNG: Saved image to {filename}")
+        except Exception as e:
+            print(f"Error saving PNG: {e}")
+
+    def execute_render(self, op: Dict[str, Any]):
+        """
+        Execute Render operation - orient, ray trace, and save PNG.
+
+        Args:
+            op: Operation dict with structures, orient_selection, dimensions, filename
+        """
+        orient_selection = op.get("orient_selection", "all")
+        width = op.get("width", 1920)
+        height = op.get("height", 1080)
+        filename = op.get("filename", "render.png")
+        dpi = op.get("dpi", 300)
+
+        # Make path absolute if relative
+        if not os.path.isabs(filename):
+            filename = os.path.join(self.output_folder, filename)
+
+        try:
+            cmd.orient(orient_selection)
+            cmd.zoom(orient_selection, buffer=5)
+            cmd.ray(width, height)
+            cmd.png(filename, width=width, height=height, dpi=dpi)
+            print(f"Render: Saved render to {filename}")
+        except Exception as e:
+            print(f"Error rendering: {e}")
+
+    def execute_render_each(self, op: Dict[str, Any]):
+        """
+        Execute RenderEach operation - render each structure individually as PNG.
+
+        For each structure:
+        1. Loads the structure
+        2. Colors protein and ligand
+        3. Orients view towards ligand
+        4. Adds title with metrics from table
+        5. Ray traces and saves PNG
+
+        Args:
+            op: Operation dict with structures, coloring options, title format, table reference
+        """
+        structures_ref = op.get("structures")
+        orient_selection = op.get("orient_selection", "hetatm")
+        color_protein = op.get("color_protein", "plddt")
+        color_ligand = op.get("color_ligand", "byatom")
+        ligand_selection = op.get("ligand_selection", "hetatm")
+        title_format = op.get("title")
+        title_table_ref = op.get("title_table")
+        width = op.get("width", 1920)
+        height = op.get("height", 1080)
+        dpi = op.get("dpi", 300)
+        background = op.get("background", "white")
+
+        if not structures_ref:
+            raise ValueError("RenderEach requires structures")
+
+        structures = self._resolve_structures(structures_ref)
+        print(f"RenderEach: Rendering {len(structures)} structures individually")
+
+        # Load title table if provided
+        title_data = None
+        if title_table_ref and title_format:
+            table_path = None
+            if isinstance(title_table_ref, dict):
+                table_path = title_table_ref.get("table_path")
+            if table_path and os.path.exists(table_path):
+                title_data = self._load_table(table_path)
+                print(f"  Loaded title table: {table_path} ({len(title_data)} rows)")
+
+        # Create renders subfolder
+        renders_folder = os.path.join(self.output_folder, "renders")
+        os.makedirs(renders_folder, exist_ok=True)
+
+        # Set background color
+        cmd.bg_color(background)
+
+        for struct in structures:
+            struct_id = struct["id"]
+            struct_path = struct["path"]
+
+            if not os.path.exists(struct_path):
+                print(f"  Skipping {struct_id}: file not found ({struct_path})")
+                continue
+
+            print(f"\n  Rendering: {struct_id}")
+
+            # Clear previous objects
+            cmd.delete("all")
+
+            # Load structure
+            try:
+                cmd.load(struct_path, struct_id)
+            except Exception as e:
+                print(f"    Error loading {struct_path}: {e}")
+                continue
+
+            # Show cartoon for protein
+            cmd.show("cartoon", f"{struct_id} and polymer")
+            cmd.hide("lines", f"{struct_id}")
+
+            # Color protein
+            if color_protein == "plddt":
+                self._apply_plddt_coloring(struct_id, "polymer")
+            else:
+                cmd.color(color_protein, f"{struct_id} and polymer")
+
+            # Show and color ligand
+            cmd.show("sticks", f"{struct_id} and {ligand_selection}")
+            if color_ligand == "byatom":
+                cmd.util.cbag(f"{struct_id} and {ligand_selection}")  # Color by atom, gray carbons
+            else:
+                cmd.color(color_ligand, f"{struct_id} and {ligand_selection}")
+
+            # Orient towards ligand/selection
+            try:
+                # First orient the whole structure
+                cmd.orient(struct_id)
+                # Then zoom to show the ligand prominently
+                if cmd.count_atoms(f"{struct_id} and {orient_selection}") > 0:
+                    cmd.zoom(f"{struct_id} and {orient_selection}", buffer=15)
+            except Exception as e:
+                print(f"    Warning: Could not orient to {orient_selection}: {e}")
+                cmd.orient(struct_id)
+
+            # Build title string
+            title_text = None
+            if title_format and title_data is not None:
+                title_text = self._build_title(struct_id, title_format, title_data)
+
+            # Add title as pseudoatom label if provided
+            if title_text:
+                self._add_title_label(title_text, width, height)
+
+            # Ray trace and save
+            output_file = os.path.join(renders_folder, f"{struct_id}.png")
+            try:
+                cmd.ray(width, height)
+                cmd.png(output_file, width=width, height=height, dpi=dpi)
+                print(f"    Saved: {output_file}")
+            except Exception as e:
+                print(f"    Error saving PNG: {e}")
+
+        print(f"\nRenderEach: Completed {len(structures)} renders")
+
+    def _apply_plddt_coloring(self, obj_name: str, selection: str = "polymer"):
+        """Apply pLDDT coloring to a selection."""
+        full_sel = f"{obj_name} and {selection}"
+        try:
+            # Color by pLDDT ranges using B-factor with hex colors
+            # Blue (high confidence >= 90)
+            cmd.color("0x126DFF", f"({full_sel}) and (b >= 90)")
+            # Cyan (70-90)
+            cmd.color("0x0ECFF1", f"({full_sel}) and (b >= 70 and b < 90)")
+            # Yellow (50-70)
+            cmd.color("0xF6ED12", f"({full_sel}) and (b >= 50 and b < 70)")
+            # Orange (low confidence < 50)
+            cmd.color("0xEE831D", f"({full_sel}) and (b < 50)")
+        except Exception as e:
+            print(f"    Warning: pLDDT coloring failed: {e}")
+
+    def _build_title(self, struct_id: str, title_format: str, title_data: pd.DataFrame) -> Optional[str]:
+        """
+        Build title string by substituting placeholders with table values.
+
+        Args:
+            struct_id: Structure ID to look up in table
+            title_format: Format string with {column_name} placeholders
+            title_data: DataFrame with 'id' column and value columns
+
+        Returns:
+            Formatted title string or None if ID not found
+        """
+        if 'id' not in title_data.columns:
+            print(f"    Warning: title table has no 'id' column")
+            return None
+
+        row = title_data[title_data['id'] == struct_id]
+        if row.empty:
+            # Try matching without extension or prefix
+            for col_id in title_data['id']:
+                if struct_id in str(col_id) or str(col_id) in struct_id:
+                    row = title_data[title_data['id'] == col_id]
+                    break
+
+        if row.empty:
+            print(f"    Warning: ID '{struct_id}' not found in title table")
+            return title_format.replace("{id}", struct_id)
+
+        # Build format dict from row
+        row_dict = row.iloc[0].to_dict()
+        row_dict['id'] = struct_id  # Ensure ID is set
+
+        try:
+            return title_format.format(**row_dict)
+        except KeyError as e:
+            print(f"    Warning: Missing key in title format: {e}")
+            return title_format
+        except Exception as e:
+            print(f"    Warning: Error formatting title: {e}")
+            return title_format
+
+    def _add_title_label(self, title_text: str, width: int, height: int):
+        """
+        Add a title label to the current view.
+
+        Uses a pseudoatom positioned at the top of the view.
+
+        Args:
+            title_text: Text to display
+            width: Image width (for positioning)
+            height: Image height (for positioning)
+        """
+        try:
+            # Create a pseudoatom for the label at a fixed position
+            # Position it at the top center of the view
+            cmd.pseudoatom("title_atom", pos=[0, 50, 0], label=title_text)
+            cmd.hide("everything", "title_atom")
+            cmd.show("label", "title_atom")
+
+            # Style the label
+            cmd.set("label_size", 24)
+            cmd.set("label_color", "black", "title_atom")
+            cmd.set("label_font_id", 7)  # Sans-serif font
+            cmd.set("label_position", [0, 0, 10])  # Offset towards camera
+        except Exception as e:
+            print(f"    Warning: Could not add title label: {e}")
+
     def execute_operation(self, op: Dict[str, Any]):
         """
         Execute a single operation.
@@ -519,6 +888,16 @@ class PyMOLSessionBuilder:
             self.execute_set(op)
         elif op_type == "save":
             self.execute_save(op)
+        elif op_type == "orient":
+            self.execute_orient(op)
+        elif op_type == "ray":
+            self.execute_ray(op)
+        elif op_type == "png":
+            self.execute_png(op)
+        elif op_type == "render":
+            self.execute_render(op)
+        elif op_type == "render_each":
+            self.execute_render_each(op)
         else:
             print(f"Unknown operation type: {op_type}")
 

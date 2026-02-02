@@ -216,6 +216,143 @@ class PyMOL(BaseConfig):
         """
         return PyMOLOperation("save", filename=filename)
 
+    @staticmethod
+    def Orient(selection: str = "all", zoom: bool = True) -> PyMOLOperation:
+        """
+        Orient the view to focus on a selection.
+
+        Args:
+            selection: PyMOL selection to orient towards (e.g., "resn LIG", "chain A")
+            zoom: Whether to also zoom to the selection
+
+        Returns:
+            PyMOLOperation for orienting
+        """
+        return PyMOLOperation("orient", selection=selection, zoom=zoom)
+
+    @staticmethod
+    def Ray(width: int = 1920, height: int = 1080) -> PyMOLOperation:
+        """
+        Ray trace the current view.
+
+        Args:
+            width: Image width in pixels
+            height: Image height in pixels
+
+        Returns:
+            PyMOLOperation for ray tracing
+        """
+        return PyMOLOperation("ray", width=width, height=height)
+
+    @staticmethod
+    def PNG(filename: str = "render.png", width: int = 1920, height: int = 1080,
+            ray: bool = True, dpi: int = 300) -> PyMOLOperation:
+        """
+        Save current view as PNG image.
+
+        Args:
+            filename: Output filename (relative to output folder, supports {id} placeholder)
+            width: Image width in pixels
+            height: Image height in pixels
+            ray: Whether to ray trace before saving
+            dpi: Image DPI
+
+        Returns:
+            PyMOLOperation for saving PNG
+        """
+        return PyMOLOperation("png", filename=filename, width=width, height=height, ray=ray, dpi=dpi)
+
+    @staticmethod
+    def Render(structures: Union[StandardizedOutput, DataStream],
+               orient_selection: str = "all",
+               width: int = 1920,
+               height: int = 1080,
+               filename: str = "render.png",
+               dpi: int = 300) -> PyMOLOperation:
+        """
+        Render a single image of loaded structures.
+
+        Orients, ray traces, and saves a PNG of the current view.
+
+        Args:
+            structures: Structures to render (must be loaded first)
+            orient_selection: Selection to orient towards (e.g., "resn LIG")
+            width: Image width in pixels
+            height: Image height in pixels
+            filename: Output filename
+            dpi: Image DPI
+
+        Returns:
+            PyMOLOperation for rendering
+        """
+        return PyMOLOperation("render", structures=structures, orient_selection=orient_selection,
+                              width=width, height=height, filename=filename, dpi=dpi)
+
+    @staticmethod
+    def RenderEach(structures: Union[StandardizedOutput, DataStream],
+                   orient_selection: str = "hetatm",
+                   color_protein: str = "plddt",
+                   color_ligand: str = "byatom",
+                   ligand_selection: str = "hetatm",
+                   title: Optional[str] = None,
+                   title_table: Optional[TableInfo] = None,
+                   width: int = 1920,
+                   height: int = 1080,
+                   dpi: int = 300,
+                   background: str = "white") -> PyMOLOperation:
+        """
+        Render each structure individually as a separate PNG.
+
+        For each structure:
+        1. Loads the structure
+        2. Colors protein (by pLDDT or specified color)
+        3. Colors ligand (by atom or specified color)
+        4. Orients view towards the ligand/selection
+        5. Adds title with optional metrics from table
+        6. Ray traces and saves PNG
+
+        Args:
+            structures: Structures to render
+            orient_selection: Selection to orient towards (default: "hetatm" for ligand)
+            color_protein: Protein coloring - "plddt" for AlphaFold coloring, or color name
+            color_ligand: Ligand coloring - "byatom" for element colors, or color name
+            ligand_selection: Selection for ligand (default: "hetatm")
+            title: Title format string with placeholders like {id}, {antibiotic},
+                   {affinity_probability_binary:.2f}, etc. Values come from title_table.
+            title_table: Table containing values for title placeholders (must have 'id' column)
+            width: Image width in pixels
+            height: Image height in pixels
+            dpi: Image DPI
+            background: Background color (default: "white")
+
+        Returns:
+            PyMOLOperation for iterative rendering
+
+        Example:
+            PyMOL.RenderEach(
+                structures=boltzgen_out,
+                orient_selection="hetatm",
+                color_protein="plddt",
+                color_ligand="byatom",
+                title="Gentamicin - Affinity: {affinity_probability_binary:.2f}",
+                title_table=boltzgen_out.tables.final_designs_metrics,
+                width=1920,
+                height=1080
+            )
+        """
+        return PyMOLOperation("render_each",
+                              structures=structures,
+                              orient_selection=orient_selection,
+                              color_protein=color_protein,
+                              color_ligand=color_ligand,
+                              ligand_selection=ligand_selection,
+                              title=title,
+                              title_table=title_table,
+                              width=width,
+                              height=height,
+                              dpi=dpi,
+                              background=background)
+
     # --- Instance methods ---
 
     def __init__(self, *args, session: str = "session", **kwargs):
@@ -250,7 +387,7 @@ class PyMOL(BaseConfig):
                 if structures is not None:
                     self._structure_sources.append(structures)
 
-            elif op.op_type in ("color", "coloraf", "show", "hide"):
+            elif op.op_type in ("color", "coloraf", "show", "hide", "render"):
                 structures = op.params.get("structures")
                 if structures is not None and structures not in self._structure_sources:
                     self._structure_sources.append(structures)
@@ -258,6 +395,15 @@ class PyMOL(BaseConfig):
                 selection = op.params.get("selection")
                 if isinstance(selection, tuple):
                     self._table_references.append(selection)
+
+            elif op.op_type == "render_each":
+                structures = op.params.get("structures")
+                if structures is not None and structures not in self._structure_sources:
+                    self._structure_sources.append(structures)
+
+                title_table = op.params.get("title_table")
+                if title_table is not None and hasattr(title_table, 'path'):
+                    self._table_references.append((title_table, None))
 
             elif op.op_type == "names":
                 basename = op.params.get("basename")
@@ -293,13 +439,22 @@ class PyMOL(BaseConfig):
         result = {"op": op.op_type}
 
         for key, value in op.params.items():
-            if isinstance(value, StandardizedOutput):
+            if value is None:
+                result[key] = None
+            elif isinstance(value, StandardizedOutput):
                 # Serialize StandardizedOutput reference
                 result[key] = {
                     "type": "standardized_output",
                     "output_folder": value.output_folder,
                     "structures": value.structures,
                     "structure_ids": value.structure_ids
+                }
+            elif isinstance(value, TableInfo):
+                # Direct TableInfo reference (for title_table in RenderEach)
+                result[key] = {
+                    "type": "table_info",
+                    "table_path": value.path,
+                    "columns": value.columns if hasattr(value, 'columns') else []
                 }
             elif isinstance(value, tuple) and len(value) == 2:
                 # Table column reference: (TableInfo, column_name)

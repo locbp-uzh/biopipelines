@@ -158,7 +158,124 @@ class LoadOutput(BaseConfig):
                 print(f"  - {missing_file}")
             if len(self.missing_files) > 5:
                 print(f"  ... and {len(self.missing_files) - 5} more")
-    
+
+    def _resolve_file_paths(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Resolve glob patterns and match IDs to actual file paths.
+
+        This handles legacy output formats where:
+        - structures/sequences/compounds contain glob patterns (e.g., "rank*.cif")
+        - The number of files doesn't match the number of IDs
+
+        Called at pipeline runtime when validate_files=True.
+
+        Args:
+            output_structure: The output structure to resolve
+
+        Returns:
+            Updated output structure with resolved file paths
+        """
+        import glob as glob_module
+
+        resolved = output_structure.copy()
+
+        for file_type, id_type in [('structures', 'structure_ids'),
+                                    ('sequences', 'sequence_ids'),
+                                    ('compounds', 'compound_ids')]:
+            if file_type not in resolved or id_type not in resolved:
+                continue
+
+            files = resolved[file_type]
+            ids = resolved[id_type]
+
+            if not files or not ids:
+                continue
+
+            # Case 1: Already matched (same length, no globs)
+            if len(files) == len(ids):
+                has_glob = any('*' in f or '?' in f for f in files if isinstance(f, str))
+                if not has_glob:
+                    continue  # Already resolved
+
+            # Case 2: Need to resolve - either glob pattern or mismatched lengths
+            print(f"LoadOutput: Resolving {file_type} paths ({len(files)} patterns -> {len(ids)} IDs)")
+
+            # Collect all potential files
+            all_files = []
+            for file_pattern in files:
+                if not isinstance(file_pattern, str):
+                    continue
+
+                if '*' in file_pattern or '?' in file_pattern:
+                    # Expand glob pattern
+                    expanded = glob_module.glob(file_pattern)
+                    all_files.extend(expanded)
+                    print(f"  Expanded glob: {len(expanded)} files")
+                elif os.path.isfile(file_pattern):
+                    all_files.append(file_pattern)
+                elif os.path.isdir(file_pattern):
+                    # Search directory for structure files
+                    extensions = ['.pdb', '.cif', '.mmcif', '.fasta', '.fa', '.csv', '.sdf', '.mol2']
+                    for ext in extensions:
+                        all_files.extend(glob_module.glob(os.path.join(file_pattern, f"*{ext}")))
+
+            # Also check output_folder if we don't have enough files
+            if len(all_files) < len(ids) and 'output_folder' in resolved:
+                output_folder = resolved['output_folder']
+                if os.path.isdir(output_folder):
+                    extensions = ['.pdb', '.cif', '.mmcif', '.fasta', '.fa', '.csv', '.sdf', '.mol2']
+                    for ext in extensions:
+                        for f in glob_module.glob(os.path.join(output_folder, f"**/*{ext}"), recursive=True):
+                            if f not in all_files:
+                                all_files.append(f)
+
+            # Match IDs to files
+            resolved_files = []
+            resolved_ids = []
+
+            for item_id in ids:
+                matched_file = None
+
+                for file_path in all_files:
+                    basename = os.path.splitext(os.path.basename(file_path))[0]
+
+                    # Direct match
+                    if basename == item_id:
+                        matched_file = file_path
+                        break
+
+                    # ID contained in filename
+                    if item_id in basename:
+                        matched_file = file_path
+                        break
+
+                    # Filename contained in ID
+                    if basename in item_id:
+                        matched_file = file_path
+                        break
+
+                    # Rank number matching (e.g., rank0001 -> rank0001_something.cif)
+                    if item_id.startswith("rank") and basename.startswith("rank"):
+                        id_num = ''.join(filter(str.isdigit, item_id))
+                        # Extract rank number from basename (before first underscore)
+                        file_rank_part = basename.split('_')[0]
+                        file_num = ''.join(filter(str.isdigit, file_rank_part))
+                        if id_num and file_num and id_num == file_num:
+                            matched_file = file_path
+                            break
+
+                if matched_file:
+                    resolved_files.append(matched_file)
+                    resolved_ids.append(item_id)
+                else:
+                    print(f"  Warning: No file found for ID '{item_id}'")
+
+            resolved[file_type] = resolved_files
+            resolved[id_type] = resolved_ids
+            print(f"  Resolved: {len(resolved_files)}/{len(ids)} {file_type}")
+
+        return resolved
+
     def _process_filter(self):
         """Process filter input to determine which IDs to keep."""
         import pandas as pd
@@ -473,6 +590,10 @@ class LoadOutput(BaseConfig):
         if 'datasheets' in output_structure and 'tables' not in output_structure:
             print(f"LoadOutput: Converting legacy 'datasheets' to 'tables' for compatibility")
             output_structure['tables'] = output_structure.pop('datasheets')
+
+        # Resolve glob patterns and match IDs to files when validate_files=True
+        if self.validate_files:
+            output_structure = self._resolve_file_paths(output_structure)
 
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:
