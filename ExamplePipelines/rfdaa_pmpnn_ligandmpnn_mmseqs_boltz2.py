@@ -60,8 +60,6 @@ with Pipeline(project="Examples",
                                 })
 
     msas = MMseqs2(sequences=sequences)
-    _boltz_apo = Boltz2(proteins=sequences,
-                        msas=msas) #MSAs are passed with <tool output>, not with <tool output>.msas
     boltz_quino = Boltz2(proteins=sequences,
                        ligands=quinolinone,
                         msas=msas) #MSAs are passed with <tool output>, not with <tool output>.msas
