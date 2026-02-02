@@ -684,6 +684,7 @@ class PyMOLSessionBuilder:
         color_protein = op.get("color_protein", "plddt")
         color_ligand = op.get("color_ligand", "byatom")
         ligand_selection = op.get("ligand_selection", "hetatm")
+        plddt_upper = op.get("plddt_upper", 1)  # Default to 1 for BoltzGen confidence
         title_format = op.get("title")
         title_table_ref = op.get("title_table")
         width = op.get("width", 1920)
@@ -740,7 +741,7 @@ class PyMOLSessionBuilder:
 
             # Color protein
             if color_protein == "plddt":
-                self._apply_plddt_coloring(struct_id, "polymer")
+                self._apply_plddt_coloring(struct_id, "polymer", upper=plddt_upper)
             else:
                 cmd.color(color_protein, f"{struct_id} and polymer")
 
@@ -762,45 +763,60 @@ class PyMOLSessionBuilder:
                 print(f"    Warning: Could not orient to {orient_selection}: {e}")
                 cmd.orient(struct_id)
 
-            # Build title string
-            title_text = None
+            # Build title info from table
+            title_info = None
             if title_format and title_data is not None:
-                title_text = self._build_title(struct_id, title_format, title_data)
+                title_info = self._get_title_info(struct_id, title_format, title_data)
 
-            # Add title as pseudoatom label if provided
-            if title_text:
-                self._add_title_label(title_text, width, height)
-
-            # Ray trace and save
+            # Ray trace and save (title will be added as overlay after ray tracing)
             output_file = os.path.join(renders_folder, f"{struct_id}.png")
             try:
                 cmd.ray(width, height)
                 cmd.png(output_file, width=width, height=height, dpi=dpi)
                 print(f"    Saved: {output_file}")
+
+                # Add title overlay to the saved PNG
+                if title_info:
+                    self._add_title_overlay(output_file, title_info, width, height)
+
             except Exception as e:
                 print(f"    Error saving PNG: {e}")
 
         print(f"\nRenderEach: Completed {len(structures)} renders")
 
-    def _apply_plddt_coloring(self, obj_name: str, selection: str = "polymer"):
-        """Apply pLDDT coloring to a selection."""
+    def _apply_plddt_coloring(self, obj_name: str, selection: str = "polymer", upper: float = 100):
+        """
+        Apply pLDDT/confidence coloring to a selection.
+
+        Args:
+            obj_name: PyMOL object name
+            selection: Selection within object (e.g., "polymer")
+            upper: Upper bound for confidence values (100 for AlphaFold pLDDT, 1 for BoltzGen)
+        """
         full_sel = f"{obj_name} and {selection}"
+
+        # Calculate thresholds based on upper value
+        t90 = upper * 0.9  # High confidence threshold
+        t70 = upper * 0.7  # Medium-high threshold
+        t50 = upper * 0.5  # Medium-low threshold
+
         try:
-            # Color by pLDDT ranges using B-factor with hex colors
-            # Blue (high confidence >= 90)
-            cmd.color("0x126DFF", f"({full_sel}) and (b >= 90)")
-            # Cyan (70-90)
-            cmd.color("0x0ECFF1", f"({full_sel}) and (b >= 70 and b < 90)")
-            # Yellow (50-70)
-            cmd.color("0xF6ED12", f"({full_sel}) and (b >= 50 and b < 70)")
-            # Orange (low confidence < 50)
-            cmd.color("0xEE831D", f"({full_sel}) and (b < 50)")
+            # Color by confidence ranges using B-factor with hex colors
+            # Blue (high confidence >= 90%)
+            cmd.color("0x126DFF", f"({full_sel}) and (b >= {t90})")
+            # Cyan (70-90%)
+            cmd.color("0x0ECFF1", f"({full_sel}) and (b >= {t70} and b < {t90})")
+            # Yellow (50-70%)
+            cmd.color("0xF6ED12", f"({full_sel}) and (b >= {t50} and b < {t70})")
+            # Orange (low confidence < 50%)
+            cmd.color("0xEE831D", f"({full_sel}) and (b < {t50})")
+            print(f"    Applied pLDDT coloring (upper={upper})")
         except Exception as e:
             print(f"    Warning: pLDDT coloring failed: {e}")
 
-    def _build_title(self, struct_id: str, title_format: str, title_data: pd.DataFrame) -> Optional[str]:
+    def _get_title_info(self, struct_id: str, title_format: str, title_data: pd.DataFrame) -> Optional[Dict[str, Any]]:
         """
-        Build title string by substituting placeholders with table values.
+        Get title information from table for a structure.
 
         Args:
             struct_id: Structure ID to look up in table
@@ -808,7 +824,7 @@ class PyMOLSessionBuilder:
             title_data: DataFrame with 'id' column and value columns
 
         Returns:
-            Formatted title string or None if ID not found
+            Dict with 'format' and 'values' for title rendering, or None
         """
         if 'id' not in title_data.columns:
             print(f"    Warning: title table has no 'id' column")
@@ -816,54 +832,129 @@ class PyMOLSessionBuilder:
 
         row = title_data[title_data['id'] == struct_id]
         if row.empty:
-            # Try matching without extension or prefix
+            # Try matching - check if struct_id contains table id or vice versa
             for col_id in title_data['id']:
-                if struct_id in str(col_id) or str(col_id) in struct_id:
+                col_id_str = str(col_id)
+                # Match rank numbers (e.g., rank0001_xxx matches rank0001)
+                if struct_id.startswith("rank") and col_id_str.startswith("rank"):
+                    struct_rank = struct_id.split('_')[0]
+                    col_rank = col_id_str.split('_')[0] if '_' in col_id_str else col_id_str
+                    if struct_rank == col_rank:
+                        row = title_data[title_data['id'] == col_id]
+                        break
+                elif struct_id in col_id_str or col_id_str in struct_id:
                     row = title_data[title_data['id'] == col_id]
                     break
 
         if row.empty:
             print(f"    Warning: ID '{struct_id}' not found in title table")
-            return title_format.replace("{id}", struct_id)
+            return {'format': title_format, 'values': {'id': struct_id}, 'struct_id': struct_id}
 
-        # Build format dict from row
-        row_dict = row.iloc[0].to_dict()
-        row_dict['id'] = struct_id  # Ensure ID is set
+        # Build values dict from row
+        values = row.iloc[0].to_dict()
+        values['id'] = struct_id  # Use actual struct_id
 
-        try:
-            return title_format.format(**row_dict)
-        except KeyError as e:
-            print(f"    Warning: Missing key in title format: {e}")
-            return title_format
-        except Exception as e:
-            print(f"    Warning: Error formatting title: {e}")
-            return title_format
+        return {'format': title_format, 'values': values, 'struct_id': struct_id}
 
-    def _add_title_label(self, title_text: str, width: int, height: int):
+    def _add_title_overlay(self, image_path: str, title_info: Dict[str, Any], width: int, height: int):
         """
-        Add a title label to the current view.
+        Add title text overlay to a rendered PNG image using PIL.
 
-        Uses a pseudoatom positioned at the top of the view.
+        Creates a multi-line title at the top of the image:
+        - Line 1: Main title (from format string, typically antibiotic name)
+        - Line 2: Structure ID
+        - Line 3: Metrics (affinity, probability, etc.)
 
         Args:
-            title_text: Text to display
-            width: Image width (for positioning)
-            height: Image height (for positioning)
+            image_path: Path to the PNG file to modify
+            title_info: Dict with 'format', 'values', 'struct_id'
+            width: Image width
+            height: Image height
         """
         try:
-            # Create a pseudoatom for the label at a fixed position
-            # Position it at the top center of the view
-            cmd.pseudoatom("title_atom", pos=[0, 50, 0], label=title_text)
-            cmd.hide("everything", "title_atom")
-            cmd.show("label", "title_atom")
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            print("    Warning: PIL not available, skipping title overlay")
+            return
 
-            # Style the label
-            cmd.set("label_size", 24)
-            cmd.set("label_color", "black", "title_atom")
-            cmd.set("label_font_id", 7)  # Sans-serif font
-            cmd.set("label_position", [0, 0, 10])  # Offset towards camera
+        try:
+            # Open the image
+            img = Image.open(image_path)
+            draw = ImageDraw.Draw(img)
+
+            # Try to get a nice font, fall back to default
+            font_size_title = max(36, width // 40)
+            font_size_id = max(28, width // 50)
+            font_size_metrics = max(24, width // 55)
+
+            try:
+                # Try common system fonts
+                for font_name in ['DejaVuSans-Bold.ttf', 'DejaVuSans.ttf', 'Arial.ttf', 'arial.ttf']:
+                    try:
+                        font_title = ImageFont.truetype(font_name, font_size_title)
+                        font_id = ImageFont.truetype(font_name, font_size_id)
+                        font_metrics = ImageFont.truetype(font_name, font_size_metrics)
+                        break
+                    except:
+                        continue
+                else:
+                    font_title = ImageFont.load_default()
+                    font_id = font_title
+                    font_metrics = font_title
+            except:
+                font_title = ImageFont.load_default()
+                font_id = font_title
+                font_metrics = font_title
+
+            # Parse the title format to extract components
+            title_format = title_info['format']
+            values = title_info['values']
+            struct_id = title_info['struct_id']
+
+            # Try to format the full title string
+            try:
+                full_title = title_format.format(**values)
+            except:
+                full_title = title_format
+
+            # Split by | to get components (e.g., "Ampicillin | Affinity: 0.85 | Probability: 0.92")
+            parts = [p.strip() for p in full_title.split('|')]
+
+            # Build lines
+            lines = []
+            if len(parts) >= 1:
+                lines.append((parts[0], font_title, 'black'))  # Main title (antibiotic name)
+            lines.append((struct_id, font_id, 'gray'))  # Structure ID
+            if len(parts) >= 2:
+                metrics_text = ' | '.join(parts[1:])  # Remaining parts are metrics
+                lines.append((metrics_text, font_metrics, 'dimgray'))
+
+            # Calculate positions - center horizontally, stack vertically from top
+            y_offset = max(20, height // 30)
+            line_spacing = max(8, height // 80)
+
+            for text, font, color in lines:
+                # Get text bounding box
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+
+                # Center horizontally
+                x = (width - text_width) // 2
+
+                # Draw text with slight shadow for readability
+                shadow_offset = 2
+                draw.text((x + shadow_offset, y_offset + shadow_offset), text, font=font, fill='white')
+                draw.text((x, y_offset), text, font=font, fill=color)
+
+                y_offset += text_height + line_spacing
+
+            # Save the modified image
+            img.save(image_path)
+            print(f"    Added title overlay")
+
         except Exception as e:
-            print(f"    Warning: Could not add title label: {e}")
+            print(f"    Warning: Could not add title overlay: {e}")
 
     def execute_operation(self, op: Dict[str, Any]):
         """

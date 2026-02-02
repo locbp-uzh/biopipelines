@@ -294,6 +294,7 @@ class PyMOL(BaseConfig):
                    color_protein: str = "plddt",
                    color_ligand: str = "byatom",
                    ligand_selection: str = "hetatm",
+                   plddt_upper: float = 1,
                    title: Optional[str] = None,
                    title_table: Optional[TableInfo] = None,
                    width: int = 1920,
@@ -317,8 +318,10 @@ class PyMOL(BaseConfig):
             color_protein: Protein coloring - "plddt" for AlphaFold coloring, or color name
             color_ligand: Ligand coloring - "byatom" for element colors, or color name
             ligand_selection: Selection for ligand (default: "hetatm")
+            plddt_upper: Upper bound for pLDDT values (default: 1 for BoltzGen, use 100 for AlphaFold)
             title: Title format string with placeholders like {id}, {antibiotic},
                    {affinity_probability_binary:.2f}, etc. Values come from title_table.
+                   Use '|' to separate main title from metrics (e.g., "Ampicillin | Affinity: {aff:.2f}").
             title_table: Table containing values for title placeholders (must have 'id' column)
             width: Image width in pixels
             height: Image height in pixels
@@ -334,7 +337,8 @@ class PyMOL(BaseConfig):
                 orient_selection="hetatm",
                 color_protein="plddt",
                 color_ligand="byatom",
-                title="Gentamicin - Affinity: {affinity_probability_binary:.2f}",
+                plddt_upper=1,  # BoltzGen uses 0-1 confidence scores
+                title="Gentamicin | Affinity: {affinity_probability_binary:.2f}",
                 title_table=boltzgen_out.tables.final_designs_metrics,
                 width=1920,
                 height=1080
@@ -346,6 +350,7 @@ class PyMOL(BaseConfig):
                               color_protein=color_protein,
                               color_ligand=color_ligand,
                               ligand_selection=ligand_selection,
+                              plddt_upper=plddt_upper,
                               title=title,
                               title_table=title_table,
                               width=width,
