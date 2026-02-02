@@ -432,6 +432,14 @@ fi
                         "description": getattr(obj, 'description', ''),
                         "count": getattr(obj, 'count', None)
                     }
+                # Handle DataStream objects - extract files and map_table for completion checking
+                elif hasattr(obj, 'files') and hasattr(obj, 'ids') and hasattr(obj, 'map_table'):
+                    # Return list of all paths that need to exist: files + map_table
+                    paths = list(getattr(obj, 'files', []))
+                    map_table = getattr(obj, 'map_table', '')
+                    if map_table:
+                        paths.append(map_table)
+                    return paths
                 else:
                     # Convert other custom objects to string
                     return str(obj)
