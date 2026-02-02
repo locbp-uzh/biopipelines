@@ -7,8 +7,7 @@ import os, sys
 sys.path.insert(0, os.getcwd())
 
 from PipelineScripts.pipeline import *
-from PipelineScripts.pdb import PDB
-from PipelineScripts.compound_library import CompoundLibrary
+from PipelineScripts.entities import *
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.mmseqs2 import MMseqs2
 
@@ -18,31 +17,24 @@ with Pipeline(project="RefactorTest",
 
     Resources(gpu="A100",
               time="4:00:00",
-              memory="32GB")
+              memory="8GB")
 
     # Test 1: Boltz2 with direct sequence
     boltz_seq = Boltz2(
-        proteins="MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH",
-        num_seeds=1,
-        num_recycles=1  # Low for quick test
+        proteins=Sequence("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH")
     )
 
     # Test 2: PDB fetch and Boltz2 with structure input
-    lysozyme = PDB("1AKI", "LYZ")
+    lysozyme = PDB("1AKI", ids="LYZ")
 
     boltz_pdb = Boltz2(
-        proteins=lysozyme,
-        num_seeds=1,
-        num_recycles=1
+        proteins=lysozyme
     )
 
     # Test 3: Boltz2 with ligand (tests compound input)
     boltz_ligand = Boltz2(
-        proteins="MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH",
-        ligands="CCO",  # Ethanol - simple ligand
-        affinity=True,
-        num_seeds=1,
-        num_recycles=1
+        proteins=Sequence("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH"),
+        ligands=Ligand("ethanol")
     )
 
     # Test 4: CompoundLibrary with multiple ligands
@@ -54,19 +46,14 @@ with Pipeline(project="RefactorTest",
 
     boltz_multi = Boltz2(
         proteins=lysozyme,
-        ligands=compounds,
-        num_seeds=1,
-        num_recycles=1
+        ligands=compounds
     )
 
     # Test 5: Boltz2 with MSAs
-    msas = MMseqs2(sequences=lysozyme)
 
     boltz_msa = Boltz2(
         proteins=lysozyme,
-        msas=msas,
-        num_seeds=1,
-        num_recycles=1
+        msas=boltz_pdb
     )
 
     print("=== Boltz2 Test Summary ===")

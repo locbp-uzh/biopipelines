@@ -38,6 +38,7 @@ from .panda import Panda
 from .mmseqs2 import MMseqs2, MMseqs2Server
 from .mmseqs2_lcf import MMseqs2LCF, MMseqs2ServerLCF
 from .converters import *
+from .entities import *
 
 __all__ = [
     # Core pipeline components
