@@ -36,16 +36,12 @@ with Pipeline(project="RefactorTest",
 
     boltz1 = Boltz2(
         proteins=lysozyme,
-        ligands=compounds1,
-        num_seeds=1,
-        num_recycles=1
+        ligands=compounds1
     )
 
     boltz2 = Boltz2(
         proteins=lysozyme,
-        ligands=compounds2,
-        num_seeds=1,
-        num_recycles=1
+        ligands=compounds2
     )
 
     # ========== Test 1: Filter (replaces Filter tool) ==========

@@ -118,7 +118,7 @@ class CombinatoricsConfig:
 
 def _extract_source_paths(source: Any) -> List[str]:
     """
-    Extract CSV file paths from a source (StandardizedOutput, ToolOutput, etc.).
+    Extract CSV file paths from a source (StandardizedOutput, ToolOutput, DataStream, etc.).
 
     Returns list of paths to CSV files containing the data.
     """
@@ -138,19 +138,31 @@ def _extract_source_paths(source: Any) -> List[str]:
             paths.extend(_extract_source_paths(item))
         return paths
 
-    # StandardizedOutput - get sequences or compounds CSV
+    # DataStream - use map_table path
+    if hasattr(source, 'map_table') and hasattr(source, 'ids'):
+        if source.map_table:
+            return [source.map_table]
+        return []
+
+    # StandardizedOutput - get sequences or compounds DataStream
     if hasattr(source, 'sequences') and source.sequences:
-        return source.sequences[:1]  # First sequence file
+        if hasattr(source.sequences, 'map_table') and source.sequences.map_table:
+            return [source.sequences.map_table]
     if hasattr(source, 'compounds') and source.compounds:
-        return source.compounds[:1]  # First compounds file
+        if hasattr(source.compounds, 'map_table') and source.compounds.map_table:
+            return [source.compounds.map_table]
 
     # ToolOutput
     if hasattr(source, 'get_output_files'):
         outputs = source.get_output_files()
         if 'sequences' in outputs and outputs['sequences']:
-            return outputs['sequences'][:1]
+            seq = outputs['sequences']
+            if hasattr(seq, 'map_table') and seq.map_table:
+                return [seq.map_table]
         if 'compounds' in outputs and outputs['compounds']:
-            return outputs['compounds'][:1]
+            comp = outputs['compounds']
+            if hasattr(comp, 'map_table') and comp.map_table:
+                return [comp.map_table]
 
     return []
 
