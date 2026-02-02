@@ -163,9 +163,9 @@ class LoadOutput(BaseConfig):
         """
         Resolve glob patterns and match IDs to actual file paths.
 
-        This handles legacy output formats where:
-        - structures/sequences/compounds contain glob patterns (e.g., "rank*.cif")
-        - The number of files doesn't match the number of IDs
+        This handles both legacy and new output formats:
+        - Legacy: structures=[...], structure_ids=[...]
+        - New: structures={ids:[...], files:[...], ...}
 
         Called at pipeline runtime when validate_files=True.
 
@@ -182,11 +182,18 @@ class LoadOutput(BaseConfig):
         for file_type, id_type in [('structures', 'structure_ids'),
                                     ('sequences', 'sequence_ids'),
                                     ('compounds', 'compound_ids')]:
-            if file_type not in resolved or id_type not in resolved:
-                continue
 
-            files = resolved[file_type]
-            ids = resolved[id_type]
+            # Handle new DataStream dict format
+            if file_type in resolved and isinstance(resolved[file_type], dict):
+                ds_dict = resolved[file_type]
+                files = ds_dict.get('files', [])
+                ids = ds_dict.get('ids', [])
+            # Handle legacy format
+            elif file_type in resolved and id_type in resolved:
+                files = resolved[file_type]
+                ids = resolved[id_type]
+            else:
+                continue
 
             if not files or not ids:
                 continue
@@ -266,12 +273,22 @@ class LoadOutput(BaseConfig):
 
                 if matched_file:
                     resolved_files.append(matched_file)
-                    resolved_ids.append(item_id)
+                    # Update ID to match the actual filename (use basename without extension)
+                    actual_id = os.path.splitext(os.path.basename(matched_file))[0]
+                    resolved_ids.append(actual_id)
                 else:
                     print(f"  Warning: No file found for ID '{item_id}'")
 
-            resolved[file_type] = resolved_files
-            resolved[id_type] = resolved_ids
+            # Store back in appropriate format
+            if isinstance(resolved.get(file_type), dict):
+                # New DataStream dict format - update in place
+                resolved[file_type]['files'] = resolved_files
+                resolved[file_type]['ids'] = resolved_ids
+            else:
+                # Legacy format - store as separate lists
+                resolved[file_type] = resolved_files
+                resolved[id_type] = resolved_ids
+
             print(f"  Resolved: {len(resolved_files)}/{len(ids)} {file_type}")
 
         return resolved
@@ -575,10 +592,14 @@ class LoadOutput(BaseConfig):
 
     def get_output_files(self) -> Dict[str, Any]:
         """
-        Return the loaded output structure, optionally filtered.
+        Return the loaded output structure converted to new DataStream format.
+
+        Handles legacy outputs (raw lists) and converts them to DataStream objects.
+        When validate_files=True, resolves glob patterns to actual file paths.
 
         Returns:
-            The output structure from the saved result, filtered if filter was applied
+            Dict with DataStream objects for structures, sequences, compounds,
+            plus tables dict and output_folder string.
         """
         if not self.loaded_result:
             raise RuntimeError("No result loaded")
@@ -598,75 +619,144 @@ class LoadOutput(BaseConfig):
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:
             output_structure = self._apply_filter_to_output_structure(output_structure)
-            # Don't call _update_ids_from_csv when filtering - the filtered IDs are already
-            # correct from _apply_filter_to_output_structure, and the filtered CSV files
-            # don't exist yet at pipeline runtime (they're created at SLURM runtime)
         else:
             # Check for missing table and exclude those IDs
             missing_ids = self._exclude_missing_ids(output_structure)
             if missing_ids:
-                # Filter out missing IDs from structures, compounds, sequences
-                if 'structures' in output_structure and 'structure_ids' in output_structure:
-                    structures = output_structure['structures']
-                    structure_ids = output_structure['structure_ids']
-                    if len(structures) == len(structure_ids):
-                        filtered_structures = []
-                        filtered_structure_ids = []
-                        for struct, struct_id in zip(structures, structure_ids):
-                            if struct_id not in missing_ids:
-                                filtered_structures.append(struct)
-                                filtered_structure_ids.append(struct_id)
-                        output_structure['structures'] = filtered_structures
-                        output_structure['structure_ids'] = filtered_structure_ids
-                        print(f"  - Filtered structures: {len(filtered_structures)}/{len(structures)} kept")
-
-                if 'compounds' in output_structure and 'compound_ids' in output_structure:
-                    compounds = output_structure['compounds']
-                    compound_ids = output_structure['compound_ids']
-                    if len(compounds) == len(compound_ids):
-                        filtered_compounds = []
-                        filtered_compound_ids = []
-                        for comp, comp_id in zip(compounds, compound_ids):
-                            if comp_id not in missing_ids:
-                                filtered_compounds.append(comp)
-                                filtered_compound_ids.append(comp_id)
-                        output_structure['compounds'] = filtered_compounds
-                        output_structure['compound_ids'] = filtered_compound_ids
-
-                if 'sequences' in output_structure and 'sequence_ids' in output_structure:
-                    sequences = output_structure['sequences']
-                    sequence_ids = output_structure['sequence_ids']
-                    if len(sequences) == len(sequence_ids):
-                        filtered_sequences = []
-                        filtered_sequence_ids = []
-                        for seq, seq_id in zip(sequences, sequence_ids):
-                            if seq_id not in missing_ids:
-                                filtered_sequences.append(seq)
-                                filtered_sequence_ids.append(seq_id)
-                        output_structure['sequences'] = filtered_sequences
-                        output_structure['sequence_ids'] = filtered_sequence_ids
+                self._filter_missing_ids(output_structure, missing_ids)
 
             # Update compound_ids with actual IDs from CSV files (only when not filtering)
             self._update_ids_from_csv(output_structure)
 
-        # Ensure we have all expected keys for compatibility
-        default_structure = {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
-            "tables": {},
-            "output_folder": ""
+        # Convert legacy format to DataStream format
+        return self._convert_to_datastream_format(output_structure)
+
+    def _filter_missing_ids(self, output_structure: Dict[str, Any], missing_ids: set):
+        """Filter out missing IDs from output structure in place."""
+        for file_type, id_type in [('structures', 'structure_ids'),
+                                    ('compounds', 'compound_ids'),
+                                    ('sequences', 'sequence_ids')]:
+            if file_type in output_structure and id_type in output_structure:
+                files = output_structure[file_type]
+                ids = output_structure[id_type]
+                if len(files) == len(ids):
+                    filtered_files = []
+                    filtered_ids = []
+                    for f, i in zip(files, ids):
+                        if i not in missing_ids:
+                            filtered_files.append(f)
+                            filtered_ids.append(i)
+                    output_structure[file_type] = filtered_files
+                    output_structure[id_type] = filtered_ids
+                    if len(filtered_files) < len(files):
+                        print(f"  - Filtered {file_type}: {len(filtered_files)}/{len(files)} kept")
+
+    def _convert_to_datastream_format(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert legacy output format (raw lists) to new DataStream format.
+
+        Handles both:
+        - Legacy format: structures=[...], structure_ids=[...]
+        - New format: structures={name:..., ids:..., files:..., format:...}
+
+        Args:
+            output_structure: Dict with structures/structure_ids lists or DataStream dicts
+
+        Returns:
+            Dict with DataStream objects for structures, sequences, compounds
+        """
+        from .datastream import DataStream, create_map_table
+
+        output_folder = output_structure.get('output_folder', '')
+
+        # Helper to detect format from file extension
+        def detect_format(files: List[str], default: str) -> str:
+            for f in files:
+                if isinstance(f, str):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in ['.pdb']:
+                        return 'pdb'
+                    elif ext in ['.cif', '.mmcif']:
+                        return 'cif'
+                    elif ext in ['.fasta', '.fa']:
+                        return 'fasta'
+                    elif ext in ['.csv']:
+                        return 'csv'
+                    elif ext in ['.sdf', '.mol2']:
+                        return 'sdf'
+            return default
+
+        # Helper to convert a single data type (structures, sequences, or compounds)
+        def convert_data_type(data_key: str, ids_key: str, default_format: str) -> DataStream:
+            raw_data = output_structure.get(data_key)
+
+            # Case 1: Already a DataStream dict (new format)
+            if isinstance(raw_data, dict) and 'ids' in raw_data and 'files' in raw_data:
+                return DataStream.from_dict(raw_data)
+
+            # Case 2: Legacy format - separate lists
+            files = raw_data if isinstance(raw_data, list) else []
+            ids = output_structure.get(ids_key, [])
+
+            if files and ids and len(files) == len(ids):
+                fmt = detect_format(files, default_format)
+                return DataStream(
+                    name=data_key,
+                    ids=ids,
+                    files=files,
+                    map_table="",
+                    format=fmt
+                )
+            elif ids and not files:
+                # IDs but no files (value-based like SMILES)
+                return DataStream(
+                    name=data_key,
+                    ids=ids,
+                    files=[],
+                    map_table="",
+                    format=default_format
+                )
+            else:
+                return DataStream.empty(data_key, default_format)
+
+        # Convert all data types using the helper
+        structures = convert_data_type('structures', 'structure_ids', 'pdb')
+        sequences = convert_data_type('sequences', 'sequence_ids', 'fasta')
+        compounds = convert_data_type('compounds', 'compound_ids', 'sdf')
+
+        # Convert tables to TableInfo objects
+        tables_dict = {}
+        raw_tables = output_structure.get('tables', {})
+        if isinstance(raw_tables, dict):
+            for table_name, table_info in raw_tables.items():
+                if isinstance(table_info, dict) and 'path' in table_info:
+                    tables_dict[table_name] = TableInfo(
+                        name=table_name,
+                        path=table_info['path'],
+                        columns=table_info.get('columns', []),
+                        description=table_info.get('description', ''),
+                        count=table_info.get('count', 0)
+                    )
+                elif isinstance(table_info, str):
+                    # Legacy format: just a path string
+                    tables_dict[table_name] = TableInfo(
+                        name=table_name,
+                        path=table_info,
+                        columns=[],
+                        description='',
+                        count=0
+                    )
+                elif isinstance(table_info, TableInfo):
+                    # Already a TableInfo object
+                    tables_dict[table_name] = table_info
+
+        return {
+            "structures": structures,
+            "sequences": sequences,
+            "compounds": compounds,
+            "tables": tables_dict,
+            "output_folder": output_folder
         }
-
-        # Merge with defaults
-        for key, default_value in default_structure.items():
-            if key not in output_structure:
-                output_structure[key] = default_value
-
-        return output_structure
     
     def generate_script(self, script_path: str) -> str:
         """

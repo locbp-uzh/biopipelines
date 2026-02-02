@@ -441,14 +441,32 @@ class PyMOL(BaseConfig):
         for key, value in op.params.items():
             if value is None:
                 result[key] = None
+            elif isinstance(value, DataStream):
+                # Serialize DataStream - use files and ids directly
+                result[key] = {
+                    "type": "datastream",
+                    "structures": value.files,
+                    "structure_ids": value.ids,
+                    "format": value.format
+                }
             elif isinstance(value, StandardizedOutput):
                 # Serialize StandardizedOutput reference
-                result[key] = {
-                    "type": "standardized_output",
-                    "output_folder": value.output_folder,
-                    "structures": value.structures,
-                    "structure_ids": value.structure_ids
-                }
+                # Check if structures is a DataStream
+                structures_data = value.structures
+                if isinstance(structures_data, DataStream):
+                    result[key] = {
+                        "type": "standardized_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_data.files,
+                        "structure_ids": structures_data.ids
+                    }
+                else:
+                    result[key] = {
+                        "type": "standardized_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_data if isinstance(structures_data, list) else [],
+                        "structure_ids": value.structure_ids if hasattr(value, 'structure_ids') else []
+                    }
             elif isinstance(value, TableInfo):
                 # Direct TableInfo reference (for title_table in RenderEach)
                 result[key] = {
@@ -468,13 +486,22 @@ class PyMOL(BaseConfig):
                 else:
                     result[key] = str(value)
             elif hasattr(value, 'output_folder'):
-                # ToolOutput or similar
-                result[key] = {
-                    "type": "tool_output",
-                    "output_folder": value.output_folder,
-                    "structures": getattr(value, 'structures', []),
-                    "structure_ids": getattr(value, 'structure_ids', [])
-                }
+                # ToolOutput or similar - check for DataStream in structures
+                structures_attr = getattr(value, 'structures', None)
+                if isinstance(structures_attr, DataStream):
+                    result[key] = {
+                        "type": "tool_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_attr.files,
+                        "structure_ids": structures_attr.ids
+                    }
+                else:
+                    result[key] = {
+                        "type": "tool_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_attr if isinstance(structures_attr, list) else [],
+                        "structure_ids": getattr(value, 'structure_ids', [])
+                    }
             else:
                 result[key] = value
 
