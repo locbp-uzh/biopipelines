@@ -16,6 +16,7 @@ from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .protein_mpnn import ProteinMPNN
 from .alphafold import AlphaFold
 from .ligand import Ligand
+from .sequence import Sequence
 from .ligand_mpnn import LigandMPNN
 from .boltz2 import Boltz2
 from .boltzgen import BoltzGen, BoltzGenMerge
@@ -74,6 +75,7 @@ __all__ = [
     'ProteinMPNN',
     'AlphaFold',
     'Ligand',
+    'Sequence',
     'LigandMPNN',
     'Boltz2',
     'BoltzGen',

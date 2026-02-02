@@ -1,8 +1,9 @@
 """
-Ligand tool for fetching small molecule ligands from RCSB PDB or PubChem.
+Ligand tool for fetching small molecule ligands from RCSB PDB, PubChem, or SMILES strings.
 
 Downloads SDF files and converts them to PDB format with proper atom numbering.
 Supports lookup by CCD code (RCSB), compound name, CID, or CAS number (PubChem).
+Also supports direct SMILES input for custom molecules.
 Fetches ligands with priority-based lookup: local_folder -> Ligands/ -> RCSB/PubChem download.
 """
 
@@ -24,11 +25,12 @@ except ImportError:
 
 class Ligand(BaseConfig):
     """
-    Pipeline tool for fetching small molecule ligands from RCSB PDB or PubChem.
+    Pipeline tool for fetching small molecule ligands from RCSB PDB, PubChem, or SMILES strings.
 
     Downloads SDF files and converts to PDB format with proper atom numbering.
     Implements priority-based lookup: checks local_folder (if provided), then
     Ligands/ folder, then downloads from RCSB or PubChem based on lookup type.
+    Also supports direct SMILES input for custom molecules.
     """
 
     TOOL_NAME = "Ligand"
@@ -40,12 +42,13 @@ class Ligand(BaseConfig):
     ligand_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_ligand.py"))
 
     def __init__(self,
-                 lookup: Union[str, List[str]],
+                 lookup: Optional[Union[str, List[str]]] = None,
                  ids: Optional[Union[str, List[str]]] = None,
                  codes: Optional[Union[str, List[str]]] = None,
                  source: Optional[str] = None,
                  local_folder: Optional[str] = None,
                  output_format: str = "pdb",
+                 smiles: Optional[Union[str, List[str]]] = None,
                  **kwargs):
         """
         Initialize Ligand tool.
@@ -56,21 +59,25 @@ class Ligand(BaseConfig):
                     - PubChem CID: "2244"
                     - PubChem CAS: "50-78-2"
                     - PubChem name: "aspirin", "caffeine"
+                    Can be None if using smiles parameter instead.
             ids: Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb).
-                 If not provided, defaults to lookup values.
+                 If not provided, defaults to lookup values (for lookup) or "smiles_1", "smiles_2", etc. (for smiles).
             codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
-                   If not provided, defaults to lookup[:3].upper().
+                   If not provided, defaults to lookup[:3].upper() (for lookup) or "LIG" (for smiles).
             source: Force source ("rcsb" or "pubchem"). If None, auto-detects:
                     - 1-3 uppercase alphanumeric -> RCSB (CCD)
                     - Purely numeric -> PubChem (CID)
                     - XX-XX-X format -> PubChem (CAS)
                     - Otherwise -> PubChem (name)
+                    Ignored when using smiles parameter.
             local_folder: Custom local folder to check first (before Ligands/). Default: None
             output_format: Output format - "pdb" or "cif". CIF includes explicit bond orders
                           which is recommended for tools like RFdiffusion3. Default: "pdb"
+            smiles: SMILES string(s) for direct molecule input. Bypasses lookup entirely.
+                    Molecules are converted to 3D structures using RDKit.
             **kwargs: Additional parameters
 
-        Fetch Priority:
+        Fetch Priority (for lookup):
             For each ligand, searches in order:
             1. local_folder (if parameter provided)
             2. ./Ligands/ folder in repository
@@ -104,38 +111,70 @@ class Ligand(BaseConfig):
 
             # Force source
             lig = Ligand("ATP", source="pubchem")
-        """
-        # Handle lookup (required)
-        if isinstance(lookup, str):
-            self.lookup_values = [lookup]
-        else:
-            self.lookup_values = list(lookup)
 
-        # Handle ids - default to lookup if not provided
+            # Direct SMILES input (single)
+            lig = Ligand(smiles="CCO")  # ids=["smiles_1"], codes=["LIG"]
+
+            # Direct SMILES input (multiple)
+            lig = Ligand(smiles=["CCO", "CC(=O)O"])  # ids=["smiles_1", "smiles_2"], codes=["LIG", "LIG"]
+
+            # SMILES with custom ids and codes
+            lig = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
+        """
+        # Handle smiles input
+        if smiles is not None:
+            if isinstance(smiles, str):
+                self.smiles_values = [smiles]
+            else:
+                self.smiles_values = list(smiles)
+        else:
+            self.smiles_values = []
+
+        # Handle lookup
+        if lookup is not None:
+            if isinstance(lookup, str):
+                self.lookup_values = [lookup]
+            else:
+                self.lookup_values = list(lookup)
+        else:
+            self.lookup_values = []
+
+        # Validate: must have at least one of lookup or smiles
+        if not self.lookup_values and not self.smiles_values:
+            raise ValueError("Must provide at least one of 'lookup' or 'smiles'")
+
+        # Total number of ligands
+        total_count = len(self.lookup_values) + len(self.smiles_values)
+
+        # Handle ids - default based on input type
         if ids is not None:
             if isinstance(ids, str):
                 self.custom_ids = [ids]
             else:
                 self.custom_ids = list(ids)
         else:
-            # Default ids to lookup values
+            # Default ids: lookup values for lookup, "smiles_N" for smiles
             self.custom_ids = self.lookup_values.copy()
+            for i in range(len(self.smiles_values)):
+                self.custom_ids.append(f"smiles_{i + 1}")
 
-        # Handle codes - default to lookup[:3].upper() if not provided
+        # Handle codes - default based on input type
         if codes is not None:
             if isinstance(codes, str):
                 self.residue_codes = [codes.upper()]
             else:
                 self.residue_codes = [c.upper() for c in codes]
         else:
-            # Default codes to lookup values (truncated to 3 chars, uppercased)
+            # Default codes: lookup[:3].upper() for lookup, "LIG" for smiles
             self.residue_codes = [lv.upper()[:3] for lv in self.lookup_values]
+            for _ in range(len(self.smiles_values)):
+                self.residue_codes.append("LIG")
 
         # Validate lengths
-        if len(self.custom_ids) != len(self.lookup_values):
-            raise ValueError(f"Length mismatch: ids has {len(self.custom_ids)} items but lookup has {len(self.lookup_values)} items")
-        if len(self.custom_ids) != len(self.residue_codes):
-            raise ValueError(f"Length mismatch: ids has {len(self.custom_ids)} items but codes has {len(self.residue_codes)} items")
+        if len(self.custom_ids) != total_count:
+            raise ValueError(f"Length mismatch: ids has {len(self.custom_ids)} items but total ligands is {total_count}")
+        if len(self.residue_codes) != total_count:
+            raise ValueError(f"Length mismatch: codes has {len(self.residue_codes)} items but total ligands is {total_count}")
 
         # Validate source
         if source is not None and source not in ["rcsb", "pubchem"]:
@@ -185,17 +224,18 @@ class Ligand(BaseConfig):
         if not self.custom_ids:
             raise ValueError("ids cannot be empty")
 
-        if not self.lookup_values:
-            raise ValueError("lookup cannot be empty")
+        if not self.lookup_values and not self.smiles_values:
+            raise ValueError("Must have at least one of lookup or smiles")
 
         if not self.residue_codes:
             raise ValueError("codes cannot be empty")
 
-        if len(self.custom_ids) != len(self.lookup_values):
-            raise ValueError("ids and lookup must have same length")
+        total_count = len(self.lookup_values) + len(self.smiles_values)
+        if len(self.custom_ids) != total_count:
+            raise ValueError(f"ids length ({len(self.custom_ids)}) must match total ligands ({total_count})")
 
-        if len(self.custom_ids) != len(self.residue_codes):
-            raise ValueError("ids and codes must have same length")
+        if len(self.residue_codes) != total_count:
+            raise ValueError(f"codes length ({len(self.residue_codes)}) must match total ligands ({total_count})")
 
         for code in self.residue_codes:
             if not code:
@@ -210,7 +250,8 @@ class Ligand(BaseConfig):
         self.found_locally = []
         self.needs_download = []
 
-        for lookup, custom_id in zip(self.lookup_values, self.custom_ids):
+        # Process lookup values
+        for lookup, custom_id in zip(self.lookup_values, self.custom_ids[:len(self.lookup_values)]):
             found = False
             local_path = None
 
@@ -238,18 +279,31 @@ class Ligand(BaseConfig):
                 self.needs_download.append(lookup)
                 print(f"  Ligand {lookup} not found locally, will download from {effective_source}")
 
+        # Process SMILES values (these are always "generated" at runtime)
+        smiles_start_idx = len(self.lookup_values)
+        for i, smiles in enumerate(self.smiles_values):
+            custom_id = self.custom_ids[smiles_start_idx + i]
+            smiles_preview = smiles[:30] + "..." if len(smiles) > 30 else smiles
+            print(f"  SMILES ligand {custom_id}: {smiles_preview} (will be generated with RDKit)")
+
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
         config_lines.extend([
             f"IDS: {', '.join(self.custom_ids)} ({len(self.custom_ids)} ligands)",
-            f"LOOKUP: {', '.join(self.lookup_values)}",
             f"CODES: {', '.join(self.residue_codes)}",
-            f"SOURCE: {self.source if self.source else 'auto-detect'}",
             f"FORMAT: {self.output_format.upper()}",
-            f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses Ligands/)'}"
         ])
+
+        if self.lookup_values:
+            config_lines.append(f"LOOKUP: {', '.join(self.lookup_values)}")
+            config_lines.append(f"SOURCE: {self.source if self.source else 'auto-detect'}")
+            config_lines.append(f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses Ligands/)'}")
+
+        if self.smiles_values:
+            smiles_preview = [s[:20] + "..." if len(s) > 20 else s for s in self.smiles_values]
+            config_lines.append(f"SMILES: {', '.join(smiles_preview)} ({len(self.smiles_values)} molecules)")
 
         # Add status of files found/not found
         if hasattr(self, 'found_locally') and self.found_locally:
@@ -282,6 +336,7 @@ class Ligand(BaseConfig):
             "custom_ids": self.custom_ids,
             "residue_codes": self.residue_codes,
             "lookup_values": self.lookup_values,
+            "smiles_values": self.smiles_values,
             "source": self.source,
             "local_folder": self.local_folder,
             "output_format": self.output_format,
@@ -294,12 +349,15 @@ class Ligand(BaseConfig):
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""echo "Fetching {len(self.lookup_values)} ligands"
-echo "Lookup values: {', '.join(self.lookup_values)}"
+        total_count = len(self.lookup_values) + len(self.smiles_values)
+        lookup_info = f"Lookup: {', '.join(self.lookup_values)}" if self.lookup_values else ""
+        smiles_info = f"SMILES: {len(self.smiles_values)} molecule(s)" if self.smiles_values else ""
+
+        return f"""echo "Processing {total_count} ligands"
 echo "Custom IDs: {', '.join(self.custom_ids)}"
 echo "Residue codes: {', '.join(self.residue_codes)}"
-echo "Source: {self.source if self.source else 'auto-detect'}"
-echo "Priority: {'local_folder -> ' if self.local_folder else ''}Ligands/ -> download"
+{f'echo "{lookup_info}"' if lookup_info else ''}
+{f'echo "{smiles_info}"' if smiles_info else ''}
 echo "Output folder: {self.output_folder}"
 
 python "{self.ligand_py}" --config "{self.config_file}"
@@ -313,13 +371,15 @@ python "{self.ligand_py}" --config "{self.config_file}"
         structure_files = [os.path.join(self.output_folder, f"{custom_id}.{ext}")
                           for custom_id in self.custom_ids]
 
+        total_count = len(self.lookup_values) + len(self.smiles_values)
+
         tables = {
             "compounds": TableInfo(
                 name="compounds",
                 path=self.compounds_csv,
                 columns=["id", "format", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"],
-                description="Successfully fetched ligand files with metadata",
-                count=len(self.lookup_values)
+                description="Successfully fetched/generated ligand files with metadata",
+                count=total_count
             ),
             "failed": TableInfo(
                 name="failed",
@@ -362,6 +422,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
                 "custom_ids": self.custom_ids,
                 "residue_codes": self.residue_codes,
                 "lookup_values": self.lookup_values,
+                "smiles_values": self.smiles_values,
                 "source": self.source,
                 "local_folder": self.local_folder,
                 "output_format": self.output_format

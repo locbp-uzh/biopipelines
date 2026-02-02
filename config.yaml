@@ -125,6 +125,7 @@ environments:
   CompoundLibrary: "biopipelines"
   PDB: "biopipelines"
   Ligand: "biopipelines"
+  Sequence: "biopipelines"
   PyMOL: "ProteinEnv"
   Plot: "biopipelines"
 
