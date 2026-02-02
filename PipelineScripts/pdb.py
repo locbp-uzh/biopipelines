@@ -650,7 +650,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
         compounds = DataStream(
             name="compounds",
             ids=compound_ids,
-            files=[self.compounds_csv],
+            files=[],  # Value-based format - data is in map_table, not individual files
             map_table=self.compounds_csv,
             format="csv"
         )
