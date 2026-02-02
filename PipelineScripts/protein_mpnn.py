@@ -3,7 +3,7 @@ ProteinMPNN configuration for sequence design from protein structures.
 """
 
 import os
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Tuple
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
@@ -45,8 +45,8 @@ class ProteinMPNN(BaseConfig):
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
                  num_sequences: int = 1,
-                 fixed: str = "",
-                 redesigned: str = "",
+                 fixed: Union[str, Tuple['TableInfo', str]] = "",
+                 redesigned: Union[str, Tuple['TableInfo', str]] = "",
                  fixed_chain: str = "A",
                  plddt_threshold: float = 100.0,
                  sampling_temp: float = 0.1,
@@ -59,8 +59,12 @@ class ProteinMPNN(BaseConfig):
         Args:
             structures: Input structures as DataStream or StandardizedOutput
             num_sequences: Number of sequences to generate per structure
-            fixed: PyMOL-style selection for fixed positions
-            redesigned: PyMOL-style selection for redesigned positions
+            fixed: Fixed positions. Accepts:
+                   - PyMOL-style selection string: "10-20+30-40"
+                   - Table column reference: (table, "column_name")
+            redesigned: Designed positions. Accepts:
+                   - PyMOL-style selection string: "10-20+30-40"
+                   - Table column reference: (table, "column_name")
             fixed_chain: Chain to apply fixed positions to
             plddt_threshold: pLDDT threshold for automatic fixing (100 = no fixing)
             sampling_temp: Sampling temperature for sequence generation
@@ -137,14 +141,18 @@ class ProteinMPNN(BaseConfig):
         """Generate the input preparation part of the script."""
         input_directory = os.path.dirname(self.structures_stream.files[0])
 
+        # Resolve table references to DATASHEET_REFERENCE format
+        resolved_fixed = self.resolve_table_reference(self.fixed) if self.fixed else ""
+        resolved_redesigned = self.resolve_table_reference(self.redesigned) if self.redesigned else ""
+
         # Determine input source for fixed positions
-        if self.fixed or self.redesigned:
+        if resolved_fixed or resolved_redesigned:
             input_source = "selection"
         else:
             input_source = "plddt"
 
-        fixed_param = self.fixed if self.fixed else "-"
-        designed_param = self.redesigned if self.redesigned else "-"
+        fixed_param = resolved_fixed if resolved_fixed else "-"
+        designed_param = resolved_redesigned if resolved_redesigned else "-"
 
         return f"""echo "Determining fixed positions"
 python {self.fixed_py} "{input_directory}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"

@@ -3,7 +3,7 @@ LigandMPNN configuration for ligand-aware sequence design.
 """
 
 import os
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Tuple
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
@@ -41,8 +41,8 @@ class LigandMPNN(BaseConfig):
                  structures: Union[DataStream, StandardizedOutput],
                  ligand: str = "",
                  num_sequences: int = 1,
-                 fixed: str = "",
-                 redesigned: str = "",
+                 fixed: Union[str, Tuple['TableInfo', str]] = "",
+                 redesigned: Union[str, Tuple['TableInfo', str]] = "",
                  design_within: float = 5.0,
                  model: str = "v_32_010",
                  batch_size: int = 1,
@@ -54,8 +54,12 @@ class LigandMPNN(BaseConfig):
             structures: Input structures as DataStream or StandardizedOutput
             ligand: Ligand identifier for binding site focus
             num_sequences: Number of sequences to generate per structure
-            fixed: Fixed positions (LigandMPNN format: "A3 A4 A5")
-            redesigned: Designed positions (LigandMPNN format: "A3 A4 A5")
+            fixed: Fixed positions. Accepts:
+                   - PyMOL selection string: "10-20+30-40"
+                   - Table column reference: (table, "column_name")
+            redesigned: Designed positions. Accepts:
+                   - PyMOL selection string: "10-20+30-40"
+                   - Table column reference: (table, "column_name")
             design_within: Distance in Angstrom from ligand to redesign (fallback if positions not specified)
             model: LigandMPNN model version to use
             batch_size: Batch size for processing
@@ -141,16 +145,20 @@ class LigandMPNN(BaseConfig):
 
     def _generate_script_setup_positions(self) -> str:
         """Generate the position setup and script modification part."""
+        # Resolve table references to DATASHEET_REFERENCE format
+        resolved_fixed = self.resolve_table_reference(self.fixed) if self.fixed else ""
+        resolved_redesigned = self.resolve_table_reference(self.redesigned) if self.redesigned else ""
+
         # Determine input source for positions
-        if self.fixed or self.redesigned:
+        if resolved_fixed or resolved_redesigned:
             input_source = "selection"
             input_table = "-"
         else:
             input_source = "ligand"
             input_table = "-"
 
-        fixed_param = self.fixed if self.fixed else "-"
-        designed_param = self.redesigned if self.redesigned else "-"
+        fixed_param = resolved_fixed if resolved_fixed else "-"
+        designed_param = resolved_redesigned if resolved_redesigned else "-"
 
         # Build base LigandMPNN options
         base_options = f'--model_type "ligand_mpnn"'
