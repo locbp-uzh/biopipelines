@@ -22,7 +22,7 @@ with Pipeline(project="RefactorTest",
               memory="32GB")
 
     # Create test data with two separate Boltz2 runs
-    lysozyme = PDB("1AKI", "LYZ")
+    lysozyme = PDB("1AKI", ids="LYZ")
 
     compounds1 = CompoundLibrary({
         'ethanol': 'CCO',
