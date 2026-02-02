@@ -85,7 +85,7 @@ tool2 = pipeline.add(Tool2(input=tool1))
 pipeline.slurm()
 ```
 
-**Tools**: Individual bioinformatics operations like running models (RFdiffusion, LigandMPNN, Boltz2, ...) or analyzing results (Filter, SelectBest, ...) that generate bash scripts and predict their outputs. Tools return an object containing predictions of the filesystem after SLURM execution. The prediction can be used as input in subsequent tools. One can access the prediction with the default `print(<prediction>)` method.
+**Tools**: Individual bioinformatics operations like running models (RFdiffusion, LigandMPNN, Boltz2, ...) or analyzing results (Panda, ...) that generate bash scripts and predict their outputs. Tools return an object containing predictions of the filesystem after SLURM execution. The prediction can be used as input in subsequent tools. One can access the prediction with the default `print(<prediction>)` method.
 
 ```python
 from PipelineScripts.pipeline import *
@@ -267,7 +267,7 @@ with Pipeline("Project", "Job", "Description"):
     tool2 = ProteinMPNN(...)
 
     Resources(time="2:00:00")                # Batch 2: CPU-only analysis (waits for Batch 1)
-    tool3 = Filter(...)
+    tool3 = Panda(...)
 ```
 
 The `./submit` script automatically chains batch jobs using `--dependency=afterok:<jobid>`, ensuring proper execution order and resource optimization.

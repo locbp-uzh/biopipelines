@@ -4,151 +4,109 @@
 
 ---
 
-### Filter
+### Panda
 
-Filters structures or sequences based on metric criteria. Uses pandas query expressions to select items meeting specified thresholds.
+Unified tool for pandas-style table transformations. Supports filtering, sorting, ranking, merging, concatenation, grouping, and calculated columns through a declarative operation-based API.
 
-**Environment**: `ProteinEnv`
-
-**Parameters**:
-- `data`: Union[ToolOutput, StandardizedOutput] (required) - Table input to filter
-- `pool`: Union[ToolOutput, StandardizedOutput] = None - Structure/sequence pool for copying filtered items
-- `expression`: str (required) - Pandas query-style filter expression (e.g., "distance < 3.5 and confidence > 0.8")
-- `max_items`: Optional[int] = None - Maximum items to keep after filtering
-- `sort_by`: Optional[str] = None - Column name to sort by before applying max_items
-- `sort_ascending`: bool = True - Sort order (True = ascending, False = descending)
-
-**Outputs**:
-- Filtered pool with same structure as input
-- All the tables of the upstream tool given as input will be copied and fitered based on the expression, and maintain the same table name. For example, after filtering an output of MergeTables, you can access filtered.tables.merged.
-- `tables.missing`:
-
-  | id | structure | msa |
-  |----|-----------|-----|
-
-**Example**:
-```python
-from PipelineScripts.filter import Filter
-
-filtered = Filter(
-    data=distances.tables.analysis,
-    pool=boltz,
-    expression="distance < 3.5 and confidence_score > 0.85",
-    max_items=10,
-    sort_by="distance"
-)
-```
-
----
-
-### Rank
-
-Ranks entries based on a metric (column or computed expression), renames IDs to sequential format, and optionally copies structures/compounds in ranked order. Useful for generating ranked lists with standardized naming.
+**Replaces**: Filter, Rank, SelectBest, MergeTables, ConcatenateTables, SliceTable
 
 **Environment**: `ProteinEnv`
 
 **Parameters**:
-- `data`: Union[ToolOutput, StandardizedOutput, TableInfo, tuple] (required) - Table input to rank. Supports tuple notation: `tool.tables.table_name.column_name` (metric auto-extracted)
-- `pool`: Union[ToolOutput, StandardizedOutput] = None - Structure/sequence pool for copying ranked items
-- `metric`: str = None - Column name or expression for ranking (e.g., "pLDDT" or "0.8*pLDDT+0.2*affinity"). Optional if using tuple notation for data.
-- `ascending`: bool = False - Sort order (False = descending/best first, True = ascending)
-- `prefix`: str = "rank" - Prefix for renamed IDs (e.g., "rank" produces rank_1, rank_2, ...)
-- `top`: Optional[int] = None - Limit to top N entries after ranking
+- `table`: Union[TableInfo, StandardizedOutput, str] - Single table input (mutually exclusive with `tables`)
+- `tables`: List[Union[TableInfo, StandardizedOutput, str]] - Multiple tables for merge/concat operations
+- `operations`: List[Operation] (required) - Sequence of operations to apply
+- `pool`: Optional[StandardizedOutput] = None - Tool output for pool mode (copies structures matching filtered IDs)
+- `rename`: Optional[str] = None - If provided, output IDs will be renamed to `{rename}_1`, `{rename}_2`, etc.
+
+**Available Operations**:
+
+| Operation | Description | Example |
+|-----------|-------------|---------|
+| `Panda.filter(expr)` | Filter rows using pandas query | `Panda.filter("pLDDT > 80 and distance < 5.0")` |
+| `Panda.sort(by, ascending)` | Sort by column(s) | `Panda.sort("affinity", ascending=False)` |
+| `Panda.head(n)` | Keep first N rows | `Panda.head(10)` |
+| `Panda.tail(n)` | Keep last N rows | `Panda.tail(5)` |
+| `Panda.sample(n, frac)` | Random sample | `Panda.sample(n=100, random_state=42)` |
+| `Panda.rank(by, prefix, ascending)` | Add rank column | `Panda.rank(by="score", ascending=False)` |
+| `Panda.drop_duplicates(subset, keep)` | Remove duplicates | `Panda.drop_duplicates(subset="sequence")` |
+| `Panda.merge(on, how, prefixes)` | Join tables horizontally | `Panda.merge(on="id", prefixes=["apo_", "holo_"])` |
+| `Panda.concat(fill, add_source)` | Stack tables vertically | `Panda.concat(fill="", add_source=True)` |
+| `Panda.calculate(exprs)` | Add computed columns | `Panda.calculate({"delta": "holo - apo"})` |
+| `Panda.groupby(by, agg)` | Group and aggregate | `Panda.groupby("category", {"score": "mean"})` |
+| `Panda.select_columns(cols)` | Keep specified columns | `Panda.select_columns(["id", "score"])` |
+| `Panda.drop_columns(cols)` | Remove columns | `Panda.drop_columns(["temp"])` |
+| `Panda.rename(mapping)` | Rename columns | `Panda.rename({"old": "new"})` |
+| `Panda.fillna(value, column)` | Fill missing values | `Panda.fillna(0)` |
+| `Panda.pivot(index, columns, values)` | Wide format | `Panda.pivot("id", "metric", "value")` |
+| `Panda.melt(id_vars, value_vars)` | Long format | `Panda.melt(id_vars="id")` |
+| `Panda.average_by_source()` | Average per source table | `Panda.average_by_source()` |
 
 **Outputs**:
-- Ranked pool with same structure as input (when pool provided)
-- `tables.ranked`: Full ranked table with all columns
+- `tables.result`: Transformed table with all operations applied
+- `tables.missing`: IDs filtered out (when using pool mode)
+- Pool mode: Structures/compounds/sequences matching filtered IDs
 
-  | id | source_id | metric | {variable_columns} | {original_columns} |
-  |----|-----------|--------|-------------------|-------------------|
+**Examples**:
 
-- `tables.metrics`: Summary table with only ranking info
-
-  | id | source_id | {metric_column} |
-  |----|-----------|-----------------|
-
-**Output Columns**:
-- `id`: Renamed IDs (e.g., rank_1, rank_2, ...)
-- `source_id`: Original IDs
-- `metric`: Computed metric column (if expression used)
-- Individual variable columns if metric is an expression with multiple variables (e.g., pLDDT, affinity)
-- All other original columns preserved
-
-**Metric Types**:
-- **Column reference**: Simple column name (e.g., "pLDDT", "affinity")
-- **Expression**: Computed metric using pandas eval syntax (e.g., "0.8*pLDDT + 0.2*affinity", "pLDDT - 2*rmsd")
-
-**Example**:
 ```python
-from PipelineScripts.rank import Rank
+from PipelineScripts.panda import Panda
 
-# Rank using tuple notation (metric auto-extracted from column reference)
-ranked = Rank(
-    data=boltz.tables.structures.pLDDT,  # metric="pLDDT" inferred
-    pool=boltz,
-    prefix="model",
-    top=10
+# Filter (replaces Filter tool)
+filtered = Panda(
+    table=boltz.tables.confidence,
+    operations=[
+        Panda.filter("confidence_score > 0.8")
+    ]
 )
 
-# Rank by single column (explicit metric)
-ranked = Rank(
-    data=analysis.tables.merged,
-    pool=boltz,
-    metric="pLDDT",
-    ascending=False,  # Higher is better
-    prefix="model",
-    top=10
+# Sort + head (replaces SelectBest)
+best = Panda(
+    table=boltz.tables.confidence,
+    operations=[
+        Panda.sort("confidence_score", ascending=False),
+        Panda.head(5)
+    ]
 )
 
-# Rank by computed expression with pool mode
-ranked = Rank(
-    data=merged.tables.merged,
-    pool=boltz,
-    metric="0.8*pLDDT + 0.2*binding_affinity",
-    prefix="design",
-    top=20
-)
-```
-
----
-
-### SelectBest
-
-Selects the single best structure or sequence based on optimization criteria. Supports single or multi-objective optimization with configurable weights.
-
-**Environment**: `ProteinEnv`
-
-**Parameters**:
-- `pool`: Union[ToolOutput, StandardizedOutput, List[Union[ToolOutput, StandardizedOutput]]] (required) - Single or list of tool outputs to select from
-- `tables`: Union[List[Union[ToolOutput, StandardizedOutput, TableInfo, str]], List[str]] (required) - Tables to evaluate for selection
-- `metric`: str (required) - Primary metric to optimize
-- `mode`: str = "max" - Optimization direction ("max" or "min")
-- `weights`: Optional[Dict[str, float]] = None - Dictionary of {metric_name: weight} for multi-metric selection
-- `tie_breaker`: str = "first" - How to break ties ("first", "random", or metric name)
-- `composite_function`: str = "weighted_sum" - How to combine metrics (weighted_sum, product, min, max)
-- `name`: str = "best" - Name for output structure file
-
-**Outputs**:
-- Single best structure/sequence with same format as input pool
-
-**Example**:
-```python
-from PipelineScripts.select_best import SelectBest
-
-best = SelectBest(
-    pool=boltz,
-    tables=[distances.tables.analysis],
-    metric="distance",
-    mode="min"
+# Rank with renamed IDs (replaces Rank tool)
+ranked = Panda(
+    table=boltz.tables.confidence,
+    operations=[
+        Panda.sort("confidence_score", ascending=False)
+    ],
+    rename="best",  # Output: best_1, best_2, ...
+    pool=boltz
 )
 
-# Multi-objective selection
-best_multi = SelectBest(
-    pool=boltz,
-    tables=[analysis.tables.merged],
-    metric="composite_score",
-    weights={"binding_affinity": 0.6, "pLDDT": 0.4},
-    mode="max"
+# Merge tables (replaces MergeTables)
+merged = Panda(
+    tables=[apo.tables.affinity, holo.tables.affinity],
+    operations=[
+        Panda.merge(on="id", prefixes=["apo_", "holo_"]),
+        Panda.calculate({"delta": "holo_affinity - apo_affinity"})
+    ]
+)
+
+# Concatenate tables (replaces ConcatenateTables)
+combined = Panda(
+    tables=[cycle0.tables.results, cycle1.tables.results],
+    operations=[
+        Panda.concat(fill="", add_source=True)
+    ]
+)
+
+# Complex pipeline with pool mode
+complex_result = Panda(
+    tables=[boltz1.tables.confidence, boltz2.tables.confidence],
+    operations=[
+        Panda.concat(fill="", add_source=True),
+        Panda.filter("confidence_score > 0.6"),
+        Panda.sort("confidence_score", ascending=False),
+        Panda.head(10)
+    ],
+    rename="top",
+    pool=boltz1
 )
 ```
 
@@ -185,93 +143,6 @@ unique = RemoveDuplicates(
 
 ---
 
-### MergeTables
-
-Combines multiple tables by joining on a common key column. Enables integration of metrics from different analysis tools.
-
-**Environment**: `ProteinEnv`
-
-**Parameters**:
-- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - List of tables to merge
-- `key`: str = "id" - Join column name
-- `prefixes`: Optional[List[str]] = None - Prefixes for columns from each table
-- `suffixes`: Optional[List[str]] = None - Suffixes for columns from each table
-- `how`: str = "inner" - Join type (inner, outer, left, right)
-- `calculate`: Optional[Dict[str, str]] = None - Derived column expressions {new_col: expression}
-
-**Outputs**:
-- `tables.merged`: Combined table with columns from all inputs
-
-**Example**:
-```python
-from PipelineScripts.merge_tables import MergeTables
-
-merged = MergeTables(
-    tables=[distances.tables.analysis, plip.tables.interactions],
-    prefixes=["dist_", "plip_"],
-    key="id",
-    calculate={"score": "dist_distance + plip_energy"}
-)
-```
-
----
-
-### ConcatenateTables
-
-Stacks multiple tables vertically (row-wise). Useful for combining results from multiple cycles or parallel runs.
-
-**Environment**: `ProteinEnv`
-
-**Parameters**:
-- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - List of tables to concatenate
-- `fill`: str = "N/A" - Value for missing columns
-- `ignore_index`: bool = True - Reset index in concatenated output
-
-**Outputs**:
-- `tables.concatenated`: Row-wise concatenation of all input tables
-
-**Example**:
-```python
-from PipelineScripts.concatenate_tables import ConcatenateTables
-
-concat = ConcatenateTables(
-    tables=[cycle1_results, cycle2_results, cycle3_results],
-    fill="N/A"
-)
-```
-
----
-
-### SliceTable
-
-Extracts a subset of rows and/or columns from a table. Enables data sampling and column selection.
-
-**Environment**: `ProteinEnv`
-
-**Parameters**:
-- `table`: Union[ToolOutput, StandardizedOutput, TableInfo, str] (required) - Input table to slice
-- `start`: int = 0 - Starting row index
-- `end`: Optional[int] = None - Ending row index (None = to end)
-- `step`: int = 1 - Step size for slicing
-- `columns`: Optional[List[str]] = None - Specific columns to keep (None = all columns)
-
-**Outputs**:
-- `tables.sliced`: Sliced table
-
-**Example**:
-```python
-from PipelineScripts.slice_table import SliceTable
-
-sliced = SliceTable(
-    table=results.tables.analysis,
-    start=0,
-    end=100,
-    columns=["id", "distance", "confidence"]
-)
-```
-
----
-
 ### ExtractMetrics
 
 Extracts and aggregates specific metrics from tables. Supports grouping and various aggregation functions for data summarization.
@@ -301,35 +172,6 @@ metrics = ExtractMetrics(
 ```
 
 ---
-
-### AverageByTable
-
-Computes averages of metrics grouped by a specified column. Useful for summarizing results across multiple structures or cycles.
-
-**Environment**: `ProteinEnv`
-
-**Parameters**:
-- `tables`: List[Union[ToolOutput, StandardizedOutput, TableInfo, str]] (required) - Input tables
-- `group_by`: str (required) - Column to group by
-- `metrics`: List[str] (required) - Metric columns to average
-- `weights`: Optional[Dict[str, float]] = None - Weights for each metric
-
-**Outputs**:
-- `tables.averaged`: Averaged metrics by group
-
-**Example**:
-```python
-from PipelineScripts.average_by_table import AverageByTable
-
-averaged = AverageByTable(
-    tables=[cycle1.tables.analysis, cycle2.tables.analysis],
-    group_by="structure_id",
-    metrics=["distance", "confidence"]
-)
-```
-
----
-
 
 ### SelectionEditor
 

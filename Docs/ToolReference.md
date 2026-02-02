@@ -55,15 +55,9 @@ Tools for analyzing structures, interactions, and mutations.
 
 Tools for filtering, ranking, and manipulating data tables.
 
-- [Filter](Tool/DataManagement.md#filter) - Expression-based filtering
-- [Rank](Tool/DataManagement.md#rank) - Metric-based ranking with ID renaming
-- [SelectBest](Tool/DataManagement.md#selectbest) - Single/multi-objective selection
+- [Panda](Tool/DataManagement.md#panda) - Unified pandas-style table transformations (filter, sort, merge, concat, rank, etc.)
 - [RemoveDuplicates](Tool/DataManagement.md#removeduplicates) - Deduplication
-- [MergeTables](Tool/DataManagement.md#mergetables) - Table joining
-- [ConcatenateTables](Tool/DataManagement.md#concatenatetables) - Vertical table stacking
-- [SliceTable](Tool/DataManagement.md#slicetable) - Row/column extraction
 - [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric aggregation
-- [AverageByTable](Tool/DataManagement.md#averagebytable) - Grouped averaging
 - [SelectionEditor](Tool/Analysis.md#selectioneditor) - Selection string manipulation
 
 ### [Utilities](Tool/Utilities.md)

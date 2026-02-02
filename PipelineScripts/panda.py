@@ -444,6 +444,7 @@ class Panda(BaseConfig):
                  tables: Optional[List[Union[TableInfo, StandardizedOutput, str]]] = None,
                  operations: Optional[List[Operation]] = None,
                  pool: Optional[StandardizedOutput] = None,
+                 rename: Optional[str] = None,
                  **kwargs):
         """
         Initialize Panda tool.
@@ -453,6 +454,8 @@ class Panda(BaseConfig):
             tables: Multiple table inputs for merge/concat operations
             operations: List of operations to apply sequentially
             pool: Tool output for pool mode - structures matching filtered IDs will be copied
+            rename: If provided, output IDs will be renamed to {rename}_1, {rename}_2, etc.
+                    Useful after sorting to get ranked IDs (e.g., rename="best" -> best_1, best_2, ...)
             **kwargs: Additional parameters
 
         Examples:
@@ -474,6 +477,14 @@ class Panda(BaseConfig):
                 operations=[Panda.filter("delta > 0")],
                 pool=boltz_output
             )
+
+            # Sort and rename to get ranked output
+            ranked = Panda(
+                table=boltz.tables.confidence,
+                operations=[Panda.sort("confidence_score", ascending=False)],
+                rename="best",  # Output will have IDs: best_1, best_2, ...
+                pool=boltz
+            )
         """
         # Validate mutual exclusivity
         if table is not None and tables is not None:
@@ -487,6 +498,7 @@ class Panda(BaseConfig):
         self.operations = operations or []
         self.pool_output = pool
         self.use_pool_mode = pool is not None
+        self.rename = rename
 
         # Validate operations
         self._validate_operations()
@@ -673,6 +685,9 @@ class Panda(BaseConfig):
         if self.use_pool_mode:
             config_lines.append(f"POOL MODE: enabled")
 
+        if self.rename:
+            config_lines.append(f"RENAME: {self.rename}_N")
+
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
@@ -685,7 +700,8 @@ class Panda(BaseConfig):
             "operations": [op.to_dict() for op in self.operations],
             "output_csv": self.output_csv,
             "use_pool_mode": self.use_pool_mode,
-            "pool_output_folder": getattr(self, 'pool_folder', None)
+            "pool_output_folder": getattr(self, 'pool_folder', None),
+            "rename": self.rename
         }
 
         with open(self.config_file, 'w') as f:
@@ -741,24 +757,46 @@ fi
 
         if self.use_pool_mode:
             # Pool mode: predict structures, compounds, sequences from pool
-            updated_structures = []
-            updated_compounds = []
-            updated_sequences = []
+            # If rename is set, predict renamed IDs and files
+            pool_struct_count = len(self.pool_output.structures.ids) if self.pool_output.structures else 0
+            pool_comp_count = len(self.pool_output.compounds.ids) if self.pool_output.compounds else 0
+            pool_seq_count = len(self.pool_output.sequences.ids) if self.pool_output.sequences else 0
 
-            if self.pool_output.structures and len(self.pool_output.structures) > 0:
-                for struct_path in self.pool_output.structures.files:
-                    filename = os.path.basename(struct_path)
-                    updated_structures.append(os.path.join(self.output_folder, filename))
+            if self.rename:
+                # Predict renamed IDs: {rename}_1, {rename}_2, ...
+                struct_ids = [f"{self.rename}_{i+1}" for i in range(pool_struct_count)]
+                comp_ids = [f"{self.rename}_{i+1}" for i in range(pool_comp_count)]
+                seq_ids = [f"{self.rename}_{i+1}" for i in range(pool_seq_count)]
 
-            if self.pool_output.compounds and len(self.pool_output.compounds) > 0:
-                for comp_path in self.pool_output.compounds.files:
-                    filename = os.path.basename(comp_path)
-                    updated_compounds.append(os.path.join(self.output_folder, filename))
+                # Predict renamed file paths
+                updated_structures = [os.path.join(self.output_folder, f"{sid}.pdb") for sid in struct_ids]
+                updated_compounds = [os.path.join(self.output_folder, f"{cid}.sdf") for cid in comp_ids]
+                updated_sequences = [os.path.join(self.output_folder, f"{seqid}.fasta") for seqid in seq_ids]
+            else:
+                # Keep original IDs
+                struct_ids = list(self.pool_output.structures.ids) if self.pool_output.structures else []
+                comp_ids = list(self.pool_output.compounds.ids) if self.pool_output.compounds else []
+                seq_ids = list(self.pool_output.sequences.ids) if self.pool_output.sequences else []
 
-            if self.pool_output.sequences and len(self.pool_output.sequences) > 0:
-                for seq_path in self.pool_output.sequences.files:
-                    filename = os.path.basename(seq_path)
-                    updated_sequences.append(os.path.join(self.output_folder, filename))
+                # Keep original filenames
+                updated_structures = []
+                updated_compounds = []
+                updated_sequences = []
+
+                if self.pool_output.structures and len(self.pool_output.structures) > 0:
+                    for struct_path in self.pool_output.structures.files:
+                        filename = os.path.basename(struct_path)
+                        updated_structures.append(os.path.join(self.output_folder, filename))
+
+                if self.pool_output.compounds and len(self.pool_output.compounds) > 0:
+                    for comp_path in self.pool_output.compounds.files:
+                        filename = os.path.basename(comp_path)
+                        updated_compounds.append(os.path.join(self.output_folder, filename))
+
+                if self.pool_output.sequences and len(self.pool_output.sequences) > 0:
+                    for seq_path in self.pool_output.sequences.files:
+                        filename = os.path.basename(seq_path)
+                        updated_sequences.append(os.path.join(self.output_folder, filename))
 
             # Include pool tables
             if hasattr(self.pool_output, 'tables') and hasattr(self.pool_output.tables, '_tables'):
@@ -775,19 +813,19 @@ fi
 
             structures = DataStream(
                 name="structures",
-                ids=self.pool_output.structures.ids if self.pool_output.structures else [],
+                ids=struct_ids,
                 files=updated_structures,
                 format="pdb"
             )
             compounds = DataStream(
                 name="compounds",
-                ids=self.pool_output.compounds.ids if self.pool_output.compounds else [],
+                ids=comp_ids,
                 files=updated_compounds,
                 format="sdf"
             )
             sequences = DataStream(
                 name="sequences",
-                ids=self.pool_output.sequences.ids if self.pool_output.sequences else [],
+                ids=seq_ids,
                 files=updated_sequences,
                 format="fasta"
             )

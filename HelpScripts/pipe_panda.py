@@ -417,14 +417,16 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
 
 
 def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str,
-                                        output_folder: str) -> Dict[str, List[str]]:
+                                        output_folder: str,
+                                        rename_map: Optional[Dict[str, str]] = None) -> Dict[str, List[str]]:
     """
     Extract structures, compounds, and sequences from pool for filtered IDs.
 
     Args:
-        filtered_ids: List of IDs that passed filtering
+        filtered_ids: List of IDs that passed filtering (original IDs for lookup)
         pool_folder: Pool output folder containing all data types
         output_folder: Where to copy the filtered data
+        rename_map: Optional mapping from original ID to new ID for renaming output files
 
     Returns:
         Dictionary mapping data type to list of extracted file paths
@@ -434,8 +436,13 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
     os.makedirs(output_folder, exist_ok=True)
 
     print(f"\nPool mode: Extracting data for {len(filtered_ids)} filtered IDs")
+    if rename_map:
+        print(f"Renaming files according to rename map")
 
     for selected_id in filtered_ids:
+        # Determine output ID (renamed or original)
+        output_id = rename_map.get(str(selected_id), selected_id) if rename_map else selected_id
+
         # Extract structures (PDB/CIF files)
         structure_patterns = [
             os.path.join(pool_folder, f"{selected_id}.pdb"),
@@ -450,7 +457,7 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
             matches = glob.glob(pattern, recursive=True)
             if matches:
                 source = matches[0]
-                dest = os.path.join(output_folder, f"{selected_id}.pdb")
+                dest = os.path.join(output_folder, f"{output_id}.pdb")
                 try:
                     shutil.copy2(source, dest)
                     extracted_files["structures"].append(dest)
@@ -471,7 +478,7 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
             matches = glob.glob(pattern, recursive=True)
             if matches:
                 source = matches[0]
-                dest = os.path.join(output_folder, f"{selected_id}.sdf")
+                dest = os.path.join(output_folder, f"{output_id}.sdf")
                 try:
                     shutil.copy2(source, dest)
                     extracted_files["compounds"].append(dest)
@@ -504,7 +511,13 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                     continue
 
                 if filtered_ids:
-                    matching_rows = df[df['id'].isin(filtered_ids)]
+                    matching_rows = df[df['id'].isin(filtered_ids)].copy()
+                    # Apply rename mapping to the id column if provided
+                    if rename_map and not matching_rows.empty:
+                        matching_rows['original_id'] = matching_rows['id']
+                        matching_rows['id'] = matching_rows['id'].astype(str).map(
+                            lambda x: rename_map.get(x, x)
+                        )
                     dest = os.path.join(output_folder, filename)
                     matching_rows.to_csv(dest, index=False)
                     print(f"Filtered table: {filename} ({len(matching_rows)} rows)")
@@ -565,9 +578,12 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
     use_pool_mode = config_data.get('use_pool_mode', False)
     pool_output_folder = config_data.get('pool_output_folder')
+    rename = config_data.get('rename')
 
     print(f"Panda: Processing {len(input_csvs)} input files")
     print(f"Operations: {len(operations)}")
+    if rename:
+        print(f"Rename: {rename}_N")
 
     # Load input dataframes
     dataframes = []
@@ -615,6 +631,17 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     else:
         result_df = current
 
+    # Apply rename if specified - creates new IDs based on row order
+    original_to_new_id = {}
+    if rename and 'id' in result_df.columns:
+        original_ids_ordered = result_df['id'].tolist()
+        new_ids = [f"{rename}_{i+1}" for i in range(len(result_df))]
+        original_to_new_id = dict(zip([str(x) for x in original_ids_ordered], new_ids))
+        result_df = result_df.copy()
+        result_df['original_id'] = result_df['id']
+        result_df['id'] = new_ids
+        print(f"\nApplied rename: {rename}_1 to {rename}_{len(result_df)}")
+
     # Create output directory
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
@@ -633,18 +660,28 @@ def run_panda(config_data: Dict[str, Any]) -> None:
             print(f"... and {len(result_df) - 3} more rows")
 
     # Get filtered IDs for pool mode and missing.csv
+    # Use original_id for lookup, new id for output files
     filtered_ids = []
+    filtered_ids_for_lookup = []
     if 'id' in result_df.columns:
         filtered_ids = result_df['id'].astype(str).tolist()
+        if 'original_id' in result_df.columns:
+            filtered_ids_for_lookup = result_df['original_id'].astype(str).tolist()
+        else:
+            filtered_ids_for_lookup = filtered_ids
     else:
         id_columns = [col for col in result_df.columns if 'id' in col.lower()]
         if id_columns:
             filtered_ids = result_df[id_columns[0]].astype(str).tolist()
+            filtered_ids_for_lookup = filtered_ids
 
     # Handle pool mode
-    if use_pool_mode and pool_output_folder and filtered_ids:
+    if use_pool_mode and pool_output_folder and filtered_ids_for_lookup:
         output_dir = os.path.dirname(output_csv)
-        extracted = extract_pool_data_for_filtered_ids(filtered_ids, pool_output_folder, output_dir)
+        extracted = extract_pool_data_for_filtered_ids(
+            filtered_ids_for_lookup, pool_output_folder, output_dir,
+            rename_map=original_to_new_id if rename else None
+        )
 
         print(f"\nPool mode summary:")
         print(f"Filtered IDs: {len(filtered_ids)}")
