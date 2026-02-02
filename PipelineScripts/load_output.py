@@ -686,6 +686,30 @@ class LoadOutput(BaseConfig):
                         return 'sdf'
             return default
 
+        # Helper to find map_table for a data type from tables
+        def find_map_table(data_key: str) -> str:
+            """Look for a corresponding table that can serve as map_table."""
+            raw_tables = output_structure.get('tables', {})
+            if not isinstance(raw_tables, dict):
+                return ""
+
+            # Map data types to their typical table names
+            table_mappings = {
+                'structures': ['structures', 'structures_map'],
+                'sequences': ['sequences', 'sequences_map'],
+                'compounds': ['ligands', 'compounds', 'ligands_map', 'compounds_map']
+            }
+
+            candidate_names = table_mappings.get(data_key, [data_key])
+            for table_name in candidate_names:
+                if table_name in raw_tables:
+                    table_info = raw_tables[table_name]
+                    if isinstance(table_info, dict) and 'path' in table_info:
+                        return table_info['path']
+                    elif isinstance(table_info, str):
+                        return table_info
+            return ""
+
         # Helper to convert a single data type (structures, sequences, or compounds)
         def convert_data_type(data_key: str, ids_key: str, default_format: str) -> DataStream:
             raw_data = output_structure.get(data_key)
@@ -698,13 +722,16 @@ class LoadOutput(BaseConfig):
             files = raw_data if isinstance(raw_data, list) else []
             ids = output_structure.get(ids_key, [])
 
+            # Try to find a map_table from tables
+            map_table = find_map_table(data_key)
+
             if files and ids and len(files) == len(ids):
                 fmt = detect_format(files, default_format)
                 return DataStream(
                     name=data_key,
                     ids=ids,
                     files=files,
-                    map_table="",
+                    map_table=map_table,
                     format=fmt
                 )
             elif ids and not files:
@@ -713,7 +740,16 @@ class LoadOutput(BaseConfig):
                     name=data_key,
                     ids=ids,
                     files=[],
-                    map_table="",
+                    map_table=map_table,
+                    format=default_format
+                )
+            elif map_table:
+                # No files or IDs but we have a map_table - create minimal DataStream
+                return DataStream(
+                    name=data_key,
+                    ids=[],
+                    files=[],
+                    map_table=map_table,
                     format=default_format
                 )
             else:
