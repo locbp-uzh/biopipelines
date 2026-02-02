@@ -35,7 +35,7 @@ with Pipeline(project="RefactorTest",
 
     # Test SDM (Site-Directed Mutagenesis)
     sdm = SDM(
-        sequences=halotag,
+        original=halotag,
         position=14,
         mode="charged"
     )
