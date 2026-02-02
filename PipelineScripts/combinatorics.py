@@ -116,9 +116,13 @@ class CombinatoricsConfig:
         return axis.sources if axis else []
 
 
-def _extract_source_paths(source: Any) -> List[str]:
+def _extract_source_paths(source: Any, axis_name: str) -> List[str]:
     """
     Extract CSV file paths from a source (StandardizedOutput, ToolOutput, DataStream, etc.).
+
+    Args:
+        source: The source object to extract paths from
+        axis_name: Which data type to extract ("proteins" -> sequences, "ligands" -> compounds)
 
     Returns list of paths to CSV files containing the data.
     """
@@ -135,41 +139,37 @@ def _extract_source_paths(source: Any) -> List[str]:
     if isinstance(source, list):
         paths = []
         for item in source:
-            paths.extend(_extract_source_paths(item))
+            paths.extend(_extract_source_paths(item, axis_name))
         return paths
 
     # DataStream - use map_table path
     if hasattr(source, 'map_table') and hasattr(source, 'ids'):
         if source.map_table:
             return [source.map_table]
-        return []
+        raise ValueError(f"DataStream for axis '{axis_name}' has no map_table")
 
-    # StandardizedOutput - get sequences or compounds DataStream
-    if hasattr(source, 'sequences') and source.sequences:
-        if hasattr(source.sequences, 'map_table') and source.sequences.map_table:
-            return [source.sequences.map_table]
-    if hasattr(source, 'compounds') and source.compounds:
-        if hasattr(source.compounds, 'map_table') and source.compounds.map_table:
-            return [source.compounds.map_table]
-
-    # ToolOutput
-    if hasattr(source, 'get_output_files'):
-        outputs = source.get_output_files()
-        if 'sequences' in outputs and outputs['sequences']:
-            seq = outputs['sequences']
-            if hasattr(seq, 'map_table') and seq.map_table:
-                return [seq.map_table]
-        if 'compounds' in outputs and outputs['compounds']:
-            comp = outputs['compounds']
-            if hasattr(comp, 'map_table') and comp.map_table:
-                return [comp.map_table]
-
-    return []
+    # StandardizedOutput - use axis_name to determine which DataStream to use
+    if axis_name == "sequences":
+        if hasattr(source, 'sequences') and source.sequences:
+            if hasattr(source.sequences, 'map_table') and source.sequences.map_table:
+                return [source.sequences.map_table]
+        raise ValueError(f"Source for 'sequences' axis must have sequences with map_table")
+    elif axis_name == "compounds":
+        if hasattr(source, 'compounds') and source.compounds:
+            if hasattr(source.compounds, 'map_table') and source.compounds.map_table:
+                return [source.compounds.map_table]
+        raise ValueError(f"Source for 'compounds' axis must have compounds with map_table")
+    else:
+        raise ValueError(f"Unknown axis name: {axis_name}. Must be 'sequences' or 'compounds'")
 
 
-def _unwrap_sources(value: Any) -> tuple:
+def _unwrap_sources(value: Any, axis_name: str) -> tuple:
     """
     Unwrap Bundle/Each wrappers and return (mode, sources).
+
+    Args:
+        value: The value to unwrap
+        axis_name: Which data type to extract ("proteins" -> sequences, "ligands" -> compounds)
 
     Returns:
         (mode: str, sources: list) where mode is "bundle" or "each"
@@ -181,16 +181,16 @@ def _unwrap_sources(value: Any) -> tuple:
             if isinstance(src, Each):
                 # Each inside Bundle - flatten
                 for sub_src in src.sources:
-                    all_paths.extend(_extract_source_paths(sub_src))
+                    all_paths.extend(_extract_source_paths(sub_src, axis_name))
             else:
-                all_paths.extend(_extract_source_paths(src))
+                all_paths.extend(_extract_source_paths(src, axis_name))
         return ("bundle", all_paths)
 
     elif isinstance(value, Each):
         # Each iterates
         all_paths = []
         for src in value.sources:
-            all_paths.extend(_extract_source_paths(src))
+            all_paths.extend(_extract_source_paths(src, axis_name))
         return ("each", all_paths)
 
     elif isinstance(value, list):
@@ -198,15 +198,15 @@ def _unwrap_sources(value: Any) -> tuple:
         all_paths = []
         for item in value:
             if isinstance(item, (Bundle, Each)):
-                _, paths = _unwrap_sources(item)
+                _, paths = _unwrap_sources(item, axis_name)
                 all_paths.extend(paths)
             else:
-                all_paths.extend(_extract_source_paths(item))
+                all_paths.extend(_extract_source_paths(item, axis_name))
         return ("each", all_paths)
 
     else:
         # Bare value defaults to Each
-        paths = _extract_source_paths(value)
+        paths = _extract_source_paths(value, axis_name)
         return ("each", paths)
 
 
@@ -221,8 +221,8 @@ def generate_combinatorics_config(
 
     Args:
         output_path: Path to write the config JSON file
-        **named_inputs: Named inputs, each may be wrapped in Bundle/Each or bare
-                       e.g., proteins=tool1, ligands=Bundle(tool2)
+        **named_inputs: Named inputs using data type names (sequences, compounds)
+                       e.g., sequences=tool1, compounds=Bundle(tool2)
 
     Returns:
         CombinatoricsConfig object (also saved to output_path)
@@ -230,15 +230,15 @@ def generate_combinatorics_config(
     Example:
         generate_combinatorics_config(
             "config.json",
-            proteins=lmpnn,
-            ligands=Bundle(compounds)
+            sequences=lmpnn,
+            compounds=Bundle(compounds)
         )
     """
     axes = {}
     for name, value in named_inputs.items():
         if value is None:
             continue
-        mode, sources = _unwrap_sources(value)
+        mode, sources = _unwrap_sources(value, name)
         axes[name] = AxisConfig(name=name, mode=mode, sources=sources)
 
     config = CombinatoricsConfig(axes=axes)
@@ -323,30 +323,28 @@ def predict_output_ids(
     for name, value in named_inputs.items():
         if value is None:
             continue
-        mode, _ = _unwrap_sources(value)
+        mode, _ = _unwrap_sources(value, name)
 
         # Get IDs directly from source object
         unwrapped = value.sources[0] if isinstance(value, (Bundle, Each)) else value
-        if name == "proteins":
-            # DataStream refactor: sequences.ids instead of sequence_ids
+        if name == "sequences":
             if hasattr(unwrapped, 'sequences') and unwrapped.sequences:
                 ids = list(unwrapped.sequences.ids)
             elif isinstance(unwrapped, str):
                 # Direct sequence string - single ID
-                ids = ["protein"]
+                ids = ["sequence"]
             else:
                 raise ValueError(f"No sequences found in {name} input")
-        elif name == "ligands":
-            # DataStream refactor: compounds.ids instead of compound_ids
+        elif name == "compounds":
             if hasattr(unwrapped, 'compounds') and unwrapped.compounds:
                 ids = list(unwrapped.compounds.ids)
             elif isinstance(unwrapped, str):
-                # Direct SMILES string - single ligand, bundled by default
-                ids = ["ligand"]
+                # Direct SMILES string - single compound
+                ids = ["compound"]
             else:
                 raise ValueError(f"No compounds found in {name} input")
         else:
-            raise ValueError(f"Unknown axis name: {name}")
+            raise ValueError(f"Unknown axis name: {name}. Must be 'sequences' or 'compounds'")
 
         axes_info.append((name, mode, ids))
 

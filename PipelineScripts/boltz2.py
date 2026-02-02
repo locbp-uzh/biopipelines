@@ -239,8 +239,8 @@ class Boltz2(BaseConfig):
         config_path = os.path.join(self.output_folder, "combinatorics_config.json")
         generate_combinatorics_config(
             config_path,
-            proteins=self.proteins,
-            ligands=self.ligands
+            sequences=self.proteins,
+            compounds=self.ligands
         )
         return config_path
 
@@ -516,8 +516,8 @@ echo "Boltz2 completed successfully"
         """Predict sequence IDs from input sources using combinatorics module."""
         return predict_output_ids(
             bundled_name="bundled_complex",
-            proteins=self.proteins,
-            ligands=self.ligands
+            sequences=self.proteins,
+            compounds=self.ligands
         )
 
     def get_output_files(self) -> Dict[str, Any]:

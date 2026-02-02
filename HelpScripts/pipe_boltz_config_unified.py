@@ -502,12 +502,12 @@ def main():
     comb_config = load_combinatorics_config(args.combinatorics_config)
     axes = comb_config.get('axes', {})
 
-    # Extract proteins and ligands axes
-    if 'proteins' not in axes:
-        print("Error: proteins axis is required")
+    # Extract sequences and compounds axes
+    if 'sequences' not in axes:
+        print("Error: sequences axis is required")
         sys.exit(1)
-    proteins_axis = axes['proteins']
-    ligands_axis = axes.get('ligands')  # None if no ligands
+    proteins_axis = axes['sequences']
+    ligands_axis = axes.get('compounds')  # None if no ligands
 
     proteins_mode = proteins_axis.get('mode', 'each')
     ligands_mode = ligands_axis.get('mode', 'each') if ligands_axis else None
