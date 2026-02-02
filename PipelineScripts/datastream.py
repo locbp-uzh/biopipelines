@@ -68,11 +68,15 @@ class DataStream:
 
     def __post_init__(self):
         """Validate DataStream after initialization."""
-        # For file-based formats, files and ids should match in length
-        if self.files and len(self.files) != len(self.ids):
+        # Validation rules for files:
+        # - Empty files list: valid (value-based, data in map_table)
+        # - Single file: valid (one file contains all records, e.g., CSV)
+        # - Multiple files: must match number of ids (one file per record)
+        if len(self.files) > 1 and len(self.files) != len(self.ids):
             raise ValueError(
                 f"Length mismatch: {len(self.ids)} ids but {len(self.files)} files. "
-                f"For value-based formats (like 'smiles'), leave files empty."
+                f"Use empty files list or single file for table-based data, "
+                f"or provide one file per id."
             )
 
     def __len__(self) -> int:

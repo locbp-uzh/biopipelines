@@ -420,7 +420,7 @@ print(f'Output: {self.compounds_csv}')
         compounds = DataStream(
             name="compounds",
             ids=self.compound_ids,
-            files=[self.compounds_csv],
+            files=[],  # Value-based format - data is in map_table, not individual files
             map_table=self.compounds_csv,
             format="csv"
         )
