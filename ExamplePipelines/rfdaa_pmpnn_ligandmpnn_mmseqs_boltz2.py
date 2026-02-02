@@ -53,10 +53,9 @@ with Pipeline(project="Examples",
 
     #stitch sequences by replacing the pmpnn sequences with lmpnn sequences at the "within" positions
     #we'll get 2x2 = 4 sequences per design
-    sequences = StitchSequences(template=rfdaa,
+    sequences = StitchSequences(template=pmpnn,
                                 substitutions={
-                                    distances.tables.selections.within: lmpnn,
-                                    distances.tables.selections.beyond: pmpnn
+                                    distances.tables.selections.within: lmpnn
                                 })
 
     msas = MMseqs2(sequences=sequences)
