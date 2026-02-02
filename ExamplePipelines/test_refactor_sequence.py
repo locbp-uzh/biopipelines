@@ -19,7 +19,7 @@ with Pipeline(project="RefactorTest",
               job="SequenceDesign",
               description="Test sequence design tools"):
 
-    Resources(gpu="V100",
+    Resources(gpu="any",
               time="4:00:00",
               memory="16GB")
 
