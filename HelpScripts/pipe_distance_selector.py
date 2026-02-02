@@ -160,6 +160,23 @@ def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
 
+def is_placeholder_atom(atom: Atom) -> bool:
+    """
+    Check if an atom has placeholder coordinates (0, 0, 0).
+
+    Some tools generate structures with side chain atoms at (0, 0, 0) when
+    the side chain conformation is unknown. These should be excluded from
+    distance calculations.
+
+    Args:
+        atom: Atom to check
+
+    Returns:
+        True if atom is at origin (0, 0, 0), False otherwise
+    """
+    return atom.x == 0.0 and atom.y == 0.0 and atom.z == 0.0
+
+
 def sele_to_list(sele_str: str) -> List[int]:
     """
     Convert selection string to list of residue numbers.
@@ -328,10 +345,15 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
                 continue  # Skip this residue - not in restriction set
 
         # Calculate minimum distance from any atom in this residue to any reference atom
+        # Skip atoms at (0, 0, 0) as these are placeholders for missing side chains
         min_distance = float('inf')
 
         for res_atom in residue_atoms:
+            if is_placeholder_atom(res_atom):
+                continue
             for ref_atom in reference_atoms:
+                if is_placeholder_atom(ref_atom):
+                    continue
                 dist = calculate_distance(res_atom, ref_atom)
                 min_distance = min(min_distance, dist)
 
