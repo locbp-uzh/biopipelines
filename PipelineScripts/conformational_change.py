@@ -92,7 +92,7 @@ class ConformationalChange(BaseConfig):
         """
         # Resolve reference structures to DataStream
         if isinstance(reference_structures, StandardizedOutput):
-            self.reference_stream: DataStream = reference_structures.structures
+            self.reference_stream: DataStream = reference_structures.streams.structures
         elif isinstance(reference_structures, DataStream):
             self.reference_stream = reference_structures
         else:
@@ -100,7 +100,7 @@ class ConformationalChange(BaseConfig):
 
         # Resolve target structures to DataStream
         if isinstance(target_structures, StandardizedOutput):
-            self.target_stream: DataStream = target_structures.structures
+            self.target_stream: DataStream = target_structures.streams.structures
         elif isinstance(target_structures, DataStream):
             self.target_stream = target_structures
         else:

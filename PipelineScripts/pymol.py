@@ -457,7 +457,7 @@ class PyMOL(BaseConfig):
             elif isinstance(value, StandardizedOutput):
                 # Serialize StandardizedOutput reference
                 # Check if structures is a DataStream
-                structures_data = value.structures
+                structures_data = value.streams.structures
                 if isinstance(structures_data, DataStream):
                     result[key] = {
                         "type": "standardized_output",

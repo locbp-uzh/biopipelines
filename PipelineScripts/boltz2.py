@@ -153,7 +153,7 @@ class Boltz2(BaseConfig):
         self.proteins_stream: Optional[DataStream] = None
         if unwrapped_proteins is not None:
             if isinstance(unwrapped_proteins, StandardizedOutput):
-                self.proteins_stream = unwrapped_proteins.sequences
+                self.proteins_stream = unwrapped_proteins.streams.sequences
             elif isinstance(unwrapped_proteins, DataStream):
                 self.proteins_stream = unwrapped_proteins
             else:
@@ -164,7 +164,7 @@ class Boltz2(BaseConfig):
         self.ligands_smiles: Optional[str] = None
         if unwrapped_ligands is not None:
             if isinstance(unwrapped_ligands, StandardizedOutput):
-                self.ligands_stream = unwrapped_ligands.compounds
+                self.ligands_stream = unwrapped_ligands.streams.compounds
             elif isinstance(unwrapped_ligands, DataStream):
                 self.ligands_stream = unwrapped_ligands
             elif isinstance(unwrapped_ligands, str):

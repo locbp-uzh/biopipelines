@@ -71,7 +71,7 @@ class AlphaFold(BaseConfig):
         """
         # Resolve input to DataStream
         if isinstance(proteins, StandardizedOutput):
-            self.sequences_stream: DataStream = proteins.sequences
+            self.sequences_stream: DataStream = proteins.streams.sequences
         elif isinstance(proteins, DataStream):
             self.sequences_stream = proteins
         else:

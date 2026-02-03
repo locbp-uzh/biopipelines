@@ -58,7 +58,7 @@ class RFdiffusion(BaseConfig):
         self.pdb_file: Optional[str] = None
         if pdb is not None:
             if isinstance(pdb, StandardizedOutput):
-                self.pdb_file = pdb.structures.files[0]
+                self.pdb_file = pdb.streams.structures.files[0]
             elif isinstance(pdb, DataStream):
                 self.pdb_file = pdb.files[0]
             else:

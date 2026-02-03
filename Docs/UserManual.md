@@ -151,22 +151,22 @@ Tools output two types of data containers:
 **DataStream** - Unified container supporting IDs and associated files:
 
 ```python
-# Access structures from a tool
-for struct_id, pdb_path in boltz.structures:
+# Access structures from a tool via the streams container
+for struct_id, pdb_path in boltz.streams.structures:
     print(f"{struct_id}: {pdb_path}")
 
 # Count items
-print(f"Generated {len(boltz.structures)} structures")
+print(f"Generated {len(boltz.streams.structures)} structures")
 
 # Filter by IDs
-filtered = boltz.structures.filter_by_ids(["id1", "id3"])
+filtered = boltz.streams.structures.filter_by_ids(["id1", "id3"])
 ```
 
-DataStream types:
-- `structures` - PDB/CIF files
-- `sequences` - FASTA files or CSV with sequence column
-- `compounds` - SDF files or CSV with SMILES column
-- `msas` - A3M or CSV files
+DataStream types accessed via `tool.streams.<type>`:
+- `streams.structures` - PDB/CIF files
+- `streams.sequences` - FASTA files or CSV with sequence column
+- `streams.compounds` - SDF files or CSV with SMILES column
+- `streams.msas` - A3M or CSV files
 
 **Tables (TableInfo)** - Rich metadata about CSV files:
 

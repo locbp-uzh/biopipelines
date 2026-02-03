@@ -790,12 +790,12 @@ fi
             all_seq_ids = []
 
             for pool in self.pool_outputs:
-                if pool.structures:
-                    all_struct_ids.extend(pool.structures.ids)
-                if pool.compounds:
-                    all_comp_ids.extend(pool.compounds.ids)
-                if pool.sequences:
-                    all_seq_ids.extend(pool.sequences.ids)
+                if pool.streams.structures:
+                    all_struct_ids.extend(pool.streams.structures.ids)
+                if pool.streams.compounds:
+                    all_comp_ids.extend(pool.streams.compounds.ids)
+                if pool.streams.sequences:
+                    all_seq_ids.extend(pool.streams.sequences.ids)
 
             pool_struct_count = len(all_struct_ids)
             pool_comp_count = len(all_comp_ids)
@@ -823,18 +823,18 @@ fi
                 updated_sequences = []
 
                 for pool in self.pool_outputs:
-                    if pool.structures and len(pool.structures) > 0:
-                        for struct_path in pool.structures.files:
+                    if pool.streams.structures and len(pool.streams.structures) > 0:
+                        for struct_path in pool.streams.structures.files:
                             filename = os.path.basename(struct_path)
                             updated_structures.append(os.path.join(self.output_folder, filename))
 
-                    if pool.compounds and len(pool.compounds) > 0:
-                        for comp_path in pool.compounds.files:
+                    if pool.streams.compounds and len(pool.streams.compounds) > 0:
+                        for comp_path in pool.streams.compounds.files:
                             filename = os.path.basename(comp_path)
                             updated_compounds.append(os.path.join(self.output_folder, filename))
 
-                    if pool.sequences and len(pool.sequences) > 0:
-                        for seq_path in pool.sequences.files:
+                    if pool.streams.sequences and len(pool.streams.sequences) > 0:
+                        for seq_path in pool.streams.sequences.files:
                             filename = os.path.basename(seq_path)
                             updated_sequences.append(os.path.join(self.output_folder, filename))
 

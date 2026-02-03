@@ -67,7 +67,7 @@ class PoseDistance(BaseConfig):
         """
         # Resolve reference structure to DataStream
         if isinstance(reference_structure, StandardizedOutput):
-            self.reference_stream: DataStream = reference_structure.structures
+            self.reference_stream: DataStream = reference_structure.streams.structures
         elif isinstance(reference_structure, DataStream):
             self.reference_stream = reference_structure
         else:
@@ -75,7 +75,7 @@ class PoseDistance(BaseConfig):
 
         # Resolve sample structures to DataStream
         if isinstance(sample_structures, StandardizedOutput):
-            self.samples_stream: DataStream = sample_structures.structures
+            self.samples_stream: DataStream = sample_structures.streams.structures
         elif isinstance(sample_structures, DataStream):
             self.samples_stream = sample_structures
         else:

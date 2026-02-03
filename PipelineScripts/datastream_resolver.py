@@ -23,13 +23,13 @@ class DataStreamResolver:
         resolver = DataStreamResolver(output_folder="/path/to/tool/output")
 
         # From ToolOutput - extracts the DataStream directly
-        structures = resolver.resolve(tool_output.structures)
+        structures = resolver.resolve(tool_output.streams.structures)
 
         # From file list - caller provides format
         structures = resolver.resolve(["/path/a.pdb", "/path/b.pdb"], format="pdb")
 
         # From StandardizedOutput attribute
-        sequences = resolver.resolve(std_output.sequences)
+        sequences = resolver.resolve(std_output.streams.sequences)
     """
 
     def __init__(self, output_folder: str):

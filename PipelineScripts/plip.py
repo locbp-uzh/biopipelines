@@ -69,7 +69,7 @@ class PLIP(BaseConfig):
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
-            self.structures_stream: DataStream = structures.structures
+            self.structures_stream: DataStream = structures.streams.structures
         elif isinstance(structures, DataStream):
             self.structures_stream = structures
         else:

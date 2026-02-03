@@ -57,6 +57,14 @@ with Pipeline(project="Examples",
                                 substitutions={
                                     distances.tables.selections.within: lmpnn
                                 })
+    """
+    rfdiffusion3 gives also sequences in output, so we can write:
+    sequences = StitchSequences(template=rfd3,
+                                substitutions={
+                                    distances.tables.selections.beyond: pmpnn,
+                                    distances.tables.selections.within: lmpnn
+                                })
+    """
 
     msas = MMseqs2(sequences=sequences)
     boltz_quino = Boltz2(proteins=sequences,

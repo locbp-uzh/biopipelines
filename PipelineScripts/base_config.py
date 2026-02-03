@@ -809,17 +809,67 @@ class TableContainer:
         return f"TableContainer({list(self._tables.keys())})"
 
 
+class StreamContainer:
+    """Container for named DataStreams with dot-notation access."""
+
+    def __init__(self, streams: Dict[str, Any]):
+        self._streams = streams
+
+        # Set attributes for dot notation access to DataStream objects
+        for name, stream in streams.items():
+            setattr(self, name, stream)
+
+    def __getitem__(self, key: str):
+        """Get DataStream by name."""
+        if key in self._streams:
+            return self._streams[key]
+        raise KeyError(f"No stream named '{key}' in streams")
+
+    def __getattr__(self, name: str):
+        """Get DataStream by name via dot notation."""
+        if '_streams' in self.__dict__ and name in self._streams:
+            return self._streams[name]
+        raise AttributeError(f"No stream named '{name}'")
+
+    def keys(self):
+        """Get all stream names."""
+        return self._streams.keys()
+
+    def items(self):
+        """Get all name, stream pairs."""
+        return self._streams.items()
+
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' operator: 'stream_name' in streams"""
+        return key in self._streams
+
+    def get(self, key: str, default=None):
+        """Get stream with default (like dict.get())."""
+        return self._streams.get(key, default)
+
+    def __len__(self) -> int:
+        """Return number of streams."""
+        return len(self._streams)
+
+    def __str__(self) -> str:
+        if not self._streams:
+            return "{}"
+        return f"StreamContainer({list(self._streams.keys())})"
+
+    def __repr__(self) -> str:
+        return f"StreamContainer({list(self._streams.keys())})"
+
+
 class StandardizedOutput:
     """
     Provides dot-notation access to standardized output keys.
 
-    The main data attributes (structures, sequences, compounds, msas) are
-    DataStream objects that unify files and IDs:
+    DataStreams are accessed via the streams container:
 
-        for struct_id, pdb_path in output.structures:
+        for struct_id, pdb_path in output.streams.structures:
             print(f"Processing {struct_id}: {pdb_path}")
 
-        print(f"Generated {len(output.structures)} structures")
+        print(f"Generated {len(output.streams.structures)} structures")
     """
 
     def __init__(self, output_files: Dict[str, Any]):
@@ -830,11 +880,13 @@ class StandardizedOutput:
         tables_raw = output_files.get('tables', [])
         self.tables = self._process_tables(tables_raw)
 
-        # DataStream attributes - tools provide these directly
-        self.structures = output_files.get('structures')
-        self.sequences = output_files.get('sequences')
-        self.compounds = output_files.get('compounds')
-        self.msas = output_files.get('msas')
+        # Build streams container from all DataStream objects in output_files
+        from .datastream import DataStream
+        streams_dict = {}
+        for key, value in output_files.items():
+            if isinstance(value, DataStream):
+                streams_dict[key] = value
+        self.streams = StreamContainer(streams_dict)
 
         self.output_folder = output_files.get('output_folder', '')
 
@@ -842,11 +894,10 @@ class StandardizedOutput:
         self.filter_metadata = output_files.get('filter_metadata', {})
         self.is_filtered = self.filter_metadata.get('is_filtered', False)
 
-        # Store additional attributes
-        reserved_keys = {'tables', 'structures', 'sequences', 'compounds', 'msas',
-                        'output_folder', 'filter_metadata'}
+        # Store additional attributes (non-DataStream, non-reserved)
+        reserved_keys = {'tables', 'output_folder', 'filter_metadata', 'streams'}
         for key, value in output_files.items():
-            if key not in reserved_keys and not hasattr(self, key):
+            if key not in reserved_keys and not isinstance(value, DataStream) and not hasattr(self, key):
                 setattr(self, key, value)
     
     def _process_tables(self, tables_raw: Any) -> 'TableContainer':
@@ -1067,7 +1118,7 @@ class StandardizedOutput:
             Number of kept items (structures + sequences + compounds)
         """
         count = 0
-        for attr in (self.structures, self.sequences, self.compounds):
+        for attr in (self.streams.structures, self.streams.sequences, self.streams.compounds):
             if attr is not None:
                 count += len(attr)
         return count

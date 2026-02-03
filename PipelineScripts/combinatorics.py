@@ -150,14 +150,14 @@ def _extract_source_paths(source: Any, axis_name: str) -> List[str]:
 
     # StandardizedOutput - use axis_name to determine which DataStream to use
     if axis_name == "sequences":
-        if hasattr(source, 'sequences') and source.sequences:
-            if hasattr(source.sequences, 'map_table') and source.sequences.map_table:
-                return [source.sequences.map_table]
+        if hasattr(source, 'streams') and source.streams.sequences:
+            if hasattr(source.streams.sequences, 'map_table') and source.streams.sequences.map_table:
+                return [source.streams.sequences.map_table]
         raise ValueError(f"Source for 'sequences' axis must have sequences with map_table")
     elif axis_name == "compounds":
-        if hasattr(source, 'compounds') and source.compounds:
-            if hasattr(source.compounds, 'map_table') and source.compounds.map_table:
-                return [source.compounds.map_table]
+        if hasattr(source, 'streams') and source.streams.compounds:
+            if hasattr(source.streams.compounds, 'map_table') and source.streams.compounds.map_table:
+                return [source.streams.compounds.map_table]
         raise ValueError(f"Source for 'compounds' axis must have compounds with map_table")
     else:
         raise ValueError(f"Unknown axis name: {axis_name}. Must be 'sequences' or 'compounds'")
@@ -328,16 +328,16 @@ def predict_output_ids(
         # Get IDs directly from source object
         unwrapped = value.sources[0] if isinstance(value, (Bundle, Each)) else value
         if name == "sequences":
-            if hasattr(unwrapped, 'sequences') and unwrapped.sequences:
-                ids = list(unwrapped.sequences.ids)
+            if hasattr(unwrapped, 'streams') and unwrapped.streams.sequences:
+                ids = list(unwrapped.streams.sequences.ids)
             elif isinstance(unwrapped, str):
                 # Direct sequence string - single ID
                 ids = ["sequence"]
             else:
                 raise ValueError(f"No sequences found in {name} input")
         elif name == "compounds":
-            if hasattr(unwrapped, 'compounds') and unwrapped.compounds:
-                ids = list(unwrapped.compounds.ids)
+            if hasattr(unwrapped, 'streams') and unwrapped.streams.compounds:
+                ids = list(unwrapped.streams.compounds.ids)
             elif isinstance(unwrapped, str):
                 # Direct SMILES string - single compound
                 ids = ["compound"]

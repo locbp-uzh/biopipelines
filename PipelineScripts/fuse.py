@@ -94,10 +94,10 @@ class Fuse(BaseConfig):
         """
         if isinstance(proteins, StandardizedOutput):
             # Extract sequences from StandardizedOutput
-            if proteins.sequences and len(proteins.sequences) > 0:
-                return proteins.sequences.files
-            elif proteins.structures and len(proteins.structures) > 0:
-                return proteins.structures.files
+            if proteins.streams.sequences and len(proteins.streams.sequences) > 0:
+                return proteins.streams.sequences.files
+            elif proteins.streams.structures and len(proteins.streams.structures) > 0:
+                return proteins.streams.structures.files
             else:
                 raise ValueError("StandardizedOutput has no sequences or structures")
 
@@ -113,10 +113,10 @@ class Fuse(BaseConfig):
             for item in proteins:
                 if isinstance(item, StandardizedOutput):
                     # Extract first file from StandardizedOutput
-                    if item.structures and len(item.structures) > 0:
-                        resolved.append(item.structures.files[0])
-                    elif item.sequences and len(item.sequences) > 0:
-                        resolved.append(item.sequences.files[0])
+                    if item.streams.structures and len(item.streams.structures) > 0:
+                        resolved.append(item.streams.structures.files[0])
+                    elif item.streams.sequences and len(item.streams.sequences) > 0:
+                        resolved.append(item.streams.sequences.files[0])
                     else:
                         raise ValueError("StandardizedOutput has no structures or sequences")
                 elif isinstance(item, DataStream):

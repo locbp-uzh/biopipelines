@@ -268,13 +268,13 @@ class StitchSequences(BaseConfig):
                 "type": "tool_output",
                 "sequences_file": sequences_file,
                 "source_name": source.__class__.__name__,
-                "sequence_ids": source.sequences.ids if source.sequences else []
+                "sequence_ids": source.streams.sequences.ids if source.streams.sequences else []
             }
 
             # Include structure files if available (for PDB residue number mapping)
-            if source.structures and len(source.structures) > 0:
-                result["structure_files"] = source.structures.files
-                result["structure_ids"] = source.structures.ids or []
+            if source.streams.structures and len(source.streams.structures) > 0:
+                result["structure_files"] = source.streams.structures.files
+                result["structure_ids"] = source.streams.structures.ids or []
 
             return result
 

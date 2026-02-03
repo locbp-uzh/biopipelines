@@ -230,9 +230,9 @@ class BoltzGen(BaseConfig):
             return
 
         if isinstance(ligand, StandardizedOutput):
-            if ligand.compounds and len(ligand.compounds) > 0:
+            if ligand.streams.compounds and len(ligand.streams.compounds) > 0:
                 # compounds is a DataStream, get map_table
-                self.ligand_compounds_csv = ligand.compounds.map_table
+                self.ligand_compounds_csv = ligand.streams.compounds.map_table
             elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
                 self.ligand_compounds_csv = ligand.tables.compounds.path
             else:
@@ -248,9 +248,9 @@ class BoltzGen(BaseConfig):
             return
 
         if isinstance(target_structure, StandardizedOutput):
-            if target_structure.structures and len(target_structure.structures) > 0:
+            if target_structure.streams.structures and len(target_structure.streams.structures) > 0:
                 # Get first structure file
-                first_id, first_file = target_structure.structures[0]
+                first_id, first_file = target_structure.streams.structures[0]
                 self.target_structure_path = first_file
             else:
                 raise ValueError("target_structure StandardizedOutput has no structures")
@@ -1232,8 +1232,8 @@ class BoltzGenImport(BaseConfig):
             return
 
         if isinstance(designs, StandardizedOutput):
-            if designs.structures and len(designs.structures) > 0:
-                for struct_id, struct_file in designs.structures:
+            if designs.streams.structures and len(designs.streams.structures) > 0:
+                for struct_id, struct_file in designs.streams.structures:
                     self.design_ids.append(struct_id)
                     self.design_structures.append(struct_file)
             else:
@@ -1278,8 +1278,8 @@ class BoltzGenImport(BaseConfig):
             return
 
         if isinstance(ligand, StandardizedOutput):
-            if ligand.compounds and len(ligand.compounds) > 0:
-                self.ligand_compounds_csv = ligand.compounds.map_table
+            if ligand.streams.compounds and len(ligand.streams.compounds) > 0:
+                self.ligand_compounds_csv = ligand.streams.compounds.map_table
             elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
                 self.ligand_compounds_csv = ligand.tables.compounds.path
         elif isinstance(ligand, DataStream):

@@ -76,7 +76,7 @@ class DynamicBind(BaseConfig):
         """
         # Resolve structures input to DataStream
         if isinstance(structures, StandardizedOutput):
-            self.structures_stream: DataStream = structures.structures
+            self.structures_stream: DataStream = structures.streams.structures
         elif isinstance(structures, DataStream):
             self.structures_stream = structures
         else:
@@ -84,7 +84,7 @@ class DynamicBind(BaseConfig):
 
         # Resolve compounds input to DataStream
         if isinstance(compounds, StandardizedOutput):
-            self.compounds_stream: DataStream = compounds.compounds
+            self.compounds_stream: DataStream = compounds.streams.compounds
         elif isinstance(compounds, DataStream):
             self.compounds_stream = compounds
         else:

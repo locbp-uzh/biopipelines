@@ -66,7 +66,7 @@ class LigandMPNN(BaseConfig):
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
-            self.structures_stream: DataStream = structures.structures
+            self.structures_stream: DataStream = structures.streams.structures
         elif isinstance(structures, DataStream):
             self.structures_stream = structures
         else:
@@ -234,12 +234,21 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             for seq_num in range(1, self.num_sequences + 1):
                 sequence_ids.append(f"{pdb_base}_{seq_num}")
 
+        # Sequences stream - CSV-based with individual sequence IDs
         sequences = DataStream(
             name="sequences",
+            ids=sequence_ids,
+            files=[],
+            map_table=self.queries_csv,
+            format="csv"
+        )
+
+        # Fasta stream - file-based with structure IDs (one .fa file per structure)
+        fasta = DataStream(
+            name="fasta",
             ids=fasta_ids,
             files=fasta_files,
-            map_table=self.queries_csv,
-            format="fa"
+            format="fasta"
         )
 
         tables = {
@@ -255,6 +264,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         return {
             "structures": DataStream.empty("structures", "pdb"),
             "sequences": sequences,
+            "fasta": fasta,
             "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder

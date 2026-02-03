@@ -182,10 +182,10 @@ class RFdiffusion3(BaseConfig):
         # Handle ligand structure (takes precedence over pdb)
         if ligand_structure is not None:
             if isinstance(ligand_structure, StandardizedOutput):
-                self.input_pdb_file = ligand_structure.structures.files[0]
+                self.input_pdb_file = ligand_structure.streams.structures.files[0]
                 # Auto-extract ligand code from compound_ids if not provided
-                if not ligand_code and hasattr(ligand_structure, 'compounds') and ligand_structure.compounds:
-                    ligand_code = ligand_structure.compounds.ids[0] if ligand_structure.compounds.ids else ""
+                if not ligand_code and ligand_structure.streams.compounds:
+                    ligand_code = ligand_structure.streams.compounds.ids[0] if ligand_structure.streams.compounds.ids else ""
             elif isinstance(ligand_structure, DataStream):
                 self.input_pdb_file = ligand_structure.files[0]
             else:
@@ -193,9 +193,9 @@ class RFdiffusion3(BaseConfig):
         # Handle PDB input (only if ligand_structure not provided)
         elif pdb is not None:
             if isinstance(pdb, StandardizedOutput):
-                self.input_pdb_file = pdb.structures.files[0]
-                if len(pdb.structures.files) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.structures.files)}), using first: {pdb.structures.files[0]}")
+                self.input_pdb_file = pdb.streams.structures.files[0]
+                if len(pdb.streams.structures.files) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures.files)}), using first: {pdb.streams.structures.files[0]}")
             elif isinstance(pdb, DataStream):
                 self.input_pdb_file = pdb.files[0]
                 if len(pdb.files) > 1:
