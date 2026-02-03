@@ -85,7 +85,7 @@ class MutationProfiler(BaseConfig):
         """
         # Resolve original to DataStream
         if isinstance(original, StandardizedOutput):
-            self.original_stream: DataStream = original.sequences
+            self.original_stream: DataStream = original.streams.sequences
         elif isinstance(original, DataStream):
             self.original_stream = original
         else:
@@ -93,7 +93,7 @@ class MutationProfiler(BaseConfig):
 
         # Resolve mutants to DataStream
         if isinstance(mutants, StandardizedOutput):
-            self.mutants_stream: DataStream = mutants.sequences
+            self.mutants_stream: DataStream = mutants.streams.sequences
         elif isinstance(mutants, DataStream):
             self.mutants_stream = mutants
         else:

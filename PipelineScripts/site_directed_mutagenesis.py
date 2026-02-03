@@ -106,9 +106,9 @@ class SDM(BaseConfig):
         self.sequences_stream = None
 
         if isinstance(original, StandardizedOutput):
-            if original.sequences and len(original.sequences) > 0:
-                self.sequences_stream = original.sequences
-                self.input_sequence_id = original.sequences.ids[0] if original.sequences.ids else "sequence"
+            if original.streams.sequences and len(original.streams.sequences) > 0:
+                self.sequences_stream = original.streams.sequences
+                self.input_sequence_id = original.streams.sequences.ids[0] if original.streams.sequences.ids else "sequence"
             else:
                 raise ValueError("StandardizedOutput has no sequences")
         elif isinstance(original, DataStream):

@@ -115,8 +115,8 @@ class StitchSequences(BaseConfig):
         if isinstance(template, str):
             self.template_sequence = template
         elif isinstance(template, StandardizedOutput):
-            if template.sequences and len(template.sequences) > 0:
-                self.template_stream = template.sequences
+            if template.streams.sequences and len(template.streams.sequences) > 0:
+                self.template_stream = template.streams.sequences
             else:
                 raise ValueError("StandardizedOutput has no sequences for template")
         elif isinstance(template, DataStream):
@@ -459,7 +459,7 @@ fi
         sub_ids_list = []
         for options in self.substitutions.values():
             if isinstance(options, StandardizedOutput):
-                sub_ids_list.append(options.sequences.ids if options.sequences else [])
+                sub_ids_list.append(options.streams.sequences.ids if options.streams.sequences else [])
             elif isinstance(options, DataStream):
                 sub_ids_list.append(options.ids or [])
 
@@ -467,7 +467,7 @@ fi
         indel_ids_list = []
         for options in self.indels.values():
             if isinstance(options, StandardizedOutput):
-                indel_ids_list.append(options.sequences.ids if options.sequences else [])
+                indel_ids_list.append(options.streams.sequences.ids if options.streams.sequences else [])
             elif isinstance(options, DataStream):
                 indel_ids_list.append(options.ids or [])
 

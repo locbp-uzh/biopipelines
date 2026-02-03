@@ -1274,9 +1274,9 @@ class ToolOutput:
         Get standardized output with dot notation access.
 
         Allows usage like:
-        - rfd.structures
+        - rfd.streams.structures
         - rfd.tables
-        - rfd['structures'] (dict-style)
+        - rfd['streams'] (dict-style)
         """
         # Get current output files from the config
         if hasattr(self.config, 'get_output_files'):
@@ -1296,7 +1296,7 @@ class ToolOutput:
         Shorthand for .output - elegant access to tool outputs.
 
         Allows usage like:
-        - tool.o.structures
+        - tool.o.streams.structures
         - tool.o.tables.sequences
         - tool.o.tables.concatenated
         """

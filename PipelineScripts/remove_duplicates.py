@@ -150,8 +150,8 @@ class RemoveDuplicates(BaseConfig):
                         config["sequence_csv"] = first_info.path
 
         # Also check sequences DataStream
-        if config["sequence_csv"] is None and hasattr(pool, 'sequences'):
-            sequences = pool.sequences
+        if config["sequence_csv"] is None and hasattr(pool, 'streams') and pool.streams.sequences:
+            sequences = pool.streams.sequences
             if sequences and hasattr(sequences, 'map_table') and sequences.map_table:
                 config["sequence_csv"] = sequences.map_table
             elif sequences and hasattr(sequences, 'files') and sequences.files:

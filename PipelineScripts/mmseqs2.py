@@ -75,9 +75,9 @@ class MMseqs2(BaseConfig):
         self.raw_sequences: Optional[Union[str, List[str]]] = None
 
         if isinstance(sequences, StandardizedOutput):
-            if sequences.sequences and len(sequences.sequences) > 0:
-                self.sequences_stream = sequences.sequences
-                self.sequences_source_file = sequences.sequences.map_table
+            if sequences.streams.sequences and len(sequences.streams.sequences) > 0:
+                self.sequences_stream = sequences.streams.sequences
+                self.sequences_source_file = sequences.streams.sequences.map_table
             else:
                 raise ValueError("No sequences found in StandardizedOutput")
         elif isinstance(sequences, DataStream):
