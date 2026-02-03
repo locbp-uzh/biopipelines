@@ -80,31 +80,47 @@ def load_combinatorics_config(config_path: str) -> Dict:
         return json.load(f)
 
 
-def load_axis_data(axis_config: Dict) -> List[Dict]:
+def load_axis_data(axis_config: Dict) -> tuple:
     """
     Load data from an axis's source CSV files.
 
     Args:
         axis_config: Dict with 'name', 'mode', 'sources' keys
+                    sources can be list of strings or list of dicts with 'path' and 'iterate'
 
     Returns:
-        List of dicts, each representing a row from the CSVs
+        Tuple of (iterated_data, static_data):
+        - iterated_data: List of dicts from sources with iterate=True
+        - static_data: List of dicts from sources with iterate=False
     """
-    all_data = []
+    iterated_data = []
+    static_data = []
     sources = axis_config.get('sources', [])
 
-    for source_path in sources:
+    for source in sources:
+        # Handle both old string format and new dict format
+        if isinstance(source, dict):
+            source_path = source.get('path')
+            is_iterate = source.get('iterate', True)
+        else:
+            source_path = source
+            is_iterate = True
+
         if not source_path or not os.path.exists(source_path):
             print(f"Warning: Source file not found: {source_path}")
             continue
         try:
             df = pd.read_csv(source_path)
-            all_data.extend(df.to_dict('records'))
+            records = df.to_dict('records')
+            if is_iterate:
+                iterated_data.extend(records)
+            else:
+                static_data.extend(records)
         except Exception as e:
             print(f"Error loading {source_path}: {e}")
             sys.exit(1)
 
-    return all_data
+    return iterated_data, static_data
 
 
 def load_msa_mappings(msa_table: Optional[str]) -> Dict:
@@ -314,21 +330,42 @@ def generate_config_id(
 
 
 def generate_configs(
-    proteins: List[Dict], ligands: List[Dict],
+    proteins_iterated: List[Dict], proteins_static: List[Dict],
+    ligands_iterated: List[Dict], ligands_static: List[Dict],
     proteins_mode: str, ligands_mode: str,
     msa_mappings: Dict, args
 ) -> List[tuple]:
     """
     Generate all config dictionaries based on combinatorics modes.
 
+    Args:
+        proteins_iterated: Proteins with iterate=True (one config per protein for 'each' mode)
+        proteins_static: Proteins with iterate=False (included in every config)
+        ligands_iterated: Ligands with iterate=True (one config per ligand for 'each' mode)
+        ligands_static: Ligands with iterate=False (included in every config)
+        proteins_mode: "each" or "bundle"
+        ligands_mode: "each", "bundle", or None (no ligands)
+        msa_mappings: MSA file mappings
+        args: Command line arguments
+
     Returns list of (config_id, config_dict) tuples.
+
+    Key behavior for Bundle with nested Each (e.g., Bundle(Each(library), cofactor)):
+    - mode = "bundle"
+    - ligands_iterated = library compounds
+    - ligands_static = cofactor
+    - Creates one config per iterated ligand, each containing all static ligands
     """
     # Parse extra parameters
     glycosylation = json.loads(args.glycosylation) if args.glycosylation else None
     covalent_linkage = json.loads(args.covalent_linkage) if args.covalent_linkage else None
 
-    protein_ids = [p['id'] for p in proteins] if proteins else []
-    ligand_ids = [l['id'] for l in ligands] if ligands else []
+    # Combine iterated and static for ID generation (legacy behavior for pure modes)
+    proteins = proteins_iterated + proteins_static
+    ligands = ligands_iterated + ligands_static
+
+    protein_ids = [p['id'] for p in proteins_iterated] if proteins_iterated else [p['id'] for p in proteins_static]
+    ligand_ids = [l['id'] for l in ligands_iterated] if ligands_iterated else [l['id'] for l in ligands_static]
 
     configs = []
 
@@ -345,46 +382,85 @@ def generate_configs(
             config = add_glycosylation_to_config(config, glycosylation)
             configs.append(('bundled_complex', config))
         else:  # proteins_mode == 'each'
-            # One config per protein
-            for prot_idx, protein in enumerate(proteins):
+            # One config per iterated protein (static proteins included in each)
+            proteins_to_iterate = proteins_iterated if proteins_iterated else proteins_static
+            for prot_idx, protein in enumerate(proteins_to_iterate):
                 config = {'sequences': []}
                 msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
                 config['sequences'].append(build_protein_entry(protein, 'A', msa_file))
+                # Add static proteins
+                for static_idx, static_protein in enumerate(proteins_static):
+                    if static_protein['id'] != protein['id']:  # Don't add if same as iterated
+                        chain_id = chr(65 + len(config['sequences']))
+                        msa_file = get_msa_file(static_protein['id'], static_protein['sequence'], msa_mappings)
+                        config['sequences'].append(build_protein_entry(static_protein, chain_id, msa_file))
                 config = add_template_to_config(config, args)
                 config = add_glycosylation_to_config(config, glycosylation)
-                configs.append((protein_ids[prot_idx], config))
+                configs.append((protein['id'], config))
 
     elif proteins_mode == 'bundle' and ligands_mode == 'bundle':
-        # Single config with all proteins and ligands
-        config = {'sequences': []}
+        # Check if we have iterated ligands (Bundle with nested Each)
+        if ligands_iterated:
+            # Bundle with iteration: one config per iterated ligand, each with all static ligands
+            for lig_idx, ligand in enumerate(ligands_iterated):
+                config = {'sequences': []}
 
-        for idx, protein in enumerate(proteins):
-            chain_id = chr(65 + idx)
-            msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
-            config['sequences'].append(build_protein_entry(protein, chain_id, msa_file))
+                # Add all proteins
+                for idx, protein in enumerate(proteins):
+                    chain_id = chr(65 + idx)
+                    msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
+                    config['sequences'].append(build_protein_entry(protein, chain_id, msa_file))
 
-        config = add_template_to_config(config, args)
-        config = add_glycosylation_to_config(config, glycosylation)
+                config = add_template_to_config(config, args)
+                config = add_glycosylation_to_config(config, glycosylation)
 
-        first_ligand_chain = None
-        for ligand in ligands:
-            chain_id = chr(65 + len(config['sequences']))
-            if first_ligand_chain is None:
-                first_ligand_chain = chain_id
-            config['sequences'].append(build_ligand_entry(ligand, chain_id))
+                # Add iterated ligand first (for affinity)
+                first_ligand_chain = chr(65 + len(config['sequences']))
+                config['sequences'].append(build_ligand_entry(ligand, first_ligand_chain))
 
-        if args.affinity and first_ligand_chain:
-            config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+                # Add all static ligands
+                for static_ligand in ligands_static:
+                    chain_id = chr(65 + len(config['sequences']))
+                    config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
 
-        config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'C')
-        if first_ligand_chain:
-            config = add_pocket_to_config(config, args, first_ligand_chain)
+                if args.affinity:
+                    config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
 
-        configs.append(('bundled_complex', config))
+                config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain)
+                config = add_pocket_to_config(config, args, first_ligand_chain)
+
+                configs.append((ligand['id'], config))
+        else:
+            # Pure bundle: single config with all proteins and all ligands
+            config = {'sequences': []}
+
+            for idx, protein in enumerate(proteins):
+                chain_id = chr(65 + idx)
+                msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
+                config['sequences'].append(build_protein_entry(protein, chain_id, msa_file))
+
+            config = add_template_to_config(config, args)
+            config = add_glycosylation_to_config(config, glycosylation)
+
+            first_ligand_chain = None
+            for ligand in ligands:
+                chain_id = chr(65 + len(config['sequences']))
+                if first_ligand_chain is None:
+                    first_ligand_chain = chain_id
+                config['sequences'].append(build_ligand_entry(ligand, chain_id))
+
+            if args.affinity and first_ligand_chain:
+                config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+
+            config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'C')
+            if first_ligand_chain:
+                config = add_pocket_to_config(config, args, first_ligand_chain)
+
+            configs.append(('bundled_complex', config))
 
     elif proteins_mode == 'bundle' and ligands_mode == 'each':
         # One config per ligand, all proteins bundled
-        for lig_idx, ligand in enumerate(ligands):
+        for lig_idx, ligand in enumerate(ligands_iterated if ligands_iterated else ligands_static):
             config = {'sequences': []}
 
             for idx, protein in enumerate(proteins):
@@ -404,46 +480,110 @@ def generate_configs(
             config = add_covalent_linkage_to_config(config, covalent_linkage, ligand_chain_id)
             config = add_pocket_to_config(config, args, ligand_chain_id)
 
-            config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, ligand_idx=lig_idx)
+            config_id = ligand['id']
             configs.append((config_id, config))
 
     elif proteins_mode == 'each' and ligands_mode == 'bundle':
-        # One config per protein, all ligands bundled
-        for prot_idx, protein in enumerate(proteins):
-            config = {'sequences': []}
+        # Check if we have iterated ligands (Bundle with nested Each)
+        proteins_to_iterate = proteins_iterated if proteins_iterated else proteins_static
 
-            msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
-            config['sequences'].append(build_protein_entry(protein, 'A', msa_file))
+        if ligands_iterated:
+            # Bundle with iteration: one config per (protein, iterated_ligand), each with all static ligands
+            for prot_idx, protein in enumerate(proteins_to_iterate):
+                for lig_idx, ligand in enumerate(ligands_iterated):
+                    config = {'sequences': []}
 
-            config = add_template_to_config(config, args)
-            config = add_glycosylation_to_config(config, glycosylation)
+                    msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
+                    config['sequences'].append(build_protein_entry(protein, 'A', msa_file))
 
-            first_ligand_chain = None
-            for ligand in ligands:
-                chain_id = chr(65 + len(config['sequences']))
-                if first_ligand_chain is None:
-                    first_ligand_chain = chain_id
-                config['sequences'].append(build_ligand_entry(ligand, chain_id))
+                    # Add static proteins
+                    for static_protein in proteins_static:
+                        if static_protein['id'] != protein['id']:
+                            chain_id = chr(65 + len(config['sequences']))
+                            msa_file = get_msa_file(static_protein['id'], static_protein['sequence'], msa_mappings)
+                            config['sequences'].append(build_protein_entry(static_protein, chain_id, msa_file))
 
-            if args.affinity and first_ligand_chain:
-                config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+                    config = add_template_to_config(config, args)
+                    config = add_glycosylation_to_config(config, glycosylation)
 
-            config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'B')
-            if first_ligand_chain:
-                config = add_pocket_to_config(config, args, first_ligand_chain)
+                    # Add iterated ligand first (for affinity)
+                    first_ligand_chain = chr(65 + len(config['sequences']))
+                    config['sequences'].append(build_ligand_entry(ligand, first_ligand_chain))
 
-            config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, protein_idx=prot_idx)
-            configs.append((config_id, config))
+                    # Add all static ligands
+                    for static_ligand in ligands_static:
+                        chain_id = chr(65 + len(config['sequences']))
+                        config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
+
+                    if args.affinity:
+                        config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+
+                    config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain)
+                    config = add_pocket_to_config(config, args, first_ligand_chain)
+
+                    # Generate config ID
+                    if len(proteins_to_iterate) == 1:
+                        config_id = ligand['id']
+                    elif len(ligands_iterated) == 1:
+                        config_id = protein['id']
+                    else:
+                        config_id = f"{protein['id']}_{ligand['id']}"
+
+                    configs.append((config_id, config))
+        else:
+            # Pure bundle: one config per protein, all ligands bundled together
+            for prot_idx, protein in enumerate(proteins_to_iterate):
+                config = {'sequences': []}
+
+                msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
+                config['sequences'].append(build_protein_entry(protein, 'A', msa_file))
+
+                # Add static proteins
+                for static_protein in proteins_static:
+                    if static_protein['id'] != protein['id']:
+                        chain_id = chr(65 + len(config['sequences']))
+                        msa_file = get_msa_file(static_protein['id'], static_protein['sequence'], msa_mappings)
+                        config['sequences'].append(build_protein_entry(static_protein, chain_id, msa_file))
+
+                config = add_template_to_config(config, args)
+                config = add_glycosylation_to_config(config, glycosylation)
+
+                first_ligand_chain = None
+                for ligand in ligands:
+                    chain_id = chr(65 + len(config['sequences']))
+                    if first_ligand_chain is None:
+                        first_ligand_chain = chain_id
+                    config['sequences'].append(build_ligand_entry(ligand, chain_id))
+
+                if args.affinity and first_ligand_chain:
+                    config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+
+                config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'B')
+                if first_ligand_chain:
+                    config = add_pocket_to_config(config, args, first_ligand_chain)
+
+                config_id = protein['id']
+                configs.append((config_id, config))
 
     else:  # each x each (cartesian product)
-        for prot_idx, protein in enumerate(proteins):
-            ligands_to_process = ligands if ligands else [None]
+        proteins_to_iterate = proteins_iterated if proteins_iterated else proteins_static
+        ligands_to_iterate = ligands_iterated if ligands_iterated else ligands_static
+
+        for prot_idx, protein in enumerate(proteins_to_iterate):
+            ligands_to_process = ligands_to_iterate if ligands_to_iterate else [None]
 
             for lig_idx, ligand in enumerate(ligands_to_process):
                 config = {'sequences': []}
 
                 msa_file = get_msa_file(protein['id'], protein['sequence'], msa_mappings)
                 config['sequences'].append(build_protein_entry(protein, 'A', msa_file))
+
+                # Add static proteins
+                for static_protein in proteins_static:
+                    if static_protein['id'] != protein['id']:
+                        chain_id = chr(65 + len(config['sequences']))
+                        msa_file = get_msa_file(static_protein['id'], static_protein['sequence'], msa_mappings)
+                        config['sequences'].append(build_protein_entry(static_protein, chain_id, msa_file))
 
                 config = add_template_to_config(config, args)
                 config = add_glycosylation_to_config(config, glycosylation)
@@ -453,6 +593,11 @@ def generate_configs(
                     ligand_chain_id = chr(65 + len(config['sequences']))
                     config['sequences'].append(build_ligand_entry(ligand, ligand_chain_id))
 
+                    # Add static ligands
+                    for static_ligand in ligands_static:
+                        chain_id = chr(65 + len(config['sequences']))
+                        config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
+
                     if args.affinity:
                         config['properties'] = [{'affinity': {'binder': ligand_chain_id}}]
 
@@ -460,9 +605,14 @@ def generate_configs(
                     config = add_pocket_to_config(config, args, ligand_chain_id)
 
                 if ligand:
-                    config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, prot_idx, lig_idx)
+                    if len(proteins_to_iterate) == 1:
+                        config_id = ligand['id']
+                    elif len(ligands_to_iterate) == 1:
+                        config_id = protein['id']
+                    else:
+                        config_id = f"{protein['id']}_{ligand['id']}"
                 else:
-                    config_id = protein_ids[prot_idx]
+                    config_id = protein['id']
 
                 configs.append((config_id, config))
 
@@ -514,11 +664,12 @@ def main():
 
     print(f"Combinatorics modes: proteins={proteins_mode}, ligands={ligands_mode}")
 
-    # Load data
-    proteins = load_axis_data(proteins_axis)
-    ligands = load_axis_data(ligands_axis) if ligands_axis else []
+    # Load data - returns (iterated, static) tuples
+    proteins_iterated, proteins_static = load_axis_data(proteins_axis)
+    ligands_iterated, ligands_static = load_axis_data(ligands_axis) if ligands_axis else ([], [])
 
-    print(f"Loaded {len(proteins)} proteins, {len(ligands)} ligands")
+    print(f"Loaded proteins: {len(proteins_iterated)} iterated, {len(proteins_static)} static")
+    print(f"Loaded ligands: {len(ligands_iterated)} iterated, {len(ligands_static)} static")
 
     # Load MSA mappings
     msa_mappings = load_msa_mappings(args.msa_table)
@@ -527,7 +678,8 @@ def main():
 
     # Generate configs
     configs = generate_configs(
-        proteins, ligands,
+        proteins_iterated, proteins_static,
+        ligands_iterated, ligands_static,
         proteins_mode, ligands_mode,
         msa_mappings, args
     )

@@ -43,36 +43,39 @@ with Pipeline(project="Examples",
               memory="16GB")
 
     # Test 1: Boltz2 with direct sequence
+    Suffix("1")
     boltz_seq = Boltz2(
         proteins=Sequence("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH")
     )
 
     # Test 2: PDB fetch and Boltz2 with structure input
+    Suffix("2")
     lysozyme = PDB("1AKI", ids="LYZ")
-
     boltz_pdb = Boltz2(
         proteins=lysozyme
     )
 
     # Test 3: Boltz2 with ligand (tests compound input)
+    Suffix("3")
     boltz_ligand = Boltz2(
         proteins=Sequence("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH"),
         ligands=Ligand("ethanol")
     )
 
     # Test 4: CompoundLibrary with multiple ligands
+    Suffix("4")
     compounds = CompoundLibrary({
         'ethanol': 'CCO',
         'methanol': 'CO',
         'propanol': 'CCCO'
     })
-
     boltz_multi = Boltz2(
         proteins=lysozyme,
         ligands=compounds
     )
 
     # Test 5: Boltz2 with MSAs
+    Suffix("5")
     boltz_msa = Boltz2(
         proteins=lysozyme,
         msas=boltz_pdb
@@ -93,6 +96,7 @@ with Pipeline(project="Examples",
     })
 
     # Test 6: Default behavior (Each) - Cartesian product
+    Suffix("6")
     # With 2 proteins and 3 ligands: generates 6 predictions
     # ProteinA_aspirin, ProteinA_caffeine, ProteinA_ibuprofen,
     # ProteinB_aspirin, ProteinB_caffeine, ProteinB_ibuprofen
@@ -102,6 +106,7 @@ with Pipeline(project="Examples",
     )
 
     # Test 7: Bundle ligands - Each protein gets all ligands together
+    Suffix("7")
     # With 2 proteins and 3 ligands bundled: generates 2 predictions
     # ProteinA (with aspirin+caffeine+ibuprofen), ProteinB (with aspirin+caffeine+ibuprofen)
     boltz_bundle_ligands = Boltz2(
@@ -110,6 +115,7 @@ with Pipeline(project="Examples",
     )
 
     # Test 8: Bundle proteins - All proteins together with each ligand
+    Suffix("8")
     # With 2 proteins bundled and 3 ligands: generates 3 predictions
     # (ProteinA+ProteinB)_aspirin, (ProteinA+ProteinB)_caffeine, (ProteinA+ProteinB)_ibuprofen
     boltz_bundle_proteins = Boltz2(
@@ -118,6 +124,7 @@ with Pipeline(project="Examples",
     )
 
     # Test 9: Bundle both - All proteins with all ligands in one prediction
+    Suffix("9")
     # With 2 proteins and 3 ligands both bundled: generates 1 prediction
     # (ProteinA+ProteinB) with (aspirin+caffeine+ibuprofen)
     boltz_bundle_all = Boltz2(
@@ -125,7 +132,8 @@ with Pipeline(project="Examples",
         ligands=Bundle(ligand_library)
     )
 
-    # Test 10: Nested combinatorics - Bundle containing Each
+    # Test 10: Nested combinatorics - Bundle containing 
+    Suffix("10")
     # This is useful when you want to predict each protein-ligand pair with a common cofactor (ATP).
     # Bundle(Each(library), ATP) means: for each ligand in the library, bundle it with ATP.
     # With 1 protein and 3 ligands: generates 3 predictions
@@ -140,6 +148,7 @@ with Pipeline(project="Examples",
     )
 
     # Test 11: Same pattern with multiple proteins - full cartesian product
+    Suffix("11")
     # With 2 proteins and Bundle(Each(3 ligands), ATP): generates 6 predictions
     # ProteinA + (aspirin + ATP), ProteinA + (caffeine + ATP), ProteinA + (ibuprofen + ATP),
     # ProteinB + (aspirin + ATP), ProteinB + (caffeine + ATP), ProteinB + (ibuprofen + ATP)
@@ -149,6 +158,7 @@ with Pipeline(project="Examples",
     )
 
     # Test 12: Reversed order - affinity for cofactor instead of library ligands
+    Suffix("12")
     # Bundle(ATP, Each(library)) means: ATP is first, so affinity is calculated for ATP
     # in the presence of each library ligand.
     # With 1 protein and 3 ligands: generates 3 predictions

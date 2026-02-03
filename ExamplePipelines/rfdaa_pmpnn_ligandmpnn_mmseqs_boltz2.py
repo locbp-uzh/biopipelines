@@ -22,10 +22,9 @@ with Pipeline(project="Examples",
               job="RFDAA-ProteinMPNN-LigandMPNN-MMseqs-Boltz",
               description="redesign of N terminus of rifampicin binding protein"):
 
-    Resources(gpu="any", #ask for V100-32GB or A100-80GB or H100-80GB
-              time="24:00:00",
+    Resources(gpu="any", 
+              time="4:00:00",
               memory="16GB")
-
 
     rifampicin_binding_protein = PDB("9IAF") # loads from PDB
     rifampicin = Ligand("rifampicin") # loads from pubchem. Also possible: CAS, CCD
@@ -66,13 +65,32 @@ with Pipeline(project="Examples",
                                 })
     """
 
-    msas = MMseqs2(sequences=sequences)
+    # MMseqs2 has to wait for the server to initialize and provide the msas.
+    # This is often not immediate. It is better to switch to non-GPU mode when waiting.
+    Resources(gpu=None,
+              time="4:00:00",
+              memory="16GB")
+    msas = MMseqs2(sequences=sequences) 
+
+    # Now we need again a GPU
+    # This will be a separate job, dependent on the msa job, dependent on the design job.
+    Resources(gpu="any", 
+            time="4:00:00",
+            memory="16GB")
     boltz_quino = Boltz2(proteins=sequences,
                        ligands=quinolinone,
-                        msas=msas) #MSAs are passed with <tool output>, not with <tool output>.msas
+                        msas=msas) 
     boltz_rifampicin = Boltz2(proteins=sequences,
                         ligands=rifampicin, #ligand smiles taken from original
-                        msas=msas) #MSAs are passed with <tool output>, not with <tool output>.msas
+                        msas=msas) 
+    """
+    For up to 250-500 sequences (depending on length) one can simply use the public MMseqs2 server while removing the MMseqs2 tool usage:
+    boltz_quino = Boltz2(proteins=sequences,
+                       ligands=quinolinone) 
+    boltz_rifampicin = Boltz2(proteins=sequences,
+                        ligands=rifampicin, #ligand smiles taken from original
+                        msas=boltz_quino) #recycle the msas
+    """
 
     # Merge apo and holo metrics to calculate affinity delta
     merged = Panda(

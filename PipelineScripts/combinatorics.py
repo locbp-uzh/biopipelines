@@ -62,10 +62,14 @@ class Bundle:
 class AxisConfig:
     """
     Configuration for a single combinatorics axis.
+
+    Each source is a dict with:
+    - path: Path to source CSV
+    - iterate: True = part of iteration (Each), False = static/bundled with each iteration
     """
     name: str                                    # Axis name (e.g., "proteins", "ligands")
     mode: str = "each"                           # "each" or "bundle"
-    sources: List[str] = field(default_factory=list)  # Paths to source CSVs
+    sources: List[Dict] = field(default_factory=list)  # [{"path": str, "iterate": bool}]
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -110,10 +114,17 @@ class CombinatoricsConfig:
         axis = self.axes.get(axis_name)
         return axis.mode if axis else "each"
 
-    def get_sources(self, axis_name: str) -> List[str]:
-        """Get sources for an axis."""
+    def get_sources(self, axis_name: str) -> List[Dict]:
+        """Get sources for an axis (list of dicts with 'path' and 'iterate' keys)."""
         axis = self.axes.get(axis_name)
         return axis.sources if axis else []
+
+    def get_source_paths(self, axis_name: str) -> List[str]:
+        """Get just the source paths for an axis."""
+        axis = self.axes.get(axis_name)
+        if not axis:
+            return []
+        return [s["path"] if isinstance(s, dict) else s for s in axis.sources]
 
 
 def _extract_source_paths(source: Any, axis_name: str) -> List[str]:
@@ -173,47 +184,54 @@ def _unwrap_sources(value: Any, axis_name: str) -> tuple:
 
     Returns:
         (mode: str, sources: list) where mode is "bundle" or "each"
+        sources is a list of dicts: [{"path": str, "iterate": bool}]
+
+    For Bundle(Each(library), cofactor):
+    - mode = "bundle" (preserves the bundle semantics)
+    - Each sources marked iterate=True
+    - Bare sources marked iterate=False
     """
     if isinstance(value, Bundle):
-        # Check if any source inside Bundle is an Each - if so, mode is "each"
-        # Bundle(Each(library), cofactor) means: for each library item, bundle it with cofactor
-        has_each_inside = any(isinstance(src, Each) for src in value.sources)
-
-        all_paths = []
+        sources_with_iterate = []
         for src in value.sources:
             if isinstance(src, Each):
-                # Each inside Bundle - flatten
+                # Each inside Bundle - these are iterated
                 for sub_src in src.sources:
-                    all_paths.extend(_extract_source_paths(sub_src, axis_name))
+                    for path in _extract_source_paths(sub_src, axis_name):
+                        sources_with_iterate.append({"path": path, "iterate": True})
             else:
-                all_paths.extend(_extract_source_paths(src, axis_name))
+                # Bare source inside Bundle - static (bundled with each iteration)
+                for path in _extract_source_paths(src, axis_name):
+                    sources_with_iterate.append({"path": path, "iterate": False})
 
-        # If there's an Each inside, the mode is "each" (we iterate over Each items)
-        mode = "each" if has_each_inside else "bundle"
-        return (mode, all_paths)
+        return ("bundle", sources_with_iterate)
 
     elif isinstance(value, Each):
-        # Each iterates
-        all_paths = []
+        # Each iterates - all sources are iterated
+        sources_with_iterate = []
         for src in value.sources:
-            all_paths.extend(_extract_source_paths(src, axis_name))
-        return ("each", all_paths)
+            for path in _extract_source_paths(src, axis_name):
+                sources_with_iterate.append({"path": path, "iterate": True})
+        return ("each", sources_with_iterate)
 
     elif isinstance(value, list):
-        # Bare list defaults to Each
-        all_paths = []
+        # Bare list defaults to Each - all iterated
+        sources_with_iterate = []
         for item in value:
             if isinstance(item, (Bundle, Each)):
-                _, paths = _unwrap_sources(item, axis_name)
-                all_paths.extend(paths)
+                _, sub_sources = _unwrap_sources(item, axis_name)
+                sources_with_iterate.extend(sub_sources)
             else:
-                all_paths.extend(_extract_source_paths(item, axis_name))
-        return ("each", all_paths)
+                for path in _extract_source_paths(item, axis_name):
+                    sources_with_iterate.append({"path": path, "iterate": True})
+        return ("each", sources_with_iterate)
 
     else:
-        # Bare value defaults to Each
-        paths = _extract_source_paths(value, axis_name)
-        return ("each", paths)
+        # Bare value defaults to Each - iterated
+        sources_with_iterate = []
+        for path in _extract_source_paths(value, axis_name):
+            sources_with_iterate.append({"path": path, "iterate": True})
+        return ("each", sources_with_iterate)
 
 
 def generate_combinatorics_config(
@@ -277,12 +295,13 @@ def get_mode(value: Any) -> str:
     return "each"
 
 
-def load_ids_from_sources(sources: List[str]) -> List[str]:
+def load_ids_from_sources(sources: List[Union[str, Dict]], iterate_only: bool = False) -> List[str]:
     """
     Load IDs from CSV source files at pipeline time.
 
     Args:
-        sources: List of CSV file paths
+        sources: List of CSV file paths or dicts with {"path": str, "iterate": bool}
+        iterate_only: If True, only load IDs from sources with iterate=True
 
     Returns:
         List of IDs from the 'id' column of the CSVs
@@ -290,7 +309,16 @@ def load_ids_from_sources(sources: List[str]) -> List[str]:
     import pandas as pd
 
     all_ids = []
-    for source_path in sources:
+    for source in sources:
+        # Handle both string and dict formats
+        if isinstance(source, dict):
+            source_path = source.get("path")
+            is_iterate = source.get("iterate", True)
+            if iterate_only and not is_iterate:
+                continue
+        else:
+            source_path = source
+
         if not source_path or not os.path.exists(source_path):
             continue
         try:
@@ -302,17 +330,19 @@ def load_ids_from_sources(sources: List[str]) -> List[str]:
     return all_ids
 
 
-def _collect_ids_from_value(value: Any, axis_name: str) -> List[str]:
+def _collect_ids_from_value(value: Any, axis_name: str, iterate_only: bool = False) -> List[str]:
     """
     Collect all IDs from a value, handling Bundle/Each wrappers.
 
     For Each(a, b), collects IDs from both a and b.
-    For Bundle(Each(library), cofactor), collects IDs from the Each (library).
-    For Bundle(cofactor, Each(library)), finds the Each and collects its IDs.
+    For Bundle(Each(library), cofactor), collects IDs from the Each (library) only.
+    For Bundle(cofactor, Each(library)), finds the Each and collects its IDs only.
+    For pure Bundle(a, b), collects IDs from first source only (single bundled config).
 
     Args:
         value: A value that may be wrapped in Bundle/Each
         axis_name: "sequences" or "compounds" to determine which stream to access
+        iterate_only: If True, only collect IDs from iterated sources (used for Bundle mode)
 
     Returns:
         List of all IDs from the relevant sources
@@ -330,16 +360,20 @@ def _collect_ids_from_value(value: Any, axis_name: str) -> List[str]:
         return []
 
     if isinstance(value, Bundle):
-        # Look for an Each inside the Bundle - that's what we iterate over
-        for src in value.sources:
-            if isinstance(src, Each):
-                # Found Each inside Bundle - collect IDs from all Each sources
-                all_ids = []
-                for each_src in src.sources:
-                    all_ids.extend(_collect_ids_from_value(each_src, axis_name))
-                return all_ids
-        # No Each found - this is a pure Bundle, return IDs from first source
-        return _collect_ids_from_value(value.sources[0], axis_name)
+        # Check if there's an Each inside - if so, only collect IDs from the Each sources
+        has_each_inside = any(isinstance(src, Each) for src in value.sources)
+
+        if has_each_inside:
+            # Collect IDs only from the Each sources (these are what we iterate over)
+            all_ids = []
+            for src in value.sources:
+                if isinstance(src, Each):
+                    for each_src in src.sources:
+                        all_ids.extend(_collect_ids_from_value(each_src, axis_name))
+            return all_ids
+        else:
+            # Pure Bundle - return IDs from first source (single bundled config)
+            return _collect_ids_from_value(value.sources[0], axis_name)
 
     elif isinstance(value, Each):
         # Collect IDs from all sources in the Each
@@ -351,7 +385,6 @@ def _collect_ids_from_value(value: Any, axis_name: str) -> List[str]:
     else:
         # Bare value - get IDs directly
         return get_ids_from_source(value)
-    return value
 
 
 def predict_output_ids(
@@ -365,9 +398,9 @@ def predict_output_ids(
     will be generated at SLURM time based on the combinatorics modes.
 
     The ID generation follows these rules:
-    - If all axes are bundled: single ID (bundled_name)
-    - If one axis is "each" and others are "bundle": IDs from the "each" axis
-    - If multiple axes are "each": cartesian product of IDs joined with "_"
+    - If all axes are fully bundled (no iterate sources): single ID (bundled_name)
+    - If one axis has iteration (each mode or bundle with iterate sources): IDs from that axis
+    - If multiple axes have iteration: cartesian product of IDs joined with "_"
 
     Args:
         bundled_name: Name to use when all axes are bundled (default: "bundled_complex")
@@ -376,41 +409,47 @@ def predict_output_ids(
     Returns:
         List of expected output IDs
     """
-    # Collect axis info: (name, mode, ids)
+    # Collect axis info: (name, mode, sources, ids)
     axes_info = []
     for name, value in named_inputs.items():
         if value is None:
             continue
-        mode, _ = _unwrap_sources(value, name)
+        mode, sources = _unwrap_sources(value, name)
 
-        # Collect all IDs from the value, handling Bundle/Each wrappers
+        # Check if this axis has any iterated sources
+        has_iteration = any(s.get("iterate", True) for s in sources)
+
+        # Collect IDs from the value - for Bundle with nested Each, this gets only the Each IDs
         ids = _collect_ids_from_value(value, name)
         if not ids:
             raise ValueError(f"No {name} found in input")
 
-        axes_info.append((name, mode, ids))
+        axes_info.append((name, mode, has_iteration, ids))
 
     if not axes_info:
         return [bundled_name]
 
-    # Separate into "each" and "bundle" axes
-    each_axes = [(name, ids) for name, mode, ids in axes_info if mode == "each"]
-    bundle_axes = [(name, ids) for name, mode, ids in axes_info if mode == "bundle"]
+    # Separate into axes with iteration and axes without iteration
+    # An axis has iteration if: mode=="each" OR (mode=="bundle" AND has iterated sources)
+    iterated_axes = [(name, ids) for name, mode, has_iteration, ids in axes_info
+                     if mode == "each" or has_iteration]
+    pure_bundle_axes = [(name, ids) for name, mode, has_iteration, ids in axes_info
+                        if mode == "bundle" and not has_iteration]
 
-    # If all bundled, return single bundled name
-    if not each_axes:
+    # If no iterated axes, return single bundled name
+    if not iterated_axes:
         return [bundled_name]
 
-    # If single "each" axis, return its IDs
-    if len(each_axes) == 1:
-        return each_axes[0][1]
+    # If single iterated axis, return its IDs
+    if len(iterated_axes) == 1:
+        return iterated_axes[0][1]
 
-    # Multiple "each" axes: cartesian product
+    # Multiple iterated axes: cartesian product
     # Special case: if one axis has only 1 element, use the other axis's IDs directly
     # This matches the behavior in pipe_boltz_config_unified.py generate_config_id()
-    if len(each_axes) == 2:
-        name0, ids0 = each_axes[0]
-        name1, ids1 = each_axes[1]
+    if len(iterated_axes) == 2:
+        name0, ids0 = iterated_axes[0]
+        name1, ids1 = iterated_axes[1]
 
         if len(ids0) == 1:
             # Single protein, multiple ligands: use ligand IDs
@@ -426,11 +465,11 @@ def predict_output_ids(
                     result_ids.append(f"{id0}_{id1}")
             return result_ids
 
-    # General case: cartesian product of all axes
-    result_ids = each_axes[0][1]
+    # General case: cartesian product of all iterated axes
+    result_ids = iterated_axes[0][1]
 
     # Combine with remaining axes
-    for _, ids in each_axes[1:]:
+    for _, ids in iterated_axes[1:]:
         new_result = []
         for existing_id in result_ids:
             for new_id in ids:
