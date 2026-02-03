@@ -296,6 +296,23 @@ def load_ids_from_sources(sources: List[str]) -> List[str]:
     return all_ids
 
 
+def _unwrap_to_first_source(value: Any) -> Any:
+    """
+    Recursively unwrap Bundle/Each wrappers to get the first actual source.
+
+    Args:
+        value: A value that may be wrapped in Bundle/Each
+
+    Returns:
+        The first non-Bundle/Each source found
+    """
+    while isinstance(value, (Bundle, Each)):
+        if not value.sources:
+            raise ValueError("Empty Bundle/Each wrapper")
+        value = value.sources[0]
+    return value
+
+
 def predict_output_ids(
     bundled_name: str = "bundled_complex",
     **named_inputs: Any
@@ -325,8 +342,8 @@ def predict_output_ids(
             continue
         mode, _ = _unwrap_sources(value, name)
 
-        # Get IDs directly from source object
-        unwrapped = value.sources[0] if isinstance(value, (Bundle, Each)) else value
+        # Get IDs directly from source object - recursively unwrap to get actual source
+        unwrapped = _unwrap_to_first_source(value)
         if name == "sequences":
             if hasattr(unwrapped, 'streams') and unwrapped.streams.sequences:
                 ids = list(unwrapped.streams.sequences.ids)

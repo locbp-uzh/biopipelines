@@ -594,14 +594,27 @@ class Panda(BaseConfig):
             # Multi-table mode
             self.input_csv_paths = [self._resolve_table_path(t) for t in self.tables_input]
 
-        # Configure pool mode - collect all pool folders
+        # Configure pool mode - collect all pool folders and file mappings
         if self.use_pool_mode:
             self.pool_folders = []
+            self.pool_file_maps = []  # List of {stream_name: {id: file_path}} dicts for each pool
             for pool in self.pool_outputs:
                 if hasattr(pool, 'output_folder'):
                     self.pool_folders.append(pool.output_folder)
                 else:
                     raise ValueError("Each pool must have an output_folder attribute")
+
+                # Build file map from all pool streams
+                file_map = {}
+                if hasattr(pool, 'streams'):
+                    for stream_name in pool.streams.keys():
+                        stream = pool.streams.get(stream_name)
+                        if stream and len(stream) > 0:
+                            file_map[stream_name] = {}
+                            for i, sid in enumerate(stream.ids):
+                                if i < len(stream.files):
+                                    file_map[stream_name][sid] = stream.files[i]
+                self.pool_file_maps.append(file_map)
 
     def _resolve_table_path(self, table_input: Any) -> str:
         """
@@ -728,6 +741,7 @@ class Panda(BaseConfig):
             "output_csv": self.output_csv,
             "use_pool_mode": self.use_pool_mode,
             "pool_folders": getattr(self, 'pool_folders', []),
+            "pool_file_maps": getattr(self, 'pool_file_maps', []),
             "rename": self.rename
         }
 
@@ -783,60 +797,53 @@ fi
         }
 
         if self.use_pool_mode and self.pool_outputs:
-            # Pool mode: predict structures, compounds, sequences from pool(s)
-            # Collect all IDs from all pools
-            all_struct_ids = []
-            all_comp_ids = []
-            all_seq_ids = []
+            # Pool mode: dynamically collect all streams from all pools
+            # Collect stream info: {stream_name: {"ids": [], "files": [], "format": str}}
+            stream_data = {}
 
             for pool in self.pool_outputs:
-                if pool.streams.structures:
-                    all_struct_ids.extend(pool.streams.structures.ids)
-                if pool.streams.compounds:
-                    all_comp_ids.extend(pool.streams.compounds.ids)
-                if pool.streams.sequences:
-                    all_seq_ids.extend(pool.streams.sequences.ids)
+                if hasattr(pool, 'streams'):
+                    for stream_name in pool.streams.keys():
+                        stream = pool.streams.get(stream_name)
+                        if stream and len(stream) > 0:
+                            if stream_name not in stream_data:
+                                stream_data[stream_name] = {
+                                    "ids": [],
+                                    "files": [],
+                                    "format": stream.format
+                                }
+                            stream_data[stream_name]["ids"].extend(stream.ids)
+                            stream_data[stream_name]["files"].extend(stream.files)
 
-            pool_struct_count = len(all_struct_ids)
-            pool_comp_count = len(all_comp_ids)
-            pool_seq_count = len(all_seq_ids)
+            # Build output streams
+            output_streams = {}
+            for stream_name, data in stream_data.items():
+                if self.rename:
+                    # Predict renamed IDs and file paths
+                    new_ids = [f"{self.rename}_{i+1}" for i in range(len(data["ids"]))]
+                    new_files = []
+                    for i, old_file in enumerate(data["files"]):
+                        ext = os.path.splitext(old_file)[1]
+                        new_files.append(os.path.join(self.output_folder, f"{new_ids[i]}{ext}"))
+                else:
+                    new_ids = data["ids"]
+                    new_files = [os.path.join(self.output_folder, os.path.basename(f)) for f in data["files"]]
 
-            if self.rename:
-                # Predict renamed IDs: {rename}_1, {rename}_2, ...
-                struct_ids = [f"{self.rename}_{i+1}" for i in range(pool_struct_count)]
-                comp_ids = [f"{self.rename}_{i+1}" for i in range(pool_comp_count)]
-                seq_ids = [f"{self.rename}_{i+1}" for i in range(pool_seq_count)]
+                # For sequences, use the result CSV as map_table
+                map_table = self.output_csv if stream_name == "sequences" else None
 
-                # Predict renamed file paths
-                updated_structures = [os.path.join(self.output_folder, f"{sid}.pdb") for sid in struct_ids]
-                updated_compounds = [os.path.join(self.output_folder, f"{cid}.sdf") for cid in comp_ids]
-                updated_sequences = [os.path.join(self.output_folder, f"{seqid}.fasta") for seqid in seq_ids]
-            else:
-                # Keep original IDs
-                struct_ids = all_struct_ids
-                comp_ids = all_comp_ids
-                seq_ids = all_seq_ids
+                output_streams[stream_name] = DataStream(
+                    name=stream_name,
+                    ids=new_ids,
+                    files=new_files,
+                    map_table=map_table,
+                    format=data["format"]
+                )
 
-                # Keep original filenames
-                updated_structures = []
-                updated_compounds = []
-                updated_sequences = []
-
-                for pool in self.pool_outputs:
-                    if pool.streams.structures and len(pool.streams.structures) > 0:
-                        for struct_path in pool.streams.structures.files:
-                            filename = os.path.basename(struct_path)
-                            updated_structures.append(os.path.join(self.output_folder, filename))
-
-                    if pool.streams.compounds and len(pool.streams.compounds) > 0:
-                        for comp_path in pool.streams.compounds.files:
-                            filename = os.path.basename(comp_path)
-                            updated_compounds.append(os.path.join(self.output_folder, filename))
-
-                    if pool.streams.sequences and len(pool.streams.sequences) > 0:
-                        for seq_path in pool.streams.sequences.files:
-                            filename = os.path.basename(seq_path)
-                            updated_sequences.append(os.path.join(self.output_folder, filename))
+            # Ensure standard streams exist (empty if not in pools)
+            for std_stream in ["structures", "sequences", "compounds"]:
+                if std_stream not in output_streams:
+                    output_streams[std_stream] = DataStream.empty(std_stream, "pdb" if std_stream == "structures" else "fasta" if std_stream == "sequences" else "sdf")
 
             # Include tables from first pool (they typically have same schema)
             first_pool = self.pool_outputs[0]
@@ -852,35 +859,9 @@ fi
                             count=info.count
                         )
 
-            structures = DataStream(
-                name="structures",
-                ids=struct_ids,
-                files=updated_structures,
-                format="pdb"
-            )
-            compounds = DataStream(
-                name="compounds",
-                ids=comp_ids,
-                files=updated_compounds,
-                format="sdf"
-            )
-            # For sequences, use the result CSV as map_table (contains id and sequence columns)
-            # This allows Boltz2 and other tools to read sequences from the filtered result
-            sequences = DataStream(
-                name="sequences",
-                ids=seq_ids,
-                files=updated_sequences,
-                map_table=self.output_csv,  # Result CSV serves as sequence map
-                format="fasta"
-            )
-
-            return {
-                "structures": structures,
-                "compounds": compounds,
-                "sequences": sequences,
-                "tables": tables,
-                "output_folder": self.output_folder
-            }
+            output_streams["tables"] = tables
+            output_streams["output_folder"] = self.output_folder
+            return output_streams
         else:
             return {
                 "structures": DataStream.empty("structures", "pdb"),

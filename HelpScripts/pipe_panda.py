@@ -10,7 +10,6 @@ import os
 import sys
 import argparse
 import json
-import glob
 import shutil
 import pandas as pd
 from typing import Dict, List, Any, Optional
@@ -418,20 +417,22 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
 
 def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str,
                                         output_folder: str,
-                                        rename_map: Optional[Dict[str, str]] = None) -> Dict[str, List[str]]:
+                                        rename_map: Optional[Dict[str, str]] = None,
+                                        file_map: Optional[Dict[str, Dict[str, str]]] = None) -> Dict[str, List[str]]:
     """
-    Extract structures, compounds, and sequences from a single pool for filtered IDs.
+    Extract data from a single pool for filtered IDs.
 
     Args:
         filtered_ids: List of IDs that passed filtering (original IDs for lookup)
         pool_folder: Pool output folder containing all data types
         output_folder: Where to copy the filtered data
         rename_map: Optional mapping from original ID to new ID for renaming output files
+        file_map: Optional mapping {stream_name: {id: file_path}} for direct file lookup
 
     Returns:
-        Dictionary mapping data type to list of extracted file paths
+        Dictionary mapping stream name to list of extracted file paths
     """
-    extracted_files = {"structures": [], "compounds": [], "sequences": []}
+    extracted_files = {}
 
     os.makedirs(output_folder, exist_ok=True)
 
@@ -439,186 +440,91 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
     if rename_map:
         print(f"Renaming files according to rename map")
 
-    for selected_id in filtered_ids:
-        # Determine output ID (renamed or original)
-        output_id = rename_map.get(str(selected_id), selected_id) if rename_map else selected_id
+    if file_map:
+        # Use file map - iterate over all streams dynamically
+        print(f"Using file map for direct lookup (streams: {list(file_map.keys())})")
 
-        # Extract structures (PDB/CIF files)
-        structure_patterns = [
-            os.path.join(pool_folder, f"{selected_id}.pdb"),
-            os.path.join(pool_folder, f"*{selected_id}*.pdb"),
-            os.path.join(pool_folder, f"{selected_id}.cif"),
-            os.path.join(pool_folder, f"*{selected_id}*.cif"),
-            os.path.join(pool_folder, "**", f"{selected_id}.pdb"),
-            os.path.join(pool_folder, "**", f"*{selected_id}*.pdb"),
-        ]
+        for stream_name, id_to_file in file_map.items():
+            extracted_files[stream_name] = []
 
-        for pattern in structure_patterns:
-            matches = glob.glob(pattern, recursive=True)
-            if matches:
-                source = matches[0]
-                dest = os.path.join(output_folder, f"{output_id}.pdb")
-                try:
-                    shutil.copy2(source, dest)
-                    extracted_files["structures"].append(dest)
-                    print(f"Extracted structure: {source} -> {dest}")
-                    break
-                except Exception as e:
-                    print(f"Warning: Could not copy structure {source}: {e}")
-
-        # Extract compounds (SDF files)
-        compound_patterns = [
-            os.path.join(pool_folder, f"{selected_id}.sdf"),
-            os.path.join(pool_folder, f"*{selected_id}*.sdf"),
-            os.path.join(pool_folder, "**", f"{selected_id}.sdf"),
-            os.path.join(pool_folder, "**", f"*{selected_id}*.sdf"),
-        ]
-
-        for pattern in compound_patterns:
-            matches = glob.glob(pattern, recursive=True)
-            if matches:
-                source = matches[0]
-                dest = os.path.join(output_folder, f"{output_id}.sdf")
-                try:
-                    shutil.copy2(source, dest)
-                    extracted_files["compounds"].append(dest)
-                    print(f"Extracted compound: {source} -> {dest}")
-                    break
-                except Exception as e:
-                    print(f"Warning: Could not copy compound {source}: {e}")
-
-    # Extract and filter tables from pool folder
-    table_patterns = [
-        os.path.join(pool_folder, "*.csv"),
-        os.path.join(pool_folder, "**", "*.csv")
-    ]
-
-    processed_files = set()
-
-    for pattern in table_patterns:
-        matches = glob.glob(pattern, recursive=True)
-        for source_csv in matches:
-            if source_csv in processed_files:
-                continue
-            processed_files.add(source_csv)
-
-            try:
-                df = pd.read_csv(source_csv)
-                filename = os.path.basename(source_csv)
-
-                # Only process files that have an 'id' column
-                if 'id' not in df.columns:
+            for selected_id in filtered_ids:
+                if selected_id not in id_to_file:
                     continue
 
-                if filtered_ids:
-                    matching_rows = df[df['id'].isin(filtered_ids)].copy()
-                    # Apply rename mapping to the id column if provided
-                    if rename_map and not matching_rows.empty:
-                        matching_rows['original_id'] = matching_rows['id']
-                        matching_rows['id'] = matching_rows['id'].astype(str).map(
-                            lambda x: rename_map.get(x, x)
-                        )
-                    dest = os.path.join(output_folder, filename)
-                    matching_rows.to_csv(dest, index=False)
-                    print(f"Filtered table: {filename} ({len(matching_rows)} rows)")
-                else:
-                    empty_df = pd.DataFrame(columns=df.columns)
-                    dest = os.path.join(output_folder, filename)
-                    empty_df.to_csv(dest, index=False)
-                    print(f"Created empty table: {filename}")
+                source = id_to_file[selected_id]
+                output_id = rename_map.get(str(selected_id), selected_id) if rename_map else selected_id
+                ext = os.path.splitext(source)[1]
+                dest = os.path.join(output_folder, f"{output_id}{ext}")
 
-            except Exception as e:
-                print(f"Warning: Could not process table {source_csv}: {e}")
+                shutil.copy2(source, dest)
+                extracted_files[stream_name].append(dest)
+                print(f"Extracted {stream_name}: {source} -> {dest}")
+    else:
+        raise ValueError("file_map is required for pool extraction")
 
     return extracted_files
 
 
 def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str],
                                  output_folder: str,
-                                 rename_map: Optional[Dict[str, str]] = None) -> Dict[str, List[str]]:
+                                 rename_map: Optional[Dict[str, str]] = None,
+                                 file_maps: Optional[List[Dict[str, Dict[str, str]]]] = None) -> Dict[str, List[str]]:
     """
-    Extract structures from multiple pools based on source_table column.
+    Extract data from multiple pools based on source_table column.
 
     When tables are concatenated with add_source=True, each row has a source_table
     column (0, 1, 2...) indicating which table it came from. This function uses that
-    to select files from the corresponding pool folder.
+    to select files from the corresponding pool.
 
     Args:
         result_df: DataFrame with 'id' and 'source_table' columns
         pool_folders: List of pool folders, indexed by source_table
         output_folder: Where to copy the extracted data
         rename_map: Optional mapping from original ID to new ID
+        file_maps: List of file maps, one per pool: [{stream_name: {id: file_path}}]
 
     Returns:
-        Dictionary mapping data type to list of extracted file paths
+        Dictionary mapping stream name to list of extracted file paths
     """
-    extracted_files = {"structures": [], "compounds": [], "sequences": []}
+    if not file_maps:
+        raise ValueError("file_maps is required for multi-pool extraction")
+
+    if 'source_table' not in result_df.columns:
+        raise ValueError("source_table column required for multi-pool extraction")
 
     os.makedirs(output_folder, exist_ok=True)
 
-    if 'source_table' not in result_df.columns:
-        print("Warning: No source_table column found. Using first pool for all rows.")
-        # Fall back to single pool mode
-        if pool_folders:
-            filtered_ids = result_df['id'].astype(str).tolist() if 'id' in result_df.columns else []
-            return extract_pool_data_for_filtered_ids(filtered_ids, pool_folders[0], output_folder, rename_map)
-        return extracted_files
-
     print(f"\nMulti-pool mode: Extracting data from {len(pool_folders)} pools")
+
+    # Collect all stream names from all file maps
+    all_stream_names = set()
+    for fm in file_maps:
+        all_stream_names.update(fm.keys())
+
+    extracted_files = {name: [] for name in all_stream_names}
 
     for _, row in result_df.iterrows():
         selected_id = str(row.get('id', ''))
         source_idx = int(row.get('source_table', 0))
 
-        if source_idx >= len(pool_folders):
-            print(f"Warning: source_table {source_idx} >= num pools {len(pool_folders)}, using last pool")
-            source_idx = len(pool_folders) - 1
+        if source_idx >= len(file_maps):
+            raise ValueError(f"source_table {source_idx} >= num pools {len(file_maps)}")
 
-        pool_folder = pool_folders[source_idx]
+        file_map = file_maps[source_idx]
         output_id = rename_map.get(selected_id, selected_id) if rename_map else selected_id
 
-        # Extract structure
-        structure_patterns = [
-            os.path.join(pool_folder, f"{selected_id}.pdb"),
-            os.path.join(pool_folder, f"*{selected_id}*.pdb"),
-            os.path.join(pool_folder, f"{selected_id}.cif"),
-            os.path.join(pool_folder, f"*{selected_id}*.cif"),
-            os.path.join(pool_folder, "**", f"{selected_id}.pdb"),
-            os.path.join(pool_folder, "**", f"*{selected_id}*.pdb"),
-        ]
+        # Extract from all streams in this pool's file map
+        for stream_name, id_to_file in file_map.items():
+            if selected_id not in id_to_file:
+                continue
 
-        for pattern in structure_patterns:
-            matches = glob.glob(pattern, recursive=True)
-            if matches:
-                source = matches[0]
-                dest = os.path.join(output_folder, f"{output_id}.pdb")
-                try:
-                    shutil.copy2(source, dest)
-                    extracted_files["structures"].append(dest)
-                    print(f"Extracted structure from pool {source_idx}: {source} -> {dest}")
-                    break
-                except Exception as e:
-                    print(f"Warning: Could not copy structure {source}: {e}")
+            source = id_to_file[selected_id]
+            ext = os.path.splitext(source)[1]
+            dest = os.path.join(output_folder, f"{output_id}{ext}")
 
-        # Extract compound
-        compound_patterns = [
-            os.path.join(pool_folder, f"{selected_id}.sdf"),
-            os.path.join(pool_folder, f"*{selected_id}*.sdf"),
-            os.path.join(pool_folder, "**", f"{selected_id}.sdf"),
-        ]
-
-        for pattern in compound_patterns:
-            matches = glob.glob(pattern, recursive=True)
-            if matches:
-                source = matches[0]
-                dest = os.path.join(output_folder, f"{output_id}.sdf")
-                try:
-                    shutil.copy2(source, dest)
-                    extracted_files["compounds"].append(dest)
-                    print(f"Extracted compound from pool {source_idx}: {source} -> {dest}")
-                    break
-                except Exception as e:
-                    print(f"Warning: Could not copy compound {source}: {e}")
+            shutil.copy2(source, dest)
+            extracted_files[stream_name].append(dest)
+            print(f"Extracted {stream_name} from pool {source_idx}: {source} -> {dest}")
 
     return extracted_files
 
@@ -668,6 +574,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
     use_pool_mode = config_data.get('use_pool_mode', False)
     pool_folders = config_data.get('pool_folders', [])
+    pool_file_maps = config_data.get('pool_file_maps', [])
     rename = config_data.get('rename')
 
     print(f"Panda: Processing {len(input_csvs)} input files")
@@ -766,27 +673,29 @@ def run_panda(config_data: Dict[str, Any]) -> None:
             filtered_ids_for_lookup = filtered_ids
 
     # Handle pool mode
-    if use_pool_mode and pool_folders and filtered_ids_for_lookup:
+    if use_pool_mode and pool_file_maps and filtered_ids_for_lookup:
         output_dir = os.path.dirname(output_csv)
 
         # Use multi-pool extraction if we have source_table column and multiple pools
-        if len(pool_folders) > 1 and 'source_table' in result_df.columns:
+        if len(pool_file_maps) > 1 and 'source_table' in result_df.columns:
             extracted = extract_from_multiple_pools(
                 result_df, pool_folders, output_dir,
-                rename_map=original_to_new_id if rename else None
+                rename_map=original_to_new_id if rename else None,
+                file_maps=pool_file_maps
             )
         else:
             # Single pool mode - use first pool
             extracted = extract_pool_data_for_filtered_ids(
                 filtered_ids_for_lookup, pool_folders[0], output_dir,
-                rename_map=original_to_new_id if rename else None
+                rename_map=original_to_new_id if rename else None,
+                file_map=pool_file_maps[0] if pool_file_maps else None
             )
 
         print(f"\nPool mode summary:")
         print(f"Filtered IDs: {len(filtered_ids)}")
         print(f"Pool folders: {len(pool_folders)}")
-        for data_type, files in extracted.items():
-            print(f"Extracted {data_type}: {len(files)} files")
+        for stream_name, files in extracted.items():
+            print(f"Extracted {stream_name}: {len(files)} files")
 
     # Create missing.csv
     if original_ids:

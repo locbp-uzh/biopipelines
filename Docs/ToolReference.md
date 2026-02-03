@@ -76,7 +76,7 @@ Analyze structures and interactions.
 
 Filter, transform, and manipulate tables.
 
-- [Panda](Tool/DataManagement.md#panda) - Unified table transformations (filter, sort, merge, concat, rank)
+- [Panda](Tool/DataManagement.md#panda) - Unified table transformations (filter, sort, merge, concat, rank, ...)
 - [RemoveDuplicates](Tool/DataManagement.md#removeduplicates) - Cross-table deduplication
 - [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric extraction for Prism
 - [SelectionEditor](Tool/DataManagement.md#selectioneditor) - Selection string manipulation
