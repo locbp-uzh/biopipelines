@@ -32,7 +32,7 @@ def drop_duplicates_history(new_sequences, all_sequences_seen):
     else:
         # Subsequent cycles - concatenate with history and remove duplicates
         combined = Panda(
-            tables=[new_sequences.tables.sequences, all_sequences_updated.tables.result],
+            tables=[new_sequences.tables.sequences, all_sequences_seen.tables.result],
             operations=[Panda.concat(add_source=True)]
         )
         unique_new_sequences = Panda(
