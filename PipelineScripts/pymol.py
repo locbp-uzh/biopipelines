@@ -290,13 +290,14 @@ class PyMOL(BaseConfig):
 
     @staticmethod
     def RenderEach(structures: Union[StandardizedOutput, DataStream],
-                   orient_selection: str = "hetatm",
+                   orient_selection: str = "resn LIG",
                    color_protein: str = "plddt",
                    color_ligand: str = "byatom",
-                   ligand_selection: str = "hetatm",
+                   ligand_selection: str = "resn LIG",
                    plddt_upper: float = 1,
                    title: Optional[str] = None,
-                   title_table: Optional[TableInfo] = None,
+                   caption: Optional[str] = None,
+                   data_table: Optional[TableInfo] = None,
                    width: int = 1920,
                    height: int = 1080,
                    dpi: int = 300,
@@ -309,20 +310,23 @@ class PyMOL(BaseConfig):
         2. Colors protein (by pLDDT or specified color)
         3. Colors ligand (by atom or specified color)
         4. Orients view towards the ligand/selection
-        5. Adds title with optional metrics from table
+        5. Adds title (top, centered) and caption (bottom, centered) with metrics from table
         6. Ray traces and saves PNG
 
         Args:
             structures: Structures to render
-            orient_selection: Selection to orient towards (default: "hetatm" for ligand)
-            color_protein: Protein coloring - "plddt" for AlphaFold coloring, or color name
+            orient_selection: Selection to orient towards (default: "resn LIG" for ligand)
+            color_protein: Protein coloring - "plddt" for confidence coloring, or color name
             color_ligand: Ligand coloring - "byatom" for element colors, or color name
-            ligand_selection: Selection for ligand (default: "hetatm")
-            plddt_upper: Upper bound for pLDDT values (default: 1 for BoltzGen, use 100 for AlphaFold)
-            title: Title format string with placeholders like {id}, {antibiotic},
-                   {affinity_probability_binary:.2f}, etc. Values come from title_table.
-                   Use '|' to separate main title from metrics (e.g., "Ampicillin | Affinity: {aff:.2f}").
-            title_table: Table containing values for title placeholders (must have 'id' column)
+            ligand_selection: Selection for ligand (default: "resn LIG")
+            plddt_upper: Upper bound for pLDDT values (default: 1 for Boltz2, use 100 for AlphaFold)
+            title: Title format string (displayed at top, centered). Can include placeholders
+                   like {id}, {antibiotic}, etc. Values come from data_table.
+                   Example: "Rifampicin Binder"
+            caption: Caption format string (displayed at bottom, centered). Can include
+                     placeholders with formatting like {affinity_pred_value:.2f}.
+                     Example: "Probability: {affinity_probability_binary:.2f} | Affinity: {affinity_pred_value:.2f}"
+            data_table: Table containing values for title/caption placeholders (must have 'id' column)
             width: Image width in pixels
             height: Image height in pixels
             dpi: Image DPI
@@ -333,13 +337,15 @@ class PyMOL(BaseConfig):
 
         Example:
             PyMOL.RenderEach(
-                structures=boltzgen_out,
-                orient_selection="hetatm",
+                structures=boltz_rifampicin,
+                orient_selection="resn LIG",
                 color_protein="plddt",
                 color_ligand="byatom",
-                plddt_upper=1,  # BoltzGen uses 0-1 confidence scores
-                title="Gentamicin | Affinity: {affinity_probability_binary:.2f}",
-                title_table=boltzgen_out.tables.final_designs_metrics,
+                ligand_selection="resn LIG",
+                plddt_upper=1,  # Boltz2 uses 0-1 confidence scores
+                title="Rifampicin Binder",
+                caption="Probability: {affinity_probability_binary:.2f} | Affinity: {affinity_pred_value:.2f}",
+                data_table=boltz_rifampicin.tables.affinity,
                 width=1920,
                 height=1080
             )
@@ -352,7 +358,8 @@ class PyMOL(BaseConfig):
                               ligand_selection=ligand_selection,
                               plddt_upper=plddt_upper,
                               title=title,
-                              title_table=title_table,
+                              caption=caption,
+                              data_table=data_table,
                               width=width,
                               height=height,
                               dpi=dpi,
@@ -406,9 +413,9 @@ class PyMOL(BaseConfig):
                 if structures is not None and structures not in self._structure_sources:
                     self._structure_sources.append(structures)
 
-                title_table = op.params.get("title_table")
-                if title_table is not None and hasattr(title_table, 'path'):
-                    self._table_references.append((title_table, None))
+                data_table = op.params.get("data_table")
+                if data_table is not None and hasattr(data_table, 'path'):
+                    self._table_references.append((data_table, None))
 
             elif op.op_type == "names":
                 basename = op.params.get("basename")
@@ -473,7 +480,7 @@ class PyMOL(BaseConfig):
                         "structure_ids": value.structure_ids if hasattr(value, 'structure_ids') else []
                     }
             elif isinstance(value, TableInfo):
-                # Direct TableInfo reference (for title_table in RenderEach)
+                # Direct TableInfo reference (for data_table in RenderEach)
                 result[key] = {
                     "type": "table_info",
                     "table_path": value.path,

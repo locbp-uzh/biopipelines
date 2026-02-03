@@ -673,20 +673,21 @@ class PyMOLSessionBuilder:
         1. Loads the structure
         2. Colors protein and ligand
         3. Orients view towards ligand
-        4. Adds title with metrics from table
+        4. Adds title (top) and caption (bottom) with metrics from table
         5. Ray traces and saves PNG
 
         Args:
-            op: Operation dict with structures, coloring options, title format, table reference
+            op: Operation dict with structures, coloring options, title/caption format, table reference
         """
         structures_ref = op.get("structures")
-        orient_selection = op.get("orient_selection", "hetatm")
+        orient_selection = op.get("orient_selection", "resn LIG")
         color_protein = op.get("color_protein", "plddt")
         color_ligand = op.get("color_ligand", "byatom")
-        ligand_selection = op.get("ligand_selection", "hetatm")
-        plddt_upper = op.get("plddt_upper", 1)  # Default to 1 for BoltzGen confidence
+        ligand_selection = op.get("ligand_selection", "resn LIG")
+        plddt_upper = op.get("plddt_upper", 1)  # Default to 1 for Boltz2 confidence
         title_format = op.get("title")
-        title_table_ref = op.get("title_table")
+        caption_format = op.get("caption")
+        data_table_ref = op.get("data_table")
         width = op.get("width", 1920)
         height = op.get("height", 1080)
         dpi = op.get("dpi", 300)
@@ -698,15 +699,15 @@ class PyMOLSessionBuilder:
         structures = self._resolve_structures(structures_ref)
         print(f"RenderEach: Rendering {len(structures)} structures individually")
 
-        # Load title table if provided
-        title_data = None
-        if title_table_ref and title_format:
+        # Load data table if provided
+        data_table = None
+        if data_table_ref and (title_format or caption_format):
             table_path = None
-            if isinstance(title_table_ref, dict):
-                table_path = title_table_ref.get("table_path")
+            if isinstance(data_table_ref, dict):
+                table_path = data_table_ref.get("table_path")
             if table_path and os.path.exists(table_path):
-                title_data = self._load_table(table_path)
-                print(f"  Loaded title table: {table_path} ({len(title_data)} rows)")
+                data_table = self._load_table(table_path)
+                print(f"  Loaded data table: {table_path} ({len(data_table)} rows)")
 
         # Create renders subfolder
         renders_folder = os.path.join(self.output_folder, "renders")
@@ -763,21 +764,19 @@ class PyMOLSessionBuilder:
                 print(f"    Warning: Could not orient to {orient_selection}: {e}")
                 cmd.orient(struct_id)
 
-            # Build title info from table
-            title_info = None
-            if title_format and title_data is not None:
-                title_info = self._get_title_info(struct_id, title_format, title_data)
+            # Build text info from table
+            text_info = self._get_text_info(struct_id, title_format, caption_format, data_table)
 
-            # Ray trace and save (title will be added as overlay after ray tracing)
+            # Ray trace and save
             output_file = os.path.join(renders_folder, f"{struct_id}.png")
             try:
                 cmd.ray(width, height)
                 cmd.png(output_file, width=width, height=height, dpi=dpi)
                 print(f"    Saved: {output_file}")
 
-                # Add title overlay to the saved PNG
-                if title_info:
-                    self._add_title_overlay(output_file, title_info, width, height)
+                # Add title/caption overlay to the saved PNG
+                if text_info:
+                    self._add_text_overlay(output_file, text_info, width, height)
 
             except Exception as e:
                 print(f"    Error saving PNG: {e}")
@@ -786,95 +785,106 @@ class PyMOLSessionBuilder:
 
     def _apply_plddt_coloring(self, obj_name: str, selection: str = "polymer", upper: float = 100):
         """
-        Apply pLDDT/confidence coloring to a selection.
+        Apply pLDDT/confidence coloring to a selection using B-factor values.
+
+        Uses the AlphaFold color scheme:
+        - Blue (high confidence >= 90%): #126DFF
+        - Cyan (70-90%): #0ECFF1
+        - Yellow (50-70%): #F6ED12
+        - Orange (low confidence < 50%): #EE831D
 
         Args:
             obj_name: PyMOL object name
             selection: Selection within object (e.g., "polymer")
-            upper: Upper bound for confidence values (100 for AlphaFold pLDDT, 1 for BoltzGen)
+            upper: Upper bound for confidence values (100 for AlphaFold pLDDT, 1 for Boltz2)
         """
         full_sel = f"{obj_name} and {selection}"
 
         # Calculate thresholds based on upper value
-        t90 = upper * 0.9  # High confidence threshold
-        t70 = upper * 0.7  # Medium-high threshold
-        t50 = upper * 0.5  # Medium-low threshold
+        # For upper=100: extremes = [50, 70, 90]
+        # For upper=1: extremes = [0.5, 0.7, 0.9]
+        if upper == 100:
+            extremes = [int(float(upper) * x) for x in [0.5, 0.7, 0.9]]
+        else:
+            extremes = [float(upper) * x for x in [0.5, 0.7, 0.9]]
 
         try:
-            # Color by confidence ranges using B-factor with hex colors
+            # Color by confidence ranges using B-factor
             # Blue (high confidence >= 90%)
-            cmd.color("0x126DFF", f"({full_sel}) and (b >= {t90})")
+            cmd.color("0x126DFF", f"({full_sel}) and (b > {extremes[2]} or b = {extremes[2]})")
             # Cyan (70-90%)
-            cmd.color("0x0ECFF1", f"({full_sel}) and (b >= {t70} and b < {t90})")
+            cmd.color("0x0ECFF1", f"({full_sel}) and ((b < {extremes[2]} and b > {extremes[1]}) or b = {extremes[1]})")
             # Yellow (50-70%)
-            cmd.color("0xF6ED12", f"({full_sel}) and (b >= {t50} and b < {t70})")
+            cmd.color("0xF6ED12", f"({full_sel}) and ((b < {extremes[1]} and b > {extremes[0]}) or b = {extremes[0]})")
             # Orange (low confidence < 50%)
-            cmd.color("0xEE831D", f"({full_sel}) and (b < {t50})")
-            print(f"    Applied pLDDT coloring (upper={upper})")
+            cmd.color("0xEE831D", f"({full_sel}) and b < {extremes[0]}")
+            print(f"    Applied pLDDT coloring (upper={upper}, thresholds={extremes})")
         except Exception as e:
             print(f"    Warning: pLDDT coloring failed: {e}")
 
-    def _get_title_info(self, struct_id: str, title_format: str, title_data: pd.DataFrame) -> Optional[Dict[str, Any]]:
+    def _get_text_info(self, struct_id: str, title_format: Optional[str],
+                       caption_format: Optional[str], data_table: Optional[pd.DataFrame]) -> Optional[Dict[str, Any]]:
         """
-        Get title information from table for a structure.
+        Get title and caption information from table for a structure.
 
         Args:
             struct_id: Structure ID to look up in table
-            title_format: Format string with {column_name} placeholders
-            title_data: DataFrame with 'id' column and value columns
+            title_format: Format string for title (top) with {column_name} placeholders
+            caption_format: Format string for caption (bottom) with {column_name} placeholders
+            data_table: DataFrame with 'id' column and value columns
 
         Returns:
-            Dict with 'format' and 'values' for title rendering, or None
+            Dict with 'title', 'caption', 'values', 'struct_id', or None if no text needed
         """
-        if 'id' not in title_data.columns:
-            print(f"    Warning: title table has no 'id' column")
+        if not title_format and not caption_format:
             return None
 
-        row = title_data[title_data['id'] == struct_id]
-        if row.empty:
-            # Try matching - check if struct_id contains table id or vice versa
-            for col_id in title_data['id']:
-                col_id_str = str(col_id)
-                # Match rank numbers (e.g., rank0001_xxx matches rank0001)
-                if struct_id.startswith("rank") and col_id_str.startswith("rank"):
-                    struct_rank = struct_id.split('_')[0]
-                    col_rank = col_id_str.split('_')[0] if '_' in col_id_str else col_id_str
-                    if struct_rank == col_rank:
-                        row = title_data[title_data['id'] == col_id]
+        values = {'id': struct_id}
+
+        if data_table is not None and 'id' in data_table.columns:
+            row = data_table[data_table['id'] == struct_id]
+            if row.empty:
+                # Try matching - check if struct_id contains table id or vice versa
+                for col_id in data_table['id']:
+                    col_id_str = str(col_id)
+                    # Match rank numbers (e.g., rank0001_xxx matches rank0001)
+                    if struct_id.startswith("rank") and col_id_str.startswith("rank"):
+                        struct_rank = struct_id.split('_')[0]
+                        col_rank = col_id_str.split('_')[0] if '_' in col_id_str else col_id_str
+                        if struct_rank == col_rank:
+                            row = data_table[data_table['id'] == col_id]
+                            break
+                    elif struct_id in col_id_str or col_id_str in struct_id:
+                        row = data_table[data_table['id'] == col_id]
                         break
-                elif struct_id in col_id_str or col_id_str in struct_id:
-                    row = title_data[title_data['id'] == col_id]
-                    break
 
-        if row.empty:
-            print(f"    Warning: ID '{struct_id}' not found in title table")
-            return {'format': title_format, 'values': {'id': struct_id}, 'struct_id': struct_id}
+            if not row.empty:
+                values = row.iloc[0].to_dict()
+                values['id'] = struct_id  # Use actual struct_id
+            else:
+                print(f"    Warning: ID '{struct_id}' not found in data table")
 
-        # Build values dict from row
-        values = row.iloc[0].to_dict()
-        values['id'] = struct_id  # Use actual struct_id
+        return {
+            'title_format': title_format,
+            'caption_format': caption_format,
+            'values': values,
+            'struct_id': struct_id
+        }
 
-        return {'format': title_format, 'values': values, 'struct_id': struct_id}
-
-    def _add_title_overlay(self, image_path: str, title_info: Dict[str, Any], width: int, height: int):
+    def _add_text_overlay(self, image_path: str, text_info: Dict[str, Any], width: int, height: int):
         """
-        Add title text overlay to a rendered PNG image using PIL.
-
-        Creates a multi-line title at the top of the image:
-        - Line 1: Main title (from format string, typically antibiotic name)
-        - Line 2: Structure ID
-        - Line 3: Metrics (affinity, probability, etc.)
+        Add title (top, centered) and caption (bottom, centered) overlay to a rendered PNG image.
 
         Args:
             image_path: Path to the PNG file to modify
-            title_info: Dict with 'format', 'values', 'struct_id'
+            text_info: Dict with 'title_format', 'caption_format', 'values', 'struct_id'
             width: Image width
             height: Image height
         """
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError:
-            print("    Warning: PIL not available, skipping title overlay")
+            print("    Warning: PIL not available, skipping text overlay")
             return
 
         try:
@@ -882,79 +892,93 @@ class PyMOLSessionBuilder:
             img = Image.open(image_path)
             draw = ImageDraw.Draw(img)
 
-            # Try to get a nice font, fall back to default
-            font_size_title = max(36, width // 40)
-            font_size_id = max(28, width // 50)
-            font_size_metrics = max(24, width // 55)
+            # Font sizes based on image dimensions
+            font_size_title = max(48, width // 30)
+            font_size_caption = max(32, width // 45)
 
-            try:
-                # Try common system fonts
-                for font_name in ['DejaVuSans-Bold.ttf', 'DejaVuSans.ttf', 'Arial.ttf', 'arial.ttf']:
-                    try:
-                        font_title = ImageFont.truetype(font_name, font_size_title)
-                        font_id = ImageFont.truetype(font_name, font_size_id)
-                        font_metrics = ImageFont.truetype(font_name, font_size_metrics)
-                        break
-                    except:
-                        continue
-                else:
-                    font_title = ImageFont.load_default()
-                    font_id = font_title
-                    font_metrics = font_title
-            except:
+            # Try to load fonts
+            font_title = None
+            font_caption = None
+            font_paths = [
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                'DejaVuSans-Bold.ttf',
+                'DejaVuSans.ttf',
+                'Arial.ttf',
+                'arial.ttf',
+                '/System/Library/Fonts/Helvetica.ttc',
+                'C:\\Windows\\Fonts\\arial.ttf',
+            ]
+            for font_path in font_paths:
+                try:
+                    font_title = ImageFont.truetype(font_path, font_size_title)
+                    font_caption = ImageFont.truetype(font_path, font_size_caption)
+                    break
+                except:
+                    continue
+
+            if font_title is None:
                 font_title = ImageFont.load_default()
-                font_id = font_title
-                font_metrics = font_title
+                font_caption = ImageFont.load_default()
 
-            # Parse the title format to extract components
-            title_format = title_info['format']
-            values = title_info['values']
-            struct_id = title_info['struct_id']
+            title_format = text_info.get('title_format')
+            caption_format = text_info.get('caption_format')
+            values = text_info.get('values', {})
 
-            # Try to format the full title string
-            try:
-                full_title = title_format.format(**values)
-            except:
-                full_title = title_format
+            # Draw title at top center
+            if title_format:
+                try:
+                    title_text = title_format.format(**values)
+                except Exception as e:
+                    title_text = title_format
+                    print(f"    Warning: Could not format title: {e}")
 
-            # Split by | to get components (e.g., "Ampicillin | Affinity: 0.85 | Probability: 0.92")
-            parts = [p.strip() for p in full_title.split('|')]
-
-            # Build lines
-            lines = []
-            if len(parts) >= 1:
-                lines.append((parts[0], font_title, 'black'))  # Main title (antibiotic name)
-            lines.append((struct_id, font_id, 'gray'))  # Structure ID
-            if len(parts) >= 2:
-                metrics_text = ' | '.join(parts[1:])  # Remaining parts are metrics
-                lines.append((metrics_text, font_metrics, 'dimgray'))
-
-            # Calculate positions - center horizontally, stack vertically from top
-            y_offset = max(20, height // 30)
-            line_spacing = max(8, height // 80)
-
-            for text, font, color in lines:
-                # Get text bounding box
-                bbox = draw.textbbox((0, 0), text, font=font)
+                bbox = draw.textbbox((0, 0), title_text, font=font_title)
                 text_width = bbox[2] - bbox[0]
                 text_height = bbox[3] - bbox[1]
 
-                # Center horizontally
                 x = (width - text_width) // 2
+                y = max(30, height // 25)
 
-                # Draw text with slight shadow for readability
+                # Draw shadow for readability on any background
+                shadow_offset = 3
+                draw.text((x + shadow_offset, y + shadow_offset), title_text, font=font_title, fill='white')
+                draw.text((x - 1, y - 1), title_text, font=font_title, fill='white')
+                draw.text((x + 1, y - 1), title_text, font=font_title, fill='white')
+                draw.text((x - 1, y + 1), title_text, font=font_title, fill='white')
+                draw.text((x + 1, y + 1), title_text, font=font_title, fill='white')
+                draw.text((x, y), title_text, font=font_title, fill='black')
+
+            # Draw caption at bottom center
+            if caption_format:
+                try:
+                    caption_text = caption_format.format(**values)
+                except Exception as e:
+                    caption_text = caption_format
+                    print(f"    Warning: Could not format caption: {e}")
+
+                bbox = draw.textbbox((0, 0), caption_text, font=font_caption)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+
+                x = (width - text_width) // 2
+                y = height - text_height - max(30, height // 25)
+
+                # Draw shadow for readability
                 shadow_offset = 2
-                draw.text((x + shadow_offset, y_offset + shadow_offset), text, font=font, fill='white')
-                draw.text((x, y_offset), text, font=font, fill=color)
-
-                y_offset += text_height + line_spacing
+                draw.text((x + shadow_offset, y + shadow_offset), caption_text, font=font_caption, fill='white')
+                draw.text((x - 1, y - 1), caption_text, font=font_caption, fill='white')
+                draw.text((x + 1, y - 1), caption_text, font=font_caption, fill='white')
+                draw.text((x - 1, y + 1), caption_text, font=font_caption, fill='white')
+                draw.text((x + 1, y + 1), caption_text, font=font_caption, fill='white')
+                draw.text((x, y), caption_text, font=font_caption, fill='dimgray')
 
             # Save the modified image
             img.save(image_path)
-            print(f"    Added title overlay")
+            print(f"    Added text overlay")
 
         except Exception as e:
-            print(f"    Warning: Could not add title overlay: {e}")
+            print(f"    Warning: Could not add text overlay: {e}")
 
     def execute_operation(self, op: Dict[str, Any]):
         """

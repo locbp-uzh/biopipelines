@@ -205,13 +205,14 @@ with Pipeline(project="Examples",
     PyMOL(
         PyMOL.RenderEach(
             structures=best_open,
-            orient_selection="hetatm",
+            orient_selection="resn LIG",
             color_protein="plddt",
             color_ligand="byatom",
-            ligand_selection="hetatm",
+            ligand_selection="resn LIG",
             plddt_upper=1,  # Boltz2 uses 0-1 confidence scores
-            title="HaloTag7-Cy7 | Affinity: {open_affinity_pred_value:.2f} | Delta: {affinity_delta:.2f}",
-            title_table=best_open.tables.affinity,
+            title="HaloTag7-Cy7",
+            caption="Affinity: {open_affinity_pred_value:.2f} | Delta: {affinity_delta:.2f}",
+            data_table=best_open.tables.affinity,
             width=1920,
             height=1080,
             background="white"

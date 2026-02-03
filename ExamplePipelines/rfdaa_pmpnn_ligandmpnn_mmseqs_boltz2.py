@@ -138,13 +138,14 @@ with Pipeline(project="Examples",
     PyMOL(
         PyMOL.RenderEach(
             structures=boltz_rifampicin,
-            orient_selection="hetatm",  # Orient towards ligand
+            orient_selection="resn LIG",  # Orient towards ligand
             color_protein="plddt",
             color_ligand="byatom",
-            ligand_selection="hetatm",
+            ligand_selection="resn LIG",
             plddt_upper=1,  # Boltz2 uses 0-1 confidence scores
-            title="Rifampicin Binder | Affinity: {affinity_pred_value:.2f}",
-            title_table=boltz_rifampicin.tables.affinity,
+            title="Rifampicin Binder",
+            caption="Probability: {affinity_probability_binary:.2f} | Affinity: {affinity_pred_value:.2f}",
+            data_table=boltz_rifampicin.tables.affinity,
             width=1920,
             height=1080,
             background="white"
