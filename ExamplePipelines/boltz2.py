@@ -38,7 +38,7 @@ with Pipeline(project="Examples",
               job="Boltz2",
               description="Test Boltz2 with various inputs"):
 
-    Resources(gpu="A100",
+    Resources(gpu="any",
               time="4:00:00",
               memory="16GB")
 
