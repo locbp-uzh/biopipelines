@@ -175,7 +175,10 @@ def _unwrap_sources(value: Any, axis_name: str) -> tuple:
         (mode: str, sources: list) where mode is "bundle" or "each"
     """
     if isinstance(value, Bundle):
-        # Collect all paths from bundle sources
+        # Check if any source inside Bundle is an Each - if so, mode is "each"
+        # Bundle(Each(library), cofactor) means: for each library item, bundle it with cofactor
+        has_each_inside = any(isinstance(src, Each) for src in value.sources)
+
         all_paths = []
         for src in value.sources:
             if isinstance(src, Each):
@@ -184,7 +187,10 @@ def _unwrap_sources(value: Any, axis_name: str) -> tuple:
                     all_paths.extend(_extract_source_paths(sub_src, axis_name))
             else:
                 all_paths.extend(_extract_source_paths(src, axis_name))
-        return ("bundle", all_paths)
+
+        # If there's an Each inside, the mode is "each" (we iterate over Each items)
+        mode = "each" if has_each_inside else "bundle"
+        return (mode, all_paths)
 
     elif isinstance(value, Each):
         # Each iterates
