@@ -842,10 +842,19 @@ fi
         
         # Add file existence checks for first few files in each category
         output_structure = self.loaded_result['output_structure']
-        
+
         for file_type in ['structures', 'sequences', 'compounds']:
             if file_type in output_structure and output_structure[file_type]:
-                files_to_check = output_structure[file_type][:3]  # Check first 3
+                stream_data = output_structure[file_type]
+                # Handle both old format (list of paths) and new format (dict with 'files' key)
+                if isinstance(stream_data, dict):
+                    files_list = stream_data.get('files', [])
+                elif isinstance(stream_data, list):
+                    files_list = stream_data
+                else:
+                    files_list = []
+
+                files_to_check = files_list[:3]  # Check first 3
                 for file_path in files_to_check:
                     if isinstance(file_path, str):
                         script_content += f"""
