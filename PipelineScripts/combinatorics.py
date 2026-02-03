@@ -302,20 +302,55 @@ def load_ids_from_sources(sources: List[str]) -> List[str]:
     return all_ids
 
 
-def _unwrap_to_first_source(value: Any) -> Any:
+def _collect_ids_from_value(value: Any, axis_name: str) -> List[str]:
     """
-    Recursively unwrap Bundle/Each wrappers to get the first actual source.
+    Collect all IDs from a value, handling Bundle/Each wrappers.
+
+    For Each(a, b), collects IDs from both a and b.
+    For Bundle(Each(library), cofactor), collects IDs from the Each (library).
+    For Bundle(cofactor, Each(library)), finds the Each and collects its IDs.
 
     Args:
         value: A value that may be wrapped in Bundle/Each
+        axis_name: "sequences" or "compounds" to determine which stream to access
 
     Returns:
-        The first non-Bundle/Each source found
+        List of all IDs from the relevant sources
     """
-    while isinstance(value, (Bundle, Each)):
-        if not value.sources:
-            raise ValueError("Empty Bundle/Each wrapper")
-        value = value.sources[0]
+    stream_name = "sequences" if axis_name == "sequences" else "compounds"
+
+    def get_ids_from_source(src: Any) -> List[str]:
+        """Get IDs from a single unwrapped source."""
+        if hasattr(src, 'streams'):
+            stream = getattr(src.streams, stream_name, None)
+            if stream:
+                return list(stream.ids)
+        if isinstance(src, str):
+            return ["sequence" if axis_name == "sequences" else "compound"]
+        return []
+
+    if isinstance(value, Bundle):
+        # Look for an Each inside the Bundle - that's what we iterate over
+        for src in value.sources:
+            if isinstance(src, Each):
+                # Found Each inside Bundle - collect IDs from all Each sources
+                all_ids = []
+                for each_src in src.sources:
+                    all_ids.extend(_collect_ids_from_value(each_src, axis_name))
+                return all_ids
+        # No Each found - this is a pure Bundle, return IDs from first source
+        return _collect_ids_from_value(value.sources[0], axis_name)
+
+    elif isinstance(value, Each):
+        # Collect IDs from all sources in the Each
+        all_ids = []
+        for src in value.sources:
+            all_ids.extend(_collect_ids_from_value(src, axis_name))
+        return all_ids
+
+    else:
+        # Bare value - get IDs directly
+        return get_ids_from_source(value)
     return value
 
 
@@ -348,26 +383,10 @@ def predict_output_ids(
             continue
         mode, _ = _unwrap_sources(value, name)
 
-        # Get IDs directly from source object - recursively unwrap to get actual source
-        unwrapped = _unwrap_to_first_source(value)
-        if name == "sequences":
-            if hasattr(unwrapped, 'streams') and unwrapped.streams.sequences:
-                ids = list(unwrapped.streams.sequences.ids)
-            elif isinstance(unwrapped, str):
-                # Direct sequence string - single ID
-                ids = ["sequence"]
-            else:
-                raise ValueError(f"No sequences found in {name} input")
-        elif name == "compounds":
-            if hasattr(unwrapped, 'streams') and unwrapped.streams.compounds:
-                ids = list(unwrapped.streams.compounds.ids)
-            elif isinstance(unwrapped, str):
-                # Direct SMILES string - single compound
-                ids = ["compound"]
-            else:
-                raise ValueError(f"No compounds found in {name} input")
-        else:
-            raise ValueError(f"Unknown axis name: {name}. Must be 'sequences' or 'compounds'")
+        # Collect all IDs from the value, handling Bundle/Each wrappers
+        ids = _collect_ids_from_value(value, name)
+        if not ids:
+            raise ValueError(f"No {name} found in input")
 
         axes_info.append((name, mode, ids))
 
