@@ -58,18 +58,21 @@ with Pipeline(project="Examples",
               time="4:00:00",
               memory="16GB")
 
+    # We load the prediction from Boltz. This is very important to benchmark the affinities
     original_open = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json')
     original_close = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json')
 
     best_open, best_close = original_open, original_close
 
     # Merge original open and close affinity tables with Panda
+    # pool=best_open preserves structure files with id_map remapped IDs
     original_analysis = Panda(
         tables=[best_open.tables.affinity, best_close.tables.affinity],
         operations=[
             Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": ["HT7_Cy7_C_R", "HT7_Cy7_C_RR"]}),
             Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
-        ]
+        ],
+        pool=best_open
     )
 
     NUM_CYCLES = 3

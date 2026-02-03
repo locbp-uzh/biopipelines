@@ -594,6 +594,16 @@ class Panda(BaseConfig):
             # Multi-table mode
             self.input_csv_paths = [self._resolve_table_path(t) for t in self.tables_input]
 
+        # Extract id_map from merge operation if present (maps new_id -> [old_ids])
+        # We need to reverse it: old_id -> new_id for file map remapping
+        self.id_remap = {}  # old_id -> new_id
+        for op in self.operations:
+            if op.type == "merge" and op.params.get("id_map"):
+                id_map = op.params["id_map"]
+                for new_id, old_ids in id_map.items():
+                    for old_id in old_ids:
+                        self.id_remap[old_id] = new_id
+
         # Configure pool mode - collect all pool folders and file mappings
         if self.use_pool_mode:
             self.pool_folders = []
@@ -613,7 +623,9 @@ class Panda(BaseConfig):
                             file_map[stream_name] = {}
                             for i, sid in enumerate(stream.ids):
                                 if i < len(stream.files):
-                                    file_map[stream_name][sid] = stream.files[i]
+                                    # Apply id_remap if the original ID should be remapped
+                                    mapped_id = self.id_remap.get(sid, sid)
+                                    file_map[stream_name][mapped_id] = stream.files[i]
                 self.pool_file_maps.append(file_map)
 
     def _resolve_table_path(self, table_input: Any) -> str:
@@ -775,6 +787,22 @@ fi
 
         return script_content
 
+    def _get_predicted_output_count(self) -> Optional[int]:
+        """
+        Predict the number of output rows based on operations.
+
+        Returns:
+            Predicted count if determinable (e.g., head/tail/sample with n), None otherwise.
+        """
+        for op in self.operations:
+            if op.type == "head":
+                return op.params.get("n")
+            elif op.type == "tail":
+                return op.params.get("n")
+            elif op.type == "sample":
+                return op.params.get("n")  # Only if n is specified, not frac
+        return None
+
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after transformation."""
         expected_columns = self._get_expected_columns()
@@ -797,6 +825,16 @@ fi
         }
 
         if self.use_pool_mode and self.pool_outputs:
+            # Extract id_map from merge operation if present (maps new_id -> [old_ids])
+            # We need to reverse it: old_id -> new_id for remapping pool IDs
+            id_remap = {}  # old_id -> new_id
+            for op in self.operations:
+                if op.type == "merge" and op.params.get("id_map"):
+                    id_map = op.params["id_map"]
+                    for new_id, old_ids in id_map.items():
+                        for old_id in old_ids:
+                            id_remap[old_id] = new_id
+
             # Pool mode: dynamically collect all streams from all pools
             # Collect stream info: {stream_name: {"ids": [], "files": [], "format": str}}
             stream_data = {}
@@ -812,22 +850,35 @@ fi
                                     "files": [],
                                     "format": stream.format
                                 }
-                            stream_data[stream_name]["ids"].extend(stream.ids)
+                            # Apply id_remap to IDs if present
+                            remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids]
+                            stream_data[stream_name]["ids"].extend(remapped_ids)
                             stream_data[stream_name]["files"].extend(stream.files)
+
+            # Check if head/tail/sample limits the output count
+            predicted_count = self._get_predicted_output_count()
 
             # Build output streams
             output_streams = {}
             for stream_name, data in stream_data.items():
+                pool_count = len(data["ids"])
+                # Use predicted count if available, otherwise use pool count
+                num_items = min(predicted_count, pool_count) if predicted_count is not None else pool_count
+
                 if self.rename:
-                    # Predict renamed IDs and file paths
-                    new_ids = [f"{self.rename}_{i+1}" for i in range(len(data["ids"]))]
+                    # Predict renamed IDs and file paths based on predicted output count
+                    new_ids = [f"{self.rename}_{i+1}" for i in range(num_items)]
                     new_files = []
-                    for i, old_file in enumerate(data["files"]):
-                        ext = os.path.splitext(old_file)[1]
-                        new_files.append(os.path.join(self.output_folder, f"{new_ids[i]}{ext}"))
+                    # Get extension from first file
+                    if data["files"]:
+                        ext = os.path.splitext(data["files"][0])[1]
+                    else:
+                        ext = ".pdb" if stream_name == "structures" else ".fasta" if stream_name == "sequences" else ".sdf"
+                    for new_id in new_ids:
+                        new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
                 else:
-                    new_ids = data["ids"]
-                    new_files = [os.path.join(self.output_folder, os.path.basename(f)) for f in data["files"]]
+                    new_ids = data["ids"][:num_items]
+                    new_files = [os.path.join(self.output_folder, os.path.basename(f)) for f in data["files"][:num_items]]
 
                 # For sequences, use the result CSV as map_table
                 map_table = self.output_csv if stream_name == "sequences" else None

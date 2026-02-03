@@ -504,27 +504,35 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
     extracted_files = {name: [] for name in all_stream_names}
 
     for _, row in result_df.iterrows():
-        selected_id = str(row.get('id', ''))
+        # Use original_id for lookup if available (when rename was applied),
+        # otherwise use id column
+        if 'original_id' in result_df.columns:
+            lookup_id = str(row.get('original_id', ''))
+        else:
+            lookup_id = str(row.get('id', ''))
+
+        # Output ID is always the current 'id' column (may be renamed)
+        output_id = str(row.get('id', lookup_id))
+
         source_idx = int(row.get('source_table', 0))
 
         if source_idx >= len(file_maps):
             raise ValueError(f"source_table {source_idx} >= num pools {len(file_maps)}")
 
         file_map = file_maps[source_idx]
-        output_id = rename_map.get(selected_id, selected_id) if rename_map else selected_id
 
         # Extract from all streams in this pool's file map
         for stream_name, id_to_file in file_map.items():
-            if selected_id not in id_to_file:
+            if lookup_id not in id_to_file:
                 continue
 
-            source = id_to_file[selected_id]
+            source = id_to_file[lookup_id]
             ext = os.path.splitext(source)[1]
             dest = os.path.join(output_folder, f"{output_id}{ext}")
 
             shutil.copy2(source, dest)
             extracted_files[stream_name].append(dest)
-            print(f"Extracted {stream_name} from pool {source_idx}: {source} -> {dest}")
+            print(f"Extracted {stream_name} from pool {source_idx}: {lookup_id} -> {dest}")
 
     return extracted_files
 
