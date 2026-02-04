@@ -193,16 +193,19 @@ def _unwrap_sources(value: Any, axis_name: str) -> tuple:
     """
     if isinstance(value, Bundle):
         sources_with_iterate = []
+        order = 0
         for src in value.sources:
             if isinstance(src, Each):
                 # Each inside Bundle - these are iterated
                 for sub_src in src.sources:
                     for path in _extract_source_paths(sub_src, axis_name):
-                        sources_with_iterate.append({"path": path, "iterate": True})
+                        sources_with_iterate.append({"path": path, "iterate": True, "order": order})
+                        order += 1
             else:
                 # Bare source inside Bundle - static (bundled with each iteration)
                 for path in _extract_source_paths(src, axis_name):
-                    sources_with_iterate.append({"path": path, "iterate": False})
+                    sources_with_iterate.append({"path": path, "iterate": False, "order": order})
+                    order += 1
 
         return ("bundle", sources_with_iterate)
 

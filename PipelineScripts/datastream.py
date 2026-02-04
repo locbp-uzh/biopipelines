@@ -26,6 +26,11 @@ class DataStream:
         map_table: Path to CSV file mapping ids to files/values and additional metadata
         format: Data format ("pdb", "cif", "fasta", "csv", "sdf", "smiles", "ccd", etc.)
         metadata: Additional tool-specific metadata
+        files_contain_wildcards: If True, file paths contain wildcard patterns (e.g.,
+            "/path/to/rank0001_*.cif") that will be resolved at SLURM runtime.
+            This is used when the exact filename cannot be predicted at pipeline time,
+            such as BoltzGen's filtered outputs where the design ID suffix is only
+            known after filtering.
 
     The map_table CSV always contains at minimum:
         - id: The item identifier
@@ -51,6 +56,16 @@ class DataStream:
             format="smiles"
         )
 
+        # Wildcard patterns (resolved at SLURM time)
+        filtered_structures = DataStream(
+            name="structures",
+            ids=["rank0001", "rank0002"],
+            files=["/path/to/rank0001_*.cif", "/path/to/rank0002_*.cif"],
+            map_table="/path/to/structures_map.csv",
+            format="cif",
+            files_contain_wildcards=True
+        )
+
         # Iteration works uniformly
         for item_id, item_path in structures:
             print(f"Processing {item_id}: {item_path}")
@@ -62,6 +77,7 @@ class DataStream:
     map_table: str = ""
     format: str = "pdb"
     metadata: Dict[str, Any] = field(default_factory=dict)
+    files_contain_wildcards: bool = False
 
     # Internal cache for map_table data (loaded lazily)
     _map_data: Optional[pd.DataFrame] = field(default=None, repr=False, compare=False)
@@ -132,7 +148,8 @@ class DataStream:
                 ids=sliced_ids,
                 files=sliced_files,
                 map_table=self.map_table,
-                format=self.format
+                format=self.format,
+                files_contain_wildcards=self.files_contain_wildcards
             )
 
         # Integer indexing
@@ -229,7 +246,8 @@ class DataStream:
             files=new_files,
             map_table=self.map_table,  # Original map still valid for lookups
             format=self.format,
-            metadata={**self.metadata, '_filtered': True, '_original_count': len(self.ids)}
+            metadata={**self.metadata, '_filtered': True, '_original_count': len(self.ids)},
+            files_contain_wildcards=self.files_contain_wildcards
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -245,7 +263,8 @@ class DataStream:
             'files': self.files.copy(),
             'map_table': self.map_table,
             'format': self.format,
-            'metadata': self.metadata.copy()
+            'metadata': self.metadata.copy(),
+            'files_contain_wildcards': self.files_contain_wildcards
         }
 
     @classmethod
@@ -265,7 +284,8 @@ class DataStream:
             files=data.get('files', []),
             map_table=data.get('map_table', ''),
             format=data.get('format', 'pdb'),
-            metadata=data.get('metadata', {})
+            metadata=data.get('metadata', {}),
+            files_contain_wildcards=data.get('files_contain_wildcards', False)
         )
 
     @classmethod
@@ -295,11 +315,12 @@ class DataStream:
 
     def __repr__(self) -> str:
         """Detailed string representation."""
+        wildcards_info = ", wildcards=True" if self.files_contain_wildcards else ""
         return (
             f"DataStream(name='{self.name}', format='{self.format}', "
             f"items={len(self)}, "
             f"files={len(self.files)}, "
-            f"map_table={'set' if self.map_table else 'unset'})"
+            f"map_table={'set' if self.map_table else 'unset'}{wildcards_info})"
         )
 
     def __str__(self) -> str:

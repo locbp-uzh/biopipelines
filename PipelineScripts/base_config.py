@@ -1147,28 +1147,6 @@ class StandardizedOutput:
             return kept_count / original_count
         return None
 
-    def filter(self, expression: str, max_items: Optional[int] = None,
-               sort_by: Optional[str] = None, sort_ascending: bool = True):
-        """
-        Shorthand for Filter(pool=self, data=self, expression=...).
-
-        Args:
-            expression: Pandas query-style filter expression (e.g., "pLDDT>80 and distance<5.0")
-            max_items: Maximum number of items to keep after filtering
-            sort_by: Column name to sort by before applying max_items limit
-            sort_ascending: Sort order (True for ascending, False for descending)
-
-        Returns:
-            StandardizedOutput from Filter tool
-
-        Examples:
-            filtered = boltz.filter("pLDDT>80")
-            top10 = boltz.filter("contacts>=3", max_items=10, sort_by="affinity_pred_value")
-        """
-        from .filter import Filter
-        return Filter(pool=self, data=self, expression=expression,
-                     max_items=max_items, sort_by=sort_by, sort_ascending=sort_ascending)
-
 
 class ToolOutput:
     """

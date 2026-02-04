@@ -12,6 +12,9 @@
   - [Path Descriptors](#path-descriptors)
   - [Script Generation](#script-generation)
   - [Output Prediction](#output-prediction)
+- [HelpScript Development](#helpscript-development)
+  - [pipe_biopipelines_io Module](#pipe_biopipelines_io-module)
+  - [Table References](#table-references)
 - [Code Principles](#code-principles)
 - [Working with Git](#working-with-git)
 - [Working with Claude Code](#working-with-claude-code)
@@ -279,6 +282,132 @@ def get_output_files(self) -> Dict[str, Any]:
         "tables": tables,
         "output_folder": self.output_folder
     }
+```
+
+---
+
+## HelpScript Development
+
+HelpScripts (`HelpScripts/pipe_*.py`) execute at SLURM runtime. They process data, generate outputs, and communicate results back to the pipeline.
+
+### pipe_biopipelines_io Module
+
+The `pipe_biopipelines_io.py` module provides utilities for reading DataStreams and tables at SLURM runtime:
+
+```python
+from pipe_biopipelines_io import (
+    # DataStream utilities
+    load_datastream,      # Load DataStream from JSON or dict
+    iterate_files,        # Iterate (id, file_path) pairs
+    iterate_values,       # Iterate (id, value_dict) pairs from map_table
+    resolve_file,         # Get single file for an ID
+    get_value,            # Get single value from map_table
+    get_all_values,       # Get all values for an ID
+
+    # Table reference utilities
+    load_table,           # Load table from path or DATASHEET_REFERENCE
+    lookup_table_value,   # Look up value for an ID
+    iterate_table_values, # Iterate (id, value) pairs
+)
+```
+
+#### DataStream Iteration
+
+For file-based streams (structures, sequences):
+
+```python
+ds = load_datastream("/path/to/structures.json")
+
+# Iterate over all files (handles wildcards automatically)
+for struct_id, struct_file in iterate_files(ds):
+    process_structure(struct_id, struct_file)
+
+# Get single file
+file_path = resolve_file(ds, "protein_1")
+```
+
+For value-based streams (SMILES, sequences in map_table):
+
+```python
+ds = load_datastream("/path/to/compounds.json")
+
+# Iterate with specific columns
+for comp_id, values in iterate_values(ds, columns=['smiles', 'name']):
+    smiles = values['smiles']
+
+# Get single value
+smiles = get_value(ds, "ligand_001", column="smiles")
+```
+
+### Table References
+
+Tools can pass per-structure data (e.g., fixed positions) to HelpScripts via table references. The format is:
+
+```
+DATASHEET_REFERENCE:/path/to/table.csv:column_name
+```
+
+Use `pipe_biopipelines_io` to resolve these:
+
+```python
+from pipe_biopipelines_io import load_table, lookup_table_value, iterate_table_values
+
+# Parse reference and load table
+table, column = load_table("DATASHEET_REFERENCE:/path/to/positions.csv:within")
+
+# Look up value for a specific structure
+positions = lookup_table_value(table, "protein_1", column)
+
+# Or iterate over all structures
+for struct_id, positions in iterate_table_values(table, structure_ids, column):
+    print(f"{struct_id}: {positions}")
+```
+
+The lookup handles ID matching automatically:
+1. Try `pdb` column with `.pdb` extension
+2. Try `id` column exact match
+3. Try ID mapping (strip suffixes like `_1`, `_2`)
+
+#### Example: Processing Structures with Per-Structure Data
+
+```python
+#!/usr/bin/env python3
+"""Example pipe script using biopipelines_io utilities."""
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from pipe_biopipelines_io import (
+    load_datastream, iterate_files,
+    load_table, lookup_table_value
+)
+
+def main():
+    structures_json = sys.argv[1]
+    positions_ref = sys.argv[2]  # DATASHEET_REFERENCE:path:column
+    output_csv = sys.argv[3]
+
+    # Load structures
+    ds = load_datastream(structures_json)
+
+    # Load positions table
+    table, column = load_table(positions_ref)
+
+    results = []
+    for struct_id, struct_file in iterate_files(ds):
+        # Get per-structure positions
+        positions = lookup_table_value(table, struct_id, column)
+
+        # Process structure with its positions
+        result = process(struct_file, positions)
+        results.append({"id": struct_id, "result": result})
+
+    # Write output
+    pd.DataFrame(results).to_csv(output_csv, index=False)
+
+if __name__ == "__main__":
+    main()
 ```
 
 ---

@@ -7,7 +7,7 @@ sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import * # PDB, Ligand, Sequence
-from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.load import LoadOutput
 from PipelineScripts.pymol import PyMOL
 
 with Pipeline(project="Examples",

@@ -284,6 +284,8 @@ class LoadOutput(BaseConfig):
                 # New DataStream dict format - update in place
                 resolved[file_type]['files'] = resolved_files
                 resolved[file_type]['ids'] = resolved_ids
+                # Wildcards have been resolved, so clear the flag
+                resolved[file_type]['files_contain_wildcards'] = False
             else:
                 # Legacy format - store as separate lists
                 resolved[file_type] = resolved_files

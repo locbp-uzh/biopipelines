@@ -86,25 +86,32 @@ def load_axis_data(axis_config: Dict) -> tuple:
 
     Args:
         axis_config: Dict with 'name', 'mode', 'sources' keys
-                    sources can be list of strings or list of dicts with 'path' and 'iterate'
+                    sources can be list of strings or list of dicts with 'path', 'iterate', and 'order'
 
     Returns:
-        Tuple of (iterated_data, static_data):
+        Tuple of (iterated_data, static_data, static_first):
         - iterated_data: List of dicts from sources with iterate=True
         - static_data: List of dicts from sources with iterate=False
+        - static_first: True if static sources should be added before iterated (based on order)
     """
     iterated_data = []
     static_data = []
     sources = axis_config.get('sources', [])
+
+    # Track order to determine if static should come first
+    min_iterated_order = float('inf')
+    min_static_order = float('inf')
 
     for source in sources:
         # Handle both old string format and new dict format
         if isinstance(source, dict):
             source_path = source.get('path')
             is_iterate = source.get('iterate', True)
+            order = source.get('order', 0)
         else:
             source_path = source
             is_iterate = True
+            order = 0
 
         if not source_path or not os.path.exists(source_path):
             print(f"Warning: Source file not found: {source_path}")
@@ -114,13 +121,18 @@ def load_axis_data(axis_config: Dict) -> tuple:
             records = df.to_dict('records')
             if is_iterate:
                 iterated_data.extend(records)
+                min_iterated_order = min(min_iterated_order, order)
             else:
                 static_data.extend(records)
+                min_static_order = min(min_static_order, order)
         except Exception as e:
             print(f"Error loading {source_path}: {e}")
             sys.exit(1)
 
-    return iterated_data, static_data
+    # Static comes first if its minimum order is less than iterated's minimum order
+    static_first = min_static_order < min_iterated_order
+
+    return iterated_data, static_data, static_first
 
 
 def load_msa_mappings(msa_table: Optional[str]) -> Dict:
@@ -333,7 +345,8 @@ def generate_configs(
     proteins_iterated: List[Dict], proteins_static: List[Dict],
     ligands_iterated: List[Dict], ligands_static: List[Dict],
     proteins_mode: str, ligands_mode: str,
-    msa_mappings: Dict, args
+    msa_mappings: Dict, args,
+    ligands_static_first: bool = False
 ) -> List[tuple]:
     """
     Generate all config dictionaries based on combinatorics modes.
@@ -347,6 +360,7 @@ def generate_configs(
         ligands_mode: "each", "bundle", or None (no ligands)
         msa_mappings: MSA file mappings
         args: Command line arguments
+        ligands_static_first: If True, static ligands are added before iterated ligands (for affinity)
 
     Returns list of (config_id, config_dict) tuples.
 
@@ -355,6 +369,7 @@ def generate_configs(
     - ligands_iterated = library compounds
     - ligands_static = cofactor
     - Creates one config per iterated ligand, each containing all static ligands
+    - If ligands_static_first=True (e.g., Bundle(cofactor, Each(library))), static ligand gets affinity
     """
     # Parse extra parameters
     glycosylation = json.loads(args.glycosylation) if args.glycosylation else None
@@ -414,14 +429,25 @@ def generate_configs(
                 config = add_template_to_config(config, args)
                 config = add_glycosylation_to_config(config, glycosylation)
 
-                # Add iterated ligand first (for affinity)
-                first_ligand_chain = chr(65 + len(config['sequences']))
-                config['sequences'].append(build_ligand_entry(ligand, first_ligand_chain))
-
-                # Add all static ligands
-                for static_ligand in ligands_static:
+                # Add ligands in correct order based on ligands_static_first
+                # The first ligand added gets the affinity calculation
+                if ligands_static_first and ligands_static:
+                    # Static ligands first (e.g., Bundle(ATP, Each(library)) - ATP gets affinity)
+                    first_ligand_chain = chr(65 + len(config['sequences']))
+                    for static_ligand in ligands_static:
+                        chain_id = chr(65 + len(config['sequences']))
+                        config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
+                    # Add iterated ligand after
                     chain_id = chr(65 + len(config['sequences']))
-                    config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
+                    config['sequences'].append(build_ligand_entry(ligand, chain_id))
+                else:
+                    # Iterated ligand first (e.g., Bundle(Each(library), ATP) - library ligand gets affinity)
+                    first_ligand_chain = chr(65 + len(config['sequences']))
+                    config['sequences'].append(build_ligand_entry(ligand, first_ligand_chain))
+                    # Add all static ligands after
+                    for static_ligand in ligands_static:
+                        chain_id = chr(65 + len(config['sequences']))
+                        config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
 
                 if args.affinity:
                     config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
@@ -506,14 +532,25 @@ def generate_configs(
                     config = add_template_to_config(config, args)
                     config = add_glycosylation_to_config(config, glycosylation)
 
-                    # Add iterated ligand first (for affinity)
-                    first_ligand_chain = chr(65 + len(config['sequences']))
-                    config['sequences'].append(build_ligand_entry(ligand, first_ligand_chain))
-
-                    # Add all static ligands
-                    for static_ligand in ligands_static:
+                    # Add ligands in correct order based on ligands_static_first
+                    # The first ligand added gets the affinity calculation
+                    if ligands_static_first and ligands_static:
+                        # Static ligands first (e.g., Bundle(ATP, Each(library)) - ATP gets affinity)
+                        first_ligand_chain = chr(65 + len(config['sequences']))
+                        for static_ligand in ligands_static:
+                            chain_id = chr(65 + len(config['sequences']))
+                            config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
+                        # Add iterated ligand after
                         chain_id = chr(65 + len(config['sequences']))
-                        config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
+                        config['sequences'].append(build_ligand_entry(ligand, chain_id))
+                    else:
+                        # Iterated ligand first (e.g., Bundle(Each(library), ATP) - library ligand gets affinity)
+                        first_ligand_chain = chr(65 + len(config['sequences']))
+                        config['sequences'].append(build_ligand_entry(ligand, first_ligand_chain))
+                        # Add all static ligands after
+                        for static_ligand in ligands_static:
+                            chain_id = chr(65 + len(config['sequences']))
+                            config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
 
                     if args.affinity:
                         config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
@@ -664,12 +701,17 @@ def main():
 
     print(f"Combinatorics modes: proteins={proteins_mode}, ligands={ligands_mode}")
 
-    # Load data - returns (iterated, static) tuples
-    proteins_iterated, proteins_static = load_axis_data(proteins_axis)
-    ligands_iterated, ligands_static = load_axis_data(ligands_axis) if ligands_axis else ([], [])
+    # Load data - returns (iterated, static, static_first) tuples
+    proteins_iterated, proteins_static, _ = load_axis_data(proteins_axis)
+    if ligands_axis:
+        ligands_iterated, ligands_static, ligands_static_first = load_axis_data(ligands_axis)
+    else:
+        ligands_iterated, ligands_static, ligands_static_first = [], [], False
 
     print(f"Loaded proteins: {len(proteins_iterated)} iterated, {len(proteins_static)} static")
     print(f"Loaded ligands: {len(ligands_iterated)} iterated, {len(ligands_static)} static")
+    if ligands_static_first:
+        print(f"Ligand order: static first (affinity calculated for static ligand)")
 
     # Load MSA mappings
     msa_mappings = load_msa_mappings(args.msa_table)
@@ -681,7 +723,8 @@ def main():
         proteins_iterated, proteins_static,
         ligands_iterated, ligands_static,
         proteins_mode, ligands_mode,
-        msa_mappings, args
+        msa_mappings, args,
+        ligands_static_first=ligands_static_first
     )
 
     # Write configs

@@ -202,7 +202,7 @@ Loads a single tool output JSON file.
 **Example**:
 
 ```python
-from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.load import LoadOutput
 
 prev = LoadOutput(
     output_json="/path/to/ToolOutputs/003_Boltz2.json",
@@ -225,7 +225,7 @@ Loads multiple outputs from a ToolOutputs folder.
 **Example**:
 
 ```python
-from PipelineScripts.load_output import LoadOutputs
+from PipelineScripts.load import LoadOutputs
 
 # All Boltz2 outputs
 all_boltz = LoadOutputs("/path/to/job/", tool="Boltz2")

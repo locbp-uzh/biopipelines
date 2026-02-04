@@ -7,7 +7,7 @@ import sys
 sys.path.insert(0, os.getcwd())
 
 from PipelineScripts.pipeline import *
-from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.load import LoadOutput
 from PipelineScripts.boltzgen import BoltzGenMerge, BoltzGen
 
 with Pipeline(project="Examples",

@@ -32,6 +32,7 @@ class ProteinMPNN(BaseConfig):
     main_table = Path(lambda self: os.path.join(self.output_folder, "proteinmpnn_results.csv"))
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.csv"))
     queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.fasta"))
+    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
 
     # Helper scripts
     fixed_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_fixed_positions.py"))
@@ -139,7 +140,14 @@ class ProteinMPNN(BaseConfig):
 
     def _generate_script_prepare_inputs(self) -> str:
         """Generate the input preparation part of the script."""
+        import json
+
         input_directory = os.path.dirname(self.structures_stream.files[0])
+
+        # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
+        datastream_dict = self.structures_stream.to_dict()
+        with open(self.structures_json, 'w') as f:
+            json.dump(datastream_dict, f, indent=2)
 
         # Resolve table references to DATASHEET_REFERENCE format
         resolved_fixed = self.resolve_table_reference(self.fixed) if self.fixed else ""
@@ -155,7 +163,7 @@ class ProteinMPNN(BaseConfig):
         designed_param = resolved_redesigned if resolved_redesigned else "-"
 
         return f"""echo "Determining fixed positions"
-python {self.fixed_py} "{input_directory}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
+python {self.fixed_py} "{self.structures_json}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
 
 echo "Parsing multiple PDBs"
 python {self.parse_py} --input_path {input_directory} --output_path {self.parsed_pdbs_jsonl}

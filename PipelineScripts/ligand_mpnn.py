@@ -28,7 +28,7 @@ class LigandMPNN(BaseConfig):
     seqs_folder = Path(lambda self: os.path.join(self.output_folder, "seqs"))
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.csv"))
     queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.fasta"))
-    structures_list_file = Path(lambda self: os.path.join(self.output_folder, ".input_structures.txt"))
+    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
     commands_file = Path(lambda self: os.path.join(self.output_folder, "lmpnn_commands.sh"))
     replacement_script = Path(lambda self: os.path.join(self.output_folder, "lmpnn_positions_replacement.sh"))
 
@@ -128,10 +128,12 @@ class LigandMPNN(BaseConfig):
 
     def generate_script(self, script_path: str) -> str:
         """Generate LigandMPNN execution script."""
-        # Write structure paths to list file (avoids "Argument list too long" error)
-        with open(self.structures_list_file, 'w') as f:
-            for struct_path in self.structures_stream.files:
-                f.write(f"{struct_path}\n")
+        import json
+
+        # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
+        datastream_dict = self.structures_stream.to_dict()
+        with open(self.structures_json, 'w') as f:
+            json.dump(datastream_dict, f, indent=2)
 
         script_content = "#!/bin/bash\n"
         script_content += "# LigandMPNN execution script\n"
@@ -168,13 +170,12 @@ class LigandMPNN(BaseConfig):
         base_options += f' --ligand_mpnn_cutoff_for_score "{self.design_within}"'
         base_options += f' --out_folder "{self.output_folder}"'
 
-        # Generate commands for each structure
+        # Generate commands for each structure using DataStream IDs
         commands = []
-        for pdb_path in sorted(self.structures_stream.files):
+        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
             pdb_name = os.path.basename(pdb_path)
-            pdb_id = os.path.splitext(pdb_name)[0]
-            commands.append(f'echo "Processing {pdb_name} with positions for ID: {pdb_id}"')
-            commands.append(f'python run.py {base_options} --pdb_path "{pdb_path}" {pdb_id}_FIXED_OPTION_PLACEHOLDER {pdb_id}_REDESIGNED_OPTION_PLACEHOLDER')
+            commands.append(f'echo "Processing {pdb_name} with positions for ID: {struct_id}"')
+            commands.append(f'python run.py {base_options} --pdb_path "{pdb_path}" {struct_id}_FIXED_OPTION_PLACEHOLDER {struct_id}_REDESIGNED_OPTION_PLACEHOLDER')
             commands.append("")
 
         return f"""echo "Setting up LigandMPNN position constraints"
@@ -192,7 +193,7 @@ chmod +x {self.commands_file}
 
 # Use existing HelpScript to create position replacement script
 echo "Creating position replacement script..."
-python {self.runtime_positions_py} "{self.structures_list_file}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
+python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
 
 """
 

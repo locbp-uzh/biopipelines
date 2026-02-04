@@ -32,7 +32,7 @@ class DistanceSelector(BaseConfig):
 
     # Lazy path descriptors
     selections_csv = Path(lambda self: os.path.join(self.output_folder, "selections.csv"))
-    structures_list_file = Path(lambda self: os.path.join(self.output_folder, ".input_structures.txt"))
+    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
     distance_selector_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_distance_selector.py"))
 
     def __init__(self,
@@ -162,10 +162,12 @@ class DistanceSelector(BaseConfig):
         Returns:
             Script content as string
         """
-        # Write structure paths to list file (avoids "Argument list too long" error)
-        with open(self.structures_list_file, 'w') as f:
-            for struct_path in self.structures_stream.files:
-                f.write(f"{struct_path}\n")
+        import json
+
+        # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
+        datastream_dict = self.structures_stream.to_dict()
+        with open(self.structures_json, 'w') as f:
+            json.dump(datastream_dict, f, indent=2)
 
         # Determine reference specification
         if self.reference == "ligand":
@@ -182,7 +184,6 @@ class DistanceSelector(BaseConfig):
         restrict_echo = f'echo "Restricting to selection: {restrict_spec}"' if restrict_spec else ""
 
         # Serialize id_map as JSON string for passing to script
-        import json
         id_map_json = json.dumps(self.id_map)
 
         # Convert include_reference to string for bash
@@ -199,7 +200,7 @@ echo "Include reference: {self.include_reference}"
 {restrict_echo}
 
 # Run distance analysis
-python {self.distance_selector_py} "{self.structures_list_file}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}' {include_reference_str}
+python {self.distance_selector_py} "{self.structures_json}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}' {include_reference_str}
 
 echo "Distance analysis completed"
 echo "Selections saved to: {self.selections_csv}"

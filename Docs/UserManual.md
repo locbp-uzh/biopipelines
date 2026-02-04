@@ -87,6 +87,7 @@ Basic input types can be imported conveniently from `PipelineScripts/entities.py
 | `Sequence` | Defines proteins and polynucleotides from strings |
 | `Ligand` | Fetch small molecules |
 | `CompoundLibrary` | Create compound collections |
+| `Table` | Load existing CSV files |
 
 **PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/PDBs/` → RCSB download.
 
@@ -142,6 +143,29 @@ library = CompoundLibrary(
     },
     primary_key="scaffold"
 )
+```
+
+**Table** - Loads existing CSV files:
+
+```python
+# Load a CSV file (columns auto-detected)
+metrics = Table("/path/to/metrics.csv")
+
+# Access via tables.data (default name)
+Panda(
+    tables=[metrics.tables.data],
+    operations=[Panda.sort("score", ascending=False)]
+)
+
+# Use column reference for per-structure data
+ProteinMPNN(
+    structures=proteins,
+    redesigned=(metrics.tables.data, "designed_positions")
+)
+
+# Custom table name
+previous = Table("/path/to/results.csv", name="previous_run")
+# Access via: previous.tables.previous_run
 ```
 
 ### DataStream vs Tables
@@ -396,7 +420,7 @@ with Pipeline("Test", "Debug", "Testing", debug=True):
 **Load previous outputs**:
 
 ```python
-from PipelineScripts.load_output import LoadOutput, LoadOutputs
+from PipelineScripts.load import LoadOutput, LoadOutputs
 
 # Single output
 prev = LoadOutput("/path/to/ToolOutputs/001_Boltz2.json")

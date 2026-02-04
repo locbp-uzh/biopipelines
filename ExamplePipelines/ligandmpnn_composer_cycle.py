@@ -6,7 +6,7 @@ import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import *
-from PipelineScripts.load_output import LoadOutput
+from PipelineScripts.load import LoadOutput
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.mutation_profiler import MutationProfiler
 from PipelineScripts.mutation_composer import MutationComposer

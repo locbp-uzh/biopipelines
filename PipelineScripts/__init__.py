@@ -29,7 +29,7 @@ from .stitch_sequences import StitchSequences
 from .split_chains import SplitChains
 from .dynamic_bind import DynamicBind
 from .dna_encoder import DNAEncoder
-from .load_output import LoadOutput, LoadOutputs
+from .load import LoadOutput, LoadOutputs
 from .sequence_metric_correlation import SequenceMetricCorrelation
 from .pymol import PyMOL
 from .fuse import Fuse

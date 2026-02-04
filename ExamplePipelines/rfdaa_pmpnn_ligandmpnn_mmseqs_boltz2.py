@@ -81,8 +81,15 @@ with Pipeline(project="Examples",
                        ligands=quinolinone,
                         msas=msas) 
     boltz_rifampicin = Boltz2(proteins=sequences,
-                        ligands=rifampicin, #ligand smiles taken from original
+                        ligands=rifampicin,
                         msas=msas) 
+    # we also take the affinity of quinoline in presence of rifampicin and viceversa
+    boltz_quino_w_rifampicin = Boltz2(proteins=sequences,
+                                      ligands=Bundle(quinolinone,rifampicin), #affinity: quinoline
+                                      msas=msas) 
+    boltz_rifampicin_w_quino = Boltz2(proteins=sequences,
+                                      ligands=Bundle(rifampicin,quinolinone), #affinity: rifampicin
+                                      msas=msas) 
     """
     For up to 250-500 sequences (depending on length) one can simply use the public MMseqs2 server while removing the MMseqs2 tool usage:
     boltz_quino = Boltz2(proteins=sequences,
@@ -90,26 +97,41 @@ with Pipeline(project="Examples",
     boltz_rifampicin = Boltz2(proteins=sequences,
                         ligands=rifampicin, #ligand smiles taken from original
                         msas=boltz_quino) #recycle the msas
+    ...
     """
 
-    # Merge apo and holo metrics to calculate affinity delta
+    # Merge metrics to calculate affinity delta
     merged = Panda(
-        tables=[boltz_quino.tables.affinity, boltz_rifampicin.tables.affinity],
+        tables=[boltz_quino.tables.affinity, 
+                boltz_rifampicin.tables.affinity,
+                boltz_quino_w_rifampicin.tables.affinity,
+                boltz_rifampicin_w_quino.tables.affinity],
         operations=[
-            Panda.merge(on="id", prefixes=["quino_", "rif_"]),
-            Panda.calculate({"affinity_delta": "rif_affinity_pred_value - quino_affinity_pred_value"}),
+            Panda.merge(on="id", prefixes=["quino_", "rif_","quino_w_r_","rif_w_q_"]), # without <metric> -> <prefix><metric>. We don't want overlaps
+            Panda.calculate({"affinity_delta": "rif_affinity_pred_value - quino_affinity_pred_value",
+                             "affinity_delta_both": "rif_w_affinity_pred_value - quino_w_affinity_pred_value"}),
             Panda.sort("affinity_delta", ascending=True)
         ]
     )
 
-    # Generate plots comparing apo vs holo metrics
+    # Generate plots comparing  metrics
     Plot(
-        # Scatter plot: apo vs holo affinity
+        # Scatter plot:  affinity
         Plot.Scatter(
             data=merged.tables.result,
             x="rif_affinity_pred_value",
             y="quino_affinity_pred_value",
             title="Rif vs Quino Binding Affinity",
+            xlabel="Rif Affinity",
+            ylabel="Quino Affinity",
+            grid=True
+        ),
+        # Scatter plot:  affinity in presence of other analyte
+        Plot.Scatter(
+            data=merged.tables.result,
+            x="rif_w_affinity_pred_value",
+            y="quino_w_affinity_pred_value",
+            title="Rif vs Quino Binding Affinity in presence of the other",
             xlabel="Rif Affinity",
             ylabel="Quino Affinity",
             grid=True
@@ -121,6 +143,15 @@ with Pipeline(project="Examples",
             bins=15,
             title="Binding Affinity Delta Distribution",
             xlabel="Affinity Delta (Rif -  Quino)",
+            ylabel="Count"
+        ),
+        # Histogram of affinity delta
+        Plot.Histogram(
+            data=merged.tables.result,
+            x="affinity_delta_both",
+            bins=15,
+            title="Binding Affinity Delta Distribution",
+            xlabel="Affinity Delta (Rif -  Quino) with both present",
             ylabel="Count"
         ),
         # Confidence score distributions

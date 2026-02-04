@@ -2,109 +2,7 @@
 
 [← Back to Tool Reference](../ToolReference.md)
 
----
 
-### DynamicBind
-
-**UNDER DEVELOPMENT** - Installation failed.
-
-Predicts ligand-specific protein-ligand complex structures using equivariant diffusion models. Recovers ligand-specific conformations from unbound protein structures.
-
-**Key Features:**
-- Predicts protein-ligand binding conformations
-- Handles multiple ligands per protein
-- Generates multiple poses with affinity predictions
-- Outputs relaxed structures with confidence scores
-
-**Installation:**
-
-Requires two mamba environments.
-
-```bash
-cd /home/$USER/data
-git clone https://github.com/luwei0917/DynamicBind.git
-cd DynamicBind
-wget https://zenodo.org/records/10183369/files/workdir.zip
-unzip workdir.zip
-
-# Request additional resources during installation
-srun --mem=32G --cpus-per-task=8 --time=02:00:00 --pty bash
-
-mamba create -n dynamicbind python=3.9 -y
-mamba activate dynamicbind
-pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
-
-# Setup LD_LIBRARY_PATH inside the environment
-mkdir -p $CONDA_PREFIX/etc/mamba/activate.d
-echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH' > \
-     $CONDA_PREFIX/etc/mamba/activate.d/env_vars.sh
-export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
-
-# Continue installation
-mamba install -c conda-forge rdkit biopython scipy pandas pyyaml networkx -y
-pip install numpy==1.26.4 e3nn==0.4.4 spyrmsd fair-esm tqdm
-pip install \
-    torch-scatter==2.1.1+pt113cu117 \
-    torch-sparse==0.6.17+pt113cu117 \
-    torch-cluster==1.6.1+pt113cu117 \
-    torch-spline-conv \
-    pyg_lib \
-    -f https://data.pyg.org/whl/torch-1.13.1+cu117.html \
-    --no-cache-dir
-pip install torch-geometric
-
-# Create relax environment
-mamba create --name relax python=3.8
-mamba activate relax
-mamba install -c conda-forge openmm pdbfixer biopython openmmforcefields openff-toolkit ambertools=22 compilers -y
-```
-
-Config: `DynamicBind: null` (tool manages environments)
-
-Model weights location: `/home/{username}/data/DynamicBind/workdir`
-
-**Parameters:**
-- `proteins`: Input protein(s) - PDB filename, list of PDBs, or tool output (all structures used)
-- `ligands`: SMILES string or tool output with compounds table (must have 'smiles' column)
-- `samples_per_complex`: Number of samples per complex (default: 10)
-- `inference_steps`: Diffusion steps (default: 20)
-- `no_relax`: Skip OpenMM relaxation (default: False)
-- `hts`: High-throughput screening mode (default: False)
-- `seed`: Random seed (default: 42)
-
-**Example:**
-
-```python
-from PipelineScripts.dynamic_bind import DynamicBind
-from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
-from PipelineScripts.compound_library import CompoundLibrary
-
-# Basic usage - single protein, SMILES string
-db = DynamicBind(
-    proteins="target.pdb",
-    ligands="CCO",  # SMILES string
-    samples_per_complex=10
-)
-
-# Multiple proteins from PDBs folder
-db = DynamicBind(
-    proteins=["protein1.pdb", "protein2.pdb"],
-    ligands="CC(=O)O"
-)
-
-# Chain with other tools - all structures from tool output
-rfdaa = RFdiffusionAllAtom(ligand="ZIT", contigs="A1-100", num_designs=5)
-compounds = CompoundLibrary(smiles_list=["CCO", "CC(=O)O"])
-db = DynamicBind(proteins=rfdaa, ligands=compounds)
-```
-
-**Outputs:**
-- Structures: SDF files with pattern `rank{N}_ligand_lddt{score}_affinity{score}_relaxed.sdf`
-- Tables:
-  - `dynamicbind_results.csv`: columns `id`, `ligand_id`, `structure`, `affinity`, `lddt`, `rank`
-  - `compounds.csv`: compounds used (available as `output.compounds`)
-
----
 
 ### ResidueAtomDistance
 
@@ -138,48 +36,6 @@ distances = ResidueAtomDistance(
 )
 ```
 
----
-
-### PLIP (Protein-Ligand Interaction Profiler)
-
-**UNDER DEVELOPMENT** - This tool is still being tested and refined.
-
-Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydrophobic contacts, salt bridges, and other interaction types.
-
-**Environment**: `biopipelines`
-
-**Installation**: requires to download a singularity image in the containers folder.
-
-**Note**: This tool is not fully debugged yet and may require adjustments.
-
-**Parameters**:
-- `structures`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Input structures
-- `ligand`: str = "" - Specific ligand identifier (if empty, analyzes all ligands)
-- `output_format`: List[str] = None - Output formats (default: ['xml', 'txt', 'pymol'])
-- `create_pymol`: bool = True - Generate PyMOL session files
-- `create_images`: bool = False - Generate ray-traced images
-- `analyze_peptides`: bool = False - Include protein-peptide interactions
-- `analyze_intra`: bool = False - Include intra-chain interactions
-- `analyze_dna`: bool = False - Include DNA/RNA interactions
-- `max_threads`: int = 4 - Maximum threads for parallel processing
-- `verbose`: bool = True - Enable verbose output
-
-**Outputs**:
-- `tables.interactions`:
-
-  | id | ligand_id | interaction_type | residue | distance | angle | energy |
-  |----|-----------|------------------|---------|----------|-------|--------|
-
-**Example**:
-```python
-from PipelineScripts.plip import PLIP
-
-plip = PLIP(
-    structures=boltz,
-    ligand="LIG",
-    create_pymol=True
-)
-```
 
 ---
 
@@ -224,7 +80,7 @@ Quantifies structural changes between reference and target structures. Calculate
 **Note**: This tool is not fully debugged yet and may require adjustments.
 
 **Parameters**:
-- `reference_structures`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference structures
+- `reference_structures`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference structures. Can be one or the same number as targets.
 - `target_structures`: Union[ToolOutput, StandardizedOutput] (required) - Target structures to compare
 - `selection`: Union[str, ToolOutput] (required) - Region specification (PyMOL selection or table reference)
 - `alignment`: str = "align" - Alignment method, as available in pymol (align, super, cealign) Rule of thumb: sequence similarity > 50% -> align; otherwise cealign.
@@ -406,5 +262,3 @@ good_poses = Filter(
     expression="ligand_rmsd < 2.0"
 )
 ```
-
----

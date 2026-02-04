@@ -828,18 +828,21 @@ fi
             final_designs_folder = os.path.join(self.final_ranked_folder, f"final_{self.budget}_designs")
 
             # Generate structure IDs and paths
+            # BoltzGen filtering outputs files named rank0001_<original_design_id>.cif
+            # The exact design ID suffix is only known at SLURM time, so we use wildcard patterns
             structure_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
-            structure_files = [os.path.join(final_designs_folder, f"rank{i:04d}_design.cif") for i in range(1, self.budget + 1)]
+            structure_files = [os.path.join(final_designs_folder, f"rank{i:04d}_*.cif") for i in range(1, self.budget + 1)]
 
             # Create map_table for structures
             create_map_table(self.structures_map, structure_ids, files=structure_files)
 
             structures = DataStream(
-                name="structures",
+                name="filtered_ranked_structures",
                 ids=structure_ids,
                 files=structure_files,
                 map_table=self.structures_map,
-                format="cif"
+                format="cif",
+                files_contain_wildcards=True
             )
 
             # All designs metrics
@@ -887,7 +890,7 @@ fi
             create_map_table(self.structures_map, structure_ids, files=structure_files)
 
             structures = DataStream(
-                name="structures",
+                name="refolded_structures",
                 ids=structure_ids,
                 files=structure_files,
                 map_table=self.structures_map,
