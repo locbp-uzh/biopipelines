@@ -200,7 +200,7 @@ def remove_waters_from_content(content: str, format: str) -> str:
 
 def extract_sequence_from_structure(content: str, format: str) -> str:
     """
-    Extract protein sequence from structure content using text parsing.
+    Extract protein sequence from structure content.
 
     Args:
         content: Structure file content
@@ -209,14 +209,14 @@ def extract_sequence_from_structure(content: str, format: str) -> str:
     Returns:
         Concatenated protein sequence from all chains
     """
-    if format != "pdb":
-        # For CIF format, return empty sequence for now
-        print("Warning: Sequence extraction not implemented for CIF format")
-        return ""
+    import tempfile
 
+    if format == "cif":
+        return extract_sequence_from_cif(content)
+
+    # PDB format
     try:
         # Write content to temporary file for parsing
-        import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.pdb', delete=False) as tmp:
             tmp.write(content)
             tmp.flush()
@@ -232,7 +232,81 @@ def extract_sequence_from_structure(content: str, format: str) -> str:
             return "".join(sequences_dict.values())
 
     except Exception as e:
-        print(f"Warning: Could not extract sequence - {str(e)}")
+        print(f"Warning: Could not extract sequence from PDB - {str(e)}")
+        return ""
+
+
+def extract_sequence_from_cif(content: str) -> str:
+    """
+    Extract protein sequence from CIF content using BioPython.
+
+    Args:
+        content: CIF file content
+
+    Returns:
+        Concatenated protein sequence from all chains
+    """
+    import tempfile
+
+    # Standard amino acid mapping (3-letter to 1-letter)
+    aa_map = {
+        'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
+        'GLN': 'Q', 'GLU': 'E', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
+        'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
+        'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
+    }
+
+    try:
+        from Bio.PDB import MMCIFParser
+
+        # Write content to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.cif', delete=False) as tmp:
+            tmp.write(content)
+            tmp.flush()
+            cif_path = tmp.name
+
+        try:
+            # Parse CIF file
+            parser = MMCIFParser(QUIET=True)
+            structure = parser.get_structure("structure", cif_path)
+
+            # Extract sequences from all chains
+            sequences = {}
+            for model in structure:
+                for chain in model:
+                    chain_id = chain.id
+                    residues = []
+                    for residue in chain:
+                        res_name = residue.get_resname()
+                        if res_name in aa_map:
+                            res_id = residue.get_id()[1]  # Residue number
+                            residues.append((res_id, aa_map[res_name]))
+
+                    if residues:
+                        # Sort by residue number and concatenate
+                        residues.sort(key=lambda x: x[0])
+                        sequences[chain_id] = ''.join([r[1] for r in residues])
+
+            # Clean up
+            os.unlink(cif_path)
+
+            # Concatenate all chain sequences
+            full_sequence = "".join(sequences.values())
+            if full_sequence:
+                print(f"  Extracted sequence from CIF: {len(full_sequence)} residues from {len(sequences)} chain(s)")
+            return full_sequence
+
+        except Exception as e:
+            # Clean up on error
+            if os.path.exists(cif_path):
+                os.unlink(cif_path)
+            raise e
+
+    except ImportError:
+        print("Warning: BioPython not available for CIF sequence extraction")
+        return ""
+    except Exception as e:
+        print(f"Warning: Could not extract sequence from CIF - {str(e)}")
         return ""
 
 

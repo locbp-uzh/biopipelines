@@ -367,16 +367,17 @@ class PDB(BaseConfig):
                     # Valid RCSB format - check for ligands
                     try:
                         has_ligands = self._check_rcsb_exists_silent(rcsb_id, custom_id)
+                        format_label = self.format.upper()
                         if has_ligands:
-                            print(f"  Found PDB {pdb_id} locally: {local_path} (contains ligands)")
+                            print(f"  Found {format_label} {pdb_id} locally: {local_path} (contains ligands)")
                         else:
-                            print(f"  Found PDB {pdb_id} locally: {local_path}")
+                            print(f"  Found {format_label} {pdb_id} locally: {local_path}")
                     except:
                         # RCSB query failed, just show found locally
-                        print(f"  Found PDB {pdb_id} locally: {local_path}")
+                        print(f"  Found {self.format.upper()} {pdb_id} locally: {local_path}")
                 else:
                     # Custom file, not an RCSB ID
-                    print(f"  Found PDB {pdb_id} locally: {local_path}")
+                    print(f"  Found {self.format.upper()} {pdb_id} locally: {local_path}")
             else:
                 # Not found locally - check if valid RCSB ID
                 rcsb_id = pdb_id.upper()
@@ -388,9 +389,9 @@ class PDB(BaseConfig):
                 self.needs_download.append(pdb_id)
 
                 if has_ligands:
-                    print(f"  PDB {pdb_id} not found locally, will download from RCSB (contains ligands)")
+                    print(f"  {self.format.upper()} {pdb_id} not found locally, will download from RCSB (contains ligands)")
                 else:
-                    print(f"  PDB {pdb_id} not found locally, will download from RCSB")
+                    print(f"  {self.format.upper()} {pdb_id} not found locally, will download from RCSB")
 
         # Query RCSB API to get ligand information for all structures
         self._fetch_ligand_info_from_rcsb()

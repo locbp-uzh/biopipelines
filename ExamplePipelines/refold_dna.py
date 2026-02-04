@@ -19,22 +19,21 @@ with Pipeline(project="Examples",
               description="Refold of filtered designs from a BoltzGen run and DNA output"):
 
     Resources(gpu="any",
-              time="4:00:00",
+              time="24:00:00",
               memory="16GB")
 
-    # Load structures from previous BoltzGen run
-    cif_folder_path = "/shares/locbp.chem.uzh/gquarg/BioPipelines/DeNovo-Gentamicin-Sensor/Gentamicin_BoltzGen_20x500designs_Filtering_001/041_BoltzGenMerge/final_ranked_designs/final_100_designs"
-    proteins = PDB(cif_folder_path, format="cif") #PDB will also extract the sequences
-    DNAEncoder(proteins, organism="EC") # Generate DNA sequences
+    # Load sequences from previous BoltzGen run
+    final_metrics_csv = "/shares/locbp.chem.uzh/gquarg/BioPipelines/DeNovo-Gentamicin-Sensor/Gentamicin_BoltzGen_20x500designs_Filtering_001/041_BoltzGenMerge/final_ranked_designs/final_designs_metrics_100.csv"
+    final_sequences = Sequence(final_metrics_csv)
+    DNAEncoder(final_sequences, organism="EC") # Generate DNA sequences
 
     # Load previous results table (BoltzGen metrics with partial MSA)
-    table_path = "/shares/locbp.chem.uzh/gquarg/BioPipelines/DeNovo-Gentamicin-Sensor/Gentamicin_BoltzGen_20x500designs_Filtering_001/041_BoltzGenMerge/final_ranked_designs/final_designs_metrics_100.csv"
-    boltzgen_data = Table(table_path)
+    boltzgen_data = Table(final_metrics_csv) # we load it again as a table with all the data. When doing Sequence(table path) we only extract id and sequence, and generate a DataStream
     ligand = Ligand("gentamicin")
 
     # Refold with full MSA: apo and holo
-    boltz_apo  = Boltz2(proteins=proteins)
-    boltz_holo = Boltz2(proteins=proteins,
+    boltz_apo  = Boltz2(proteins=final_sequences)
+    boltz_holo = Boltz2(proteins=final_sequences,
                         ligands=ligand,
                         msas=boltz_apo)
 

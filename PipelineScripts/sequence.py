@@ -1,5 +1,5 @@
 """
-Sequence tool for creating sequence DataStreams from raw sequence strings.
+Sequence tool for creating sequence DataStreams from raw sequence strings or CSV files.
 
 Provides a standardized way to pass sequences to other tools like Boltz2, AlphaFold, etc.
 Supports automatic type detection (protein/DNA/RNA) or explicit type specification.
@@ -7,6 +7,7 @@ Supports automatic type detection (protein/DNA/RNA) or explicit type specificati
 
 import os
 import re
+import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -23,9 +24,9 @@ except ImportError:
 
 class Sequence(BaseConfig):
     """
-    Pipeline tool for creating sequence DataStreams from raw sequence strings.
+    Pipeline tool for creating sequence DataStreams from raw sequence strings or CSV files.
 
-    Converts raw sequence strings into a standardized format that can be passed
+    Converts raw sequence strings or CSV files into a standardized format that can be passed
     to other tools like Boltz2, AlphaFold, ProteinMPNN, etc.
     """
 
@@ -46,9 +47,10 @@ class Sequence(BaseConfig):
         Initialize Sequence tool.
 
         Args:
-            seq: Sequence string(s). Can be:
-                 - Single sequence: "MKTVRQERLKSIVRILERSKEPVSGAQ"
+            seq: Sequence input. Can be:
+                 - Single sequence string: "MKTVRQERLKSIVRILERSKEPVSGAQ"
                  - Multiple sequences: ["MKTVRQ...", "AETGFT..."]
+                 - Path to CSV file with 'id' and 'sequence' columns: "/path/to/sequences.csv"
             type: Sequence type - "auto", "protein", "dna", or "rna".
                   "auto" will detect based on sequence content:
                   - Contains only ACGT -> DNA
@@ -56,6 +58,7 @@ class Sequence(BaseConfig):
                   - Otherwise -> protein
             ids: Output identifier(s) for the sequences (e.g., "my_protein" -> my_protein in FASTA).
                  If not provided, defaults to "seq_1", "seq_2", etc.
+                 Ignored when loading from CSV (uses 'id' column from file).
             **kwargs: Additional parameters
 
         Examples:
@@ -74,36 +77,49 @@ class Sequence(BaseConfig):
             # Explicit type
             seq = Sequence("ACGTACGT", type="dna")
 
+            # Load from CSV file (must have 'id' and 'sequence' columns)
+            seq = Sequence("/path/to/sequences.csv")
+
             # Use in pipeline
             with Pipeline("MyProject", "Test", "Description"):
                 proteins = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
                 boltz = Boltz2(proteins=proteins)
         """
-        # Handle sequence input
-        if isinstance(seq, str):
-            self.sequences = [seq]
+        # Track if loaded from CSV
+        self.from_csv = False
+        self.source_csv_path = None
+
+        # Check if seq is a path to a CSV file
+        if isinstance(seq, str) and self._is_csv_path(seq):
+            self._load_from_csv(seq)
+            if ids is not None:
+                print(f"  Warning: 'ids' parameter ignored when loading from CSV file (using 'id' column from file)")
         else:
-            self.sequences = list(seq)
-
-        # Validate sequences are not empty
-        if not self.sequences:
-            raise ValueError("Must provide at least one sequence")
-        for i, s in enumerate(self.sequences):
-            if not s or not s.strip():
-                raise ValueError(f"Sequence at index {i} is empty")
-
-        # Handle ids - default to "seq_N"
-        if ids is not None:
-            if isinstance(ids, str):
-                self.custom_ids = [ids]
+            # Handle sequence input as before
+            if isinstance(seq, str):
+                self.sequences = [seq]
             else:
-                self.custom_ids = list(ids)
-        else:
-            self.custom_ids = [f"seq_{i + 1}" for i in range(len(self.sequences))]
+                self.sequences = list(seq)
 
-        # Validate lengths
-        if len(self.custom_ids) != len(self.sequences):
-            raise ValueError(f"Length mismatch: ids has {len(self.custom_ids)} items but sequences has {len(self.sequences)} items")
+            # Validate sequences are not empty
+            if not self.sequences:
+                raise ValueError("Must provide at least one sequence")
+            for i, s in enumerate(self.sequences):
+                if not s or not s.strip():
+                    raise ValueError(f"Sequence at index {i} is empty")
+
+            # Handle ids - default to "seq_N"
+            if ids is not None:
+                if isinstance(ids, str):
+                    self.custom_ids = [ids]
+                else:
+                    self.custom_ids = list(ids)
+            else:
+                self.custom_ids = [f"seq_{i + 1}" for i in range(len(self.sequences))]
+
+            # Validate lengths
+            if len(self.custom_ids) != len(self.sequences):
+                raise ValueError(f"Length mismatch: ids has {len(self.custom_ids)} items but sequences has {len(self.sequences)} items")
 
         # Validate and store type
         valid_types = ["auto", "protein", "dna", "rna"]
@@ -118,6 +134,58 @@ class Sequence(BaseConfig):
 
         # Initialize base class
         super().__init__(**kwargs)
+
+    def _is_csv_path(self, path: str) -> bool:
+        """
+        Check if a string is a path to an existing CSV file.
+
+        Args:
+            path: String to check
+
+        Returns:
+            True if path points to an existing CSV file, False otherwise
+        """
+        # Check if it ends with .csv and exists as a file
+        if path.lower().endswith('.csv') and os.path.isfile(path):
+            return True
+        return False
+
+    def _load_from_csv(self, csv_path: str):
+        """
+        Load sequences from a CSV file.
+
+        Args:
+            csv_path: Path to CSV file with 'id' and 'sequence' columns
+
+        Raises:
+            FileNotFoundError: If CSV file doesn't exist
+            ValueError: If required columns are missing
+        """
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        self.source_csv_path = os.path.abspath(csv_path)
+        self.from_csv = True
+
+        # Read CSV
+        df = pd.read_csv(csv_path)
+
+        # Validate required columns
+        if 'id' not in df.columns:
+            raise ValueError(f"CSV file must have 'id' column. Found columns: {list(df.columns)}")
+        if 'sequence' not in df.columns:
+            raise ValueError(f"CSV file must have 'sequence' column. Found columns: {list(df.columns)}")
+
+        # Extract data
+        self.custom_ids = df['id'].astype(str).tolist()
+        self.sequences = df['sequence'].astype(str).tolist()
+
+        # Validate no empty sequences
+        for i, (seq_id, seq) in enumerate(zip(self.custom_ids, self.sequences)):
+            if not seq or not seq.strip() or pd.isna(seq):
+                raise ValueError(f"Empty sequence for id '{seq_id}' at row {i}")
+
+        print(f"  Loaded {len(self.sequences)} sequences from CSV: {csv_path}")
 
     def _detect_type(self, seq: str) -> str:
         """
@@ -167,8 +235,12 @@ class Sequence(BaseConfig):
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
+        # Show source if loaded from CSV
+        if self.from_csv and self.source_csv_path:
+            config_lines.append(f"SOURCE: {self.source_csv_path}")
+
         config_lines.extend([
-            f"IDS: {', '.join(self.custom_ids)} ({len(self.custom_ids)} sequences)",
+            f"IDS: {', '.join(self.custom_ids[:5])}{'...' if len(self.custom_ids) > 5 else ''} ({len(self.custom_ids)} sequences)",
             f"TYPE: {self.seq_type}",
         ])
 
@@ -264,7 +336,9 @@ python "{self.sequence_py}" --config "{self.config_file}"
                 "custom_ids": self.custom_ids,
                 "sequences": self.sequences,
                 "seq_type": self.seq_type,
-                "detected_types": self.detected_types
+                "detected_types": self.detected_types,
+                "from_csv": self.from_csv,
+                "source_csv_path": self.source_csv_path
             }
         })
         return base_dict

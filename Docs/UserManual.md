@@ -72,7 +72,7 @@ Tools predict their outputs before execution. These predictions enable chaining:
 
 ```python
 rfd = RFdiffusion(contigs="50-100", num_designs=5)
-# rfd.structures contains predicted paths (files don't exist yet)
+# rfd contains predicted paths (files don't exist yet)
 mpnn = ProteinMPNN(structures=rfd, num_sequences=2)
 # mpnn uses rfd's predicted outputs
 ```
@@ -89,7 +89,9 @@ Basic input types can be imported conveniently from `PipelineScripts/entities.py
 | `CompoundLibrary` | Create compound collections |
 | `Table` | Load existing CSV files |
 
-**PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/PDBs/` → RCSB download.
+**PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/PDBs/` → RCSB download. 
+It also generate protein sequences for each of the proteins. 
+If an RCSB code is provided, ligands will also be downloaded and will be available with their smiles/ccd.
 
 ```python
 # Simple fetch
@@ -99,7 +101,7 @@ protein = PDB("4ufc")
 proteins = PDB(["4ufc", "1aki"], ids=["POI1", "POI2"])
 
 # From folder
-proteins = PDB("/path/to/structures")
+proteins = PDB("/path/to/structures") # if the folder contains cif files, add format="cif"
 ```
 
 **Sequence** - Creates sequences with auto-detection (protein/DNA/RNA):
@@ -110,6 +112,9 @@ seq = Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ", ids="my_protein")
 
 # Multiple sequences
 seqs = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
+
+# Multiple DNA sequences from a file
+seqs = Sequence("/path/to/sequences.csv", type="dna")
 ```
 
 **Ligand** - Fetches from RCSB (CCD codes) or PubChem (names, CID, CAS):
