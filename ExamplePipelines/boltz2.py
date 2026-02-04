@@ -43,7 +43,7 @@ with Pipeline(project="Examples",
               memory="16GB")
 
     # Test 1: Boltz2 with direct sequence
-    Suffix("1")
+    Suffix("1") # Outout folder is <Execution order>_Boltz_<Suffix>
     boltz_seq = Boltz2(
         proteins=Sequence("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH")
     )
