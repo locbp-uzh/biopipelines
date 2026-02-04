@@ -75,7 +75,7 @@ class DNAEncoder(BaseConfig):
         """
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):
-            self.sequences_stream: DataStream = sequences.sequences
+            self.sequences_stream: DataStream = sequences.streams.sequences
         elif isinstance(sequences, DataStream):
             self.sequences_stream = sequences
         else:
