@@ -12,6 +12,10 @@ import os
 import sys
 import pandas as pd
 
+# Import unified I/O utilities
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pipe_biopipelines_io import load_datastream, iterate_files
+
 
 def calculate_pose_distance(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
                             ligand, alignment_selection, calculate_centroid,
@@ -141,13 +145,14 @@ def main():
 
     reference_pdb = config['reference_pdb']
     reference_ligand = config['reference_ligand']
-    target_pdbs = config['target_pdbs']
-    target_ids = config['target_ids']
     ligand = config['ligand']
     alignment_selection = config['alignment_selection']
     calculate_centroid = config['calculate_centroid']
     calculate_orientation = config['calculate_orientation']
     output_csv = config['output_csv']
+
+    # Load sample structures DataStream using pipe_biopipelines_io
+    samples_ds = load_datastream(config['samples_json'])
 
     # Initialize PyMOL once for all structures
     try:
@@ -162,18 +167,19 @@ def main():
     pymol.finish_launching(['pymol', '-cq'])
     print("PyMOL initialized")
 
-    print(f"Analyzing pose distances for {len(target_pdbs)} structures")
+    print(f"Analyzing pose distances for {len(samples_ds.ids)} structures")
     print(f"Reference: {os.path.basename(reference_pdb)}")
     print(f"Reference ligand: {reference_ligand}")
     print(f"Target ligand: {ligand}")
     print(f"Alignment: {alignment_selection}")
 
-    # Process each target structure
+    # Process each target structure using iterate_files for proper ID-file matching
     results = []
     failed = []
-    total = len(target_pdbs)
+    target_items = list(iterate_files(samples_ds))
+    total = len(target_items)
 
-    for idx, (target_pdb, target_id) in enumerate(zip(target_pdbs, target_ids), 1):
+    for idx, (target_id, target_pdb) in enumerate(target_items, 1):
         print(f"[{idx}/{total}] Processing {target_id}...", end=" ")
         try:
             result = calculate_pose_distance(

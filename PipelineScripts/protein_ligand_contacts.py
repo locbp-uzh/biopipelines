@@ -44,6 +44,7 @@ class ProteinLigandContacts(BaseConfig):
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_contacts.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_config.json"))
+    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
     contacts_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_protein_ligand_contacts.py"))
 
     def __init__(self,
@@ -148,6 +149,10 @@ class ProteinLigandContacts(BaseConfig):
         """Generate the protein-ligand contact analysis part of the script."""
         import json
 
+        # Serialize structures DataStream to JSON for HelpScript to load
+        with open(self.structures_ds_json, 'w') as f:
+            json.dump(self.structures_stream.to_dict(), f, indent=2)
+
         # Handle protein selections input
         if self.protein_selections is None:
             selections_config = {"type": "all_protein"}
@@ -155,7 +160,7 @@ class ProteinLigandContacts(BaseConfig):
             selections_config = {"type": "fixed", "value": self.protein_selections}
 
         config_data = {
-            "input_structures": self.structures_stream.files,
+            "structures_json": self.structures_ds_json,
             "protein_selections": selections_config,
             "ligand_name": self.ligand_name,
             "contact_threshold": self.contact_threshold,

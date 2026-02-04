@@ -40,7 +40,7 @@ class SASA(BaseConfig):
 
     # Lazy path descriptors
     results_csv = Path(lambda self: os.path.join(self.output_folder, "sasa_analysis.csv"))
-    structures_list_file = Path(lambda self: os.path.join(self.output_folder, ".input_structures.txt"))
+    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
     helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_sasa.py"))
 
     def __init__(self,
@@ -95,10 +95,11 @@ class SASA(BaseConfig):
 
     def generate_script(self, script_path: str) -> str:
         """Generate SASA execution script."""
-        # Write structure paths to list file (avoids "Argument list too long" error)
-        with open(self.structures_list_file, 'w') as f:
-            for struct_path in self.structures_stream.files:
-                f.write(f"{struct_path}\n")
+        import json
+
+        # Serialize structures DataStream to JSON for HelpScript to load
+        with open(self.structures_ds_json, 'w') as f:
+            json.dump(self.structures_stream.to_dict(), f, indent=2)
 
         script_content = "#!/bin/bash\n"
         script_content += "# SASA execution script\n"
@@ -120,7 +121,7 @@ echo "Ligand: {self.ligand}"
 echo "Output: {self.results_csv}"
 
 python "{self.helper_script}" \\
-    --structures "{self.structures_list_file}" \\
+    --structures "{self.structures_ds_json}" \\
     --ligand "{ligand_resn}" \\
     --output_csv "{self.results_csv}" \\
     --dot_density {self.dot_density}

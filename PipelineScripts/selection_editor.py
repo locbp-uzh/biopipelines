@@ -35,6 +35,7 @@ class SelectionEditor(BaseConfig):
     # Lazy path descriptors
     selections_csv = Path(lambda self: os.path.join(self.output_folder, "selections.csv"))
     config_json = Path(lambda self: os.path.join(self.output_folder, "config.json"))
+    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
     selection_editor_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_selection_editor.py"))
 
     def __init__(self,
@@ -155,11 +156,15 @@ class SelectionEditor(BaseConfig):
         # Ensure output folder exists
         os.makedirs(self.output_folder, exist_ok=True)
 
+        # Serialize structures DataStream to JSON for HelpScript to load
+        with open(self.structures_ds_json, 'w') as f:
+            json.dump(self.structures_stream.to_dict(), f, indent=2)
+
         # Create config file for helper script
         config_data = {
             "selection_table": self.selection_table_path,
             "selection_column": self.selection_column,
-            "structures": self.structures_stream.files,
+            "structures_json": self.structures_ds_json,
             "expand": self.expand,
             "shrink": self.shrink,
             "shift": self.shift,

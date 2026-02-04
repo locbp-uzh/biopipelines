@@ -13,6 +13,10 @@ import json
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
+
+# Import unified I/O utilities
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pipe_biopipelines_io import load_datastream, iterate_files
 from pdb_parser import parse_pdb_file, parse_selection, calculate_distances, debug_ligand_atoms
 
 
@@ -101,14 +105,16 @@ def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
     Args:
         config_data: Configuration dictionary with analysis parameters
     """
-    input_structures = config_data['input_structures']
+    # Load structures DataStream using pipe_biopipelines_io
+    structures_ds = load_datastream(config_data['structures_json'])
+
     atom_selection = config_data['atom_selection']
     residue_selection = config_data['residue_selection']
     distance_metric = config_data['distance_metric']
     metric_name = config_data['metric_name']
     output_csv = config_data['output_csv']
 
-    print(f"Analyzing distances in {len(input_structures)} structures")
+    print(f"Analyzing distances in {len(structures_ds.ids)} structures")
 
     # Determine and display mode
     if isinstance(atom_selection, list):
@@ -127,30 +133,30 @@ def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
     print(f"Distance metric: {distance_metric}")
     print(f"Output column: {metric_name}")
     
-    # Process each structure
+    # Process each structure using iterate_files for proper ID-file matching
     results = []
-    
-    for i, structure_path in enumerate(input_structures):
+    structure_items = list(iterate_files(structures_ds))
+    total = len(structure_items)
+
+    for i, (structure_id, structure_path) in enumerate(structure_items):
         if not os.path.exists(structure_path):
             print(f"Warning: Structure file not found: {structure_path}")
             continue
-        
-        print(f"\nProcessing structure {i+1}/{len(input_structures)}: {structure_path}")
-        
-        # Extract structure ID from filename
-        structure_id = os.path.splitext(os.path.basename(structure_path))[0]
-        
+
+        print(f"\nProcessing structure {i+1}/{total}: {structure_path}")
+        print(f"  - ID: {structure_id}")
+
         # Calculate distance
         distance = calculate_distance(structure_path, atom_selection, residue_selection, distance_metric)
-        
-        # Store result
+
+        # Store result using proper ID from DataStream
         result = {
             'id': structure_id,
             'source_structure': structure_path,
             metric_name: distance
         }
         results.append(result)
-        
+
         print(f"  - Result: {metric_name} = {distance}")
     
     # Create DataFrame and save
@@ -238,7 +244,7 @@ def main():
         sys.exit(1)
     
     # Validate required parameters
-    required_params = ['input_structures', 'atom_selection', 'residue_selection', 
+    required_params = ['structures_json', 'atom_selection', 'residue_selection',
                       'distance_metric', 'metric_name', 'output_csv']
     for param in required_params:
         if param not in config_data:

@@ -11,7 +11,7 @@ Usage:
 Config JSON should contain:
     - selection_table: Path to CSV with selection column
     - selection_column: Name of column containing selections
-    - structures: List of PDB file paths
+    - structures_json: Path to DataStream JSON file with structures
     - expand: Residues to add on each side (int)
     - shrink: Residues to remove from each side (int)
     - shift: Residues to shift by (+/-) (int)
@@ -25,8 +25,9 @@ import json
 import pandas as pd
 from typing import List, Tuple, Set
 
-# Import PDB parser
+# Import unified I/O utilities and PDB parser
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pipe_biopipelines_io import load_datastream, iterate_files
 from pdb_parser import parse_pdb_file, Atom
 
 
@@ -367,7 +368,7 @@ def process_selections(config_path: str):
 
     selection_table = config['selection_table']
     selection_column = config['selection_column']
-    structures = config['structures']
+    structures_json = config['structures_json']
     expand = config.get('expand', 0)
     shrink = config.get('shrink', 0)
     shift = config.get('shift', 0)
@@ -387,12 +388,15 @@ def process_selections(config_path: str):
             f"Available columns: {list(df.columns)}"
         )
 
-    # Create structure ID to path mapping
+    # Load structures DataStream using pipe_biopipelines_io
+    structures_ds = load_datastream(structures_json)
+
+    # Create structure ID to path mapping from DataStream
     struct_map = {}
-    for struct_path in structures:
-        struct_id = os.path.splitext(os.path.basename(struct_path))[0]
+    for struct_id, struct_path in iterate_files(structures_ds):
         struct_map[struct_id] = struct_path
 
+    print(f"Loaded {len(struct_map)} structures from DataStream")
     print(f"Processing {len(df)} selections")
     print(f"Operations: expand={expand}, shrink={shrink}, shift={shift}, invert={invert}")
 

@@ -40,6 +40,7 @@ class ResidueAtomDistance(BaseConfig):
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "distance_config.json"))
+    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
     helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_residue_atom_distance.py"))
 
     def __init__(self,
@@ -174,10 +175,16 @@ class ResidueAtomDistance(BaseConfig):
 
     def _generate_script_run_distance_analysis(self) -> str:
         """Generate the distance analysis execution part of the script."""
+        # Write config file at pipeline time
+        os.makedirs(self.output_folder, exist_ok=True)
+
+        # Serialize structures DataStream to JSON for HelpScript to load
+        with open(self.structures_ds_json, 'w') as f:
+            json.dump(self.structures_stream.to_dict(), f, indent=2)
+
         # Create config data
         config_data = {
-            "input_structures": self.structures_stream.files,
-            "structure_ids": self.structures_stream.ids,
+            "structures_json": self.structures_ds_json,
             "atom_selection": self.atom_selection,
             "residue_selection": self.residue_selection,
             "distance_metric": self.distance_metric,
@@ -185,8 +192,6 @@ class ResidueAtomDistance(BaseConfig):
             "output_csv": self.analysis_csv
         }
 
-        # Write config file at pipeline time
-        os.makedirs(self.output_folder, exist_ok=True)
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 

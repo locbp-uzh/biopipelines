@@ -43,6 +43,8 @@ class ConformationalChange(BaseConfig):
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "conformational_change_analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "conformational_change_config.json"))
+    reference_ds_json = Path(lambda self: os.path.join(self.output_folder, "reference_structures.json"))
+    target_ds_json = Path(lambda self: os.path.join(self.output_folder, "target_structures.json"))
     analysis_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_conformational_change.py"))
 
     def __init__(self,
@@ -159,6 +161,13 @@ class ConformationalChange(BaseConfig):
         """Generate the conformational change analysis part of the script."""
         import json
 
+        # Serialize DataStreams to JSON for HelpScript to load
+        with open(self.reference_ds_json, 'w') as f:
+            json.dump(self.reference_stream.to_dict(), f, indent=2)
+
+        with open(self.target_ds_json, 'w') as f:
+            json.dump(self.target_stream.to_dict(), f, indent=2)
+
         # Handle selection input
         if self.selection_spec is None:
             selection_config = {"type": "all"}
@@ -166,8 +175,8 @@ class ConformationalChange(BaseConfig):
             selection_config = {"type": "fixed", "value": self.selection_spec}
 
         config_data = {
-            "reference_structures": self.reference_stream.files,
-            "target_structures": self.target_stream.files,
+            "reference_structures_json": self.reference_ds_json,
+            "target_structures_json": self.target_ds_json,
             "selection": selection_config,
             "alignment_method": self.alignment_method,
             "output_csv": self.analysis_csv

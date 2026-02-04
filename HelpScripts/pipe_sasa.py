@@ -16,6 +16,10 @@ import argparse
 import pandas as pd
 from typing import List, Tuple
 
+# Import unified I/O utilities
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pipe_biopipelines_io import load_datastream, iterate_files
+
 # Import PyMOL
 import pymol
 from pymol import cmd
@@ -66,25 +70,25 @@ def calculate_sasa(structure_path: str, ligand_resn: str, dot_density: int = 4) 
     return sasa_alone, sasa_complex, delta_sasa
 
 
-def process_structures(structure_paths: List[str], ligand_resn: str,
+def process_structures(structures_ds, ligand_resn: str,
                        output_csv: str, dot_density: int = 4) -> None:
     """
     Process multiple structures and calculate SASA for each.
 
     Args:
-        structure_paths: List of structure file paths
+        structures_ds: DataStreamRuntime with structure files
         ligand_resn: Ligand residue name
         output_csv: Output CSV file path
         dot_density: Dot density for SASA calculation
     """
     results = []
 
-    for struct_path in structure_paths:
+    # Use iterate_files for proper ID-file matching
+    for struct_id, struct_path in iterate_files(structures_ds):
         if not os.path.exists(struct_path):
             print(f"Warning: Structure file not found: {struct_path}")
             continue
 
-        struct_id = os.path.splitext(os.path.basename(struct_path))[0]
         print(f"Processing: {struct_id}")
 
         try:
@@ -128,7 +132,7 @@ def main():
     parser.add_argument(
         "--structures",
         required=True,
-        help="File containing list of structure file paths (one per line)"
+        help="JSON file containing DataStream with structure files"
     )
     parser.add_argument(
         "--ligand",
@@ -149,20 +153,21 @@ def main():
 
     args = parser.parse_args()
 
-    # Read structure paths from file (one path per line)
-    with open(args.structures, 'r') as f:
-        structure_paths = [line.strip() for line in f if line.strip()]
+    # Load structures DataStream using pipe_biopipelines_io
+    structures_ds = load_datastream(args.structures)
 
-    if not structure_paths:
+    if not structures_ds.ids:
         print(f"Error: No structures found in: {args.structures}")
         sys.exit(1)
+
+    print(f"Loaded {len(structures_ds.ids)} structures from DataStream")
 
     # Initialize PyMOL in quiet mode
     pymol.finish_launching(['pymol', '-qc'])
 
     # Process structures
     process_structures(
-        structure_paths=structure_paths,
+        structures_ds=structures_ds,
         ligand_resn=args.ligand,
         output_csv=args.output_csv,
         dot_density=args.dot_density

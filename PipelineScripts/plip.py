@@ -34,7 +34,7 @@ class PLIP(BaseConfig):
     results_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_interactions.csv"))
     summary_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_summary.csv"))
     summary_txt = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_summary.txt"))
-    structures_list_file = Path(lambda self: os.path.join(self.output_folder, ".input_structures.txt"))
+    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
     raw_outputs_folder = Path(lambda self: os.path.join(self.output_folder, "raw_outputs"))
     processed_folder = Path(lambda self: os.path.join(self.output_folder, "processed"))
     plip_container = Path(lambda self: os.path.join(self.folders["containers"], "plip_3.0.0.simg"))
@@ -123,11 +123,11 @@ class PLIP(BaseConfig):
 
     def generate_script(self, script_path: str) -> str:
         """Generate PLIP execution script."""
-        # Write structure paths to list file at pipeline time
+        import json
+        # Serialize structures DataStream to JSON for HelpScript to load
         os.makedirs(self.output_folder, exist_ok=True)
-        with open(self.structures_list_file, 'w') as f:
-            for struct_file in self.structures_stream.files:
-                f.write(f"{struct_file}\n")
+        with open(self.structures_ds_json, 'w') as f:
+            json.dump(self.structures_stream.to_dict(), f, indent=2)
 
         script_content = "#!/bin/bash\n"
         script_content += "# PLIP execution script\n"
@@ -180,25 +180,33 @@ echo "Processing {len(self.structures_stream)} structure(s)"
 mkdir -p {self.raw_outputs_folder}
 mkdir -p {self.processed_folder}
 
-# Process each structure with PLIP (reading from list file)
-while IFS= read -r pdb_file || [[ -n "$pdb_file" ]]; do
-    pdb_name=$(basename "$pdb_file" .pdb)
-    echo "Analyzing structure: $pdb_name"
+# Process each structure with PLIP using Python to read DataStream
+python -c "
+import json
+import sys
+sys.path.append('{self.folders['HelpScripts']}')
+from pipe_biopipelines_io import load_datastream, iterate_files
+
+ds = load_datastream('{self.structures_ds_json}')
+for struct_id, struct_path in iterate_files(ds):
+    print(struct_id + '\\t' + struct_path)
+" | while IFS=$'\\t' read -r struct_id pdb_file; do
+    echo "Analyzing structure: $struct_id"
 
     # Create individual output directory
-    output_dir="{self.raw_outputs_folder}/$pdb_name"
+    output_dir="{self.raw_outputs_folder}/$struct_id"
     mkdir -p "$output_dir"
 
     # Run PLIP apptainer container
     apptainer exec {self.plip_container} plip -f "$pdb_file" {plip_opts_str} --outdir "$output_dir"
 
     if [ $? -eq 0 ]; then
-        echo "PLIP analysis completed for $pdb_name"
+        echo "PLIP analysis completed for $struct_id"
     else
-        echo "Error: PLIP analysis failed for $pdb_name"
+        echo "Error: PLIP analysis failed for $struct_id"
         exit 1
     fi
-done < "{self.structures_list_file}"
+done
 
 echo "All PLIP analyses completed successfully"
 
@@ -210,7 +218,7 @@ echo "All PLIP analyses completed successfully"
 
         return f"""echo "Processing PLIP outputs into standardized format"
 python {self.helper_script} \\
-    --structures "{self.structures_list_file}" \\
+    --structures "{self.structures_ds_json}" \\
     --raw_dir "{self.raw_outputs_folder}" \\
     --output_csv "{self.results_csv}" \\
     --summary_csv "{self.summary_csv}" \\

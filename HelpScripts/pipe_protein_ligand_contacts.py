@@ -16,6 +16,10 @@ import numpy as np
 import math
 from typing import Dict, List, Any, Optional, Tuple, NamedTuple
 
+# Import unified I/O utilities
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pipe_biopipelines_io import load_datastream, iterate_files
+
 # Import unified ID mapping utilities
 from id_map_utils import map_table_ids_to_ids
 
@@ -420,7 +424,9 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
     Args:
         config_data: Configuration dictionary with analysis parameters
     """
-    input_structures = config_data['input_structures']
+    # Load structures DataStream using pipe_biopipelines_io
+    structures_ds = load_datastream(config_data['structures_json'])
+
     selections_config = config_data['protein_selections']
     ligand_name = config_data['ligand_name']
     contact_threshold = config_data['contact_threshold']
@@ -429,27 +435,25 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
 
     print(f"Analyzing protein-ligand contacts")
-    print(f"Structures: {len(input_structures)}")
+    print(f"Structures: {len(structures_ds.ids)}")
     print(f"Protein selections: {selections_config}")
     print(f"Ligand: {ligand_name}")
     print(f"Contact threshold: {contact_threshold} Å")
     print(f"Contact metric: {contact_metric_name}")
     print(f"ID mapping pattern: {id_map}")
 
-    # Handle protein selections
+    # Handle protein selections - build map using IDs from DataStream
     selections_map = {}
     if selections_config['type'] == 'all_protein':
         # All protein residues for all structures
         print(f"Using all protein residues for all structures")
-        for structure_path in input_structures:
-            structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+        for structure_id in structures_ds.ids:
             selections_map[structure_id] = None  # None means all protein
     elif selections_config['type'] == 'fixed':
         # Fixed selection for all structures
         fixed_selection = selections_config['value']
         print(f"Using fixed protein selection: {fixed_selection}")
-        for structure_path in input_structures:
-            structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+        for structure_id in structures_ds.ids:
             selections_map[structure_id] = fixed_selection
     else:
         # Load from table with ID mapping
@@ -458,8 +462,7 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
         table_selections = load_selections_from_table(table_path, column_name, id_map)
 
         # Map structure IDs to table IDs and populate selections_map
-        for structure_path in input_structures:
-            structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+        for structure_id in structures_ds.ids:
             candidate_ids = map_table_ids_to_ids(structure_id, id_map)
 
             # Try all candidate IDs in priority order (most specific to least specific)
@@ -475,18 +478,18 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             if not found:
                 print(f"Warning: No table entry for structure ID '{structure_id}'. Tried: {', '.join(candidate_ids)}")
 
-    # Process structures
+    # Process structures using iterate_files for proper ID-file matching
     results = []
+    structure_items = list(iterate_files(structures_ds))
+    total = len(structure_items)
 
-    for i, structure_path in enumerate(input_structures):
+    for i, (structure_id, structure_path) in enumerate(structure_items):
         if not os.path.exists(structure_path):
             print(f"Warning: Structure file not found: {structure_path}")
             continue
 
-        print(f"\nProcessing structure {i+1}/{len(input_structures)}: {structure_path}")
-
-        # Extract structure ID from filename
-        structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+        print(f"\nProcessing structure {i+1}/{total}: {structure_path}")
+        print(f"  - ID: {structure_id}")
 
         # Get selection for this structure
         selections = selections_map.get(structure_id)
@@ -499,7 +502,7 @@ def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
             structure_path, selections, ligand_name, contact_threshold
         )
 
-        # Store result
+        # Store result using proper ID from DataStream
         result = {
             'id': structure_id,
             'source_structure': structure_path,
@@ -587,7 +590,7 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['input_structures', 'protein_selections', 'ligand_name',
+    required_params = ['structures_json', 'protein_selections', 'ligand_name',
                        'contact_threshold', 'contact_metric_name', 'output_csv']
     for param in required_params:
         if param not in config_data:

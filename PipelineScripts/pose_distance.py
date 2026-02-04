@@ -40,6 +40,7 @@ class PoseDistance(BaseConfig):
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "pose_analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "pose_config.json"))
+    samples_ds_json = Path(lambda self: os.path.join(self.output_folder, "samples_structures.json"))
     pose_distance_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pose_distance.py"))
 
     def __init__(self,
@@ -151,11 +152,14 @@ class PoseDistance(BaseConfig):
         """Generate the pose distance analysis part of the script."""
         import json
 
+        # Serialize sample structures DataStream to JSON for HelpScript to load
+        with open(self.samples_ds_json, 'w') as f:
+            json.dump(self.samples_stream.to_dict(), f, indent=2)
+
         config_data = {
             "reference_pdb": self.reference_stream.files[0],
             "reference_ligand": self.reference_ligand,
-            "target_pdbs": self.samples_stream.files,
-            "target_ids": self.samples_stream.ids,
+            "samples_json": self.samples_ds_json,
             "ligand": self.sample_ligand,
             "alignment_selection": self.alignment_selection,
             "calculate_centroid": self.calculate_centroid,
