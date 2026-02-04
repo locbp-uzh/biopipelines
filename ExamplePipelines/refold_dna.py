@@ -24,7 +24,7 @@ with Pipeline(project="Examples",
 
     # Load structures from previous BoltzGen run
     cif_folder_path = "/shares/locbp.chem.uzh/gquarg/BioPipelines/DeNovo-Gentamicin-Sensor/Gentamicin_BoltzGen_20x500designs_Filtering_001/041_BoltzGenMerge/final_ranked_designs/final_100_designs"
-    proteins = PDB(cif_folder_path) #PDB will also extract the sequences
+    proteins = PDB(cif_folder_path, format="cif") #PDB will also extract the sequences
     DNAEncoder(proteins, organism="EC") # Generate DNA sequences
 
     # Load previous results table (BoltzGen metrics with partial MSA)
