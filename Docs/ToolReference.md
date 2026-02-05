@@ -63,7 +63,8 @@ Predict protein and complex structures.
 
 Analyze structures and interactions.
 
-- [ResidueAtomDistance](Tool/Analysis.md#residueatomdistance) - Distance measurements
+- [Distance](Tool/Analysis.md#residueatomdistance) - Distance measurements
+- [Angle](Tool/Analysis.md#angle) - Bond and torsional angles
 - [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
 - [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
 - [MutationProfiler](Tool/Analysis.md#mutationprofiler) - Mutation patterns

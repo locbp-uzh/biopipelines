@@ -93,7 +93,7 @@ environments:
   DynamicBind:
     - "dynamicbind"
     - "relax"
-  ResidueAtomDistance: "biopipelines"
+  Distance: "biopipelines"
   PLIP: "biopipelines"
   DistanceSelector: "biopipelines"
   ConformationalChange: "ProteinEnv"

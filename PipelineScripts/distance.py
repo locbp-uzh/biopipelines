@@ -1,5 +1,5 @@
 """
-ResidueAtomDistance analysis for calculating distances between atoms and residues.
+Distance analysis for calculating distances between atoms and residues.
 
 Analyzes protein structures to calculate distances between specific atoms and residues,
 commonly used for ligand-protein binding site analysis and interaction validation.
@@ -22,7 +22,7 @@ except ImportError:
     from datastream import DataStream
 
 
-class ResidueAtomDistance(BaseConfig):
+class Distance(BaseConfig):
     """
     Pipeline tool for analyzing structures to calculate distances between atoms and residues.
 
@@ -35,13 +35,13 @@ class ResidueAtomDistance(BaseConfig):
     - Interaction distance measurements
     """
 
-    TOOL_NAME = "ResidueAtomDistance"
+    TOOL_NAME = "Distance"
 
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "distance_config.json"))
     structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
-    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_residue_atom_distance.py"))
+    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_distance.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -122,7 +122,7 @@ class ResidueAtomDistance(BaseConfig):
         return "distance"
 
     def validate_params(self):
-        """Validate ResidueAtomDistance parameters."""
+        """Validate Distance parameters."""
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
 
@@ -163,9 +163,9 @@ class ResidueAtomDistance(BaseConfig):
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """Generate ResidueAtomDistance execution script."""
+        """Generate Distance execution script."""
         script_content = "#!/bin/bash\n"
-        script_content += "# ResidueAtomDistance execution script\n"
+        script_content += "# Distance execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += self._generate_script_run_distance_analysis()
@@ -248,7 +248,7 @@ fi
             mode = "atom-residue"
 
         base_dict.update({
-            "residue_atom_distance_params": {
+            "distance_params": {
                 "mode": mode,
                 "atom_selection": self.atom_selection,
                 "residue_selection": self.residue_selection,

@@ -528,7 +528,7 @@ Open biopipelines folder and start with `prompt.txt` to give Claude repository c
 ### Reference Existing Patterns
 
 ```
-"Before creating MyTool, read ResidueAtomDistance to understand the pattern"
+"Before creating MyTool, read Distance to understand the pattern"
 "Check how Boltz2 handles multiple input types and use the same pattern"
 ```
 

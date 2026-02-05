@@ -6,16 +6,17 @@ import os, sys
 sys.path.insert(0, os.getcwd()) #to see scripts in current folder
 
 from PipelineScripts.pipeline import *
-from PipelineScripts.load import LoadOutput
+from PipelineScripts.entities import *
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.mutation_profiler import MutationProfiler
 from PipelineScripts.mutation_composer import MutationComposer
 from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.residue_atom_distance import ResidueAtomDistance
+from PipelineScripts.distance import Distance
 from PipelineScripts.panda import Panda
 from PipelineScripts.plot import Plot
 from PipelineScripts.pymol import PyMOL
 
+# This function will be used to make sure new sequences generated at each cycle haven't been folded before
 def drop_duplicates_history(new_sequences, all_sequences_seen):
     if all_sequences_seen is None:
         # First cycle - just deduplicate within current batch
@@ -57,6 +58,11 @@ with Pipeline(project="Examples",
     Resources(gpu="any",
               time="4:00:00",
               memory="16GB")
+    
+    SNAPTag = Sequence()
+
+    cy5_snap_open = Ligand()
+    cy5_snap_close = Ligand()
 
     # We load the prediction from Boltz. This is very important to benchmark the affinities
     original_open = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json')
@@ -107,11 +113,11 @@ with Pipeline(project="Examples",
                                   ligands=original_close,
                                   msas=boltz_holo_open)
 
-        open_chlorine_aspartate_distance = ResidueAtomDistance(structures=boltz_holo_open,
+        open_chlorine_aspartate_distance = Distance(structures=boltz_holo_open,
                                                                residue='D in IHDWG',
                                                                atom='LIG.Cl',
                                                                metric_name='open_chlorine_distance')
-        open_cap_aspartate_distance = ResidueAtomDistance(structures=boltz_holo_open,
+        open_cap_aspartate_distance = Distance(structures=boltz_holo_open,
                                                           residue='D in IHDWG',
                                                           atom='LIG.N88',
                                                           metric_name='open_cap_distance')

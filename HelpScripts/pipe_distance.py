@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Runtime helper script for ResidueAtomDistance analysis.
+Runtime helper script for Distance analysis.
 
 This script analyzes protein structures to calculate distances between specific atoms and residues,
 outputting CSV with distance metrics for all structures. Parses PDB files directly as text.
@@ -16,7 +16,7 @@ from typing import Dict, List, Any, Optional, Tuple
 
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from pipe_biopipelines_io import load_datastream, iterate_files
+from HelpScripts.biopipelines_io import load_datastream, iterate_files
 from pdb_parser import parse_pdb_file, parse_selection, calculate_distances, debug_ligand_atoms
 
 
@@ -97,7 +97,7 @@ def calculate_distance(structure_path: str, atom_selection, residue_selection,
         return None
 
 
-def analyze_residue_atom_distances(config_data: Dict[str, Any]) -> None:
+def analyze_distances(config_data: Dict[str, Any]) -> None:
     """
     Analyze distances between selections in structures by parsing PDB files.
     Supports atom-residue, atom-atom, and residue-residue modes.
@@ -252,7 +252,7 @@ def main():
             sys.exit(1)
     
     try:
-        analyze_residue_atom_distances(config_data)
+        analyze_distances(config_data)
         
     except Exception as e:
         print(f"Error analyzing distances: {e}")

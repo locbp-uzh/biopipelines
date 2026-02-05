@@ -4,7 +4,7 @@
 
 
 
-### ResidueAtomDistance
+### Distance
 
 Measures distances between specific atoms and residues in structures. Useful for tracking ligand-protein interactions or structural features.
 
@@ -25,9 +25,9 @@ Measures distances between specific atoms and residues in structures. Useful for
 
 **Example**:
 ```python
-from PipelineScripts.residue_atom_distance import ResidueAtomDistance
+from PipelineScripts.distance import Distance
 
-distances = ResidueAtomDistance(
+distances = Distance(
     structures=boltz,
     atom="LIG.Cl",
     residue="D in IGDWG",
@@ -36,6 +36,75 @@ distances = ResidueAtomDistance(
 )
 ```
 
+
+---
+
+### Angle
+
+Calculates bond angles (3 atoms) or torsional/dihedral angles (4 atoms) between specified atoms in structures. Useful for backbone phi/psi analysis, side chain rotamers, and ligand geometry verification.
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `structures`: Union[ToolOutput, StandardizedOutput] (required) - Input structures
+- `atoms`: List[str] (required) - List of 3 or 4 atom selections
+- `metric_name`: str = None - Custom name for angle column (default: "angle" or "torsion")
+
+**Selection Syntax**:
+Same as Distance, with additional support for `residue.atom` format:
+- `'10.CA'` - Alpha carbon of residue 10
+- `'-1.C'` - Carbonyl carbon of last residue (C-terminus)
+- `'LIG.C1'` - Atom C1 of ligand residue LIG
+- `'D in IGDWG'` - Aspartic acid in sequence context (uses centroid if multiple atoms)
+
+**Outputs**:
+- `tables.analysis`:
+
+  | id | source_structure | {metric_name} |
+  |----|------------------|---------------|
+
+**Angle Types**:
+- **3 atoms (A-B-C)**: Bond angle at B in degrees (0-180°)
+- **4 atoms (A-B-C-D)**: Torsional angle in degrees (-180° to 180°)
+
+**Example**:
+```python
+from PipelineScripts.angle import Angle
+
+# Bond angle at CA (N-CA-C angle)
+bond_angle = Angle(
+    structures=boltz,
+    atoms=['10.N', '10.CA', '10.C'],
+    metric_name="nca_angle"
+)
+
+# Phi angle (C-N-CA-C)
+phi = Angle(
+    structures=boltz,
+    atoms=['9.C', '10.N', '10.CA', '10.C'],
+    metric_name="phi"
+)
+
+# Psi angle (N-CA-C-N)
+psi = Angle(
+    structures=boltz,
+    atoms=['10.N', '10.CA', '10.C', '11.N'],
+    metric_name="psi"
+)
+
+# Chi1 angle for a residue
+chi1 = Angle(
+    structures=boltz,
+    atoms=['50.N', '50.CA', '50.CB', '50.CG'],
+    metric_name="chi1"
+)
+
+# Ligand geometry
+ligand_angle = Angle(
+    structures=boltz,
+    atoms=['LIG.C1', 'LIG.C2', 'LIG.C3']
+)
+```
 
 ---
 

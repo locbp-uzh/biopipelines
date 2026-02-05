@@ -25,6 +25,8 @@ from .extract_metrics import ExtractMetrics
 from .folders import FolderManager
 from .conformational_change import ConformationalChange
 from .protein_ligand_contacts import ProteinLigandContacts
+from .distance import Distance
+from .angle import Angle
 from .stitch_sequences import StitchSequences
 from .split_chains import SplitChains
 from .dynamic_bind import DynamicBind
@@ -85,6 +87,8 @@ __all__ = [
     'ExtractMetrics',
     'ConformationalChange',
     'ProteinLigandContacts',
+    'Distance',
+    'Angle',
     'StitchSequences',
     'SplitChains',
     'DynamicBind',

@@ -554,11 +554,66 @@ python "{self.pymol_py}" --config "{self.config_file}"
 """
 
     def get_output_files(self) -> Dict[str, Any]:
-        """Get expected output files."""
+        """Get expected output files including PNG renders as DataStream."""
+        # Predict PNG files from Render and RenderEach operations
+        render_ids = []
+        render_files = []
+
+        for op in self.operations:
+            if op.op_type == "render":
+                # Single render - predict the output filename
+                filename = op.params.get("filename", "render.png")
+                if not os.path.isabs(filename):
+                    filename = os.path.join(self.output_folder, filename)
+                # Use filename without extension as ID
+                render_id = os.path.splitext(os.path.basename(filename))[0]
+                render_ids.append(render_id)
+                render_files.append(filename)
+
+            elif op.op_type == "render_each":
+                # RenderEach - predict PNG for each structure
+                structures = op.params.get("structures")
+                if structures is not None:
+                    # Get structure IDs to predict render filenames
+                    structure_ids = []
+                    if isinstance(structures, DataStream):
+                        structure_ids = structures.ids
+                    elif isinstance(structures, StandardizedOutput):
+                        structures_ds = structures.streams.structures
+                        if isinstance(structures_ds, DataStream):
+                            structure_ids = structures_ds.ids
+
+                    # RenderEach saves to renders/<id>.png
+                    renders_folder = os.path.join(self.output_folder, "renders")
+                    for struct_id in structure_ids:
+                        render_ids.append(struct_id)
+                        render_files.append(os.path.join(renders_folder, f"{struct_id}.png"))
+
+            elif op.op_type == "png":
+                # Direct PNG operation
+                filename = op.params.get("filename", "render.png")
+                if not os.path.isabs(filename):
+                    filename = os.path.join(self.output_folder, filename)
+                render_id = os.path.splitext(os.path.basename(filename))[0]
+                render_ids.append(render_id)
+                render_files.append(filename)
+
+        # Create renders DataStream if there are any render operations
+        if render_ids:
+            renders = DataStream(
+                name="renders",
+                ids=render_ids,
+                files=render_files,
+                format="png"
+            )
+        else:
+            renders = DataStream.empty("renders", "png")
+
         return {
             "structures": DataStream.empty("structures", "pdb"),
             "sequences": DataStream.empty("sequences", "fasta"),
             "compounds": DataStream.empty("compounds", "sdf"),
+            "renders": renders,
             "tables": {},
             "output_folder": self.output_folder,
             "session_file": self.session_file

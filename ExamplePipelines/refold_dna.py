@@ -1,6 +1,7 @@
 """
-This shows how to refold the filtered results from a BoltzGen run with Boltz (full MSA from MMseqs2 public server)
-
+This shows how to refold the filtered results from a BoltzGen run with Boltz (full MSA from MMseqs2 public server),
+plot a metrics comparison between the two, add some analysis steps (apo vs holo),
+and obtain codon-optimized sequences for e coli
 """
 
 import os, sys

@@ -30,7 +30,7 @@ class DNAEncoder(BaseConfig):
 
     Supports:
     - Single or multiple organisms (EC: E. coli, SC: S. cerevisiae, HS: H. sapiens)
-    - Thresholded weighted sampling (recommended): samples codons ≥10‰ frequency
+    - Thresholded weighted sampling (recommended for synthesis): samples codons ≥10‰ frequency
     - CSV output with DNA sequences
     - Excel output with color-coded codon frequencies
 
@@ -64,6 +64,7 @@ class DNAEncoder(BaseConfig):
                      - "EC&SC" (optimized for both E. coli and yeast)
                      - "HS&SC" (optimized for both human and yeast)
                      - "EC&HS&SC" (optimized for all three organisms)
+                     With more than one organism it is more likely if not inevitable to have rare codons.
             **kwargs: Additional parameters
 
         Examples:

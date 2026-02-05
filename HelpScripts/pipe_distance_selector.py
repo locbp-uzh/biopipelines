@@ -37,7 +37,7 @@ from pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom
 from typing import List, Dict, Tuple
 
 # Import unified I/O utilities
-from pipe_biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
+from HelpScripts.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
 
 def parse_reference_spec(reference_spec):

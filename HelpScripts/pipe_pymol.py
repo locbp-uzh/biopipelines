@@ -14,15 +14,20 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-# Set environment for headless PyMOL before importing
-# This avoids libGL.so.1 errors on headless cluster nodes
-os.environ.setdefault('PYMOL_SYMMETRY_VIEWER', '0')
-os.environ.setdefault('DISPLAY', '')
+# CRITICAL: Set environment variables for headless PyMOL BEFORE any import
+# This prevents libGL.so.1 errors on headless cluster nodes
+os.environ['PYMOL_SYMMETRY_VIEWER'] = '0'
+os.environ['DISPLAY'] = ''
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
 import pandas as pd
+
+# Import PyMOL with headless configuration
+# The -c flag runs PyMOL without a GUI, -q suppresses startup messages
+# -p reads commands from stdin (not used here but helps with headless mode)
 import pymol
-pymol.pymol_argv = ['pymol', '-cq']  # -c: no GUI, -q: quiet
-pymol.finish_launching()
+pymol.pymol_argv = ['pymol', '-cqp']
+pymol.finish_launching(['pymol', '-cqp'])
 from pymol import cmd
 
 
