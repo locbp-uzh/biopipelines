@@ -218,8 +218,8 @@ fi
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after distance analysis."""
         tables = {
-            "analysis": TableInfo(
-                name="analysis",
+            "distances": TableInfo(
+                name="distances",
                 path=self.analysis_csv,
                 columns=["id", "source_structure", self.get_metric_name()],
                 description=f"Distance analysis: {self.atom_selection} to {self.residue_selection}",

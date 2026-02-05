@@ -1,5 +1,5 @@
 """
-PoseDistance - Measure ligand pose distance between reference and sample structures.
+PoseChange - Measure ligand pose distance between reference and sample structures.
 
 Calculates RMSD and distance metrics for ligand poses between a reference
 holo structure (e.g., from X-ray crystallography) and designed holo structures.
@@ -21,7 +21,7 @@ except ImportError:
     from datastream import DataStream
 
 
-class PoseDistance(BaseConfig):
+class PoseChange(BaseConfig):
     """
     Measures ligand pose distance between reference and sample structures.
 
@@ -35,13 +35,13 @@ class PoseDistance(BaseConfig):
     - Analyzing ligand pose consistency across designs
     """
 
-    TOOL_NAME = "PoseDistance"
+    TOOL_NAME = "PoseChange"
 
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "pose_analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "pose_config.json"))
     samples_ds_json = Path(lambda self: os.path.join(self.output_folder, "samples_structures.json"))
-    pose_distance_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pose_distance.py"))
+    pose_change_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pose_change.py"))
 
     def __init__(self,
                  reference_structure: Union[DataStream, StandardizedOutput],
@@ -53,7 +53,7 @@ class PoseDistance(BaseConfig):
                  calculate_orientation: bool = False,
                  **kwargs):
         """
-        Initialize PoseDistance tool.
+        Initialize PoseChange tool.
 
         Args:
             reference_structure: Reference holo structure as DataStream or StandardizedOutput
@@ -136,19 +136,19 @@ class PoseDistance(BaseConfig):
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """Generate PoseDistance execution script."""
+        """Generate PoseChange execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
         script_content = "#!/bin/bash\n"
-        script_content += "# PoseDistance execution script\n"
+        script_content += "# PoseChange execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += self.generate_script_run_pose_distance()
+        script_content += self.generate_script_run_pose_change()
         script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def generate_script_run_pose_distance(self) -> str:
+    def generate_script_run_pose_change(self) -> str:
         """Generate the pose distance analysis part of the script."""
         import json
 
@@ -178,7 +178,7 @@ echo "Sample ligand: {self.sample_ligand}"
 echo "Alignment: {self.alignment_selection}"
 echo "Output: {self.analysis_csv}"
 
-python "{self.pose_distance_py}" --config "{self.config_file}"
+python "{self.pose_change_py}" --config "{self.config_file}"
 
 """
 
@@ -205,8 +205,8 @@ python "{self.pose_distance_py}" --config "{self.config_file}"
         ])
 
         tables = {
-            "analysis": TableInfo(
-                name="analysis",
+            "changes": TableInfo(
+                name="changes",
                 path=self.analysis_csv,
                 columns=columns,
                 description=f"Ligand pose distance analysis comparing {self.sample_ligand} poses to reference",

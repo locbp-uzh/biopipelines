@@ -18,7 +18,7 @@ Measures distances between specific atoms and residues in structures. Useful for
 - `metric_name`: str = None - Custom name for distance column in output (default: "distance")
 
 **Outputs**:
-- `tables.analysis`:
+- `tables.distances`:
 
   | id | source_structure | {metric_name} |
   |----|------------------|---------------|
@@ -58,7 +58,7 @@ Same as Distance, with additional support for `residue.atom` format:
 - `'D in IGDWG'` - Aspartic acid in sequence context (uses centroid if multiple atoms)
 
 **Outputs**:
-- `tables.analysis`:
+- `tables.angles`:
 
   | id | source_structure | {metric_name} |
   |----|------------------|---------------|
@@ -155,7 +155,7 @@ Quantifies structural changes between reference and target structures. Calculate
 - `alignment`: str = "align" - Alignment method, as available in pymol (align, super, cealign) Rule of thumb: sequence similarity > 50% -> align; otherwise cealign.
 
 **Outputs**:
-- `tables.conformational_analysis`:
+- `tables.changes`:
 
   | id | reference_structure | target_structure | selection | num_residues | RMSD | max_distance | mean_distance | sum_over_square_root |
   |----|---------------------|------------------|-----------|--------------|------|--------------|---------------|---------------------|
@@ -220,7 +220,7 @@ profiler = MutationProfiler(
 ```
 ---
 
-### ProteinLigandContacts
+### Contacts
 **Environment**: `ProteinEnv`
 
 Analyzes contacts between selected protein regions and ligands. For each selected residue, calculates the minimum distance to any ligand atom. Returns contact counts and distance statistics.
@@ -233,7 +233,7 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 - `contact_metric_name`: str = None - Custom name for contact count column (default: "contacts")
 
 **Outputs**:
-- `tables.contact_analysis`:
+- `tables.contacts`:
 
   | id | source_structure | selections | ligand | contacts | min_distance | max_distance | mean_distance | sum_distances_sqrt_normalized |
   |----|------------------|------------|--------|----------|--------------|--------------|---------------|-------------------------------|
@@ -251,10 +251,10 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 
 **Example**:
 ```python
-from PipelineScripts.protein_ligand_contacts import ProteinLigandContacts
+from PipelineScripts.contacts import Contacts
 
 # Analyze contacts with specific protein regions
-contacts = ProteinLigandContacts(
+contacts = Contacts(
     structures=rfdaa,
     selections=rfdaa.tables.structures.designed,
     ligand="LIG",
@@ -262,7 +262,7 @@ contacts = ProteinLigandContacts(
 )
 
 # Use fixed selection for all structures
-contacts = ProteinLigandContacts(
+contacts = Contacts(
     structures=boltz,
     selections='10-20+30-40',
     ligand="ATP",
@@ -270,7 +270,7 @@ contacts = ProteinLigandContacts(
 )
 
 # Analyze all protein residues
-contacts = ProteinLigandContacts(
+contacts = Contacts(
     structures=boltz,
     ligand="GDP"
 )
@@ -278,7 +278,7 @@ contacts = ProteinLigandContacts(
 
 ---
 
-### PoseDistance
+### PoseChange
 
 Measures ligand pose distance between reference holo structure and sample structures. Calculates RMSD and geometric metrics to quantify how well designed structures reproduce known binding poses.
 
@@ -294,7 +294,7 @@ Measures ligand pose distance between reference holo structure and sample struct
 - `calculate_orientation`: bool = False - Calculate orientation angle difference
 
 **Outputs**:
-- `tables.analysis`:
+- `tables.changes`:
 
   | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | alignment_rmsd | num_ligand_atoms | alignment_selection |
   |----|------------------|---------------------|-------------|-------------------|----------------|------------------|---------------------|
@@ -307,7 +307,7 @@ Measures ligand pose distance between reference holo structure and sample struct
 
 **Example**:
 ```python
-from PipelineScripts.pose_distance import PoseDistance
+from PipelineScripts.pose_change import PoseChange
 from PipelineScripts.pdb import PDB
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.filter import Filter
@@ -316,7 +316,7 @@ from PipelineScripts.filter import Filter
 xrc = PDB(pdbs="4ufc", ids="reference")
 designed = Boltz2(proteins=sequences, ligands="CCO")
 
-pose_analysis = PoseDistance(
+pose_analysis = PoseChange(
     reference_structure=xrc,
     sample_structures=designed,
     reference_ligand="ATP",
@@ -326,7 +326,7 @@ pose_analysis = PoseDistance(
 
 # Filter structures with RMSD < 2.0 Å
 good_poses = Filter(
-    data=pose_analysis.tables.analysis,
+    data=pose_analysis.tables.changes,
     pool=designed,
     expression="ligand_rmsd < 2.0"
 )

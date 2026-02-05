@@ -63,13 +63,13 @@ Predict protein and complex structures.
 
 Analyze structures and interactions.
 
-- [Distance](Tool/Analysis.md#residueatomdistance) - Distance measurements
+- [Distance](Tool/Analysis.md#distance) - Distance measurements
 - [Angle](Tool/Analysis.md#angle) - Bond and torsional angles
 - [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
 - [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
 - [MutationProfiler](Tool/Analysis.md#mutationprofiler) - Mutation patterns
-- [ProteinLigandContacts](Tool/Analysis.md#proteinligandcontacts) - Contact analysis
-- [PoseDistance](Tool/Analysis.md#posedistance) - Ligand pose comparison
+- [Contacts](Tool/Analysis.md#contacts) - Contact analysis
+- [PoseChange](Tool/Analysis.md#posechange) - Ligand pose comparison (to be unified with ConformationalChange)
 
 ---
 
@@ -89,3 +89,4 @@ Filter, transform, and manipulate tables.
 - BayesianAdjuster - Correlation-based frequency adjustment
 - SequenceMetricAnalysis - Multi-metric mutation analysis
 - ESMFold - Fast single-sequence prediction (under development)
+- MMSeqs2_LCF - Full MSA from local MMseqs2

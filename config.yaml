@@ -101,8 +101,8 @@ environments:
   SequenceMetricCorrelation: "MutationEnv"
   BayesianAdjuster: "MutationEnv"
   SequenceMetricAnalysis: "MutationEnv"
-  ProteinLigandContacts: "ProteinEnv"
-  PoseDistance: "ProteinEnv"
+  Contacts: "ProteinEnv"
+  PoseChange: "ProteinEnv"
 
   # Data management
   Filter: "biopipelines"

@@ -24,7 +24,7 @@ from .compound_library import CompoundLibrary
 from .extract_metrics import ExtractMetrics
 from .folders import FolderManager
 from .conformational_change import ConformationalChange
-from .protein_ligand_contacts import ProteinLigandContacts
+from .contacts import Contacts
 from .distance import Distance
 from .angle import Angle
 from .stitch_sequences import StitchSequences
@@ -86,7 +86,7 @@ __all__ = [
     'CompoundLibrary',
     'ExtractMetrics',
     'ConformationalChange',
-    'ProteinLigandContacts',
+    'Contacts',
     'Distance',
     'Angle',
     'StitchSequences',

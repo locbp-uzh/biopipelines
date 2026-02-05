@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Runtime helper script for ProteinLigandContacts analysis.
+Runtime helper script for Contacts analysis.
 
 This script analyzes protein structures to calculate minimum distances between
 selected protein residues and ligands, returning contact count and normalized distance sum.
@@ -200,7 +200,7 @@ def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
 
-def calculate_protein_ligand_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
+def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
     """
     Calculate protein-ligand contact metrics for a structure.
 
@@ -400,7 +400,7 @@ def calculate_contact_metrics(structure_path: str, selections: str, ligand: str,
         print(f"  - Parsed {len(atoms)} atoms from structure")
 
         # Calculate contact metrics
-        contact_count, min_dist, max_dist, mean_dist, sum_sqrt_norm = calculate_protein_ligand_contacts(
+        contact_count, min_dist, max_dist, mean_dist, sum_sqrt_norm = calculate_contacts(
             atoms, selections, ligand, threshold
         )
 
@@ -417,7 +417,7 @@ def calculate_contact_metrics(structure_path: str, selections: str, ligand: str,
         return None, None, None, None, None
 
 
-def analyze_protein_ligand_contacts(config_data: Dict[str, Any]) -> None:
+def analyze_contacts(config_data: Dict[str, Any]) -> None:
     """
     Analyze protein-ligand contacts in structures.
 
@@ -598,7 +598,7 @@ def main():
             sys.exit(1)
 
     try:
-        analyze_protein_ligand_contacts(config_data)
+        analyze_contacts(config_data)
 
     except Exception as e:
         print(f"Error analyzing protein-ligand contacts: {e}")

@@ -1,5 +1,5 @@
 """
-ProteinLigandContacts analysis for calculating contacts between selected protein regions and ligands.
+Contacts analysis for calculating contacts between selected protein regions and ligands.
 
 Analyzes protein structures to calculate minimum distances between selected protein residues
 and ligands, returning contact count and normalized distance sum.
@@ -21,7 +21,7 @@ except ImportError:
     from datastream import DataStream
 
 
-class ProteinLigandContacts(BaseConfig):
+class Contacts(BaseConfig):
     """
     Pipeline tool for analyzing contacts between selected protein regions and ligands.
 
@@ -39,13 +39,13 @@ class ProteinLigandContacts(BaseConfig):
     """
 
     # Tool identification
-    TOOL_NAME = "ProteinLigandContacts"
+    TOOL_NAME = "Contacts"
 
     # Lazy path descriptors
-    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_contacts.csv"))
+    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "contacts.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_config.json"))
     structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
-    contacts_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_protein_ligand_contacts.py"))
+    contacts_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_contacts.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -71,7 +71,7 @@ class ProteinLigandContacts(BaseConfig):
 
         Examples:
             # Analyze protein-ligand contacts with specific protein regions
-            contact_analysis = ProteinLigandContacts(
+            contact_analysis = Contacts(
                 structures=boltz_holo,
                 selections='10-20+30-40',
                 ligand='LIG',
@@ -99,7 +99,7 @@ class ProteinLigandContacts(BaseConfig):
         return self.custom_contact_metric_name if self.custom_contact_metric_name else "contacts"
 
     def validate_params(self):
-        """Validate ProteinLigandContacts parameters."""
+        """Validate Contacts parameters."""
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures cannot be empty")
 
@@ -133,19 +133,19 @@ class ProteinLigandContacts(BaseConfig):
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """Generate ProteinLigandContacts execution script."""
+        """Generate Contacts execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
         script_content = "#!/bin/bash\n"
-        script_content += "# ProteinLigandContacts execution script\n"
+        script_content += "# Contacts execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += self.generate_script_run_protein_ligand_contacts()
+        script_content += self.generate_script_run_contacts()
         script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def generate_script_run_protein_ligand_contacts(self) -> str:
+    def generate_script_run_contacts(self) -> str:
         """Generate the protein-ligand contact analysis part of the script."""
         import json
 
@@ -186,8 +186,8 @@ python "{self.contacts_py}" --config "{self.config_file}"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after protein-ligand contact analysis."""
         tables = {
-            "contact_analysis": TableInfo(
-                name="contact_analysis",
+            "contacts": TableInfo(
+                name="contacts",
                 path=self.analysis_csv,
                 columns=["id", "source_structure", "selections", "ligand",
                         self.get_contact_metric_name(), "min_distance", "max_distance",

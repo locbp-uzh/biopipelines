@@ -202,8 +202,8 @@ fi
         atoms_desc = " -> ".join(self.atom_selections)
 
         tables = {
-            "analysis": TableInfo(
-                name="analysis",
+            "angles": TableInfo(
+                name="angles",
                 path=self.analysis_csv,
                 columns=["id", "source_structure", self.get_metric_name()],
                 description=f"{angle_type}: {atoms_desc}",

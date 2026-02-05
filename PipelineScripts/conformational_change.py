@@ -199,8 +199,8 @@ python "{self.analysis_py}" --config "{self.config_file}"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after conformational change analysis."""
         tables = {
-            "conformational_analysis": TableInfo(
-                name="conformational_analysis",
+            "changes": TableInfo(
+                name="changes",
                 path=self.analysis_csv,
                 columns=["id", "reference_structure", "target_structure", "selection",
                         "num_residues", "RMSD", "max_distance", "mean_distance", "sum_over_square_root"],

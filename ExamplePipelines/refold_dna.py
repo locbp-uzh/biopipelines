@@ -48,7 +48,7 @@ with Pipeline(project="Examples",
                 boltz_apo.tables.confidence,
                 boltz_holo.tables.confidence,
                 boltz_holo.tables.affinity,
-                conf_change.tables.conformational_analysis],
+                conf_change.tables.changes],
         operations=[
             Panda.merge(on="id", prefixes=["", "apo_", "holo_", "holo_", ""]),
             Panda.rank("holo_affinity_pred_value", ascending=True)
@@ -98,7 +98,7 @@ with Pipeline(project="Examples",
         ),
         # Histogram: RMSD distribution
         Plot.Histogram(
-            data=conf_change.tables.conformational_analysis,
+            data=conf_change.tables.changes,
             x="rmsd",
             bins=20,
             title="Apo-Holo RMSD Distribution",

@@ -135,8 +135,8 @@ with Pipeline(project="Examples",
         current_analysis = Panda(
             tables=[boltz_holo_open.tables.affinity,
                     boltz_holo_close.tables.affinity,
-                    open_chlorine_aspartate_distance.tables.analysis,
-                    open_cap_aspartate_distance.tables.analysis],
+                    open_chlorine_aspartate_distance.tables.distances,
+                    open_cap_aspartate_distance.tables.distances],
             operations=[
                 Panda.merge(on="id", prefixes=["open_", "close_", "", ""]),
                 Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})

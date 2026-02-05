@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Helper script for PoseDistance - executed during SLURM runtime.
+Helper script for PoseChange - executed during SLURM runtime.
 
 Calculates ligand pose RMSD and distance metrics between reference
 and target structures using PyMOL.
@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from HelpScripts.biopipelines_io import load_datastream, iterate_files
 
 
-def calculate_pose_distance(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
+def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
                             ligand, alignment_selection, calculate_centroid,
                             calculate_orientation):
     """
@@ -159,7 +159,7 @@ def main():
         import pymol
         from pymol import cmd
     except ImportError:
-        print("Error: PyMOL is required for PoseDistance")
+        print("Error: PyMOL is required for PoseChange")
         print("Install with: conda install -c conda-forge pymol-open-source")
         sys.exit(1)
 
@@ -182,7 +182,7 @@ def main():
     for idx, (target_id, target_pdb) in enumerate(target_items, 1):
         print(f"[{idx}/{total}] Processing {target_id}...", end=" ")
         try:
-            result = calculate_pose_distance(
+            result = calculate_pose_change(
                 cmd=cmd,
                 reference_pdb=reference_pdb,
                 reference_ligand=reference_ligand,
