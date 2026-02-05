@@ -597,14 +597,13 @@ class PyMOL(BaseConfig):
             "output_folder": self.output_folder
         }
 
+        # Write config file at pipeline time (not SLURM time)
+        os.makedirs(self.output_folder, exist_ok=True)
+        with open(self.config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+
         return f"""echo "Creating PyMOL session..."
 echo "Output: {self.session_file}"
-
-mkdir -p "{self.output_folder}"
-
-cat > "{self.config_file}" << 'PYMOL_CONFIG_EOF'
-{json.dumps(config, indent=2)}
-PYMOL_CONFIG_EOF
 
 python "{self.pymol_py}" --config "{self.config_file}"
 

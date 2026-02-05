@@ -99,7 +99,7 @@ with Pipeline(project="Examples",
         # Histogram: RMSD distribution
         Plot.Histogram(
             data=conf_change.tables.changes,
-            x="rmsd",
+            x="RMSD",
             bins=20,
             title="Apo-Holo RMSD Distribution",
             xlabel="RMSD (Å)",

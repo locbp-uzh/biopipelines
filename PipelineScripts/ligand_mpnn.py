@@ -178,15 +178,17 @@ class LigandMPNN(BaseConfig):
             commands.append(f'python run.py {base_options} --pdb_path "{pdb_path}" {struct_id}_FIXED_OPTION_PLACEHOLDER {struct_id}_REDESIGNED_OPTION_PLACEHOLDER')
             commands.append("")
 
-        return f"""echo "Setting up LigandMPNN position constraints"
-# Create a separate commands file that will be modified instead of this script
-cat > {self.commands_file} << 'EOF'
-#!/bin/bash
-cd {self.lmpnn_folder}
+        # Write commands file at pipeline time (not SLURM time)
+        os.makedirs(os.path.dirname(self.commands_file), exist_ok=True)
+        with open(self.commands_file, 'w') as f:
+            f.write("#!/bin/bash\n")
+            f.write(f"cd {self.lmpnn_folder}\n\n")
+            f.write("# LigandMPNN commands with placeholders - will be replaced by position script\n")
+            f.write(chr(10).join(commands))
+            f.write("\n")
 
-# LigandMPNN commands with placeholders - will be replaced by position script
-{chr(10).join(commands)}
-EOF
+        return f"""echo "Setting up LigandMPNN position constraints"
+# Commands file: {self.commands_file}
 
 # Make the commands file executable
 chmod +x {self.commands_file}

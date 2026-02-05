@@ -504,14 +504,12 @@ class Plot(BaseConfig):
             "plot_filenames": [self._generate_plot_filename(op, i) for i, op in enumerate(self.operations)]
         }
 
+        # Write config file at pipeline time (not SLURM time)
+        with open(self.config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+
         return f"""echo "Creating plots..."
 echo "Output folder: {self.output_folder}"
-
-mkdir -p "{self.output_folder}"
-
-cat > "{self.config_file}" << 'PLOT_CONFIG_EOF'
-{json.dumps(config, indent=2)}
-PLOT_CONFIG_EOF
 
 python "{self.plot_py}" --config "{self.config_file}"
 

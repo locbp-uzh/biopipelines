@@ -451,12 +451,14 @@ class RFdiffusion3(BaseConfig):
 
     def _generate_json_section(self) -> str:
         """Generate bash section that creates JSON input file."""
-        json_content = json.dumps(self._build_json_config(), indent=2)
+        json_config = self._build_json_config()
 
-        return f"""echo "Creating RFdiffusion3 JSON configuration"
-cat > "{self.json_file}" << 'EOF'
-{json_content}
-EOF
+        # Write JSON config file at pipeline time (not SLURM time)
+        os.makedirs(self.output_folder, exist_ok=True)
+        with open(self.json_file, 'w') as f:
+            json.dump(json_config, f, indent=2)
+
+        return f"""echo "Using RFdiffusion3 JSON configuration: {self.json_file}"
 
 """
 

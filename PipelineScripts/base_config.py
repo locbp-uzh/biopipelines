@@ -497,17 +497,15 @@ fi
             "pipe_check_completion.py"
         )
 
-        # Write expected outputs to a temporary JSON file to avoid "Argument list too long" error
+        # Write expected outputs to JSON file at pipeline time (not SLURM time)
         expected_outputs_file = os.path.join(self.output_folder, ".expected_outputs.json")
+        os.makedirs(self.output_folder, exist_ok=True)
+        with open(expected_outputs_file, 'w') as f:
+            json.dump(json_safe_outputs, f, indent=2)
 
         return f"""
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
-
-# Write expected outputs to JSON file to avoid argument list length limits
-cat > "{expected_outputs_file}" << 'EXPECTED_OUTPUTS_EOF'
-{json.dumps(json_safe_outputs, indent=2)}
-EXPECTED_OUTPUTS_EOF
 
 python {pipe_check_completion} "{self.output_folder}" "{self.TOOL_NAME}" "{expected_outputs_file}"
 

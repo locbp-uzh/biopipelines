@@ -252,18 +252,17 @@ cp "{self.library_csv}" "{self.compounds_csv}"
 """
         elif self.library_dict:
             # Generate from dictionary
+            # Write JSON files at pipeline time (not SLURM time)
+            os.makedirs(self.output_folder, exist_ok=True)
+            with open(self.library_dict_json, 'w') as f:
+                json.dump(self.library_dict, f, indent=2)
+
+            compounds_data_json = os.path.join(self.output_folder, "compounds_data.json")
+            with open(compounds_data_json, 'w') as f:
+                json.dump({'expanded_compounds': self.expanded_compounds, 'compound_ids': self.compound_ids}, f, indent=2)
+
             script_content += f"""
 echo "Generating compound library from dictionary ({len(self.expanded_compounds)} compounds)"
-
-# Save library dictionary for reference
-cat > "{self.library_dict_json}" << 'EOF'
-{json.dumps(self.library_dict, indent=2)}
-EOF
-
-# Write compound data to temporary JSON file
-cat > "/tmp/compounds_data.json" << 'EOF'
-{json.dumps({'expanded_compounds': self.expanded_compounds, 'compound_ids': self.compound_ids}, indent=2)}
-EOF
 
 # Generate CSV with expanded compounds
 python3 -c "
@@ -271,7 +270,7 @@ import csv
 import json
 
 # Load compound data from JSON file
-with open('/tmp/compounds_data.json', 'r') as f:
+with open('{compounds_data_json}', 'r') as f:
     data = json.load(f)
 expanded_compounds = data['expanded_compounds']
 compound_ids = data['compound_ids']

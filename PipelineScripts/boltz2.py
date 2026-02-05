@@ -316,12 +316,12 @@ mkdir -p {self.msa_cache_folder}
         config_file_path = os.path.join(self.output_folder, f"{effective_job_name}.yaml")
 
         if self.config:
-            # Direct YAML configuration
+            # Direct YAML configuration - write at pipeline time
+            os.makedirs(self.output_folder, exist_ok=True)
+            with open(config_file_path, 'w') as f:
+                f.write(self.config)
             script_content += f"""
-echo "Using direct YAML configuration"
-cat > {config_file_path} << 'EOF'
-{self.config}
-EOF
+echo "Using direct YAML configuration: {config_file_path}"
 
 """
             uses_unified_config = False
@@ -379,14 +379,14 @@ echo "Generating Boltz2 configurations using unified config generator"
 mkdir -p {self.config_files_dir}
 
 """
-        # Generate ligands CSV if using direct SMILES string
+        # Generate ligands CSV if using direct SMILES string - write at pipeline time
         if self.ligands_smiles:
             ligand_id = config_name if config_name != "prediction" else "ligand"
-            script += f"""# Create ligands CSV from direct SMILES string
-cat > {self.ligands_csv} << 'EOF'
-id,format,smiles,ccd
-{ligand_id},smiles,{self.ligands_smiles},
-EOF
+            os.makedirs(os.path.dirname(self.ligands_csv), exist_ok=True)
+            with open(self.ligands_csv, 'w') as f:
+                f.write("id,format,smiles,ccd\n")
+                f.write(f"{ligand_id},smiles,{self.ligands_smiles},\n")
+            script += f"""# Using ligands CSV: {self.ligands_csv}
 
 """
 
