@@ -73,8 +73,6 @@ with Pipeline(project="Examples",
     original_close = Boltz2(proteins=HaloTag,
                        ligands=cy7_RR_close,
                        msas=original_open)
-    print(original_open.streams.structures.ids) # verify the ids. we need this for merging (id map)
-    print(original_close.streams.structures.ids) # verify the ids. we need this for merging (id map)
     ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
 
     # Merge original open and close affinity tables with Panda
@@ -82,7 +80,7 @@ with Pipeline(project="Examples",
     original_analysis = Panda(
         tables=[original_open.tables.affinity, original_close.tables.affinity],
         operations=[
-            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": ["Cy7_R_OPEN", "Cy7_RR_CLOSE"]}),
+            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": [original_open.streams.structures.ids[0],original_close.streams.structures.ids[1]]}),
             Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
         ],
         pool=original_open # this way we have the original open pdb file linked to the id "original". it is necessary in case the best of the first cycle(s) is that.
