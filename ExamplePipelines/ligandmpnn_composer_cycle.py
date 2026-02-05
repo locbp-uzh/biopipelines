@@ -85,7 +85,7 @@ with Pipeline(project="Examples",
             Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": ["Cy7_R_OPEN", "Cy7_RR_CLOSE"]}),
             Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
         ],
-        pool=original_open #
+        pool=original_open # this way we have the original open pdb file linked to the id "original". it is necessary in case the best of the first cycle(s) is that.
     )
 
     NUM_CYCLES = 3

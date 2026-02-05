@@ -78,7 +78,6 @@ class Boltz2(BaseConfig):
     boltz_config_unified_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_config_unified.py"))
     boltz_postprocessing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_postprocessing.py"))
     boltz_msa_copy_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_msa_copy.py"))
-    boltz_completion_check_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_completion_check.py"))
     propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
 
     def __init__(self,
@@ -368,7 +367,7 @@ boltz predict {config_file_path} {boltz_options}
         script_content += self._generate_missing_table_propagation()
 
         # Completion check
-        script_content += self._generate_completion_check_section()
+        script_content += self.generate_completion_check_footer()
 
         return script_content
 
@@ -483,34 +482,6 @@ fi
 
 """
 
-    def _generate_completion_check_section(self) -> str:
-        """Generate completion check section using helper script."""
-        # Check if there's an upstream missing table
-        upstream_missing_path = self._get_upstream_missing_table_path(
-            self.proteins,
-            self.proteins_stream
-        )
-
-        if upstream_missing_path:
-            # Use helper script for completion check with missing sequence filtering
-            return f"""
-# Completion check with missing sequence filtering
-python {self.boltz_completion_check_py} \\
-    --output-folder "{self.output_folder}" \\
-    --sequence-ids-file "{self.sequence_ids_file}" \\
-    --missing-file "{upstream_missing_path}" \\
-    --output-format "{self.output_format}"
-
-if [ $? -ne 0 ]; then
-    echo "Boltz2 failed - some outputs missing"
-    exit 1
-fi
-
-echo "Boltz2 completed successfully"
-""" + self.generate_completion_check_footer()
-        else:
-            # Standard completion check
-            return self.generate_completion_check_footer()
 
     def _predict_sequence_ids(self) -> List[str]:
         """Predict sequence IDs from input sources using combinatorics module."""
