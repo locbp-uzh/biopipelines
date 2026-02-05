@@ -93,7 +93,7 @@ with Pipeline(project="Examples",
 
     # Track all analyses and pools across cycles for best selection
     all_analyses = [original_analysis]  # Start with original baseline
-    all_pools = [original_close]  # Start with original best structure
+    all_pools = [original_open]  # Start with original best structure
 
     best_open,best_close=original_open,original_close
 
