@@ -80,7 +80,7 @@ with Pipeline(project="Examples",
     original_analysis = Panda(
         tables=[original_open.tables.affinity, original_close.tables.affinity],
         operations=[
-            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": [original_open.streams.structures.ids[0],original_close.streams.structures.ids[1]]}),
+            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": [original_open.streams.structures.ids[0],original_close.streams.structures.ids[0]]}),
             Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
         ],
         pool=original_open # this way we have the original open pdb file linked to the id "original". it is necessary in case the best of the first cycle(s) is that.
