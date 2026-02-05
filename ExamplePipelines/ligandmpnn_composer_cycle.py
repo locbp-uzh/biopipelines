@@ -71,9 +71,10 @@ with Pipeline(project="Examples",
     original_open = Boltz2(proteins=HaloTag,
                        ligands=cy7_R_open)
     original_close = Boltz2(proteins=HaloTag,
-                       ligands=cy7_RR_close)
-    print(original_open.streams.structures.ids) # verify the ids. we need this for merging
-    print(original_close.streams.structures.ids) # verify the ids. we need this for merging
+                       ligands=cy7_RR_close,
+                       msas=original_open)
+    print(original_open.streams.structures.ids) # verify the ids. we need this for merging (id map)
+    print(original_close.streams.structures.ids) # verify the ids. we need this for merging (id map)
     ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
 
     # Merge original open and close affinity tables with Panda
@@ -81,7 +82,7 @@ with Pipeline(project="Examples",
     original_analysis = Panda(
         tables=[original_open.tables.affinity, original_close.tables.affinity],
         operations=[
-            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": ["HT", "HT"]}),
+            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": ["Cy7_R_OPEN", "Cy7_RR_CLOSE"]}),
             Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
         ],
         pool=original_open #
