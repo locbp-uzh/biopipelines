@@ -133,26 +133,21 @@ with Pipeline(project="Examples",
                                                           metric_name='open_cap_distance')
 
         # Merge all metrics with Panda
-        current_analysis = Panda(
+        current_analysis_filtered = Panda(
             tables=[boltz_holo_open.tables.affinity,
                     boltz_holo_close.tables.affinity,
                     open_chlorine_aspartate_distance.tables.distances,
                     open_cap_aspartate_distance.tables.distances],
             operations=[
                 Panda.merge(on="id", prefixes=["open_", "close_", "", ""]),
-                Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
+                Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}),
+                Panda.filter("open_chlorine_distance < 5.0 and open_cap_distance > 10.0")
             ]
-        )
-
-        # Filter using Panda
-        current_filtered = Panda(
-            table=current_analysis.tables.result,
-            operations=[Panda.filter("open_chlorine_distance < 5.0 and open_cap_distance > 10.0")]
         )
 
         # Add current cycle results to the arrays
         all_pools.append(boltz_holo_open)
-        all_analyses.append(current_filtered)
+        all_analyses.append(current_analysis_filtered)
 
         # Select best structure across all cycles using Panda with multi-pool support
         best_open = Panda(
