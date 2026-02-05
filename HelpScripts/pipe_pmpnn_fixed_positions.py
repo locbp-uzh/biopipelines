@@ -7,7 +7,7 @@ import sys
 # Import PDB parser and I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from pdb_parser import parse_pdb_file
-from HelpScripts.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
+from biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
 parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion table, use direct selections, or apply pLDDT threshold')
 parser.add_argument('structures_json', type=str, help="Path to DataStream JSON file with input structures")

@@ -26,7 +26,7 @@ from pymol import cmd
 
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from HelpScripts.biopipelines_io import load_datastream, iterate_files
+from biopipelines_io import load_datastream, iterate_files
 
 
 def align_structures(ref_obj: str, target_obj: str, selection: str, alignment_method: str) -> None:

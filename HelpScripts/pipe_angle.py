@@ -20,7 +20,7 @@ from typing import Dict, List, Any, Optional, Tuple
 
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from HelpScripts.biopipelines_io import load_datastream, iterate_files
+from biopipelines_io import load_datastream, iterate_files
 from pdb_parser import parse_pdb_file, parse_selection, Atom
 
 

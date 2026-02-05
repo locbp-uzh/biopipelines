@@ -18,7 +18,7 @@ from typing import Dict, List, Any, Optional, Tuple, NamedTuple
 
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from HelpScripts.biopipelines_io import load_datastream, iterate_files
+from biopipelines_io import load_datastream, iterate_files
 
 # Import unified ID mapping utilities
 from id_map_utils import map_table_ids_to_ids

@@ -595,11 +595,15 @@ class Panda(BaseConfig):
             self.input_csv_paths = [self._resolve_table_path(t) for t in self.tables_input]
 
         # Extract id_map from merge operation if present (maps new_id -> [old_ids])
-        # We need to reverse it: old_id -> new_id for file map remapping
+        # We store both directions for different use cases:
+        # - id_remap: old_id -> new_id (for remapping pool IDs to merged IDs)
+        # - id_map_forward: new_id -> [old_ids] (for reverse lookup at SLURM time)
         self.id_remap = {}  # old_id -> new_id
+        self.id_map_forward = {}  # new_id -> [old_ids] (original id_map)
         for op in self.operations:
             if op.type == "merge" and op.params.get("id_map"):
                 id_map = op.params["id_map"]
+                self.id_map_forward = id_map  # Store original for SLURM time
                 for new_id, old_ids in id_map.items():
                     for old_id in old_ids:
                         self.id_remap[old_id] = new_id
@@ -608,6 +612,7 @@ class Panda(BaseConfig):
         if self.use_pool_mode:
             self.pool_folders = []
             self.pool_file_maps = []  # List of {stream_name: {id: file_path}} dicts for each pool
+            self.pool_table_maps = []  # List of {table_name: {"path": str, "columns": list}} for each pool
             for pool in self.pool_outputs:
                 if hasattr(pool, 'output_folder'):
                     self.pool_folders.append(pool.output_folder)
@@ -627,6 +632,17 @@ class Panda(BaseConfig):
                                     mapped_id = self.id_remap.get(sid, sid)
                                     file_map[stream_name][mapped_id] = stream.files[i]
                 self.pool_file_maps.append(file_map)
+
+                # Build table map from pool tables (for filtering/copying at SLURM time)
+                table_map = {}
+                if hasattr(pool, 'tables') and hasattr(pool.tables, '_tables'):
+                    for table_name, table_info in pool.tables._tables.items():
+                        if table_name not in ('result', 'missing'):  # Skip Panda's own tables
+                            table_map[table_name] = {
+                                "path": table_info.path,
+                                "columns": list(table_info.columns) if table_info.columns else []
+                            }
+                self.pool_table_maps.append(table_map)
 
     def _resolve_table_path(self, table_input: Any) -> str:
         """
@@ -754,6 +770,8 @@ class Panda(BaseConfig):
             "use_pool_mode": self.use_pool_mode,
             "pool_folders": getattr(self, 'pool_folders', []),
             "pool_file_maps": getattr(self, 'pool_file_maps', []),
+            "pool_table_maps": getattr(self, 'pool_table_maps', []),
+            "id_map_forward": getattr(self, 'id_map_forward', {}),
             "rename": self.rename
         }
 

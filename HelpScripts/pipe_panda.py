@@ -570,6 +570,147 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
     print(f"Created missing.csv with {len(missing_ids)} filtered out IDs")
 
 
+def filter_and_copy_pool_tables(
+    result_df: pd.DataFrame,
+    pool_table_maps: List[Dict[str, Dict[str, Any]]],
+    pool_folders: List[str],
+    output_folder: str,
+    id_map_forward: Dict[str, List[str]],
+    rename_map: Optional[Dict[str, str]] = None
+) -> Dict[str, str]:
+    """
+    Filter and copy pool tables to output folder, matching rows by ID.
+
+    For each table in the pool(s), this function:
+    1. Loads the table
+    2. Filters rows to match the IDs in result_df
+    3. Applies ID remapping (using id_map_forward for reverse lookup)
+    4. Saves the filtered table to output_folder
+
+    Args:
+        result_df: DataFrame with filtered IDs (has 'id' column, may have 'source_table')
+        pool_table_maps: List of table maps per pool: [{table_name: {"path": str, "columns": list}}]
+        pool_folders: List of pool folder paths
+        output_folder: Where to save filtered tables
+        id_map_forward: Mapping new_id -> [old_ids] for reverse lookup
+        rename_map: Optional mapping from lookup_id to output_id
+
+    Returns:
+        Dictionary mapping table_name to output path
+    """
+    if not pool_table_maps:
+        return {}
+
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Collect all table names across all pools
+    all_table_names = set()
+    for tm in pool_table_maps:
+        all_table_names.update(tm.keys())
+
+    copied_tables = {}
+    has_source_table = 'source_table' in result_df.columns
+    has_original_id = 'original_id' in result_df.columns
+
+    print(f"\nFiltering and copying pool tables...")
+    print(f"Tables to process: {list(all_table_names)}")
+
+    for table_name in all_table_names:
+        # Collect rows from all pools that have this table
+        filtered_rows = []
+
+        for pool_idx, table_map in enumerate(pool_table_maps):
+            if table_name not in table_map:
+                continue
+
+            table_info = table_map[table_name]
+            table_path = table_info["path"]
+
+            if not os.path.exists(table_path):
+                print(f"  Warning: Table not found: {table_path}")
+                continue
+
+            # Load the pool table
+            pool_df = pd.read_csv(table_path)
+
+            if 'id' not in pool_df.columns:
+                print(f"  Warning: Table {table_name} has no 'id' column, skipping")
+                continue
+
+            # For each row in result_df, find matching rows in pool table
+            for _, result_row in result_df.iterrows():
+                # Determine which pool this row came from
+                if has_source_table:
+                    row_pool_idx = int(result_row.get('source_table', 0))
+                    if row_pool_idx != pool_idx:
+                        continue  # This row is from a different pool
+                elif len(pool_table_maps) > 1:
+                    # Multiple pools but no source_table - can't determine which pool
+                    # Try all pools (may get duplicates, but better than nothing)
+                    pass
+
+                # Get the ID to look up in the pool table
+                if has_original_id:
+                    lookup_id = str(result_row.get('original_id', ''))
+                else:
+                    lookup_id = str(result_row.get('id', ''))
+
+                # Get the output ID (may be renamed)
+                output_id = str(result_row.get('id', lookup_id))
+
+                # Try to find matching row in pool table
+                # Strategy 1: Direct match
+                matching = pool_df[pool_df['id'].astype(str) == lookup_id]
+
+                # Strategy 2: If no match and we have id_map_forward, try reverse lookup
+                if matching.empty and id_map_forward:
+                    # lookup_id might be the new (merged) ID, find original IDs
+                    original_ids = id_map_forward.get(lookup_id, [])
+                    for orig_id in original_ids:
+                        matching = pool_df[pool_df['id'].astype(str) == orig_id]
+                        if not matching.empty:
+                            break
+
+                if not matching.empty:
+                    # Copy matching row(s) and update ID
+                    for _, match_row in matching.iterrows():
+                        new_row = match_row.copy()
+                        new_row['id'] = output_id
+                        filtered_rows.append(new_row)
+
+        # Determine output filename from the pool table path (use basename to match get_output_files)
+        output_filename = None
+        for tm in pool_table_maps:
+            if table_name in tm:
+                output_filename = os.path.basename(tm[table_name]["path"])
+                break
+        if not output_filename:
+            raise ValueError(f"Table '{table_name}' not found in any pool_table_maps")
+
+        # Create output table
+        if filtered_rows:
+            output_df = pd.DataFrame(filtered_rows)
+            # Remove duplicate rows (same id might be matched multiple times)
+            output_df = output_df.drop_duplicates(subset=['id'], keep='first')
+        else:
+            # Create empty DataFrame with expected columns
+            if pool_table_maps and table_name in pool_table_maps[0]:
+                columns = pool_table_maps[0][table_name].get("columns", ["id"])
+                if not columns:
+                    columns = ["id"]
+            else:
+                columns = ["id"]
+            output_df = pd.DataFrame(columns=columns)
+
+        # Save to output folder (use output_filename from pool table path)
+        output_path = os.path.join(output_folder, output_filename)
+        output_df.to_csv(output_path, index=False)
+        copied_tables[table_name] = output_path
+        print(f"  {table_name}: {len(output_df)} rows -> {output_path}")
+
+    return copied_tables
+
+
 def run_panda(config_data: Dict[str, Any]) -> None:
     """
     Execute Panda operations on CSV files.
@@ -583,6 +724,8 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     use_pool_mode = config_data.get('use_pool_mode', False)
     pool_folders = config_data.get('pool_folders', [])
     pool_file_maps = config_data.get('pool_file_maps', [])
+    pool_table_maps = config_data.get('pool_table_maps', [])
+    id_map_forward = config_data.get('id_map_forward', {})
     rename = config_data.get('rename')
 
     print(f"Panda: Processing {len(input_csvs)} input files")
@@ -681,29 +824,44 @@ def run_panda(config_data: Dict[str, Any]) -> None:
             filtered_ids_for_lookup = filtered_ids
 
     # Handle pool mode
-    if use_pool_mode and pool_file_maps and filtered_ids_for_lookup:
+    if use_pool_mode and pool_file_maps:
         output_dir = os.path.dirname(output_csv)
 
-        # Use multi-pool extraction if we have source_table column and multiple pools
-        if len(pool_file_maps) > 1 and 'source_table' in result_df.columns:
-            extracted = extract_from_multiple_pools(
-                result_df, pool_folders, output_dir,
-                rename_map=original_to_new_id if rename else None,
-                file_maps=pool_file_maps
-            )
-        else:
-            # Single pool mode - use first pool
-            extracted = extract_pool_data_for_filtered_ids(
-                filtered_ids_for_lookup, pool_folders[0], output_dir,
-                rename_map=original_to_new_id if rename else None,
-                file_map=pool_file_maps[0] if pool_file_maps else None
-            )
+        # Extract files only if we have IDs to extract
+        extracted = {}
+        if filtered_ids_for_lookup:
+            # Use multi-pool extraction if we have source_table column and multiple pools
+            if len(pool_file_maps) > 1 and 'source_table' in result_df.columns:
+                extracted = extract_from_multiple_pools(
+                    result_df, pool_folders, output_dir,
+                    rename_map=original_to_new_id if rename else None,
+                    file_maps=pool_file_maps
+                )
+            else:
+                # Single pool mode - use first pool
+                extracted = extract_pool_data_for_filtered_ids(
+                    filtered_ids_for_lookup, pool_folders[0], output_dir,
+                    rename_map=original_to_new_id if rename else None,
+                    file_map=pool_file_maps[0] if pool_file_maps else None
+                )
 
         print(f"\nPool mode summary:")
         print(f"Filtered IDs: {len(filtered_ids)}")
         print(f"Pool folders: {len(pool_folders)}")
         for stream_name, files in extracted.items():
             print(f"Extracted {stream_name}: {len(files)} files")
+
+        # Filter and copy pool tables (always do this, even with 0 rows - creates empty tables)
+        if pool_table_maps:
+            copied_tables = filter_and_copy_pool_tables(
+                result_df=result_df,
+                pool_table_maps=pool_table_maps,
+                pool_folders=pool_folders,
+                output_folder=output_dir,
+                id_map_forward=id_map_forward,
+                rename_map=original_to_new_id if rename else None
+            )
+            print(f"Copied {len(copied_tables)} tables")
 
     # Create missing.csv
     if original_ids:

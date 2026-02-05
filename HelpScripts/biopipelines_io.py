@@ -20,7 +20,7 @@ Functions:
     iterate_table_values: Iterate over (id, value) pairs from a table
 
 Example usage:
-    from pipe_biopipelines_io import load_datastream, iterate_files, iterate_values
+    from biopipelines_io import load_datastream, iterate_files, iterate_values
 
     # Load from JSON or dict
     structures_ds = load_datastream("/path/to/structures.json")
@@ -34,7 +34,7 @@ Example usage:
         print(f"Compound {comp_id}: {values['smiles']}")
 
     # Table reference for per-structure data (e.g., fixed positions from DistanceSelector)
-    from pipe_biopipelines_io import load_table, lookup_table_value, iterate_table_values
+    from biopipelines_io import load_table, lookup_table_value, iterate_table_values
 
     # Load table (supports DATASHEET_REFERENCE:path:column format)
     table, column = load_table("DATASHEET_REFERENCE:/path/to/positions.csv:within")

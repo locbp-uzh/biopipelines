@@ -27,7 +27,7 @@ from typing import List, Tuple, Set
 
 # Import unified I/O utilities and PDB parser
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from HelpScripts.biopipelines_io import load_datastream, iterate_files
+from biopipelines_io import load_datastream, iterate_files
 from pdb_parser import parse_pdb_file, Atom
 
 
