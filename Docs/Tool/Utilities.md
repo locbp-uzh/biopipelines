@@ -295,10 +295,14 @@ To override defaults, use `PyMOL.Set()` before other operations.
 - `Load(structures)` - Load structures
 - `Color(structures, selection, color)` - Color selection
 - `ColorAF(structures, upper=100)` - Color by pLDDT (AlphaFold scheme)
+- `ColorAlign(reference, targets, ...)` - Color by sequence alignment against reference
 - `Align(method, target)` - Align objects (methods: "align", "super", "cealign")
 - `Show(structures, representation, selection)` - Show representation
 - `Hide(structures, representation, selection)` - Hide representation
 - `Set(setting, value, selection)` - Set PyMOL setting
+- `Center(selection="all")` - Center view on selection without changing orientation
+- `Zoom(selection="all", buffer=5.0)` - Zoom to fit selection with buffer (Angstroms)
+- `Orient(selection="all")` - Orient view to show selection from best angle
 - `Save(filename)` - Save session
 - `Render(structures, orient_selection, width, height, filename, dpi)` - Render single PNG
 - `RenderEach(structures, ...)` - Render each structure individually as PNG
@@ -317,6 +321,23 @@ To override defaults, use `PyMOL.Set()` before other operations.
 - `width`, `height`: Image dimensions (default: 1920x1080)
 - `dpi`: Image DPI (default: 300)
 - `background`: Background color (default: "white")
+
+**ColorAlign Parameters**:
+- `reference`: Reference structure for sequence alignment
+- `targets`: Target structure(s) to color based on alignment
+- `identical`: Color for identical residues (default: "white")
+- `similar`: Color for similar amino acid groups (default: "wheat")
+- `different`: Color for non-similar mismatches (default: "wheat")
+- `notcovered`: Color for gaps/unaligned regions (default: "gray50")
+- `show_mutations`: Show sticks for mutated residues (default: True)
+
+**Amino Acid Groups** (for similar coloring):
+- Aliphatic: A, V, L, I, M
+- Aromatic: F, W, Y
+- Polar: S, T, N, Q
+- Positive: K, R, H
+- Negative: D, E
+- Special: C, G, P
 
 **Examples**:
 
@@ -356,6 +377,19 @@ PyMOL(session="af_renders",
         structures=alphafold,
         color_protein="plddt",
         plddt_upper=100
+    )
+)
+
+# Color by sequence alignment against reference
+PyMOL(session="alignment_view",
+    PyMOL.ColorAlign(
+        reference=xrc_structure,
+        targets=designed_sequences,
+        identical="white",
+        similar="palegreen",
+        different="salmon",
+        notcovered="gray50",
+        show_mutations=True
     )
 )
 ```

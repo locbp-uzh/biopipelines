@@ -59,26 +59,32 @@ with Pipeline(project="Examples",
               time="4:00:00",
               memory="16GB")
     
-    SNAPTag = Sequence()
+    HaloTag = Sequence("MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
+                       ids="HT")
+    
+    cy7_R_open = Ligand(smiles=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
+                         ids="Cy7_R_OPEN")
+    cy7_RR_close = Ligand(smiles=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@]34[C@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
+                          ids="Cy7_RR_CLOSE")
 
-    cy5_snap_open = Ligand()
-    cy5_snap_close = Ligand()
-
-    # We load the prediction from Boltz. This is very important to benchmark the affinities
-    original_open = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_R_001/ToolOutputs/1_Boltz2_output.json')
-    original_close = LoadOutput('/shares/locbp.chem.uzh/public/BioPipelines/Boltz/HT7_Cy7_C_RR_001/ToolOutputs/1_Boltz2_output.json')
-
-    best_open, best_close = original_open, original_close
+    # We need an initial prediction from Boltz to benchmark the affinities
+    original_open = Boltz2(proteins=HaloTag,
+                       ligands=cy7_R_open)
+    original_close = Boltz2(proteins=HaloTag,
+                       ligands=cy7_RR_close)
+    print(original_open.streams.structures.ids) # verify the ids. we need this for merging
+    print(original_close.streams.structures.ids) # verify the ids. we need this for merging
+    ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
 
     # Merge original open and close affinity tables with Panda
     # pool=best_open preserves structure files with id_map remapped IDs
     original_analysis = Panda(
-        tables=[best_open.tables.affinity, best_close.tables.affinity],
+        tables=[original_open.tables.affinity, original_close.tables.affinity],
         operations=[
-            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": ["HT7_Cy7_C_R", "HT7_Cy7_C_RR"]}),
+            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": ["HT", "HT"]}),
             Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
         ],
-        pool=best_open
+        pool=original_open #
     )
 
     NUM_CYCLES = 3
@@ -86,7 +92,10 @@ with Pipeline(project="Examples",
 
     # Track all analyses and pools across cycles for best selection
     all_analyses = [original_analysis]  # Start with original baseline
-    all_pools = [best_open]  # Start with original best structure
+    all_pools = [original_close]  # Start with original best structure
+
+    best_open,best_close=original_open,original_close
+
 
     for CYCLE in range(NUM_CYCLES):
         Suffix(f"Cycle{CYCLE+1}")
@@ -108,9 +117,9 @@ with Pipeline(project="Examples",
         unique_new_sequences,all_sequences_seen=drop_duplicates_history(composer,all_sequences_seen)
         
         boltz_holo_open = Boltz2(proteins=unique_new_sequences,
-                                 ligands=original_open)
+                                 ligands=cy7_R_open)
         boltz_holo_close = Boltz2(proteins=unique_new_sequences,
-                                  ligands=original_close,
+                                  ligands=cy7_RR_close,
                                   msas=boltz_holo_open)
 
         open_chlorine_aspartate_distance = Distance(structures=boltz_holo_open,
@@ -207,22 +216,11 @@ with Pipeline(project="Examples",
         )
     )
 
-    # PyMOL renders of best structures from final cycle
+    # We see the sequence alignment against the original protein with PyMOL
     PyMOL(
-        PyMOL.RenderEach(
-            structures=best_open,
-            orient_selection="resn LIG",
-            color_protein="plddt",
-            color_ligand="byatom",
-            ligand_selection="resn LIG",
-            plddt_upper=1,  # Boltz2 uses 0-1 confidence scores
-            title="HaloTag7-Cy7",
-            caption="Affinity: {open_affinity_pred_value:.2f} | Delta: {affinity_delta:.2f}",
-            data_table=best_open.tables.affinity,
-            width=1920,
-            height=1080,
-            background="white"
-        ),
-        session="best_open_renders"
+        PyMOL.ColorAlign(
+            reference=original_open,
+            targets=best_open
+        )
     )
 

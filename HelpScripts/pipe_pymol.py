@@ -385,6 +385,199 @@ class PyMOLSessionBuilder:
             except Exception as e:
                 print(f"  Error coloring {pymol_name}: {e}")
 
+    def execute_coloralign(self, op: Dict[str, Any]):
+        """
+        Execute ColorAlign operation - color structures by sequence alignment.
+
+        Performs sequence alignment between reference and target structures,
+        then colors residues based on alignment quality.
+
+        Args:
+            op: Operation dict with reference, targets, and color options
+        """
+        reference_ref = op.get("reference")
+        targets_ref = op.get("targets")
+        identical_color = op.get("identical", "white")
+        similar_color = op.get("similar", "wheat")
+        different_color = op.get("different", "wheat")
+        notcovered_color = op.get("notcovered", "gray50")
+        show_mutations = op.get("show_mutations", True)
+
+        if not reference_ref:
+            raise ValueError("ColorAlign operation requires reference")
+        if not targets_ref:
+            raise ValueError("ColorAlign operation requires targets")
+
+        # Resolve structures
+        references = self._resolve_structures(reference_ref)
+        targets = self._resolve_structures(targets_ref)
+
+        if not references:
+            raise ValueError("No reference structures found")
+
+        # Use first reference structure
+        ref_struct = references[0]
+        ref_id = ref_struct["id"]
+        ref_path = ref_struct["path"]
+
+        # Load reference if not already loaded
+        if ref_id not in self.loaded_objects:
+            ref_name = self._get_pymol_name(ref_id)
+            cmd.load(ref_path, ref_name)
+            self.loaded_objects[ref_id] = ref_name
+            if self.first_loaded_object is None:
+                self.first_loaded_object = ref_name
+            print(f"  Loaded reference: {ref_name}")
+
+        ref_name = self.loaded_objects[ref_id]
+
+        # Get reference sequence
+        try:
+            ref_fasta = cmd.get_fastastr(ref_name)
+            ref_seq = ref_fasta.split('\n', 1)[1].replace('\n', '')
+        except Exception as e:
+            print(f"  Error: cannot get sequence for reference {ref_name}: {e}")
+            return
+
+        print(f"ColorAlign: Reference {ref_name} ({len(ref_seq)} residues)")
+
+        # Process each target
+        for target_struct in targets:
+            target_id = target_struct["id"]
+            target_path = target_struct["path"]
+
+            # Load target if not already loaded
+            if target_id not in self.loaded_objects:
+                target_name = self._get_pymol_name(target_id)
+                cmd.load(target_path, target_name)
+                self.loaded_objects[target_id] = target_name
+                print(f"  Loaded target: {target_name}")
+
+            target_name = self.loaded_objects[target_id]
+
+            # Perform structural alignment
+            try:
+                result = cmd.align(target_name, ref_name)
+                rmsd = result[0] if isinstance(result, tuple) else 0
+                print(f"  Aligned {target_name}: RMSD = {rmsd:.2f}")
+            except Exception as e:
+                print(f"  Warning: structural alignment failed for {target_name}: {e}")
+
+            # Get target sequence
+            try:
+                target_fasta = cmd.get_fastastr(target_name)
+                target_seq = target_fasta.split('\n', 1)[1].replace('\n', '')
+            except Exception as e:
+                print(f"  Warning: cannot get sequence for {target_name}: {e}")
+                continue
+
+            # Perform sequence alignment
+            aln_ref, aln_target = self._needleman_wunsch(ref_seq, target_seq)
+
+            # Color residues based on alignment
+            target_resi = 0
+            mutations = []
+
+            for pos in range(len(aln_ref)):
+                r_res = aln_ref[pos]
+                t_res = aln_target[pos]
+
+                if t_res != '-':
+                    target_resi += 1
+
+                    if r_res == '-':
+                        # Gap in reference - not covered
+                        color = notcovered_color
+                    elif r_res == t_res:
+                        # Identical residues
+                        color = identical_color
+                    else:
+                        mutations.append(f"{r_res}{target_resi}{t_res}")
+                        # Check if similar groups
+                        if self._aa_similar(r_res, t_res):
+                            color = similar_color
+                        else:
+                            color = different_color
+
+                    try:
+                        cmd.color(color, f"{target_name} and resi {target_resi}")
+                        if show_mutations and color not in (identical_color, notcovered_color):
+                            cmd.show("sticks", f"{target_name} and resi {target_resi} and not name N+C+O")
+                            from pymol import util
+                            util.cnc(f"{target_name} and resi {target_resi} and not name N+CA+C+O")
+                    except Exception as e:
+                        pass  # Silently skip residues that don't exist
+
+            print(f"  Colored {target_resi} residues in {target_name}")
+            if mutations:
+                print(f"  Mutations: {', '.join(mutations)}")
+
+    def _aa_similar(self, a: str, b: str) -> bool:
+        """Check if two amino acids are in the same similarity group."""
+        group_map = {
+            'A': 'aliphatic', 'V': 'aliphatic', 'L': 'aliphatic', 'I': 'aliphatic', 'M': 'aliphatic',
+            'F': 'aromatic', 'W': 'aromatic', 'Y': 'aromatic',
+            'S': 'polar', 'T': 'polar', 'N': 'polar', 'Q': 'polar',
+            'K': 'positive', 'R': 'positive', 'H': 'positive',
+            'D': 'negative', 'E': 'negative',
+            'C': 'special', 'G': 'special', 'P': 'special'
+        }
+        ga, gb = group_map.get(a), group_map.get(b)
+        return ga is not None and gb is not None and ga == gb
+
+    def _needleman_wunsch(self, s1: str, s2: str) -> tuple:
+        """
+        Perform Needleman-Wunsch global sequence alignment.
+
+        Returns:
+            Tuple of (aligned_s1, aligned_s2) with gaps represented as '-'
+        """
+        # Scoring: identical=2, similar group=1, mismatch=-1, gap=-1
+        def score(a, b):
+            if a == b:
+                return 2
+            if self._aa_similar(a, b):
+                return 1
+            return -1
+
+        gap = -1
+        m, n = len(s1), len(s2)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+
+        # Initialize first row and column
+        for i in range(1, m + 1):
+            dp[i][0] = dp[i - 1][0] + gap
+        for j in range(1, n + 1):
+            dp[0][j] = dp[0][j - 1] + gap
+
+        # Fill the DP matrix
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                match = dp[i - 1][j - 1] + score(s1[i - 1], s2[j - 1])
+                delete = dp[i - 1][j] + gap
+                insert = dp[i][j - 1] + gap
+                dp[i][j] = max(match, delete, insert)
+
+        # Traceback
+        aln1, aln2 = [], []
+        i, j = m, n
+        while i > 0 or j > 0:
+            if i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + score(s1[i - 1], s2[j - 1]):
+                aln1.append(s1[i - 1])
+                aln2.append(s2[j - 1])
+                i -= 1
+                j -= 1
+            elif i > 0 and dp[i][j] == dp[i - 1][j] + gap:
+                aln1.append(s1[i - 1])
+                aln2.append('-')
+                i -= 1
+            else:
+                aln1.append('-')
+                aln2.append(s2[j - 1])
+                j -= 1
+
+        return ''.join(reversed(aln1)), ''.join(reversed(aln2))
+
     def execute_align(self, op: Dict[str, Any]):
         """
         Execute Align operation - align all loaded objects.
@@ -576,20 +769,48 @@ class PyMOLSessionBuilder:
         except Exception as e:
             print(f"Error saving session: {e}")
 
-    def execute_orient(self, op: Dict[str, Any]):
+    def execute_center(self, op: Dict[str, Any]):
         """
-        Execute Orient operation - orient view to a selection.
+        Execute Center operation - center view on a selection.
 
         Args:
-            op: Operation dict with selection and zoom flag
+            op: Operation dict with selection
         """
         selection = op.get("selection", "all")
-        zoom = op.get("zoom", True)
+
+        try:
+            cmd.center(selection)
+            print(f"Center: Centered view on '{selection}'")
+        except Exception as e:
+            print(f"Error centering: {e}")
+
+    def execute_zoom(self, op: Dict[str, Any]):
+        """
+        Execute Zoom operation - zoom view to fit a selection.
+
+        Args:
+            op: Operation dict with selection and buffer
+        """
+        selection = op.get("selection", "all")
+        buffer = op.get("buffer", 5.0)
+
+        try:
+            cmd.zoom(selection, buffer=buffer)
+            print(f"Zoom: Zoomed to '{selection}' (buffer={buffer})")
+        except Exception as e:
+            print(f"Error zooming: {e}")
+
+    def execute_orient(self, op: Dict[str, Any]):
+        """
+        Execute Orient operation - orient view to show selection from best angle.
+
+        Args:
+            op: Operation dict with selection
+        """
+        selection = op.get("selection", "all")
 
         try:
             cmd.orient(selection)
-            if zoom:
-                cmd.zoom(selection, buffer=5)
             print(f"Orient: Oriented view to '{selection}'")
         except Exception as e:
             print(f"Error orienting: {e}")
@@ -814,6 +1035,8 @@ class PyMOLSessionBuilder:
             self.execute_color(op)
         elif op_type == "coloraf":
             self.execute_coloraf(op)
+        elif op_type == "coloralign":
+            self.execute_coloralign(op)
         elif op_type == "align":
             self.execute_align(op)
         elif op_type == "show":
@@ -824,6 +1047,10 @@ class PyMOLSessionBuilder:
             self.execute_set(op)
         elif op_type == "save":
             self.execute_save(op)
+        elif op_type == "center":
+            self.execute_center(op)
+        elif op_type == "zoom":
+            self.execute_zoom(op)
         elif op_type == "orient":
             self.execute_orient(op)
         elif op_type == "ray":

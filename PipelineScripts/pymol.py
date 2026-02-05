@@ -139,6 +139,47 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("coloraf", structures=structures, upper=upper)
 
     @staticmethod
+    def ColorAlign(reference: Union[StandardizedOutput, DataStream],
+                   targets: Union[StandardizedOutput, DataStream],
+                   identical: str = "white",
+                   similar: str = "wheat",
+                   different: str = "wheat",
+                   notcovered: str = "gray50",
+                   show_mutations: bool = True) -> PyMOLOperation:
+        """
+        Color structures based on sequence alignment against a reference.
+
+        Performs sequence alignment between reference and target structures,
+        then colors residues based on alignment quality:
+        - identical: residues that match exactly
+        - similar: residues in the same amino acid group (e.g., aliphatic, aromatic)
+        - different: mismatched residues not in similar groups
+        - notcovered: gaps/unaligned regions
+
+        Also performs structural alignment using PyMOL's align command.
+
+        Args:
+            reference: Reference structure(s) for alignment
+            targets: Target structure(s) to color based on alignment
+            identical: Color for identical residues (default: "white")
+            similar: Color for similar group matches (default: "wheat")
+            different: Color for non-similar mismatches (default: "wheat")
+            notcovered: Color for gaps/unaligned regions (default: "gray50")
+            show_mutations: Show sticks for mutated residues (default: True)
+
+        Returns:
+            PyMOLOperation for alignment-based coloring
+        """
+        return PyMOLOperation("coloralign",
+                              reference=reference,
+                              targets=targets,
+                              identical=identical,
+                              similar=similar,
+                              different=different,
+                              notcovered=notcovered,
+                              show_mutations=show_mutations)
+
+    @staticmethod
     def Align(method: str = "align", target: Optional[str] = None) -> PyMOLOperation:
         """
         Align all loaded objects.
@@ -217,18 +258,47 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("save", filename=filename)
 
     @staticmethod
-    def Orient(selection: str = "all", zoom: bool = True) -> PyMOLOperation:
+    def Center(selection: str = "all") -> PyMOLOperation:
         """
-        Orient the view to focus on a selection.
+        Center the view on a selection without changing orientation.
 
         Args:
-            selection: PyMOL selection to orient towards (e.g., "resn LIG", "chain A")
-            zoom: Whether to also zoom to the selection
+            selection: PyMOL selection to center on (default: "all")
+
+        Returns:
+            PyMOLOperation for centering
+        """
+        return PyMOLOperation("center", selection=selection)
+
+    @staticmethod
+    def Zoom(selection: str = "all", buffer: float = 5.0) -> PyMOLOperation:
+        """
+        Zoom the view to fit a selection.
+
+        Args:
+            selection: PyMOL selection to zoom to (default: "all")
+            buffer: Extra space around selection in Angstroms (default: 5.0)
+
+        Returns:
+            PyMOLOperation for zooming
+        """
+        return PyMOLOperation("zoom", selection=selection, buffer=buffer)
+
+    @staticmethod
+    def Orient(selection: str = "all") -> PyMOLOperation:
+        """
+        Orient the view to show a selection from the best angle.
+
+        Rotates the camera to align the principal axes of the selection
+        with the screen axes.
+
+        Args:
+            selection: PyMOL selection to orient towards (default: "all")
 
         Returns:
             PyMOLOperation for orienting
         """
-        return PyMOLOperation("orient", selection=selection, zoom=zoom)
+        return PyMOLOperation("orient", selection=selection)
 
     @staticmethod
     def Ray(width: int = 1920, height: int = 1080) -> PyMOLOperation:
@@ -395,6 +465,14 @@ class PyMOL(BaseConfig):
                 structures = op.params.get("structures")
                 if structures is not None and structures not in self._structure_sources:
                     self._structure_sources.append(structures)
+
+            elif op.op_type == "coloralign":
+                reference = op.params.get("reference")
+                if reference is not None and reference not in self._structure_sources:
+                    self._structure_sources.append(reference)
+                targets = op.params.get("targets")
+                if targets is not None and targets not in self._structure_sources:
+                    self._structure_sources.append(targets)
 
             elif op.op_type == "names":
                 basename = op.params.get("basename")
