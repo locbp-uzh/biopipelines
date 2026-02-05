@@ -32,3 +32,4 @@ Ligands/*
 Thumbs.db
 .claude/settings.local.json
 claude_fork.bat
+claude.bat
