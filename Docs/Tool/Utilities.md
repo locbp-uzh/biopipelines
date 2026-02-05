@@ -269,31 +269,94 @@ msas = MMseqs2(sequences=lmpnn, timeout=7200)
 
 ### PyMOL
 
-Creates PyMOL sessions using a declarative operation-based API.
+Creates PyMOL sessions using a declarative operation-based API. 
+
+**Resources**: Requires a GPU node.
 
 **Environment**: `ProteinEnv`
+
+**Default Settings** (applied automatically):
+```
+show cartoon
+set seq_view, 1
+set cartoon_gap_cutoff, 0
+set sphere_scale, 0.2
+set ray_trace_mode, 1
+set ray_shadows, 0
+set spec_reflect, 0
+set ray_trace_frames, 1
+set ray_trace_color, gray20
+```
+
+To override defaults, use `PyMOL.Set()` before other operations.
 
 **Operations**:
 - `Names(prefix, basename, suffix)` - Set ID → name mapping
 - `Load(structures)` - Load structures
 - `Color(structures, selection, color)` - Color selection
-- `ColorAF(structures, upper=100)` - Color by pLDDT
-- `Align(method, target)` - Align objects
+- `ColorAF(structures, upper=100)` - Color by pLDDT (AlphaFold scheme)
+- `Align(method, target)` - Align objects (methods: "align", "super", "cealign")
 - `Show(structures, representation, selection)` - Show representation
 - `Hide(structures, representation, selection)` - Hide representation
 - `Set(setting, value, selection)` - Set PyMOL setting
 - `Save(filename)` - Save session
+- `Render(structures, orient_selection, width, height, filename, dpi)` - Render single PNG
+- `RenderEach(structures, ...)` - Render each structure individually as PNG
 
-**Example**:
+**Outputs**:
+- `renders` - DataStream of PNG files (when using Render/RenderEach)
+- `session_file` - Path to .pse session file
+
+**RenderEach Parameters**:
+- `structures`: Structures to render
+- `orient_selection`: Selection to orient towards (default: "resn LIG")
+- `color_protein`: "plddt" for confidence coloring, or color name (default: "plddt")
+- `color_ligand`: "byatom" for element colors, or color name (default: "byatom")
+- `ligand_selection`: Selection for ligand (default: "resn LIG")
+- `plddt_upper`: Upper bound for pLDDT (default: 1 for Boltz2, use 100 for AlphaFold)
+- `width`, `height`: Image dimensions (default: 1920x1080)
+- `dpi`: Image DPI (default: 300)
+- `background`: Background color (default: "white")
+
+**Examples**:
 
 ```python
 from PipelineScripts.pymol import PyMOL
 
-PyMOL("session",
+# Basic session with alignment
+PyMOL(session="my_session",
     PyMOL.Load(boltz),
-    PyMOL.Color(boltz, selection="helix", color="red"),
     PyMOL.ColorAF(boltz),
     PyMOL.Align("align")
+)
+
+# Override default settings
+PyMOL(session="custom",
+    PyMOL.Set("ray_shadows", 1),
+    PyMOL.Set("cartoon_gap_cutoff", 10),
+    PyMOL.Load(structures),
+    PyMOL.ColorAF(structures)
+)
+
+# Render each structure individually
+PyMOL(session="renders",
+    PyMOL.RenderEach(
+        structures=boltz,
+        orient_selection="resn LIG",
+        color_protein="plddt",
+        plddt_upper=1,  # Boltz2 uses 0-1 confidence
+        width=1920,
+        height=1080
+    )
+)
+
+# AlphaFold structures (pLDDT 0-100)
+PyMOL(session="af_renders",
+    PyMOL.RenderEach(
+        structures=alphafold,
+        color_protein="plddt",
+        plddt_upper=100
+    )
 )
 ```
 

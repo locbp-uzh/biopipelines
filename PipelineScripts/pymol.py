@@ -295,9 +295,6 @@ class PyMOL(BaseConfig):
                    color_ligand: str = "byatom",
                    ligand_selection: str = "resn LIG",
                    plddt_upper: float = 1,
-                   title: Optional[str] = None,
-                   caption: Optional[str] = None,
-                   data_table: Optional[TableInfo] = None,
                    width: int = 1920,
                    height: int = 1080,
                    dpi: int = 300,
@@ -310,8 +307,7 @@ class PyMOL(BaseConfig):
         2. Colors protein (by pLDDT or specified color)
         3. Colors ligand (by atom or specified color)
         4. Orients view towards the ligand/selection
-        5. Adds title (top, centered) and caption (bottom, centered) with metrics from table
-        6. Ray traces and saves PNG
+        5. Ray traces and saves PNG
 
         Args:
             structures: Structures to render
@@ -320,13 +316,6 @@ class PyMOL(BaseConfig):
             color_ligand: Ligand coloring - "byatom" for element colors, or color name
             ligand_selection: Selection for ligand (default: "resn LIG")
             plddt_upper: Upper bound for pLDDT values (default: 1 for Boltz2, use 100 for AlphaFold)
-            title: Title format string (displayed at top, centered). Can include placeholders
-                   like {id}, {antibiotic}, etc. Values come from data_table.
-                   Example: "Rifampicin Binder"
-            caption: Caption format string (displayed at bottom, centered). Can include
-                     placeholders with formatting like {affinity_pred_value:.2f}.
-                     Example: "Probability: {affinity_probability_binary:.2f} | Affinity: {affinity_pred_value:.2f}"
-            data_table: Table containing values for title/caption placeholders (must have 'id' column)
             width: Image width in pixels
             height: Image height in pixels
             dpi: Image DPI
@@ -343,9 +332,6 @@ class PyMOL(BaseConfig):
                 color_ligand="byatom",
                 ligand_selection="resn LIG",
                 plddt_upper=1,  # Boltz2 uses 0-1 confidence scores
-                title="Rifampicin Binder",
-                caption="Probability: {affinity_probability_binary:.2f} | Affinity: {affinity_pred_value:.2f}",
-                data_table=boltz_rifampicin.tables.affinity,
                 width=1920,
                 height=1080
             )
@@ -357,9 +343,6 @@ class PyMOL(BaseConfig):
                               color_ligand=color_ligand,
                               ligand_selection=ligand_selection,
                               plddt_upper=plddt_upper,
-                              title=title,
-                              caption=caption,
-                              data_table=data_table,
                               width=width,
                               height=height,
                               dpi=dpi,
@@ -412,10 +395,6 @@ class PyMOL(BaseConfig):
                 structures = op.params.get("structures")
                 if structures is not None and structures not in self._structure_sources:
                     self._structure_sources.append(structures)
-
-                data_table = op.params.get("data_table")
-                if data_table is not None and hasattr(data_table, 'path'):
-                    self._table_references.append((data_table, None))
 
             elif op.op_type == "names":
                 basename = op.params.get("basename")

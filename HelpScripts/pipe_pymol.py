@@ -57,24 +57,15 @@ class PyMOLSessionBuilder:
     def setup_pymol(self):
         """Initialize PyMOL with standard settings (already launched at import time)."""
         # Standard visualization settings
+        cmd.show("cartoon")
         cmd.set("seq_view", 1)
-        cmd.set("cartoon_gap_cutoff", 20)
-        cmd.set("cartoon_sampling", 20)
+        cmd.set("cartoon_gap_cutoff", 0)
         cmd.set("sphere_scale", 0.2)
         cmd.set("ray_trace_mode", 1)
         cmd.set("ray_shadows", 0)
         cmd.set("spec_reflect", 0)
         cmd.set("ray_trace_frames", 1)
         cmd.set("ray_trace_color", "gray20")
-
-        # Set up pLDDT colors
-        self._setup_plddt_colors()
-
-    def _setup_plddt_colors(self):
-        """Set up standard pLDDT color scheme using hex colors."""
-        # Colors match AlphaFold confidence visualization
-        # Blue (high confidence), Cyan, Yellow, Orange (low confidence)
-        pass  # Colors are applied directly via hex in coloraf
 
     def _load_table(self, table_path: str) -> pd.DataFrame:
         """Load a table CSV file."""
@@ -690,9 +681,6 @@ class PyMOLSessionBuilder:
         color_ligand = op.get("color_ligand", "byatom")
         ligand_selection = op.get("ligand_selection", "resn LIG")
         plddt_upper = op.get("plddt_upper", 1)  # Default to 1 for Boltz2 confidence
-        title_format = op.get("title")
-        caption_format = op.get("caption")
-        data_table_ref = op.get("data_table")
         width = op.get("width", 1920)
         height = op.get("height", 1080)
         dpi = op.get("dpi", 300)
@@ -703,16 +691,6 @@ class PyMOLSessionBuilder:
 
         structures = self._resolve_structures(structures_ref)
         print(f"RenderEach: Rendering {len(structures)} structures individually")
-
-        # Load data table if provided
-        data_table = None
-        if data_table_ref and (title_format or caption_format):
-            table_path = None
-            if isinstance(data_table_ref, dict):
-                table_path = data_table_ref.get("table_path")
-            if table_path and os.path.exists(table_path):
-                data_table = self._load_table(table_path)
-                print(f"  Loaded data table: {table_path} ({len(data_table)} rows)")
 
         # Create renders subfolder
         renders_folder = os.path.join(self.output_folder, "renders")
@@ -769,20 +747,12 @@ class PyMOLSessionBuilder:
                 print(f"    Warning: Could not orient to {orient_selection}: {e}")
                 cmd.orient(struct_id)
 
-            # Build text info from table
-            text_info = self._get_text_info(struct_id, title_format, caption_format, data_table)
-
             # Ray trace and save
             output_file = os.path.join(renders_folder, f"{struct_id}.png")
             try:
                 cmd.ray(width, height)
                 cmd.png(output_file, width=width, height=height, dpi=dpi)
                 print(f"    Saved: {output_file}")
-
-                # Add title/caption overlay to the saved PNG
-                if text_info:
-                    self._add_text_overlay(output_file, text_info, width, height)
-
             except Exception as e:
                 print(f"    Error saving PNG: {e}")
 
@@ -826,164 +796,6 @@ class PyMOLSessionBuilder:
             print(f"    Applied pLDDT coloring (upper={upper}, thresholds={extremes})")
         except Exception as e:
             print(f"    Warning: pLDDT coloring failed: {e}")
-
-    def _get_text_info(self, struct_id: str, title_format: Optional[str],
-                       caption_format: Optional[str], data_table: Optional[pd.DataFrame]) -> Optional[Dict[str, Any]]:
-        """
-        Get title and caption information from table for a structure.
-
-        Args:
-            struct_id: Structure ID to look up in table
-            title_format: Format string for title (top) with {column_name} placeholders
-            caption_format: Format string for caption (bottom) with {column_name} placeholders
-            data_table: DataFrame with 'id' column and value columns
-
-        Returns:
-            Dict with 'title', 'caption', 'values', 'struct_id', or None if no text needed
-        """
-        if not title_format and not caption_format:
-            return None
-
-        values = {'id': struct_id}
-
-        if data_table is not None and 'id' in data_table.columns:
-            row = data_table[data_table['id'] == struct_id]
-            if row.empty:
-                # Try matching - check if struct_id contains table id or vice versa
-                for col_id in data_table['id']:
-                    col_id_str = str(col_id)
-                    # Match rank numbers (e.g., rank0001_xxx matches rank0001)
-                    if struct_id.startswith("rank") and col_id_str.startswith("rank"):
-                        struct_rank = struct_id.split('_')[0]
-                        col_rank = col_id_str.split('_')[0] if '_' in col_id_str else col_id_str
-                        if struct_rank == col_rank:
-                            row = data_table[data_table['id'] == col_id]
-                            break
-                    elif struct_id in col_id_str or col_id_str in struct_id:
-                        row = data_table[data_table['id'] == col_id]
-                        break
-
-            if not row.empty:
-                values = row.iloc[0].to_dict()
-                values['id'] = struct_id  # Use actual struct_id
-            else:
-                print(f"    Warning: ID '{struct_id}' not found in data table")
-
-        return {
-            'title_format': title_format,
-            'caption_format': caption_format,
-            'values': values,
-            'struct_id': struct_id
-        }
-
-    def _add_text_overlay(self, image_path: str, text_info: Dict[str, Any], width: int, height: int):
-        """
-        Add title (top, centered) and caption (bottom, centered) overlay to a rendered PNG image.
-
-        Args:
-            image_path: Path to the PNG file to modify
-            text_info: Dict with 'title_format', 'caption_format', 'values', 'struct_id'
-            width: Image width
-            height: Image height
-        """
-        try:
-            from PIL import Image, ImageDraw, ImageFont
-        except ImportError:
-            print("    Warning: PIL not available, skipping text overlay")
-            return
-
-        try:
-            # Open the image
-            img = Image.open(image_path)
-            draw = ImageDraw.Draw(img)
-
-            # Font sizes based on image dimensions
-            font_size_title = max(48, width // 30)
-            font_size_caption = max(32, width // 45)
-
-            # Try to load fonts
-            font_title = None
-            font_caption = None
-            font_paths = [
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                'DejaVuSans-Bold.ttf',
-                'DejaVuSans.ttf',
-                'Arial.ttf',
-                'arial.ttf',
-                '/System/Library/Fonts/Helvetica.ttc',
-                'C:\\Windows\\Fonts\\arial.ttf',
-            ]
-            for font_path in font_paths:
-                try:
-                    font_title = ImageFont.truetype(font_path, font_size_title)
-                    font_caption = ImageFont.truetype(font_path, font_size_caption)
-                    break
-                except:
-                    continue
-
-            if font_title is None:
-                font_title = ImageFont.load_default()
-                font_caption = ImageFont.load_default()
-
-            title_format = text_info.get('title_format')
-            caption_format = text_info.get('caption_format')
-            values = text_info.get('values', {})
-
-            # Draw title at top center
-            if title_format:
-                try:
-                    title_text = title_format.format(**values)
-                except Exception as e:
-                    title_text = title_format
-                    print(f"    Warning: Could not format title: {e}")
-
-                bbox = draw.textbbox((0, 0), title_text, font=font_title)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1]
-
-                x = (width - text_width) // 2
-                y = max(30, height // 25)
-
-                # Draw shadow for readability on any background
-                shadow_offset = 3
-                draw.text((x + shadow_offset, y + shadow_offset), title_text, font=font_title, fill='white')
-                draw.text((x - 1, y - 1), title_text, font=font_title, fill='white')
-                draw.text((x + 1, y - 1), title_text, font=font_title, fill='white')
-                draw.text((x - 1, y + 1), title_text, font=font_title, fill='white')
-                draw.text((x + 1, y + 1), title_text, font=font_title, fill='white')
-                draw.text((x, y), title_text, font=font_title, fill='black')
-
-            # Draw caption at bottom center
-            if caption_format:
-                try:
-                    caption_text = caption_format.format(**values)
-                except Exception as e:
-                    caption_text = caption_format
-                    print(f"    Warning: Could not format caption: {e}")
-
-                bbox = draw.textbbox((0, 0), caption_text, font=font_caption)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1]
-
-                x = (width - text_width) // 2
-                y = height - text_height - max(30, height // 25)
-
-                # Draw shadow for readability
-                shadow_offset = 2
-                draw.text((x + shadow_offset, y + shadow_offset), caption_text, font=font_caption, fill='white')
-                draw.text((x - 1, y - 1), caption_text, font=font_caption, fill='white')
-                draw.text((x + 1, y - 1), caption_text, font=font_caption, fill='white')
-                draw.text((x - 1, y + 1), caption_text, font=font_caption, fill='white')
-                draw.text((x + 1, y + 1), caption_text, font=font_caption, fill='white')
-                draw.text((x, y), caption_text, font=font_caption, fill='dimgray')
-
-            # Save the modified image
-            img.save(image_path)
-            print(f"    Added text overlay")
-
-        except Exception as e:
-            print(f"    Warning: Could not add text overlay: {e}")
 
     def execute_operation(self, op: Dict[str, Any]):
         """
