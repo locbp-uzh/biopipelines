@@ -14,7 +14,7 @@ with Pipeline(project="Examples",
               job="PyMOL",
               description="redesign of N terminus of rifampicin binding protein"):
 
-    Resources(gpu=None,
+    Resources(gpu="any",
               time="4:00:00",
               memory="16GB")
    
