@@ -403,6 +403,8 @@ mkdir -p {self.config_files_dir}
         if self.affinity:
             cmd_parts.append('--affinity')
 
+        cmd_parts.append(f'--sequences-csv "{self.sequences_csv}"')
+
         extra_params = self._generate_extra_config_params()
         if extra_params:
             cmd_parts.append(extra_params)

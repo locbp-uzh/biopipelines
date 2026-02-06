@@ -896,7 +896,11 @@ fi
                         new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
                 else:
                     new_ids = data["ids"][:num_items]
-                    new_files = [os.path.join(self.output_folder, os.path.basename(f)) for f in data["files"][:num_items]]
+                    # Use remapped IDs + original extension for predicted file paths
+                    new_files = []
+                    for new_id, f in zip(new_ids, data["files"][:num_items]):
+                        ext = os.path.splitext(f)[1]
+                        new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
 
                 # For sequences, use the result CSV as map_table
                 map_table = self.output_csv if stream_name == "sequences" else None

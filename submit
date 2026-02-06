@@ -6,9 +6,7 @@
 # of going to job composer and running the job with the suggested job name.
 #
 # Usage:
-#     ./submit.sh [pipeline_name] [job_name]
-#
-# If no arguments provided, will look for the most recent pipeline output.
+#     ./submit.sh <pipeline_script>
 #
 
 module load miniforge3
@@ -96,15 +94,14 @@ echo ""
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 [pipeline_script]"
+    echo "Usage: $0 <pipeline_script>"
     echo ""
     echo "Run a BioPipelines script and submit the generated job to SLURM"
     echo ""
     echo "Arguments:"
-    echo "  pipeline_script  Path to pipeline script (optional, defaults to pipeline.py)"
+    echo "  pipeline_script  Path to pipeline script"
     echo ""
     echo "Examples:"
-    echo "  $0                                           # Run pipeline.py"
     echo "  $0 pipeline.py                               # Run pipeline.py"
     echo "  $0 ExamplePipelines/ligandmpnn_boltz2.py    # Run specific pipeline"
     echo ""
@@ -307,19 +304,17 @@ main() {
     #echo "✓ pandas available"
     #echo ""
 
-    # Default to pipeline.py if no script specified
+    # Require a pipeline script argument
     if [ -z "$pipeline_script" ]; then
-        pipeline_script="pipeline.py"
+        echo "Error: No pipeline script specified"
+        echo ""
+        usage
+        return 1
     fi
 
     # Check if pipeline script exists
     if [ ! -f "$pipeline_script" ]; then
         echo "Error: Pipeline script not found: $pipeline_script"
-        echo ""
-        echo "Available options:"
-        echo "  ./submit.sh                     # Run pipeline.py"
-        echo "  ./submit.sh pipeline.py         # Run specific pipeline script"
-        echo "  ./submit.sh ExamplePipelines/ligandmpnn_boltz2.py"
         return 1
     fi
 

@@ -257,8 +257,11 @@ elif confidence_data:  # If we processed sequences but no affinity data, create 
 
 # 3. Create sequences CSV from original input data
 sequences_csv = os.path.join(OUTPUT_FOLDER, "sequences.csv")
-if os.path.exists(SEQUENCE_IDS_FILE):
-    # Copy the original sequences file to maintain input data
+if os.path.exists(sequences_csv):
+    # Already written by config generator (with id + sequence columns)
+    print(f"Sequences CSV already exists: {sequences_csv}")
+elif os.path.exists(SEQUENCE_IDS_FILE):
+    # Fallback: copy the sequence IDs file
     import shutil
     shutil.copy2(SEQUENCE_IDS_FILE, sequences_csv)
     print(f"Created sequences CSV: {sequences_csv}")

@@ -8,11 +8,21 @@ parser.add_argument('queries_csv_file', type=str)
 parser.add_argument('queries_fasta_file', type=str)
 parser.add_argument('-d', '--duplicates', action='store_true',
                     help='Allow duplicate sequences in output')
+parser.add_argument('--id-map', type=str, default=None,
+                    help='Path to JSON file mapping PDB basenames to stream IDs')
 
 # Parse the arguments
 args = parser.parse_args()
 
 import os
+import json
+
+# Load optional ID map
+id_map = None
+if args.id_map and os.path.exists(args.id_map):
+    with open(args.id_map, 'r') as f:
+        id_map = json.load(f)
+
 fa_files = os.listdir(args.FA_FOLDER)
 old_sequences = []
 for fa in fa_files:
@@ -32,7 +42,9 @@ for fa in fa_files:
                     key,value = p.split("=")
                     if key == 'id': key = 'sample' #ligandmpnn is structured differently from proteinmpnn
                     seq_data[key] = value
-                seq_data["id"] = fa[:-3] + "_" + seq_data["sample"]
+                pdb_base = fa[:-3]
+                mapped_base = id_map.get(pdb_base, pdb_base) if id_map else pdb_base
+                seq_data["id"] = mapped_base + "_" + seq_data["sample"]
                 if seq_data["sequence"] in old_sequences:
                     if args.duplicates:
                         data.append(seq_data)

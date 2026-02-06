@@ -26,11 +26,12 @@ class LigandMPNN(BaseConfig):
 
     # Lazy path descriptors
     seqs_folder = Path(lambda self: os.path.join(self.output_folder, "seqs"))
-    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.csv"))
-    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.fasta"))
+    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"queries.csv"))
+    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"queries.fasta"))
     structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
     commands_file = Path(lambda self: os.path.join(self.output_folder, "lmpnn_commands.sh"))
     replacement_script = Path(lambda self: os.path.join(self.output_folder, "lmpnn_positions_replacement.sh"))
+    id_map_json = Path(lambda self: os.path.join(self.output_folder, ".pdb_to_stream_id_map.json"))
 
     # Helper script paths
     fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
@@ -135,6 +136,14 @@ class LigandMPNN(BaseConfig):
         with open(self.structures_json, 'w') as f:
             json.dump(datastream_dict, f, indent=2)
 
+        # Write pdb_basename -> stream_id map for runtime ID remapping
+        id_map = {}
+        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
+            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
+            id_map[pdb_base] = struct_id
+        with open(self.id_map_json, 'w') as f:
+            json.dump(id_map, f, indent=2)
+
         script_content = "#!/bin/bash\n"
         script_content += "# LigandMPNN execution script\n"
         script_content += self.generate_completion_check_header()
@@ -214,7 +223,7 @@ bash {self.commands_file}
     def _generate_script_convert_outputs(self) -> str:
         """Generate the output conversion part of the script."""
         return f"""echo "Converting FASTA outputs to CSV format"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --duplicates
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --duplicates --id-map {self.id_map_json}
 
 """
 
@@ -224,18 +233,17 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         fasta_files = []
         fasta_ids = []
 
-        for pdb_path in self.structures_stream.files:
+        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
             pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
             fasta_path = os.path.join(self.seqs_folder, f"{pdb_base}.fa")
             fasta_files.append(fasta_path)
-            fasta_ids.append(pdb_base)
+            fasta_ids.append(struct_id)
 
-        # Predict sequence IDs (structure_id + sequence number)
+        # Predict sequence IDs (stream_id + sequence number)
         sequence_ids = []
-        for pdb_path in self.structures_stream.files:
-            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
+        for struct_id in self.structures_stream.ids:
             for seq_num in range(1, self.num_sequences + 1):
-                sequence_ids.append(f"{pdb_base}_{seq_num}")
+                sequence_ids.append(f"{struct_id}_{seq_num}")
 
         # Sequences stream - CSV-based with individual sequence IDs
         sequences = DataStream(

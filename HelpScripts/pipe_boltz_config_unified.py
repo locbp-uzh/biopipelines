@@ -70,6 +70,8 @@ def parse_arguments():
     parser.add_argument('--glycosylation', help='JSON dict mapping chain IDs to Asn positions')
     # Covalent linkage parameters
     parser.add_argument('--covalent-linkage', help='JSON dict for covalent attachment')
+    # Sequences output
+    parser.add_argument('--sequences-csv', help='Path to write protein sequences CSV (id, sequence)')
 
     return parser.parse_args()
 
@@ -682,6 +684,21 @@ def write_sequence_ids(ids: List[str], output_dir: str):
     print(f"Created sequence IDs file: {ids_file}")
 
 
+def write_protein_sequences(proteins: List[Dict], output_path: str):
+    """Write protein sequences CSV with id and sequence columns."""
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['id', 'sequence'])
+        seen = set()
+        for protein in proteins:
+            pid = protein.get('id', '')
+            seq = protein.get('sequence', '')
+            if pid and pid not in seen:
+                writer.writerow([pid, seq])
+                seen.add(pid)
+    print(f"Created protein sequences file: {output_path}")
+
+
 def main():
     args = parse_arguments()
 
@@ -732,6 +749,11 @@ def main():
 
     # Write sequence_ids.csv
     write_sequence_ids(generated_ids, args.output_dir)
+
+    # Write protein sequences CSV with id and sequence columns
+    if args.sequences_csv:
+        all_proteins = proteins_iterated + proteins_static
+        write_protein_sequences(all_proteins, args.sequences_csv)
 
     print(f"\nGenerated {len(configs)} config files")
 
