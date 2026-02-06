@@ -24,6 +24,10 @@ from typing import Dict, List, Any, Optional, Tuple
 import pymol
 from pymol import cmd
 
+# Import unified I/O utilities
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from biopipelines_io import load_datastream, iterate_files
+
 
 def align_structures(ref_obj: str, target_obj: str, selection: str, alignment_method: str) -> None:
     """
@@ -270,15 +274,17 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
     Args:
         config_data: Configuration dictionary with analysis parameters
     """
-    reference_structures = config_data['reference_structures']
-    target_structures = config_data['target_structures']
+    # Load DataStreams using pipe_biopipelines_io
+    reference_ds = load_datastream(config_data['reference_structures_json'])
+    target_ds = load_datastream(config_data['target_structures_json'])
+
     selection_config = config_data['selection']
     alignment_method = config_data['alignment_method']
     output_csv = config_data['output_csv']
 
     print(f"Analyzing conformational changes")
-    print(f"Reference structures: {len(reference_structures)}")
-    print(f"Target structures: {len(target_structures)}")
+    print(f"Reference structures: {len(reference_ds.ids)}")
+    print(f"Target structures: {len(target_ds.ids)}")
     print(f"Selection: {selection_config}")
     print(f"Alignment method: {alignment_method}")
 
@@ -287,24 +293,24 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
     pymol.finish_launching()
     cmd.set("cartoon_gap_cutoff", 0)
 
+    # Build reference lookup by ID for efficient matching
+    reference_files_by_id = {}
+    for ref_id, ref_file in iterate_files(reference_ds):
+        reference_files_by_id[ref_id] = ref_file
+
     # Handle selection
     selection_map = {}
-    use_all_selection = False
     if selection_config['type'] == 'all':
         # Use all CA atoms (whole structure RMSD)
         print("Using all CA atoms (whole structure RMSD)")
-        use_all_selection = True
-        for target_path in target_structures:
-            structure_id = os.path.splitext(os.path.basename(target_path))[0]
-            selection_map[structure_id] = "all"
+        for target_id in target_ds.ids:
+            selection_map[target_id] = "all"
     elif selection_config['type'] == 'fixed':
         # Fixed selection for all structures
         fixed_selection = selection_config['value']
         print(f"Using fixed selection: {fixed_selection}")
-        # Create mapping for all structures (we'll use structure IDs as keys)
-        for target_path in target_structures:
-            structure_id = os.path.splitext(os.path.basename(target_path))[0]
-            selection_map[structure_id] = fixed_selection
+        for target_id in target_ds.ids:
+            selection_map[target_id] = fixed_selection
     else:
         # Load from table
         table_path = selection_config['table_path']
@@ -312,48 +318,50 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         selection_map = load_selection_from_table(table_path, column_name)
 
     # Determine if reference is single or multiple
-    use_single_reference = len(reference_structures) == 1
+    use_single_reference = len(reference_ds.ids) == 1
     if use_single_reference:
-        print(f"Using single reference structure: {reference_structures[0]}")
+        single_ref_id, single_ref_path = next(iterate_files(reference_ds))
+        print(f"Using single reference structure: {single_ref_path}")
     else:
         print(f"Using paired reference structures")
 
     # Ensure we have compatible number of structures
-    if not use_single_reference and len(reference_structures) != len(target_structures):
-        print(f"Warning: Reference structures ({len(reference_structures)}) and target structures ({len(target_structures)}) count mismatch")
+    if not use_single_reference and len(reference_ds.ids) != len(target_ds.ids):
+        print(f"Warning: Reference structures ({len(reference_ds.ids)}) and target structures ({len(target_ds.ids)}) count mismatch")
 
-    # Process structure pairs
+    # Process structure pairs using iterate_files for proper ID-file matching
     results = []
+    target_items = list(iterate_files(target_ds))
 
-    for i, target_path in enumerate(target_structures):
+    for i, (target_id, target_path) in enumerate(target_items):
         if not os.path.exists(target_path):
             print(f"Warning: Target structure file not found: {target_path}")
             continue
 
-        # Get reference structure (single or paired)
+        # Get reference structure (single or paired by ID)
         if use_single_reference:
-            ref_path = reference_structures[0]
+            ref_path = single_ref_path
         else:
-            if i >= len(reference_structures):
-                print(f"Warning: No matching reference for target {i+1}")
+            # Match by ID - reference and target should have same IDs
+            if target_id in reference_files_by_id:
+                ref_path = reference_files_by_id[target_id]
+            else:
+                print(f"Warning: No matching reference for target ID: {target_id}")
                 continue
-            ref_path = reference_structures[i]
 
         if not os.path.exists(ref_path):
             print(f"Warning: Reference structure file not found: {ref_path}")
             continue
 
-        print(f"\nProcessing structure pair {i+1}/{len(target_structures)}")
+        print(f"\nProcessing structure pair {i+1}/{len(target_items)}")
         print(f"Reference: {ref_path}")
         print(f"Target: {target_path}")
-
-        # Extract structure ID from target filename
-        structure_id = os.path.splitext(os.path.basename(target_path))[0]
+        print(f"ID: {target_id}")
 
         # Get selection for this structure (with recursive base ID lookup)
-        selection = lookup_selection_with_base_id(structure_id, selection_map)
+        selection = lookup_selection_with_base_id(target_id, selection_map)
         if not selection:
-            print(f"  - Warning: No selection found for structure ID: {structure_id}")
+            print(f"  - Warning: No selection found for structure ID: {target_id}")
             print(f"    Available IDs in selection map: {list(selection_map.keys())[:5]}...")
             continue
 
@@ -363,9 +371,9 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         if metrics is None:
             continue
 
-        # Store result
+        # Store result using the proper ID from DataStream
         result = {
-            'id': structure_id,
+            'id': target_id,
             'reference_structure': ref_path,
             'target_structure': target_path,
             'selection': selection,
@@ -434,7 +442,7 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['reference_structures', 'target_structures', 'selection', 'alignment_method', 'output_csv']
+    required_params = ['reference_structures_json', 'target_structures_json', 'selection', 'alignment_method', 'output_csv']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")

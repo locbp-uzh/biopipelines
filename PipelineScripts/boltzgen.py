@@ -10,13 +10,15 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream, create_map_table
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream, create_map_table
 
 
 class BoltzGen(BaseConfig):
@@ -38,7 +40,23 @@ class BoltzGen(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BoltzGen"
-    
+
+    # Lazy path descriptors for output files
+    design_spec_yaml_file = Path(lambda self: os.path.join(self.output_folder, "design_spec.yaml"))
+    config_folder = Path(lambda self: os.path.join(self.output_folder, "config"))
+    intermediate_designs_folder = Path(lambda self: os.path.join(self.output_folder, "intermediate_designs"))
+    intermediate_inverse_folded_folder = Path(lambda self: os.path.join(self.output_folder, "intermediate_designs_inverse_folded"))
+    final_ranked_folder = Path(lambda self: os.path.join(self.output_folder, "final_ranked_designs"))
+    all_designs_metrics_csv = Path(lambda self: os.path.join(self.final_ranked_folder, "all_designs_metrics.csv"))
+    final_designs_metrics_csv = Path(lambda self: os.path.join(self.final_ranked_folder, f"final_designs_metrics_{self.budget}.csv"))
+    aggregate_metrics_csv = Path(lambda self: os.path.join(self.intermediate_inverse_folded_folder, "aggregate_metrics_analyze.csv"))
+    per_target_metrics_csv = Path(lambda self: os.path.join(self.intermediate_inverse_folded_folder, "per_target_metrics_analyze.csv"))
+    results_overview_pdf = Path(lambda self: os.path.join(self.final_ranked_folder, "results_overview.pdf"))
+    structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
+
+    # Helper script paths
+    boltzgen_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen.py"))
+    boltzgen_config_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_config.py"))
 
     def __init__(self,
                  # Design specification - Option 1: Manual YAML/dict
@@ -46,8 +64,8 @@ class BoltzGen(BaseConfig):
                  # Design specification - Option 2: Automatic building from BioPipelines inputs
                  # For protein-small_molecule: use ligand parameter
                  # For protein-anything: use target_structure parameter
-                 ligand: Union[ToolOutput, StandardizedOutput] = None,
-                 target_structure: Union[str, ToolOutput, StandardizedOutput] = None,
+                 ligand: Union[DataStream, StandardizedOutput] = None,
+                 target_structure: Union[str, DataStream, StandardizedOutput] = None,
                  ligand_code: str = None,
                  binder_spec: Union[str, Dict[str, Any]] = None,
                  binding_region: str = None,
@@ -71,7 +89,7 @@ class BoltzGen(BaseConfig):
                  metrics_override: Optional[Dict[str, float]] = None,
                  # Execution parameters
                  devices: Optional[int] = None,
-                 reuse: Union[ToolOutput, StandardizedOutput, str, None] = None,
+                 reuse: Union[DataStream, StandardizedOutput, str, None] = None,
                  steps: Optional[List[str]] = None,
                  cache_dir: Optional[str] = None,
                  **kwargs):
@@ -89,10 +107,10 @@ class BoltzGen(BaseConfig):
                         - Binder specification (sequence ranges)
                         - Binding site constraints
                         - Secondary structure specifications
-            ligand: Ligand input from Ligand tool (ToolOutput/StandardizedOutput).
+            ligand: Ligand input from Ligand tool (DataStream/StandardizedOutput).
                    For protein-small_molecule protocol. The tool reads the compounds.csv
                    to determine format (smiles/ccd) automatically.
-            target_structure: BioPipelines structure input (ToolOutput or file path) for
+            target_structure: BioPipelines structure input (DataStream or file path) for
                             protein-anything protocol (binder against protein target)
             ligand_code: Ligand residue name in target structure (e.g., "LIG", "ATP")
                         for binding site detection when using target_structure
@@ -121,7 +139,7 @@ class BoltzGen(BaseConfig):
             metrics_override: Per-metric ranking weights override
             devices: Number of GPUs to use (default: auto-detect)
             reuse: Previous BoltzGen run to resume or extend. Can be:
-                  - ToolOutput/StandardizedOutput from a previous BoltzGen call
+                  - DataStream/StandardizedOutput from a previous BoltzGen call
                   - String path to a previous BoltzGen output directory
                   When provided, operates on the existing output folder instead of
                   creating a new one. Use with `steps` to run specific steps only
@@ -132,8 +150,6 @@ class BoltzGen(BaseConfig):
         """
         # Store design specification parameters
         self.design_spec = design_spec
-        self.ligand = ligand
-        self.target_structure = target_structure
         self.ligand_code = ligand_code
         self.binder_spec = binder_spec
         self.binding_region = binding_region
@@ -162,14 +178,18 @@ class BoltzGen(BaseConfig):
 
         # Execution parameters
         self.devices = devices
-        self.reuse = reuse
-        self.reuse_path = None  # Will be set in configure_inputs if reuse is provided
         self.steps = steps or []
         self.cache_dir = cache_dir
 
         # Track inputs from previous tools
         self.ligand_compounds_csv = None  # Path to compounds.csv from Ligand tool
         self.target_structure_path = None  # Path to target protein structure
+        self.reuse_path = None  # Will be set in configure_inputs if reuse is provided
+
+        # Resolve input types and extract paths
+        self._resolve_ligand_input(ligand)
+        self._resolve_target_structure_input(target_structure)
+        self._resolve_reuse_input(reuse)
 
         # Determine specification mode
         if reuse is not None:
@@ -186,13 +206,13 @@ class BoltzGen(BaseConfig):
                 'entities:' in design_spec or '- protein:' in design_spec
             )
             self.design_spec_is_file = isinstance(design_spec, str) and not self.design_spec_is_yaml_str
-        elif ligand is not None and binder_spec is not None:
+        elif self.ligand_compounds_csv is not None and binder_spec is not None:
             # Automatic mode: ligand + binder_spec (protein-small_molecule)
             self.spec_mode = "ligand"
             self.design_spec_is_dict = False
             self.design_spec_is_yaml_str = False
             self.design_spec_is_file = False
-        elif target_structure is not None and binder_spec is not None:
+        elif self.target_structure_path is not None and binder_spec is not None:
             # Automatic mode: target_structure + binder_spec (protein-anything)
             self.spec_mode = "target"
             self.design_spec_is_dict = False
@@ -204,70 +224,60 @@ class BoltzGen(BaseConfig):
         # Initialize base class
         super().__init__(**kwargs)
 
-        # Initialize file paths (will be set in configure_inputs)
-        self._initialize_file_paths()
+    def _resolve_ligand_input(self, ligand: Union[DataStream, StandardizedOutput, None]):
+        """Resolve ligand input to compounds CSV path."""
+        if ligand is None:
+            return
 
-    def _initialize_file_paths(self):
-        """Initialize common file paths used throughout the class."""
-        # Design specification files
-        self.design_spec_yaml_file = None
-
-        # Output directories
-        self.config_folder = None
-        self.intermediate_designs_folder = None
-        self.intermediate_inverse_folded_folder = None
-        self.final_ranked_folder = None
-
-        # Output files
-        self.all_designs_metrics_csv = None
-        self.final_designs_metrics_csv = None
-        self.aggregate_metrics_csv = None
-        self.per_target_metrics_csv = None
-        self.results_overview_pdf = None
-
-        # Helper script paths
-        self.boltzgen_helper_py = None
-
-    def _setup_file_paths(self):
-        """Set up all file paths after output_folder is known."""
-        # Design specification file
-        self.design_spec_yaml_file = os.path.join(self.output_folder, "design_spec.yaml")
-
-        # Output directory structure (mirrors BoltzGen output)
-        self.config_folder = os.path.join(self.output_folder, "config")
-        self.intermediate_designs_folder = os.path.join(self.output_folder, "intermediate_designs")
-        self.intermediate_inverse_folded_folder = os.path.join(
-            self.output_folder, "intermediate_designs_inverse_folded"
-        )
-        self.final_ranked_folder = os.path.join(self.output_folder, "final_ranked_designs")
-
-        # Output files
-        self.all_designs_metrics_csv = os.path.join(
-            self.final_ranked_folder, "all_designs_metrics.csv"
-        )
-        self.final_designs_metrics_csv = os.path.join(
-            self.final_ranked_folder, f"final_designs_metrics_{self.budget}.csv"
-        )
-        self.aggregate_metrics_csv = os.path.join(
-            self.intermediate_inverse_folded_folder, "aggregate_metrics_analyze.csv"
-        )
-        self.per_target_metrics_csv = os.path.join(
-            self.intermediate_inverse_folded_folder, "per_target_metrics_analyze.csv"
-        )
-        self.results_overview_pdf = os.path.join(
-            self.final_ranked_folder, "results_overview.pdf"
-        )
-
-        # Helper script paths and cache directory (only set if folders are available)
-        if hasattr(self, 'folders') and self.folders:
-            self.boltzgen_helper_py = os.path.join(
-                self.folders["HelpScripts"], "pipe_boltzgen.py"
-            )
-            # Use BoltzGenCache folder if user didn't specify custom cache_dir
-            if self.cache_dir is None:
-                self.cache_dir = self.folders["BoltzGenCache"]
+        if isinstance(ligand, StandardizedOutput):
+            if ligand.streams.compounds and len(ligand.streams.compounds) > 0:
+                # compounds is a DataStream, get map_table
+                self.ligand_compounds_csv = ligand.streams.compounds.map_table
+            elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
+                self.ligand_compounds_csv = ligand.tables.compounds.path
+            else:
+                raise ValueError("Ligand StandardizedOutput has no compounds attribute")
+        elif isinstance(ligand, DataStream):
+            self.ligand_compounds_csv = ligand.map_table
         else:
-            self.boltzgen_helper_py = None
+            raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
+
+    def _resolve_target_structure_input(self, target_structure: Union[str, DataStream, StandardizedOutput, None]):
+        """Resolve target structure input to file path."""
+        if target_structure is None:
+            return
+
+        if isinstance(target_structure, StandardizedOutput):
+            if target_structure.streams.structures and len(target_structure.streams.structures) > 0:
+                # Get first structure file
+                first_id, first_file = target_structure.streams.structures[0]
+                self.target_structure_path = first_file
+            else:
+                raise ValueError("target_structure StandardizedOutput has no structures")
+        elif isinstance(target_structure, DataStream):
+            if len(target_structure) > 0:
+                self.target_structure_path = target_structure.files[0]
+            else:
+                raise ValueError("target_structure DataStream is empty")
+        elif isinstance(target_structure, str):
+            self.target_structure_path = target_structure
+        else:
+            raise ValueError(f"target_structure must be str, DataStream, or StandardizedOutput, got {type(target_structure)}")
+
+    def _resolve_reuse_input(self, reuse: Union[DataStream, StandardizedOutput, str, None]):
+        """Resolve reuse input to output folder path."""
+        if reuse is None:
+            return
+
+        if isinstance(reuse, StandardizedOutput):
+            if hasattr(reuse, 'output_folder') and reuse.output_folder:
+                self.reuse_path = reuse.output_folder
+            else:
+                raise ValueError("StandardizedOutput has no output_folder")
+        elif isinstance(reuse, str):
+            self.reuse_path = reuse
+        else:
+            raise ValueError(f"reuse must be StandardizedOutput or path string, got {type(reuse)}")
 
     def validate_params(self):
         """Validate BoltzGen parameters."""
@@ -282,33 +292,20 @@ class BoltzGen(BaseConfig):
 
         if self.spec_mode == "reuse":
             # Validate reuse parameter
-            if not isinstance(self.reuse, (ToolOutput, StandardizedOutput, str)):
-                raise ValueError(
-                    f"reuse must be ToolOutput, StandardizedOutput, or path string, "
-                    f"got {type(self.reuse)}"
-                )
-            # Steps should typically be specified when reusing
-            if not self.steps:
-                # Allow full run with reuse (will skip completed steps)
-                pass
+            if self.reuse_path is None:
+                raise ValueError("reuse path could not be resolved")
 
         if self.spec_mode == "manual" and not self.design_spec:
             raise ValueError("design_spec cannot be empty in manual mode")
 
         if self.spec_mode == "ligand":
-            if not self.ligand:
+            if not self.ligand_compounds_csv:
                 raise ValueError("ligand is required for protein-small_molecule mode")
             if not self.binder_spec:
                 raise ValueError("binder_spec is required for protein-small_molecule mode")
-            # Validate ligand is ToolOutput or StandardizedOutput
-            if not isinstance(self.ligand, (ToolOutput, StandardizedOutput)):
-                raise ValueError(
-                    f"ligand must be ToolOutput or StandardizedOutput from Ligand tool, "
-                    f"got {type(self.ligand)}"
-                )
 
         if self.spec_mode == "target":
-            if not self.target_structure:
+            if not self.target_structure_path:
                 raise ValueError("target_structure is required for protein-anything mode")
             if not self.binder_spec:
                 raise ValueError("binder_spec is required for protein-anything mode")
@@ -357,38 +354,17 @@ class BoltzGen(BaseConfig):
         """Configure input design specification and dependencies."""
         self.folders = pipeline_folders
 
-        # Handle reuse mode first - extract path and override output_folder
-        if self.spec_mode == "reuse":
-            if isinstance(self.reuse, StandardizedOutput):
-                if hasattr(self.reuse, 'output_folder') and self.reuse.output_folder:
-                    self.reuse_path = self.reuse.output_folder
-                elif hasattr(self.reuse, 'tool_folder') and self.reuse.tool_folder:
-                    self.reuse_path = self.reuse.tool_folder
-                else:
-                    raise ValueError("StandardizedOutput has no output_folder or tool_folder")
-            elif isinstance(self.reuse, ToolOutput):
-                output_folder = self.reuse.get_output_files("output_folder")
-                if output_folder:
-                    self.reuse_path = output_folder[0] if isinstance(output_folder, list) else output_folder
-                    self.dependencies.append(self.reuse.config)
-                else:
-                    raise ValueError("ToolOutput has no output_folder")
-            elif isinstance(self.reuse, str):
-                self.reuse_path = self.reuse
-            else:
-                raise ValueError(f"Invalid reuse type: {type(self.reuse)}")
-
-            # Override output_folder with the reuse path
+        # Handle reuse mode - override output_folder with reuse path
+        if self.spec_mode == "reuse" and self.reuse_path:
             self.output_folder = self.reuse_path
 
-        self._setup_file_paths()
+        # Use BoltzGenCache folder if user didn't specify custom cache_dir
+        if self.cache_dir is None:
+            self.cache_dir = pipeline_folders.get("BoltzGenCache", None)
 
         if self.spec_mode == "manual":
             # Handle manual design specification input
-            if self.design_spec_is_dict:
-                # Dictionary specification - will convert to YAML in script generation
-                pass
-            elif self.design_spec_is_file:
+            if self.design_spec_is_file:
                 # File path - check if it exists
                 if os.path.isabs(self.design_spec):
                     spec_path = self.design_spec
@@ -400,63 +376,6 @@ class BoltzGen(BaseConfig):
                     raise ValueError(f"Design specification file not found: {self.design_spec}")
 
                 self.design_spec = spec_path
-            elif self.design_spec_is_yaml_str:
-                # Direct YAML string - will write to file in script generation
-                pass
-            else:
-                raise ValueError(
-                    "design_spec must be a YAML string, dictionary, or path to YAML file"
-                )
-
-        elif self.spec_mode == "ligand":
-            # Handle ligand mode: extract compounds CSV from Ligand ToolOutput
-            if isinstance(self.ligand, StandardizedOutput):
-                # Get compounds CSV path
-                if hasattr(self.ligand, 'compounds') and self.ligand.compounds:
-                    self.ligand_compounds_csv = self.ligand.compounds[0]
-                elif hasattr(self.ligand, 'tables') and hasattr(self.ligand.tables, 'compounds'):
-                    self.ligand_compounds_csv = self.ligand.tables.compounds
-                else:
-                    raise ValueError("Ligand StandardizedOutput has no compounds attribute")
-            elif isinstance(self.ligand, ToolOutput):
-                # Get compounds CSV path from ToolOutput
-                compounds = self.ligand.get_output_files("compounds")
-                if compounds:
-                    self.ligand_compounds_csv = compounds[0]
-                    self.dependencies.append(self.ligand.config)
-                else:
-                    raise ValueError("Ligand ToolOutput has no compounds output")
-            else:
-                raise ValueError(
-                    f"ligand must be ToolOutput or StandardizedOutput, got {type(self.ligand)}"
-                )
-
-        elif self.spec_mode == "target":
-            # Handle target mode: extract structure path from ToolOutput
-            if isinstance(self.target_structure, (ToolOutput, StandardizedOutput)):
-                # Extract first structure from tool output
-                if hasattr(self.target_structure, 'structures') and self.target_structure.structures:
-                    self.target_structure_path = self.target_structure.structures[0]
-                elif hasattr(self.target_structure, 'get') and 'structures' in self.target_structure:
-                    structures = self.target_structure.get('structures', [])
-                    if structures:
-                        self.target_structure_path = structures[0]
-                    else:
-                        raise ValueError("No structures found in target_structure ToolOutput")
-                else:
-                    raise ValueError("target_structure ToolOutput has no structures attribute")
-            elif isinstance(self.target_structure, str):
-                # Direct file path
-                if not os.path.exists(self.target_structure):
-                    raise ValueError(f"Target structure file not found: {self.target_structure}")
-                self.target_structure_path = self.target_structure
-            else:
-                raise ValueError(
-                    f"target_structure must be a file path or ToolOutput, got {type(self.target_structure)}"
-                )
-
-            # Will build design spec in script generation
-            self.design_spec = None
 
     def get_config_display(self) -> List[str]:
         """Get BoltzGen configuration display lines."""
@@ -530,7 +449,9 @@ class BoltzGen(BaseConfig):
         """
         # Parse binder_spec
         if isinstance(self.binder_spec, dict):
-            binder_length = self.binder_spec.get("length", [50, 100])
+            if "length" not in self.binder_spec:
+                raise ValueError("binder_spec dict must contain 'length' key")
+            binder_length = self.binder_spec["length"]
         elif isinstance(self.binder_spec, str):
             # Parse string format: "50-100" or "50"
             if "-" in self.binder_spec:
@@ -657,13 +578,15 @@ fi
         """Parse binder_spec into min and max length values."""
         if isinstance(self.binder_spec, dict):
             # Dict format: {"length": [50, 100]}
-            length = self.binder_spec.get("length", [100, 200])
+            if "length" not in self.binder_spec:
+                raise ValueError("binder_spec dict must contain 'length' key")
+            length = self.binder_spec["length"]
             if isinstance(length, list) and len(length) == 2:
                 return length[0], length[1]
             elif isinstance(length, int):
                 return length, length
             else:
-                return 100, 200
+                raise ValueError(f"Invalid length format in binder_spec: {length}")
         elif isinstance(self.binder_spec, str):
             # String format: "50-100" or "50"
             if "-" in self.binder_spec:
@@ -673,12 +596,10 @@ fi
                 length = int(self.binder_spec)
                 return length, length
         else:
-            return 100, 200
+            raise ValueError(f"Invalid binder_spec type: {type(self.binder_spec)}")
 
     def _generate_config_section(self, binder_min: int, binder_max: int) -> str:
         """Generate the config file creation section for the bash script."""
-        config_py = os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_config.py")
-
         if self.spec_mode == "reuse":
             # Reuse mode: design_spec.yaml already exists in the reuse folder
             return f'''# Using existing design specification from previous run
@@ -694,7 +615,7 @@ echo "Design spec: {self.design_spec_yaml_file}"
 
             return f'''# Generate design specification from ligand
 echo "Generating design specification from ligand compounds..."
-python "{config_py}" \\
+python "{self.boltzgen_config_py}" \\
   --ligand-csv "{self.ligand_compounds_csv}" \\
   --output-yaml "{self.design_spec_yaml_file}" \\
   --binder-length-min {binder_min} \\
@@ -719,7 +640,7 @@ fi
             return f'''# Generate design specification from target structure
 echo "Generating design specification from target structure..."
 # Note: Target mode with protein structure - YAML will be built at runtime
-python "{config_py}" \\
+python "{self.boltzgen_config_py}" \\
   --ligand-csv "NONE" \\
   --output-yaml "{self.design_spec_yaml_file}" \\
   --binder-length-min {binder_min} \\
@@ -809,7 +730,7 @@ fi
         if self.devices is not None:
             cmd_parts.append(f'--devices {self.devices}')
 
-        if self.reuse:
+        if self.reuse_path:
             cmd_parts.append('--reuse')
 
         if self.steps:
@@ -835,12 +756,8 @@ fi
         - None of above: empty prediction
 
         Returns:
-            Dictionary mapping output types to file paths with standard keys.
+            Dictionary mapping output types to DataStream and TableInfo objects.
         """
-        # Ensure file paths are set up
-        if not hasattr(self, 'final_ranked_folder') or self.final_ranked_folder is None:
-            self._setup_file_paths()
-
         # Determine which steps are being run
         # If no steps specified, BoltzGen runs all steps by default
         steps = self.steps if self.steps else [
@@ -850,21 +767,19 @@ fi
         has_filtering = "filtering" in steps
         has_folding = "folding" in steps or "design_folding" in steps
 
-        # Initialize empty outputs
+        # Initialize empty structures
         tables = {}
-        structures = []
-        structure_ids = []
-        output = {
-            "structures": structures,
-            "structure_ids": structure_ids,
-            "tables": tables,
-            "output_folder": self.output_folder,
-            "tool_folder": self.output_folder,
-        }
 
         # If no relevant steps, return empty prediction
         if not has_analysis and not has_filtering and not has_folding:
-            return output
+            return {
+                "structures": DataStream.empty("structures", "cif"),
+                "sequences": DataStream.empty("sequences", "fasta"),
+                "compounds": DataStream.empty("compounds", "sdf"),
+                "msas": DataStream.empty("msas", "a3m"),
+                "tables": tables,
+                "output_folder": self.output_folder
+            }
 
         # Analysis step outputs
         if has_analysis:
@@ -881,8 +796,6 @@ fi
                     "TYR_fraction", "TRP_fraction", "loop", "helix", "sheet", "liability_score",
                     "liability_num_violations", "liability_high_severity_violations",
                     "liability_medium_severity_violations", "liability_low_severity_violations",
-                    "liability_AspBridge_count", "liability_AspCleave_count", "liability_ProtTryp_count",
-                    "liability_TrpOx_count", "liability_HydroPatch_count", "liability_UnpairedCys_count",
                     "native_rmsd", "native_rmsd_bb", "native_rmsd_refolded", "native_rmsd_bb_refolded",
                     "bb_rmsd", "bb_rmsd_design", "bb_rmsd_target", "design_ptm", "design_iptm",
                     "design_to_target_iptm", "min_design_to_target_pae", "min_interaction_pae",
@@ -913,14 +826,24 @@ fi
         if has_filtering:
             # Final designs folder
             final_designs_folder = os.path.join(self.final_ranked_folder, f"final_{self.budget}_designs")
-            output["final_designs_folder"] = final_designs_folder
 
-            # Structure pattern: rankNNNN_*.cif
-            # We predict the pattern, actual files will be rankNNNN_<design_id>.cif
-            structures = [os.path.join(final_designs_folder, "rankNNNN_*.cif")]
+            # Generate structure IDs and paths
+            # BoltzGen filtering outputs files named rank0001_<original_design_id>.cif
+            # The exact design ID suffix is only known at SLURM time, so we use wildcard patterns
             structure_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
-            output["structures"] = structures
-            output["structure_ids"] = structure_ids
+            structure_files = [os.path.join(final_designs_folder, f"rank{i:04d}_*.cif") for i in range(1, self.budget + 1)]
+
+            # Create map_table for structures
+            create_map_table(self.structures_map, structure_ids, files=structure_files)
+
+            structures = DataStream(
+                name="filtered_ranked_structures",
+                ids=structure_ids,
+                files=structure_files,
+                map_table=self.structures_map,
+                format="cif",
+                files_contain_wildcards=True
+            )
 
             # All designs metrics
             tables["all_designs_metrics"] = TableInfo(
@@ -932,97 +855,7 @@ fi
                     "min_design_to_target_pae", "design_ptm", "filter_rmsd",
                     "designfolding-filter_rmsd", "plip_hbonds_refolded", "delta_sasa_refolded",
                     "design_largest_hydrophobic_patch_refolded", "design_chain_hydrophobicity",
-                    "design_hydrophobicity", "loop", "helix", "sheet", "file_name",
-                    "num_prot_tokens", "num_lig_atoms", "num_resolved_tokens", "num_tokens",
-                    "UNK_fraction", "GLY_fraction", "ALA_fraction", "CYS_fraction",
-                    "SER_fraction", "PRO_fraction", "THR_fraction", "VAL_fraction",
-                    "ILE_fraction", "ASN_fraction", "ASP_fraction", "LEU_fraction",
-                    "MET_fraction", "GLN_fraction", "GLU_fraction", "LYS_fraction",
-                    "HIS_fraction", "PHE_fraction", "ARG_fraction", "TYR_fraction",
-                    "TRP_fraction", "liability_score", "liability_num_violations",
-                    "liability_high_severity_violations", "liability_medium_severity_violations",
-                    "liability_low_severity_violations", "liability_AspCleave_count",
-                    "liability_ProtTryp_count", "liability_MetOx_count",
-                    "liability_HydroPatch_count", "liability_AspBridge_count",
-                    "liability_AspBridge_position", "liability_AspBridge_length",
-                    "liability_AspBridge_severity", "liability_AspBridge_details",
-                    "liability_AspBridge_positions", "liability_AspBridge_num_positions",
-                    "liability_AspBridge_global_details", "liability_AspBridge_avg_severity",
-                    "liability_DPP4_count", "liability_DPP4_position", "liability_DPP4_length",
-                    "liability_DPP4_severity", "liability_DPP4_details", "liability_DPP4_positions",
-                    "liability_DPP4_num_positions", "liability_DPP4_global_details",
-                    "liability_DPP4_avg_severity", "liability_MetOx_position",
-                    "liability_MetOx_length", "liability_MetOx_severity", "liability_MetOx_details",
-                    "liability_MetOx_positions", "liability_MetOx_num_positions",
-                    "liability_MetOx_global_details", "liability_MetOx_avg_severity",
-                    "liability_ProtTryp_position", "liability_ProtTryp_length",
-                    "liability_ProtTryp_severity", "liability_ProtTryp_details",
-                    "liability_ProtTryp_positions", "liability_ProtTryp_num_positions",
-                    "liability_ProtTryp_global_details", "liability_ProtTryp_avg_severity",
-                    "liability_HydroPatch_position", "liability_HydroPatch_length",
-                    "liability_HydroPatch_severity", "liability_HydroPatch_details",
-                    "liability_HydroPatch_positions", "liability_HydroPatch_num_positions",
-                    "liability_HydroPatch_global_details", "liability_HydroPatch_avg_severity",
-                    "liability_NTCycl_count", "liability_NTCycl_position",
-                    "liability_NTCycl_length", "liability_NTCycl_severity",
-                    "liability_NTCycl_details", "liability_NTCycl_positions",
-                    "liability_NTCycl_num_positions", "liability_NTCycl_global_details",
-                    "liability_NTCycl_avg_severity", "liability_AspCleave_position",
-                    "liability_AspCleave_length", "liability_AspCleave_severity",
-                    "liability_AspCleave_details", "liability_AspCleave_positions",
-                    "liability_AspCleave_num_positions", "liability_AspCleave_global_details",
-                    "liability_AspCleave_avg_severity", "liability_TrpOx_count",
-                    "liability_TrpOx_position", "liability_TrpOx_length",
-                    "liability_TrpOx_severity", "liability_TrpOx_details",
-                    "liability_TrpOx_positions", "liability_TrpOx_num_positions",
-                    "liability_TrpOx_global_details", "liability_TrpOx_avg_severity",
-                    "liability_violations_summary", "native_rmsd", "native_rmsd_bb",
-                    "native_rmsd_refolded", "native_rmsd_bb_refolded",
-                    "designfolding-bb_rmsd", "designfolding-bb_rmsd_design",
-                    "designfolding-bb_rmsd_target", "designfolding-bb_rmsd_design_target",
-                    "designfolding-bb_target_aligned_rmsd_design", "designfolding-bb_rmsd<2.5",
-                    "designfolding-bb_target_aligned<2.5", "designfolding-bb_designability_rmsd_2",
-                    "designfolding-bb_designability_rmsd_4", "designfolding-ligand_iptm",
-                    "designfolding-interaction_pae", "designfolding-min_interaction_pae",
-                    "designfolding-min_design_to_target_pae", "designfolding-iptm",
-                    "designfolding-ptm", "designfolding-protein_iptm", "designfolding-design_iptm",
-                    "designfolding-design_iiptm", "designfolding-design_to_target_iptm",
-                    "designfolding-target_ptm", "designfolding-design_ptm",
-                    "designfolding-min_interaction_pae<1.5", "designfolding-min_interaction_pae<2",
-                    "designfolding-min_interaction_pae<2.5", "designfolding-min_interaction_pae<3",
-                    "designfolding-min_interaction_pae<4", "designfolding-min_interaction_pae<5",
-                    "designfolding-design_ptm>80", "designfolding-design_ptm>75",
-                    "designfolding-design_iptm>80", "designfolding-design_iptm>70",
-                    "designfolding-design_iptm>60", "designfolding-design_iptm>50",
-                    "bb_rmsd", "bb_rmsd_design", "bb_rmsd_target", "bb_rmsd_design_target",
-                    "bb_target_aligned_rmsd_design", "bb_rmsd<2.5", "bb_target_aligned<2.5",
-                    "bb_designability_rmsd_2", "bb_designability_rmsd_4", "ligand_iptm",
-                    "interaction_pae", "min_interaction_pae", "iptm", "ptm", "protein_iptm",
-                    "design_iptm", "design_iiptm", "target_ptm", "min_interaction_pae<1.5",
-                    "min_interaction_pae<2", "min_interaction_pae<2.5", "min_interaction_pae<3",
-                    "min_interaction_pae<4", "min_interaction_pae<5", "design_ptm>80",
-                    "design_ptm>75", "design_iptm>80", "design_iptm>70", "design_iptm>60",
-                    "design_iptm>50", "design_sasa_unbound_refolded", "design_sasa_bound_refolded",
-                    "plip_saltbridge_refolded", "affinity_pred_value", "affinity_probability_binary",
-                    "affinity_probability_binary2", "affinity_pred_value2", "affinity_pred_value1",
-                    "affinity_probability_binary1>50", "affinity_probability_binary1>75",
-                    "liability_UnpairedCys_count", "liability_UnpairedCys_position",
-                    "liability_UnpairedCys_length", "liability_UnpairedCys_severity",
-                    "liability_UnpairedCys_details", "liability_UnpairedCys_positions",
-                    "liability_UnpairedCys_num_positions", "liability_UnpairedCys_global_details",
-                    "liability_UnpairedCys_avg_severity", "liability_details",
-                    "filter_rmsd_design", "neg_min_design_to_target_pae",
-                    "neg_design_hydrophobicity", "neg_design_largest_hydrophobic_patch_refolded",
-                    "neg_min_interaction_pae", "has_x", "num_filters_passed", "pass_has_x_filter",
-                    "pass_filters", "pass_filter_rmsd_filter", "pass_filter_rmsd_design_filter",
-                    "pass_designfolding-filter_rmsd_filter", "pass_ALA_fraction_filter",
-                    "pass_GLY_fraction_filter", "pass_GLU_fraction_filter",
-                    "pass_LEU_fraction_filter", "pass_VAL_fraction_filter",
-                    "rank_design_to_target_iptm", "rank_design_ptm",
-                    "rank_neg_min_design_to_target_pae", "rank_affinity_probability_binary1",
-                    "rank_plip_hbonds_refolded", "rank_plip_saltbridge_refolded",
-                    "rank_delta_sasa_refolded", "rank_design_iiptm", "max_rank",
-                    "secondary_rank", "quality_score"
+                    "design_hydrophobicity", "loop", "helix", "sheet", "file_name"
                 ],
                 description="Metrics for all designs considered by filtering",
                 count=None
@@ -1038,120 +871,42 @@ fi
                     "min_design_to_target_pae", "design_ptm", "filter_rmsd",
                     "designfolding-filter_rmsd", "plip_hbonds_refolded", "delta_sasa_refolded",
                     "design_largest_hydrophobic_patch_refolded", "design_chain_hydrophobicity",
-                    "design_hydrophobicity", "loop", "helix", "sheet", "file_name",
-                    "num_prot_tokens", "num_lig_atoms", "num_resolved_tokens", "num_tokens",
-                    "UNK_fraction", "GLY_fraction", "ALA_fraction", "CYS_fraction",
-                    "SER_fraction", "PRO_fraction", "THR_fraction", "VAL_fraction",
-                    "ILE_fraction", "ASN_fraction", "ASP_fraction", "LEU_fraction",
-                    "MET_fraction", "GLN_fraction", "GLU_fraction", "LYS_fraction",
-                    "HIS_fraction", "PHE_fraction", "ARG_fraction", "TYR_fraction",
-                    "TRP_fraction", "liability_score", "liability_num_violations",
-                    "liability_high_severity_violations", "liability_medium_severity_violations",
-                    "liability_low_severity_violations", "liability_AspCleave_count",
-                    "liability_ProtTryp_count", "liability_MetOx_count",
-                    "liability_HydroPatch_count", "liability_AspBridge_count",
-                    "liability_AspBridge_position", "liability_AspBridge_length",
-                    "liability_AspBridge_severity", "liability_AspBridge_details",
-                    "liability_AspBridge_positions", "liability_AspBridge_num_positions",
-                    "liability_AspBridge_global_details", "liability_AspBridge_avg_severity",
-                    "liability_DPP4_count", "liability_DPP4_position", "liability_DPP4_length",
-                    "liability_DPP4_severity", "liability_DPP4_details", "liability_DPP4_positions",
-                    "liability_DPP4_num_positions", "liability_DPP4_global_details",
-                    "liability_DPP4_avg_severity", "liability_MetOx_position",
-                    "liability_MetOx_length", "liability_MetOx_severity", "liability_MetOx_details",
-                    "liability_MetOx_positions", "liability_MetOx_num_positions",
-                    "liability_MetOx_global_details", "liability_MetOx_avg_severity",
-                    "liability_ProtTryp_position", "liability_ProtTryp_length",
-                    "liability_ProtTryp_severity", "liability_ProtTryp_details",
-                    "liability_ProtTryp_positions", "liability_ProtTryp_num_positions",
-                    "liability_ProtTryp_global_details", "liability_ProtTryp_avg_severity",
-                    "liability_HydroPatch_position", "liability_HydroPatch_length",
-                    "liability_HydroPatch_severity", "liability_HydroPatch_details",
-                    "liability_HydroPatch_positions", "liability_HydroPatch_num_positions",
-                    "liability_HydroPatch_global_details", "liability_HydroPatch_avg_severity",
-                    "liability_NTCycl_count", "liability_NTCycl_position",
-                    "liability_NTCycl_length", "liability_NTCycl_severity",
-                    "liability_NTCycl_details", "liability_NTCycl_positions",
-                    "liability_NTCycl_num_positions", "liability_NTCycl_global_details",
-                    "liability_NTCycl_avg_severity", "liability_AspCleave_position",
-                    "liability_AspCleave_length", "liability_AspCleave_severity",
-                    "liability_AspCleave_details", "liability_AspCleave_positions",
-                    "liability_AspCleave_num_positions", "liability_AspCleave_global_details",
-                    "liability_AspCleave_avg_severity", "liability_TrpOx_count",
-                    "liability_TrpOx_position", "liability_TrpOx_length",
-                    "liability_TrpOx_severity", "liability_TrpOx_details",
-                    "liability_TrpOx_positions", "liability_TrpOx_num_positions",
-                    "liability_TrpOx_global_details", "liability_TrpOx_avg_severity",
-                    "liability_violations_summary", "native_rmsd", "native_rmsd_bb",
-                    "native_rmsd_refolded", "native_rmsd_bb_refolded",
-                    "designfolding-bb_rmsd", "designfolding-bb_rmsd_design",
-                    "designfolding-bb_rmsd_target", "designfolding-bb_rmsd_design_target",
-                    "designfolding-bb_target_aligned_rmsd_design", "designfolding-bb_rmsd<2.5",
-                    "designfolding-bb_target_aligned<2.5", "designfolding-bb_designability_rmsd_2",
-                    "designfolding-bb_designability_rmsd_4", "designfolding-ligand_iptm",
-                    "designfolding-interaction_pae", "designfolding-min_interaction_pae",
-                    "designfolding-min_design_to_target_pae", "designfolding-iptm",
-                    "designfolding-ptm", "designfolding-protein_iptm", "designfolding-design_iptm",
-                    "designfolding-design_iiptm", "designfolding-design_to_target_iptm",
-                    "designfolding-target_ptm", "designfolding-design_ptm",
-                    "designfolding-min_interaction_pae<1.5", "designfolding-min_interaction_pae<2",
-                    "designfolding-min_interaction_pae<2.5", "designfolding-min_interaction_pae<3",
-                    "designfolding-min_interaction_pae<4", "designfolding-min_interaction_pae<5",
-                    "designfolding-design_ptm>80", "designfolding-design_ptm>75",
-                    "designfolding-design_iptm>80", "designfolding-design_iptm>70",
-                    "designfolding-design_iptm>60", "designfolding-design_iptm>50",
-                    "bb_rmsd", "bb_rmsd_design", "bb_rmsd_target", "bb_rmsd_design_target",
-                    "bb_target_aligned_rmsd_design", "bb_rmsd<2.5", "bb_target_aligned<2.5",
-                    "bb_designability_rmsd_2", "bb_designability_rmsd_4", "ligand_iptm",
-                    "interaction_pae", "min_interaction_pae", "iptm", "ptm", "protein_iptm",
-                    "design_iptm", "design_iiptm", "target_ptm", "min_interaction_pae<1.5",
-                    "min_interaction_pae<2", "min_interaction_pae<2.5", "min_interaction_pae<3",
-                    "min_interaction_pae<4", "min_interaction_pae<5", "design_ptm>80",
-                    "design_ptm>75", "design_iptm>80", "design_iptm>70", "design_iptm>60",
-                    "design_iptm>50", "design_sasa_unbound_refolded", "design_sasa_bound_refolded",
-                    "plip_saltbridge_refolded", "affinity_pred_value", "affinity_probability_binary",
-                    "affinity_probability_binary2", "affinity_pred_value2", "affinity_pred_value1",
-                    "affinity_probability_binary1>50", "affinity_probability_binary1>75",
-                    "liability_UnpairedCys_count", "liability_UnpairedCys_position",
-                    "liability_UnpairedCys_length", "liability_UnpairedCys_severity",
-                    "liability_UnpairedCys_details", "liability_UnpairedCys_positions",
-                    "liability_UnpairedCys_num_positions", "liability_UnpairedCys_global_details",
-                    "liability_UnpairedCys_avg_severity", "liability_details",
-                    "filter_rmsd_design", "neg_min_design_to_target_pae",
-                    "neg_design_hydrophobicity", "neg_design_largest_hydrophobic_patch_refolded",
-                    "neg_min_interaction_pae", "has_x", "num_filters_passed", "pass_has_x_filter",
-                    "pass_filters", "pass_filter_rmsd_filter", "pass_filter_rmsd_design_filter",
-                    "pass_designfolding-filter_rmsd_filter", "pass_ALA_fraction_filter",
-                    "pass_GLY_fraction_filter", "pass_GLU_fraction_filter",
-                    "pass_LEU_fraction_filter", "pass_VAL_fraction_filter",
-                    "rank_design_to_target_iptm", "rank_design_ptm",
-                    "rank_neg_min_design_to_target_pae", "rank_affinity_probability_binary1",
-                    "rank_plip_hbonds_refolded", "rank_plip_saltbridge_refolded",
-                    "rank_delta_sasa_refolded", "rank_design_iiptm", "max_rank",
-                    "secondary_rank", "quality_score"
+                    "design_hydrophobicity", "loop", "helix", "sheet", "file_name"
                 ],
                 description=f"Metrics for top {self.budget} designs after filtering",
                 count=self.budget
             )
 
-            # Results overview PDF
-            output["results_pdf"] = self.results_overview_pdf
-            output["main"] = self.final_designs_metrics_csv
-
         # Folding step outputs (only if filtering not present)
         elif has_folding:
             # Structures in refold_cif folder
             refold_cif_folder = os.path.join(self.intermediate_inverse_folded_folder, "refold_cif")
-            output["refold_cif_folder"] = refold_cif_folder
 
-            # Structure pattern: design_spec_NNN.cif
-            structures = [os.path.join(refold_cif_folder, "design_spec_*.cif")]
+            # Generate structure IDs and paths
             structure_ids = [f"design_spec_{i}" for i in range(self.num_designs)]
-            output["structures"] = structures
-            output["structure_ids"] = structure_ids
+            structure_files = [os.path.join(refold_cif_folder, f"design_spec_{i}.cif") for i in range(self.num_designs)]
 
-        output["tables"] = tables
-        return output
+            # Create map_table for structures
+            create_map_table(self.structures_map, structure_ids, files=structure_files)
+
+            structures = DataStream(
+                name="refolded_structures",
+                ids=structure_ids,
+                files=structure_files,
+                map_table=self.structures_map,
+                format="cif"
+            )
+        else:
+            structures = DataStream.empty("structures", "cif")
+
+        return {
+            "structures": structures,
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
+            "msas": DataStream.empty("msas", "a3m"),
+            "tables": tables,
+            "output_folder": self.output_folder
+        }
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration with all BoltzGen parameters."""
@@ -1169,8 +924,8 @@ fi
             "tool_params": {
                 "spec_mode": self.spec_mode,
                 "design_spec": design_spec_value,
-                "target_structure": str(self.target_structure) if self.target_structure else None,
-                "ligand": self.ligand,
+                "target_structure": str(self.target_structure_path) if self.target_structure_path else None,
+                "ligand_compounds_csv": self.ligand_compounds_csv,
                 "binder_spec": self.binder_spec,
                 "binding_region": self.binding_region,
                 "protocol": self.protocol,
@@ -1187,7 +942,7 @@ fi
                 "additional_filters": self.additional_filters,
                 "metrics_override": self.metrics_override,
                 "devices": self.devices,
-                "reuse": self.reuse,
+                "reuse_path": self.reuse_path,
                 "steps": self.steps,
                 "cache_dir": self.cache_dir
             }
@@ -1215,17 +970,19 @@ class BoltzGenMerge(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenMerge"
-    
+
+    # Lazy path descriptors
+    merge_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_merge.py"))
 
     def __init__(self,
-                 sources: List[Union[ToolOutput, StandardizedOutput, str]] = None,
+                 sources: List[Union[DataStream, StandardizedOutput, str]] = None,
                  id_template: str = None,
                  **kwargs):
         """
         Initialize BoltzGenMerge configuration.
 
         Args:
-            sources: List of BoltzGen outputs to merge. Can be ToolOutput,
+            sources: List of BoltzGen outputs to merge. Can be DataStream,
                     StandardizedOutput, or direct paths to output directories.
             id_template: Template for renaming design IDs to avoid collisions.
                         If provided, uses custom merge logic instead of
@@ -1255,12 +1012,6 @@ class BoltzGenMerge(BaseConfig):
         """Configure input sources."""
         self.folders = pipeline_folders
 
-        # Store HelpScripts path for custom merge
-        self.merge_helper_py = os.path.join(
-            pipeline_folders.get("HelpScripts", "HelpScripts"),
-            "pipe_boltzgen_merge.py"
-        )
-
         # Reset source_paths to avoid accumulation if configure_inputs is called multiple times
         self.source_paths = []
 
@@ -1271,14 +1022,6 @@ class BoltzGenMerge(BaseConfig):
                     self.source_paths.append(source.output_folder)
                 else:
                     raise ValueError("StandardizedOutput has no output_folder")
-            elif isinstance(source, ToolOutput):
-                # Get output folder from ToolOutput
-                output_folder = source.get_output_files("output_folder")
-                if output_folder:
-                    self.source_paths.append(output_folder[0] if isinstance(output_folder, list) else output_folder)
-                    self.dependencies.append(source.config)
-                else:
-                    raise ValueError("ToolOutput has no output_folder")
             elif isinstance(source, str):
                 self.source_paths.append(source)
             else:
@@ -1362,12 +1105,12 @@ fi
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after merge."""
         return {
-            "output_folder": self.output_folder,
-            "tool_folder": self.output_folder,
-            # Merged outputs will have same structure as BoltzGen
-            "structures": [],  # Will be populated after merge
-            "structure_ids": [],
-            "tables": {}
+            "structures": DataStream.empty("structures", "cif"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
+            "msas": DataStream.empty("msas", "a3m"),
+            "tables": {},
+            "output_folder": self.output_folder
         }
 
     def get_config_display(self) -> List[str]:
@@ -1414,16 +1157,19 @@ class BoltzGenImport(BaseConfig):
 
     TOOL_NAME = "BoltzGenImport"
 
+    # Lazy path descriptors
+    import_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_import.py"))
+
     def __init__(self,
-                 designs: Union[ToolOutput, StandardizedOutput] = None,
-                 sequences: Union[ToolOutput, StandardizedOutput] = None,
+                 designs: Union[DataStream, StandardizedOutput] = None,
+                 sequences: Union[DataStream, StandardizedOutput] = None,
                  # Design spec parameters (same as BoltzGen)
-                 ligand: Union[ToolOutput, StandardizedOutput] = None,
+                 ligand: Union[DataStream, StandardizedOutput] = None,
                  binder_spec: Union[str, Dict[str, Any]] = None,
                  protocol: str = "protein-small_molecule",
                  ligand_chain: str = "B",
                  protein_chain: str = "A",
-                 id_map: Dict[str, str] = {"*": "*_<N>"},
+                 id_map: Dict[str, str] = None,
                  ligand_name: str = "LIG1",
                  num_designs: int = None,
                  **kwargs):
@@ -1455,9 +1201,10 @@ class BoltzGenImport(BaseConfig):
                         Used for consistent naming with BoltzGen conventions.
             **kwargs: Additional parameters passed to BaseConfig
         """
-        self.designs = designs
-        self.sequences = sequences
-        self.ligand = ligand
+        # Set default for id_map
+        if id_map is None:
+            id_map = {"*": "*_<N>"}
+
         self.binder_spec = binder_spec
         self.protocol = protocol
         self.ligand_chain = ligand_chain
@@ -1466,33 +1213,87 @@ class BoltzGenImport(BaseConfig):
         self.ligand_name = ligand_name
         self.num_designs = num_designs
 
-        # Paths to be resolved in configure_inputs
+        # Paths to be resolved
         self.design_structures = []  # List of PDB/CIF paths
+        self.design_ids = []  # List of structure IDs
         self.sequences_csv = None    # Path to sequences CSV
         self.ligand_compounds_csv = None  # Path to ligand compounds CSV
+
+        # Resolve inputs
+        self._resolve_designs_input(designs)
+        self._resolve_sequences_input(sequences)
+        self._resolve_ligand_input(ligand)
 
         # Determine mode
         self.mode = "inverse_folding" if sequences is not None else "design"
 
         super().__init__(**kwargs)
 
-    def validate_params(self):
-        """Validate BoltzGenImport parameters."""
-        if self.designs is None:
-            raise ValueError("designs parameter is required")
+    def _resolve_designs_input(self, designs: Union[DataStream, StandardizedOutput, None]):
+        """Resolve designs input to structure file paths."""
+        if designs is None:
+            return
 
-        if not isinstance(self.designs, (ToolOutput, StandardizedOutput)):
+        if isinstance(designs, StandardizedOutput):
+            if designs.streams.structures and len(designs.streams.structures) > 0:
+                for struct_id, struct_file in designs.streams.structures:
+                    self.design_ids.append(struct_id)
+                    self.design_structures.append(struct_file)
+            else:
+                raise ValueError("designs StandardizedOutput has no structures")
+        elif isinstance(designs, DataStream):
+            self.design_ids = designs.ids.copy()
+            self.design_structures = designs.files.copy()
+        else:
+            raise ValueError(f"designs must be DataStream or StandardizedOutput, got {type(designs)}")
+
+    def _resolve_sequences_input(self, sequences: Union[DataStream, StandardizedOutput, None]):
+        """Resolve sequences input to CSV path."""
+        if sequences is None:
+            return
+
+        if isinstance(sequences, StandardizedOutput):
+            # Look for sequences table or CSV
+            if hasattr(sequences, 'tables'):
+                if hasattr(sequences.tables, 'sequences'):
+                    self.sequences_csv = sequences.tables.sequences.path
+                elif hasattr(sequences.tables, '_tables'):
+                    for name, info in sequences.tables._tables.items():
+                        if 'sequence' in name.lower() or name == 'main':
+                            self.sequences_csv = info.path
+                            break
+            if not self.sequences_csv and sequences.sequences and len(sequences.sequences) > 0:
+                self.sequences_csv = sequences.sequences.map_table
+        elif isinstance(sequences, DataStream):
+            self.sequences_csv = sequences.map_table
+        else:
+            raise ValueError(f"sequences must be DataStream or StandardizedOutput, got {type(sequences)}")
+
+        if not self.sequences_csv:
             raise ValueError(
-                f"designs must be ToolOutput or StandardizedOutput, "
-                f"got {type(self.designs)}"
+                "Could not find sequences CSV from sequences input. "
+                "Ensure it has a table with 'id' and 'sequence' columns."
             )
 
-        if self.sequences is not None:
-            if not isinstance(self.sequences, (ToolOutput, StandardizedOutput)):
-                raise ValueError(
-                    f"sequences must be ToolOutput or StandardizedOutput, "
-                    f"got {type(self.sequences)}"
-                )
+    def _resolve_ligand_input(self, ligand: Union[DataStream, StandardizedOutput, None]):
+        """Resolve ligand input to compounds CSV path."""
+        if ligand is None:
+            return
+
+        if isinstance(ligand, StandardizedOutput):
+            if ligand.streams.compounds and len(ligand.streams.compounds) > 0:
+                self.ligand_compounds_csv = ligand.streams.compounds.map_table
+            elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
+                self.ligand_compounds_csv = ligand.tables.compounds.path
+        elif isinstance(ligand, DataStream):
+            self.ligand_compounds_csv = ligand.map_table
+        else:
+            raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
+
+    def validate_params(self):
+        """Validate BoltzGenImport parameters."""
+        if not self.design_structures:
+            raise ValueError("designs parameter is required and must have structures")
 
         if self.binder_spec is None:
             raise ValueError("binder_spec is required for design_spec generation")
@@ -1501,86 +1302,18 @@ class BoltzGenImport(BaseConfig):
         """Configure input sources."""
         self.folders = pipeline_folders
 
-        # Helper script path
-        self.import_helper_py = os.path.join(
-            pipeline_folders.get("HelpScripts", "HelpScripts"),
-            "pipe_boltzgen_import.py"
-        )
-
-        # Extract structure paths from designs
-        if isinstance(self.designs, StandardizedOutput):
-            if hasattr(self.designs, 'structures') and self.designs.structures:
-                self.design_structures = self.designs.structures
-            else:
-                raise ValueError("designs StandardizedOutput has no structures")
-        elif isinstance(self.designs, ToolOutput):
-            structures = self.designs.get_output_files("structures")
-            if structures:
-                self.design_structures = structures
-                self.dependencies.append(self.designs.config)
-            else:
-                raise ValueError("designs ToolOutput has no structures")
-
-        # Extract sequences CSV if provided
-        if self.sequences is not None:
-            if isinstance(self.sequences, StandardizedOutput):
-                # Look for sequences table or CSV
-                if hasattr(self.sequences, 'tables'):
-                    if hasattr(self.sequences.tables, 'sequences'):
-                        self.sequences_csv = self.sequences.tables.sequences.path
-                    elif hasattr(self.sequences.tables, '_tables'):
-                        for name, info in self.sequences.tables._tables.items():
-                            if 'sequence' in name.lower() or name == 'main':
-                                self.sequences_csv = info.path
-                                break
-                if not self.sequences_csv and hasattr(self.sequences, 'sequences'):
-                    seqs = self.sequences.sequences
-                    if seqs and len(seqs) > 0:
-                        self.sequences_csv = seqs[0]
-            elif isinstance(self.sequences, ToolOutput):
-                # Try to get sequences table
-                output_files = self.sequences.get_output_files()
-                if 'tables' in output_files:
-                    tables = output_files['tables']
-                    if isinstance(tables, dict):
-                        for name, info in tables.items():
-                            if 'sequence' in name.lower() or name == 'main':
-                                if hasattr(info, 'path'):
-                                    self.sequences_csv = info.path
-                                elif isinstance(info, dict) and 'path' in info:
-                                    self.sequences_csv = info['path']
-                                break
-                self.dependencies.append(self.sequences.config)
-
-            if not self.sequences_csv:
-                raise ValueError(
-                    "Could not find sequences CSV from sequences input. "
-                    "Ensure it has a table with 'id' and 'sequence' columns."
-                )
-
-        # Extract ligand compounds CSV if provided
-        if self.ligand is not None:
-            if isinstance(self.ligand, StandardizedOutput):
-                if hasattr(self.ligand, 'compounds') and self.ligand.compounds:
-                    self.ligand_compounds_csv = self.ligand.compounds[0]
-                elif hasattr(self.ligand, 'tables') and hasattr(self.ligand.tables, 'compounds'):
-                    self.ligand_compounds_csv = self.ligand.tables.compounds.path
-            elif isinstance(self.ligand, ToolOutput):
-                compounds = self.ligand.get_output_files("compounds")
-                if compounds:
-                    self.ligand_compounds_csv = compounds[0]
-                    self.dependencies.append(self.ligand.config)
-
     def _parse_binder_spec(self):
         """Parse binder_spec into min and max length values."""
         if isinstance(self.binder_spec, dict):
-            length = self.binder_spec.get("length", [100, 200])
+            if "length" not in self.binder_spec:
+                raise ValueError("binder_spec dict must contain 'length' key")
+            length = self.binder_spec["length"]
             if isinstance(length, list) and len(length) == 2:
                 return length[0], length[1]
             elif isinstance(length, int):
                 return length, length
             else:
-                return 100, 200
+                raise ValueError(f"Invalid length format in binder_spec: {length}")
         elif isinstance(self.binder_spec, str):
             if "-" in self.binder_spec:
                 parts = self.binder_spec.split("-")
@@ -1589,7 +1322,7 @@ class BoltzGenImport(BaseConfig):
                 length = int(self.binder_spec)
                 return length, length
         else:
-            return 100, 200
+            raise ValueError(f"Invalid binder_spec type: {type(self.binder_spec)}")
 
     def generate_script(self, script_path: str) -> str:
         """Generate BoltzGenImport execution script."""
@@ -1634,7 +1367,6 @@ class BoltzGenImport(BaseConfig):
             f.write(steps_content)
 
         # Serialize id_map as JSON string for passing to script
-        import json
         id_map_json = json.dumps(self.id_map)
 
         # Build command arguments
@@ -1756,11 +1488,12 @@ fi
         structure for subsequent BoltzGen steps.
         """
         return {
-            "output_folder": self.output_folder,
-            "tool_folder": self.output_folder,
-            "structures": [],
-            "structure_ids": [],
-            "tables": {}
+            "structures": DataStream.empty("structures", "cif"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
+            "msas": DataStream.empty("msas", "a3m"),
+            "tables": {},
+            "output_folder": self.output_folder
         }
 
     def get_config_display(self) -> List[str]:
@@ -1898,4 +1631,3 @@ fi
 #     └── ...
 #
 # =============================================================================
-

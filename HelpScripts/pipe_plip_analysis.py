@@ -15,6 +15,10 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
+# Import unified I/O utilities
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from biopipelines_io import load_datastream, iterate_files
+
 
 def parse_plip_xml(xml_file: str) -> List[Dict[str, Any]]:
     """
@@ -105,11 +109,12 @@ def parse_plip_txt(txt_file: str) -> Dict[str, Any]:
     return summary
 
 
-def process_plip_structure(structure_path: str, raw_dir: str, ligand_filter: str = "") -> List[Dict[str, Any]]:
+def process_plip_structure(structure_id: str, structure_path: str, raw_dir: str, ligand_filter: str = "") -> List[Dict[str, Any]]:
     """
     Process PLIP outputs for a single structure.
 
     Args:
+        structure_id: ID of the structure from DataStream
         structure_path: Path to input structure file
         raw_dir: Directory containing PLIP raw outputs
         ligand_filter: Specific ligand ID to filter (empty = all ligands)
@@ -117,7 +122,6 @@ def process_plip_structure(structure_path: str, raw_dir: str, ligand_filter: str
     Returns:
         List of interaction data
     """
-    structure_id = os.path.splitext(os.path.basename(structure_path))[0]
     structure_output_dir = os.path.join(raw_dir, structure_id)
 
     interactions = []
@@ -180,13 +184,13 @@ def create_summary(all_interactions: List[Dict[str, Any]]) -> Dict[str, Any]:
     return summary
 
 
-def create_summary_csv(all_interactions: List[Dict[str, Any]], structures: List[str], output_csv: str):
+def create_summary_csv(all_interactions: List[Dict[str, Any]], structure_items: List[tuple], output_csv: str):
     """
     Create a summary CSV with aggregated interaction counts per structure.
 
     Args:
         all_interactions: List of all interaction data
-        structures: List of structure file paths
+        structure_items: List of (structure_id, structure_path) tuples from DataStream
         output_csv: Output CSV file path
     """
     # Map interaction types to column names
@@ -203,8 +207,7 @@ def create_summary_csv(all_interactions: List[Dict[str, Any]], structures: List[
 
     # Initialize results for all structures
     results = []
-    for structure_path in structures:
-        structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+    for structure_id, structure_path in structure_items:
         results.append({
             'id': structure_id,
             'structure': structure_path,
@@ -240,19 +243,18 @@ def create_summary_csv(all_interactions: List[Dict[str, Any]], structures: List[
     print(f"Saved summary CSV with {len(results)} structures to {output_csv}")
 
 
-def copy_additional_outputs(raw_dir: str, processed_dir: str, structures: List[str]):
+def copy_additional_outputs(raw_dir: str, processed_dir: str, structure_items: List[tuple]):
     """
     Copy additional PLIP outputs (PyMOL files, images) to processed directory.
 
     Args:
         raw_dir: Directory containing raw PLIP outputs
         processed_dir: Directory for processed outputs
-        structures: List of structure file paths
+        structure_items: List of (structure_id, structure_path) tuples from DataStream
     """
     os.makedirs(processed_dir, exist_ok=True)
 
-    for structure_path in structures:
-        structure_id = os.path.splitext(os.path.basename(structure_path))[0]
+    for structure_id, structure_path in structure_items:
         structure_output_dir = os.path.join(raw_dir, structure_id)
 
         if not os.path.exists(structure_output_dir):
@@ -278,7 +280,7 @@ def copy_additional_outputs(raw_dir: str, processed_dir: str, structures: List[s
 
 def main():
     parser = argparse.ArgumentParser(description='Process PLIP outputs into standardized format')
-    parser.add_argument('--structures', required=True, help='File containing list of structure file paths (one per line)')
+    parser.add_argument('--structures', required=True, help='JSON file containing DataStream with structure files')
     parser.add_argument('--raw_dir', required=True, help='Directory containing PLIP raw outputs')
     parser.add_argument('--output_csv', required=True, help='Output CSV file for interactions')
     parser.add_argument('--summary_csv', required=True, help='Output CSV file for aggregated counts per structure')
@@ -288,22 +290,24 @@ def main():
 
     args = parser.parse_args()
 
-    # Read structure list from file (one path per line)
-    with open(args.structures, 'r') as f:
-        structures = [line.strip() for line in f if line.strip()]
+    # Load structures DataStream using pipe_biopipelines_io
+    structures_ds = load_datastream(args.structures)
 
-    if not structures:
+    # Build list of (struct_id, struct_path) tuples
+    structure_items = list(iterate_files(structures_ds))
+
+    if not structure_items:
         print(f"Error: No structures found in: {args.structures}")
         sys.exit(1)
 
-    print(f"Processing PLIP outputs for {len(structures)} structures")
+    print(f"Processing PLIP outputs for {len(structure_items)} structures")
 
     # Process each structure
     all_interactions = []
 
-    for structure_path in structures:
-        print(f"Processing structure: {os.path.basename(structure_path)}")
-        interactions = process_plip_structure(structure_path, args.raw_dir, args.ligand)
+    for struct_id, structure_path in structure_items:
+        print(f"Processing structure: {struct_id}")
+        interactions = process_plip_structure(struct_id, structure_path, args.raw_dir, args.ligand)
         all_interactions.extend(interactions)
         print(f"  Found {len(interactions)} interactions")
 
@@ -329,7 +333,7 @@ def main():
         empty_df.to_csv(args.output_csv, index=False)
 
     # Create summary CSV with aggregated counts per structure
-    create_summary_csv(all_interactions, structures, args.summary_csv)
+    create_summary_csv(all_interactions, structure_items, args.summary_csv)
 
     # Create summary
     summary = create_summary(all_interactions)
@@ -363,7 +367,7 @@ def main():
     print(f"Saved summary to {args.summary_txt}")
 
     # Copy additional outputs (PyMOL files, images)
-    copy_additional_outputs(args.raw_dir, args.processed_dir, structures)
+    copy_additional_outputs(args.raw_dir, args.processed_dir, structure_items)
 
     print("PLIP output processing completed successfully")
 

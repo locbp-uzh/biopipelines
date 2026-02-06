@@ -31,3 +31,5 @@ Ligands/*
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+claude_fork.bat
+claude.bat

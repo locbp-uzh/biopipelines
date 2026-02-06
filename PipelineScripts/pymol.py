@@ -11,11 +11,15 @@ import json
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class PyMOLOperation:
@@ -49,7 +53,11 @@ class PyMOL(BaseConfig):
     """
 
     TOOL_NAME = "PyMOL"
-    
+
+    # Lazy path descriptors
+    config_file = Path(lambda self: os.path.join(self.output_folder, "pymol_config.json"))
+    session_file = Path(lambda self: os.path.join(self.output_folder, f"{self.session_name}.pse"))
+    pymol_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pymol.py"))
 
     # --- Static methods for creating operations ---
 
@@ -73,7 +81,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("names", prefix=prefix, basename=basename, suffix=suffix)
 
     @staticmethod
-    def Load(structures: Union[StandardizedOutput, ToolOutput]) -> PyMOLOperation:
+    def Load(structures: Union[StandardizedOutput, DataStream]) -> PyMOLOperation:
         """
         Load structures into PyMOL with current naming.
 
@@ -90,7 +98,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("load", structures=structures)
 
     @staticmethod
-    def Color(structures: Union[StandardizedOutput, ToolOutput],
+    def Color(structures: Union[StandardizedOutput, DataStream],
               selection: Union[Tuple[TableInfo, str], str],
               color: str) -> PyMOLOperation:
         """
@@ -113,7 +121,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("color", structures=structures, selection=selection, color=color)
 
     @staticmethod
-    def ColorAF(structures: Union[StandardizedOutput, ToolOutput],
+    def ColorAF(structures: Union[StandardizedOutput, DataStream],
                 upper: float = 100) -> PyMOLOperation:
         """
         Color structures by AlphaFold pLDDT (B-factor spectrum).
@@ -129,6 +137,47 @@ class PyMOL(BaseConfig):
             PyMOLOperation for pLDDT coloring
         """
         return PyMOLOperation("coloraf", structures=structures, upper=upper)
+
+    @staticmethod
+    def ColorAlign(reference: Union[StandardizedOutput, DataStream],
+                   targets: Union[StandardizedOutput, DataStream],
+                   identical: str = "white",
+                   similar: str = "wheat",
+                   different: str = "wheat",
+                   notcovered: str = "gray50",
+                   show_mutations: bool = True) -> PyMOLOperation:
+        """
+        Color structures based on sequence alignment against a reference.
+
+        Performs sequence alignment between reference and target structures,
+        then colors residues based on alignment quality:
+        - identical: residues that match exactly
+        - similar: residues in the same amino acid group (e.g., aliphatic, aromatic)
+        - different: mismatched residues not in similar groups
+        - notcovered: gaps/unaligned regions
+
+        Also performs structural alignment using PyMOL's align command.
+
+        Args:
+            reference: Reference structure(s) for alignment
+            targets: Target structure(s) to color based on alignment
+            identical: Color for identical residues (default: "white")
+            similar: Color for similar group matches (default: "wheat")
+            different: Color for non-similar mismatches (default: "wheat")
+            notcovered: Color for gaps/unaligned regions (default: "gray50")
+            show_mutations: Show sticks for mutated residues (default: True)
+
+        Returns:
+            PyMOLOperation for alignment-based coloring
+        """
+        return PyMOLOperation("coloralign",
+                              reference=reference,
+                              targets=targets,
+                              identical=identical,
+                              similar=similar,
+                              different=different,
+                              notcovered=notcovered,
+                              show_mutations=show_mutations)
 
     @staticmethod
     def Align(method: str = "align", target: Optional[str] = None) -> PyMOLOperation:
@@ -147,7 +196,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("align", method=method, target=target)
 
     @staticmethod
-    def Show(structures: Union[StandardizedOutput, ToolOutput, None] = None,
+    def Show(structures: Union[StandardizedOutput, DataStream, None] = None,
              representation: str = "cartoon",
              selection: Optional[Union[Tuple[TableInfo, str], str]] = None) -> PyMOLOperation:
         """
@@ -164,7 +213,7 @@ class PyMOL(BaseConfig):
         return PyMOLOperation("show", structures=structures, representation=representation, selection=selection)
 
     @staticmethod
-    def Hide(structures: Union[StandardizedOutput, ToolOutput, None] = None,
+    def Hide(structures: Union[StandardizedOutput, DataStream, None] = None,
              representation: str = "everything",
              selection: Optional[Union[Tuple[TableInfo, str], str]] = None) -> PyMOLOperation:
         """
@@ -208,6 +257,167 @@ class PyMOL(BaseConfig):
         """
         return PyMOLOperation("save", filename=filename)
 
+    @staticmethod
+    def Center(selection: str = "all") -> PyMOLOperation:
+        """
+        Center the view on a selection without changing orientation.
+
+        Args:
+            selection: PyMOL selection to center on (default: "all")
+
+        Returns:
+            PyMOLOperation for centering
+        """
+        return PyMOLOperation("center", selection=selection)
+
+    @staticmethod
+    def Zoom(selection: str = "all", buffer: float = 5.0) -> PyMOLOperation:
+        """
+        Zoom the view to fit a selection.
+
+        Args:
+            selection: PyMOL selection to zoom to (default: "all")
+            buffer: Extra space around selection in Angstroms (default: 5.0)
+
+        Returns:
+            PyMOLOperation for zooming
+        """
+        return PyMOLOperation("zoom", selection=selection, buffer=buffer)
+
+    @staticmethod
+    def Orient(selection: str = "all") -> PyMOLOperation:
+        """
+        Orient the view to show a selection from the best angle.
+
+        Rotates the camera to align the principal axes of the selection
+        with the screen axes.
+
+        Args:
+            selection: PyMOL selection to orient towards (default: "all")
+
+        Returns:
+            PyMOLOperation for orienting
+        """
+        return PyMOLOperation("orient", selection=selection)
+
+    @staticmethod
+    def Ray(width: int = 1920, height: int = 1080) -> PyMOLOperation:
+        """
+        Ray trace the current view.
+
+        Args:
+            width: Image width in pixels
+            height: Image height in pixels
+
+        Returns:
+            PyMOLOperation for ray tracing
+        """
+        return PyMOLOperation("ray", width=width, height=height)
+
+    @staticmethod
+    def PNG(filename: str = "render.png", width: int = 1920, height: int = 1080,
+            ray: bool = True, dpi: int = 300) -> PyMOLOperation:
+        """
+        Save current view as PNG image.
+
+        Args:
+            filename: Output filename (relative to output folder, supports {id} placeholder)
+            width: Image width in pixels
+            height: Image height in pixels
+            ray: Whether to ray trace before saving
+            dpi: Image DPI
+
+        Returns:
+            PyMOLOperation for saving PNG
+        """
+        return PyMOLOperation("png", filename=filename, width=width, height=height, ray=ray, dpi=dpi)
+
+    @staticmethod
+    def Render(structures: Union[StandardizedOutput, DataStream],
+               orient_selection: str = "all",
+               width: int = 1920,
+               height: int = 1080,
+               filename: str = "render.png",
+               dpi: int = 300) -> PyMOLOperation:
+        """
+        Render a single image of loaded structures.
+
+        Orients, ray traces, and saves a PNG of the current view.
+
+        Args:
+            structures: Structures to render (must be loaded first)
+            orient_selection: Selection to orient towards (e.g., "resn LIG")
+            width: Image width in pixels
+            height: Image height in pixels
+            filename: Output filename
+            dpi: Image DPI
+
+        Returns:
+            PyMOLOperation for rendering
+        """
+        return PyMOLOperation("render", structures=structures, orient_selection=orient_selection,
+                              width=width, height=height, filename=filename, dpi=dpi)
+
+    @staticmethod
+    def RenderEach(structures: Union[StandardizedOutput, DataStream],
+                   orient_selection: str = "resn LIG",
+                   color_protein: str = "plddt",
+                   color_ligand: str = "byatom",
+                   ligand_selection: str = "resn LIG",
+                   plddt_upper: float = 1,
+                   width: int = 1920,
+                   height: int = 1080,
+                   dpi: int = 300,
+                   background: str = "white") -> PyMOLOperation:
+        """
+        Render each structure individually as a separate PNG.
+
+        For each structure:
+        1. Loads the structure
+        2. Colors protein (by pLDDT or specified color)
+        3. Colors ligand (by atom or specified color)
+        4. Orients view towards the ligand/selection
+        5. Ray traces and saves PNG
+
+        Args:
+            structures: Structures to render
+            orient_selection: Selection to orient towards (default: "resn LIG" for ligand)
+            color_protein: Protein coloring - "plddt" for confidence coloring, or color name
+            color_ligand: Ligand coloring - "byatom" for element colors, or color name
+            ligand_selection: Selection for ligand (default: "resn LIG")
+            plddt_upper: Upper bound for pLDDT values (default: 1 for Boltz2, use 100 for AlphaFold)
+            width: Image width in pixels
+            height: Image height in pixels
+            dpi: Image DPI
+            background: Background color (default: "white")
+
+        Returns:
+            PyMOLOperation for iterative rendering
+
+        Example:
+            PyMOL.RenderEach(
+                structures=boltz_rifampicin,
+                orient_selection="resn LIG",
+                color_protein="plddt",
+                color_ligand="byatom",
+                ligand_selection="resn LIG",
+                plddt_upper=1,  # Boltz2 uses 0-1 confidence scores
+                width=1920,
+                height=1080
+            )
+        """
+        return PyMOLOperation("render_each",
+                              structures=structures,
+                              orient_selection=orient_selection,
+                              color_protein=color_protein,
+                              color_ligand=color_ligand,
+                              ligand_selection=ligand_selection,
+                              plddt_upper=plddt_upper,
+                              width=width,
+                              height=height,
+                              dpi=dpi,
+                              background=background)
+
     # --- Instance methods ---
 
     def __init__(self, *args, session: str = "session", **kwargs):
@@ -242,7 +452,7 @@ class PyMOL(BaseConfig):
                 if structures is not None:
                     self._structure_sources.append(structures)
 
-            elif op.op_type in ("color", "coloraf", "show", "hide"):
+            elif op.op_type in ("color", "coloraf", "show", "hide", "render"):
                 structures = op.params.get("structures")
                 if structures is not None and structures not in self._structure_sources:
                     self._structure_sources.append(structures)
@@ -250,6 +460,19 @@ class PyMOL(BaseConfig):
                 selection = op.params.get("selection")
                 if isinstance(selection, tuple):
                     self._table_references.append(selection)
+
+            elif op.op_type == "render_each":
+                structures = op.params.get("structures")
+                if structures is not None and structures not in self._structure_sources:
+                    self._structure_sources.append(structures)
+
+            elif op.op_type == "coloralign":
+                reference = op.params.get("reference")
+                if reference is not None and reference not in self._structure_sources:
+                    self._structure_sources.append(reference)
+                targets = op.params.get("targets")
+                if targets is not None and targets not in self._structure_sources:
+                    self._structure_sources.append(targets)
 
             elif op.op_type == "names":
                 basename = op.params.get("basename")
@@ -285,13 +508,40 @@ class PyMOL(BaseConfig):
         result = {"op": op.op_type}
 
         for key, value in op.params.items():
-            if isinstance(value, StandardizedOutput):
-                # Serialize StandardizedOutput reference
+            if value is None:
+                result[key] = None
+            elif isinstance(value, DataStream):
+                # Serialize DataStream - use files and ids directly
                 result[key] = {
-                    "type": "standardized_output",
-                    "output_folder": value.output_folder,
-                    "structures": value.structures,
-                    "structure_ids": value.structure_ids
+                    "type": "datastream",
+                    "structures": value.files,
+                    "structure_ids": value.ids,
+                    "format": value.format
+                }
+            elif isinstance(value, StandardizedOutput):
+                # Serialize StandardizedOutput reference
+                # Check if structures is a DataStream
+                structures_data = value.streams.structures
+                if isinstance(structures_data, DataStream):
+                    result[key] = {
+                        "type": "standardized_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_data.files,
+                        "structure_ids": structures_data.ids
+                    }
+                else:
+                    result[key] = {
+                        "type": "standardized_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_data if isinstance(structures_data, list) else [],
+                        "structure_ids": value.structure_ids if hasattr(value, 'structure_ids') else []
+                    }
+            elif isinstance(value, TableInfo):
+                # Direct TableInfo reference (for data_table in RenderEach)
+                result[key] = {
+                    "type": "table_info",
+                    "table_path": value.path,
+                    "columns": value.columns if hasattr(value, 'columns') else []
                 }
             elif isinstance(value, tuple) and len(value) == 2:
                 # Table column reference: (TableInfo, column_name)
@@ -305,13 +555,22 @@ class PyMOL(BaseConfig):
                 else:
                     result[key] = str(value)
             elif hasattr(value, 'output_folder'):
-                # ToolOutput or similar
-                result[key] = {
-                    "type": "tool_output",
-                    "output_folder": value.output_folder,
-                    "structures": getattr(value, 'structures', []),
-                    "structure_ids": getattr(value, 'structure_ids', [])
-                }
+                # ToolOutput or similar - check for DataStream in structures
+                structures_attr = getattr(value, 'structures', None)
+                if isinstance(structures_attr, DataStream):
+                    result[key] = {
+                        "type": "tool_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_attr.files,
+                        "structure_ids": structures_attr.ids
+                    }
+                else:
+                    result[key] = {
+                        "type": "tool_output",
+                        "output_folder": value.output_folder,
+                        "structures": structures_attr if isinstance(structures_attr, list) else [],
+                        "structure_ids": getattr(value, 'structure_ids', [])
+                    }
             else:
                 result[key] = value
 
@@ -332,57 +591,88 @@ class PyMOL(BaseConfig):
 
     def generate_script_run_pymol(self) -> str:
         """Generate the PyMOL session creation part of the script."""
-        # Create config file with all operations
         config = {
             "operations": [self._serialize_operation(op) for op in self.operations],
             "session_name": self.session_name,
             "output_folder": self.output_folder
         }
 
-        config_file = os.path.join(self.output_folder, "pymol_config.json")
-        session_file = os.path.join(self.output_folder, f"{self.session_name}.pse")
-
-        # Get HelpScripts path
-        help_scripts = self.folders.get("HelpScripts", "HelpScripts")
-        pymol_script = os.path.join(help_scripts, "pipe_pymol.py")
+        # Write config file at pipeline time (not SLURM time)
+        os.makedirs(self.output_folder, exist_ok=True)
+        with open(self.config_file, 'w') as f:
+            json.dump(config, f, indent=2)
 
         return f"""echo "Creating PyMOL session..."
-echo "Output: {session_file}"
+echo "Output: {self.session_file}"
 
-# Create output directory
-mkdir -p "{self.output_folder}"
-
-# Write configuration
-cat > "{config_file}" << 'PYMOL_CONFIG_EOF'
-{json.dumps(config, indent=2)}
-PYMOL_CONFIG_EOF
-
-# Run PyMOL session creation
-python "{pymol_script}" --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "PyMOL session created successfully"
-else
-    echo "ERROR: Failed to create PyMOL session"
-    exit 1
-fi
+python "{self.pymol_py}" --config "{self.config_file}"
 
 """
 
     def get_output_files(self) -> Dict[str, Any]:
-        """Get expected output files."""
-        session_file = os.path.join(self.output_folder, f"{self.session_name}.pse")
+        """Get expected output files including PNG renders as DataStream."""
+        # Predict PNG files from Render and RenderEach operations
+        render_ids = []
+        render_files = []
+
+        for op in self.operations:
+            if op.op_type == "render":
+                # Single render - predict the output filename
+                filename = op.params.get("filename", "render.png")
+                if not os.path.isabs(filename):
+                    filename = os.path.join(self.output_folder, filename)
+                # Use filename without extension as ID
+                render_id = os.path.splitext(os.path.basename(filename))[0]
+                render_ids.append(render_id)
+                render_files.append(filename)
+
+            elif op.op_type == "render_each":
+                # RenderEach - predict PNG for each structure
+                structures = op.params.get("structures")
+                if structures is not None:
+                    # Get structure IDs to predict render filenames
+                    structure_ids = []
+                    if isinstance(structures, DataStream):
+                        structure_ids = structures.ids
+                    elif isinstance(structures, StandardizedOutput):
+                        structures_ds = structures.streams.structures
+                        if isinstance(structures_ds, DataStream):
+                            structure_ids = structures_ds.ids
+
+                    # RenderEach saves to renders/<id>.png
+                    renders_folder = os.path.join(self.output_folder, "renders")
+                    for struct_id in structure_ids:
+                        render_ids.append(struct_id)
+                        render_files.append(os.path.join(renders_folder, f"{struct_id}.png"))
+
+            elif op.op_type == "png":
+                # Direct PNG operation
+                filename = op.params.get("filename", "render.png")
+                if not os.path.isabs(filename):
+                    filename = os.path.join(self.output_folder, filename)
+                render_id = os.path.splitext(os.path.basename(filename))[0]
+                render_ids.append(render_id)
+                render_files.append(filename)
+
+        # Create renders DataStream if there are any render operations
+        if render_ids:
+            renders = DataStream(
+                name="renders",
+                ids=render_ids,
+                files=render_files,
+                format="png"
+            )
+        else:
+            renders = DataStream.empty("renders", "png")
 
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
+            "renders": renders,
             "tables": {},
             "output_folder": self.output_folder,
-            "session_file": session_file
+            "session_file": self.session_file
         }
 
     def get_config_display(self) -> List[str]:

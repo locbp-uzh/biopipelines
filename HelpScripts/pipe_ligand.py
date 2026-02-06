@@ -4,7 +4,7 @@ Runtime helper script for Ligand tool.
 
 Fetches small molecule ligands with priority-based lookup: local_folder -> Ligands/ -> RCSB/PubChem download.
 Downloads SDF files and converts them to PDB format with proper atom numbering.
-Supports both RCSB (CCD codes) and PubChem (name, CID, CAS) as sources.
+Supports RCSB (CCD codes), PubChem (name, CID, CAS), and direct SMILES input.
 """
 
 import os
@@ -1234,11 +1234,79 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
         return False, "", metadata
 
 
+def generate_from_smiles(smiles: str, custom_id: str, residue_code: str,
+                          output_folder: str, output_format: str = "pdb") -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Generate a ligand structure file from a SMILES string using RDKit.
+
+    Args:
+        smiles: SMILES string of the molecule
+        custom_id: Custom ID for output filename
+        residue_code: Residue code to use in output file
+        output_folder: Directory to save the ligand
+        output_format: "pdb" or "cif" (default: "pdb")
+
+    Returns:
+        Tuple of (success: bool, file_path: str, metadata: dict)
+    """
+    try:
+        print(f"Generating structure from SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"Generating structure from SMILES: {smiles}")
+
+        content = None
+        ext = output_format
+
+        # Convert SMILES to requested format using RDKit
+        if output_format == "cif":
+            print(f"  Converting SMILES to CIF using RDKit (with bond orders)...")
+            content = convert_smiles_to_cif_rdkit(smiles, residue_code)
+        else:
+            print(f"  Converting SMILES to PDB using RDKit...")
+            content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
+
+        if content is None:
+            raise ValueError(f"Failed to convert SMILES to {output_format.upper()} format")
+
+        # Save to output folder
+        output_filename = f"{custom_id}.{ext}"
+        output_path = os.path.join(output_folder, output_filename)
+        with open(output_path, 'w') as f:
+            f.write(content)
+
+        file_size = os.path.getsize(output_path)
+
+        metadata = {
+            "file_size": file_size,
+            "source": "smiles",
+            "ccd": "",
+            "cid": "",
+            "cas": "",
+            "smiles": smiles,
+            "name": "",
+            "formula": "",
+        }
+
+        print(f"Successfully generated {custom_id}.{ext}: {file_size} bytes")
+        return True, output_path, metadata
+
+    except Exception as e:
+        error_msg = f"Error generating from SMILES: {str(e)}"
+        print(f"Error: {error_msg}")
+
+        metadata = {
+            "error_message": error_msg,
+            "source": "smiles_generation_failed",
+            "attempted_path": f"smiles:{smiles[:30]}..."
+        }
+
+        return False, "", metadata
+
+
 def fetch_ligands(config_data: Dict[str, Any]) -> int:
     """
-    Fetch multiple ligands with priority-based lookup.
+    Fetch multiple ligands with priority-based lookup and/or generate from SMILES.
 
-    Priority: local_folder -> Ligands/ -> RCSB/PubChem download
+    Priority for lookup: local_folder -> Ligands/ -> RCSB/PubChem download
+    SMILES are always generated directly using RDKit.
 
     Args:
         config_data: Configuration dictionary with fetch parameters
@@ -1248,7 +1316,8 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     """
     custom_ids = config_data['custom_ids']
     residue_codes = config_data['residue_codes']
-    lookup_values = config_data['lookup_values']
+    lookup_values = config_data.get('lookup_values', [])
+    smiles_values = config_data.get('smiles_values', [])
     source = config_data.get('source')  # "rcsb", "pubchem", or None (auto-detect)
     local_folder = config_data.get('local_folder')
     output_format = config_data.get('output_format', 'pdb')  # "pdb" or "cif"
@@ -1257,13 +1326,15 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     compounds_table = config_data['compounds_table']
     failed_table = config_data['failed_table']
 
-    print(f"Fetching {len(lookup_values)} ligands")
+    total_count = len(lookup_values) + len(smiles_values)
+    print(f"Processing {total_count} ligands ({len(lookup_values)} lookup, {len(smiles_values)} SMILES)")
     print(f"Output format: {output_format.upper()}")
-    if source:
-        print(f"Forced source: {source}")
-    else:
-        print(f"Source: auto-detect")
-    print(f"Priority: {'local_folder -> ' if local_folder else ''}Ligands/ -> download")
+    if lookup_values:
+        if source:
+            print(f"Forced source: {source}")
+        else:
+            print(f"Source: auto-detect")
+        print(f"Priority: {'local_folder -> ' if local_folder else ''}Ligands/ -> download")
 
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
@@ -1272,9 +1343,12 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     successful_downloads = []
     failed_downloads = []
 
-    # Fetch each ligand
-    for i, (custom_id, residue_code, lookup) in enumerate(zip(custom_ids, residue_codes, lookup_values), 1):
-        print(f"\n[{i}/{len(lookup_values)}] Processing {lookup} -> {custom_id} (code: {residue_code})")
+    # Process lookup values first
+    for i, (custom_id, residue_code, lookup) in enumerate(zip(
+            custom_ids[:len(lookup_values)],
+            residue_codes[:len(lookup_values)],
+            lookup_values), 1):
+        print(f"\n[{i}/{total_count}] Processing lookup {lookup} -> {custom_id} (code: {residue_code})")
 
         # Detect lookup type
         lookup_type = detect_lookup_type(lookup)
@@ -1335,6 +1409,41 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
                 'attempted_path': metadata.get('attempted_path', '')
             })
 
+    # Process SMILES values
+    smiles_start_idx = len(lookup_values)
+    for i, (custom_id, residue_code, smiles) in enumerate(zip(
+            custom_ids[smiles_start_idx:],
+            residue_codes[smiles_start_idx:],
+            smiles_values), smiles_start_idx + 1):
+        print(f"\n[{i}/{total_count}] Processing SMILES -> {custom_id} (code: {residue_code})")
+
+        success, file_path, metadata = generate_from_smiles(
+            smiles, custom_id, residue_code, output_folder, output_format
+        )
+
+        if success:
+            successful_downloads.append({
+                'id': custom_id,
+                'format': 'smiles',
+                'code': residue_code,
+                'lookup': '',  # No lookup for direct SMILES
+                'source': 'smiles',
+                'ccd': '',
+                'cid': '',
+                'cas': '',
+                'smiles': smiles,
+                'name': '',
+                'formula': '',
+                'file_path': file_path
+            })
+        else:
+            failed_downloads.append({
+                'lookup': f"SMILES:{custom_id}",
+                'error_message': metadata.get('error_message', 'Unknown error'),
+                'source': 'smiles_generation_failed',
+                'attempted_path': metadata.get('attempted_path', '')
+            })
+
     # Save successful downloads table
     if successful_downloads:
         df_success = pd.DataFrame(successful_downloads)
@@ -1360,15 +1469,16 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
 
     # Summary
     print(f"\n=== FETCH SUMMARY ===")
-    print(f"Requested: {len(lookup_values)} ligands")
+    print(f"Requested: {total_count} ligands")
     print(f"Successful: {len(successful_downloads)}")
     print(f"Failed: {len(failed_downloads)}")
-    print(f"Success rate: {len(successful_downloads)/len(lookup_values)*100:.1f}%")
+    if total_count > 0:
+        print(f"Success rate: {len(successful_downloads)/total_count*100:.1f}%")
 
     if successful_downloads:
         # Count how many have SMILES
         with_smiles = sum(1 for item in successful_downloads if item['smiles'])
-        print(f"SMILES fetched: {with_smiles}/{len(successful_downloads)}")
+        print(f"SMILES available: {with_smiles}/{len(successful_downloads)}")
 
     # Log any failed fetches
     if failed_downloads:
@@ -1399,12 +1509,19 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['custom_ids', 'residue_codes', 'lookup_values', 'repo_ligands_folder',
+    required_params = ['custom_ids', 'residue_codes', 'repo_ligands_folder',
                        'output_folder', 'compounds_table', 'failed_table']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")
             sys.exit(1)
+
+    # Ensure at least one of lookup_values or smiles_values is present
+    lookup_values = config_data.get('lookup_values', [])
+    smiles_values = config_data.get('smiles_values', [])
+    if not lookup_values and not smiles_values:
+        print("Error: Must provide at least one of 'lookup_values' or 'smiles_values'")
+        sys.exit(1)
 
     try:
         failed_count = fetch_ligands(config_data)

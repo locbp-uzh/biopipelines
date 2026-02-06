@@ -7,16 +7,18 @@ with color-coded codon frequencies.
 """
 
 import os
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class DNAEncoder(BaseConfig):
@@ -28,7 +30,7 @@ class DNAEncoder(BaseConfig):
 
     Supports:
     - Single or multiple organisms (EC: E. coli, SC: S. cerevisiae, HS: H. sapiens)
-    - Thresholded weighted sampling (recommended): samples codons ≥10‰ frequency
+    - Thresholded weighted sampling (recommended for synthesis): samples codons ≥10‰ frequency
     - CSV output with DNA sequences
     - Excel output with color-coded codon frequencies
 
@@ -37,17 +39,23 @@ class DNAEncoder(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "DNAEncoder"
-    
+
+    # Lazy path descriptors
+    dna_csv = Path(lambda self: os.path.join(self.output_folder, "dna.csv"))
+    dna_excel = Path(lambda self: os.path.join(self.output_folder, "dna_sequences.xlsx"))
+    info_txt = Path(lambda self: os.path.join(self.output_folder, "dna_info.txt"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "dna_encoder_config.json"))
+    encoder_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_dna_encoder.py"))
 
     def __init__(self,
-                 sequences: Union[ToolOutput, StandardizedOutput],
+                 sequences: Union[DataStream, StandardizedOutput],
                  organism: str = "EC",
                  **kwargs):
         """
         Initialize DNA encoder tool.
 
         Args:
-            sequences: Input protein sequences (ToolOutput or StandardizedOutput with sequences table)
+            sequences: Input protein sequences as DataStream or StandardizedOutput
             organism: Target organism(s) for codon optimization. Options:
                      - "EC" (Escherichia coli)
                      - "SC" (Saccharomyces cerevisiae)
@@ -56,35 +64,32 @@ class DNAEncoder(BaseConfig):
                      - "EC&SC" (optimized for both E. coli and yeast)
                      - "HS&SC" (optimized for both human and yeast)
                      - "EC&HS&SC" (optimized for all three organisms)
+                     With more than one organism it is more likely if not inevitable to have rare codons.
             **kwargs: Additional parameters
 
         Examples:
             # Encode for E. coli
-            dna = pipeline.add(DNAEncoder(
-                sequences=lmpnn,
-                organism="EC"
-            ))
+            dna = DNAEncoder(sequences=lmpnn, organism="EC")
 
             # Encode for both E. coli and human (conservative approach)
-            dna = pipeline.add(DNAEncoder(
-                sequences=designed_sequences,
-                organism="EC&HS"
-            ))
+            dna = DNAEncoder(sequences=designed_sequences, organism="EC&HS")
         """
-        self.sequences_input = sequences
+        # Resolve input to DataStream
+        if isinstance(sequences, StandardizedOutput):
+            self.sequences_stream: DataStream = sequences.streams.sequences
+        elif isinstance(sequences, DataStream):
+            self.sequences_stream = sequences
+        else:
+            raise ValueError(f"sequences must be DataStream or StandardizedOutput, got {type(sequences)}")
+
         self.organism = organism
 
-        # Initialize base class
         super().__init__(**kwargs)
-
-        # Set up dependencies
-        if hasattr(sequences, 'config'):
-            self.dependencies.append(sequences.config)
 
     def validate_params(self):
         """Validate DNAEncoder parameters."""
-        if not isinstance(self.sequences_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("sequences must be a ToolOutput or StandardizedOutput object")
+        if not self.sequences_stream or len(self.sequences_stream) == 0:
+            raise ValueError("sequences parameter is required and must not be empty")
 
         # Validate organism parameter
         valid_organisms = ["EC", "SC", "HS"]
@@ -98,60 +103,15 @@ class DNAEncoder(BaseConfig):
                 )
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input sequences from previous tools."""
+        """Configure input sequences."""
         self.folders = pipeline_folders
-
-        # Extract sequences path
-        self.sequences_path = self._extract_sequences_path(self.sequences_input)
-
-    def _extract_sequences_path(self, input_obj: Union[ToolOutput, StandardizedOutput]) -> str:
-        """Extract sequences path from ToolOutput or StandardizedOutput."""
-        # Try to get sequences table from input
-        if hasattr(input_obj, 'tables'):
-            tables = input_obj.tables
-
-            # Check for sequences table
-            if hasattr(tables, 'sequences'):
-                if isinstance(tables.sequences, str):
-                    return tables.sequences
-                else:
-                    if hasattr(tables.sequences, 'path'):
-                        return tables.sequences.path
-                    else:
-                        raise ValueError("Cannot extract path of sequences table")
-            elif hasattr(tables, '_tables'):
-                # Standard BioPipelines format
-                for name, info in tables._tables.items():
-                    if 'sequence' in name.lower():
-                        return info.path
-            elif isinstance(tables, dict):
-                # Dict format
-                for name, info in tables.items():
-                    if 'sequence' in name.lower():
-                        if isinstance(info, str):
-                            return info
-                        elif isinstance(info, dict) and 'path' in info:
-                            return info['path']
-                        elif hasattr(info, 'path'):
-                            return info.path
-
-        # Fallback: try to predict sequences file in output folder
-        if hasattr(input_obj, 'output_folder'):
-            predicted_files = [
-                os.path.join(input_obj.output_folder, 'sequences.csv'),
-                os.path.join(input_obj.output_folder, 'queries.csv'),
-                os.path.join(input_obj.output_folder, 'table.csv')
-            ]
-            return predicted_files[0]  # Return first prediction
-
-        raise ValueError("Could not extract sequences path from input")
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
         config_lines.extend([
-            f"SEQUENCES: {type(self.sequences_input).__name__}",
+            f"SEQUENCES: {len(self.sequences_stream)} sequences",
             f"ORGANISM: {self.organism}"
         ])
 
@@ -172,70 +132,57 @@ class DNAEncoder(BaseConfig):
 
     def generate_script_run_encoding(self) -> str:
         """Generate the DNA encoding part of the script."""
-        dna_csv = os.path.join(self.output_folder, "dna.csv")
-        dna_excel = os.path.join(self.output_folder, "dna_sequences.xlsx")
-        info_txt = os.path.join(self.output_folder, "dna_info.txt")
+        import json
 
-        config_file = os.path.join(self.output_folder, "dna_encoder_config.json")
         config_data = {
-            "sequences_csv": self.sequences_path,
+            "sequences_csv": self.sequences_stream.map_table,
             "organism": self.organism,
-            "dna_output": dna_csv,
-            "excel_output": dna_excel,
-            "info_output": info_txt
+            "dna_output": self.dna_csv,
+            "excel_output": self.dna_excel,
+            "info_output": self.info_txt
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Encoding protein sequences to DNA"
-echo "Input sequences: {self.sequences_path}"
+echo "Input sequences: {self.sequences_stream.map_table}"
 echo "Target organism(s): {self.organism}"
 echo "Output folder: {self.output_folder}"
 
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_dna_encoder.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully encoded sequences to DNA"
-    echo "DNA sequences (CSV): {dna_csv}"
-    echo "DNA sequences (Excel): {dna_excel}"
-    echo "Encoding info: {info_txt}"
-else
-    echo "Error: Failed to encode sequences to DNA"
-    exit 1
-fi
+python "{self.encoder_py}" --config "{self.config_file}"
 
 """
 
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after DNA encoding.
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after DNA encoding."""
+        # DNA sequences inherit IDs from input sequences
+        sequence_ids = self.sequences_stream.ids.copy()
 
-        Returns:
-            Dictionary with output file paths and table information
-        """
-        dna_csv = os.path.join(self.output_folder, "dna.csv")
-        dna_excel = os.path.join(self.output_folder, "dna_sequences.xlsx")
-        info_txt = os.path.join(self.output_folder, "dna_info.txt")
+        sequences = DataStream(
+            name="sequences",
+            ids=sequence_ids,
+            files=[],
+            map_table=self.dna_csv,
+            format="dna"
+        )
 
-        # Create standardized output
-        output = {
-            "output_folder": self.output_folder,
-            "tables": {
-                "dna": TableInfo(
-                    name="dna",
-                    path=dna_csv,
-                    columns=["id", "protein_sequence", "dna_sequence", "organism", "method"],
-                    description="DNA sequences with thresholded weighted codon optimization",
-                    count=0  # Will be determined at runtime
-                )
-            },
-            "files": {
-                "excel": dna_excel,
-                "info": info_txt
-            }
+        tables = {
+            "dna": TableInfo(
+                name="dna",
+                path=self.dna_csv,
+                columns=["id", "protein_sequence", "dna_sequence", "organism", "method"],
+                description="DNA sequences with thresholded weighted codon optimization",
+                count=len(sequence_ids)
+            )
         }
 
-        return output
+        return {
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": sequences,
+            "compounds": DataStream.empty("compounds", "sdf"),
+            "tables": tables,
+            "output_folder": self.output_folder,
+            "excel": self.dna_excel,
+            "info": self.info_txt
+        }

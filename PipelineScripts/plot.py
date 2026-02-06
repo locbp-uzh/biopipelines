@@ -11,11 +11,15 @@ import json
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class PlotOperation:
@@ -78,12 +82,16 @@ class Plot(BaseConfig):
     """
 
     TOOL_NAME = "Plot"
-    
+
+    # Lazy path descriptors
+    config_file = Path(lambda self: os.path.join(self.output_folder, "plot_config.json"))
+    metadata_csv = Path(lambda self: os.path.join(self.output_folder, "plot_metadata.csv"))
+    plot_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_plot.py"))
 
     # --- Static methods for creating operations ---
 
     @staticmethod
-    def Scatter(data: Union[StandardizedOutput, ToolOutput, TableInfo],
+    def Scatter(data: Union[StandardizedOutput, TableInfo],
                 x: str,
                 y: str,
                 color: str = None,
@@ -129,7 +137,7 @@ class Plot(BaseConfig):
                             color_legend_outside=color_legend_outside)
 
     @staticmethod
-    def Histogram(data: Union[StandardizedOutput, ToolOutput, TableInfo],
+    def Histogram(data: Union[StandardizedOutput, TableInfo],
                   x: str,
                   bins: int = 20,
                   title: str = None,
@@ -160,7 +168,7 @@ class Plot(BaseConfig):
                             x_name=x_name, y_name=y_name, figsize=figsize)
 
     @staticmethod
-    def Bar(data: Union[StandardizedOutput, ToolOutput, TableInfo],
+    def Bar(data: Union[StandardizedOutput, TableInfo],
             x: str,
             y: str,
             title: str = None,
@@ -191,7 +199,7 @@ class Plot(BaseConfig):
                             x_name=x_name, y_name=y_name, figsize=figsize)
 
     @staticmethod
-    def Column(data: List[Union[StandardizedOutput, ToolOutput, TableInfo]],
+    def Column(data: List[Union[StandardizedOutput, TableInfo]],
                y: str,
                labels: List[str] = None,
                title: str = None,
@@ -252,7 +260,7 @@ class Plot(BaseConfig):
                             grid=grid)
 
     @staticmethod
-    def HeatMap(data: Union[StandardizedOutput, ToolOutput, TableInfo],
+    def HeatMap(data: Union[StandardizedOutput, TableInfo],
                 x: str = None,
                 y: str = None,
                 value: str = None,
@@ -490,39 +498,20 @@ class Plot(BaseConfig):
 
     def generate_script_run_plot(self) -> str:
         """Generate the plot creation part of the script."""
-        # Create config file with all operations
         config = {
             "operations": [self._serialize_operation(op) for op in self.operations],
             "output_folder": self.output_folder,
             "plot_filenames": [self._generate_plot_filename(op, i) for i, op in enumerate(self.operations)]
         }
 
-        config_file = os.path.join(self.output_folder, "plot_config.json")
-
-        # Get HelpScripts path
-        help_scripts = self.folders.get("HelpScripts", "HelpScripts")
-        plot_script = os.path.join(help_scripts, "pipe_plot.py")
+        # Write config file at pipeline time (not SLURM time)
+        with open(self.config_file, 'w') as f:
+            json.dump(config, f, indent=2)
 
         return f"""echo "Creating plots..."
 echo "Output folder: {self.output_folder}"
 
-# Create output directory
-mkdir -p "{self.output_folder}"
-
-# Write configuration
-cat > "{config_file}" << 'PLOT_CONFIG_EOF'
-{json.dumps(config, indent=2)}
-PLOT_CONFIG_EOF
-
-# Run plot generation
-python "{plot_script}" --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Plots created successfully"
-else
-    echo "ERROR: Failed to create plots"
-    exit 1
-fi
+python "{self.plot_py}" --config "{self.config_file}"
 
 """
 
@@ -534,29 +523,20 @@ fi
             filename = self._generate_plot_filename(op, i)
             plot_files.append(os.path.join(self.output_folder, filename))
 
-        # Metadata table
-        metadata_csv = os.path.join(self.output_folder, "plot_metadata.csv")
-
-        # Build columns for metadata table
-        metadata_columns = ["filename", "type", "title", "x_column", "y_column", "data_sources"]
-
         tables = {
             "metadata": TableInfo(
                 name="metadata",
-                path=metadata_csv,
-                columns=metadata_columns,
+                path=self.metadata_csv,
+                columns=["filename", "type", "title", "x_column", "y_column", "data_sources"],
                 description="Summary of all generated plots",
                 count=len(self.operations)
             )
         }
 
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder,
             "plots": plot_files

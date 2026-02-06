@@ -1,8 +1,10 @@
-Read Docs/UserManual.md. 
+Read Docs/UserManual.md.
 Understand the difference between pipeline and slurm runtime. 
 Understand the organization of the repository and the relationship between PipelineScripts and HelpScripts. 
 Understand the folder configuration on the cluster. 
 This session is run on a local computer, not on the cluster, so home, data, scratch, shares are not accessible, the environments are not set, and no tool requiring a gpu can run.
-Do not implement unnecessary fallback methods nor to assign arbitrary default values to variables. 
-Remember that tools shouldn't write python code, only bash code, and python code meant to run at slurm runtime should be in HelpScripts (pipe scripts).
+Remember that tools shouldn't write python code, only bash code, and python code meant to run at slurm runtime should be in HelpScripts (pipe_ scripts for tools).
+Read Docs/ToolReference.md for a broad idea of which tools are available.
+Read HelpScripts/biopipelines_io.py.
+When implementing new code or refactoring, never introduce unnecessary fallbacks or guessed default values.
 Make sure you don't leave tmpclaude-XXXX-cwd files behind in the repository. 

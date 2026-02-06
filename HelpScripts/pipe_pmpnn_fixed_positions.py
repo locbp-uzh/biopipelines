@@ -4,12 +4,13 @@ import argparse
 import os
 import sys
 
-# Import PDB parser
+# Import PDB parser and I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from pdb_parser import parse_pdb_file
+from biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
 parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion table, use direct selections, or apply pLDDT threshold')
-parser.add_argument('JOB_FOLDER', type=str, help="Directory containing PDB files")
+parser.add_argument('structures_json', type=str, help="Path to DataStream JSON file with input structures")
 parser.add_argument('input_source', type=str, help = "'table' for reading from table, 'selection' for direct input, 'plddt' for threshold")
 parser.add_argument('input_table', type=str, help='Path to input table (e.g., tool_results.csv) or "-" if not used')
 parser.add_argument('pLDDT_thr', type=float, help="Will consider residues with pLDDT > threshold as fixed ")
@@ -20,7 +21,7 @@ parser.add_argument('fixed_jsonl_file', type=str, help="output file")
 parser.add_argument('sele_csv_file', type=str, help="output file with selections of fixed and mobile parts")
 # Parse the arguments
 args = parser.parse_args()
-JOB_FOLDER=args.JOB_FOLDER
+structures_json=args.structures_json
 input_source=args.input_source
 input_table=args.input_table
 pLDDT_thr=args.pLDDT_thr
@@ -132,47 +133,35 @@ def compute_complement(all_residues, redesigned_residues):
     complement = [res for res in all_residues if res not in redesigned_set]
     return sorted(complement)
 
-def resolve_table_reference(reference, design_names):
+def resolve_table_reference(reference, design_ids):
     """
     Resolve table reference to per-design selections.
 
     Args:
         reference: Either a table reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
-        design_names: List of design names (PDB base names without extension)
+        design_ids: List of design IDs from DataStream
 
     Returns:
-        Dictionary mapping design names to position lists
+        Dictionary mapping design IDs to position lists
     """
     if not reference.startswith("DATASHEET_REFERENCE:"):
         # Direct PyMOL selection - same for all designs
-        return {name: sele_to_list(reference) for name in design_names}
+        return {design_id: sele_to_list(reference) for design_id in design_ids}
 
-    # Parse table reference: DATASHEET_REFERENCE:path:column
-    _, table_path, column_name = reference.split(":", 2)
-
-    if not os.path.exists(table_path):
-        raise FileNotFoundError(f"Table not found: {table_path}")
-
-    df = pd.read_csv(table_path)
+    # Use pipe_biopipelines_io to load table and column
+    table, column_name = load_table(reference)
     positions_per_design = {}
 
-    for design_name in design_names:
-        # Find matching row in table
-        matching_rows = df[df['pdb'] == design_name + '.pdb']
-        if matching_rows.empty:
-            # Try with base name in 'id' column
-            matching_rows = df[df['id'] == design_name]
-
-        if not matching_rows.empty:
-            row = matching_rows.iloc[0]
-            selection_value = row.get(column_name, '')
+    for design_id in design_ids:
+        try:
+            selection_value = lookup_table_value(table, design_id, column_name)
             if pd.notna(selection_value) and selection_value != '':
-                positions_per_design[design_name] = sele_to_list(str(selection_value))
+                positions_per_design[design_id] = sele_to_list(str(selection_value))
             else:
-                positions_per_design[design_name] = []
-        else:
-            print(f"Warning: No table entry found for {design_name} in column {column_name}")
-            positions_per_design[design_name] = []
+                positions_per_design[design_id] = []
+        except KeyError:
+            print(f"Warning: No table entry found for {design_id} in column {column_name}")
+            positions_per_design[design_id] = []
 
     return positions_per_design
 
@@ -181,7 +170,12 @@ import pandas as pd
 import pymol
 from pymol import cmd
 
-design_names = [d[:-4] for d in os.listdir(JOB_FOLDER) if d.endswith(".pdb")]
+# Load DataStream and get (id, file) pairs
+structures_ds = load_datastream(structures_json)
+design_entries = list(iterate_files(structures_ds))  # List of (design_id, pdb_file) tuples
+design_ids = [entry[0] for entry in design_entries]
+design_files = {entry[0]: entry[1] for entry in design_entries}  # Map id -> file path
+
 fixed_dict = dict()
 mobile_dict = dict()
 
@@ -190,26 +184,34 @@ if input_source == "table": #derive from table
         # Read input table
         df = pd.read_csv(input_table)
         print(f"Reading from table: {input_table}")
-        
-        for _, row in df.iterrows():
-            pdb_name = os.path.splitext(os.path.basename(row['pdb']))[0]
-            if pdb_name in design_names:
-                fixed_dict[pdb_name] = dict()
-                mobile_dict[pdb_name] = dict()
-                
+
+        for design_id in design_ids:
+            # Find matching row - try by id column first, then by pdb column
+            matching_rows = df[df['id'] == design_id] if 'id' in df.columns else pd.DataFrame()
+            if matching_rows.empty and 'pdb' in df.columns:
+                # Try matching by pdb filename
+                matching_rows = df[df['pdb'].apply(lambda x: os.path.splitext(os.path.basename(str(x)))[0]) == design_id]
+
+            if not matching_rows.empty:
+                row = matching_rows.iloc[0]
+                fixed_dict[design_id] = dict()
+                mobile_dict[design_id] = dict()
+
                 # Parse fixed and designed selections from table
                 if 'fixed' in df.columns and pd.notna(row['fixed']) and row['fixed'] != '':
-                    fixed_dict[pdb_name][FIXED_CHAIN] = sele_to_list(str(row['fixed']))
+                    fixed_dict[design_id][FIXED_CHAIN] = sele_to_list(str(row['fixed']))
                 else:
-                    fixed_dict[pdb_name][FIXED_CHAIN] = []
-                    
+                    fixed_dict[design_id][FIXED_CHAIN] = []
+
                 if 'designed' in df.columns and pd.notna(row['designed']) and row['designed'] != '':
-                    mobile_dict[pdb_name][FIXED_CHAIN] = sele_to_list(str(row['designed']))
+                    mobile_dict[design_id][FIXED_CHAIN] = sele_to_list(str(row['designed']))
                 else:
-                    mobile_dict[pdb_name][FIXED_CHAIN] = []
-                    
-                print(f"Design: {pdb_name}, Fixed: {fixed_dict[pdb_name][FIXED_CHAIN]}, Designed: {mobile_dict[pdb_name][FIXED_CHAIN]}")
-                
+                    mobile_dict[design_id][FIXED_CHAIN] = []
+
+                print(f"Design: {design_id}, Fixed: {fixed_dict[design_id][FIXED_CHAIN]}, Designed: {mobile_dict[design_id][FIXED_CHAIN]}")
+            else:
+                print(f"Warning: No table entry found for {design_id}")
+
     except Exception as e:
         print(f"Error reading table {input_table}: {e}")
         print("Falling back to pLDDT threshold method...")
@@ -221,41 +223,41 @@ if input_source == "selection":
     DESIGNED = DESIGNED if DESIGNED != '-' else ''
 
     # Resolve table references if present
-    fixed_per_design = resolve_table_reference(FIXED, design_names) if FIXED else {name: [] for name in design_names}
-    designed_per_design = resolve_table_reference(DESIGNED, design_names) if DESIGNED else {name: [] for name in design_names}
+    fixed_per_design = resolve_table_reference(FIXED, design_ids) if FIXED else {design_id: [] for design_id in design_ids}
+    designed_per_design = resolve_table_reference(DESIGNED, design_ids) if DESIGNED else {design_id: [] for design_id in design_ids}
 
-    for name in design_names:
-        fixed_dict[name] = dict()
-        mobile_dict[name] = dict()
+    for design_id in design_ids:
+        fixed_dict[design_id] = dict()
+        mobile_dict[design_id] = dict()
 
         # Store original mobile/designed positions for documentation
-        mobile_dict[name][FIXED_CHAIN] = designed_per_design[name]
+        mobile_dict[design_id][FIXED_CHAIN] = designed_per_design[design_id]
 
         # Compute what ProteinMPNN should keep fixed:
         # Option C: Union of explicit fixed + complement of redesigned
-        pdb_path = os.path.join(JOB_FOLDER, name + ".pdb")
+        pdb_path = design_files[design_id]
 
         # Start with explicit fixed positions
-        final_fixed = list(fixed_per_design[name])
+        final_fixed = list(fixed_per_design[design_id])
 
         # If redesigned positions are specified, add their complement to fixed
-        if designed_per_design[name]:
+        if designed_per_design[design_id]:
             # Get all protein residues from PDB
             all_residues = get_protein_residues_from_pdb(pdb_path, FIXED_CHAIN)
 
             # Compute complement of redesigned positions
-            complement = compute_complement(all_residues, designed_per_design[name])
+            complement = compute_complement(all_residues, designed_per_design[design_id])
 
             # Union: fixed + complement
             final_fixed = sorted(list(set(final_fixed + complement)))
 
-            print(f"Design: {name}, Selection-based - Explicit Fixed: {list_to_sele(fixed_per_design[name]) if fixed_per_design[name] else ''}, Redesigned: {list_to_sele(designed_per_design[name])}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
+            print(f"Design: {design_id}, Selection-based - Explicit Fixed: {list_to_sele(fixed_per_design[design_id]) if fixed_per_design[design_id] else ''}, Redesigned: {list_to_sele(designed_per_design[design_id])}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
         else:
             # No redesigned specified, use fixed as-is
-            print(f"Design: {name}, Selection-based - Fixed: {list_to_sele(final_fixed) if final_fixed else ''}, Redesigned: ")
+            print(f"Design: {design_id}, Selection-based - Fixed: {list_to_sele(final_fixed) if final_fixed else ''}, Redesigned: ")
 
         # Store final fixed positions (what ProteinMPNN will use)
-        fixed_dict[name][FIXED_CHAIN] = final_fixed
+        fixed_dict[design_id][FIXED_CHAIN] = final_fixed
         
 elif input_source == "plddt" or input_source == "table":  # table fallback
     # Use pLDDT threshold method
@@ -268,14 +270,14 @@ elif input_source == "plddt" or input_source == "table":  # table fallback
         except Exception as e:
             print("Error while initializing pymol")
             print(str(e))
-    
-    for name in design_names:
-        if name not in fixed_dict:  # Skip if already processed from table
-            fixed_dict[name] = dict()
-            mobile_dict[name] = dict()
-            
+
+    for design_id in design_ids:
+        if design_id not in fixed_dict:  # Skip if already processed from table
+            fixed_dict[design_id] = dict()
+            mobile_dict[design_id] = dict()
+
             if pLDDT_thr < 100:
-                pdb_file = os.path.join(JOB_FOLDER,name+".pdb")
+                pdb_file = design_files[design_id]
                 try:
                     cmd.load(pdb_file,"prot")
                     fixed_residues = []
@@ -291,18 +293,18 @@ elif input_source == "plddt" or input_source == "table":  # table fallback
                             if not resi in fixed_residues:
                                 fixed_residues.append(int(atom.resi))
                     cmd.delete("prot")
-                    fixed_dict[name][FIXED_CHAIN] = fixed_residues[:]
-                    mobile_dict[name][FIXED_CHAIN] = mobile_residues[:]
-                    print(f"Design: {name}, pLDDT-based - Fixed: {len(fixed_residues)}, Mobile: {len(mobile_residues)}")
+                    fixed_dict[design_id][FIXED_CHAIN] = fixed_residues[:]
+                    mobile_dict[design_id][FIXED_CHAIN] = mobile_residues[:]
+                    print(f"Design: {design_id}, pLDDT-based - Fixed: {len(fixed_residues)}, Mobile: {len(mobile_residues)}")
                 except Exception as e:
                     print("Error while calculating fixed positions")
                     print(str(e))
-                    fixed_dict[name][FIXED_CHAIN] = sele_to_list(FIXED)
-                    mobile_dict[name][FIXED_CHAIN] = []
+                    fixed_dict[design_id][FIXED_CHAIN] = sele_to_list(FIXED)
+                    mobile_dict[design_id][FIXED_CHAIN] = []
             else:
-                fixed_dict[name][FIXED_CHAIN] = sele_to_list(FIXED)
-                mobile_dict[name][FIXED_CHAIN] = sele_to_list(DESIGNED)
-                print(f"Design: {name}, Selection-based - Fixed: {FIXED}, Redesigned: {DESIGNED}")
+                fixed_dict[design_id][FIXED_CHAIN] = sele_to_list(FIXED)
+                mobile_dict[design_id][FIXED_CHAIN] = sele_to_list(DESIGNED)
+                print(f"Design: {design_id}, Selection-based - Fixed: {FIXED}, Redesigned: {DESIGNED}")
 
 with open(fixed_jsonl_file,"w") as jsonl_file:
     #Python converts dictionaries to string having keys inside '', json only recognises ""

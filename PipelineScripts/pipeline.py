@@ -909,10 +909,17 @@ umask 002
             try:
                 # Get current output structure
                 output_structure = tool.get_output_files()
-                
+
+                # Convert DataStream objects to dictionaries for JSON serialization
+                from .datastream import DataStream
+                from .base_config import TableInfo
+
+                for key in ['structures', 'sequences', 'compounds', 'msas']:
+                    if key in output_structure and isinstance(output_structure[key], DataStream):
+                        output_structure[key] = output_structure[key].to_dict()
+
                 # Convert TableInfo objects to dictionaries for JSON serialization
                 if 'tables' in output_structure:
-                    from .base_config import TableInfo
                     serializable_tables = {}
                     for name, table_info in output_structure['tables'].items():
                         if isinstance(table_info, TableInfo):

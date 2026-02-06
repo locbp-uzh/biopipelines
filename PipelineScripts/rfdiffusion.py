@@ -1,84 +1,68 @@
 """
 RFdiffusion configuration for protein backbone generation.
-
-Handles both standard RFdiffusion and RFdiffusion-AllAtom workflows
-with proper parameter validation and script generation.
 """
 
 import os
-import shutil
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream, create_map_table
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream, create_map_table
 
 
 class RFdiffusion(BaseConfig):
     """
     Configuration for RFdiffusion protein backbone generation.
-    
-    Supports both standard RFdiffusion and RFdiffusion-AllAtom modes
-    with comprehensive parameter validation and automatic script generation.
     """
-    
+
     TOOL_NAME = "RFdiffusion"
-    
-    
-    def __init__(self, pdb: Union[str, ToolOutput, StandardizedOutput] = "", contigs: str = "", inpaint: str = "",
-                 num_designs: int = 1, active_site: bool = False, 
-                 steps: int = 50, partial_steps: int = 0, 
-                 reproducible: bool = False, design_startnum: int = 1,
+
+    # Lazy path descriptors
+    main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion_results.csv"))
+    table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
+    inference_py_file = Path(lambda self: os.path.join(self.folders["RFdiffusion"], "scripts", "run_inference.py"))
+
+    def __init__(self,
+                 contigs: str,
+                 pdb: Optional[Union[DataStream, StandardizedOutput]] = None,
+                 inpaint: str = "",
+                 num_designs: int = 1,
+                 active_site: bool = False,
+                 steps: int = 50,
+                 partial_steps: int = 0,
+                 reproducible: bool = False,
+                 design_startnum: int = 1,
                  **kwargs):
         """
         Initialize RFdiffusion configuration.
-        
+
         Args:
-            pdb: Input PDB file (optional template), ToolOutput, or StandardizedOutput
             contigs: Contig specification (e.g., "A1-100,10-20")
+            pdb: Optional input structure as DataStream or StandardizedOutput
             inpaint: Inpainting specification (same format as contigs)
             num_designs: Number of designs to generate
             active_site: Use active site model for small motifs
             steps: Diffusion steps (default 50)
             partial_steps: Partial diffusion steps
             reproducible: Use deterministic sampling
-            design_startnum: Starting number for design numbering (default: 1)
-            **kwargs: Additional parameters
+            design_startnum: Starting number for design numbering
         """
-        # Store RFdiffusion-specific parameters
-        self.pdb = pdb
-        self.pdb_is_tool_output = False
-        self.pdb_source_file = None
-
-        # Handle tool output for PDB input
-        if isinstance(pdb, (ToolOutput, StandardizedOutput)):
-            self.pdb_is_tool_output = True
+        # Resolve optional pdb input
+        self.pdb_file: Optional[str] = None
+        if pdb is not None:
             if isinstance(pdb, StandardizedOutput):
-                # Get first structure from StandardizedOutput
-                if hasattr(pdb, 'structures') and pdb.structures:
-                    self.pdb_source_file = pdb.structures[0]
-                    if len(pdb.structures) > 1:
-                        print(f"Warning: Multiple structures found in input, using first one: {os.path.basename(self.pdb_source_file)}")
-                        print("Note: Multiple structure support not yet implemented")
-                else:
-                    raise ValueError("No structures found in StandardizedOutput for pdb parameter")
-            else:  # ToolOutput
-                # Get first structure from ToolOutput
-                structures = pdb.get_output_files("structures")
-                if structures:
-                    self.pdb_source_file = structures[0]
-                    if len(structures) > 1:
-                        print(f"Warning: Multiple structures found in tool output, using first one: {os.path.basename(self.pdb_source_file)}")
-                        print("Note: Multiple structure support not yet implemented")
-                    # Add dependency
-                    self.dependencies.append(pdb.config)
-                else:
-                    raise ValueError("No structures found in ToolOutput for pdb parameter")
+                self.pdb_file = pdb.streams.structures.files[0]
+            elif isinstance(pdb, DataStream):
+                self.pdb_file = pdb.files[0]
+            else:
+                raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
 
         self.contigs = contigs
         self.inpaint = inpaint
@@ -88,294 +72,149 @@ class RFdiffusion(BaseConfig):
         self.partial_steps = partial_steps
         self.reproducible = reproducible
         self.design_startnum = design_startnum
-        
-        # Initialize base class
-        super().__init__(**kwargs)
 
-        # Initialize file paths (will be set in configure_inputs)
-        self._initialize_file_paths()
+        super().__init__(**kwargs)
 
     def validate_params(self):
         """Validate RFdiffusion-specific parameters."""
         if not self.contigs:
-            raise ValueError("contigs parameter is required for RFdiffusion")
-        
+            raise ValueError("contigs parameter is required")
+
         if self.num_designs <= 0:
             raise ValueError("num_designs must be positive")
-        
+
         if self.steps <= 0:
             raise ValueError("steps must be positive")
-        
+
         if self.partial_steps < 0:
             raise ValueError("partial_steps cannot be negative")
-        
-        # Skip PDB validation for tool outputs (will be validated at runtime)
-        if self.pdb and not self.pdb_is_tool_output:
-            if not (isinstance(self.pdb, str) and (self.pdb.endswith('.pdb') or os.path.exists(self.pdb))):
-                # Check if it exists in PDBs folder
-                pdb_path = os.path.join(os.getcwd(), "PDBs", self.pdb + ".pdb" if not self.pdb.endswith('.pdb') else self.pdb)
-                if not os.path.exists(pdb_path):
-                    raise ValueError(f"PDB file not found: {self.pdb}")
-    
-    def _initialize_file_paths(self):
-        """Initialize common file paths used throughout the class."""
-        self.input_pdb_file = None
-        self.main_table = None
-        self.rfd_log_file = None
-        self.pipeline_name = None
-        
-        # Helper script paths
-        self.inference_py_file = None
-        self.table_py_file = None
-    
-    def _setup_file_paths(self):
-        """Set up all file paths after output_folder is known."""
-        # Extract pipeline name from folder structure
-        self.pipeline_name = self._extract_pipeline_name()
-        
-        # Core output files
-        self.main_table = os.path.join(self.output_folder, "rfdiffusion_results.csv")
-        
-        # Log file is created by pipeline in Logs folder with pattern NNN_{toolname}.log
-        # Extract index from folder name (e.g., "001_RFdiffusion" -> "001")
-        folder_name = os.path.basename(self.output_folder)
-        pipeline_folder = os.path.dirname(self.output_folder)  # Get parent folder (DeNovoProtein_013)
-        logs_folder = os.path.join(pipeline_folder, "Logs")
-
-        if '_' in folder_name and folder_name.split('_')[0].isdigit():
-            index = folder_name.split('_')[0]
-            tool_name = folder_name.split('_', 1)[1]  # Get everything after first underscore
-            self.rfd_log_file = os.path.join(logs_folder, f"{index}_{tool_name}.log")
-        else:
-            raise ValueError(f"Invalid output folder naming pattern: {folder_name}. Expected 'NNN_RFdiffusion' format.")
-        
-        # Helper script paths (only set if folders are available)
-        if hasattr(self, 'folders') and self.folders:
-            self.inference_py_file = os.path.join(self.folders["RFdiffusion"], "scripts", "run_inference.py")
-            self.table_py_file = os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py")
-            
-            # Input PDB file path (if PDB is provided)
-            if self.pdb_is_tool_output:
-                # Use the actual file path from tool output
-                self.input_pdb_file = self.pdb_source_file
-            elif self.pdb:
-                # Handle string PDB filename
-                pdb_temp = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
-                self.input_pdb_file = os.path.join(self.folders["runtime"], pdb_temp)
-            else:
-                self.input_pdb_file = ""
-        else:
-            # Temporary placeholders when folders aren't available yet
-            self.inference_py_file = None
-            self.table_py_file = None
-            self.input_pdb_file = ""
-    
-    def _extract_pipeline_name(self) -> str:
-        """Extract pipeline name from output folder structure."""
-        folder_parts = self.output_folder.split(os.sep)
-        for i, part in enumerate(folder_parts):
-            if "RFdiffusion" in part:
-                if i > 0:
-                    return folder_parts[i-1]
-                break
-        raise ValueError(f"Could not extract job name from output folder: {self.output_folder}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input files and dependencies."""
+        """Configure input files."""
         self.folders = pipeline_folders
-        self._setup_file_paths()  # Set up all file paths now that we have folders
 
-        # Handle PDB input if provided
-        if self.pdb_is_tool_output:
-            # Tool output - file already exists at pdb_source_file path
-            self.input_sources["pdb"] = self.pdb_source_file
-        elif self.pdb:
-            # String filename - look in PDBs folder
-            pdb_temp = self.pdb if self.pdb.endswith(".pdb") else self.pdb + ".pdb"
-            pdb_source = os.path.join(pipeline_folders["PDBs"], pdb_temp)
-
-            if os.path.exists(pdb_source):
-                # Will be copied in script generation
-                self.input_sources["pdb"] = pdb_source
-            else:
-                raise ValueError(f"PDB file not found: {pdb_source}")
-    
     def get_config_display(self) -> List[str]:
         """Get RFdiffusion configuration display lines."""
         config_lines = super().get_config_display()
-        
         config_lines.extend([
             f"CONTIGS: {self.contigs}",
             f"NUM DESIGNS: {self.num_designs}",
             f"ACTIVE SITE: {self.active_site}",
             f"STEPS: {self.steps}"
         ])
-        
-        if self.pdb:
-            config_lines.append(f"PDB: {self.pdb}")
+
+        if self.pdb_file:
+            config_lines.append(f"PDB: {self.pdb_file}")
         if self.inpaint:
             config_lines.append(f"INPAINT: {self.inpaint}")
         if self.partial_steps > 0:
             config_lines.append(f"PARTIAL STEPS: {self.partial_steps}")
         if self.reproducible:
             config_lines.append(f"REPRODUCIBLE: {self.reproducible}")
-        
+
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """
-        Generate RFdiffusion execution script.
-        
-        Args:
-            script_path: Path where script should be written
-            
-        Returns:
-            Script content as string
-        """
-        rfd_job_folder = self.output_folder
-        os.makedirs(rfd_job_folder, exist_ok=True)
-        
-        # Generate script content following modular pattern
+        """Generate RFdiffusion execution script."""
         script_content = "#!/bin/bash\n"
         script_content += "# RFdiffusion execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += self.generate_script_run_rfdiffusion()
-        script_content += self.generate_script_create_table()
+        script_content += self._generate_script_run_rfdiffusion()
+        script_content += self._generate_script_create_table()
         script_content += self.generate_completion_check_footer()
-        
         return script_content
-    
-    def generate_script_run_rfdiffusion(self) -> str:
+
+    def _generate_script_run_rfdiffusion(self) -> str:
         """Generate the RFdiffusion execution part of the script."""
-        rfd_job_folder = self.output_folder
-        
-        # Copy input PDB if provided (only if source and destination are different)
-        if self.pdb and "pdb" in self.input_sources:
-            source_path = os.path.abspath(self.input_sources["pdb"])
-            dest_path = os.path.abspath(self.input_pdb_file)
-            if source_path != dest_path:
-                shutil.copy(source_path, dest_path)
-        
-        # Build RFdiffusion options
         rfd_options = f"'contigmap.contigs=[{self.contigs}]'"
-        
+
         if self.inpaint:
             rfd_options += f" 'contigmap.inpaint_seq=[{self.inpaint}]'"
-        
-        if self.input_pdb_file:
-            rfd_options += f" inference.input_pdb={self.input_pdb_file}"
-        
-        # Output prefix for generated designs (use clean pipeline name for elegant consistency)
-        prefix = os.path.join(rfd_job_folder, f"{self.pipeline_name}")
+
+        if self.pdb_file:
+            rfd_options += f" inference.input_pdb={self.pdb_file}"
+
+        prefix = os.path.join(self.output_folder, self.pipeline_name)
         rfd_options += f" inference.output_prefix={prefix}"
         rfd_options += f" inference.num_designs={self.num_designs}"
         rfd_options += f" inference.deterministic={self.reproducible}"
         rfd_options += f" inference.design_startnum={self.design_startnum}"
-        
+
         if self.steps != 50:
             rfd_options += f" diffuser.T={self.steps}"
-        
+
         if self.partial_steps > 0:
             rfd_options += f" diffuser.partial_T={self.partial_steps}"
-        
+
         if self.active_site:
             rfd_options += " inference.ckpt_override_path=models/ActiveSite_ckpt.pt"
-        
+
         return f"""echo "Starting RFdiffusion"
 echo "Options: {rfd_options}"
-echo "Output folder: {rfd_job_folder}"
+echo "Output folder: {self.output_folder}"
 
-# Run RFdiffusion
 cd {self.folders["RFdiffusion"]}
 python {self.inference_py_file} {rfd_options}
 
 """
 
-    def generate_script_create_table(self) -> str:
+    def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
-        rfd_job_folder = self.output_folder
-        
-        # Design character: '-' for RFdiffusion, '?' for RFdiffusion-AllAtom
         design_character = "-"
-        
+
         return f"""echo "Creating results table"
-# Create main table with id, pdb, fixed, designed columns by parsing RFdiffusion log
-python {self.table_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{design_character}" "{self.pipeline_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_character}" "{self.pipeline_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
 
 """
-    
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after RFdiffusion execution.
-        
-        Uses pure path construction - no filesystem access.
-        Returns expected paths based on naming patterns.
-        
-        Returns:
-            Dictionary mapping output types to file paths with standard keys:
-            - structures: PDB files
-            - compounds: Empty (no compounds from RFdiffusion)
-            - sequences: Empty (no sequences from RFdiffusion)  
-            - tables: Main table CSV
-            - output_folder: Tool's output directory
-        """
-        # Ensure file paths are set up
-        if not hasattr(self, 'pipeline_name') or self.pipeline_name is None:
-            # Fallback if configure_inputs hasn't been called yet
-            self._setup_file_paths()
-        
-        pipeline_name = self.pipeline_name
-        main_table = self.main_table
-        
-        # Generate expected PDB file paths based on clean naming pattern
+
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after RFdiffusion execution."""
+        # Generate expected PDB file paths and IDs
         design_pdbs = []
         structure_ids = []
         for i in range(self.num_designs):
-            design_id = f"{pipeline_name}_{self.design_startnum + i}"
+            design_id = f"{self.pipeline_name}_{self.design_startnum + i}"
             design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
             design_pdbs.append(design_path)
             structure_ids.append(design_id)
-        
-        # Import TableInfo
-        from .base_config import TableInfo
 
-        # Update the existing table path if already initialized for IDE
-        if hasattr(self, 'tables') and hasattr(self.tables, 'structures'):
-            self.tables.structures.path = main_table
-            self.tables.structures.count = self.num_designs
+        # Create map_table for structures
+        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        create_map_table(structures_map, structure_ids, files=design_pdbs)
 
-        # Organize tables by content type
+        structures = DataStream(
+            name="structures",
+            ids=structure_ids,
+            files=design_pdbs,
+            map_table=structures_map,
+            format="pdb"
+        )
+
         tables = {
             "structures": TableInfo(
                 name="structures",
-                path=main_table,
+                path=self.main_table,
                 columns=["id", "source_id", "pdb", "fixed", "designed", "contigs", "time", "status"],
-                description="RFdiffusion structure generation results with fixed/designed regions",
+                description="RFdiffusion structure generation results",
                 count=self.num_designs
             )
         }
-        
+
         return {
-            "structures": design_pdbs,
-            "structure_ids": structure_ids,
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": structures,
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
-            "output_folder": self.output_folder,
-            # Keep legacy aliases for compatibility
-            "pdbs": design_pdbs,
-            "main": main_table  # Legacy alias for backward compatibility
+            "output_folder": self.output_folder
         }
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize configuration including RFdiffusion-specific parameters."""
+        """Serialize configuration."""
         base_dict = super().to_dict()
         base_dict.update({
             "rfd_params": {
-                "pdb": self.pdb,
+                "pdb_file": self.pdb_file,
                 "contigs": self.contigs,
                 "inpaint": self.inpaint,
                 "num_designs": self.num_designs,
@@ -387,5 +226,3 @@ python {self.table_py_file} "{rfd_job_folder}" "{self.rfd_log_file}" "{design_ch
             }
         })
         return base_dict
-
-

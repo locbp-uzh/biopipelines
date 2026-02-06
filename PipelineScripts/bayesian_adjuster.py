@@ -20,13 +20,18 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+
+# Standard amino acids - guaranteed output structure
+AMINO_ACIDS = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
+    from datastream import DataStream
 
 
 class BayesianAdjuster(BaseConfig):
@@ -45,7 +50,20 @@ class BayesianAdjuster(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BayesianAdjuster"
-    
+
+    # Lazy path descriptors
+    adjusted_probs_csv = Path(lambda self: os.path.join(self.output_folder, "adjusted_probabilities.csv"))
+    absolute_probs_csv = Path(lambda self: os.path.join(self.output_folder, "absolute_probabilities.csv"))
+    relative_probs_csv = Path(lambda self: os.path.join(self.output_folder, "relative_probabilities.csv"))
+    adjustment_log_csv = Path(lambda self: os.path.join(self.output_folder, "adjustment_log.csv"))
+    adjusted_logo_svg = Path(lambda self: os.path.join(self.output_folder, "adjusted_probabilities_logo.svg"))
+    adjusted_logo_png = Path(lambda self: os.path.join(self.output_folder, "adjusted_probabilities_logo.png"))
+    absolute_logo_svg = Path(lambda self: os.path.join(self.output_folder, "absolute_probabilities_logo.svg"))
+    absolute_logo_png = Path(lambda self: os.path.join(self.output_folder, "absolute_probabilities_logo.png"))
+    relative_logo_svg = Path(lambda self: os.path.join(self.output_folder, "relative_probabilities_logo.svg"))
+    relative_logo_png = Path(lambda self: os.path.join(self.output_folder, "relative_probabilities_logo.png"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "adjustment_config.json"))
+    adjuster_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_bayesian_adjuster.py"))
 
     def __init__(self,
                  frequencies: Union[TableInfo, str],
@@ -117,14 +135,7 @@ class BayesianAdjuster(BaseConfig):
         self.pseudocount = pseudocount
         self.positions = positions
 
-        # Initialize base class
         super().__init__(**kwargs)
-
-        # Set up dependencies
-        if hasattr(frequencies, 'config'):
-            self.dependencies.append(frequencies.config)
-        if hasattr(correlations, 'config'):
-            self.dependencies.append(correlations.config)
 
     def validate_params(self):
         """Validate BayesianAdjuster parameters."""
@@ -149,26 +160,12 @@ class BayesianAdjuster(BaseConfig):
             raise ValueError(f"pseudocount must be non-negative, got: {self.pseudocount}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input tables from previous tools."""
+        """Configure input tables."""
         self.folders = pipeline_folders
 
-        # Extract frequencies table path
-        self.frequencies_path = self._extract_table_path(self.frequencies_input, "frequencies")
-
-        # Extract correlations table path
-        self.correlations_path = self._extract_table_path(self.correlations_input, "correlations")
-
-    def _extract_table_path(self, input_obj: Union[TableInfo, str], name: str) -> str:
-        """Extract table path from input."""
-        # Direct path string
-        if isinstance(input_obj, str):
-            return input_obj
-
-        # TableInfo object
-        if isinstance(input_obj, TableInfo):
-            return input_obj.path
-
-        raise ValueError(f"Could not extract {name} table path from input")
+        # Extract table paths
+        self.frequencies_path = self.frequencies_input.path if isinstance(self.frequencies_input, TableInfo) else self.frequencies_input
+        self.correlations_path = self.correlations_input.path if isinstance(self.correlations_input, TableInfo) else self.correlations_input
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -201,19 +198,8 @@ class BayesianAdjuster(BaseConfig):
 
     def generate_script_run_adjustment(self) -> str:
         """Generate the Bayesian adjustment part of the script."""
-        adjusted_probs_csv = os.path.join(self.output_folder, "adjusted_probabilities.csv")
-        absolute_probs_csv = os.path.join(self.output_folder, "absolute_probabilities.csv")
-        relative_probs_csv = os.path.join(self.output_folder, "relative_probabilities.csv")
-        adjustment_log_csv = os.path.join(self.output_folder, "adjustment_log.csv")
+        import json
 
-        adjusted_logo_svg = os.path.join(self.output_folder, "adjusted_probabilities_logo.svg")
-        adjusted_logo_png = os.path.join(self.output_folder, "adjusted_probabilities_logo.png")
-        absolute_logo_svg = os.path.join(self.output_folder, "absolute_probabilities_logo.svg")
-        absolute_logo_png = os.path.join(self.output_folder, "absolute_probabilities_logo.png")
-        relative_logo_svg = os.path.join(self.output_folder, "relative_probabilities_logo.svg")
-        relative_logo_png = os.path.join(self.output_folder, "relative_probabilities_logo.png")
-
-        config_file = os.path.join(self.output_folder, "adjustment_config.json")
         config_data = {
             "frequencies_path": self.frequencies_path,
             "correlations_path": self.correlations_path,
@@ -222,20 +208,19 @@ class BayesianAdjuster(BaseConfig):
             "kappa": self.kappa,
             "pseudocount": self.pseudocount,
             "positions": self.positions,
-            "adjusted_probabilities_output": adjusted_probs_csv,
-            "absolute_probabilities_output": absolute_probs_csv,
-            "relative_probabilities_output": relative_probs_csv,
-            "adjustment_log_output": adjustment_log_csv,
-            "adjusted_logo_svg": adjusted_logo_svg,
-            "adjusted_logo_png": adjusted_logo_png,
-            "absolute_logo_svg": absolute_logo_svg,
-            "absolute_logo_png": absolute_logo_png,
-            "relative_logo_svg": relative_logo_svg,
-            "relative_logo_png": relative_logo_png
+            "adjusted_probabilities_output": self.adjusted_probs_csv,
+            "absolute_probabilities_output": self.absolute_probs_csv,
+            "relative_probabilities_output": self.relative_probs_csv,
+            "adjustment_log_output": self.adjustment_log_csv,
+            "adjusted_logo_svg": self.adjusted_logo_svg,
+            "adjusted_logo_png": self.adjusted_logo_png,
+            "absolute_logo_svg": self.absolute_logo_svg,
+            "absolute_logo_png": self.absolute_logo_png,
+            "relative_logo_svg": self.relative_logo_svg,
+            "relative_logo_png": self.relative_logo_png
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Running Bayesian frequency adjustment"
@@ -245,73 +230,49 @@ echo "Kappa: {self.kappa}"
 echo "Pseudocount: {self.pseudocount}"
 echo "Output folder: {self.output_folder}"
 
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_bayesian_adjuster.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully adjusted frequencies"
-    echo "Adjusted probabilities: {adjusted_probs_csv}"
-    echo "Absolute probabilities: {absolute_probs_csv}"
-    echo "Relative probabilities: {relative_probs_csv}"
-    echo "Logo plots generated"
-else
-    echo "Error: Failed to adjust frequencies"
-    exit 1
-fi
+python "{self.adjuster_py}" --config "{self.config_file}"
 
 """
 
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after adjustment.
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after adjustment."""
+        aa_columns = ["position", "original"] + AMINO_ACIDS
 
-        Returns:
-            Dictionary with output file paths and table information
-        """
-        adjusted_probs_csv = os.path.join(self.output_folder, "adjusted_probabilities.csv")
-        absolute_probs_csv = os.path.join(self.output_folder, "absolute_probabilities.csv")
-        relative_probs_csv = os.path.join(self.output_folder, "relative_probabilities.csv")
-        adjustment_log_csv = os.path.join(self.output_folder, "adjustment_log.csv")
-
-        # Define tables
         tables = {
             "adjusted_probabilities": TableInfo(
                 name="adjusted_probabilities",
-                path=adjusted_probs_csv,
-                columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
+                path=self.adjusted_probs_csv,
+                columns=aa_columns,
                 description="Raw Bayesian-adjusted probabilities before normalization",
-                count=None
+                count=0
             ),
             "absolute_probabilities": TableInfo(
                 name="absolute_probabilities",
-                path=absolute_probs_csv,
-                columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
+                path=self.absolute_probs_csv,
+                columns=aa_columns,
                 description="Normalized absolute probabilities (comparable to MutationProfiler absolute_frequencies)",
-                count=None
+                count=0
             ),
             "relative_probabilities": TableInfo(
                 name="relative_probabilities",
-                path=relative_probs_csv,
-                columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
+                path=self.relative_probs_csv,
+                columns=aa_columns,
                 description="Normalized relative probabilities (comparable to MutationProfiler relative_frequencies)",
-                count=None
+                count=0
             ),
             "adjustment_log": TableInfo(
                 name="adjustment_log",
-                path=adjustment_log_csv,
+                path=self.adjustment_log_csv,
                 columns=["position", "wt_aa", "aa", "prior_freq", "correlation", "adjusted_prob", "change"],
                 description="Log of Bayesian adjustments for debugging",
-                count=None
+                count=0
             )
         }
 
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

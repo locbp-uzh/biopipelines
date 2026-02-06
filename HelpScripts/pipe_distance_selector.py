@@ -7,10 +7,10 @@ a specified distance from a reference (ligand, atoms, or residues), generating
 PyMOL-formatted selections for use in downstream tools like LigandMPNN.
 
 Usage:
-    python pipe_distance_selector.py <structures_list_file> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map>
+    python pipe_distance_selector.py <structures_json> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map> <include_reference>
 
 Arguments:
-    structures_list_file: File containing list of PDB file paths (one per line)
+    structures_json: JSON file containing DataStream with ids and files
     reference_spec: Reference specification in format "type:selection"
                    - "ligand:LIG" - Use ligand with name LIG
                    - "atoms:resname ATP" - Use PyMOL atom selection
@@ -19,6 +19,7 @@ Arguments:
     restrict_spec: Restriction specification (table reference, direct selection, or "" for no restriction)
     output_csv: Path to output CSV file with selections
     id_map: JSON string with ID mapping pattern (e.g., '{"*": "*_<N>"}') for matching structure IDs to table IDs
+    include_reference: 'true' or 'false' - whether to include reference residues in 'within'
 
 Output:
     CSV file with columns: id, pdb, within, beyond, distance_cutoff, reference_ligand
@@ -35,8 +36,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom
 from typing import List, Dict, Tuple
 
-# Import unified ID mapping utilities
-from id_map_utils import map_table_ids_to_ids
+# Import unified I/O utilities
+from biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
 
 def parse_reference_spec(reference_spec):
@@ -160,6 +161,23 @@ def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
 
+def is_placeholder_atom(atom: Atom) -> bool:
+    """
+    Check if an atom has placeholder coordinates (0, 0, 0).
+
+    Some tools generate structures with side chain atoms at (0, 0, 0) when
+    the side chain conformation is unknown. These should be excluded from
+    distance calculations.
+
+    Args:
+        atom: Atom to check
+
+    Returns:
+        True if atom is at origin (0, 0, 0), False otherwise
+    """
+    return atom.x == 0.0 and atom.y == 0.0 and atom.z == 0.0
+
+
 def sele_to_list(sele_str: str) -> List[int]:
     """
     Convert selection string to list of residue numbers.
@@ -228,10 +246,7 @@ def format_ligandmpnn_selection_from_list(res_nums: List[int]) -> str:
     return "+".join(ranges)
 
 
-# Note: map_structure_id_to_table_id is now imported from id_map_utils
-
-
-def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str, str] = None) -> List[int]:
+def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict[str, str] = None) -> List[int]:
     """
     Resolve restriction specification to list of residue numbers.
 
@@ -240,7 +255,7 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
                       - "" (empty): No restriction
                       - "DATASHEET_REFERENCE:path:column": Table reference
                       - "10-20+30-40": Direct PyMOL selection
-        pdb_file: PDB file being analyzed
+        structure_id: Structure ID from the DataStream (not derived from filename)
         id_map: ID mapping dictionary for matching structure IDs to table IDs
 
     Returns:
@@ -249,50 +264,21 @@ def resolve_restriction_spec(restrict_spec: str, pdb_file: str, id_map: Dict[str
     if not restrict_spec or restrict_spec == "":
         return []  # No restriction
 
-    # Handle table reference
+    # Handle table reference using pipe_biopipelines_io
     if restrict_spec.startswith("DATASHEET_REFERENCE:"):
-        _, table_path, column_name = restrict_spec.split(":", 2)
-
-        if not os.path.exists(table_path):
-            print(f"Warning: Restriction table not found: {table_path}")
+        try:
+            table, column_name = load_table(restrict_spec)
+        except FileNotFoundError as e:
+            print(f"Warning: Restriction table not found: {e}")
             return []
 
-        df = pd.read_csv(table_path)
-        pdb_name = os.path.basename(pdb_file)
-        pdb_base = os.path.splitext(pdb_name)[0]
-
-        # Track attempted IDs for error reporting
-        attempted_ids = [pdb_name]
-
-        # Find matching row - try multiple lookup strategies in order:
-        # 1. Try pdb filename match
-        matching_rows = df[df['pdb'] == pdb_name]
-
-        # 2. Apply id_map to get candidate IDs and try each in priority order
-        if matching_rows.empty and id_map:
-            candidate_ids = map_table_ids_to_ids(pdb_base, id_map)
-            attempted_ids.extend(candidate_ids)
-            for candidate_id in candidate_ids:
-                matching_rows = df[df['id'] == candidate_id]
-                if not matching_rows.empty:
-                    if candidate_id != pdb_base:
-                        print(f"Mapped structure ID '{pdb_base}' -> table ID '{candidate_id}'")
-                    break
-
-        # 3. If no id_map or no match yet, try original structure ID
-        if matching_rows.empty:
-            matching_rows = df[df['id'] == pdb_base]
-            if pdb_base not in attempted_ids:
-                attempted_ids.append(pdb_base)
-
-        if not matching_rows.empty:
-            row = matching_rows.iloc[0]
-            selection_str = row.get(column_name, '')
+        try:
+            selection_str = lookup_table_value(table, structure_id, column_name, id_map=id_map)
             residues = sele_to_list(selection_str)
             print(f"Restricting to {len(residues)} residues: {format_ligandmpnn_selection_from_list(residues)}")
             return residues
-        else:
-            print(f"ERROR: No restriction table entry found. Tried: {', '.join(attempted_ids)}")
+        except KeyError as e:
+            print(f"ERROR: No restriction table entry found for ID '{structure_id}'. {e}")
             print(f"ERROR: This means the restriction cannot be applied!")
             return []
 
@@ -328,10 +314,15 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
                 continue  # Skip this residue - not in restriction set
 
         # Calculate minimum distance from any atom in this residue to any reference atom
+        # Skip atoms at (0, 0, 0) as these are placeholders for missing side chains
         min_distance = float('inf')
 
         for res_atom in residue_atoms:
+            if is_placeholder_atom(res_atom):
+                continue
             for ref_atom in reference_atoms:
+                if is_placeholder_atom(ref_atom):
+                    continue
                 dist = calculate_distance(res_atom, ref_atom)
                 min_distance = min(min_distance, dist)
 
@@ -448,11 +439,12 @@ def format_pymol_selection(residue_list):
     return "+".join(range_parts)
 
 
-def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cutoff: float, restrict_spec: str = "", id_map: Dict[str, str] = None, include_reference: bool = True) -> Dict[str, any]:
+def analyze_structure_distance(structure_id: str, pdb_file: str, reference_spec: str, distance_cutoff: float, restrict_spec: str = "", id_map: Dict[str, str] = None, include_reference: bool = True) -> Dict[str, any]:
     """
     Analyze a single structure for distance-based residue selection using native PDB parser.
 
     Args:
+        structure_id: Structure ID from the DataStream
         pdb_file: Path to PDB file
         reference_spec: Reference specification string
         distance_cutoff: Distance cutoff in Angstroms
@@ -494,8 +486,8 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
     print(f"Using reference: {reference_description} ({len(reference_atoms)} atoms)")
 
-    # Resolve restriction with id_map
-    restrict_to_residues = resolve_restriction_spec(restrict_spec, pdb_file, id_map)
+    # Resolve restriction using structure_id (not derived from filename)
+    restrict_to_residues = resolve_restriction_spec(restrict_spec, structure_id, id_map)
     if restrict_to_residues:
         print(f"Restricting to {len(restrict_to_residues)} residues: {format_ligandmpnn_selection_from_list(restrict_to_residues)}")
 
@@ -507,9 +499,6 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
     # Format as universal selections (numbers only) - works for all tools
     within_selection = format_ligandmpnn_selection(within_residues)
     beyond_selection = format_ligandmpnn_selection(beyond_residues)
-
-    # Extract structure ID from filename
-    structure_id = os.path.splitext(os.path.basename(pdb_file))[0]
 
     return {
         "id": structure_id,
@@ -523,10 +512,10 @@ def analyze_structure_distance(pdb_file: str, reference_spec: str, distance_cuto
 
 def main():
     if len(sys.argv) != 8:
-        print("Usage: python pipe_distance_selector.py <structures_list_file> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map> <include_reference>")
+        print("Usage: python pipe_distance_selector.py <structures_json> <reference_spec> <distance> <restrict_spec> <output_csv> <id_map> <include_reference>")
         print("")
         print("Arguments:")
-        print("  structures_list_file: File containing list of PDB file paths (one per line)")
+        print("  structures_json: JSON file containing DataStream with ids and files")
         print("  reference_spec: Reference specification (e.g., 'ligand:LIG', 'residues:87-100')")
         print("  distance: Distance cutoff in Angstroms")
         print("  restrict_spec: Restriction specification (table reference, direct selection, or empty string)")
@@ -535,7 +524,7 @@ def main():
         print("  include_reference: 'true' or 'false' - whether to include reference residues in 'within'")
         sys.exit(1)
 
-    structures_list_file = sys.argv[1]
+    structures_json = sys.argv[1]
     reference_spec = sys.argv[2]
     distance_cutoff = float(sys.argv[3])
     restrict_spec = sys.argv[4]
@@ -543,11 +532,8 @@ def main():
     id_map_str = sys.argv[6]
     include_reference_str = sys.argv[7]
 
-    # Read structure files from list file (one path per line)
-    with open(structures_list_file, 'r') as f:
-        structure_files = [line.strip() for line in f if line.strip()]
-    if not structure_files:
-        raise ValueError(f"No structure files found in: {structures_list_file}")
+    # Load DataStream from JSON file (contains ids and files properly mapped)
+    structures_ds = load_datastream(structures_json)
 
     # Parse id_map JSON string
     import json
@@ -559,30 +545,30 @@ def main():
     # Parse include_reference boolean
     include_reference = include_reference_str.lower() in ['true', '1', 'yes']
 
-    print(f"Analyzing {len(structure_files)} structures with distance cutoff {distance_cutoff}Å")
+    print(f"Analyzing {len(structures_ds.ids)} structures with distance cutoff {distance_cutoff}Å")
     print(f"Reference: {reference_spec}")
     if restrict_spec:
         print(f"Restriction: {restrict_spec}")
     print(f"ID mapping: {id_map}")
     print(f"Include reference: {include_reference}")
 
-    # Analyze each structure
+    # Analyze each structure using iterate_files (handles wildcards, bundles, etc.)
     results = []
-    for pdb_file in structure_files:
+    for structure_id, pdb_file in iterate_files(structures_ds):
         if not os.path.exists(pdb_file):
             print(f"Warning: PDB file not found: {pdb_file}")
             continue
 
         try:
-            print(f"\nAnalyzing: {os.path.basename(pdb_file)}")
-            result = analyze_structure_distance(pdb_file, reference_spec, distance_cutoff, restrict_spec, id_map, include_reference)
+            print(f"\nAnalyzing: {structure_id} ({os.path.basename(pdb_file)})")
+            result = analyze_structure_distance(structure_id, pdb_file, reference_spec, distance_cutoff, restrict_spec, id_map, include_reference)
             results.append(result)
 
             print(f"  Within {distance_cutoff}Å: {len(result['within'].split('+')) if result['within'] else 0} segments")
             print(f"  Beyond {distance_cutoff}Å: {len(result['beyond'].split('+')) if result['beyond'] else 0} segments")
 
         except Exception as e:
-            print(f"Error analyzing {pdb_file}: {e}")
+            print(f"Error analyzing {structure_id}: {e}")
             continue
 
     if not results:

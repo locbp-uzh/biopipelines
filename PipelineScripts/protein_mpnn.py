@@ -1,308 +1,120 @@
 """
 ProteinMPNN configuration for sequence design from protein structures.
-
-Handles sequence generation with fixed position constraints, pLDDT thresholds,
-and automatic integration with upstream structure generation tools.
 """
 
 import os
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class ProteinMPNN(BaseConfig):
     """
     Configuration for ProteinMPNN sequence design.
-    
-    Generates protein sequences for given backbone structures with support
-    for fixed positions, confidence-based constraints, and flexible input sources.
     """
-    
-    TOOL_NAME = "ProteinMPNN" 
-    
-    
+
+    TOOL_NAME = "ProteinMPNN"
+
+    # Lazy path descriptors
+    parsed_pdbs_jsonl = Path(lambda self: os.path.join(self.output_folder, "parsed_pdbs.jsonl"))
+    fixed_jsonl = Path(lambda self: os.path.join(self.output_folder, "fixed_pos.jsonl"))
+    sele_csv = Path(lambda self: os.path.join(self.output_folder, "fixed_designed.csv"))
+    seqs_folder = Path(lambda self: os.path.join(self.output_folder, "seqs"))
+    main_table = Path(lambda self: os.path.join(self.output_folder, "proteinmpnn_results.csv"))
+    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"queries.csv"))
+    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"queries.fasta"))
+    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
+    id_map_json = Path(lambda self: os.path.join(self.output_folder, ".pdb_to_stream_id_map.json"))
+
+    # Helper scripts
+    fixed_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_fixed_positions.py"))
+    table_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_table.py"))
+    fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
+
+    # ProteinMPNN installation scripts
+    parse_py = Path(lambda self: os.path.join(self.folders["ProteinMPNN"], "helper_scripts", "parse_multiple_chains.py"))
+    pmpnn_py = Path(lambda self: os.path.join(self.folders["ProteinMPNN"], "protein_mpnn_run.py"))
+
     def __init__(self,
-                 structures: Union[str, List[str], ToolOutput],
-                 tables: Optional[List[str]] = None,
+                 structures: Union[DataStream, StandardizedOutput],
                  num_sequences: int = 1,
-                 fixed: str = "",
-                 redesigned: str = "",
+                 fixed: Union[str, Tuple['TableInfo', str]] = "",
+                 redesigned: Union[str, Tuple['TableInfo', str]] = "",
                  fixed_chain: str = "A",
-                 plddt_threshold: float = 100.0, sampling_temp: float = 0.1,
-                 model_name: str = "v_48_020", soluble_model: bool = True,
-                 # Legacy parameter support (deprecated)
-                 fixed_positions: str = "",
-                 designed_positions: str = "",
+                 plddt_threshold: float = 100.0,
+                 sampling_temp: float = 0.1,
+                 model_name: str = "v_48_020",
+                 soluble_model: bool = True,
                  **kwargs):
         """
         Initialize ProteinMPNN configuration.
 
         Args:
-            structures: Input structures (PDB files, folder, or ToolOutput from previous tool)
-            tables: Input table files for metadata (optional)
+            structures: Input structures as DataStream or StandardizedOutput
             num_sequences: Number of sequences to generate per structure
-            fixed: PyMOL-style selection or table reference (e.g., "structures.fixed")
-            redesigned: PyMOL-style selection or table reference (e.g., "structures.designed")
+            fixed: Fixed positions. Accepts:
+                   - PyMOL-style selection string: "10-20+30-40"
+                   - Table column reference: (table, "column_name")
+            redesigned: Designed positions. Accepts:
+                   - PyMOL-style selection string: "10-20+30-40"
+                   - Table column reference: (table, "column_name")
             fixed_chain: Chain to apply fixed positions to
             plddt_threshold: pLDDT threshold for automatic fixing (100 = no fixing)
             sampling_temp: Sampling temperature for sequence generation
-            model_name: ProteinMPNN model variant to use
+            model_name: ProteinMPNN model variant
             soluble_model: Use soluble protein model
-            fixed_positions: DEPRECATED - use 'fixed' instead
-            designed_positions: DEPRECATED - use 'redesigned' instead
-            **kwargs: Additional parameters
-
-        Examples:
-            # Basic usage with fixed/redesigned parameters
-            pmpnn = pipeline.add(ProteinMPNN(
-                structures=rfdaa,
-                num_sequences=10,
-                fixed="1-10+50-60",
-                redesigned="20-40"
-            ))
-
-            # Using table references
-            pmpnn = pipeline.add(ProteinMPNN(
-                structures=rfdaa,
-                num_sequences=5,
-                redesigned=distances.tables.selections.beyond
-            ))
         """
-        # Store input parameters
-        self.input_structures = structures
-        self.input_tables = tables or {}
-        self.input_is_tool_output = isinstance(structures, ToolOutput)
-        
-        # Store ProteinMPNN-specific parameters
+        # Resolve input to DataStream
+        if isinstance(structures, StandardizedOutput):
+            self.structures_stream: DataStream = structures.streams.structures
+        elif isinstance(structures, DataStream):
+            self.structures_stream = structures
+        else:
+            raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
+
+        # Store parameters
         self.num_sequences = num_sequences
-
-        # Handle both new and legacy parameter names
-        # Priority: new parameters > legacy parameters
-        self.fixed = fixed if fixed else fixed_positions
-        self.redesigned = redesigned if redesigned else designed_positions
-
-        # For backward compatibility, also store legacy names
-        self.fixed_positions = self.fixed
-        self.designed_positions = self.redesigned
-
+        self.fixed = fixed
+        self.redesigned = redesigned
         self.fixed_chain = fixed_chain
         self.plddt_threshold = plddt_threshold
         self.sampling_temp = sampling_temp
         self.model_name = model_name
         self.soluble_model = soluble_model
-        
-        # Track input source type
-        self.input_is_tool_output = isinstance(structures, ToolOutput)
-        self.input_is_folder = False
-        self.input_pdb_files = []
-        
-        # Set up dependencies for table references
-        if hasattr(structures, 'config'):
-            self.dependencies.append(structures.config)
-        if hasattr(fixed, 'config'):
-            self.dependencies.append(fixed.config)
-        if hasattr(redesigned, 'config'):
-            self.dependencies.append(redesigned.config)
 
-        # Initialize base class
         super().__init__(**kwargs)
-
-        # Initialize file paths (will be set in configure_inputs)
-        self._initialize_file_paths()
 
     def validate_params(self):
         """Validate ProteinMPNN-specific parameters."""
-        if not self.input_structures:
-            raise ValueError("input_structures parameter is required")
-        
+        if not self.structures_stream or len(self.structures_stream) == 0:
+            raise ValueError("structures parameter is required and must not be empty")
+
         if self.num_sequences <= 0:
             raise ValueError("num_sequences must be positive")
-        
+
         if self.sampling_temp <= 0:
             raise ValueError("sampling_temp must be positive")
-        
-        if self.plddt_threshold < 0 or self.plddt_threshold > 100:
-            raise ValueError("plddt_threshold must be between 0 and 100")
-        
-        # Validate table references if provided
-        if self.fixed:
-            self.validate_table_reference(self.fixed)
-        if self.redesigned:
-            self.validate_table_reference(self.redesigned)
-        
-        # Validate model name
+
         valid_models = ["v_48_002", "v_48_010", "v_48_020", "v_48_030"]
         if self.model_name not in valid_models:
             raise ValueError(f"model_name must be one of: {valid_models}")
-    
-    def _initialize_file_paths(self):
-        """Initialize common file paths used throughout the class."""
-        self.parsed_pdbs_jsonl = None
-        self.fixed_jsonl = None
-        self.sele_csv = None
-        self.seqs_folder = None
-        self.main_table = None
-        self.queries_csv = None
-        self.queries_fasta = None
-        
-        # Helper script paths
-        self.parse_py = None
-        self.fixed_py = None
-        self.pmpnn_py = None
-        self.table_py = None
-    
-    def _setup_file_paths(self):
-        """Set up all file paths after output_folder is known."""
-        # Core output files
-        self.parsed_pdbs_jsonl = os.path.join(self.output_folder, "parsed_pdbs.jsonl")
-        self.fixed_jsonl = os.path.join(self.output_folder, "fixed_pos.jsonl")
-        self.sele_csv = os.path.join(self.output_folder, "fixed_designed.csv")
-        self.seqs_folder = os.path.join(self.output_folder, "seqs")
-        self.main_table = os.path.join(self.output_folder, "proteinmpnn_results.csv")
-        
-        # Pipeline-based files
-        pipeline_name = self._extract_pipeline_name()
-        self.queries_csv = os.path.join(self.output_folder, f"{pipeline_name}_queries.csv")
-        self.queries_fasta = os.path.join(self.output_folder, f"{pipeline_name}_queries.fasta")
-        
-        # Helper script paths (only set if folders are available)
-        if hasattr(self, 'folders') and self.folders:
-            self.parse_py = os.path.join(self.folders["ProteinMPNN"], "helper_scripts", "parse_multiple_chains.py")
-            self.fixed_py = os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_fixed_positions.py")
-            self.pmpnn_py = os.path.join(self.folders["ProteinMPNN"], "protein_mpnn_run.py")
-            self.table_py = os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_table.py")
-            self.fa_to_csv_fasta_py = os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py")
-        else:
-            # Temporary placeholders when folders aren't available yet
-            self.parse_py = None
-            self.fixed_py = None
-            self.pmpnn_py = None
-            self.table_py = None
-            self.fa_to_csv_fasta_py = None
-    
-    def _extract_pipeline_name(self) -> str:
-        """Extract pipeline name from output folder structure."""
-        folder_parts = self.output_folder.split(os.sep)
-        for i, part in enumerate(folder_parts):
-            if "ProteinMPNN" in part:
-                if i > 0:
-                    return folder_parts[i-1]
-                break
-        raise ValueError(f"Could not extract pipeline name from output folder: {self.output_folder}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input structures from various sources."""
+        """Configure input structures."""
         self.folders = pipeline_folders
-        self._setup_file_paths()  # Set up all file paths now that we have folders
-        runtime_folder = os.path.join(self.output_folder, "RunTime")
-        
-        if self.input_is_tool_output:
-            # Input from previous tool (e.g., RFdiffusion)
-            tool_output: ToolOutput = self.input_structures
-            source_pdbs = tool_output.get_output_files("pdbs")
-            
-            if not source_pdbs:
-                raise ValueError(f"No PDB outputs found from {tool_output.tool_type}")
-            
-            # Add dependency
-            self.dependencies.append(tool_output.config)
-            
-            # Copy or link to runtime folder
-            self.input_pdb_files = []
-            for pdb_path in source_pdbs:
-                pdb_name = os.path.basename(pdb_path)
-                runtime_pdb = os.path.join(runtime_folder, pdb_name)
-                self.input_pdb_files.append(runtime_pdb)
-                self.input_sources[pdb_name] = pdb_path
 
-            # Store source PDbs for script generation (like LigandMPNN)
-            self.input_sources["structures"] = source_pdbs
-                
-        elif isinstance(self.input_structures, list):
-            # Direct list of PDB file paths (from rfd.structures)
-            self.input_pdb_files = []
-            for pdb_path in self.input_structures:
-                pdb_name = os.path.basename(pdb_path)
-                runtime_pdb = os.path.join(runtime_folder, pdb_name)
-                self.input_pdb_files.append(runtime_pdb)
-
-                # Only check existence for non-pipeline inputs (e.g., user files)
-                # Pipeline-generated files don't exist yet during configuration
-                if hasattr(self, 'is_pipeline_input') and self.is_pipeline_input:
-                    # Pipeline input - don't check existence, files will be created during execution
-                    self.input_sources[pdb_name] = pdb_path
-                else:
-                    # Direct file input - check existence
-                    if os.path.exists(pdb_path):
-                        self.input_sources[pdb_name] = pdb_path
-                    else:
-                        raise ValueError(f"PDB file not found: {pdb_path}")
-
-            # Store source structures for script generation (like LigandMPNN)
-            self.input_sources["structures"] = self.input_structures
-
-        elif hasattr(self.input_structures, 'structures'):
-            # StandardizedOutput object (from pipeline.add)
-            if self.input_structures.structures:
-                self.input_pdb_files = []
-                for pdb_path in self.input_structures.structures:
-                    pdb_name = os.path.basename(pdb_path)
-                    runtime_pdb = os.path.join(runtime_folder, pdb_name)
-                    self.input_pdb_files.append(runtime_pdb)
-                    self.input_sources[pdb_name] = pdb_path
-
-                # Store source structures for script generation (like LigandMPNN)
-                self.input_sources["structures"] = self.input_structures.structures
-            else:
-                raise ValueError("No structures found in StandardizedOutput")
-
-        elif isinstance(self.input_structures, str):
-            # String input - could be file or folder
-            if self.input_structures.endswith('.pdb'):
-                # Single PDB file
-                pdb_source = os.path.join(pipeline_folders["PDBs"], self.input_structures)
-                if os.path.exists(pdb_source):
-                    runtime_pdb = os.path.join(runtime_folder, self.input_structures)
-                    self.input_pdb_files = [runtime_pdb]
-                    self.input_sources[self.input_structures] = pdb_source
-                    # Store source structures for script generation (like LigandMPNN)
-                    self.input_sources["structures"] = [pdb_source]
-                else:
-                    raise ValueError(f"PDB file not found: {pdb_source}")
-            else:
-                # Folder of PDB files
-                folder_path = os.path.join(os.getcwd(), self.input_structures)
-                if os.path.exists(folder_path):
-                    pdb_files = [f for f in os.listdir(folder_path) if f.endswith('.pdb')]
-                    if not pdb_files:
-                        raise ValueError(f"No PDB files found in folder: {folder_path}")
-                    
-                    self.input_is_folder = True
-                    self.input_pdb_files = []
-                    source_structures = []
-                    for pdb_file in pdb_files:
-                        source_path = os.path.join(folder_path, pdb_file)
-                        runtime_pdb = os.path.join(runtime_folder, pdb_file)
-                        self.input_pdb_files.append(runtime_pdb)
-                        self.input_sources[pdb_file] = source_path
-                        source_structures.append(source_path)
-                    # Store source structures for script generation (like LigandMPNN)
-                    self.input_sources["structures"] = source_structures
-                else:
-                    raise ValueError(f"Input folder not found: {folder_path}")
-    
     def get_config_display(self) -> List[str]:
-        """Get ProteinMPNN configuration display lines.""" 
+        """Get ProteinMPNN configuration display lines."""
         config_lines = super().get_config_display()
-        
         config_lines.extend([
             f"NUM SEQUENCES PER TARGET: {self.num_sequences}",
             f"FIXED: {self.fixed or 'None'}",
@@ -313,316 +125,154 @@ class ProteinMPNN(BaseConfig):
             f"MODEL: {self.model_name}",
             f"SOLUBLE: {self.soluble_model}"
         ])
-        
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """
-        Generate ProteinMPNN execution script.
-        
-        Args:
-            script_path: Path where script should be written
-            
-        Returns:
-            Script content as string
-        """
-        
-        # Generate script content following modular pattern
+        """Generate ProteinMPNN execution script."""
         script_content = "#!/bin/bash\n"
         script_content += "# ProteinMPNN execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += self.generate_script_prepare_inputs()
-        script_content += self.generate_script_run_proteinmpnn()
-        script_content += self.generate_script_create_table()
+        script_content += self._generate_script_prepare_inputs()
+        script_content += self._generate_script_run_proteinmpnn()
+        script_content += self._generate_script_create_table()
         script_content += self.generate_completion_check_footer()
-        
         return script_content
-    
-    def generate_script_prepare_inputs(self) -> str:
-        """Generate the input preparation part of the script."""
-        # Get specific structure files instead of directory
-        if "structures" in self.input_sources:
-            structure_files = self.input_sources["structures"]
-            # Use first file's directory as input directory
-            input_directory = os.path.dirname(structure_files[0]) if structure_files else ""
-        else:
-            raise ValueError("No structure sources found")
-        
-        # Determine input source and parameters for fixed positions script
-        # Priority: explicit fixed/redesigned parameters > input tables > pLDDT
-        if self.fixed or self.redesigned:
-            # Use explicit fixed/redesigned positions (including DATASHEET_REFERENCE)
-            input_source = "selection"
-            input_table = "-"
-        elif (self.input_is_tool_output and hasattr(self, 'input_tables') and self.input_tables) or \
-           (hasattr(self, 'is_pipeline_input') and self.is_pipeline_input and hasattr(self, 'input_tables') and self.input_tables):
-            # Use table from previous tool (e.g., RFdiffusion)
-            input_source = "table"
-            if isinstance(self.input_tables, dict):
-                # New named table format - look for structures first (RFdiffusion), then main (legacy)
-                if "structures" in self.input_tables:
-                    input_table = self.input_tables["structures"]["path"]
-                elif "main" in self.input_tables:
-                    input_table = self.input_tables["main"]["path"]
-                else:
-                    # Use first available table
-                    first_key = next(iter(self.input_tables))
-                    input_table = self.input_tables[first_key]["path"]
-            elif hasattr(self.input_tables, '_tables'):
-                # TableContainer object - get the path properly
-                if 'structures' in self.input_tables._tables:
-                    input_table = self.input_tables._tables['structures'].path
-                elif 'main' in self.input_tables._tables:
-                    input_table = self.input_tables._tables['main'].path
-                else:
-                    # Fallback to first available table
-                    first_name = list(self.input_tables._tables.keys())[0]
-                    input_table = self.input_tables._tables[first_name].path
-            else:
-                # Legacy format
-                input_table = self.input_tables[0] if isinstance(self.input_tables, list) else str(self.input_tables)
-        else:
-            # Use pLDDT threshold method
-            input_source = "plddt"
-            input_table = "-"
-        
-        # Resolve table references in fixed/designed positions
-        fixed_param = self.resolve_table_reference(self.fixed) if self.fixed else "-"
-        designed_param = self.resolve_table_reference(self.redesigned) if self.redesigned else "-"
-        
-        return f"""echo "Determining fixed positions"
-python {self.fixed_py} "{input_directory}" "{input_source}" "{input_table}" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
 
-echo "Parsing multiple PDBs" 
+    def _generate_script_prepare_inputs(self) -> str:
+        """Generate the input preparation part of the script."""
+        import json
+
+        input_directory = os.path.dirname(self.structures_stream.files[0])
+
+        # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
+        datastream_dict = self.structures_stream.to_dict()
+        with open(self.structures_json, 'w') as f:
+            json.dump(datastream_dict, f, indent=2)
+
+        # Write pdb_basename -> stream_id map for runtime ID remapping
+        id_map = {}
+        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
+            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
+            id_map[pdb_base] = struct_id
+        with open(self.id_map_json, 'w') as f:
+            json.dump(id_map, f, indent=2)
+
+        # Resolve table references to DATASHEET_REFERENCE format
+        resolved_fixed = self.resolve_table_reference(self.fixed) if self.fixed else ""
+        resolved_redesigned = self.resolve_table_reference(self.redesigned) if self.redesigned else ""
+
+        # Determine input source for fixed positions
+        if resolved_fixed or resolved_redesigned:
+            input_source = "selection"
+        else:
+            input_source = "plddt"
+
+        fixed_param = resolved_fixed if resolved_fixed else "-"
+        designed_param = resolved_redesigned if resolved_redesigned else "-"
+
+        return f"""echo "Determining fixed positions"
+python {self.fixed_py} "{self.structures_json}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
+
+echo "Parsing multiple PDBs"
 python {self.parse_py} --input_path {input_directory} --output_path {self.parsed_pdbs_jsonl}
 
 """
-    
-    def generate_script_run_proteinmpnn(self) -> str:
+
+    def _generate_script_run_proteinmpnn(self) -> str:
         """Generate the ProteinMPNN execution part of the script."""
-        mpnn_job_folder = self.output_folder
-        
-        # Build ProteinMPNN options
         pmpnn_options = f"--num_seq_per_target {self.num_sequences}"
         pmpnn_options += f" --sampling_temp {self.sampling_temp}"
         pmpnn_options += f" --model_name {self.model_name}"
-        
+
         if self.soluble_model:
             pmpnn_options += " --use_soluble_model"
-        
+
         return f"""echo "Running model"
 echo "Options: {pmpnn_options}"
-echo "Output folder: {mpnn_job_folder}"
+echo "Output folder: {self.output_folder}"
 
-# Run ProteinMPNN
 python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_jsonl {self.fixed_jsonl} --out_folder {self.output_folder} {pmpnn_options}
 
 """
 
-    def generate_script_create_table(self) -> str:
+    def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
-        pipeline_name = self._extract_pipeline_name()
-        
-        # Determine input table to inherit columns from
-        input_table = "-"  # Default: no input table
-        if self.input_is_tool_output and hasattr(self, 'input_tables') and self.input_tables:
-            if isinstance(self.input_tables, dict):
-                # New named table format - look for structures first (RFdiffusion), then main (legacy)
-                if "structures" in self.input_tables:
-                    input_table = self.input_tables["structures"]["path"]
-                elif "main" in self.input_tables:
-                    input_table = self.input_tables["main"]["path"]
-                else:
-                    # Use first available table
-                    first_key = next(iter(self.input_tables))
-                    input_table = self.input_tables[first_key]["path"]
-            elif hasattr(self.input_tables, '_tables'):
-                # TableContainer object - get the path properly
-                if 'structures' in self.input_tables._tables:
-                    input_table = self.input_tables._tables['structures'].path
-                elif 'main' in self.input_tables._tables:
-                    input_table = self.input_tables._tables['main'].path
-                else:
-                    # Fallback to first available table
-                    first_name = list(self.input_tables._tables.keys())[0]
-                    input_table = self.input_tables._tables[first_name].path
-            elif isinstance(self.input_tables, list):
-                input_table = self.input_tables[0]
-            else:
-                input_table = str(self.input_tables)
-        
         return f"""echo "Creating results table and queries files"
-# Create main table with id, source_pdb, sequence and inherited columns
-python {self.table_py} {self.seqs_folder} {pipeline_name} {input_table} {self.main_table}
+python {self.table_py} {self.seqs_folder} {self.pipeline_name} "-" {self.main_table}
 
-# Create queries CSV and FASTA from the main table (needed for AlphaFold)
 echo "Creating queries CSV and FASTA from results table"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}
 
 """
-    
-    def _predict_sequence_ids(self) -> List[str]:
-        """
-        Predict the sequence IDs that ProteinMPNN will generate.
 
-        Based on input structures and num_sequences parameter.
-        Returns list of sequence IDs in the format: {pdb_base}_{seq_num}
-        """
-        sequence_ids = []
-
-        # Use structures parameter directly
-        input_source = self.input_structures
-
-        # Check for input data from upstream tools or direct file paths
-        upstream_tool = None
-        direct_file_paths = []
-
-        # Case 1: ToolOutput input
-        if hasattr(input_source, 'get_output_files'):
-            upstream_tool = input_source
-        # Case 2: Direct file paths (from StandardizedOutput)
-        elif isinstance(input_source, list):
-            direct_file_paths = input_source
-        # Case 3: StandardizedOutput (from pipeline.add)
-        elif hasattr(input_source, 'structures'):
-            direct_file_paths = getattr(input_source, 'structures', [])
-            if not direct_file_paths:
-                direct_file_paths = getattr(input_source, 'pdbs', [])
-
-        if upstream_tool:
-            # Get input PDB files from upstream tool
-            input_pdbs = []
-
-            # Get input PDB files from upstream tool
-            input_pdbs = upstream_tool.get_output_files("pdbs")
-            if not input_pdbs:
-                input_pdbs = upstream_tool.get_output_files("structures")
-            if not input_pdbs:
-                raise ValueError(f"No PDB/structure files found in upstream tool {upstream_tool.tool_type}")
-
-            # Process the PDB files if we got any
-            if input_pdbs:
-                for pdb_path in input_pdbs:
-                    pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-                    # ProteinMPNN generates sequences numbered from 1
-                    for seq_num in range(1, self.num_sequences + 1):
-                        sequence_ids.append(f"{pdb_base}_{seq_num}")
-
-        elif direct_file_paths:
-            # Handle direct file paths from StandardizedOutput (input=tool)
-            for pdb_path in direct_file_paths:
-                pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-                # ProteinMPNN generates sequences numbered from 1
-                for seq_num in range(1, self.num_sequences + 1):
-                    sequence_ids.append(f"{pdb_base}_{seq_num}")
-
-        elif hasattr(self, 'input_sources') and self.input_sources and "structures" in self.input_sources:
-            # Direct PDB file inputs
-            for pdb_path in self.input_sources["structures"]:
-                pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-                for seq_num in range(1, self.num_sequences + 1):
-                    sequence_ids.append(f"{pdb_base}_{seq_num}")
-
-        # Must have sequence IDs from input sources
-        if not sequence_ids:
-            raise ValueError("Could not determine sequence IDs - no valid input structures found")
-
-        return sequence_ids
-
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after ProteinMPNN execution.
-        
-        Uses pure path construction - no filesystem access.
-        Returns expected paths based on ProteinMPNN output patterns.
-        
-        Returns:
-            Dictionary mapping output types to file paths with standard keys:
-            - structures: Empty (no structures from ProteinMPNN)
-            - compounds: Empty (no compounds from ProteinMPNN)
-            - sequences: FASTA files
-            - tables: Main table CSV
-            - output_folder: Tool's output directory
-        """
-        # Ensure file paths are set up
-        if not hasattr(self, 'seqs_folder') or self.seqs_folder is None:
-            # Fallback if configure_inputs hasn't been called yet
-            self._setup_file_paths()
-        
-        seqs_folder = self.seqs_folder
-        main_table = self.main_table
-        queries_csv = self.queries_csv
-        queries_fasta = self.queries_fasta
-        
-        # Expected FASTA files - ProteinMPNN generates one per input structure
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after ProteinMPNN execution."""
+        # Expected FASTA files - one per input structure
         fasta_files = []
-        
-        # If we have dependency info, use it to predict filenames
-        if self.input_is_tool_output:
-            # Get expected input PDBs from dependency
-            dependency_outputs = self.input_structures.get_output_files("pdbs")
-            for pdb_path in dependency_outputs:
-                pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-                fasta_path = os.path.join(seqs_folder, f"{pdb_base}.fa")
-                fasta_files.append(fasta_path)
-        else:
-            # For direct file inputs, generate based on expected pattern
-            # Default to pipeline-based naming
-            pipeline_name = self._extract_pipeline_name()
-            fasta_files = [os.path.join(seqs_folder, f"{pipeline_name}_sequences.fa")]
-        
-        # Predict sequence IDs for downstream tools
-        sequence_ids = self._predict_sequence_ids()
-        
-        # Organize tables by content type with detailed metadata
-        # Import TableInfo
-        from .base_config import TableInfo
+        fasta_ids = []
+
+        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
+            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
+            fasta_path = os.path.join(self.seqs_folder, f"{pdb_base}.fa")
+            fasta_files.append(fasta_path)
+            fasta_ids.append(struct_id)
+
+        # Predict sequence IDs (stream_id + sequence number)
+        sequence_ids = []
+        for struct_id in self.structures_stream.ids:
+            for seq_num in range(1, self.num_sequences + 1):
+                sequence_ids.append(f"{struct_id}_{seq_num}")
+
+        # Sequences stream - CSV-based with individual sequence IDs
+        sequences = DataStream(
+            name="sequences",
+            ids=sequence_ids,
+            files=[],
+            map_table=self.queries_csv,
+            format="csv"
+        )
+
+        # Fasta stream - file-based with structure IDs (one .fa file per structure)
+        fasta = DataStream(
+            name="fasta",
+            ids=fasta_ids,
+            files=fasta_files,
+            format="fasta"
+        )
 
         tables = {
             "sequences": TableInfo(
                 name="sequences",
-                path=queries_csv,  # Use queries_csv instead of main_table for correct StitchSequences integration
-                columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery", "rmsd"],
-                description="ProteinMPNN sequence generation results with scores and structure recovery metrics",
-                count=len(sequence_ids)  # Number of expected sequences
+                path=self.queries_csv,
+                columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery"],
+                description="ProteinMPNN sequence results",
+                count=len(sequence_ids)
             )
         }
-        
+
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [queries_csv],  # Main output is the table with sequences and scores
-            "sequence_ids": sequence_ids,
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": sequences,
+            "fasta": fasta,
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
-            "output_folder": self.output_folder,
-            # Keep legacy aliases for compatibility
-            "main": main_table,  # Legacy alias for backward compatibility
-            "fa_files": fasta_files,  # Individual .fa files
-            "queries_csv": [queries_csv],
-            "queries_fasta": [queries_fasta],
-            "seqs_folder": [seqs_folder]
+            "output_folder": self.output_folder
         }
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize configuration including ProteinMPNN-specific parameters."""
+        """Serialize configuration."""
         base_dict = super().to_dict()
         base_dict.update({
             "mpnn_params": {
                 "num_sequences": self.num_sequences,
                 "fixed": self.fixed,
                 "redesigned": self.redesigned,
-                # Legacy compatibility
-                "fixed_positions": self.fixed_positions,
-                "designed_positions": self.designed_positions,
                 "fixed_chain": self.fixed_chain,
                 "plddt_threshold": self.plddt_threshold,
                 "sampling_temp": self.sampling_temp,
                 "model_name": self.model_name,
-                "soluble_model": self.soluble_model,
-                "input_type": "tool_output" if self.input_is_tool_output else "file/folder"
+                "soluble_model": self.soluble_model
             }
         })
         return base_dict

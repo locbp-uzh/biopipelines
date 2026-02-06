@@ -13,10 +13,12 @@ from typing import Dict, List, Any, Optional, Union, TypeVar, overload, Type
 
 try:
     from .config_manager import ConfigManager
+    from .file_paths import Path
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from config_manager import ConfigManager
+    from file_paths import Path
 
 
 # TypeVar for preserving concrete tool types in type hints
@@ -33,6 +35,10 @@ class BaseConfig(ABC):
 
     # Tool-specific defaults (override in subclasses)
     TOOL_NAME = "base"
+
+    # Common path descriptors available to all tools
+    pipeline_name = Path(lambda self: self._extract_pipeline_name())
+    log_file = Path(lambda self: self._compute_log_file_path())
     
 
     @overload
@@ -190,10 +196,52 @@ echo "=============================="
         """Validate tool-specific parameters. Override in subclasses."""
         pass
 
+    def _extract_pipeline_name(self) -> str:
+        """
+        Extract pipeline name from output folder structure.
+
+        The output folder follows the pattern: .../PipelineName_NNN/NNN_ToolName/
+        This method extracts PipelineName from that structure using TOOL_NAME.
+
+        Returns:
+            Pipeline name string
+
+        Raises:
+            ValueError: If pipeline name cannot be extracted
+        """
+        folder_parts = self.output_folder.split(os.sep)
+        for i, part in enumerate(folder_parts):
+            if self.TOOL_NAME in part:
+                if i > 0:
+                    return folder_parts[i - 1]
+        raise ValueError(f"Could not extract pipeline name from output folder: {self.output_folder}")
+
+    def _compute_log_file_path(self) -> str:
+        """
+        Compute log file path from output folder naming pattern.
+
+        Log files are stored in the Logs folder with pattern NNN_ToolName.log
+
+        Returns:
+            Path to log file
+
+        Raises:
+            ValueError: If folder naming pattern is invalid
+        """
+        folder_name = os.path.basename(self.output_folder)
+        pipeline_folder = os.path.dirname(self.output_folder)
+        logs_folder = os.path.join(pipeline_folder, "Logs")
+
+        if '_' in folder_name and folder_name.split('_')[0].isdigit():
+            index = folder_name.split('_')[0]
+            tool_name = folder_name.split('_', 1)[1]
+            return os.path.join(logs_folder, f"{index}_{tool_name}.log")
+        raise ValueError(f"Invalid output folder naming pattern: {folder_name}. Expected 'NNN_ToolName' format.")
+
     def get_effective_job_name(self) -> str:
         """
         Get the effective job name, preferring pipeline job name over tool name.
-        
+
         Returns:
             Job name from pipeline if available, otherwise tool job name, or None if neither available
         """
@@ -384,6 +432,9 @@ fi
                         "description": getattr(obj, 'description', ''),
                         "count": getattr(obj, 'count', None)
                     }
+                # Handle DataStream objects - use to_dict() for consistent serialization
+                elif hasattr(obj, 'files') and hasattr(obj, 'ids') and hasattr(obj, 'map_table'):
+                    return obj.to_dict()
                 else:
                     # Convert other custom objects to string
                     return str(obj)
@@ -441,17 +492,15 @@ fi
             "pipe_check_completion.py"
         )
 
-        # Write expected outputs to a temporary JSON file to avoid "Argument list too long" error
+        # Write expected outputs to JSON file at pipeline time (not SLURM time)
         expected_outputs_file = os.path.join(self.output_folder, ".expected_outputs.json")
+        os.makedirs(self.output_folder, exist_ok=True)
+        with open(expected_outputs_file, 'w') as f:
+            json.dump(json_safe_outputs, f, indent=2)
 
         return f"""
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
-
-# Write expected outputs to JSON file to avoid argument list length limits
-cat > "{expected_outputs_file}" << 'EXPECTED_OUTPUTS_EOF'
-{json.dumps(json_safe_outputs, indent=2)}
-EXPECTED_OUTPUTS_EOF
 
 python {pipe_check_completion} "{self.output_folder}" "{self.TOOL_NAME}" "{expected_outputs_file}"
 
@@ -696,16 +745,8 @@ class TableContainer:
         """Get table path by name with legacy 'main' support."""
         if key in self._tables:
             return self._tables[key].path
-        
-        # Legacy support: if asking for "main" and it doesn't exist,
-        # try to find the most appropriate table
-        if key == "main":
-            # Try common table types in order of preference
-            for fallback_key in ['sequences', 'structures', 'compounds']:
-                if fallback_key in self._tables:
-                    return self._tables[fallback_key].path
-        
-        return ""
+
+        raise KeyError(f"No table named '{key}' in tables")
     
     def __getattr__(self, name: str) -> TableInfo:
         """Get TableInfo object by name via dot notation."""
@@ -732,19 +773,15 @@ class TableContainer:
         return self._tables.get(name)
     
     def __contains__(self, key: str) -> bool:
-        """Support 'in' operator: 'main' in tables"""
-        if key in self._tables:
-            return True
-        
-        # Legacy support for "main" - consider it present if any table exists
-        if key == "main":
-            return bool(self._tables)
-        
-        return False
+        """Support 'in' operator: 'table_name' in tables"""
+        return key in self._tables
     
     def get(self, key: str, default: str = "") -> str:
         """Get table path with default (like dict.get())."""
-        return self.__getitem__(key) or default
+        try:
+            return self.__getitem__(key)
+        except KeyError:
+            return default
     
     def __str__(self) -> str:
         if not self._tables:
@@ -765,14 +802,69 @@ class TableContainer:
         return f"TableContainer({list(self._tables.keys())})"
 
 
+class StreamContainer:
+    """Container for named DataStreams with dot-notation access."""
+
+    def __init__(self, streams: Dict[str, Any]):
+        self._streams = streams
+
+        # Set attributes for dot notation access to DataStream objects
+        for name, stream in streams.items():
+            setattr(self, name, stream)
+
+    def __getitem__(self, key: str):
+        """Get DataStream by name."""
+        if key in self._streams:
+            return self._streams[key]
+        raise KeyError(f"No stream named '{key}' in streams")
+
+    def __getattr__(self, name: str):
+        """Get DataStream by name via dot notation."""
+        if '_streams' in self.__dict__ and name in self._streams:
+            return self._streams[name]
+        raise AttributeError(f"No stream named '{name}'")
+
+    def keys(self):
+        """Get all stream names."""
+        return self._streams.keys()
+
+    def items(self):
+        """Get all name, stream pairs."""
+        return self._streams.items()
+
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' operator: 'stream_name' in streams"""
+        return key in self._streams
+
+    def get(self, key: str, default=None):
+        """Get stream with default (like dict.get())."""
+        return self._streams.get(key, default)
+
+    def __len__(self) -> int:
+        """Return number of streams."""
+        return len(self._streams)
+
+    def __str__(self) -> str:
+        if not self._streams:
+            return "{}"
+        return f"StreamContainer({list(self._streams.keys())})"
+
+    def __repr__(self) -> str:
+        return f"StreamContainer({list(self._streams.keys())})"
+
+
 class StandardizedOutput:
     """
     Provides dot-notation access to standardized output keys.
-    
-    Allows usage like: rfd.structures, rfd.tables
-    Enhanced with better visualization and named tables support.
+
+    DataStreams are accessed via the streams container:
+
+        for struct_id, pdb_path in output.streams.structures:
+            print(f"Processing {struct_id}: {pdb_path}")
+
+        print(f"Generated {len(output.streams.structures)} structures")
     """
-    
+
     def __init__(self, output_files: Dict[str, Any]):
         """Initialize with output files dictionary."""
         self._data = output_files.copy()
@@ -781,30 +873,24 @@ class StandardizedOutput:
         tables_raw = output_files.get('tables', [])
         self.tables = self._process_tables(tables_raw)
 
-        # Set standard attributes for dot notation access
-        self.structures = output_files.get('structures', [])
-        self.compounds = output_files.get('compounds', [])
-        self.sequences = output_files.get('sequences', [])
+        # Build streams container from all DataStream objects in output_files
+        from .datastream import DataStream
+        streams_dict = {}
+        for key, value in output_files.items():
+            if isinstance(value, DataStream):
+                streams_dict[key] = value
+        self.streams = StreamContainer(streams_dict)
+
         self.output_folder = output_files.get('output_folder', '')
-        
-        # Add ID arrays - extract from existing data or provided directly
-        self.structure_ids = output_files.get('structure_ids', self._extract_structure_ids())
-        self.compound_ids = output_files.get('compound_ids', self._extract_compound_ids())  
-        self.sequence_ids = output_files.get('sequence_ids', self._extract_sequence_ids())
-        
+
         # Handle filtering metadata
         self.filter_metadata = output_files.get('filter_metadata', {})
         self.is_filtered = self.filter_metadata.get('is_filtered', False)
-        
-        # Update _data to include ID arrays and filter info
-        self._data['structure_ids'] = self.structure_ids
-        self._data['compound_ids'] = self.compound_ids
-        self._data['sequence_ids'] = self.sequence_ids
-        self._data['filter_metadata'] = self.filter_metadata
-        
-        # Also store as attributes for compatibility
+
+        # Store additional attributes (non-DataStream, non-reserved)
+        reserved_keys = {'tables', 'output_folder', 'filter_metadata', 'streams'}
         for key, value in output_files.items():
-            if key != 'tables' and not hasattr(self, key):  # Don't override standard attributes
+            if key not in reserved_keys and not isinstance(value, DataStream) and not hasattr(self, key):
                 setattr(self, key, value)
     
     def _process_tables(self, tables_raw: Any) -> 'TableContainer':
@@ -848,65 +934,6 @@ class StandardizedOutput:
             return TableContainer(table_infos)
         else:
             return TableContainer({})
-    
-    def _extract_structure_ids(self) -> List[str]:
-        """Extract structure IDs from structure file paths."""
-        ids = []
-        for struct_path in self.structures:
-            if isinstance(struct_path, str):
-                # Extract ID from filename (remove extension)
-                filename = os.path.basename(struct_path)
-                if filename.endswith('.pdb'):
-                    ids.append(filename[:-4])
-                elif filename.endswith('.cif'):
-                    ids.append(filename[:-4])
-                else:
-                    ids.append(filename)
-        return ids
-    
-    def _extract_compound_ids(self) -> List[str]:
-        """Extract compound IDs from compound file paths."""
-        ids = []
-        for comp_path in self.compounds:
-            if isinstance(comp_path, str):
-                # Extract ID from filename (remove extension)
-                filename = os.path.basename(comp_path)
-                if filename.endswith('.sdf'):
-                    ids.append(filename[:-4])
-                elif filename.endswith('.mol'):
-                    ids.append(filename[:-4])
-                else:
-                    ids.append(filename)
-        return ids
-
-    def _extract_sequence_ids(self) -> List[str]:
-        """Extract sequence IDs from sequence files or tables."""
-        ids = []
-
-        # Try to get IDs from tables first
-        if hasattr(self.tables, '_tables'):
-            for name, info in self.tables._tables.items():
-                if name in ['sequences', 'main'] and info.path:
-                    if os.path.exists(info.path):
-                        df = pd.read_csv(info.path)
-                        if 'id' in df.columns:
-                            ids.extend(df['id'].tolist())
-        
-        # If no IDs found from tables, extract from sequence file paths
-        if not ids:
-            for seq_path in self.sequences:
-                if isinstance(seq_path, str):
-                    filename = os.path.basename(seq_path)
-                    if filename.endswith('.fasta'):
-                        ids.append(filename[:-6])
-                    elif filename.endswith('.fa'):
-                        ids.append(filename[:-3])
-                    elif filename.endswith('.csv'):
-                        ids.append(filename[:-4])
-                    else:
-                        ids.append(filename)
-        
-        return ids
     
     def __getitem__(self, key: str):
         """Dictionary-style access: output['structures']"""
@@ -968,166 +995,95 @@ class StandardizedOutput:
         
         return ""
     
-    def _format_list_preview(self, items: List[str], max_items: int = 2) -> str:
-        """Format a list showing first few items with ellipsis if needed."""
-        if not items:
-            return "[]"
-        
-        if len(items) <= max_items:
-            return str(items)
-        
-        preview_items = items[:max_items]
-        return f"[{', '.join(repr(item) for item in preview_items)}, ...]"
-    
     def pretty(self) -> str:
         """Pretty formatted representation of the output."""
+        from .datastream import DataStream
+
         lines = []
-        
+
         # Helper function to make paths relative to output_folder
         def make_relative_path(file_path: str) -> str:
             if self.output_folder and file_path.startswith(self.output_folder):
                 relative_path = os.path.relpath(file_path, self.output_folder)
                 return f"<output_folder>/{relative_path}"
             return file_path
-        
-        # Main content keys with their corresponding ID keys
-        content_keys = [
-            ('structures', 'structure_ids'),
-            ('compounds', 'compound_ids'), 
-            ('sequences', 'sequence_ids')
-        ]
-        
-        for content_key, id_key in content_keys:
-            if content_key in self._data and self._data[content_key]:
-                content_files = getattr(self, content_key)
-                id_list = getattr(self, id_key)
-                
-                # Show the file paths with bullet points
-                lines.append(f"{content_key}:")
-                if len(content_files) <= 6:
-                    # Show all files if 6 or fewer
-                    for file_path in content_files:
-                        relative_path = make_relative_path(file_path)
-                        lines.append(f"    – '{relative_path}'")
-                else:
-                    # Truncated format: show first 3, ..., last 3
-                    for file_path in content_files[:3]:
-                        relative_path = make_relative_path(file_path)
-                        lines.append(f"    – '{relative_path}'")
-                    lines.append(f"    – ... ({len(content_files) - 6} more) ...")
-                    for file_path in content_files[-3:]:
-                        relative_path = make_relative_path(file_path)
-                        lines.append(f"    – '{relative_path}'")
-                
-                # Show the IDs if available
-                if id_list:
-                    lines.append(f"{id_key}:")
-                    if len(id_list) <= 6:
-                        # Show all IDs if 6 or fewer
-                        for id_value in id_list:
-                            lines.append(f"    – {id_value}")
+
+        def format_datastream(name: str, ds: DataStream) -> List[str]:
+            """Format a DataStream for display."""
+            if not ds or len(ds) == 0:
+                return []
+
+            result = [f"{name}: ({ds.format}, {len(ds)} items)"]
+
+            # Show (id, file) pairs
+            items = list(ds)
+            if len(items) <= 6:
+                for item_id, item_file in items:
+                    if item_file:
+                        rel_path = make_relative_path(item_file)
+                        result.append(f"    – {item_id}: '{rel_path}'")
                     else:
-                        # Truncated format: show first 3, ..., last 3
-                        for id_value in id_list[:3]:
-                            lines.append(f"    – {id_value}")
-                        lines.append(f"    – ... ({len(id_list) - 6} more) ...")
-                        for id_value in id_list[-3:]:
-                            lines.append(f"    – {id_value}")
-        
-        # Special handling for tables
+                        result.append(f"    – {item_id}")
+            else:
+                # Truncated: first 3, ..., last 3
+                for item_id, item_file in items[:3]:
+                    if item_file:
+                        rel_path = make_relative_path(item_file)
+                        result.append(f"    – {item_id}: '{rel_path}'")
+                    else:
+                        result.append(f"    – {item_id}")
+                result.append(f"    – ... ({len(items) - 6} more) ...")
+                for item_id, item_file in items[-3:]:
+                    if item_file:
+                        rel_path = make_relative_path(item_file)
+                        result.append(f"    – {item_id}: '{rel_path}'")
+                    else:
+                        result.append(f"    – {item_id}")
+
+            return result
+
+        # Main DataStream attributes
+        for attr_name in ('structures', 'sequences', 'compounds', 'msas'):
+            ds = getattr(self, attr_name, None)
+            if isinstance(ds, DataStream) and len(ds) > 0:
+                lines.extend(format_datastream(attr_name, ds))
+
+        # Tables
         if 'tables' in self._data and hasattr(self.tables, '_tables'):
             lines.append("tables:")
             for name, info in self.tables._tables.items():
-                # Format columns display
-                col_display = ', '.join(info.columns[:]) if info.columns else '' #:3
-                #if len(info.columns) > 3:
-                #    col_display += f', +{len(info.columns)-3} more'
-                
-                # Show table info
+                col_display = ', '.join(info.columns[:]) if info.columns else ''
                 lines.append(f"    ${name} ({col_display}):")
                 relative_path = make_relative_path(info.path)
                 lines.append(f"        – '{relative_path}'")
-        
+
         # Output folder
-        if 'output_folder' in self._data:
+        if self.output_folder:
             lines.append("output_folder:")
             lines.append(f"    – '{self.output_folder}'")
-        
-        
-        # Additional keys section (aliases and other attributes)
-        processed_keys = {'structures', 'structure_ids', 'compounds', 'compound_ids', 
-                         'sequences', 'sequence_ids', 'tables', 'output_folder', 'filter_metadata'}
-        other_keys = [k for k in self._data.keys() if k not in processed_keys]
-        
-        aliases = []
-        additional_items = []
-        
-        # Standard keys to check for aliases
-        standard_keys = ['structures', 'compounds', 'sequences', 'structure_ids', 'compound_ids', 'sequence_ids']
-        
-        for key in sorted(other_keys):
+
+        # Additional attributes (not DataStreams, tables, or output_folder)
+        processed_keys = {'structures', 'sequences', 'compounds', 'msas',
+                         'tables', 'output_folder', 'filter_metadata'}
+        for key in sorted(self._data.keys()):
+            if key in processed_keys:
+                continue
             value = self._data[key]
-            found_alias = False
-            
-            # Check if this key's value matches any standard key's value (true alias)
-            for standard_key in standard_keys:
-                if standard_key in self._data:
-                    standard_value = self._data[standard_key]
-                    # Compare values (handle both lists and single values)
-                    if value == standard_value:
-                        aliases.append(f"{standard_key}={key}")
-                        found_alias = True
-                        break
-            
-            # If not an alias, format it consistently with bullet points and relative paths
-            if not found_alias:
-                if isinstance(value, list):
-                    additional_items.append(f"{key}:")
-                    # Apply compression logic for lists > 6 items (same as main content sections)
-                    if len(value) <= 6:
-                        # Show all items if 6 or fewer
-                        for item in value:
-                            if isinstance(item, str):
-                                relative_path = make_relative_path(item)
-                                additional_items.append(f"    – '{relative_path}'")
-                            else:
-                                additional_items.append(f"    – {item}")
+            if isinstance(value, DataStream):
+                continue  # Already handled
+            if isinstance(value, str):
+                lines.append(f"{key}:")
+                lines.append(f"    – '{make_relative_path(value)}'")
+            elif isinstance(value, list) and value:
+                lines.append(f"{key}:")
+                for item in value[:6]:
+                    if isinstance(item, str):
+                        lines.append(f"    – '{make_relative_path(item)}'")
                     else:
-                        # Truncated format: show first 3, ..., last 3
-                        for item in value[:3]:
-                            if isinstance(item, str):
-                                relative_path = make_relative_path(item)
-                                additional_items.append(f"    – '{relative_path}'")
-                            else:
-                                additional_items.append(f"    – {item}")
-                        additional_items.append(f"    – ... ({len(value) - 6} more) ...")
-                        for item in value[-3:]:
-                            if isinstance(item, str):
-                                relative_path = make_relative_path(item)
-                                additional_items.append(f"    – '{relative_path}'")
-                            else:
-                                additional_items.append(f"    – {item}")
-                else:
-                    # Single value - format with relative path if it's a path
-                    if isinstance(value, str):
-                        relative_path = make_relative_path(value)
-                        additional_items.append(f"{key}:")
-                        additional_items.append(f"    – '{relative_path}'")
-                    else:
-                        additional_items.append(f"{key}: {repr(value)}")
-        
-        # Show additional items and true aliases
-        if additional_items or aliases:
-            # First show additional items (non-aliases)
-            for item in additional_items:
-                lines.append(item)
-            
-            # Then show true aliases with header
-            if aliases:
-                lines.append("#Aliases")
-                for alias in aliases:
-                    lines.append(alias)
-        
+                        lines.append(f"    – {item}")
+                if len(value) > 6:
+                    lines.append(f"    – ... ({len(value) - 6} more)")
+
         return "\n".join(lines)
     
     def __str__(self) -> str:
@@ -1150,11 +1106,15 @@ class StandardizedOutput:
     def get_kept_items_count(self) -> int:
         """
         Get count of items that passed filtering.
-        
+
         Returns:
             Number of kept items (structures + sequences + compounds)
         """
-        return len(self.structures) + len(self.sequences) + len(self.compounds)
+        count = 0
+        for attr in (self.streams.structures, self.streams.sequences, self.streams.compounds):
+            if attr is not None:
+                count += len(attr)
+        return count
     
     def get_original_items_count(self) -> Optional[int]:
         """
@@ -1179,28 +1139,6 @@ class StandardizedOutput:
             kept_count = self.get_kept_items_count()
             return kept_count / original_count
         return None
-
-    def filter(self, expression: str, max_items: Optional[int] = None,
-               sort_by: Optional[str] = None, sort_ascending: bool = True):
-        """
-        Shorthand for Filter(pool=self, data=self, expression=...).
-
-        Args:
-            expression: Pandas query-style filter expression (e.g., "pLDDT>80 and distance<5.0")
-            max_items: Maximum number of items to keep after filtering
-            sort_by: Column name to sort by before applying max_items limit
-            sort_ascending: Sort order (True for ascending, False for descending)
-
-        Returns:
-            StandardizedOutput from Filter tool
-
-        Examples:
-            filtered = boltz.filter("pLDDT>80")
-            top10 = boltz.filter("contacts>=3", max_items=10, sort_by="affinity_pred_value")
-        """
-        from .filter import Filter
-        return Filter(pool=self, data=self, expression=expression,
-                     max_items=max_items, sort_by=sort_by, sort_ascending=sort_ascending)
 
 
 class ToolOutput:
@@ -1240,15 +1178,11 @@ class ToolOutput:
         """
         # If no cached outputs, delegate to config
         if not self._output_files and hasattr(self.config, 'get_output_files'):
-            try:
-                config_outputs = self.config.get_output_files()
-                if output_type is None:
-                    return config_outputs
-                return config_outputs.get(output_type, [])
-            except:
-                # Fallback if config method fails
-                pass
-        
+            config_outputs = self.config.get_output_files()
+            if output_type is None:
+                return config_outputs
+            return config_outputs.get(output_type, [])
+
         # Use cached outputs
         if output_type is None:
             return self._output_files
@@ -1285,14 +1219,12 @@ class ToolOutput:
         if hasattr(self.config, 'tables'):
             return self.config.tables
 
-        # Fallback: create TableContainer from get_output_files if available
-        try:
+        # Create TableContainer from get_output_files if available
+        if hasattr(self.config, 'get_output_files'):
             output_files = self.config.get_output_files()
             tables_dict = output_files.get('tables', {})
             if tables_dict:
                 return TableContainer(tables_dict)
-        except:
-            pass
 
         # Return empty container if nothing available
         return TableContainer({})
@@ -1313,9 +1245,9 @@ class ToolOutput:
         Get standardized output with dot notation access.
 
         Allows usage like:
-        - rfd.structures
+        - rfd.streams.structures
         - rfd.tables
-        - rfd['structures'] (dict-style)
+        - rfd['streams'] (dict-style)
         """
         # Get current output files from the config
         if hasattr(self.config, 'get_output_files'):
@@ -1335,7 +1267,7 @@ class ToolOutput:
         Shorthand for .output - elegant access to tool outputs.
 
         Allows usage like:
-        - tool.o.structures
+        - tool.o.streams.structures
         - tool.o.tables.sequences
         - tool.o.tables.concatenated
         """

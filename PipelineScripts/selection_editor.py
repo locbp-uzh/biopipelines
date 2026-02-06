@@ -6,16 +6,19 @@ like expand, shrink, shift, and invert, while respecting actual PDB residue numb
 """
 
 import os
-from typing import Dict, List, Any, Optional, Union
+import json
+from typing import Dict, List, Any, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
 
 
 class SelectionEditor(BaseConfig):
@@ -28,10 +31,15 @@ class SelectionEditor(BaseConfig):
     """
 
     TOOL_NAME = "SelectionEditor"
-    
+
+    # Lazy path descriptors
+    selections_csv = Path(lambda self: os.path.join(self.output_folder, "selections.csv"))
+    config_json = Path(lambda self: os.path.join(self.output_folder, "config.json"))
+    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
+    selection_editor_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_selection_editor.py"))
 
     def __init__(self,
-                 structures: Union[ToolOutput, StandardizedOutput, List[str]],
+                 structures: Union[DataStream, StandardizedOutput],
                  selection: tuple,
                  expand: int = 0,
                  shrink: int = 0,
@@ -42,7 +50,7 @@ class SelectionEditor(BaseConfig):
         Initialize SelectionEditor configuration.
 
         Args:
-            structures: Input structures (ToolOutput/StandardizedOutput from previous tool or list of PDB files)
+            structures: Input structures as DataStream or StandardizedOutput
             selection: Table column reference tuple (e.g., tool.tables.structures.designed)
             expand: Number of residues to add on each side of intervals (default: 0)
             shrink: Number of residues to remove from each side of intervals (default: 0)
@@ -50,16 +58,20 @@ class SelectionEditor(BaseConfig):
             invert: Whether to invert the selection (select complement) (default: False)
             **kwargs: Additional parameters
         """
+        # Resolve input to DataStream
+        if isinstance(structures, StandardizedOutput):
+            self.structures_stream: DataStream = structures.streams.structures
+        elif isinstance(structures, DataStream):
+            self.structures_stream = structures
+        else:
+            raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
+
         # Store SelectionEditor-specific parameters
         self.selection_ref = selection
-        self.structures_input = structures
         self.expand = expand
         self.shrink = shrink
         self.shift = shift
         self.invert = invert
-
-        # Track input types
-        self.structures_is_tool_output = isinstance(structures, (ToolOutput, StandardizedOutput))
 
         # Validate selection reference format
         if not isinstance(selection, tuple) or len(selection) != 2:
@@ -68,28 +80,16 @@ class SelectionEditor(BaseConfig):
                 "Example: tool.tables.structures.designed"
             )
 
+        # Extract the source table and column from the selection reference
+        self.selection_table, self.selection_column = self.selection_ref
+
         # Initialize base class
         super().__init__(**kwargs)
 
-        # Extract the source tool from the selection reference
-        self.selection_table, self.selection_column = self.selection_ref
-
-        # Add dependency on the tool that provides the structures
-        if isinstance(structures, (ToolOutput, StandardizedOutput)):
-            # Get tool config from StandardizedOutput or ToolOutput
-            tool_config = structures.tool if hasattr(structures, 'tool') else (
-                structures.config if hasattr(structures, 'config') else None
-            )
-            if tool_config:
-                self.dependencies.append(tool_config)
-
-        # Initialize file paths (will be set in configure_inputs)
-        self._initialize_file_paths()
-
     def validate_params(self):
         """Validate SelectionEditor-specific parameters."""
-        if not self.structures_input:
-            raise ValueError("structures parameter is required")
+        if not self.structures_stream or len(self.structures_stream) == 0:
+            raise ValueError("structures parameter is required and must not be empty")
 
         if not self.selection_ref:
             raise ValueError("selection parameter is required")
@@ -108,30 +108,9 @@ class SelectionEditor(BaseConfig):
         if self.shrink < 0:
             raise ValueError("shrink must be non-negative")
 
-    def _initialize_file_paths(self):
-        """Initialize common file paths used throughout the class."""
-        self.selections_csv = None
-        self.config_json = None
-
-    def _setup_file_paths(self):
-        """Set up all file paths after output_folder is known."""
-        # Output files
-        self.selections_csv = os.path.join(self.output_folder, "selections.csv")
-        self.config_json = os.path.join(self.output_folder, "config.json")
-
-        # Helper script paths
-        if hasattr(self, 'folders') and self.folders:
-            self.selection_editor_py = os.path.join(
-                self.folders["HelpScripts"],
-                "pipe_selection_editor.py"
-            )
-        else:
-            self.selection_editor_py = None
-
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input sources from selection table and structures."""
+        """Configure input sources."""
         self.folders = pipeline_folders
-        self._setup_file_paths()
 
         # Get the selection table path
         if hasattr(self.selection_table, 'path'):
@@ -139,40 +118,15 @@ class SelectionEditor(BaseConfig):
         else:
             raise ValueError("Invalid selection table reference")
 
-        # Get structures from input parameter
-        if self.structures_is_tool_output:
-            # structures_input is a StandardizedOutput or ToolOutput
-            tool_output = self.structures_input
-
-            # Try to get structures
-            source_structures = []
-            if isinstance(tool_output, StandardizedOutput):
-                source_structures = tool_output.structures
-            elif hasattr(tool_output, 'get_output_files'):
-                for struct_type in ["structures", "pdbs"]:
-                    struct_files = tool_output.get_output_files(struct_type)
-                    if struct_files:
-                        source_structures = struct_files
-                        break
-
-            if not source_structures:
-                raise ValueError(f"No structure outputs found from input")
-
-            self.input_sources = {"structures": source_structures}
-
-        elif isinstance(self.structures_input, list):
-            self.input_sources = {"structures": self.structures_input}
-
-        else:
-            raise ValueError(f"Unsupported structures input type: {type(self.structures_input)}")
-
     def get_config_display(self) -> List[str]:
         """Get SelectionEditor configuration display lines."""
         config_lines = super().get_config_display()
 
-        # Selection information
-        config_lines.append(f"SELECTION COLUMN: {self.selection_column}")
-        config_lines.append(f"SELECTION SOURCE: {self.selection_table.name}")
+        config_lines.extend([
+            f"INPUT STRUCTURES: {len(self.structures_stream)} files",
+            f"SELECTION COLUMN: {self.selection_column}",
+            f"SELECTION SOURCE: {self.selection_table.name}"
+        ])
 
         # Operations
         operations = []
@@ -186,11 +140,6 @@ class SelectionEditor(BaseConfig):
             operations.append("invert=True")
 
         config_lines.append(f"OPERATIONS: {', '.join(operations)}")
-
-        # Structure count
-        if hasattr(self, 'input_sources') and "structures" in self.input_sources:
-            struct_count = len(self.input_sources["structures"])
-            config_lines.append(f"STRUCTURES: {struct_count}")
 
         return config_lines
 
@@ -207,12 +156,15 @@ class SelectionEditor(BaseConfig):
         # Ensure output folder exists
         os.makedirs(self.output_folder, exist_ok=True)
 
+        # Serialize structures DataStream to JSON for HelpScript to load
+        with open(self.structures_ds_json, 'w') as f:
+            json.dump(self.structures_stream.to_dict(), f, indent=2)
+
         # Create config file for helper script
-        import json
         config_data = {
             "selection_table": self.selection_table_path,
             "selection_column": self.selection_column,
-            "structures": self.input_sources["structures"],
+            "structures_json": self.structures_ds_json,
             "expand": self.expand,
             "shrink": self.shrink,
             "shift": self.shift,
@@ -226,11 +178,11 @@ class SelectionEditor(BaseConfig):
         # Generate bash script
         script_content = "#!/bin/bash\n"
         script_content += "# SelectionEditor execution script\n"
-        script_content += "# Generated by BioPipelines\n\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
 
         script_content += f"""echo "Modifying PyMOL selections"
+echo "Input structures: {len(self.structures_stream)} files"
 echo "Selection column: {self.selection_column}"
 echo "Operations: expand={self.expand}, shrink={self.shrink}, shift={self.shift}, invert={self.invert}"
 
@@ -252,42 +204,13 @@ echo "Modified selections saved to: {self.selections_csv}"
 
         return script_content
 
-    def _predict_structure_ids(self) -> List[str]:
-        """
-        Predict the structure IDs that will be analyzed.
-
-        Returns:
-            List of structure identifiers
-        """
-        structure_ids = []
-
-        if hasattr(self, 'input_sources') and "structures" in self.input_sources:
-            structure_files = self.input_sources["structures"]
-            for struct_file in structure_files:
-                filename = os.path.basename(struct_file)
-                if filename.endswith('.pdb'):
-                    structure_ids.append(filename[:-4])
-                elif filename.endswith('.cif'):
-                    structure_ids.append(filename[:-4])
-                else:
-                    structure_ids.append(filename)
-
-        return structure_ids
-
-    def get_output_files(self) -> Dict[str, List[str]]:
+    def get_output_files(self) -> Dict[str, Any]:
         """
         Get expected output files after SelectionEditor execution.
 
         Returns:
-            Dictionary mapping output types to file paths with standard keys
+            Dictionary with DataStream objects and tables
         """
-        # Ensure file paths are set up
-        if not hasattr(self, 'selections_csv') or self.selections_csv is None:
-            self._setup_file_paths()
-
-        # Predict structure IDs
-        structure_ids = self._predict_structure_ids()
-
         # Create column names
         modified_col = self.selection_column
         original_col = f"original_{self.selection_column}"
@@ -299,17 +222,14 @@ echo "Modified selections saved to: {self.selections_csv}"
                 path=self.selections_csv,
                 columns=["id", "pdb", modified_col, original_col],
                 description=f"Modified PyMOL selections from {self.selection_column}",
-                count=len(structure_ids)
+                count=len(self.structures_stream)
             )
         }
 
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }
@@ -324,8 +244,7 @@ echo "Modified selections saved to: {self.selections_csv}"
                 "expand": self.expand,
                 "shrink": self.shrink,
                 "shift": self.shift,
-                "invert": self.invert,
-                "structures_provided": self.structures_provided
+                "invert": self.invert
             }
         })
         return base_dict

@@ -10,13 +10,18 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .file_paths import Path
+    from .datastream import DataStream
 except ImportError:
-    # Fallback for direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, ToolOutput, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from file_paths import Path
+    from datastream import DataStream
+
+# Standard amino acids - guaranteed output structure
+AMINO_ACIDS = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
 
 
 class MutationProfiler(BaseConfig):
@@ -35,11 +40,24 @@ class MutationProfiler(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationProfiler"
-    
-    
+
+    # Lazy path descriptors
+    profile_csv = Path(lambda self: os.path.join(self.output_folder, "profile.csv"))
+    mutations_csv = Path(lambda self: os.path.join(self.output_folder, "mutations.csv"))
+    absolute_freq_csv = Path(lambda self: os.path.join(self.output_folder, "absolute_frequencies.csv"))
+    relative_freq_csv = Path(lambda self: os.path.join(self.output_folder, "relative_frequencies.csv"))
+    sequence_logo_relative_svg = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_relative_frequencies.svg"))
+    sequence_logo_relative_png = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_relative_frequencies.png"))
+    sequence_logo_absolute_svg = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_absolute_frequencies.svg"))
+    sequence_logo_absolute_png = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_absolute_frequencies.png"))
+    sequence_logo_counts_svg = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_counts.svg"))
+    sequence_logo_counts_png = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_counts.png"))
+    config_file = Path(lambda self: os.path.join(self.output_folder, "mutation_profiler_config.json"))
+    profiler_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutation_profiler.py"))
+
     def __init__(self,
-                 original: Union[ToolOutput, StandardizedOutput],
-                 mutants: Union[ToolOutput, StandardizedOutput],
+                 original: Union[DataStream, StandardizedOutput],
+                 mutants: Union[DataStream, StandardizedOutput],
                  include_original: bool = True,
                  positions: Optional[str] = None,
                  **kwargs):
@@ -47,116 +65,65 @@ class MutationProfiler(BaseConfig):
         Initialize mutation profiler tool.
 
         Args:
-            original: Original sequences (ToolOutput or StandardizedOutput)
-            mutants: Mutant sequences to compare against original (ToolOutput or StandardizedOutput)
+            original: Original sequences as DataStream or StandardizedOutput
+            mutants: Mutant sequences as DataStream or StandardizedOutput
             include_original: Whether to include original sequence in analysis (default: True)
             positions: PyMOL-style selection string for positions to display in plots (e.g., "141+143+145+147-149")
-                      If None, shows all positions with mutations. This ensures consistent x-axis across tools.
+                      If None, shows all positions with mutations.
             **kwargs: Additional parameters
 
         Examples:
             # Analyze LigandMPNN mutations against original
-            profiler = pipeline.add(MutationProfiler(
-                original=original_structure,
-                mutants=lmpnn
-            ))
+            profiler = MutationProfiler(original=original_structure, mutants=lmpnn)
 
             # Profile mutations with specific positions for plot consistency
-            profiler = pipeline.add(MutationProfiler(
+            profiler = MutationProfiler(
                 original=original_structure,
                 mutants=lmpnn,
                 positions="141+143+145+147-149+151-152"
-            ))
-
-            # Profile mutations without including original in statistics
-            profiler = pipeline.add(MutationProfiler(
-                original=wild_type,
-                mutants=engineered_variants,
-                include_original=False
-            ))
+            )
         """
-        self.original_input = original
-        self.mutants_input = mutants
+        # Resolve original to DataStream
+        if isinstance(original, StandardizedOutput):
+            self.original_stream: DataStream = original.streams.sequences
+        elif isinstance(original, DataStream):
+            self.original_stream = original
+        else:
+            raise ValueError(f"original must be DataStream or StandardizedOutput, got {type(original)}")
+
+        # Resolve mutants to DataStream
+        if isinstance(mutants, StandardizedOutput):
+            self.mutants_stream: DataStream = mutants.streams.sequences
+        elif isinstance(mutants, DataStream):
+            self.mutants_stream = mutants
+        else:
+            raise ValueError(f"mutants must be DataStream or StandardizedOutput, got {type(mutants)}")
+
         self.include_original = include_original
         self.positions = positions
-        
-        # Initialize base class
+
         super().__init__(**kwargs)
-        
-        # Set up dependencies
-        if hasattr(original, 'config'):
-            self.dependencies.append(original.config)
-        if hasattr(mutants, 'config'):
-            self.dependencies.append(mutants.config)
 
 
     def validate_params(self):
         """Validate MutationProfiler parameters."""
-        if not isinstance(self.original_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("original must be a ToolOutput or StandardizedOutput object")
-        
-        if not isinstance(self.mutants_input, (ToolOutput, StandardizedOutput)):
-            raise ValueError("mutants must be a ToolOutput or StandardizedOutput object")
-    
+        if not self.original_stream or len(self.original_stream) == 0:
+            raise ValueError("original sequences cannot be empty")
+
+        if not self.mutants_stream or len(self.mutants_stream) == 0:
+            raise ValueError("mutants sequences cannot be empty")
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input sequences from previous tools."""
+        """Configure input sequences."""
         self.folders = pipeline_folders
-        
-        # Extract original sequences
-        self.original_sequences_path = self._extract_sequences_path(self.original_input, "original")
-        
-        # Extract mutant sequences  
-        self.mutants_sequences_path = self._extract_sequences_path(self.mutants_input, "mutants")
-    
-    def _extract_sequences_path(self, input_obj: Union[ToolOutput, StandardizedOutput], input_type: str) -> str:
-        """Extract sequences path from ToolOutput or StandardizedOutput."""
-        # Try to get sequences table from input
-        if hasattr(input_obj, 'tables'):
-            tables = input_obj.tables
-            
-            # Check for sequences table
-            if hasattr(tables, 'sequences'):
-                if isinstance(tables.sequences,str):
-                    return tables.sequences
-                else:
-                    if hasattr(tables.sequences,'path'):
-                        return tables.sequences.path
-                    else:
-                        raise ValueError("Cannot extract path of sequences table")
-            elif hasattr(tables, '_tables'):
-                # Standard BioPipelines format
-                for name, info in tables._tables.items():
-                    if 'sequence' in name.lower():
-                        return info.path
-            elif isinstance(tables, dict):
-                # Dict format
-                for name, info in tables.items():
-                    if 'sequence' in name.lower():
-                        if isinstance(info,str):
-                            return info
-                        elif isinstance(info, dict) and 'path' in info:
-                            return info['path']
-                        elif hasattr(info, 'path'):
-                            return info.path
-        
-        # Fallback: try to predict sequences file in output folder
-        if hasattr(input_obj, 'output_folder'):
-            predicted_files = [
-                os.path.join(input_obj.output_folder, 'sequences.csv'),
-                os.path.join(input_obj.output_folder, 'table.csv'),
-                os.path.join(input_obj.output_folder, 'results.csv')
-            ]
-            return predicted_files[0]  # Return first prediction
-        
-        raise ValueError(f"Could not extract sequences path from {input_type} input")
     
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
         config_lines.extend([
-            f"ORIGINAL: {type(self.original_input).__name__}",
-            f"MUTANTS: {type(self.mutants_input).__name__}",
+            f"ORIGINAL: {len(self.original_stream)} sequences",
+            f"MUTANTS: {len(self.mutants_stream)} sequences",
             f"INCLUDE_ORIGINAL: {self.include_original}",
             f"POSITIONS: {self.positions if self.positions else 'auto (all mutations)'}"
         ])
@@ -178,127 +145,82 @@ class MutationProfiler(BaseConfig):
 
     def generate_script_run_profiler(self) -> str:
         """Generate the mutation profiler execution part of the script."""
-        output_folder = self.output_folder
+        import json
 
-        # Output files
-        profile_csv = os.path.join(output_folder, "profile.csv")
-        mutations_csv = os.path.join(output_folder, "mutations.csv")
-        absolute_freq_csv = os.path.join(output_folder, "absolute_frequencies.csv")
-        relative_freq_csv = os.path.join(output_folder, "relative_frequencies.csv")
-        sequence_logo_relative_svg = os.path.join(output_folder, "sequence_logo_relative_frequencies.svg")
-        sequence_logo_relative_png = os.path.join(output_folder, "sequence_logo_relative_frequencies.png")
-        sequence_logo_absolute_svg = os.path.join(output_folder, "sequence_logo_absolute_frequencies.svg")
-        sequence_logo_absolute_png = os.path.join(output_folder, "sequence_logo_absolute_frequencies.png")
-        sequence_logo_counts_svg = os.path.join(output_folder, "sequence_logo_counts.svg")
-        sequence_logo_counts_png = os.path.join(output_folder, "sequence_logo_counts.png")
-
-        # Create config file for mutation profiler
-        config_file = os.path.join(output_folder, "mutation_profiler_config.json")
         config_data = {
-            "original_sequences": self.original_sequences_path,
-            "mutants_sequences": self.mutants_sequences_path,
+            "original_sequences": self.original_stream.map_table,
+            "mutants_sequences": self.mutants_stream.map_table,
             "include_original": self.include_original,
             "positions": self.positions,
-            "profile_output": profile_csv,
-            "mutations_output": mutations_csv,
-            "absolute_frequencies_output": absolute_freq_csv,
-            "relative_frequencies_output": relative_freq_csv,
-            "sequence_logo_relative_svg": sequence_logo_relative_svg,
-            "sequence_logo_relative_png": sequence_logo_relative_png,
-            "sequence_logo_absolute_svg": sequence_logo_absolute_svg,
-            "sequence_logo_absolute_png": sequence_logo_absolute_png,
-            "sequence_logo_counts_svg": sequence_logo_counts_svg,
-            "sequence_logo_counts_png": sequence_logo_counts_png
+            "profile_output": self.profile_csv,
+            "mutations_output": self.mutations_csv,
+            "absolute_frequencies_output": self.absolute_freq_csv,
+            "relative_frequencies_output": self.relative_freq_csv,
+            "sequence_logo_relative_svg": self.sequence_logo_relative_svg,
+            "sequence_logo_relative_png": self.sequence_logo_relative_png,
+            "sequence_logo_absolute_svg": self.sequence_logo_absolute_svg,
+            "sequence_logo_absolute_png": self.sequence_logo_absolute_png,
+            "sequence_logo_counts_svg": self.sequence_logo_counts_svg,
+            "sequence_logo_counts_png": self.sequence_logo_counts_png
         }
 
-        import json
-        with open(config_file, 'w') as f:
+        with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Analyzing mutation patterns"
-echo "Original sequences: {self.original_sequences_path}"
-echo "Mutant sequences: {self.mutants_sequences_path}"
-echo "Output folder: {output_folder}"
+echo "Original sequences: {self.original_stream.map_table}"
+echo "Mutant sequences: {self.mutants_stream.map_table}"
+echo "Output folder: {self.output_folder}"
 
-# Run Python mutation profiler script
-python "{os.path.join(self.folders['HelpScripts'], 'pipe_mutation_profiler.py')}" \\
-  --config "{config_file}"
-
-if [ $? -eq 0 ]; then
-    echo "Successfully analyzed mutation patterns"
-    echo "Profile data: {profile_csv}"
-    echo "Mutations data: {mutations_csv}"
-    echo "Absolute frequencies: {absolute_freq_csv}"
-    echo "Relative frequencies: {relative_freq_csv}"
-    echo "Sequence logos: {sequence_logo_relative_svg}, {sequence_logo_absolute_svg}, {sequence_logo_counts_svg}"
-else
-    echo "Error: Failed to analyze mutation patterns"
-    exit 1
-fi
+python "{self.profiler_py}" --config "{self.config_file}"
 
 """
     
-    def get_output_files(self) -> Dict[str, List[str]]:
-        """
-        Get expected output files after mutation profiling.
-        
-        Returns:
-            Dictionary with output file paths and table information
-        """
-        profile_csv = os.path.join(self.output_folder, "profile.csv")
-        mutations_csv = os.path.join(self.output_folder, "mutations.csv")
-        absolute_freq_csv = os.path.join(self.output_folder, "absolute_frequencies.csv")
-        relative_freq_csv = os.path.join(self.output_folder, "relative_frequencies.csv")
-        sequence_logo_relative_svg = os.path.join(self.output_folder, "sequence_logo_relative_frequencies.svg")
-        sequence_logo_relative_png = os.path.join(self.output_folder, "sequence_logo_relative_frequencies.png")
-        sequence_logo_absolute_svg = os.path.join(self.output_folder, "sequence_logo_absolute_frequencies.svg")
-        sequence_logo_absolute_png = os.path.join(self.output_folder, "sequence_logo_absolute_frequencies.png")
-        sequence_logo_counts_svg = os.path.join(self.output_folder, "sequence_logo_counts.svg")
-        sequence_logo_counts_png = os.path.join(self.output_folder, "sequence_logo_counts.png")
-        
-        # Define tables that will be created
+    def get_output_files(self) -> Dict[str, Any]:
+        """Get expected output files after mutation profiling."""
+        aa_columns = ["position", "original"] + AMINO_ACIDS
+
         tables = {
             "profile": TableInfo(
                 name="profile",
-                path=profile_csv,
+                path=self.profile_csv,
                 columns=["position", "original", "count", "frequency"],
                 description="Position-wise mutation statistics",
-                count=None  # Will be determined at runtime
+                count=0
             ),
             "mutations": TableInfo(
                 name="mutations",
-                path=mutations_csv,
-                columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
+                path=self.mutations_csv,
+                columns=aa_columns,
                 description="Raw amino acid mutation counts per position",
-                count=None
+                count=0
             ),
             "absolute_frequencies": TableInfo(
-                name="absolute_frequencies", 
-                path=absolute_freq_csv,
-                columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
+                name="absolute_frequencies",
+                path=self.absolute_freq_csv,
+                columns=aa_columns,
                 description="Absolute amino acid frequencies per position (mutation_count/total_sequences)",
-                count=None
+                count=0
             ),
             "relative_frequencies": TableInfo(
                 name="relative_frequencies",
-                path=relative_freq_csv, 
-                columns=["position", "original", "A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"],
+                path=self.relative_freq_csv,
+                columns=aa_columns,
                 description="Relative amino acid frequencies per position (mutation_count/mutations_at_position)",
-                count=None
+                count=0
             )
         }
-        
+
         return {
-            "structures": [],
-            "structure_ids": [],
-            "compounds": [],
-            "compound_ids": [],
-            "sequences": [],  # This is an analysis tool, doesn't generate new sequences
-            "sequence_ids": [],
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
-            "visualizations": [sequence_logo_relative_svg, sequence_logo_relative_png, 
-                             sequence_logo_absolute_svg, sequence_logo_absolute_png,
-                             sequence_logo_counts_svg, sequence_logo_counts_png],
+            "visualizations": [
+                self.sequence_logo_relative_svg, self.sequence_logo_relative_png,
+                self.sequence_logo_absolute_svg, self.sequence_logo_absolute_png,
+                self.sequence_logo_counts_svg, self.sequence_logo_counts_png
+            ],
             "output_folder": self.output_folder
         }
     

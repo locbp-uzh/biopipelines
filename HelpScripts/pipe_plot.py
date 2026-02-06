@@ -628,6 +628,7 @@ class PlotBuilder:
     def build_plots(self):
         """Build all plots by executing all operations."""
         operations = self.config.get("operations", [])
+        failed = []
 
         print(f"Building plots with {len(operations)} operations")
         print("=" * 60)
@@ -640,21 +641,31 @@ class PlotBuilder:
             print(f"\n[{i+1}/{len(operations)}] Creating: {op_type}")
             print("-" * 40)
 
-            self.execute_operation(op, output_path)
+            try:
+                self.execute_operation(op, output_path)
+            except Exception as e:
+                print(f"  ERROR creating {op_type} plot: {e}")
+                failed.append((i + 1, op_type, str(e)))
 
-        # Write metadata CSV
+        # Always write metadata CSV (even if some plots failed)
         self._write_metadata()
 
         print("\n" + "=" * 60)
-        print(f"Plot generation complete: {len(operations)} plots created")
+        succeeded = len(operations) - len(failed)
+        print(f"Plot generation complete: {succeeded}/{len(operations)} plots created")
+        if failed:
+            print("Failed plots:")
+            for num, op_type, err in failed:
+                print(f"  [{num}] {op_type}: {err}")
+            sys.exit(1)
 
     def _write_metadata(self):
         """Write plot metadata to CSV file."""
-        if not self.metadata:
-            return
-
         metadata_path = os.path.join(self.output_folder, "plot_metadata.csv")
-        df = pd.DataFrame(self.metadata)
+        if self.metadata:
+            df = pd.DataFrame(self.metadata)
+        else:
+            df = pd.DataFrame(columns=["filename", "type", "title", "x_column", "y_column", "data_sources"])
         df.to_csv(metadata_path, index=False)
         print(f"\nMetadata written to: {metadata_path}")
 

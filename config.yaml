@@ -93,7 +93,7 @@ environments:
   DynamicBind:
     - "dynamicbind"
     - "relax"
-  ResidueAtomDistance: "biopipelines"
+  Distance: "biopipelines"
   PLIP: "biopipelines"
   DistanceSelector: "biopipelines"
   ConformationalChange: "ProteinEnv"
@@ -101,19 +101,12 @@ environments:
   SequenceMetricCorrelation: "MutationEnv"
   BayesianAdjuster: "MutationEnv"
   SequenceMetricAnalysis: "MutationEnv"
-  ProteinLigandContacts: "ProteinEnv"
-  PoseDistance: "ProteinEnv"
+  Contacts: "ProteinEnv"
+  PoseChange: "ProteinEnv"
 
   # Data management
-  Filter: "biopipelines"
-  Rank: "biopipelines"
-  SelectBest: "biopipelines"
-  RemoveDuplicates: "biopipelines"
-  MergeTables: "biopipelines"
-  ConcatenateTables: "biopipelines"
-  SliceTable: "biopipelines"
+  Panda: "biopipelines"
   ExtractMetrics: "biopipelines"
-  AverageByTable: "biopipelines"
   SelectinEditor: "ProteinEnv"
 
   # Utilities
@@ -125,6 +118,7 @@ environments:
   CompoundLibrary: "biopipelines"
   PDB: "biopipelines"
   Ligand: "biopipelines"
+  Sequence: "biopipelines"
   PyMOL: "ProteinEnv"
   Plot: "biopipelines"
 
