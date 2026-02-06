@@ -68,16 +68,12 @@ with Pipeline(project="Examples",
                           ids="Cy7_RR_CLOSE")
 
     from PipelineScripts.load import LoadOutput
-    original_open = LoadOutput("/shares/locbp.chem.uzh/gquarg/BioPipelines/Examples/LigandMPNN-MutationComposer-Cycle_015/ToolOutputs/004_Boltz2.json")
-    original_close = LoadOutput("/shares/locbp.chem.uzh/gquarg/BioPipelines/Examples/LigandMPNN-MutationComposer-Cycle_015/ToolOutputs/005_Boltz2.json")
-    """
     # We need an initial prediction from Boltz to benchmark the affinities
     original_open = Boltz2(proteins=HaloTag,
                        ligands=cy7_R_open)
     original_close = Boltz2(proteins=HaloTag,
                        ligands=cy7_RR_close,
                        msas=original_open)
-    """
     ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
 
     # Merge original open and close affinity tables with Panda
@@ -156,7 +152,7 @@ with Pipeline(project="Examples",
         best_open = Panda(
             tables=[x.tables.result for x in all_analyses],
             operations=[
-                Panda.concat(add_source=True),  # source_table column tracks which pool
+                Panda.concat(fill="",add_source=True),  # source_table column tracks which pool
                 Panda.sort("open_affinity_pred_value", ascending=True),  # min = ascending
                 Panda.head(1)
             ],
