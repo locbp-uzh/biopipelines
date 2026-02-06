@@ -103,39 +103,6 @@ best = Panda(
 
 ---
 
-## RemoveDuplicates
-
-Cross-table deduplication for iterative cycles. Filters sequences that exist in historical data.
-
-**Use RemoveDuplicates vs Panda.drop_duplicates()**:
-- **RemoveDuplicates**: Cross-table (current vs history)
-- **Panda.drop_duplicates()**: Within-table
-
-**Environment**: `biopipelines`
-
-**Parameters**:
-- `pool`: StandardizedOutput | TableInfo | str - Current sequences
-- `history`: StandardizedOutput | TableInfo | str | None - Historical sequences (None for first cycle)
-- `compare`: str = "sequence" - Column to compare
-
-**Outputs**:
-- `tables.sequences` - Unique sequences
-- `tables.missing` - Duplicates filtered out
-
-**Example**:
-
-```python
-from PipelineScripts.remove_duplicates import RemoveDuplicates
-
-# First cycle
-unique = RemoveDuplicates(pool=composer, history=None)
-
-# Later cycles
-unique = RemoveDuplicates(pool=composer, history=all_previous)
-```
-
----
-
 ## ExtractMetrics
 
 Creates separate CSV files per metric for statistical software (GraphPad Prism).
