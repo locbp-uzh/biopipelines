@@ -71,6 +71,27 @@ def check_files_exist(file_list: List[str]) -> tuple[bool, List[str]]:
     
     return len(missing_files) == 0, missing_files
 
+def extract_file_list(category_data) -> List[str]:
+    """
+    Extract file paths from a category entry in expected outputs.
+
+    The category data may be:
+    - A list of file paths (legacy format)
+    - A dict (serialized DataStream) with a 'files' key containing the list
+
+    Args:
+        category_data: List or dict from expected_outputs[category]
+
+    Returns:
+        List of file paths
+    """
+    if isinstance(category_data, dict):
+        return category_data.get('files', [])
+    elif isinstance(category_data, list):
+        return category_data
+    return []
+
+
 def is_filter_output(expected_outputs: Dict[str, Any]) -> bool:
     """
     Check if the expected outputs are from a Filter tool (not RemoveDuplicates).
@@ -85,10 +106,10 @@ def is_filter_output(expected_outputs: Dict[str, Any]) -> bool:
     # This distinguishes Filter (works with structures) from RemoveDuplicates (sequences only)
     if 'tables' in expected_outputs and isinstance(expected_outputs['tables'], dict):
         has_missing_table = 'missing' in expected_outputs['tables']
-        has_structures = expected_outputs.get('structures', [])
-        
+        has_structures = bool(extract_file_list(expected_outputs.get('structures', [])))
+
         # Only treat as filter output if it has missing table AND expects structures
-        return has_missing_table and bool(has_structures)
+        return has_missing_table and has_structures
     
     return False
 
@@ -144,7 +165,7 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
         standard_categories = ['structures', 'compounds', 'sequences']
         for category in standard_categories:
             if category in expected_outputs and expected_outputs[category]:
-                content_files.extend(expected_outputs[category])
+                content_files.extend(extract_file_list(expected_outputs[category]))
         
         # Check critical files (must exist)
         if critical_files:
@@ -217,8 +238,8 @@ def check_expected_outputs(expected_outputs: Dict[str, Any]) -> tuple[bool, Dict
     
     for category in standard_categories:
         if category in expected_outputs:
-            files = expected_outputs[category]
-            if isinstance(files, list):
+            files = extract_file_list(expected_outputs[category])
+            if files:
                 exists, missing = check_files_exist(files)
                 if not exists:
                     missing_by_category[category] = missing

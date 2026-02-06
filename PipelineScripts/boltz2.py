@@ -479,7 +479,8 @@ if [ -f "{upstream_missing_path}" ]; then
         --structure-ext "{structure_ext}" \\
         --msa-ext "{msa_ext}"
 else
-    echo "No upstream missing.csv found"
+    echo "No upstream missing.csv found - creating empty missing.csv"
+    echo "id,structure,msa" > "{self.missing_csv}"
 fi
 
 """

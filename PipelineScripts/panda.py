@@ -854,7 +854,7 @@ fi
                             id_remap[old_id] = new_id
 
             # Pool mode: dynamically collect all streams from all pools
-            # Collect stream info: {stream_name: {"ids": [], "files": [], "format": str}}
+            # Collect stream info: {stream_name: {"ids": [], "files": [], "format": str, "map_table": str}}
             stream_data = {}
 
             for pool in self.pool_outputs:
@@ -866,7 +866,8 @@ fi
                                 stream_data[stream_name] = {
                                     "ids": [],
                                     "files": [],
-                                    "format": stream.format
+                                    "format": stream.format,
+                                    "map_table": stream.map_table or ""
                                 }
                             # Apply id_remap to IDs if present
                             remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids]
@@ -902,8 +903,12 @@ fi
                         ext = os.path.splitext(f)[1]
                         new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
 
-                # For sequences, use the result CSV as map_table
-                map_table = self.output_csv if stream_name == "sequences" else None
+                # Preserve pool's map_table, pointing to the copy in output_folder
+                pool_map_table = data.get("map_table", "")
+                if pool_map_table:
+                    map_table = os.path.join(self.output_folder, os.path.basename(pool_map_table))
+                else:
+                    map_table = None
 
                 output_streams[stream_name] = DataStream(
                     name=stream_name,

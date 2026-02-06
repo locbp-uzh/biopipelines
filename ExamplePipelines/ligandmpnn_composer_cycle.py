@@ -67,12 +67,17 @@ with Pipeline(project="Examples",
     cy7_RR_close = Ligand(smiles=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@]34[C@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
                           ids="Cy7_RR_CLOSE")
 
+    from PipelineScripts.load import LoadOutput
+    original_open = LoadOutput("/shares/locbp.chem.uzh/gquarg/BioPipelines/Examples/LigandMPNN-MutationComposer-Cycle_015/ToolOutputs/004_Boltz2.json")
+    original_close = LoadOutput("/shares/locbp.chem.uzh/gquarg/BioPipelines/Examples/LigandMPNN-MutationComposer-Cycle_015/ToolOutputs/005_Boltz2.json")
+    """
     # We need an initial prediction from Boltz to benchmark the affinities
     original_open = Boltz2(proteins=HaloTag,
                        ligands=cy7_R_open)
     original_close = Boltz2(proteins=HaloTag,
                        ligands=cy7_RR_close,
                        msas=original_open)
+    """
     ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
 
     # Merge original open and close affinity tables with Panda

@@ -84,7 +84,9 @@ def propagate_missing_table(
     upstream_missing_csv = find_upstream_missing_csv(upstream_folders)
 
     if not upstream_missing_csv:
-        print("No upstream missing.csv found - nothing to propagate")
+        print("No upstream missing.csv found - creating empty missing.csv")
+        output_missing_csv = os.path.join(output_folder, "missing.csv")
+        pd.DataFrame(columns=['id'] + list(file_extensions.keys())).to_csv(output_missing_csv, index=False)
         return []
 
     print(f"Found upstream missing.csv: {upstream_missing_csv}")
@@ -93,7 +95,9 @@ def propagate_missing_table(
     missing_ids = load_missing_ids(upstream_missing_csv)
 
     if not missing_ids:
-        print("No missing IDs in upstream table")
+        print("No missing IDs in upstream table - creating empty missing.csv")
+        output_missing_csv = os.path.join(output_folder, "missing.csv")
+        pd.DataFrame(columns=['id'] + list(file_extensions.keys())).to_csv(output_missing_csv, index=False)
         return []
 
     print(f"Propagating {len(missing_ids)} missing IDs to current tool")
