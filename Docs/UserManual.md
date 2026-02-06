@@ -177,7 +177,7 @@ previous = Table("/path/to/results.csv", name="previous_run")
 
 Tools output two types of data containers:
 
-**DataStream** - Unified container supporting IDs and associated files:
+**DataStream** - Unified container supporting ID tracking, and association of IDs to files (e.g. PDBs) or values (e.g. protein sequence):
 
 ```python
 # Access structures from a tool via the streams container
@@ -186,18 +186,16 @@ for struct_id, pdb_path in boltz.streams.structures:
 
 # Count items
 print(f"Generated {len(boltz.streams.structures)} structures")
-
-# Filter by IDs
-filtered = boltz.streams.structures.filter_by_ids(["id1", "id3"])
+print(f"Expected ids: {boltz.streams.structures.ids}")
 ```
 
 DataStream types accessed via `tool.streams.<type>`:
 - `streams.structures` - PDB/CIF files
-- `streams.sequences` - FASTA files or CSV with sequence column
-- `streams.compounds` - SDF files or CSV with SMILES column
+- `streams.sequences` - Table with id, sequence columns
+- `streams.compounds` - CSV with SMILES column, or SDF/PDB files
 - `streams.msas` - A3M or CSV files
 
-**Tables (TableInfo)** - Rich metadata about CSV files:
+**Tables (TableInfo)** - Rich metadata about CSV files. They do not track IDs.
 
 ```python
 # Access table path
