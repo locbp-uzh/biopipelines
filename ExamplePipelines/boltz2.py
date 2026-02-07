@@ -31,7 +31,6 @@ sys.path.insert(0, os.getcwd())
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import *
 from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.combinatorics import Bundle, Each
 
 with Pipeline(project="Examples",

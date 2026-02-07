@@ -63,7 +63,7 @@ with Pipeline(project="Examples",
             "chain": "A",
             "position": 145,
             "protein_atom": "SG",
-            "ligand_atom": "C1" # Run without the covalent linkage and inspect to verify the atom number
+            "ligand_atom": "C15"
         }
     )
 
@@ -81,7 +81,7 @@ with Pipeline(project="Examples",
             "chain": "A",
             "position": 145,
             "protein_atom": "SG",
-            "ligand_atom": "C1" # Run without the covalent linkage and inspect to verify the atom number
+            "ligand_atom": "C15" # Run without the covalent linkage and inspect to verify the atom number
         }
     )
 
