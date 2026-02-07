@@ -23,28 +23,18 @@ with Pipeline(project="Examples",
               time="4:00:00",
               memory="16GB")
 
-    # =========================================================================
-    # Example 1: N-glycosylation on IgG1 Fc (Asn-297)
-    # =========================================================================
-    # The IgG1 Fc fragment is glycosylated at Asn-297 on each chain.
-    # Boltz2 adds an NAG (N-acetylglucosamine) moiety at the specified positions.
-
+    # Test 1: N-glycosylation on IgG1 Fc (Asn-297) - with NAG (N-acetylglucosamine)
     Suffix("glyco")
     fc_fragment = Sequence(
         "TCPPCPAPELLGGPSVFLFPPKPKDTLMISRTPEVTCVVVDVSHEDPEVKFNWYVDGVEVHNAKTKPREEQYNSTYRVVSVLTVLHQDWLNGKEYKCKVSNKALPAPIEKTISKAKGQPREPQVYTLPPSRDELTKNQVSLTCLVKGFYPSDIAVEWESNGQPENNYKTTPPVLDSDGSFFLYSKLTVDKSRWQQGNVFSCSVMHEALHNHYTQKSLSLSPG",
         ids="IgG1_Fc"
     )
-
     boltz_glyco = Boltz2(
         proteins=fc_fragment,
         glycosylation={"A": [73]}
     )
 
-    # =========================================================================
-    # Example 2: Benzylated SNAP-Tag
-    # =========================================================================
-    # Cys-145 is the reactive cysteine
-
+    # Test 2: Benzylated SNAP-Tag - Cys-145 is the reactive cysteine
     Suffix("covalent")
     SnapTag = Sequence("MDKDCEMKRTTLDSPLGKLELSGCEQGLHRIIFLGKGTSAADAVEVPAPAAVLGGPEPLMQATAWLNAYFHQPEAIEEFPVPALHHPVFQQESFTRQVLWKLLKVVKFGEVISYSHLAALAGNPAATAAVKTALSGNPVPILIPCHRVVQGDLDVGGYEGGLAVKEWLLAHEGHRLGKPGLG")
     Bn = Ligand(smiles="CC1=CC=CC=C1")
@@ -67,10 +57,7 @@ with Pipeline(project="Examples",
         }
     )
 
-    # =========================================================================
-    # Example 3: Glycosylated protein with a covalent ligand
-    # =========================================================================
-
+    # Test 3: Glycosylated protein with a covalent ligand
     Suffix("glyco_covalent")
     boltz_glyco_covalent = Boltz2(
         proteins=SnapTag,
@@ -85,14 +72,8 @@ with Pipeline(project="Examples",
         }
     )
 
-    # =========================================================================
-    # Example 4: Contact constraints
-    # =========================================================================
-    # Guide ligand placement by constraining specific residues to be near
-    # the ligand. token1/token2 use [chain, residue_index] for proteins or
-    # [chain, atom_name] for ligands (e.g. ["B", "C1"]).
-    # max_distance defaults to 6A, force defaults to False.
-
+    # Test 4: Contact constraints - specific residues to be near the ligand
+    # token1/token2 use [chain, residue_index] for proteins and [chain, atom_name] for ligands.
     Suffix("contact")
     boltz_contact = Boltz2(
         proteins=SnapTag,
