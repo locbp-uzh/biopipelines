@@ -134,7 +134,9 @@ class Boltz2(BaseConfig):
             glycosylation: Dict mapping chain IDs to Asn positions for N-glycosylation
             covalent_linkage: Dict specifying covalent attachment
             contacts: List of contact constraints, each a dict with token1, token2,
-                      optional max_distance (4-20A, default 6.0), optional force (bool)
+                      optional max_distance (4-20A, default 6.0), optional force (bool).
+                      Tokens are [chain_id, residue_index] for proteins or
+                      [chain_id, atom_name] for ligands (e.g. ["B", "C1"]).
             **kwargs: Additional parameters
         """
         self.config = config
@@ -245,7 +247,7 @@ class Boltz2(BaseConfig):
                         raise ValueError(f"contacts[{i}] missing required field '{key}'")
                     token = contact[key]
                     if not isinstance(token, list) or len(token) not in (2, 3):
-                        raise ValueError(f"contacts[{i}]['{key}'] must be a list of 2 or 3 elements [chain, residue] or [chain, residue, atom]")
+                        raise ValueError(f"contacts[{i}]['{key}'] must be a list of 2 or 3 elements [chain, residue_or_atom_name] or [chain, residue, atom]")
                 if 'max_distance' in contact:
                     md = contact['max_distance']
                     if not isinstance(md, (int, float)) or md < 4 or md > 20:

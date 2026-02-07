@@ -89,7 +89,8 @@ with Pipeline(project="Examples",
     # Example 4: Contact constraints
     # =========================================================================
     # Guide ligand placement by constraining specific residues to be near
-    # the ligand. token1/token2 use [chain, residue] or [chain, residue, atom].
+    # the ligand. token1/token2 use [chain, residue_index] for proteins or
+    # [chain, atom_name] for ligands (e.g. ["B", "C1"]).
     # max_distance defaults to 6A, force defaults to False.
 
     Suffix("contact")
@@ -98,7 +99,7 @@ with Pipeline(project="Examples",
         ligands=Bn,
         msas=boltz_inspection,
         contacts=[
-            {"token1": ["A", 145], "token2": ["B", 1], "max_distance": 8.0, "force": False}
+            {"token1": ["A", 145], "token2": ["B", "C15"], "max_distance": 8.0, "force": False}
         ]
     )
 

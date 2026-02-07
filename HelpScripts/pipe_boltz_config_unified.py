@@ -295,7 +295,26 @@ def add_contacts_to_config(config: Dict, contacts: List[Dict]) -> Dict:
     if 'constraints' not in config:
         config['constraints'] = []
 
+    # Determine which chain IDs are ligands (non-polymer)
+    ligand_chain_ids = set()
+    for seq in config.get('sequences', []):
+        if 'ligand' in seq:
+            ligand_chain_ids.add(seq['ligand']['id'])
+
     for contact in contacts:
+        for key in ('token1', 'token2'):
+            token = contact[key]
+            chain_id = token[0]
+            token_value = token[1]
+            if chain_id in ligand_chain_ids and isinstance(token_value, int):
+                raise ValueError(
+                    f"Contact constraint {key}={token}: chain '{chain_id}' is a ligand, "
+                    f"so the second element must be an atom name (string, e.g. 'C1'), "
+                    f"not a residue index (integer). "
+                    f"Check the CIF file of your ligand on RCSB to find standardized atom names, "
+                    f"or run a prediction without constraints first and inspect the output."
+                )
+
         entry = {
             'contact': {
                 'token1': FlowList(contact['token1']),
