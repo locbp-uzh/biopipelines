@@ -70,6 +70,8 @@ def parse_arguments():
     parser.add_argument('--glycosylation', help='JSON dict mapping chain IDs to Asn positions')
     # Covalent linkage parameters
     parser.add_argument('--covalent-linkage', help='JSON dict for covalent attachment')
+    # Contact constraint parameters
+    parser.add_argument('--contacts', help='JSON list of contact constraints')
     # Sequences output
     parser.add_argument('--sequences-csv', help='Path to write protein sequences CSV (id, sequence)')
 
@@ -285,6 +287,31 @@ def add_covalent_linkage_to_config(config: Dict, covalent_linkage: Dict, ligand_
     return config
 
 
+def add_contacts_to_config(config: Dict, contacts: List[Dict]) -> Dict:
+    """Add contact constraints to config."""
+    if not contacts:
+        return config
+
+    if 'constraints' not in config:
+        config['constraints'] = []
+
+    for contact in contacts:
+        entry = {
+            'contact': {
+                'token1': FlowList(contact['token1']),
+                'token2': FlowList(contact['token2']),
+            }
+        }
+        if 'max_distance' in contact:
+            entry['contact']['max_distance'] = contact['max_distance']
+        if 'force' in contact:
+            entry['contact']['force'] = contact['force']
+        config['constraints'].append(entry)
+
+    print(f"Added {len(contacts)} contact constraint(s)")
+    return config
+
+
 def build_protein_entry(protein: Dict, chain_id: str, msa_file: Optional[str]) -> Dict:
     """Build a protein entry for Boltz2 config."""
     entry = {
@@ -376,6 +403,7 @@ def generate_configs(
     # Parse extra parameters
     glycosylation = json.loads(args.glycosylation) if args.glycosylation else None
     covalent_linkage = json.loads(args.covalent_linkage) if args.covalent_linkage else None
+    contacts = json.loads(args.contacts) if args.contacts else None
 
     # Combine iterated and static for ID generation (legacy behavior for pure modes)
     proteins = proteins_iterated + proteins_static
@@ -397,6 +425,7 @@ def generate_configs(
                 config['sequences'].append(build_protein_entry(protein, chain_id, msa_file))
             config = add_template_to_config(config, args)
             config = add_glycosylation_to_config(config, glycosylation)
+            config = add_contacts_to_config(config, contacts)
             configs.append(('bundled_complex', config))
         else:  # proteins_mode == 'each'
             # One config per iterated protein (static proteins included in each)
@@ -413,6 +442,7 @@ def generate_configs(
                         config['sequences'].append(build_protein_entry(static_protein, chain_id, msa_file))
                 config = add_template_to_config(config, args)
                 config = add_glycosylation_to_config(config, glycosylation)
+                config = add_contacts_to_config(config, contacts)
                 configs.append((protein['id'], config))
 
     elif proteins_mode == 'bundle' and ligands_mode == 'bundle':
@@ -456,6 +486,7 @@ def generate_configs(
 
                 config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain)
                 config = add_pocket_to_config(config, args, first_ligand_chain)
+                config = add_contacts_to_config(config, contacts)
 
                 configs.append((ligand['id'], config))
         else:
@@ -483,6 +514,7 @@ def generate_configs(
             config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'C')
             if first_ligand_chain:
                 config = add_pocket_to_config(config, args, first_ligand_chain)
+            config = add_contacts_to_config(config, contacts)
 
             configs.append(('bundled_complex', config))
 
@@ -507,6 +539,7 @@ def generate_configs(
 
             config = add_covalent_linkage_to_config(config, covalent_linkage, ligand_chain_id)
             config = add_pocket_to_config(config, args, ligand_chain_id)
+            config = add_contacts_to_config(config, contacts)
 
             config_id = ligand['id']
             configs.append((config_id, config))
@@ -559,6 +592,7 @@ def generate_configs(
 
                     config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain)
                     config = add_pocket_to_config(config, args, first_ligand_chain)
+                    config = add_contacts_to_config(config, contacts)
 
                     # Generate config ID
                     if len(proteins_to_iterate) == 1:
@@ -600,6 +634,7 @@ def generate_configs(
                 config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'B')
                 if first_ligand_chain:
                     config = add_pocket_to_config(config, args, first_ligand_chain)
+                config = add_contacts_to_config(config, contacts)
 
                 config_id = protein['id']
                 configs.append((config_id, config))
@@ -642,6 +677,7 @@ def generate_configs(
 
                     config = add_covalent_linkage_to_config(config, covalent_linkage, ligand_chain_id)
                     config = add_pocket_to_config(config, args, ligand_chain_id)
+                    config = add_contacts_to_config(config, contacts)
 
                 if ligand:
                     if len(proteins_to_iterate) == 1:

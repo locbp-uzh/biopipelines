@@ -107,6 +107,8 @@ class Boltz2(BaseConfig):
                  glycosylation: Optional[Dict[str, List[int]]] = None,
                  # Covalent linkage parameters
                  covalent_linkage: Optional[Dict[str, Any]] = None,
+                 # Contact constraint parameters
+                 contacts: Optional[List[Dict[str, Any]]] = None,
                  **kwargs):
         """
         Initialize Boltz2 configuration.
@@ -131,6 +133,8 @@ class Boltz2(BaseConfig):
             pocket_force: Whether to force pocket constraint
             glycosylation: Dict mapping chain IDs to Asn positions for N-glycosylation
             covalent_linkage: Dict specifying covalent attachment
+            contacts: List of contact constraints, each a dict with token1, token2,
+                      optional max_distance (4-20A, default 6.0), optional force (bool)
             **kwargs: Additional parameters
         """
         self.config = config
@@ -196,9 +200,10 @@ class Boltz2(BaseConfig):
         self.pocket_max_distance = pocket_max_distance
         self.pocket_force = pocket_force
 
-        # Glycosylation and covalent linkage
+        # Glycosylation, covalent linkage, and contacts
         self.glycosylation = glycosylation
         self.covalent_linkage = covalent_linkage
+        self.contacts = contacts
 
         super().__init__(**kwargs)
 
@@ -228,6 +233,23 @@ class Boltz2(BaseConfig):
 
         if self.diffusion_samples is not None and (not isinstance(self.diffusion_samples, int) or self.diffusion_samples < 1):
             raise ValueError("diffusion_samples must be a positive integer")
+
+        if self.contacts is not None:
+            if not isinstance(self.contacts, list):
+                raise ValueError("contacts must be a list of dicts")
+            for i, contact in enumerate(self.contacts):
+                if not isinstance(contact, dict):
+                    raise ValueError(f"contacts[{i}] must be a dict")
+                for key in ('token1', 'token2'):
+                    if key not in contact:
+                        raise ValueError(f"contacts[{i}] missing required field '{key}'")
+                    token = contact[key]
+                    if not isinstance(token, list) or len(token) not in (2, 3):
+                        raise ValueError(f"contacts[{i}]['{key}'] must be a list of 2 or 3 elements [chain, residue] or [chain, residue, atom]")
+                if 'max_distance' in contact:
+                    md = contact['max_distance']
+                    if not isinstance(md, (int, float)) or md < 4 or md > 20:
+                        raise ValueError(f"contacts[{i}]['max_distance'] must be a number between 4 and 20")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files."""
@@ -268,6 +290,10 @@ class Boltz2(BaseConfig):
         if self.covalent_linkage:
             covalent_json = json.dumps(self.covalent_linkage)
             extra_params.append(f"--covalent-linkage '{covalent_json}'")
+
+        if self.contacts:
+            contacts_json = json.dumps(self.contacts)
+            extra_params.append(f"--contacts '{contacts_json}'")
 
         return " ".join(extra_params)
 
@@ -664,6 +690,9 @@ fi
         if self.covalent_linkage:
             config_lines.append(f"Covalent linkage: {self.covalent_linkage}")
 
+        if self.contacts:
+            config_lines.append(f"Contact constraints: {len(self.contacts)}")
+
         return config_lines
 
     def to_dict(self) -> Dict[str, Any]:
@@ -689,7 +718,8 @@ fi
                 "pocket_max_distance": self.pocket_max_distance,
                 "pocket_force": self.pocket_force,
                 "glycosylation": self.glycosylation,
-                "covalent_linkage": self.covalent_linkage
+                "covalent_linkage": self.covalent_linkage,
+                "contacts": self.contacts
             }
         })
         return base_dict
