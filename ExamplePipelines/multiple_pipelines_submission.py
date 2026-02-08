@@ -2,9 +2,6 @@
 This pipeline shows how to use boltz2
 """
 
-import os, sys
-sys.path.insert(0, os.getcwd()) #to see scripts in current folder
-
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import * # import PDB, Sequence, Ligand
 from PipelineScripts.boltz2 import Boltz2

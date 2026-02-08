@@ -8,9 +8,6 @@ Demonstrates:
 4. Contact constraints to guide ligand placement
 """
 
-import os, sys
-sys.path.insert(0, os.getcwd())
-
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import *
 from PipelineScripts.boltz2 import Boltz2

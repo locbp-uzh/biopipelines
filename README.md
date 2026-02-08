@@ -15,9 +15,10 @@ Specific environments for using the tools have to be installed separately. Good 
 
 Check out the following resources for a detailed explanation of it.
 
-- **[User Manual](UserManual.md)** - Complete usage guide with tool reference
+- **[User Manual](Docs/UserManual.md)** - Complete usage guide
+- **[Tool Reference](Docs/ToolReference.md)** - Complete usage guide
 - **[Examples](ExamplePipelines/)** - Pipeline examples
-- **[Developer Manual](DeveloperManual.md)** - Complete usage guide with tool reference
+- **[Developer Manual](DocsDeveloperManual.md)** - Complete usage guide with tool reference
 
 ## Key Features
 

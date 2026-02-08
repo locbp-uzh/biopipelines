@@ -1,0 +1,236 @@
+#!/bin/bash
+#
+# Local Execution Script for BioPipelines
+#
+# This script runs a BioPipelines pipeline locally (without SLURM),
+# executing the generated bash scripts directly.
+#
+# Usage:
+#     ./run <pipeline_script>
+#
+
+# Try to initialize mamba/conda
+if command -v mamba &> /dev/null; then
+    eval "$(mamba shell hook --shell bash)"
+elif command -v conda &> /dev/null; then
+    eval "$(conda shell.bash hook)"
+else
+    echo "ERROR: Neither mamba nor conda found in PATH"
+    echo "Please install miniforge/mambaforge or conda first"
+    exit 1
+fi
+
+set -e  # Exit on any error
+
+# Get the directory where this script is located (biopipelines root)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ENV_FILE="$SCRIPT_DIR/Environments/biopipelines.yaml"
+
+# Read required version from yaml header comment
+if [ -f "$ENV_FILE" ]; then
+    REQUIRED_VERSION=$(grep "^# Version:" "$ENV_FILE" | sed 's/# Version: //' | tr -d '[:space:]')
+    if [ -z "$REQUIRED_VERSION" ]; then
+        echo "ERROR: Could not parse version from $ENV_FILE"
+        exit 1
+    fi
+else
+    echo "ERROR: biopipelines.yaml not found"
+    exit 1
+fi
+
+# Function to get installed version from conda env
+get_installed_version() {
+    local env_prefix=$(mamba run -n biopipelines printenv CONDA_PREFIX 2>/dev/null || conda run -n biopipelines printenv CONDA_PREFIX 2>/dev/null || echo "")
+    if [ -n "$env_prefix" ] && [ -f "$env_prefix/.biopipelines_version" ]; then
+        cat "$env_prefix/.biopipelines_version" | tr -d '[:space:]'
+    else
+        echo ""
+    fi
+}
+
+# Check if biopipelines env exists and verify version
+if mamba env list 2>/dev/null | grep -qw "biopipelines" || conda env list 2>/dev/null | grep -qw "biopipelines"; then
+    INSTALLED_VERSION=$(get_installed_version)
+    if [ "$INSTALLED_VERSION" = "$REQUIRED_VERSION" ]; then
+        echo "biopipelines environment found (version $INSTALLED_VERSION)"
+    else
+        echo "WARNING: biopipelines environment version mismatch!"
+        echo "  Installed: ${INSTALLED_VERSION:-unknown}"
+        echo "  Required:  $REQUIRED_VERSION"
+        echo ""
+        echo "Please update your environment:"
+        echo "  mamba activate biopipelines"
+        echo "  mamba env update -n biopipelines -f Environments/biopipelines.yaml --prune"
+        echo "  pip install -e ."
+        echo ""
+    fi
+    echo "Activating biopipelines environment..."
+    mamba activate biopipelines 2>/dev/null || conda activate biopipelines
+else
+    echo "ERROR: biopipelines environment not found."
+    echo ""
+    echo "Please install it first (see Docs/UserManual.md):"
+    echo "  mamba env create -f Environments/biopipelines.yaml"
+    echo "  mamba activate biopipelines"
+    echo "  pip install -e ."
+    exit 1
+fi
+echo ""
+
+# Function to print usage
+usage() {
+    echo "Usage: $0 <pipeline_script>"
+    echo ""
+    echo "Run a BioPipelines pipeline locally (without SLURM)"
+    echo ""
+    echo "Arguments:"
+    echo "  pipeline_script  Path to pipeline script"
+    echo ""
+    echo "Examples:"
+    echo "  $0 pipeline.py"
+    echo "  $0 ExamplePipelines/boltz2.py"
+    echo ""
+}
+
+# Function to run pipeline and execute locally
+run_pipeline_locally() {
+    local pipeline_script="$1"
+
+    echo "Running pipeline: $pipeline_script"
+    echo ""
+
+    # Run the pipeline Python script to generate bash scripts
+    local pipeline_output=$(python "$pipeline_script" 2>&1)
+    local exit_code=$?
+
+    # Show pipeline output
+    echo "$pipeline_output"
+    echo ""
+
+    if [ $exit_code -ne 0 ]; then
+        echo "Pipeline generation failed with exit code $exit_code"
+        return 1
+    fi
+
+    # Extract ALL runtime directories from pipeline output
+    local runtime_dirs=$(echo "$pipeline_output" | grep -o '/[^ ]*/RunTime' | sort -u)
+
+    if [ -z "$runtime_dirs" ]; then
+        echo "No runtime directories found in pipeline output"
+        return 1
+    fi
+
+    echo ""
+    echo "Found $(echo "$runtime_dirs" | wc -l) pipeline(s) to execute locally"
+    echo "=========================================="
+    echo ""
+
+    local total_pipelines_run=0
+
+    # Process each runtime directory
+    while IFS= read -r runtime_dir; do
+        if [ -z "$runtime_dir" ] || [ ! -d "$runtime_dir" ]; then
+            continue
+        fi
+
+        local pipeline_name=$(basename "$(dirname "$runtime_dir")")
+        echo "Processing pipeline: $pipeline_name"
+        echo "Runtime directory: $runtime_dir"
+        echo ""
+
+        # Check for batch files (multi-batch pipeline)
+        local batch_files=$(ls "$runtime_dir"/pipeline_batch*.sh 2>/dev/null | sort -V)
+
+        if [ -n "$batch_files" ]; then
+            # Multi-batch pipeline - execute sequentially
+            echo "Detected multi-batch pipeline"
+            echo "Executing batches sequentially..."
+            echo "------------------------------------------"
+            echo ""
+
+            local batch_count=0
+            for batch_file in $batch_files; do
+                batch_count=$((batch_count + 1))
+                local batch_num=$(basename "$batch_file" | grep -o '[0-9]\+')
+                echo "Executing batch $batch_num..."
+                echo "  Script: $batch_file"
+
+                bash "$batch_file"
+                local batch_exit=$?
+
+                if [ $batch_exit -eq 0 ]; then
+                    echo "Batch $batch_num completed successfully"
+                else
+                    echo "Batch $batch_num failed with exit code $batch_exit"
+                    return 1
+                fi
+                echo ""
+            done
+
+            echo "Pipeline $pipeline_name: $batch_count batch(es) executed"
+            total_pipelines_run=$((total_pipelines_run + 1))
+        else
+            # Single batch pipeline - look for pipeline.sh
+            local pipeline_sh="$runtime_dir/pipeline.sh"
+            if [ -f "$pipeline_sh" ]; then
+                echo "Detected single-batch pipeline"
+                echo "Executing pipeline..."
+                echo "------------------------------------------"
+                echo ""
+
+                bash "$pipeline_sh"
+                local run_exit=$?
+
+                if [ $run_exit -eq 0 ]; then
+                    echo "Pipeline completed successfully"
+                else
+                    echo "Pipeline failed with exit code $run_exit"
+                    return 1
+                fi
+
+                total_pipelines_run=$((total_pipelines_run + 1))
+            else
+                echo "Warning: No pipeline script found in $runtime_dir"
+            fi
+        fi
+        echo ""
+    done <<< "$runtime_dirs"
+
+    echo "=========================================="
+    echo "All pipelines executed. Total: $total_pipelines_run"
+}
+
+# Main execution
+main() {
+    local pipeline_script="$1"
+
+    echo "BioPipelines Local Execution Script"
+    echo "===================================="
+    echo ""
+
+    # Handle help request
+    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        usage
+        return 0
+    fi
+
+    # Require a pipeline script argument
+    if [ -z "$pipeline_script" ]; then
+        echo "Error: No pipeline script specified"
+        echo ""
+        usage
+        return 1
+    fi
+
+    # Check if pipeline script exists
+    if [ ! -f "$pipeline_script" ]; then
+        echo "Error: Pipeline script not found: $pipeline_script"
+        return 1
+    fi
+
+    # Run the pipeline locally
+    run_pipeline_locally "$pipeline_script"
+}
+
+# Run main function with all arguments
+main "$@"

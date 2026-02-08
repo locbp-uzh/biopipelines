@@ -2,9 +2,6 @@
 This pipeline shows how improve the difference in predicted binding affinity between open and close form of a carbocyanine 7 chloride and halotag7 starting from a Boltz model of the open form.
 """
 
-import os, sys
-sys.path.insert(0, os.getcwd()) #to see scripts in current folder
-
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import *
 from PipelineScripts.ligand_mpnn import LigandMPNN

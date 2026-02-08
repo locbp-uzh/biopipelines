@@ -25,9 +25,6 @@ IMPORTANT - Affinity calculation order:
   - Bundle(ATP, Each(library)): affinity calculated for ATP (in presence of each library ligand)
 """
 
-import os, sys
-sys.path.insert(0, os.getcwd())
-
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import *
 from PipelineScripts.boltz2 import Boltz2

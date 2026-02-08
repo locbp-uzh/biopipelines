@@ -26,9 +26,31 @@ BioPipelines is a Python framework that generates bash scripts for bioinformatic
 ---
 
 ## Installation
-Login to your cluster via terminal or the website ([S3IT Apps](https://apps.s3it.uzh.ch) > Clusters > Shell access). In your home directory, clone the biopipelines repository:
+
+Login to your cluster via terminal or the website ([S3IT Apps](https://apps.s3it.uzh.ch) > Clusters > Shell access). In your home directory, clone the repository and set up the environment:
+
 ```bash
+# 1. Clone the repository
 git clone https://gitlab.uzh.ch/locbp/public/biopipelines
+cd biopipelines
+
+# 2. Create the biopipelines conda environment
+module load miniforge3
+mamba env create -f Environments/biopipelines.yaml
+mamba activate biopipelines
+
+# 3. Install the package (editable mode, so updates via git pull take effect immediately)
+pip install -e .
+```
+
+After installation, `from PipelineScripts.pipeline import *` works from any directory.
+
+To update an existing installation after `git pull`:
+```bash
+module load miniforge3
+mamba activate biopipelines
+mamba env update -n biopipelines -f Environments/biopipelines.yaml --prune
+pip install -e .
 ```
 
 ---
@@ -292,19 +314,21 @@ with Pipeline("Project", "Job", "Description"):
 
 ## Job Submission
 
+**Submit to SLURM** (cluster):
 ```bash
 cd biopipelines
 ./submit /path/to/pipeline.py
 ```
 
-For memory errors during submission (This usually happens during first submission as the environment biopipelines is created):
-
+**Run locally** (no SLURM needed):
 ```bash
-srun --mem=8G --time=1:00:00 --pty bash
-./submit /path/to/pipeline.py
+cd biopipelines
+./run /path/to/pipeline.py
 ```
 
-Resubmit existing job:
+`./run` executes the generated bash scripts directly on your machine instead of submitting them to SLURM. Tools that require unavailable resources (GPUs, specific conda environments) will fail naturally. This is useful for testing pipeline logic or running lightweight tools locally.
+
+**Resubmit** existing job:
 
 ```bash
 ./resubmit /path/to/job/RunTime/slurm.sh

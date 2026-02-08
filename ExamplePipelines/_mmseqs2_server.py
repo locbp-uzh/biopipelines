@@ -2,9 +2,6 @@
 This pipeline should not be modified as it is used by the gpu server
 """
 
-import os, sys
-sys.path.insert(0, os.getcwd()) #to see scripts in current folder
-
 from PipelineScripts.pipeline import *
 from PipelineScripts.mmseqs2 import MMseqs2Server
 

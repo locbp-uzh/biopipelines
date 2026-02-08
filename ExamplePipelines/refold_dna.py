@@ -4,9 +4,6 @@ plot a metrics comparison between the two, add some analysis steps (apo vs holo)
 and obtain codon-optimized sequences for e coli
 """
 
-import os, sys
-sys.path.insert(0, os.getcwd()) #to see scripts in current folder
-
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import *
 from PipelineScripts.boltz2 import Boltz2

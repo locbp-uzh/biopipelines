@@ -10,8 +10,6 @@
 #
 
 module load miniforge3
-# miniforge3 automatically sources conda.sh
-# source /apps/opt/spack/linux-ubuntu20.04-x86_64/gcc-9.3.0/mamba-23.11.0-0-334ztq7i4mzu762ew2x3kbbrrorhe6eg/etc/profile.d/conda.sh
 
 # Initialize mamba for current shell session
 eval "$(mamba shell hook --shell bash)"
@@ -44,51 +42,32 @@ get_installed_version() {
     fi
 }
 
-# Function to store version in conda env
-store_version() {
-    local env_prefix=$(mamba run -n biopipelines printenv CONDA_PREFIX 2>/dev/null || echo "")
-    if [ -n "$env_prefix" ]; then
-        echo "$REQUIRED_VERSION" > "$env_prefix/.biopipelines_version"
-        echo "Stored version $REQUIRED_VERSION in environment"
-    fi
-}
-
-# Check if biopipelines env exists and has correct version
-NEEDS_UPDATE=false
+# Check if biopipelines env exists and verify version
 if mamba env list | grep -qw "biopipelines"; then
     INSTALLED_VERSION=$(get_installed_version)
     if [ "$INSTALLED_VERSION" = "$REQUIRED_VERSION" ]; then
         echo "biopipelines environment found (version $INSTALLED_VERSION)"
-        echo "Activating biopipelines environment..."
-        mamba activate biopipelines
     else
-        echo "biopipelines environment version mismatch!"
+        echo "WARNING: biopipelines environment version mismatch!"
         echo "  Installed: ${INSTALLED_VERSION:-unknown}"
         echo "  Required:  $REQUIRED_VERSION"
-        NEEDS_UPDATE=true
+        echo ""
+        echo "Please update your environment:"
+        echo "  mamba activate biopipelines"
+        echo "  mamba env update -n biopipelines -f Environments/biopipelines.yaml --prune"
+        echo "  pip install -e ."
+        echo ""
     fi
+    echo "Activating biopipelines environment..."
+    mamba activate biopipelines
 else
-    echo "biopipelines environment not found."
-    NEEDS_UPDATE=true
-fi
-
-# Create or update environment if needed
-if [ "$NEEDS_UPDATE" = true ]; then
-    if [ -f "$ENV_FILE" ]; then
-        if mamba env list | grep -qw "biopipelines"; then
-            echo "Updating biopipelines environment to version $REQUIRED_VERSION..."
-            mamba env update -n biopipelines -f "$ENV_FILE" --prune
-        else
-            echo "Creating biopipelines environment (version $REQUIRED_VERSION)..."
-            mamba env create -f "$ENV_FILE"
-        fi
-        echo "Activating biopipelines environment..."
-        mamba activate biopipelines
-        store_version
-    else
-        echo "ERROR: biopipelines.yaml not found at $ENV_FILE"
-        exit 1
-    fi
+    echo "ERROR: biopipelines environment not found."
+    echo ""
+    echo "Please install it first (see Docs/UserManual.md):"
+    echo "  mamba env create -f Environments/biopipelines.yaml"
+    echo "  mamba activate biopipelines"
+    echo "  pip install -e ."
+    exit 1
 fi
 echo ""
 
@@ -289,20 +268,6 @@ main() {
         usage
         return 0
     fi
-
-    # Check if pandas is available
-    #echo "Checking environment dependencies..."
-    #if ! python -c "import pandas" >/dev/null 2>&1; then
-    #    echo ""
-    #    echo "Error: BioPipelines requires pandas to run. It is usually enough to run:"
-    #    echo "   module load mamba"
-    #    echo "before running the submit script. Otherwise you might have to:"
-    #    echo "A. Install pandas first with pip install pandas, or"
-    #    echo "B. Activate a conda environment that contains pandas"
-    #    return 1
-    #fi
-    #echo "✓ pandas available"
-    #echo ""
 
     # Require a pipeline script argument
     if [ -z "$pipeline_script" ]; then
