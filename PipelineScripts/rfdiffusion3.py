@@ -128,10 +128,7 @@ class RFdiffusion3(BaseConfig):
         os.path.dirname(self.output_folder), "Logs",
         f"{os.path.basename(self.output_folder).split('_')[0] if '_' in os.path.basename(self.output_folder) else '000'}_RFdiffusion3.log"
     ))
-    checkpoint_dir = Path(lambda self: os.path.join(
-        os.path.expanduser("~"), "data",
-        self.folders["repositories"]["RFdiffusion3"]
-    ))
+    checkpoint_dir = Path(lambda self: self.folders["RFdiffusion3"])
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_table.py"))
     postprocess_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_postprocess.py"))
 
