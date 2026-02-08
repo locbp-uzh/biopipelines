@@ -26,15 +26,14 @@ def _run_script(script_name):
         print(f"ERROR: {script_name} not found at {script_path}")
         sys.exit(1)
 
-    # Resolve relative file path arguments against the caller's working directory
-    # so that e.g. "biopipelines-submit pipeline.py" works from any directory.
-    user_cwd = os.getcwd()
-    args = []
-    for arg in sys.argv[1:]:
-        if not arg.startswith("-") and os.path.exists(os.path.join(user_cwd, arg)):
-            args.append(os.path.abspath(os.path.join(user_cwd, arg)))
-        else:
-            args.append(arg)
+    # The first non-flag argument is the pipeline script path.
+    # Resolve it to an absolute path so the bash script finds it
+    # regardless of its cwd.
+    args = sys.argv[1:]
+    for i, arg in enumerate(args):
+        if not arg.startswith("-"):
+            args[i] = os.path.abspath(arg)
+            break
 
     result = subprocess.run(
         ["bash", script_path] + args,
