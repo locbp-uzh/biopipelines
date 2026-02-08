@@ -23,7 +23,7 @@ with Pipeline(project="Examples",
     
     sequences = Sequence(["GNSKKHNLILIGAPGSGKGTQCEFIKKEYGLAHLSTGDMLREAIKNGTKIGLEAKSIIESGNFVGDEIVLGLVKEK",
                           "FDLGVCVNGFVLDGFPRTIPQAEGLAKILSEIGDSLTSVIYFEIDDSEIIERISGRCTHPASGRIYHVKYNPPKQPGIDDVTGEPLVWRDDDNAEAVKVRLDVFHKQTAPLVKFYEDLGILKRVNAKLPPKEVTEQIKKIL"])
-    msas = MMseqs2(sequences=sequences) # as of now provides only reduced MSA
+    msas = MMseqs2(sequences=sequences) # as of now provides only reduced MSA, not properly implemented
 
     # Now we need a GPU. This will be a separate job, dependent on the msa job
     Resources(gpu="any", 
