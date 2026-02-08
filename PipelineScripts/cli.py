@@ -26,9 +26,18 @@ def _run_script(script_name):
         print(f"ERROR: {script_name} not found at {script_path}")
         sys.exit(1)
 
-    # Run the script from the repo root so that os.getcwd() resolves correctly
+    # Resolve relative file path arguments against the caller's working directory
+    # so that e.g. "biopipelines-submit pipeline.py" works from any directory.
+    user_cwd = os.getcwd()
+    args = []
+    for arg in sys.argv[1:]:
+        if not arg.startswith("-") and os.path.exists(os.path.join(user_cwd, arg)):
+            args.append(os.path.abspath(os.path.join(user_cwd, arg)))
+        else:
+            args.append(arg)
+
     result = subprocess.run(
-        ["bash", script_path] + sys.argv[1:],
+        ["bash", script_path] + args,
         cwd=repo_root
     )
     sys.exit(result.returncode)
