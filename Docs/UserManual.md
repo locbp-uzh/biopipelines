@@ -53,9 +53,13 @@ mamba env update -n biopipelines -f Environments/biopipelines.yaml --prune
 pip install -e .
 ```
 
+Edit config.yaml to fit your cluster configuration.
+
 ---
 
 ## Quick Start
+
+Save the following pipeline as test.py somewhere on the cluster: (Recommended: biopipelines/MyPipelines)
 
 ```python
 from PipelineScripts.pipeline import *
@@ -75,6 +79,12 @@ with Pipeline("MyProject", "JobName", "Description"):
     )
 
     print(prediction)
+```
+
+Submit with:
+
+```bash
+biopipelines-submit test.py
 ```
 
 ---

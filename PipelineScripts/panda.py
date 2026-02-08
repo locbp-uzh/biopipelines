@@ -326,7 +326,7 @@ class Panda(BaseConfig):
         })
 
     @staticmethod
-    def concat(fill: Optional[str] = None, add_source: bool = True) -> Operation:
+    def concat(fill: Optional[str] = "", add_source: bool = True) -> Operation:
         """
         Concatenate multiple tables vertically (like SQL UNION).
 

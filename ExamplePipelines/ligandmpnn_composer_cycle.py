@@ -71,7 +71,7 @@ with Pipeline(project="Examples",
                        ligands=triazole,
                        msas=original_acetamide)
     ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
-"""
+
     # Merge original open and close affinity tables with Panda
     # pool=best_acetamide preserves structure files with id_map remapped IDs
     original_analysis = Panda(
@@ -119,24 +119,24 @@ with Pipeline(project="Examples",
                                   msas=boltz_holo_acetamide)
 
         acetamide_chlorine_aspartate_distance = Distance(structures=boltz_holo_acetamide,
+                                                               residue='D in IHDWG', #importantly: we are not mutating the context around the aspartate
+                                                               atom='LIG.Cl',
+                                                               metric_name='acetamide_chlorine_distance')
+        triazole_chlorine_aspartate_distance = Distance(structures=boltz_holo_triazole,
                                                                residue='D in IHDWG',
                                                                atom='LIG.Cl',
                                                                metric_name='acetamide_chlorine_distance')
-        acetamide_cap_aspartate_distance = Distance(structures=boltz_holo_acetamide,
-                                                          residue='D in IHDWG',
-                                                          atom='LIG.N88',
-                                                          metric_name='acetamide_cap_distance')
 
         # Merge all metrics with Panda
         current_analysis_filtered = Panda(
             tables=[boltz_holo_acetamide.tables.affinity,
                     boltz_holo_triazole.tables.affinity,
                     acetamide_chlorine_aspartate_distance.tables.distances,
-                    acetamide_cap_aspartate_distance.tables.distances],
+                    triazole_chlorine_aspartate_distance.tables.distances],
             operations=[
                 Panda.merge(on="id", prefixes=["acetamide_", "triazole_", "", ""]),
                 Panda.calculate({"affinity_delta": "acetamide_affinity_pred_value - triazole_affinity_pred_value"}),
-                Panda.filter("acetamide_chlorine_distance < 5.0 and acetamide_cap_distance > 10.0")
+                Panda.filter("acetamide_chlorine_distance < 5.0 and triazole_chlorine_aspartate_distance < 5.0") #exclude odd poses
             ]
         )
 
@@ -148,7 +148,7 @@ with Pipeline(project="Examples",
         best_acetamide = Panda(
             tables=[x.tables.result for x in all_analyses],
             operations=[
-                Panda.concat(fill="",add_source=True),  # source_table column tracks which pool
+                Panda.concat(add_source=True),  # source_table column tracks which pool they come from
                 Panda.sort("acetamide_affinity_pred_value", ascending=True),  # min = ascending
                 Panda.head(1)
             ],
@@ -214,4 +214,4 @@ with Pipeline(project="Examples",
             targets=best_acetamide
         )
     )
-"""
+
