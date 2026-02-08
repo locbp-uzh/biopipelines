@@ -36,7 +36,7 @@ with Pipeline(project="Examples",
     adenylate_kinase_boltz = Boltz2(proteins=adenylate_kinase,
                                     ligands=ap5) # the sequence is also extracted with PDB
     
-    adenylate_kinase_boltz_renamed = PDB(adenylate_kinase_boltz.streams.structures.files[0],
+    adenylate_kinase_boltz_renamed = PDB(adenylate_kinase_boltz,
                                          PDB.Rename("LIG",":L:")) # RFdiffusion3 cannot handle ccd-like ligand codes
 
     rfd3 = RFdiffusion3(pdb=adenylate_kinase_boltz_renamed, #RFdiffusion3 often needs some PDB cleanup. The easiest solution is to start from a Boltz prediction

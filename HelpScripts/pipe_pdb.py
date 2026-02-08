@@ -841,9 +841,60 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         return False, "", "", [], metadata
 
 
+def resolve_upstream_file(pdb_id: str, upstream_files: List[str],
+                         files_contain_wildcards: bool) -> Optional[str]:
+    """
+    Resolve the source file for a structure from upstream tool output.
+
+    Args:
+        pdb_id: The structure ID to resolve
+        upstream_files: List of file paths from the upstream tool
+        files_contain_wildcards: Whether the paths contain glob patterns
+
+    Returns:
+        Resolved file path, or None if not found
+    """
+    import glob as glob_module
+
+    if not upstream_files:
+        return None
+
+    if files_contain_wildcards:
+        # Try each pattern
+        for pattern in upstream_files:
+            expanded = glob_module.glob(pattern)
+            if not expanded:
+                continue
+            # Try to match by ID
+            for fp in expanded:
+                basename = os.path.splitext(os.path.basename(fp))[0]
+                if basename == pdb_id or basename.startswith(f"{pdb_id}_") or basename.startswith(f"{pdb_id}-"):
+                    return fp
+            # If single pattern and single expansion, use it
+            if len(upstream_files) == 1 and len(expanded) == 1:
+                return expanded[0]
+        return None
+
+    # Direct file list - match by index or by name
+    if len(upstream_files) == 1:
+        # Single file for all IDs
+        if os.path.exists(upstream_files[0]):
+            return upstream_files[0]
+        return None
+
+    # Try to match by name
+    for fp in upstream_files:
+        basename = os.path.splitext(os.path.basename(fp))[0]
+        if basename == pdb_id:
+            return fp
+
+    return None
+
+
 def fetch_structures(config_data: Dict[str, Any]) -> int:
     """
     Fetch multiple structures with priority-based lookup: local_folder -> PDBs/ -> RCSB download.
+    Also handles upstream tool outputs where files already exist at known paths.
 
     Args:
         config_data: Configuration dictionary with fetch parameters
@@ -864,9 +915,15 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     failed_table = config_data['failed_table']
     compounds_table = config_data.get('compounds_table', os.path.join(output_folder, 'compounds.csv'))
     operations = config_data.get('operations', [])
+    from_upstream = config_data.get('from_upstream', False)
+    upstream_files = config_data.get('upstream_files', [])
+    upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)
 
-    print(f"Fetching {len(pdb_ids)} structures in {format.upper()} format")
-    print(f"Priority: {'local_folder -> ' if local_folder else ''}PDBs/ -> RCSB download")
+    if from_upstream:
+        print(f"Processing {len(pdb_ids)} structures from upstream tool")
+    else:
+        print(f"Fetching {len(pdb_ids)} structures in {format.upper()} format")
+        print(f"Priority: {'local_folder -> ' if local_folder else ''}PDBs/ -> RCSB download")
     if biological_assembly:
         print("Including biological assemblies")
     if remove_waters:
@@ -893,22 +950,48 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     for i, (pdb_id, custom_id) in enumerate(zip(pdb_ids, custom_ids), 1):
         print(f"\n[{i}/{len(pdb_ids)}] Processing {pdb_id} -> {custom_id}")
 
-        # Try to find locally first (returns tuple of (path, source_format) or None)
-        local_result = find_local_structure(pdb_id, format, local_folder, repo_pdbs_folder)
+        if from_upstream:
+            # Resolve file from upstream tool output
+            if len(upstream_files) == len(pdb_ids):
+                source_path = upstream_files[i - 1]
+            else:
+                source_path = resolve_upstream_file(pdb_id, upstream_files, upstream_wildcards)
 
-        if local_result:
-            # Copy from local (may need conversion)
-            local_path, source_format = local_result
-            success, file_path, sequence, ligands, metadata = copy_local_structure(
-                pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations
-            )
+            if source_path and os.path.exists(source_path):
+                # Detect source format from extension
+                source_format = "cif" if source_path.endswith(".cif") else "pdb"
+                success, file_path, sequence, ligands, metadata = copy_local_structure(
+                    pdb_id, custom_id, source_path, source_format, format, remove_waters, output_folder, operations
+                )
+            else:
+                error_msg = f"Upstream file not found for '{pdb_id}': {source_path}"
+                print(f"Error: {error_msg}")
+                success = False
+                file_path = ""
+                sequence = ""
+                ligands = []
+                metadata = {
+                    "error_message": error_msg,
+                    "source": "upstream_not_found",
+                    "attempted_path": str(source_path)
+                }
         else:
-            # Download from RCSB (with automatic CIF fallback if PDB fails)
-            print(f"{pdb_id} not found locally, downloading from RCSB")
-            success, file_path, sequence, ligands, metadata = download_from_rcsb(
-                pdb_id, custom_id, format, biological_assembly, remove_waters,
-                output_folder, repo_pdbs_folder, operations
-            )
+            # Try to find locally first (returns tuple of (path, source_format) or None)
+            local_result = find_local_structure(pdb_id, format, local_folder, repo_pdbs_folder)
+
+            if local_result:
+                # Copy from local (may need conversion)
+                local_path, source_format = local_result
+                success, file_path, sequence, ligands, metadata = copy_local_structure(
+                    pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations
+                )
+            else:
+                # Download from RCSB (with automatic CIF fallback if PDB fails)
+                print(f"{pdb_id} not found locally, downloading from RCSB")
+                success, file_path, sequence, ligands, metadata = download_from_rcsb(
+                    pdb_id, custom_id, format, biological_assembly, remove_waters,
+                    output_folder, repo_pdbs_folder, operations
+                )
 
         if success:
             successful_downloads.append({

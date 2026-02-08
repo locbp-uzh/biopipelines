@@ -101,7 +101,7 @@ class PDB(BaseConfig):
     # --- Instance methods ---
 
     def __init__(self,
-                 pdbs: Union[str, List[str]],
+                 pdbs: Union[str, List[str], 'StandardizedOutput', 'DataStream'],
                  *args,
                  ids: Optional[Union[str, List[str]]] = None,
                  format: str = "pdb",
@@ -113,9 +113,11 @@ class PDB(BaseConfig):
         Initialize PDB tool.
 
         Args:
-            pdbs: PDB ID(s) to fetch, or a folder path containing PDB files.
+            pdbs: PDB ID(s) to fetch, a folder path containing PDB files,
+                  or a StandardizedOutput/DataStream from an upstream tool.
                   Can be single string, list of strings (e.g. "4ufc" or ["4ufc","1abc"]),
-                  or a folder path (absolute or relative to PDBs folder)
+                  a folder path (absolute or relative to PDBs folder),
+                  or a tool output whose structures will be used at SLURM runtime.
             *args: Operations to apply after loading (e.g., PDB.Rename("LIG", ":L:"))
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
             format: File format ("pdb" or "cif", default: "pdb")
@@ -173,6 +175,9 @@ class PDB(BaseConfig):
                 pdbs="structure.pdb",
                 PDB.Rename("LIG", ":L:")
             ))
+
+            # Pass upstream tool output (files resolved at SLURM runtime)
+            pdb = PDB(boltz_output, PDB.Rename("LIG", ":L:"))
         """
         # Extract operations from args
         self.operations = []
@@ -182,14 +187,30 @@ class PDB(BaseConfig):
             else:
                 raise ValueError(f"Unexpected positional argument: {arg}. Expected PDBOperation (e.g., PDB.Rename(...))")
 
-        # Check if pdbs is a folder path and load all files from it
-        if isinstance(pdbs, str) and self._is_folder_path(pdbs):
-            self.pdb_ids = self._load_files_from_folder(pdbs, format)
-        # Normalize pdbs to list - preserve original case for local file lookups
-        elif isinstance(pdbs, str):
-            self.pdb_ids = [pdbs]
+        # Handle StandardizedOutput / DataStream input from upstream tools
+        self.from_upstream = False
+        if isinstance(pdbs, StandardizedOutput):
+            self.structures_stream = pdbs.streams.structures
+            self.from_upstream = True
+        elif isinstance(pdbs, DataStream):
+            self.structures_stream = pdbs
+            self.from_upstream = True
+
+        if self.from_upstream:
+            self.pdb_ids = list(self.structures_stream.ids)
+            self.format = self.structures_stream.format if self.structures_stream.format in ("pdb", "cif") else format.lower()
         else:
-            self.pdb_ids = list(pdbs)
+            # Check if pdbs is a folder path and load all files from it
+            if isinstance(pdbs, str) and self._is_folder_path(pdbs):
+                self.pdb_ids = self._load_files_from_folder(pdbs, format)
+            # Normalize pdbs to list - preserve original case for local file lookups
+            elif isinstance(pdbs, str):
+                self.pdb_ids = [pdbs]
+            elif isinstance(pdbs, list):
+                self.pdb_ids = list(pdbs)
+            else:
+                raise ValueError(f"pdbs must be a string, list of strings, StandardizedOutput, or DataStream, got {type(pdbs)}")
+            self.format = format.lower()
 
         # Handle custom IDs - default to pdb_ids if not provided
         if ids is None:
@@ -204,8 +225,10 @@ class PDB(BaseConfig):
         if len(self.custom_ids) != len(self.pdb_ids):
             raise ValueError(f"Length mismatch: pdbs has {len(self.pdb_ids)} items but ids has {len(self.custom_ids)} items")
 
-        self.format = format.lower()
-        self.local_folder = local_folder
+        if not self.from_upstream:
+            self.local_folder = local_folder
+        else:
+            self.local_folder = None
         self.biological_assembly = biological_assembly
         self.remove_waters = remove_waters
 
@@ -307,6 +330,13 @@ class PDB(BaseConfig):
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters and check for local files."""
         self.folders = pipeline_folders
+
+        # When input comes from an upstream tool, files will exist at SLURM runtime only
+        if self.from_upstream:
+            self.found_locally = []
+            self.needs_download = []
+            print(f"  PDB: using {len(self.pdb_ids)} structures from upstream tool (validated at SLURM runtime)")
+            return
 
         # Check if folder needs resolution relative to PDBs
         if hasattr(self, 'folder_needs_resolution') and self.folder_needs_resolution:
@@ -581,6 +611,13 @@ class PDB(BaseConfig):
             "compounds_table": self.compounds_csv,
             "operations": [op.to_dict() for op in self.operations]
         }
+
+        # When input comes from upstream, provide the source files for the runtime script
+        if self.from_upstream:
+            config_data["from_upstream"] = True
+            config_data["upstream_files"] = list(self.structures_stream.files)
+            config_data["upstream_files_contain_wildcards"] = self.structures_stream.files_contain_wildcards
+            config_data["upstream_map_table"] = self.structures_stream.map_table
 
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
