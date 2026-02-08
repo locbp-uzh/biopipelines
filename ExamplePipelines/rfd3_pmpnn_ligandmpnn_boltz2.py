@@ -4,12 +4,11 @@ This pipeline shows how to run RFdiffusion3, generate sequences far from the lig
 
 from PipelineScripts.pipeline import *
 from PipelineScripts.entities import * # PDB, Ligand, Sequence
-from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
+from PipelineScripts.rfdiffusion3 import RFdiffusion3
 from PipelineScripts.distance_selector import DistanceSelector
 from PipelineScripts.protein_mpnn import ProteinMPNN
 from PipelineScripts.ligand_mpnn import LigandMPNN
 from PipelineScripts.stitch_sequences import StitchSequences
-from PipelineScripts.mmseqs2 import MMseqs2
 from PipelineScripts.boltz2 import Boltz2
 from PipelineScripts.panda import Panda
 from PipelineScripts.plot import Plot
@@ -28,10 +27,10 @@ with Pipeline(project="Examples",
     adp = Ligand("ADP")
     amp = Ligand("AMP")
 
-    rfd3 = RFdiffusionAllAtom(pdb=adenylate_kinase,
-                                ligand='AP5', 
-                                contigs='A1-121,1-10,A170-217',
-                                num_designs=3)
+    rfd3 = RFdiffusion3(pdb=adenylate_kinase,
+                        ligand='AP5', 
+                        contigs='A1-121,1-10,A170-217',
+                        num_designs=3)
 
     #this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
     distances = DistanceSelector(structures=rfd3,
