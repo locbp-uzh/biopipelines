@@ -51,7 +51,7 @@ class LigandMPNN(BaseConfig):
                  redesigned: Union[str, Tuple['TableInfo', str]] = "",
                  design_within: float = 5.0,
                  model: str = "v_32_010",
-                 batch_size: int = 1,
+                 num_batches: int = 1,
                  remove_duplicates: bool = True,
                  **kwargs):
         """
@@ -60,7 +60,7 @@ class LigandMPNN(BaseConfig):
         Args:
             structures: Input structures as DataStream or StandardizedOutput
             ligand: Ligand identifier for binding site focus
-            num_sequences: Number of sequences to generate per structure
+            num_sequences: Number of sequences per batch (maps to --batch_size in LigandMPNN)
             fixed: Fixed positions. Accepts:
                    - PyMOL selection string: "10-20+30-40"
                    - Table column reference: (table, "column_name")
@@ -69,7 +69,7 @@ class LigandMPNN(BaseConfig):
                    - Table column reference: (table, "column_name")
             design_within: Distance in Angstrom from ligand to redesign (fallback if positions not specified)
             model: LigandMPNN model version to use
-            batch_size: Batch size for processing
+            num_batches: Number of batches to run
             remove_duplicates: Remove duplicate sequences from output (default True)
         """
         # Resolve input to DataStream
@@ -87,11 +87,8 @@ class LigandMPNN(BaseConfig):
         self.redesigned = redesigned
         self.design_within = design_within
         self.model = model
-        self.batch_size = batch_size
+        self.num_batches = num_batches
         self.remove_duplicates = remove_duplicates
-
-        # Calculate num_batches from num_sequences and batch_size
-        self.num_batches = max(1, (num_sequences + batch_size - 1) // batch_size)
 
         super().__init__(**kwargs)
 
@@ -106,8 +103,8 @@ class LigandMPNN(BaseConfig):
         if self.num_sequences <= 0:
             raise ValueError("num_sequences must be positive")
 
-        if self.batch_size <= 0:
-            raise ValueError("batch_size must be positive")
+        if self.num_batches <= 0:
+            raise ValueError("num_batches must be positive")
 
         if self.design_within <= 0:
             raise ValueError("design_within must be positive")
@@ -130,7 +127,7 @@ class LigandMPNN(BaseConfig):
             f"REDESIGNED: {self.redesigned or 'Auto (from table or ligand-based)'}",
             f"DESIGN WITHIN: {self.design_within}A",
             f"NUM SEQUENCES: {self.num_sequences}",
-            f"BATCH SIZE: {self.batch_size}",
+            f"NUM BATCHES: {self.num_batches}",
             f"MODEL: {self.model}"
         ])
         return config_lines
@@ -182,7 +179,7 @@ class LigandMPNN(BaseConfig):
         # Build base LigandMPNN options
         base_options = f'--model_type "ligand_mpnn"'
         base_options += f' --checkpoint_ligand_mpnn "./model_params/ligandmpnn_{self.model}_25.pt"'
-        base_options += f' --batch_size {self.batch_size}'
+        base_options += f' --batch_size {self.num_sequences}'
         base_options += f' --number_of_batches {self.num_batches}'
         base_options += f' --ligand_mpnn_cutoff_for_score "{self.design_within}"'
         base_options += f' --out_folder "{self.output_folder}"'
@@ -249,9 +246,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             fasta_ids.append(struct_id)
 
         # Predict sequence IDs (stream_id + sequence number)
+        # Total sequences per structure = num_sequences (batch_size) * num_batches
+        total_seqs = self.num_sequences * self.num_batches
         sequence_ids = []
         for struct_id in self.structures_stream.ids:
-            for seq_num in range(1, self.num_sequences + 1):
+            for seq_num in range(1, total_seqs + 1):
                 sequence_ids.append(f"{struct_id}_{seq_num}")
 
         # Sequences stream - CSV-based with individual sequence IDs
@@ -297,12 +296,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "lmpnn_params": {
                 "ligand": self.ligand,
                 "num_sequences": self.num_sequences,
+                "num_batches": self.num_batches,
                 "fixed": self.fixed,
                 "redesigned": self.redesigned,
                 "design_within": self.design_within,
                 "model": self.model,
-                "batch_size": self.batch_size,
-                "num_batches": self.num_batches,
                 "remove_duplicates": self.remove_duplicates
             }
         })

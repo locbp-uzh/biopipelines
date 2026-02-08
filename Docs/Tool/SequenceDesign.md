@@ -70,12 +70,12 @@ pip3 install -r requirements.txt
 - `ligand`: str (required) - Ligand identifier for binding site focus
 - `tables`: Optional[List[str]] = None - Input table files
 - `name`: str = "" - Job name for output files
-- `num_sequences`: int = 1 - Number of sequences to generate per structure
+- `num_sequences`: int = 1 - Number of sequences per batch
 - `fixed`: str = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or table reference)
 - `redesigned`: str = "" - Designed positions (LigandMPNN format or table reference)
 - `design_within`: float = 5.0 - Distance in Angstroms from ligand for post-generation analysis only (does not control design). For actually designing residues within a distance, use [DistanceSelector](Analysis.md#distanceselector) to select positions first.
 - `model`: str = "v_32_010" - LigandMPNN model version (v_32_005, v_32_010, v_32_020, v_32_025)
-- `batch_size`: int = 1 - Batch size for processing
+- `num_batches`: int = 1 - Number of batches to run. Total sequences = num_sequences × num_batches
 
 **Outputs**:
 - `sequences`: CSV file with generated sequences
