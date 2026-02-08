@@ -141,7 +141,7 @@ with Pipeline(project="Examples",
             operations=[
                 Panda.merge(on="id", prefixes=["benzamide_", "triazole_", "", ""]),
                 Panda.calculate({"affinity_delta": "benzamide_affinity_pred_value - triazole_affinity_pred_value"}),
-                Panda.filter("benzamide_chlorine_distance < 5.0 and triazole_chlorine_aspartate_distance < 5.0") #exclude odd poses
+                Panda.filter("benzamide_chlorine_distance < 5.0 and triazole_chlorine_distance < 5.0") #exclude odd poses
             ]
         )
 
