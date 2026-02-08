@@ -245,10 +245,10 @@ if input_source == "selection":
         final_fixed = list(fixed_per_design[design_id])
 
         # If redesigned positions are specified, add their complement to fixed
-        if designed_per_design[design_id]:
-            # Get all protein residues from PDB
-            all_residues = get_protein_residues_from_pdb(pdb_path, FIXED_CHAIN)
+        # Get all protein residues from PDB
+        all_residues = get_protein_residues_from_pdb(pdb_path, FIXED_CHAIN)
 
+        if designed_per_design[design_id]:
             # Compute complement of redesigned positions
             complement = compute_complement(all_residues, designed_per_design[design_id])
 
@@ -256,9 +256,14 @@ if input_source == "selection":
             final_fixed = sorted(list(set(final_fixed + complement)))
 
             print(f"Design: {design_id}, Selection-based - Explicit Fixed: {list_to_sele(fixed_per_design[design_id]) if fixed_per_design[design_id] else ''}, Redesigned: {list_to_sele(designed_per_design[design_id])}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
+        elif final_fixed:
+            # No redesigned specified but fixed specified, use fixed as-is
+            print(f"Design: {design_id}, Selection-based - Fixed: {list_to_sele(final_fixed)}, Redesigned: ")
         else:
-            # No redesigned specified, use fixed as-is
-            print(f"Design: {design_id}, Selection-based - Fixed: {list_to_sele(final_fixed) if final_fixed else ''}, Redesigned: ")
+            # Neither redesigned nor fixed specified - fix all residues
+            # This handles table references that resolved to empty at runtime
+            final_fixed = all_residues
+            print(f"Design: {design_id}, No positions to redesign, fixing all residues")
 
         # Store final fixed positions (what ProteinMPNN will use)
         fixed_dict[design_id][FIXED_CHAIN] = final_fixed

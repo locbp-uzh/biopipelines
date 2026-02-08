@@ -36,6 +36,7 @@ from pathlib import Path
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
+from pdb_parser import parse_pdb_file
 
 
 def sele_to_list(sele_str):
@@ -130,6 +131,20 @@ def resolve_table_reference(reference, design_ids):
     return positions_per_design
 
 
+def get_protein_residues_from_pdb(pdb_path, chain="A"):
+    """Get all protein residue numbers for a specific chain from PDB file."""
+    standard_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+    atoms = parse_pdb_file(pdb_path)
+    residues = set()
+    for atom in atoms:
+        if atom.chain == chain and atom.res_name in standard_residues:
+            residues.add(atom.res_num)
+    return sorted(list(residues))
+
+
 def process_selection_source(fixed_positions, designed_positions, design_entries):
     """Process direct PyMOL selections or table references for fixed/designed positions.
 
@@ -144,9 +159,21 @@ def process_selection_source(fixed_positions, designed_positions, design_entries
 
     positions_data = {}
     for design_id, pdb_file in design_entries:
+        fixed = fixed_per_design.get(design_id, [])
+        designed = designed_per_design.get(design_id, [])
+
+        # When redesigned resolves to empty and fixed is also empty,
+        # fix all residues so the tool outputs the original sequence.
+        # This handles the case where a table reference (e.g. DistanceSelector "within")
+        # resolved to empty at runtime.
+        if not designed and not fixed:
+            all_residues = get_protein_residues_from_pdb(pdb_file)
+            fixed = all_residues
+            print(f"No positions to redesign for {design_id}, fixing all residues")
+
         positions_data[design_id] = {
-            'fixed_positions': fixed_per_design.get(design_id, []),
-            'designed_positions': designed_per_design.get(design_id, []),
+            'fixed_positions': fixed,
+            'designed_positions': designed,
             'pdb_file': pdb_file
         }
 

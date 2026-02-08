@@ -52,6 +52,7 @@ class LigandMPNN(BaseConfig):
                  design_within: float = 5.0,
                  model: str = "v_32_010",
                  batch_size: int = 1,
+                 remove_duplicates: bool = True,
                  **kwargs):
         """
         Initialize LigandMPNN configuration.
@@ -69,6 +70,7 @@ class LigandMPNN(BaseConfig):
             design_within: Distance in Angstrom from ligand to redesign (fallback if positions not specified)
             model: LigandMPNN model version to use
             batch_size: Batch size for processing
+            remove_duplicates: Remove duplicate sequences from output (default True)
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
@@ -86,6 +88,7 @@ class LigandMPNN(BaseConfig):
         self.design_within = design_within
         self.model = model
         self.batch_size = batch_size
+        self.remove_duplicates = remove_duplicates
 
         # Calculate num_batches from num_sequences and batch_size
         self.num_batches = max(1, (num_sequences + batch_size - 1) // batch_size)
@@ -227,8 +230,9 @@ bash {self.commands_file}
 
     def _generate_script_convert_outputs(self) -> str:
         """Generate the output conversion part of the script."""
+        duplicates_flag = " --duplicates" if not self.remove_duplicates else ""
         return f"""echo "Converting FASTA outputs to CSV format"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --duplicates --id-map {self.id_map_json}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag} --id-map {self.id_map_json}
 
 """
 
@@ -298,7 +302,8 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "design_within": self.design_within,
                 "model": self.model,
                 "batch_size": self.batch_size,
-                "num_batches": self.num_batches
+                "num_batches": self.num_batches,
+                "remove_duplicates": self.remove_duplicates
             }
         })
         return base_dict

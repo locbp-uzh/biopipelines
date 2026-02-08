@@ -70,6 +70,7 @@ class StitchSequences(BaseConfig):
                  substitutions: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
                  indels: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
                  id_map: Dict[str, str] = {"*": "*_<N>"},
+                 remove_duplicates: bool = True,
                  **kwargs):
         """
         Initialize StitchSequences configuration.
@@ -88,6 +89,7 @@ class StitchSequences(BaseConfig):
                 - Keys: Position strings like "50-55" or "6-7+9-10+17-18"
                 - Values: List of raw sequences (each segment replaced with full sequence)
             id_map: ID mapping pattern for matching table IDs to sequence IDs
+            remove_duplicates: Remove duplicate sequences from output (default True)
             **kwargs: Additional parameters
 
         Position Syntax:
@@ -113,6 +115,7 @@ class StitchSequences(BaseConfig):
         self.substitutions = substitutions or {}
         self.indels = indels or {}
         self.id_map = id_map
+        self.remove_duplicates = remove_duplicates
 
         # Resolve template to DataStream if needed
         self.template_stream = None
@@ -346,6 +349,7 @@ class StitchSequences(BaseConfig):
             "substitutions": self.substitution_infos,
             "indels": self.indel_infos,
             "id_map": self.id_map,
+            "remove_duplicates": self.remove_duplicates,
             "output_csv": self.sequences_csv
         }
 
@@ -560,7 +564,8 @@ fi
                 "template": template_summary,
                 "substitutions": substitutions_summary,
                 "indels": indels_summary,
-                "id_map": self.id_map
+                "id_map": self.id_map,
+                "remove_duplicates": self.remove_duplicates
             }
         })
         return base_dict

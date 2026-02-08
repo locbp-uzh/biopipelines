@@ -455,6 +455,23 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         # Complex case: match sequences by base ID
         results = stitch_matched_sequences(template_sequences, substitutions, indels, id_map)
 
+    # Remove duplicates if requested
+    remove_duplicates = config_data.get('remove_duplicates', True)
+    if remove_duplicates and results:
+        seen_sequences = set()
+        unique_results = []
+        duplicates_removed = 0
+        for r in results:
+            if r['sequence'] not in seen_sequences:
+                seen_sequences.add(r['sequence'])
+                unique_results.append(r)
+            else:
+                print(f"Skipped duplicate: {r['id']}")
+                duplicates_removed += 1
+        if duplicates_removed > 0:
+            print(f"Removed {duplicates_removed} duplicate sequences ({len(results)} -> {len(unique_results)})")
+        results = unique_results
+
     # Save results
     if results:
         df = pd.DataFrame(results)

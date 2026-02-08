@@ -41,7 +41,7 @@ with Pipeline(project="Examples",
 
     rfd3 = RFdiffusion3(pdb=adenylate_kinase_boltz_renamed, #RFdiffusion3 often needs some PDB cleanup. The easiest solution is to start from a Boltz prediction
                         ligand_code=':L:', 
-                        contig='A1-121,1-10,A170-214', #They have renamed contigs -> contig
+                        contig='A1-121,50-70,A170-214', #They have renamed contigs -> contig
                         num_designs=3)
 
     #this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
@@ -58,7 +58,7 @@ with Pipeline(project="Examples",
                        redesigned=distances.tables.selections.within)
 
     #stitch sequences by replacing the rfd3 sequences with lmpnn sequences at the "within" positions, and pmpnn at the "beyond" positions
-    #we'll get 2x2 = 4 sequences per design
+    #we'll get 2x2 = 4 sequences per design, unless duplicates are found (dropped by default)
     sequences = StitchSequences(template=rfd3,
                                 substitutions={
                                     distances.tables.selections.beyond: pmpnn,

@@ -59,6 +59,7 @@ class ProteinMPNN(BaseConfig):
                  sampling_temp: float = 0.1,
                  model_name: str = "v_48_020",
                  soluble_model: bool = True,
+                 remove_duplicates: bool = True,
                  **kwargs):
         """
         Initialize ProteinMPNN configuration.
@@ -77,6 +78,7 @@ class ProteinMPNN(BaseConfig):
             sampling_temp: Sampling temperature for sequence generation
             model_name: ProteinMPNN model variant
             soluble_model: Use soluble protein model
+            remove_duplicates: Remove duplicate sequences from output (default True)
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
@@ -95,6 +97,7 @@ class ProteinMPNN(BaseConfig):
         self.sampling_temp = sampling_temp
         self.model_name = model_name
         self.soluble_model = soluble_model
+        self.remove_duplicates = remove_duplicates
 
         super().__init__(**kwargs)
 
@@ -203,11 +206,12 @@ python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_j
 
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
+        duplicates_flag = " --duplicates" if not self.remove_duplicates else ""
         return f"""echo "Creating results table and queries files"
 python {self.table_py} {self.seqs_folder} {self.pipeline_name} "-" {self.main_table}
 
 echo "Creating queries CSV and FASTA from results table"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}{duplicates_flag}
 
 """
 
@@ -277,7 +281,8 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "plddt_threshold": self.plddt_threshold,
                 "sampling_temp": self.sampling_temp,
                 "model_name": self.model_name,
-                "soluble_model": self.soluble_model
+                "soluble_model": self.soluble_model,
+                "remove_duplicates": self.remove_duplicates
             }
         })
         return base_dict
