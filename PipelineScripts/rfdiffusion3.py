@@ -647,9 +647,17 @@ python "{self.table_py_file}" \\
             )
         }
 
+        sequences = DataStream(
+            name="sequences",
+            ids=structure_ids,
+            files=[],
+            map_table=self.sequences_csv,
+            format="csv"
+        )
+
         return {
             "structures": structures,
-            "sequences": DataStream.empty("sequences", "fasta"),
+            "sequences": sequences,
             "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
