@@ -31,22 +31,26 @@ with Pipeline(project="Examples",
     atp = Ligand("ATP")
     adp = Ligand("ADP")
     amp = Ligand("AMP")
+    ap5 = Ligand("AP5")
 
-    rfd3 = RFdiffusion3(pdb=adenylate_kinase,
-                        ligand='AP5', 
+    adenylate_kinase_boltz = Boltz2(proteins=adenylate_kinase,
+                                    ligands=ap5) # the sequence is also extracted with PDB
+
+    rfd3 = RFdiffusion3(pdb=adenylate_kinase_boltz, #RFdiffusion3 often needs some PDB cleanup. The easiest solution is to start from a Boltz prediction
+                        ligand='LIG', 
                         contig='A1-121,1-10,A170-217', #They have renamed contigs -> contig
                         num_designs=3)
 
     #this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
     distances = DistanceSelector(structures=rfd3,
-                                  ligand="AP5",
+                                  ligand="LIG",
                                   distance=5,
                                   restrict_to=rfd3.tables.structures.designed)
     pmpnn = ProteinMPNN(structures=rfd3,
                         num_sequences=2,
                         redesigned=distances.tables.selections.beyond)
     lmpnn = LigandMPNN(structures=rfd3,
-                       ligand="AP5", #in ligand mpnn you should always specify the ligand name.
+                       ligand="LIG", #in ligand mpnn you should always specify the ligand name.
                        num_sequences=2,
                        redesigned=distances.tables.selections.within)
 

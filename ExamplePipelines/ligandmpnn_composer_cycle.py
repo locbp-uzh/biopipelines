@@ -4,7 +4,7 @@
 # If you use this software or any derivative of it in published work,
 # you must cite the original author and this repository.
 """
-This pipeline shows how improve the difference in predicted binding affinity between acetamide and triazole chloroalkanes and halotag7 starting from a Boltz model of both.
+This pipeline shows how improve the difference in predicted binding affinity between benzamide and triazole chloroalkanes and halotag7 starting from a Boltz model of both.
 """
 
 from PipelineScripts.pipeline import *
@@ -64,28 +64,28 @@ with Pipeline(project="Examples",
     HaloTag = Sequence("MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
                        ids="HT")
     
-    acetamide = Ligand(smiles=r"ClCCCCCCOCCOCCNC(C)=O",
-                        ids="ACETAMIDE")
+    benzamide = Ligand(smiles=r"O=C(C1=CC=CC=C1)NCCOCCOCCCCCCCl",
+                        ids="BENZAMIDE")
     triazole  = Ligand(smiles=r"ClCCCCCCOCCOCCN1C=C(C)N=N1",
                         ids="TRIAZOLE")
 
     # We need an initial prediction from Boltz to benchmark the affinities
-    original_acetamide = Boltz2(proteins=HaloTag,
-                       ligands=acetamide)
+    original_benzamide = Boltz2(proteins=HaloTag,
+                       ligands=benzamide)
     original_triazole = Boltz2(proteins=HaloTag,
                        ligands=triazole,
-                       msas=original_acetamide)
+                       msas=original_benzamide)
     ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
 
     # Merge original open and close affinity tables with Panda
-    # pool=best_acetamide preserves structure files with id_map remapped IDs
+    # pool=best_benzamide preserves structure files with id_map remapped IDs
     original_analysis = Panda(
-        tables=[original_acetamide.tables.affinity, original_triazole.tables.affinity],
+        tables=[original_benzamide.tables.affinity, original_triazole.tables.affinity],
         operations=[
-            Panda.merge(on="id", prefixes=["acetamide_", "triazole_"], id_map={"original": [original_acetamide.streams.structures.ids[0],original_triazole.streams.structures.ids[0]]}),
-            Panda.calculate({"affinity_delta": "acetamide_affinity_pred_value - triazole_affinity_pred_value"})
+            Panda.merge(on="id", prefixes=["benzamide_", "triazole_"], id_map={"original": [original_benzamide.streams.structures.ids[0],original_triazole.streams.structures.ids[0]]}),
+            Panda.calculate({"affinity_delta": "benzamide_affinity_pred_value - triazole_affinity_pred_value"})
         ],
-        pool=original_acetamide # this way we have the original open pdb file linked to the id "original". it is necessary in case the best of the first cycle(s) is that.
+        pool=original_benzamide # this way we have the original open pdb file linked to the id "original". it is necessary in case the best of the first cycle(s) is that.
     )
 
     NUM_CYCLES = 3
@@ -93,22 +93,22 @@ with Pipeline(project="Examples",
 
     # Track all analyses and pools across cycles for best selection
     all_analyses = [original_analysis]  # Start with original baseline
-    all_pools = [original_acetamide]  # Start with original best structure
+    all_pools = [original_benzamide]  # Start with original best structure
 
-    best_acetamide,best_triazole=original_acetamide,original_triazole
+    best_benzamide,best_triazole=original_benzamide,original_triazole
 
 
     for CYCLE in range(NUM_CYCLES):
         Suffix(f"Cycle{CYCLE+1}")
 
         mutation_range = "141+143+145+147-149+151-152+154+157+160-161+165+167-168+170-172+175-176+178+180+245+271" # se could have used DistanceSelector for a dynamic choise
-        lmpnn = LigandMPNN(structures=best_acetamide,
+        lmpnn = LigandMPNN(structures=best_benzamide,
                           ligand="LIG",  # LIG is the ligand name from Boltz
                           num_sequences=1000,
                           batch_size=25,
                           redesigned=mutation_range)
 
-        profiler = MutationProfiler(original=best_acetamide,
+        profiler = MutationProfiler(original=best_benzamide,
                                     mutants=lmpnn)
         composer = MutationComposer(frequencies=profiler.tables.absolute_frequencies,
                                     num_sequences=3,
@@ -117,44 +117,44 @@ with Pipeline(project="Examples",
 
         unique_new_sequences,all_sequences_seen=drop_duplicates_history(composer,all_sequences_seen)
         
-        boltz_holo_acetamide = Boltz2(proteins=unique_new_sequences,
-                                 ligands=acetamide)
+        boltz_holo_benzamide = Boltz2(proteins=unique_new_sequences,
+                                 ligands=benzamide)
         boltz_holo_triazole = Boltz2(proteins=unique_new_sequences,
                                   ligands=triazole,
-                                  msas=boltz_holo_acetamide)
+                                  msas=boltz_holo_benzamide)
 
-        acetamide_chlorine_aspartate_distance = Distance(structures=boltz_holo_acetamide,
+        benzamide_chlorine_aspartate_distance = Distance(structures=boltz_holo_benzamide,
                                                                residue='D in IHDWG', #importantly: we are not mutating the context around the aspartate
                                                                atom='LIG.Cl',
-                                                               metric_name='acetamide_chlorine_distance')
+                                                               metric_name='benzamide_chlorine_distance')
         triazole_chlorine_aspartate_distance = Distance(structures=boltz_holo_triazole,
                                                                residue='D in IHDWG',
                                                                atom='LIG.Cl',
-                                                               metric_name='acetamide_chlorine_distance')
+                                                               metric_name='triazole_chlorine_distance')
 
         # Merge all metrics with Panda
         current_analysis_filtered = Panda(
-            tables=[boltz_holo_acetamide.tables.affinity,
+            tables=[boltz_holo_benzamide.tables.affinity,
                     boltz_holo_triazole.tables.affinity,
-                    acetamide_chlorine_aspartate_distance.tables.distances,
+                    benzamide_chlorine_aspartate_distance.tables.distances,
                     triazole_chlorine_aspartate_distance.tables.distances],
             operations=[
-                Panda.merge(on="id", prefixes=["acetamide_", "triazole_", "", ""]),
-                Panda.calculate({"affinity_delta": "acetamide_affinity_pred_value - triazole_affinity_pred_value"}),
-                Panda.filter("acetamide_chlorine_distance < 5.0 and triazole_chlorine_aspartate_distance < 5.0") #exclude odd poses
+                Panda.merge(on="id", prefixes=["benzamide_", "triazole_", "", ""]),
+                Panda.calculate({"affinity_delta": "benzamide_affinity_pred_value - triazole_affinity_pred_value"}),
+                Panda.filter("benzamide_chlorine_distance < 5.0 and triazole_chlorine_aspartate_distance < 5.0") #exclude odd poses
             ]
         )
 
         # Add current cycle results to the arrays
-        all_pools.append(boltz_holo_acetamide)
+        all_pools.append(boltz_holo_benzamide)
         all_analyses.append(current_analysis_filtered)
 
         # Select best structure across all cycles using Panda with multi-pool support
-        best_acetamide = Panda(
+        best_benzamide = Panda(
             tables=[x.tables.result for x in all_analyses],
             operations=[
                 Panda.concat(add_source=True),  # source_table column tracks which pool they come from
-                Panda.sort("acetamide_affinity_pred_value", ascending=True),  # min = ascending
+                Panda.sort("benzamide_affinity_pred_value", ascending=True),  # min = ascending
                 Panda.head(1)
             ],
             pool=[pool for pool in all_pools],  # Multiple pools matching tables
@@ -192,7 +192,7 @@ with Pipeline(project="Examples",
         # Scatter: open vs close affinity
         Plot.Scatter(
             data=combined_results.tables.result,
-            x="acetamide_affinity_pred_value",
+            x="benzamide_affinity_pred_value",
             y="triazole_affinity_pred_value",
             color="source_table",
             title="Open vs Close Affinity by Cycle",
@@ -203,7 +203,7 @@ with Pipeline(project="Examples",
         # Scatter: chlorine distance vs affinity delta
         Plot.Scatter(
             data=combined_results.tables.result,
-            x="acetamide_chlorine_distance",
+            x="benzamide_chlorine_distance",
             y="affinity_delta",
             title="Chlorine-Aspartate Distance vs Affinity Delta",
             xlabel="Cl-Asp Distance (Å)",
@@ -215,8 +215,8 @@ with Pipeline(project="Examples",
     # We see the sequence alignment against the original protein with PyMOL
     PyMOL(
         PyMOL.ColorAlign(
-            reference=original_acetamide,
-            targets=best_acetamide
+            reference=original_benzamide,
+            targets=best_benzamide
         )
     )
 

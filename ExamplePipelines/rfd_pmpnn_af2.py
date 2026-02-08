@@ -27,7 +27,7 @@ with Pipeline(project="Examples",
     lysozyme = PDB("168L") # loads from PDB
 
     rfd = RFdiffusion(pdb=lysozyme,
-                        contigs='50-70,A81-140',
+                        contigs='50-70/A81-140',
                         num_designs=3)
 
     pmpnn = ProteinMPNN(structures=rfd,
