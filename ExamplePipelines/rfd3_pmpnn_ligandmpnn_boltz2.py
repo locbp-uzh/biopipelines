@@ -29,7 +29,7 @@ with Pipeline(project="Examples",
 
     rfd3 = RFdiffusion3(pdb=adenylate_kinase,
                         ligand='AP5', 
-                        contigs='A1-121,1-10,A170-217',
+                        contig='A1-121,1-10,A170-217', #They have renamed contigs -> contig
                         num_designs=3)
 
     #this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
