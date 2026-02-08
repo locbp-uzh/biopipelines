@@ -15,5 +15,9 @@ dependencies = [
     "biopython",
 ]
 
+[project.scripts]
+biopipelines-submit = "PipelineScripts.cli:submit"
+biopipelines-run = "PipelineScripts.cli:run"
+
 [tool.setuptools.packages.find]
 include = ["PipelineScripts*"]

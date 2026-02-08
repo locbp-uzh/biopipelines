@@ -316,17 +316,22 @@ with Pipeline("Project", "Job", "Description"):
 
 **Submit to SLURM** (cluster):
 ```bash
-cd biopipelines
-./submit /path/to/pipeline.py
+biopipelines-submit /path/to/pipeline.py
 ```
 
 **Run locally** (no SLURM needed):
 ```bash
+biopipelines-run /path/to/pipeline.py
+```
+
+These commands work from any directory. Alternatively, you can run the scripts directly from the biopipelines root:
+```bash
 cd biopipelines
+./submit /path/to/pipeline.py
 ./run /path/to/pipeline.py
 ```
 
-`./run` executes the generated bash scripts directly on your machine instead of submitting them to SLURM. Tools that require unavailable resources (GPUs, specific conda environments) will fail naturally. This is useful for testing pipeline logic or running lightweight tools locally.
+`./run` / `biopipelines-run` executes the generated bash scripts directly on your machine instead of submitting them to SLURM. Tools that require unavailable resources (GPUs, specific conda environments) will fail naturally. This is useful for testing pipeline logic or running lightweight tools locally.
 
 **Resubmit** existing job:
 

@@ -701,7 +701,7 @@ umask 002
         for batch_idx in range(num_batches):
             print(f"sbatch {os.path.join(self.folders['runtime'], f'slurm_batch{batch_idx + 1}.sh')}")
         print("="*30+"Automatic Submission"+"="*30)
-        print(f"# Use ./submit script to automatically chain submissions")
+        print(f"# Use submit script to automatically chain submissions")
 
     def _generate_batch_script(self, batch_idx: int, start_tool_idx: int, end_tool_idx: int) -> str:
         """Generate pipeline script for a specific batch of tools."""

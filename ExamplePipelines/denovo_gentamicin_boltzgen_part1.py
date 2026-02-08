@@ -21,6 +21,6 @@ for _ in range(10):
             num_designs=1000,
             steps=["design", "inverse_folding", "folding", "design_folding", "affinity"]) # We stop at affinity as subsequent steps require more memory and less GPU
 
-# By running the pipeline with ./submit /path/to/<pipeline>.py, 10 jobs will be submitted.
+# By running the pipeline biopipelines-submit /path/to/<pipeline>.py, 10 jobs will be submitted.
 # Note down the job ids e.g. 517802, 517803, ..., 517811, 517812
 # These can be used to make sure part 2 only starts after all jobs for part 1 are completed
