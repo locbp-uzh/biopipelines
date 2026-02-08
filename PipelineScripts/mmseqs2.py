@@ -299,7 +299,7 @@ class MMseqs2Server(BaseConfig):
     # Lazy path descriptors
     cpu_server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_server_cpu.sh"))
     gpu_server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_server_gpu.sh"))
-    shared_server_folder = Path(lambda self: "/shares/locbp.chem.uzh/models/mmseqs2_server")
+    shared_server_folder = Path(lambda self: self.folders.get("MMseqs2Server", ""))
 
     def __init__(self, mode: str = "cpu",
                  database: str = "uniref30_2302_db",
@@ -424,7 +424,8 @@ class MMseqs2Server(BaseConfig):
             f"export MMSEQS2_MAX_SEQS={self.max_seqs}",
             f"export MMSEQS2_POLL_INTERVAL={self.poll_interval}",
             f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
-            f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log"
+            f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log",
+            f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}"
         ])
 
         env_setup = "\n".join(env_vars)
@@ -459,6 +460,7 @@ bash {self.cpu_server_script}
             f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
             f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log",
             f"export MMSEQS2_DB_DIR={self.folders.get('MMseqs2Databases', '')}",
+            f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}",
             "export CUDA_VISIBLE_DEVICES=0",
             "export CUDA_CACHE_MAXSIZE=2147483648",
             "export CUDA_CACHE_DISABLE=0"

@@ -16,15 +16,27 @@ nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheade
 # MMseqs2 LCF (LocalColabFold) GPU MSA Server Script
 # Uses colabfold_search for richer MSAs from UniRef30 + ColabFoldDB
 
-# Configuration - directories for job queue and results
+# Resolve a required folder: env var first, then biopipelines-config, else fail
+require_folder() {
+  local val="$1" name="$2" key="$3"
+  if [[ -n "$val" ]]; then echo "$val"; return; fi
+  val=$(biopipelines-config folder "$key" 2>/dev/null) && [[ -n "$val" ]] && { echo "$val"; return; }
+  echo "ERROR: $name is not set and biopipelines-config could not resolve '$key'." >&2
+  echo "Set the environment variable or configure the folder in config.yaml." >&2
+  exit 1
+}
+
+# Configuration - use environment variables from pipeline, with biopipelines-config fallback
 USER=${USER:-$(whoami)}
-JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2LCFServer/job_queue"
-RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2LCFServer/results"
-TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2LCFServer/tmp"
+MMSEQS2_SHARED_FOLDER=$(require_folder "${MMSEQS2_SHARED_FOLDER:-}" "MMSEQS2_SHARED_FOLDER" "MMseqs2LCFServer")
+JOB_QUEUE_DIR="$MMSEQS2_SHARED_FOLDER/job_queue"
+RESULTS_DIR="$MMSEQS2_SHARED_FOLDER/results"
+TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp"
 
 # Database directory (ColabFold databases setup with setup_databases.sh)
-# Use environment variable from pipeline, with fallback for manual execution
-DB_DIR="${COLABFOLD_DB_DIR:-/shares/locbp.chem.uzh/models/colabfold_databases}"
+DB_DIR=$(require_folder "${COLABFOLD_DB_DIR:-}" "COLABFOLD_DB_DIR" "ColabFoldDatabases")
+DATA_DIR=$(require_folder "${BIOPIPELINES_DATA_DIR:-}" "BIOPIPELINES_DATA_DIR" "data")
+ALPHAFOLD_DIR=$(require_folder "${BIOPIPELINES_ALPHAFOLD_DIR:-}" "BIOPIPELINES_ALPHAFOLD_DIR" "AlphaFold")
 UNIREF_DB="uniref30_2302_db"
 ENVDB="colabfold_envdb_202108_db"
 
@@ -42,12 +54,12 @@ log() {
 }
 
 check_mmseqs_installation() {
-    local mmseqs_dir="/home/$USER/data/mmseqs"
+    local mmseqs_dir="$DATA_DIR/mmseqs"
     local mmseqs_bin="$mmseqs_dir/bin/mmseqs"
 
     if [[ ! -f "$mmseqs_bin" ]]; then
         log "MMseqs2 not found at $mmseqs_bin, downloading..."
-        cd "/home/$USER/data" || { log "ERROR: Cannot access /home/$USER/data"; exit 1; }
+        cd "$DATA_DIR" || { log "ERROR: Cannot access $DATA_DIR"; exit 1; }
 
         # Download MMseqs2
         wget https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
@@ -69,12 +81,12 @@ check_mmseqs_installation() {
 }
 
 check_colabfold_search() {
-    local localcolabfold_dir="/home/$USER/data/localcolabfold"
+    local localcolabfold_dir="$ALPHAFOLD_DIR"
     local colabfold_search="$localcolabfold_dir/colabfold-conda/bin/colabfold_search"
 
     if [[ ! -f "$colabfold_search" ]]; then
         log "ERROR: colabfold_search not found at $colabfold_search"
-        log "Please ensure localcolabfold is installed at /home/$USER/data/localcolabfold"
+        log "Please ensure localcolabfold is installed at $ALPHAFOLD_DIR"
         exit 1
     else
         log "colabfold_search found at $colabfold_search"
@@ -105,7 +117,7 @@ check_databases() {
 echo $$ > "$PID_FILE"   # record server PID
 
 # Create timestamp file for server detection (per-user)
-MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2LCFServer"
+MMSEQS_SERVER_DIR="$MMSEQS2_SHARED_FOLDER"
 mkdir -p "$MMSEQS_SERVER_DIR"
 SERVER_TIMESTAMP_FILE="$MMSEQS_SERVER_DIR/GPU_SERVER"
 SUBMITTING_FILE="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
@@ -125,8 +137,8 @@ check_colabfold_search
 check_databases
 
 # Paths to binaries
-MMSEQS_BIN="/home/$USER/data/mmseqs/bin/mmseqs"
-COLABFOLD_SEARCH="/home/$USER/data/localcolabfold/colabfold-conda/bin/colabfold_search"
+MMSEQS_BIN="$DATA_DIR/mmseqs/bin/mmseqs"
+COLABFOLD_SEARCH="$ALPHAFOLD_DIR/colabfold-conda/bin/colabfold_search"
 
 # Optimized Memory Settings
 export MMSEQS_MAX_MEMORY=${MMSEQS_MAX_MEMORY:-150G}

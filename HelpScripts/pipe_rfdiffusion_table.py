@@ -1,5 +1,4 @@
-# Copyright © 2024 LOCBP @ University of Zürich
-# Distributed under MIT license
+
 """
 Create RFdiffusion results table with id, pdb, fixed, designed columns.
 

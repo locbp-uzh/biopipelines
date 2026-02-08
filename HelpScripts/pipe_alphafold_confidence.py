@@ -1,5 +1,4 @@
-#Copyright © 2024 LOCBP @ University of Zürich
-#Distributed under MIT license
+
 import argparse
 import json
 import pandas as pd

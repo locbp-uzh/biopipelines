@@ -12,12 +12,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .config_manager import ConfigManager
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from config_manager import ConfigManager
 
 
 class PLIP(BaseConfig):
@@ -172,6 +174,7 @@ class PLIP(BaseConfig):
             plip_options.append(f"--maxthreads {self.max_threads}")
 
         plip_opts_str = " ".join(plip_options)
+        container_exec = ConfigManager().get_container_executor()
 
         return f"""echo "Running PLIP protein-ligand interaction profiler"
 echo "Processing {len(self.structures_stream)} structure(s)"
@@ -197,8 +200,8 @@ for struct_id, struct_path in iterate_files(ds):
     output_dir="{self.raw_outputs_folder}/$struct_id"
     mkdir -p "$output_dir"
 
-    # Run PLIP apptainer container
-    apptainer exec {self.plip_container} plip -f "$pdb_file" {plip_opts_str} --outdir "$output_dir"
+    # Run PLIP container
+    {container_exec} exec {self.plip_container} plip -f "$pdb_file" {plip_opts_str} --outdir "$output_dir"
 
     if [ $? -eq 0 ]; then
         echo "PLIP analysis completed for $struct_id"

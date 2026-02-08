@@ -9,7 +9,7 @@ import os
 import yaml
 import shutil
 import urllib.request
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 
 class ConfigManager:
@@ -124,6 +124,56 @@ class ConfigManager:
             Dictionary mapping tool names to environment names
         """
         return self._config.get('environments', {})
+
+    def _get_cluster_config(self) -> Dict[str, Any]:
+        """Get cluster configuration section. Raises if missing."""
+        cluster = self._config.get('cluster')
+        if cluster is None:
+            raise KeyError("'cluster' section not found in config.yaml. Please add it (see config.yaml template).")
+        return cluster
+
+    def get_emails(self) -> Dict[str, str]:
+        """Get email mapping (Unix username -> email address)."""
+        return self._get_cluster_config().get('emails', {})
+
+    def get_env_manager(self) -> str:
+        """Get configured environment manager ("mamba" or "conda")."""
+        val = self._get_cluster_config().get('env_manager')
+        if not val:
+            raise KeyError("'env_manager' not set in config.yaml cluster section.")
+        return val
+
+    def get_container_executor(self) -> str:
+        """Get configured container executor ("apptainer" or "singularity")."""
+        val = self._get_cluster_config().get('container_executor')
+        if not val:
+            raise KeyError("'container_executor' not set in config.yaml cluster section.")
+        return val
+
+    def get_slurm_modules(self) -> List[str]:
+        """Get list of modules to load in SLURM wrapper scripts."""
+        val = self._get_cluster_config().get('slurm_modules')
+        if val is None:
+            raise KeyError("'slurm_modules' not set in config.yaml cluster section. Use [] for no modules.")
+        return val
+
+    def get_shell_hook_command(self) -> str:
+        """Get the shell hook initialization command derived from env_manager."""
+        mgr = self.get_env_manager()
+        if mgr == "conda":
+            return 'eval "$(conda shell.bash hook)"'
+        return f'eval "$({mgr} shell hook --shell bash)"'
+
+    def get_activate_command(self, env_name: str) -> str:
+        """Get the activate command for a specific environment."""
+        return f'{self.get_env_manager()} activate {env_name}'
+
+    def get_module_load_line(self) -> str:
+        """Get the full 'module load ...' line for SLURM scripts, or empty string if none."""
+        modules = self.get_slurm_modules()
+        if not modules:
+            return ""
+        return "module load " + " ".join(modules)
 
     def get_repository_url(self) -> str:
         """

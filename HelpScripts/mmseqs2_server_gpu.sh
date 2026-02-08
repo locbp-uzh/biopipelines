@@ -15,15 +15,26 @@ nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheade
 
 # Memory-Optimized MMseqs2 GPU MSA Server Script
 
-# Configuration - must match CPU server and client directory structure
-USER=${USER:-$(whoami)}
-JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/job_queue"
-RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/results"
-# Use environment variable from pipeline, with fallback for manual execution
-DB_DIR="${MMSEQS2_DB_DIR:-/shares/locbp.chem.uzh/models/mmseqs2_databases/gpu}"
+# Resolve a required folder: env var first, then biopipelines-config, else fail
+require_folder() {
+  local val="$1" name="$2" key="$3"
+  if [[ -n "$val" ]]; then echo "$val"; return; fi
+  val=$(biopipelines-config folder "$key" 2>/dev/null) && [[ -n "$val" ]] && { echo "$val"; return; }
+  echo "ERROR: $name is not set and biopipelines-config could not resolve '$key'." >&2
+  echo "Set the environment variable or configure the folder in config.yaml." >&2
+  exit 1
+}
 
-TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp"
-GPU_TMP_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/tmp/gpu"
+# Configuration - use environment variables from pipeline, with biopipelines-config fallback
+USER=${USER:-$(whoami)}
+MMSEQS2_SHARED_FOLDER=$(require_folder "${MMSEQS2_SHARED_FOLDER:-}" "MMSEQS2_SHARED_FOLDER" "MMseqs2Server")
+JOB_QUEUE_DIR="$MMSEQS2_SHARED_FOLDER/job_queue"
+RESULTS_DIR="$MMSEQS2_SHARED_FOLDER/results"
+DB_DIR=$(require_folder "${MMSEQS2_DB_DIR:-}" "MMSEQS2_DB_DIR" "MMseqs2Databases")
+DATA_DIR=$(require_folder "${BIOPIPELINES_DATA_DIR:-}" "BIOPIPELINES_DATA_DIR" "data")
+
+TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp"
+GPU_TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp/gpu"
 UNIREF_DB="uniref30_2302_db"
 DB_PATH="$DB_DIR/$UNIREF_DB"  # Use databases directly from shares
 THREADS=4
@@ -41,12 +52,12 @@ log() {
 }
 
 check_mmseqs_installation() {
-    local mmseqs_dir="/home/$USER/data/mmseqs"
+    local mmseqs_dir="$DATA_DIR/mmseqs"
     local mmseqs_bin="$mmseqs_dir/bin/mmseqs"
 
     if [[ ! -f "$mmseqs_bin" ]]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - MMseqs2 not found at $mmseqs_bin, downloading..."
-        cd "/home/$USER/data" || { echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot access /home/$USER/data"; exit 1; }
+        cd "$DATA_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot access $DATA_DIR"; exit 1; }
 
         # Download MMseqs2
         wget https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
@@ -70,7 +81,7 @@ check_mmseqs_installation() {
 echo $$ > "$PID_FILE"   # record server PID
 
 # Create timestamp file for server detection (per-user)
-MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server"
+MMSEQS_SERVER_DIR="$MMSEQS2_SHARED_FOLDER"
 mkdir -p "$MMSEQS_SERVER_DIR"
 SERVER_TIMESTAMP_FILE="$MMSEQS_SERVER_DIR/GPU_SERVER"
 SUBMITTING_FILE="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
@@ -111,7 +122,7 @@ convert_to_a3m() {
     local scratch_a3m="$tmp_dir/raw.a3m"
     local final_a3m="$output_file"
 
-    /home/$USER/data/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
+    $DATA_DIR/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
         --msa-format-mode 5 \
         --threads "$OMP_NUM_THREADS"
 
@@ -142,7 +153,7 @@ convert_a3m_to_csv() {
 
 # Start GPU server with optimized settings
 log "Starting MMseqs2 GPU server for $DB_PATH"
-CUDA_VISIBLE_DEVICES=0 /home/$USER/data/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
+CUDA_VISIBLE_DEVICES=0 $DATA_DIR/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
@@ -316,7 +327,7 @@ while true; do
     cp "$fasta" "$tmp/query.fasta"
     query_db="$tmp/queryDB"
     log "Creating queryDB"
-    /home/$USER/data/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
+    $DATA_DIR/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
 
     # Result database (not m8 format)
     result_db="$tmp/resultDB"
@@ -331,7 +342,7 @@ while true; do
     gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory before search: ${gpu_mem_before}MB"
 
-    if ! CUDA_VISIBLE_DEVICES=0 /home/$USER/data/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
+    if ! CUDA_VISIBLE_DEVICES=0 $DATA_DIR/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
       --gpu 1 \
       --gpu-server 1 \
       --prefilter-mode 1 \

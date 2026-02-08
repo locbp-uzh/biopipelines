@@ -1,5 +1,4 @@
-#Copyright © 2024 LOCBP @ University of Zürich
-#Distributed under MIT license
+
 """
 Convert between CSV and FASTA formats for sequence files.
 

@@ -5,10 +5,21 @@ set -e
 timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(timestamp)] $*"; }
 
+# Resolve a required folder: env var first, then biopipelines-config, else fail
+require_folder() {
+  local val="$1" name="$2" key="$3"
+  if [[ -n "$val" ]]; then echo "$val"; return; fi
+  val=$(biopipelines-config folder "$key" 2>/dev/null) && [[ -n "$val" ]] && { echo "$val"; return; }
+  echo "ERROR: $name is not set and biopipelines-config could not resolve '$key'." >&2
+  echo "Set the environment variable or configure the folder in config.yaml." >&2
+  exit 1
+}
+
 # MMseqs2 client working directories - must match server script structure
 USER=${USER:-$(whoami)}
-JOB_QUEUE_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/job_queue"
-RESULTS_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server/results"
+MMSEQS2_SHARED_FOLDER=$(require_folder "${MMSEQS2_SHARED_FOLDER:-}" "MMSEQS2_SHARED_FOLDER" "MMseqs2Server")
+JOB_QUEUE_DIR="$MMSEQS2_SHARED_FOLDER/job_queue"
+RESULTS_DIR="$MMSEQS2_SHARED_FOLDER/results"
 
 usage() {
     echo "Usage: $0 -s <sequence> [-f <fasta_file>] [-t <a3m|csv>] [-o <output_file>]"
@@ -32,7 +43,7 @@ done
 # -- status check --
 if [[ "$STATUS" -eq 1 ]]; then
   # Check servers using timestamp files (per-user)
-  MMSEQS_SERVER_DIR="/shares/locbp.chem.uzh/$USER/BioPipelines/MMseqs2Server"
+  MMSEQS_SERVER_DIR="$MMSEQS2_SHARED_FOLDER"
   GPU_TIMESTAMP="$MMSEQS_SERVER_DIR/GPU_SERVER"
   CPU_TIMESTAMP="$MMSEQS_SERVER_DIR/CPU_SERVER"
   MAX_AGE_HOURS=3

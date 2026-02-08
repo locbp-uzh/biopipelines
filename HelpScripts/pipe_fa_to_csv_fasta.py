@@ -1,5 +1,4 @@
-#Copyright © 2024 LOCBP @ University of Zürich
-#Distributed under MIT license
+
 import argparse
 
 parser = argparse.ArgumentParser(description='Makes csv files from ProteinMPNN.fa output ')

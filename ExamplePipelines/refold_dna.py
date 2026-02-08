@@ -14,20 +14,20 @@ from PipelineScripts.conformational_change import ConformationalChange
 
 with Pipeline(project="Examples",
               job="BoltzGen-Refold-DNA",
-              description="Refold of filtered designs from a BoltzGen run and DNA output"):
+              description="Refold of filtered designs from a BoltzGen run and produce optimized DNA"):
 
     Resources(gpu="any",
               time="24:00:00",
               memory="16GB")
 
     # Load sequences from previous BoltzGen run
-    final_metrics_csv = "/shares/locbp.chem.uzh/gquarg/BioPipelines/DeNovo-Gentamicin-Sensor/Gentamicin_BoltzGen_20x500designs_Filtering_001/041_BoltzGenMerge/final_ranked_designs/final_designs_metrics_100.csv"
-    final_sequences = Sequence(final_metrics_csv)
-    DNAEncoder(final_sequences, organism="EC") # Generate DNA sequences
+    final_metrics_csv = "/path/to/final_designs_metrics_100.csv"
+    final_sequences = Sequence(final_metrics_csv) # extracts columns id, sequence
+    DNAEncoder(final_sequences, organism="EC") # Generate DNA sequences optimized for both expression (E coli) and synthesis
 
     # Load previous results table (BoltzGen metrics with partial MSA)
-    boltzgen_data = Table(final_metrics_csv) # we load it again as a table with all the data. When doing Sequence(table path) we only extract id and sequence, and generate a DataStream
-    ligand = Ligand("gentamicin")
+    boltzgen_data = Table(final_metrics_csv) # we load it again as a table with all the data, not just id and sequence, so we can use it in Panda
+    ligand = Ligand("dopamine")
 
     # Refold with full MSA: apo and holo
     boltz_apo  = Boltz2(proteins=final_sequences)

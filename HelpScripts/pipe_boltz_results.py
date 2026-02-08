@@ -1,5 +1,4 @@
-#Copyright © 2024 LOCBP @ University of Zürich
-#Distributed under MIT license
+
 """
 Script used by Boltz to rearrange all the outputs in one place and give a table for ranking
 

@@ -178,11 +178,15 @@ class BaseConfig(ABC):
                 )
             env_name = self.environments[index]
 
+        config_manager = ConfigManager()
+        shell_hook = config_manager.get_shell_hook_command()
+        activate_cmd = config_manager.get_activate_command(env_name)
+
         return f"""# Activate environment: {env_name}
 echo "=== Activating Environment ==="
 echo "Requested: {env_name}"
-eval "$(mamba shell hook --shell bash)"
-mamba activate {env_name}
+{shell_hook}
+{activate_cmd}
 echo "Environment: $CONDA_DEFAULT_ENV"
 echo "Location: $CONDA_PREFIX"
 echo "Python: $(which python)"

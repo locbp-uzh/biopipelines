@@ -7,14 +7,14 @@ from PipelineScripts.load import LoadOutput
 from PipelineScripts.boltzgen import BoltzGenMerge, BoltzGen
 
 with Pipeline(project="Examples",
-            job="Gentamicin_BoltzGen_10x1000designs_Filtering",
-            description="BoltzGen-based de novo protein binder design against gentamicin - analysis and filtering"):   
-    Dependencies([str(n) for n in range(517802,517812)])
+            job="Dopamine_BoltzGen_10x1000designs_AnalysisFiltering",
+            description="BoltzGen-based de novo protein binder design against dopamine - analysis and filtering"):   
+    Dependencies([str(n) for n in range(FIRST_JOB_ID,FIRST_JOB_ID+10)])
     Resources(gpu="any",time="24:00:00", memory="64GB")
     # Load results from 10 parallel batches
     boltzgens=[]
     for i in range(1,11):
-        jsonpath=f"/shares/locbp.chem.uzh/$USER/BioPipelines/Examples/Gentamicin_BoltzGen_1000designs_{i:03d}/ToolOutputs/002_BoltzGen.json"
+        jsonpath=f"/path/to/Dopamine_BoltzGen_1000designs_{i:03d}/ToolOutputs/002_BoltzGen.json"
         boltzgens.append(LoadOutput(jsonpath,validate_files=False))
     # Run analysis
     analyzed = [BoltzGen(reuse=bg1000,

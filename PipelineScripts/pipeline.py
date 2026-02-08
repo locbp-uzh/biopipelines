@@ -16,6 +16,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from .folders import FolderManager
+from .config_manager import ConfigManager
 try:
     from .base_config import BaseConfig, ToolOutput
     from .combinatorics import Bundle, Each
@@ -29,22 +30,6 @@ except ImportError:
 
 # Module-level context variable to track active pipeline for auto-registration
 _active_pipeline: contextvars.ContextVar[Optional['Pipeline']] = contextvars.ContextVar('_active_pipeline', default=None)
-
-# Email mapping for auto email functionality
-EMAILS = {
-    'rebeca': 'rebecca.andrews@uzh.ch',
-    'dkossm': 'dorothea.kossmann@chem.uzh.ch',
-    'hlaemm': 'henriette.laemmermann@chem.uzh.ch',
-    'gquarg': 'gianluca.quargnali@chem.uzh.ch',
-    'pabriv': 'pablo.riverafuentes@uzh.ch',
-    'clsonn': 'clarissa.sonnemann@chem.uzh.ch',
-    'crstev': 'craig.steven@chem.uzh.ch',
-    'rrezen': 'renata.rezendemiranda@chem.uzh.ch',
-    'qiaxu': 'qianqian.xu@chem.uzh.ch',
-    'wgoddi': 'wouter.goddijn@chem.uzh.ch',
-    'tahofm': 'tatjana.hofmann@chem.uzh.ch'
-}
-
 
 class Pipeline:
     """
@@ -427,8 +412,8 @@ class Pipeline:
             "set -e  # Exit on any error",
             "umask 002  # Make all files group-writable by default",
             "",
-            "# Initialize mamba for environment activation",
-            'eval "$(mamba shell hook --shell bash)"',
+            "# Initialize environment manager",
+            ConfigManager().get_shell_hook_command(),
             "",
             "echo Configuration",
             f"{config_script} | tee {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
@@ -512,11 +497,13 @@ class Pipeline:
         # Handle auto email detection
         if email == "auto":
             current_user = getpass.getuser()
-            if current_user in EMAILS:
-                email = EMAILS[current_user]
+            emails = ConfigManager().get_emails()
+            if current_user in emails:
+                email = emails[current_user]
                 print(f"Auto-detected email: {email} (user: {current_user})")
             else:
                 print(f"Warning: No email mapping found for user '{current_user}'. Disabling email notifications.")
+                print(f"Add your username to the 'cluster.emails' section in config.yaml.")
                 email = ""
 
         email_line = "" if email == "" else f"""
@@ -594,7 +581,7 @@ echo "GPU Type: $gpu_type"
         gpu_setup = self._generate_gpu_setup(resources["gpu"])
         additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
         dependency_line = self._generate_dependency_line(self.external_dependencies)
-        module_load = "module load miniforge3 apptainer"
+        module_load = ConfigManager().get_module_load_line()
 
         slurm_content = f"""#!/usr/bin/bash
 {gpu_line}
@@ -632,7 +619,7 @@ umask 002
 
     def _generate_multi_batch_slurm(self, email_line, num_batches):
         """Generate multiple SLURM scripts for multi-batch pipeline with <JOBID> placeholders."""
-        module_load = "module load miniforge3 apptainer"
+        module_load = ConfigManager().get_module_load_line()
 
         # Determine batch ranges
         batch_ranges = []
@@ -745,8 +732,8 @@ umask 002
             "set -e  # Exit on any error",
             "umask 002  # Make all files group-writable by default",
             "",
-            "# Initialize mamba for environment activation",
-            'eval "$(mamba shell hook --shell bash)"',
+            "# Initialize environment manager",
+            ConfigManager().get_shell_hook_command(),
             "",
             "echo Configuration",
             f"{config_script} | tee -a {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",

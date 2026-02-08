@@ -479,7 +479,7 @@ export FOUNDRY_CHECKPOINT_DIRS="{self.checkpoint_dir}"
 # Check checkpoint directory exists
 if [ ! -d "${{FOUNDRY_CHECKPOINT_DIRS}}" ]; then
     echo "ERROR: RFdiffusion3 checkpoints not found at ${{FOUNDRY_CHECKPOINT_DIRS}}"
-    echo "Please ensure checkpoints are installed at /home/$USER/data/rfdiffusion3/"
+    echo "Please ensure checkpoints are installed at ${{FOUNDRY_CHECKPOINT_DIRS}}"
     exit 1
 fi
 

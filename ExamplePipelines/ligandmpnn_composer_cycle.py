@@ -1,5 +1,5 @@
 """
-This pipeline shows how improve the difference in predicted binding affinity between open and close form of a carbocyanine 7 chloride and halotag7 starting from a Boltz model of the open form.
+This pipeline shows how improve the difference in predicted binding affinity between acetamide and triazole chloroalkanes and halotag7 starting from a Boltz model of both.
 """
 
 from PipelineScripts.pipeline import *
@@ -59,29 +59,28 @@ with Pipeline(project="Examples",
     HaloTag = Sequence("MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
                        ids="HT")
     
-    cy7_R_open = Ligand(smiles=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\C3=[N+](C)C4=C(C=CC=C4)[C@@]3(CC5=CN(CCOCCOCCCCCCCl)N=N5)CC(=O)NC",
-                         ids="Cy7_R_OPEN")
-    cy7_RR_close = Ligand(smiles=r"CC/1(C)C2=C(C=CC=C2)N(C)\C1=C\C=C\C=C\C=C\[C@]34[C@](CC5=CN(CCOCCOCCCCCCCl)N=N5)(CC(=O)N3C)C6=C(C=CC=C6)N4C",
-                          ids="Cy7_RR_CLOSE")
+    acetamide = Ligand(smiles=r"",
+                        ids="ACETAMIDE")
+    triazole  = Ligand(smiles=r"",
+                        ids="TRIAZOLE")
 
-    from PipelineScripts.load import LoadOutput
     # We need an initial prediction from Boltz to benchmark the affinities
-    original_open = Boltz2(proteins=HaloTag,
-                       ligands=cy7_R_open)
-    original_close = Boltz2(proteins=HaloTag,
-                       ligands=cy7_RR_close,
-                       msas=original_open)
+    original_acetamide = Boltz2(proteins=HaloTag,
+                       ligands=acetamide)
+    original_triazole = Boltz2(proteins=HaloTag,
+                       ligands=triazole,
+                       msas=original_acetamide)
     ## At this point, one can inspect the structure to verify the ligand atom names, and use those names for later analysis (e.g. distance or filter)
-
+"""
     # Merge original open and close affinity tables with Panda
-    # pool=best_open preserves structure files with id_map remapped IDs
+    # pool=best_acetamide preserves structure files with id_map remapped IDs
     original_analysis = Panda(
-        tables=[original_open.tables.affinity, original_close.tables.affinity],
+        tables=[original_acetamide.tables.affinity, original_triazole.tables.affinity],
         operations=[
-            Panda.merge(on="id", prefixes=["open_", "close_"], id_map={"original": [original_open.streams.structures.ids[0],original_close.streams.structures.ids[0]]}),
-            Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"})
+            Panda.merge(on="id", prefixes=["acetamide_", "triazole_"], id_map={"original": [original_acetamide.streams.structures.ids[0],original_triazole.streams.structures.ids[0]]}),
+            Panda.calculate({"affinity_delta": "acetamide_affinity_pred_value - triazole_affinity_pred_value"})
         ],
-        pool=original_open # this way we have the original open pdb file linked to the id "original". it is necessary in case the best of the first cycle(s) is that.
+        pool=original_acetamide # this way we have the original open pdb file linked to the id "original". it is necessary in case the best of the first cycle(s) is that.
     )
 
     NUM_CYCLES = 3
@@ -89,22 +88,22 @@ with Pipeline(project="Examples",
 
     # Track all analyses and pools across cycles for best selection
     all_analyses = [original_analysis]  # Start with original baseline
-    all_pools = [original_open]  # Start with original best structure
+    all_pools = [original_acetamide]  # Start with original best structure
 
-    best_open,best_close=original_open,original_close
+    best_acetamide,best_triazole=original_acetamide,original_triazole
 
 
     for CYCLE in range(NUM_CYCLES):
         Suffix(f"Cycle{CYCLE+1}")
 
-        mutation_range = "141+143+145+147-149+151-152+154+157+160-161+165+167-168+170-172+175-176+178+180+245+271"
-        lmpnn = LigandMPNN(structures=best_open,
+        mutation_range = "141+143+145+147-149+151-152+154+157+160-161+165+167-168+170-172+175-176+178+180+245+271" # se could have used DistanceSelector for a dynamic choise
+        lmpnn = LigandMPNN(structures=best_acetamide,
                           ligand="LIG",  # LIG is the ligand name from Boltz
                           num_sequences=1000,
                           batch_size=25,
                           redesigned=mutation_range)
 
-        profiler = MutationProfiler(original=best_open,
+        profiler = MutationProfiler(original=best_acetamide,
                                     mutants=lmpnn)
         composer = MutationComposer(frequencies=profiler.tables.absolute_frequencies,
                                     num_sequences=3,
@@ -113,53 +112,53 @@ with Pipeline(project="Examples",
 
         unique_new_sequences,all_sequences_seen=drop_duplicates_history(composer,all_sequences_seen)
         
-        boltz_holo_open = Boltz2(proteins=unique_new_sequences,
-                                 ligands=cy7_R_open)
-        boltz_holo_close = Boltz2(proteins=unique_new_sequences,
-                                  ligands=cy7_RR_close,
-                                  msas=boltz_holo_open)
+        boltz_holo_acetamide = Boltz2(proteins=unique_new_sequences,
+                                 ligands=acetamide)
+        boltz_holo_triazole = Boltz2(proteins=unique_new_sequences,
+                                  ligands=triazole,
+                                  msas=boltz_holo_acetamide)
 
-        open_chlorine_aspartate_distance = Distance(structures=boltz_holo_open,
+        acetamide_chlorine_aspartate_distance = Distance(structures=boltz_holo_acetamide,
                                                                residue='D in IHDWG',
                                                                atom='LIG.Cl',
-                                                               metric_name='open_chlorine_distance')
-        open_cap_aspartate_distance = Distance(structures=boltz_holo_open,
+                                                               metric_name='acetamide_chlorine_distance')
+        acetamide_cap_aspartate_distance = Distance(structures=boltz_holo_acetamide,
                                                           residue='D in IHDWG',
                                                           atom='LIG.N88',
-                                                          metric_name='open_cap_distance')
+                                                          metric_name='acetamide_cap_distance')
 
         # Merge all metrics with Panda
         current_analysis_filtered = Panda(
-            tables=[boltz_holo_open.tables.affinity,
-                    boltz_holo_close.tables.affinity,
-                    open_chlorine_aspartate_distance.tables.distances,
-                    open_cap_aspartate_distance.tables.distances],
+            tables=[boltz_holo_acetamide.tables.affinity,
+                    boltz_holo_triazole.tables.affinity,
+                    acetamide_chlorine_aspartate_distance.tables.distances,
+                    acetamide_cap_aspartate_distance.tables.distances],
             operations=[
-                Panda.merge(on="id", prefixes=["open_", "close_", "", ""]),
-                Panda.calculate({"affinity_delta": "open_affinity_pred_value - close_affinity_pred_value"}),
-                Panda.filter("open_chlorine_distance < 5.0 and open_cap_distance > 10.0")
+                Panda.merge(on="id", prefixes=["acetamide_", "triazole_", "", ""]),
+                Panda.calculate({"affinity_delta": "acetamide_affinity_pred_value - triazole_affinity_pred_value"}),
+                Panda.filter("acetamide_chlorine_distance < 5.0 and acetamide_cap_distance > 10.0")
             ]
         )
 
         # Add current cycle results to the arrays
-        all_pools.append(boltz_holo_open)
+        all_pools.append(boltz_holo_acetamide)
         all_analyses.append(current_analysis_filtered)
 
         # Select best structure across all cycles using Panda with multi-pool support
-        best_open = Panda(
+        best_acetamide = Panda(
             tables=[x.tables.result for x in all_analyses],
             operations=[
                 Panda.concat(fill="",add_source=True),  # source_table column tracks which pool
-                Panda.sort("open_affinity_pred_value", ascending=True),  # min = ascending
+                Panda.sort("acetamide_affinity_pred_value", ascending=True),  # min = ascending
                 Panda.head(1)
             ],
             pool=[pool for pool in all_pools],  # Multiple pools matching tables
             rename=f"{CYCLE+1}_best"
         )
 
-    """
-    Some plotting
-    """
+
+    #Some plotting
+
 
     # Concatenate all cycle results and compute averages using Panda
     all_result_tables = [x.tables.result for x in all_analyses]
@@ -188,8 +187,8 @@ with Pipeline(project="Examples",
         # Scatter: open vs close affinity
         Plot.Scatter(
             data=combined_results.tables.result,
-            x="open_affinity_pred_value",
-            y="close_affinity_pred_value",
+            x="acetamide_affinity_pred_value",
+            y="triazole_affinity_pred_value",
             color="source_table",
             title="Open vs Close Affinity by Cycle",
             xlabel="Open Affinity",
@@ -199,7 +198,7 @@ with Pipeline(project="Examples",
         # Scatter: chlorine distance vs affinity delta
         Plot.Scatter(
             data=combined_results.tables.result,
-            x="open_chlorine_distance",
+            x="acetamide_chlorine_distance",
             y="affinity_delta",
             title="Chlorine-Aspartate Distance vs Affinity Delta",
             xlabel="Cl-Asp Distance (Å)",
@@ -211,8 +210,8 @@ with Pipeline(project="Examples",
     # We see the sequence alignment against the original protein with PyMOL
     PyMOL(
         PyMOL.ColorAlign(
-            reference=original_open,
-            targets=best_open
+            reference=original_acetamide,
+            targets=best_acetamide
         )
     )
-
+"""

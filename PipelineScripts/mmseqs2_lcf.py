@@ -9,8 +9,6 @@ Key differences from standard MMseqs2:
 - Searches both UniRef30 and ColabFoldDB for more comprehensive MSAs
 - Outputs A3M format (native to ColabFold)
 - Requires localcolabfold installation with databases
-
-sbatch --mem=8GB --time=7-00:00:00 --wrap='export PATH="/home/gquarg/data/mmseqs/bin:$PATH" && GPU=1 /home/gquarg/setup_databases.sh /shares/locbp.chem.uzh/models/colabfold_databases'
 """
 
 import os
@@ -302,7 +300,7 @@ class MMseqs2ServerLCF(BaseConfig):
 
     # Lazy path descriptors
     server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "_mmseqs2_lcf_server_gpu.sh"))
-    shared_server_folder = Path(lambda self: self._get_shared_server_folder())
+    shared_server_folder = Path(lambda self: self.folders.get("MMseqs2LCFServer", ""))
 
     def __init__(self,
                  threads: int = None,
@@ -329,11 +327,6 @@ class MMseqs2ServerLCF(BaseConfig):
             kwargs['resources'] = mode_resources
 
         super().__init__(**kwargs)
-
-    def _get_shared_server_folder(self) -> str:
-        """Get shared persistent folder for MMseqs2ServerLCF queue and results."""
-        user = os.environ.get('USER', os.environ.get('USERNAME', 'unknown'))
-        return f"/shares/locbp.chem.uzh/{user}/BioPipelines/MMseqs2LCFServer"
 
     def validate_params(self):
         """Validate MMseqs2ServerLCF-specific parameters."""
@@ -397,6 +390,8 @@ class MMseqs2ServerLCF(BaseConfig):
             f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
             f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log",
             f"export COLABFOLD_DB_DIR={self.folders.get('ColabFoldDatabases', '')}",
+            f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}",
+            f"export BIOPIPELINES_ALPHAFOLD_DIR={self.folders.get('AlphaFold', '')}",
             "export CUDA_VISIBLE_DEVICES=0",
             "export CUDA_CACHE_MAXSIZE=2147483648",
             "export CUDA_CACHE_DISABLE=0"

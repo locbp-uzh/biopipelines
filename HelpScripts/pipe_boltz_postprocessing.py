@@ -1,5 +1,4 @@
-#Copyright © 2024 LOCBP @ University of Zürich
-#Distributed under MIT license
+
 """
 Script used by Boltz2 pipeline to post-process and rename outputs based on sequence IDs
 Simplified version of boltz_results.py with standard parameters
