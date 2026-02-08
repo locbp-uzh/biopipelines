@@ -136,17 +136,7 @@ cluster:
   # Used by SLURM submissions with email="auto"
   # Add your username and email here for automatic SLURM notifications
   emails:
-    rebeca: "rebecca.andrews@uzh.ch"
-    dkossm: "dorothea.kossmann@chem.uzh.ch"
-    hlaemm: "henriette.laemmermann@chem.uzh.ch"
     gquarg: "gianluca.quargnali@chem.uzh.ch"
-    pabriv: "pablo.riverafuentes@uzh.ch"
-    clsonn: "clarissa.sonnemann@chem.uzh.ch"
-    crstev: "craig.steven@chem.uzh.ch"
-    rrezen: "renata.rezendemiranda@chem.uzh.ch"
-    qiaxu: "qianqian.xu@chem.uzh.ch"
-    wgoddi: "wouter.goddijn@chem.uzh.ch"
-    tahofm: "tatjana.hofmann@chem.uzh.ch"
 
   # Environment manager: "mamba" or "conda"
   # Controls shell hook initialization and environment activation commands
