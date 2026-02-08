@@ -59,9 +59,9 @@ with Pipeline(project="Examples",
     HaloTag = Sequence("MAEIGTGFPFDPHYVEVLGERMHYVDVGPRDGTPVLFLHGNPTSSYVWRNIIPHVAPTHRCIAPDLIGMGKSDKPDLGYFFDDHVRFMDAFIEALGLEEVVLVIHDWGSALGFHWAKRNPERVKGIAFMEFIRPIPTWDEWPEFARETFQAFRTTDVGRKLIIDQNVFIEGTLPMGVVRPLTEVEMDHYREPFLNPVDREPLWRFPNELPIAGEPANIVALVEEYMDWLHQSPVPKLLFWGTPGVLIPPAEAARLAKSLPNCKAVDIGPGLNLLQEDNPDLIGSEIARWLSTLEISG",
                        ids="HT")
     
-    acetamide = Ligand(smiles=r"",
+    acetamide = Ligand(smiles=r"ClCCCCCCOCCOCCNC(C)=O",
                         ids="ACETAMIDE")
-    triazole  = Ligand(smiles=r"",
+    triazole  = Ligand(smiles=r"ClCCCCCCOCCOCCN1C=C(C)N=N1",
                         ids="TRIAZOLE")
 
     # We need an initial prediction from Boltz to benchmark the affinities
