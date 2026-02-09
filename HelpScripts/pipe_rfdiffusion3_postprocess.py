@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 # Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
 #
-# This software is freely available for use, modification, and redistribution.
-# If you use this software or any derivative of it in published work,
-# you must cite the original author and this repository.
+# Licensed under the MIT License. See LICENSE file in the project root for details.
+
 """
 Post-processing script for RFdiffusion3 outputs.
 
