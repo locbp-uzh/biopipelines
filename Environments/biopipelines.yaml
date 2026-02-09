@@ -1,6 +1,7 @@
 # BioPipelines base environment
-# Version: 1.1
+# Version: 1.2
 # Changes:
+#   1.2 - Added ipykernel for Jupyter usage
 #   1.1 - Added rdkit and openbabel for molecule handling
 #   1.0 - Initial version with pandas, numpy, pyyaml, requests, biopython
 name: biopipelines
@@ -18,5 +19,5 @@ dependencies:
   - biopython
   - rdkit
   - openbabel  
-
+  - ipykernel
 

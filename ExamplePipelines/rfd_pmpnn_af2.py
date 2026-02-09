@@ -3,7 +3,7 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-This pipeline shows how to run RFdiffusion-AllAtom, generate sequences far from the ligand with ProteinMPNN and close with LigandMPNN, obtain alignments with MMseqs2 and fold the sequences with Boltz2.
+This pipeline shows how to run RFdiffusion, generate sequences with ProteinMPNN, and fold the sequences with Boltz2.
 """
 
 from PipelineScripts.pipeline import *

@@ -47,7 +47,7 @@ with Pipeline(project="Examples",
 
 ## Installation
 
-Login to your cluster via terminal or the website ([S3IT Apps](https://apps.s3it.uzh.ch) > Clusters > Shell access). In your home directory, clone the repository and set up the environment:
+Clone the repository and set up the environment:
 
 ```bash
 # 1. Clone the repository
@@ -60,16 +60,6 @@ mamba env create -f Environments/biopipelines.yaml
 mamba activate biopipelines
 
 # 3. Install the package (editable mode, so updates via git pull take effect immediately)
-pip install -e .
-```
-
-After installation, `from PipelineScripts.pipeline import *` works from any directory.
-
-To update an existing installation after `git pull`:
-```bash
-module load miniforge3
-mamba activate biopipelines
-mamba env update -n biopipelines -f Environments/biopipelines.yaml --prune
 pip install -e .
 ```
 
@@ -111,7 +101,7 @@ mpnn = ProteinMPNN(structures=rfd, num_sequences=2)
 
 ### Entity Types
 
-Basic input types can be imported conveniently from `PipelineScripts/entities.py`:
+Basic input types can be imported from `PipelineScripts/entities.py`. Importantly, for models having entities such as PDB structures, proteins sequences or ligand smiles as parameters, we always pass an entity object rather than a string to ensure representation adherence across the repository.
 
 | Entity | Purpose |
 |--------|---------|

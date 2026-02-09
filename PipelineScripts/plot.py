@@ -522,10 +522,19 @@ python "{self.plot_py}" --config "{self.config_file}"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files."""
         # Generate plot filenames
+        plot_ids = []
         plot_files = []
         for i, op in enumerate(self.operations):
+            plot_ids.append(f"plot_{i + 1}")
             filename = self._generate_plot_filename(op, i)
             plot_files.append(os.path.join(self.output_folder, filename))
+
+        plots_stream = DataStream(
+            name="plots",
+            ids=plot_ids,
+            files=plot_files,
+            format="png"
+        )
 
         tables = {
             "metadata": TableInfo(
@@ -541,9 +550,9 @@ python "{self.plot_py}" --config "{self.config_file}"
             "structures": DataStream.empty("structures", "pdb"),
             "sequences": DataStream.empty("sequences", "fasta"),
             "compounds": DataStream.empty("compounds", "sdf"),
+            "plots": plots_stream,
             "tables": tables,
             "output_folder": self.output_folder,
-            "plots": plot_files
         }
 
     def get_config_display(self) -> List[str]:

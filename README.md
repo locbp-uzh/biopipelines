@@ -29,8 +29,8 @@ with Pipeline(project="Examples",
 
 Check out the following resources for a detailed explanation of it.
 
-- **[User Manual](Docs/UserManual.md)** - Complete usage guide
-- **[Tool Reference](Docs/ToolReference.md)** - Complete usage guide
-- **[Examples](ExamplePipelines/)** - Pipeline examples
-- **[Developer Manual](DocsDeveloperManual.md)** - Complete usage guide with tool reference
+- **[User Manual](Docs/UserManual.md)**
+- **[Tool Reference](Docs/ToolReference.md)**
+- **[Examples](ExamplePipelines/)**
+- **[Developer Manual](DocsDeveloperManual.md)**
 
