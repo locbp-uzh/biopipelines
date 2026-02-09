@@ -72,7 +72,7 @@ with Pipeline(project="Examples",
                        ligands=amp,
                        msas=boltz_apo)
     boltz_adp = Boltz2(proteins=sequences,
-                       ligands=Bundle(adp,adp), #put together two copies of adp, get affinity against the first one
+                       ligands=adp, 
                        msas=boltz_apo)
 
 
