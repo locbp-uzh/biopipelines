@@ -23,7 +23,7 @@
 
 BioPipelines is a Python framework for writing bioinformatics workflows that  encompasses bash and script orchestration and slurm submission. It does not execute computations directly - instead, it predicts the filesystem structure and creates scripts that will be executed on SLURM clusters. 
 
-BioPipelines was designed to maximize pipeline elegance and conciseness, while minimizing the learning curve, as shown in the following example:
+BioPipelines was designed to maximize pipeline elegance and conciseness, as shown in the following example:
 
 ```python
 #imports omitted
