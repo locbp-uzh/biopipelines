@@ -4,12 +4,26 @@
 
 A Python framework for automated computational protein design workflows that generates SLURM-executable bash scripts for high-performance computing clusters. BioPipelines creates modular, reproducible workflows by connecting bioinformatics tools through standardized interfaces. 
 
-## Installation
+## Example pipeline
 
-```bash
-git clone https://gitlab.uzh.ch/locbp/public/biopipelines
+PDB download -> RFdiffusion -> ProteinMPNN -> AlphaFold
+
+```python
+#imports omitted
+with Pipeline(project="Examples",
+              job="RFD-ProteinMPNN-AlphaFold2",
+              description="Redesign of N terminus domain of lysozyme"):
+    Resources(gpu="A100", 
+              time="4:00:00",
+              memory="16GB")
+    lysozyme = PDB("168L")
+    rfd = RFdiffusion(pdb=lysozyme,
+                        contigs='50-70/A81-140', #redesign N terminus
+                        num_designs=3)
+    pmpnn = ProteinMPNN(structures=rfd, 
+                      num_sequences=2)
+    af = AlphaFold(proteins=pmpnn)
 ```
-Specific environments for using the tools have to be installed separately.
 
 ## More info
 

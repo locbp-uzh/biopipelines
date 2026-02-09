@@ -12,6 +12,7 @@
   - [Combinatorics: Bundle and Each](#combinatorics-bundle-and-each)
   - [Table Column References](#table-column-references)
 - [Resources](#resources)
+- [On-the-fly Execution](#on-the-fly-execution)
 - [Job Submission](#job-submission)
 - [Data Management with Panda](#data-management-with-panda)
 - [Filesystem Structure](#filesystem-structure)
@@ -23,7 +24,7 @@
 
 BioPipelines is a Python framework for writing bioinformatics workflows that  encompasses bash and script orchestration and slurm submission. It does not execute computations directly - instead, it predicts the filesystem structure and creates scripts that will be executed on SLURM clusters. 
 
-BioPipelines was designed to maximize pipeline elegance and conciseness, as shown in the following example:
+BioPipelines was designed to maximize pipeline clarity and conciseness, as shown in the following example:
 
 ```python
 #imports omitted
@@ -318,6 +319,34 @@ with Pipeline("Project", "Job", "Description"):
     Resources(time="2:00:00")                # Batch 2 (waits for Batch 1)
     tool2 = Panda(...)
 ```
+
+---
+
+## On-the-fly Execution
+
+For interactive prototyping in Jupyter notebooks or running locally with plain Python, use `on_the_fly=True`. Each tool's bash script is executed immediately when the tool is added, so you see results step by step:
+
+```python
+with Pipeline("Examples", "interactive_test",
+              description="Quick test run",
+              on_the_fly=True):
+    lysozyme = PDB("168L")
+    rfd = RFdiffusion(pdb=lysozyme,
+                      contigs='50-70/A81-140',
+                      num_designs=3)
+    # rfd has already finished running at this point
+    pmpnn = ProteinMPNN(structures=rfd, num_sequences=2)
+    # pmpnn has already finished running at this point
+```
+
+Key differences from normal mode:
+- `Resources()` is **optional** (no SLURM resources needed for local execution)
+- Tools run sequentially as they are added — each tool finishes before the next one starts
+- stdout/stderr is streamed in real-time (visible in notebooks and terminals)
+- SLURM submission is skipped on context exit
+- The completion check mechanism is preserved, so re-running a notebook skips already-completed steps
+
+You can still call `Resources()` if you want to (it will be accepted but ignored for execution purposes).
 
 ---
 

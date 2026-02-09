@@ -10,10 +10,12 @@ and script generation for protein modeling pipelines.
 """
 
 import os
+import sys
 import json
 import getpass
 import inspect
 import shutil
+import subprocess
 import contextvars
 from typing import Dict, List, Any, Optional, Union
 from collections import defaultdict
@@ -43,7 +45,7 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, project: str, job: str, description: str="Description missing", debug: bool=False):
+    def __init__(self, project: str, job: str, description: str="Description missing", debug: bool=False, on_the_fly: bool=False):
         """
         Initialize a new pipeline instance.
 
@@ -52,6 +54,9 @@ class Pipeline:
             job: Name of the specific job (a unique numeric id NNN will be appended to it) (used for output folders)
             description: Optional description of what this job does
             debug: If True, runs in debug mode without creating folders (to test locally)
+            on_the_fly: If True, each tool's script is executed immediately when added.
+                        Useful for interactive use in Jupyter notebooks or running locally
+                        with plain Python. Skips SLURM submission on exit.
         """
         if ' ' in job: job=job.replace(' ','_') #It will create issues at runtime otherwise
 
@@ -59,6 +64,7 @@ class Pipeline:
         self.job = job
         self.description = description
         self.debug = debug
+        self.on_the_fly = on_the_fly
 
         self.folder_manager = FolderManager(project, job, debug)
         self.folders = self.folder_manager.get_folders()
@@ -124,8 +130,11 @@ class Pipeline:
         """
         try:
             # Only auto-submit if no exception and Save() wasn't explicitly called
-            if exc_type is None and not self._explicit_save_called:
+            if exc_type is None and not self._explicit_save_called and not self.on_the_fly:
                 self.slurm()
+            elif exc_type is None and self.on_the_fly:
+                print(f"\nPipeline completed (on_the_fly mode)")
+                print(f"Results in: {self.folders['output']}")
         finally:
             # Always clear the active pipeline context
             _active_pipeline.set(None)
@@ -231,11 +240,15 @@ class Pipeline:
             ToolOutput object for the registered tool
         """
         # Ensure Resources() has been called before adding tools
+        # In on_the_fly mode, auto-initialize resources if not set
         if self.current_batch == -1:
-            raise RuntimeError(
-                "Resources() must be called before adding tools. "
-                "Use: with Pipeline(...): Resources(...); tool = Tool(...)"
-            )
+            if self.on_the_fly:
+                self.resources()
+            else:
+                raise RuntimeError(
+                    "Resources() must be called before adding tools. "
+                    "Use: with Pipeline(...): Resources(...); tool = Tool(...)"
+                )
 
         # Merge current batch resources with tool resources
         current_resources = self.batch_resources[self.current_batch]
@@ -275,7 +288,70 @@ class Pipeline:
 
         self.tool_outputs.append(tool_output)
 
+        # On-the-fly execution: generate and run the tool's script immediately
+        if self.on_the_fly:
+            self._execute_tool_on_the_fly(tool_config)
+
         return tool_output
+
+    def _execute_tool_on_the_fly(self, tool_config: BaseConfig):
+        """
+        Generate and immediately execute a tool's bash script.
+
+        Called during on_the_fly mode after a tool is registered. Streams
+        stdout/stderr in real-time so output is visible in notebooks and terminals.
+
+        Args:
+            tool_config: The tool to execute
+
+        Raises:
+            RuntimeError: If the tool's script exits with a non-zero code
+        """
+        step_idx = self.execution_order
+        if hasattr(tool_config, 'suffix') and tool_config.suffix:
+            tool_script_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}_{tool_config.suffix}.sh"
+            log_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}_{tool_config.suffix}.log"
+        else:
+            tool_script_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}.sh"
+            log_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}.log"
+
+        tool_script_path = os.path.join(self.folders["runtime"], tool_script_name)
+        log_path = os.path.join(self.folders["logs"], log_name)
+
+        # Generate the tool script
+        script_content = tool_config.generate_script(tool_script_path)
+        with open(tool_script_path, 'w') as f:
+            f.write(script_content)
+        os.chmod(tool_script_path, 0o755)
+
+        print(f"\n{'='*60}")
+        print(f"Running {tool_config.TOOL_NAME} (step {step_idx})")
+        print(f"{'='*60}")
+
+        # Execute the script, streaming output in real-time
+        with open(log_path, 'w') as log_file:
+            process = subprocess.Popen(
+                ['bash', '-e', tool_script_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1  # Line-buffered
+            )
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                log_file.write(line)
+            process.wait()
+
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"{tool_config.TOOL_NAME} failed with exit code {process.returncode}. "
+                f"See log: {log_path}"
+            )
+
+        print(f"{'='*60}")
+        print(f"{tool_config.TOOL_NAME} completed successfully")
+        print(f"{'='*60}\n")
 
     def validate_pipeline(self, debug) -> bool:
         """
