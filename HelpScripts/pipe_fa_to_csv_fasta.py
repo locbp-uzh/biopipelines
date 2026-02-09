@@ -14,12 +14,19 @@ parser.add_argument('-d', '--duplicates', action='store_true',
                     help='Allow duplicate sequences in output')
 parser.add_argument('--id-map', type=str, default=None,
                     help='Path to JSON file mapping PDB basenames to stream IDs')
+parser.add_argument('--missing-csv', type=str, default=None,
+                    help='Path to write missing.csv for removed duplicates')
+parser.add_argument('--step-tool-name', type=str, default=None,
+                    help='Step and tool name for missing.csv removed_by column (e.g. 005_ProteinMPNN)')
+parser.add_argument('--upstream-missing', type=str, default=None,
+                    help='Path to upstream missing.csv to propagate')
 
 # Parse the arguments
 args = parser.parse_args()
 
 import os
 import json
+import pandas as pd
 
 # Load optional ID map
 id_map = None
@@ -28,7 +35,8 @@ if args.id_map and os.path.exists(args.id_map):
         id_map = json.load(f)
 
 fa_files = os.listdir(args.FA_FOLDER)
-old_sequences = []
+seen_sequences = {}  # sequence -> first_seen_id
+duplicate_entries = []  # list of {id, removed_by, cause} dicts
 for fa in fa_files:
     if fa.endswith(".fa"):
         data = []
@@ -41,7 +49,7 @@ for fa in fa_files:
                 seq_data["sequence"] = lines[i+1]
                 params = lines[i][1:].split(", ")
                 for p in params:
-                    if not '=' in p: 
+                    if not '=' in p:
                         continue
                     key,value = p.split("=")
                     if key == 'id': key = 'sample' #ligandmpnn is structured differently from proteinmpnn
@@ -49,15 +57,22 @@ for fa in fa_files:
                 pdb_base = fa[:-3]
                 mapped_base = id_map.get(pdb_base, pdb_base) if id_map else pdb_base
                 seq_data["id"] = mapped_base + "_" + seq_data["sample"]
-                if seq_data["sequence"] in old_sequences:
+                if seq_data["sequence"] in seen_sequences:
                     if args.duplicates:
                         data.append(seq_data)
-                        old_sequences.append(seq_data["sequence"])
+                        # Don't update seen_sequences - keep first
                     else:
+                        kept_id = seen_sequences[seq_data["sequence"]]
                         print(f"Skipped duplicate: {seq_data['id']}")
+                        if args.step_tool_name:
+                            duplicate_entries.append({
+                                'id': seq_data['id'],
+                                'removed_by': args.step_tool_name,
+                                'cause': f"Duplicate of {kept_id}"
+                            })
                 else:
+                    seen_sequences[seq_data["sequence"]] = seq_data["id"]
                     data.append(seq_data)
-                    old_sequences.append(seq_data["sequence"])
         if len(data) == 0: continue
         #Update CSV
         old_data = []
@@ -93,3 +108,24 @@ for fa in fa_files:
                 queries.write(seq_data["id"])
                 queries.write('\n')
                 queries.write(seq_data["sequence"])
+
+# Write missing.csv if requested
+if args.missing_csv:
+    # Load upstream missing entries if provided
+    upstream_rows = []
+    if args.upstream_missing and os.path.exists(args.upstream_missing):
+        try:
+            upstream_df = pd.read_csv(args.upstream_missing)
+            if not upstream_df.empty:
+                upstream_rows = upstream_df.to_dict('records')
+                print(f"Loaded {len(upstream_rows)} upstream missing entries")
+        except Exception as e:
+            print(f"Warning: Could not read upstream missing.csv: {e}")
+
+    all_missing = upstream_rows + duplicate_entries
+    if all_missing:
+        missing_df = pd.DataFrame(all_missing)
+    else:
+        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+    missing_df.to_csv(args.missing_csv, index=False)
+    print(f"Created missing.csv with {len(duplicate_entries)} duplicates, {len(upstream_rows)} upstream entries")

@@ -30,34 +30,31 @@ def check_file_exists(file_path: str) -> bool:
     """
     return os.path.exists(file_path) and (os.path.isfile(file_path) or os.path.isdir(file_path))
 
-def load_expected_missing_files(missing_csv_path: str) -> List[str]:
+def load_expected_missing_ids(missing_csv_path: str) -> List[str]:
     """
-    Load expected missing files from missing CSV file if it exists.
-    
+    Load expected missing IDs from missing CSV file if it exists.
+
     Args:
         missing_csv_path: Path to the missing CSV file
-        
+
     Returns:
-        List of file paths that are expected to be missing
+        List of IDs that are expected to be missing
     """
-    expected_missing = []
-    
+    missing_ids = []
+
     if os.path.exists(missing_csv_path):
         try:
             import pandas as pd
             df = pd.read_csv(missing_csv_path)
-            
-            # Extract all file paths from non-id columns
-            for col in df.columns:
-                if col != 'id':
-                    file_paths = df[col].dropna().tolist()
-                    expected_missing.extend(file_paths)
-                    
-            print(f"Found {len(expected_missing)} files expected to be missing from {os.path.basename(missing_csv_path)}")
+
+            if 'id' in df.columns:
+                missing_ids = df['id'].astype(str).tolist()
+
+            print(f"Found {len(missing_ids)} IDs expected to be missing from {os.path.basename(missing_csv_path)}")
         except Exception as e:
             print(f"Warning: Could not read {os.path.basename(missing_csv_path)}: {e}")
-    
-    return expected_missing
+
+    return missing_ids
 
 def check_files_exist(file_list: List[str]) -> tuple[bool, List[str]]:
     """
@@ -190,18 +187,27 @@ def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any],
                     else:
                         missing_csv_path = str(missing_info)
             
-            # Load expected missing files from missing CSV (if path found)
-            expected_missing = []
+            # Load expected missing IDs from missing CSV (if path found)
+            missing_ids = []
             if missing_csv_path:
-                expected_missing = load_expected_missing_files(missing_csv_path)
+                missing_ids = load_expected_missing_ids(missing_csv_path)
             else:
                 print("Warning: No missing CSV path found in expected outputs - cannot determine expected missing files")
-            
+
+            # Build set of expected-missing files by matching IDs to content file basenames
+            expected_missing_files = set()
+            for f in content_files:
+                basename = os.path.splitext(os.path.basename(f))[0]
+                for mid in missing_ids:
+                    if mid == basename or basename.startswith(f"{mid}_") or basename.startswith(f"{mid}-"):
+                        expected_missing_files.add(f)
+                        break
+
             exists, missing = check_files_exist(content_files)
             if not exists:
                 # Filter out expected missing files
-                unexpected_missing = [f for f in missing if f not in expected_missing]
-                expected_missing_found = [f for f in missing if f in expected_missing]
+                unexpected_missing = [f for f in missing if f not in expected_missing_files]
+                expected_missing_found = [f for f in missing if f in expected_missing_files]
                 
                 if unexpected_missing:
                     warnings_by_category['content'] = unexpected_missing

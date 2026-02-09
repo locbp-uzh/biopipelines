@@ -62,6 +62,7 @@ class StitchSequences(BaseConfig):
 
     # Lazy path descriptors
     sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "stitch_config.json"))
     helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_stitch_sequences.py"))
 
@@ -344,13 +345,38 @@ class StitchSequences(BaseConfig):
         """Generate StitchSequences execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
+        step_tool_name = os.path.basename(self.output_folder)
+
+        # Collect upstream missing tables from all input sources
+        # (template, substitutions, indels)
+        all_sources = []
+        if self.template_stream:
+            all_sources.append(self.template_stream)
+        for options in self.substitutions.values():
+            if options is not None:
+                all_sources.append(options)
+        for options in self.indels.values():
+            if options is not None:
+                all_sources.append(options)
+
+        upstream_missing_paths = []
+        seen_paths = set()
+        for source in all_sources:
+            path = self._get_upstream_missing_table_path(source)
+            if path and path not in seen_paths:
+                upstream_missing_paths.append(path)
+                seen_paths.add(path)
+
         config_data = {
             "template": self.template_info,
             "substitutions": self.substitution_infos,
             "indels": self.indel_infos,
             "id_map": self.id_map,
             "remove_duplicates": self.remove_duplicates,
-            "output_csv": self.sequences_csv
+            "output_csv": self.sequences_csv,
+            "missing_csv": self.missing_csv,
+            "step_tool_name": step_tool_name,
+            "upstream_missing_paths": upstream_missing_paths
         }
 
         with open(self.config_file, 'w') as f:
@@ -402,6 +428,13 @@ fi
                 columns=["id", "sequence"],
                 description="Stitched sequences with segment substitutions",
                 count=len(predicted_ids)
+            ),
+            "missing": TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed (duplicates or upstream) with removal reason",
+                count="variable"
             )
         }
 

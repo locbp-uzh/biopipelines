@@ -40,6 +40,8 @@ class ProteinMPNN(BaseConfig):
     structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
     id_map_json = Path(lambda self: os.path.join(self.output_folder, ".pdb_to_stream_id_map.json"))
 
+    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+
     # Helper scripts
     fixed_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_fixed_positions.py"))
     table_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_table.py"))
@@ -207,11 +209,19 @@ python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_j
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
         duplicates_flag = " --duplicates" if not self.remove_duplicates else ""
+        step_tool_name = os.path.basename(self.output_folder)
+
+        # Check for upstream missing table
+        upstream_missing_path = self._get_upstream_missing_table_path(
+            self.structures_stream
+        )
+        upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
+
         return f"""echo "Creating results table and queries files"
 python {self.table_py} {self.seqs_folder} {self.pipeline_name} "-" {self.main_table}
 
 echo "Creating queries CSV and FASTA from results table"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}{duplicates_flag}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}{duplicates_flag} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 
 """
 
@@ -257,6 +267,13 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery"],
                 description="ProteinMPNN sequence results",
                 count=len(sequence_ids)
+            ),
+            "missing": TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed (duplicates or upstream) with removal reason",
+                count="variable"
             )
         }
 

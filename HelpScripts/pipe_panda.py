@@ -543,7 +543,8 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
 
 
 def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
-                       output_folder: str) -> None:
+                       output_folder: str, step_tool_name: str,
+                       operations: List[Dict[str, Any]]) -> None:
     """
     Create missing.csv with IDs that were filtered out.
 
@@ -551,23 +552,34 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
         original_ids: All original IDs
         filtered_ids: IDs that passed filtering
         output_folder: Output folder for missing.csv
+        step_tool_name: Step and tool name (e.g. "005_Panda")
+        operations: List of operation dicts from config
     """
     all_ids = set(str(i) for i in original_ids)
     passed_ids = set(str(i) for i in filtered_ids)
     missing_ids = list(all_ids - passed_ids)
 
-    if not missing_ids:
-        missing_df = pd.DataFrame(columns=['id', 'structure', 'msa'])
+    # Build cause from operations
+    filter_exprs = [op['params']['expr'] for op in operations
+                    if op.get('type') == 'filter' and 'params' in op and 'expr' in op['params']]
+    if filter_exprs:
+        cause = "Filtered by: " + ", ".join(filter_exprs)
     else:
-        missing_data = []
-        for missing_id in missing_ids:
-            structure_path = os.path.join(output_folder, f"{missing_id}.pdb")
-            msa_path = os.path.join(output_folder, f"{missing_id}.csv")
-            missing_data.append({
-                'id': missing_id,
-                'structure': structure_path,
-                'msa': msa_path
-            })
+        op_summaries = []
+        for op in operations:
+            op_type = op.get('type', 'unknown')
+            if op_type in ('head', 'tail', 'sample') and 'params' in op:
+                n = op['params'].get('n', '?')
+                op_summaries.append(f"{op_type}({n})")
+            else:
+                op_summaries.append(op_type)
+        cause = "Removed by: " + ", ".join(op_summaries)
+
+    if not missing_ids:
+        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+    else:
+        missing_data = [{'id': mid, 'removed_by': step_tool_name, 'cause': cause}
+                        for mid in missing_ids]
         missing_df = pd.DataFrame(missing_data)
 
     missing_csv = os.path.join(output_folder, "missing.csv")
@@ -871,7 +883,9 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     # Create missing.csv
     if original_ids:
         output_dir = os.path.dirname(output_csv)
-        create_missing_csv(original_ids, filtered_ids, output_dir)
+        step_tool_name = os.path.basename(output_dir)
+        create_missing_csv(original_ids, filtered_ids, output_dir,
+                           step_tool_name, operations)
 
     print("\nPanda operations completed successfully!")
 

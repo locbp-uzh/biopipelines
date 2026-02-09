@@ -768,6 +768,7 @@ class Panda(BaseConfig):
         os.makedirs(self.output_folder, exist_ok=True)
 
         # Create config file
+        step_tool_name = os.path.basename(self.output_folder)
         config_data = {
             "input_csvs": self.input_csv_paths,
             "operations": [op.to_dict() for op in self.operations],
@@ -777,7 +778,8 @@ class Panda(BaseConfig):
             "pool_file_maps": getattr(self, 'pool_file_maps', []),
             "pool_table_maps": getattr(self, 'pool_table_maps', []),
             "id_map_forward": getattr(self, 'id_map_forward', {}),
-            "rename": self.rename
+            "rename": self.rename,
+            "step_tool_name": step_tool_name
         }
 
         with open(self.config_file, 'w') as f:
@@ -841,8 +843,8 @@ fi
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
-                columns=["id", "structure", "msa"],
-                description="IDs that were filtered out and their expected file paths",
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed by this tool with removal reason",
                 count="variable"
             )
         }

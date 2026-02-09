@@ -51,12 +51,14 @@ class AlphaFold(BaseConfig):
     msas_folder = Path(lambda self: os.path.join(self.output_folder, "MSAs"))
     msa_csv = Path(lambda self: os.path.join(self.output_folder, "msas.csv"))
     structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
+    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
 
     # Helper script paths
     colabfold_batch = Path(lambda self: os.path.join(self.folders["AlphaFold"], "colabfold-conda/bin/colabfold_batch"))
     fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
     alphafold_confidence_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_confidence.py"))
     alphafold_msas_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py"))
+    propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
 
     def __init__(self,
                  proteins: Union[DataStream, StandardizedOutput],
@@ -74,6 +76,9 @@ class AlphaFold(BaseConfig):
             num_recycle: Number of recycling iterations (default 3)
             rand_seed: Random seed for reproducible results (0 = random)
         """
+        # Store original input for upstream missing table lookup
+        self.proteins = proteins
+
         # Resolve input to DataStream
         if isinstance(proteins, StandardizedOutput):
             self.sequences_stream: DataStream = proteins.streams.sequences
@@ -132,6 +137,7 @@ class AlphaFold(BaseConfig):
         script_content += self._generate_script_extract_best_rank()
         script_content += self._generate_script_extract_confidence()
         script_content += self._generate_script_create_msas_table()
+        script_content += self._generate_missing_table_propagation()
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -254,6 +260,33 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
 
 """
 
+    def _generate_missing_table_propagation(self) -> str:
+        """Generate script section to propagate missing.csv from upstream tools."""
+        upstream_missing_path = self._get_upstream_missing_table_path(
+            self.proteins,
+            self.sequences_stream
+        )
+
+        if not upstream_missing_path:
+            return ""
+
+        upstream_folder = os.path.dirname(upstream_missing_path)
+
+        return f"""
+# Propagate missing table from upstream tools
+echo "Checking for upstream missing sequences..."
+if [ -f "{upstream_missing_path}" ]; then
+    echo "Found upstream missing.csv - propagating to current tool"
+    python {self.propagate_missing_py} \\
+        --upstream-folders "{upstream_folder}" \\
+        --output-folder "{self.output_folder}"
+else
+    echo "No upstream missing.csv found - creating empty missing.csv"
+    echo "id,removed_by,cause" > "{self.missing_csv}"
+fi
+
+"""
+
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after AlphaFold execution."""
         # Use sequence IDs from input to predict structure files
@@ -316,6 +349,20 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
                 count=len(msa_files)
             )
         }
+
+        # Check for upstream missing table
+        upstream_missing_path = self._get_upstream_missing_table_path(
+            self.proteins,
+            self.sequences_stream
+        )
+        if upstream_missing_path:
+            tables["missing"] = TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed by upstream tools with removal reason",
+                count="variable"
+            )
 
         return {
             "structures": structures,

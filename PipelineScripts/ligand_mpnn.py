@@ -38,6 +38,8 @@ class LigandMPNN(BaseConfig):
     replacement_script = Path(lambda self: os.path.join(self.output_folder, "lmpnn_positions_replacement.sh"))
     id_map_json = Path(lambda self: os.path.join(self.output_folder, ".pdb_to_stream_id_map.json"))
 
+    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+
     # Helper script paths
     fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
     lmpnn_folder = Path(lambda self: os.path.join(self.folders["data"], "LigandMPNN"))
@@ -228,8 +230,16 @@ bash {self.commands_file}
     def _generate_script_convert_outputs(self) -> str:
         """Generate the output conversion part of the script."""
         duplicates_flag = " --duplicates" if not self.remove_duplicates else ""
+        step_tool_name = os.path.basename(self.output_folder)
+
+        # Check for upstream missing table
+        upstream_missing_path = self._get_upstream_missing_table_path(
+            self.structures_stream
+        )
+        upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
+
         return f"""echo "Converting FASTA outputs to CSV format"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag} --id-map {self.id_map_json}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag} --id-map {self.id_map_json} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 
 """
 
@@ -277,6 +287,13 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec"],
                 description="LigandMPNN ligand-aware sequence generation results with binding scores",
                 count=len(sequence_ids)
+            ),
+            "missing": TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed (duplicates or upstream) with removal reason",
+                count="variable"
             )
         }
 

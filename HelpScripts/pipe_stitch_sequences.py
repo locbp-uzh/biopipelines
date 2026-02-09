@@ -457,20 +457,54 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
 
     # Remove duplicates if requested
     remove_duplicates = config_data.get('remove_duplicates', True)
+    duplicate_entries = []
     if remove_duplicates and results:
-        seen_sequences = set()
+        seen_sequences = {}  # sequence -> first_seen_id
         unique_results = []
-        duplicates_removed = 0
+        step_tool_name = config_data.get('step_tool_name', 'StitchSequences')
         for r in results:
-            if r['sequence'] not in seen_sequences:
-                seen_sequences.add(r['sequence'])
-                unique_results.append(r)
-            else:
+            if r['sequence'] in seen_sequences:
+                kept_id = seen_sequences[r['sequence']]
                 print(f"Skipped duplicate: {r['id']}")
-                duplicates_removed += 1
-        if duplicates_removed > 0:
-            print(f"Removed {duplicates_removed} duplicate sequences ({len(results)} -> {len(unique_results)})")
+                duplicate_entries.append({
+                    'id': r['id'],
+                    'removed_by': step_tool_name,
+                    'cause': f"Duplicate of {kept_id}"
+                })
+            else:
+                seen_sequences[r['sequence']] = r['id']
+                unique_results.append(r)
+        if duplicate_entries:
+            print(f"Removed {len(duplicate_entries)} duplicate sequences ({len(results)} -> {len(unique_results)})")
         results = unique_results
+
+    # Write missing.csv (duplicates + upstream missing from all sources)
+    missing_csv_path = config_data.get('missing_csv')
+    if missing_csv_path:
+        upstream_rows = []
+        upstream_missing_paths = config_data.get('upstream_missing_paths', [])
+        seen_upstream_ids = set()
+        for upstream_path in upstream_missing_paths:
+            if upstream_path and os.path.exists(upstream_path):
+                try:
+                    upstream_df = pd.read_csv(upstream_path)
+                    if not upstream_df.empty:
+                        for _, row in upstream_df.iterrows():
+                            row_id = str(row.get('id', ''))
+                            if row_id not in seen_upstream_ids:
+                                upstream_rows.append(row.to_dict())
+                                seen_upstream_ids.add(row_id)
+                        print(f"Loaded {len(upstream_df)} entries from {upstream_path}")
+                except Exception as e:
+                    print(f"Warning: Could not read upstream missing.csv {upstream_path}: {e}")
+
+        all_missing = upstream_rows + duplicate_entries
+        if all_missing:
+            missing_df = pd.DataFrame(all_missing)
+        else:
+            missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+        missing_df.to_csv(missing_csv_path, index=False)
+        print(f"Created missing.csv with {len(duplicate_entries)} duplicates, {len(upstream_rows)} upstream entries")
 
     # Save results
     if results:

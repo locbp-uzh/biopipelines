@@ -498,8 +498,6 @@ echo "Post-processing completed"
             return ""
 
         upstream_folder = os.path.dirname(upstream_missing_path)
-        structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
-        msa_ext = ".csv" if self.msa_server == "public" else ".a3m"
 
         return f"""
 # Propagate missing table from upstream tools
@@ -508,12 +506,10 @@ if [ -f "{upstream_missing_path}" ]; then
     echo "Found upstream missing.csv - propagating to current tool"
     python {self.propagate_missing_py} \\
         --upstream-folders "{upstream_folder}" \\
-        --output-folder "{self.output_folder}" \\
-        --structure-ext "{structure_ext}" \\
-        --msa-ext "{msa_ext}"
+        --output-folder "{self.output_folder}"
 else
     echo "No upstream missing.csv found - creating empty missing.csv"
-    echo "id,structure,msa" > "{self.missing_csv}"
+    echo "id,removed_by,cause" > "{self.missing_csv}"
 fi
 
 """
@@ -645,8 +641,8 @@ fi
             tables["missing"] = TableInfo(
                 name="missing",
                 path=self.missing_csv,
-                columns=["id", "structure", "msa"],
-                description="Sequences filtered out by upstream tools",
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed by upstream tools with removal reason",
                 count="variable"
             )
 

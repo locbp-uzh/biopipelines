@@ -21,7 +21,26 @@
 
 ## What is BioPipelines?
 
-BioPipelines is a Python framework that generates bash scripts for bioinformatics workflows. It does not execute computations directly - instead, it predicts the filesystem structure and creates scripts that will be executed on SLURM clusters.
+BioPipelines is a Python framework for writing bioinformatics workflows that  encompasses bash and script orchestration and slurm submission. It does not execute computations directly - instead, it predicts the filesystem structure and creates scripts that will be executed on SLURM clusters. 
+
+BioPipelines was designed to maximize pipeline elegance and conciseness, while minimizing the learning curve, as shown in the following example:
+
+```python
+#imports omitted
+with Pipeline(project="Examples",
+              job="RFD-ProteinMPNN-AlphaFold2",
+              description="Redesign of N terminus domain of lysozyme"):
+    Resources(gpu="A100", 
+              time="4:00:00",
+              memory="16GB")
+    lysozyme = PDB("168L")
+    rfd = RFdiffusion(pdb=lysozyme,
+                        contigs='50-70/A81-140', #redesign N terminus
+                        num_designs=3)
+    pmpnn = ProteinMPNN(structures=rfd, 
+                      num_sequences=2)
+    af = AlphaFold(proteins=pmpnn)
+```
 
 ---
 
@@ -59,33 +78,13 @@ Edit config.yaml to fit your cluster configuration.
 
 ## Quick Start
 
-Save the following pipeline as test.py somewhere on the cluster: (Recommended: biopipelines/MyPipelines)
-
-```python
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import *
-from PipelineScripts.boltz2 import Boltz2
-
-with Pipeline("MyProject", "JobName", "Description"):
-    Resources(gpu="A100", time="4:00:00", memory="16GB")
-
-    # Fetch a protein structure
-    protein = PDB("4ufc", ids="LYZ")
-
-    # Predict structure with a ligand
-    prediction = Boltz2(
-        proteins=protein,
-        ligands=Ligand("ATP")
-    )
-
-    print(prediction)
-```
-
-Submit with:
+Navigate to the ExamplePipelines folder and, after activating the biopipelines environment, run:
 
 ```bash
-biopipelines-submit test.py
+biopipelines-submit <example pipeline name>.py
 ```
+
+Note: you must have installed the relevant environments and configured them in config.yaml
 
 ---
 
