@@ -31,13 +31,12 @@ Fetches protein structures with priority: `local_folder` → `PDBs/` → RCSB do
 **Operations** (optional positional args):
 - `PDB.Rename(old, new)` - Rename residues (e.g., for RFdiffusion3 compatibility)
 
-**Outputs**:
-- `structures` - DataStream of PDB files
-- `sequences` - DataStream of sequences
-- `compounds` - DataStream of ligands extracted from structures
-- `tables.structures`: | id | pdb_id | file_path | format | source |
-- `tables.sequences`: | id | sequence |
-- `tables.compounds`: | id | code | smiles | ccd |
+**Streams**: `structures`, `sequences`, `compounds`
+
+**Tables**:
+- `structures`: | id | pdb_id | file_path | format | source |
+- `sequences`: | id | sequence |
+- `compounds`: | id | code | smiles | ccd |
 
 **Examples**:
 
@@ -73,9 +72,10 @@ Creates sequences from strings with auto-detection (protein/DNA/RNA).
 - `type`: str = "auto" - Sequence type ("auto", "protein", "dna", "rna")
 - `ids`: str | List[str] = None - Custom IDs (defaults to "seq_N")
 
-**Outputs**:
-- `sequences` - DataStream of sequences
-- `tables.sequences`: | id | sequence | type | length |
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`: | id | sequence | type | length |
 
 **Examples**:
 
@@ -115,10 +115,10 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 - XX-XX-X format → PubChem (CAS)
 - Otherwise → PubChem (name)
 
-**Outputs**:
-- `structures` - DataStream of ligand files
-- `compounds` - DataStream with SMILES data
-- `tables.compounds`: | id | code | lookup | source | smiles | formula |
+**Streams**: `structures`, `compounds`
+
+**Tables**:
+- `compounds`: | id | code | lookup | source | smiles | formula |
 
 **Examples**:
 
@@ -159,9 +159,10 @@ Creates compound collections from dictionaries with optional combinatorial expan
 - `validate_smiles`: bool = True - Validate SMILES during expansion
 - `conformer_method`: str = "UFF" - Conformer method (UFF, OpenFF, DFT)
 
-**Outputs**:
-- `compounds` - DataStream with library compounds
-- `tables.compounds`: | id | format | smiles | ccd | {branching_keys} |
+**Streams**: `compounds`
+
+**Tables**:
+- `compounds`: | id | format | smiles | ccd | {branching_keys} |
 
 **Examples**:
 
@@ -251,9 +252,10 @@ Generates multiple sequence alignments for structure prediction.
 - `output_format`: str = "csv" - Output format (csv, a3m)
 - `timeout`: int = 3600 - Server timeout in seconds
 
-**Outputs**:
-- `msas` - DataStream of MSA files
-- `tables.msas`: | id | sequence_id | sequence | msa_file |
+**Streams**: `msas`
+
+**Tables**:
+- `msas`: | id | sequence_id | sequence | msa_file |
 
 **Example**:
 
@@ -307,9 +309,7 @@ To override defaults, use `PyMOL.Set()` before other operations.
 - `Render(structures, orient_selection, width, height, filename, dpi)` - Render single PNG
 - `RenderEach(structures, ...)` - Render each structure individually as PNG
 
-**Outputs**:
-- `renders` - DataStream of PNG files (when using Render/RenderEach)
-- `session_file` - Path to .pse session file
+**Streams**: `images` (when using Render/RenderEach)
 
 **RenderEach Parameters**:
 - `structures`: Structures to render

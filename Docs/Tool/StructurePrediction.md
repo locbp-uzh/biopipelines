@@ -32,20 +32,20 @@ rm install_colabbatch_linux.sh
   - `"mmseqs2_uniref"` - MMseqs2 with UniRef only
   - `"single_sequence"` - No MSA generation (fast single-sequence prediction)
 
-**Outputs**:
-- `structures`: List of predicted PDB files
-- `msas`: List of MSA files (.a3m) - empty when `msa_mode="single_sequence"`
-- `tables.structures`:
+**Streams**: `structures`, `msas`
+
+**Tables**:
+- `structures`:
 
   | id | source_id | sequence |
   |----|-----------|----------|
 
-- `tables.confidence`:
+- `confidence`:
 
   | id | structure | plddt | max_pae | ptm |
   |----|-----------|-------|---------|-----|
 
-- `tables.msas` (only when MSAs are generated):
+- `msas` (only when MSAs are generated):
 
   | id | sequence_id | sequence | msa_file |
   |----|-------------|----------|----------|
@@ -110,14 +110,15 @@ pip install boltz[cuda] -U
 - `glycosylation`: Optional[Dict[str, List[int]]] = None - N-glycosylation sites per chain (e.g., {"A": [164]})
 - `covalent_linkage`: Optional[Dict[str, Any]] = None - Covalent attachment specification (see examples)
 
-**Outputs**:
-- `structures`: List of predicted complex PDB files
-- `tables.confidence`:
+**Streams**: `structures`
+
+**Tables**:
+- `confidence`:
 
   | id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt |
   |----|------------|------------------|-----|------|---------------|----------------|
 
-- `tables.affinity`:
+- `affinity`:
 
   | id | input_file | affinity_pred_value | affinity_probability_binary |
   |----|------------|---------------------|----------------------------|
@@ -202,8 +203,8 @@ pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 sci
 - `shells`: int = 62 - Number of contacting shells
 - `output_format`: str = "csv" - Output format ("csv" or "json")
 
-**Outputs**:
-- `tables.affinities`:
+**Tables**:
+- `affinities`:
 
   | id | structure_path | predicted_affinity_pKa |
   |----|----------------|------------------------|

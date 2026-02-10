@@ -17,8 +17,8 @@ Measures distances between specific atoms and residues in structures. Useful for
 - `method`: str = "min" - Distance calculation method (min, max, mean, closest)
 - `metric_name`: str = None - Custom name for distance column in output (default: "distance")
 
-**Outputs**:
-- `tables.distances`:
+**Tables**:
+- `distances`:
 
   | id | source_structure | {metric_name} |
   |----|------------------|---------------|
@@ -57,8 +57,8 @@ Same as Distance, with additional support for `residue.atom` format:
 - `'LIG.C1'` - Atom C1 of ligand residue LIG
 - `'D in IGDWG'` - Aspartic acid in sequence context (uses centroid if multiple atoms)
 
-**Outputs**:
-- `tables.angles`:
+**Tables**:
+- `angles`:
 
   | id | source_structure | {metric_name} |
   |----|------------------|---------------|
@@ -121,8 +121,8 @@ Selects protein residues based on proximity to ligands or other reference points
 - `reference_type`: str = "ligand" - Type of reference (ligand, atoms, residues)
 - `reference_selection`: str = "" - Specific PyMOL selection if not using ligand
 
-**Outputs**:
-- `tables.selections`:
+**Tables**:
+- `selections`:
 
   | id | pdb | within | beyond | distance_cutoff | reference_ligand |
   |----|-----|--------|--------|-----------------|------------------|
@@ -154,8 +154,8 @@ Quantifies structural changes between reference and target structures. Calculate
 - `selection`: Union[str, ToolOutput] (required) - Region specification (PyMOL selection or table reference)
 - `alignment`: str = "align" - Alignment method, as available in pymol (align, super, cealign) Rule of thumb: sequence similarity > 50% -> align; otherwise cealign.
 
-**Outputs**:
-- `tables.changes`:
+**Tables**:
+- `changes`:
 
   | id | reference_structure | target_structure | selection | num_residues | RMSD | max_distance | mean_distance | sum_over_square_root |
   |----|---------------------|------------------|-----------|--------------|------|--------------|---------------|---------------------|
@@ -188,23 +188,23 @@ mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 - `mutants`: Union[ToolOutput, StandardizedOutput] (required) - Mutant sequences to analyze
 - `include_original`: bool = True - Include original sequence in frequency analysis
 
-**Outputs**:
-- `tables.profile`:
+**Tables**:
+- `profile`:
 
   | position | original | count | frequency |
   |----------|----------|-------|-----------|
 
-- `tables.mutations`:
+- `mutations`:
 
   | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
   |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
-- `tables.absolute_frequencies`:
+- `absolute_frequencies`:
 
   | position | original | A | C | ... | Y |
   |----------|----------|---|---|-----|---|
 
-- `tables.relative_frequencies`:
+- `relative_frequencies`:
 
   | position | original | A | C | ... | Y |
   |----------|----------|---|---|-----|---|
@@ -232,8 +232,8 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 - `contact_threshold`: float = 5.0 - Distance threshold for counting contacts (Angstroms)
 - `contact_metric_name`: str = None - Custom name for contact count column (default: "contacts")
 
-**Outputs**:
-- `tables.contacts`:
+**Tables**:
+- `contacts`:
 
   | id | source_structure | selections | ligand | contacts | min_distance | max_distance | mean_distance | sum_distances_sqrt_normalized |
   |----|------------------|------------|--------|----------|--------------|--------------|---------------|-------------------------------|
@@ -293,8 +293,8 @@ Measures ligand pose distance between reference holo structure and sample struct
 - `calculate_centroid`: bool = True - Calculate ligand centroid distance
 - `calculate_orientation`: bool = False - Calculate orientation angle difference
 
-**Outputs**:
-- `tables.changes`:
+**Tables**:
+- `changes`:
 
   | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | alignment_rmsd | num_ligand_atoms | alignment_selection |
   |----|------------------|---------------------|-------------|-------------------|----------------|------------------|---------------------|

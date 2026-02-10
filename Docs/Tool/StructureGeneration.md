@@ -36,9 +36,10 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 - `reproducible`: bool = False - Use deterministic sampling
 - `design_startnum`: int = 1 - Starting number for design IDs
 
-**Outputs**:
-- `structures`: List of generated PDB files
-- `tables.structures`:
+**Streams**: `structures`
+
+**Tables**:
+- `structures`:
 
   | id | source_id | pdb | fixed | designed | contigs | time | status |
   |----|-----------|-----|-------|----------|---------|------|--------|
@@ -88,9 +89,10 @@ Generates protein structures with explicit modeling of ligands and small molecul
 - `inpaint_length`: int = None - Target length for inpainted regions
 - `guiding_potentials`: str = None - Custom external potentials
 
-**Outputs**:
-- `structures`: List of generated PDB files
-- `tables.structures`:
+**Streams**: `structures`
+
+**Tables**:
+- `structures`:
 
   | id | source_id | pdb | fixed | designed | contigs | time | status |
   |----|-----------|-----|-------|----------|---------|------|--------|
@@ -150,9 +152,10 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 - `symmetric`: bool = False - Enable symmetric design mode
 - `symmetry_type`: str = None - Symmetry specification (e.g., "C3", "D2")
 
-**Outputs**:
-- `structures`: List of generated PDB files
-- `tables.structures`:
+**Streams**: `structures`
+
+**Tables**:
+- `structures`:
 
   | id | source_id | pdb | contig | length | design_name | status |
   |----|-----------|-----|--------|--------|-------------|--------|
@@ -236,18 +239,15 @@ pip install boltzgen
 - `steps`: Optional[List[str]] = None - Run only specific pipeline steps
 - `cache_dir`: Optional[str] = None - Model download location
 
-**Outputs**:
-Tables are only predicted if the appropriate step is chosen. There are many columns, please refer to the repository for more info.
+**Tables** (only predicted if the appropriate step is chosen; there are many columns, please refer to the repository for more info):
 
-After analysis you can access:
+After analysis:
+- `aggregate_metrics`
+- `per_target_metrics`
 
-- `tables.aggregate_metrics`:
-- `tables.per_target_metrics`:
-
-After filtering you can access:
-
-- `tables.all_designs_metrics`:
-- `tables.final_metrics`:
+After filtering:
+- `all_designs_metrics`
+- `final_metrics`
 
 **Notes**:
 - **Residue indexing**: All residue indices start at 1 and use canonical mmcif `label_asym_id`, not `auth_asym_id`

@@ -27,9 +27,10 @@ git clone https://github.com/dauparas/ProteinMPN
 - `model_name`: str = "v_48_020" - ProteinMPNN model variant
 - `soluble_model`: bool = True - Use soluble protein model
 
-**Outputs**:
-- `sequences`: CSV file with generated sequences
-- `tables.sequences`:
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`:
 
   | id | source_id | source_pdb | sequence | score | seq_recovery | rmsd |
   |----|-----------|------------|----------|-------|--------------|------|
@@ -77,9 +78,10 @@ pip3 install -r requirements.txt
 - `model`: str = "v_32_010" - LigandMPNN model version (v_32_005, v_32_010, v_32_020, v_32_025)
 - `num_batches`: int = 1 - Number of batches to run. Total sequences = num_sequences × num_batches
 
-**Outputs**:
-- `sequences`: CSV file with generated sequences
-- `tables.sequences`:
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`:
 
   | id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec |
   |----|----------|--------|---|------|-------------------|-------------------|---------|
@@ -119,9 +121,10 @@ Generates new protein sequences by composing mutations based on frequency analys
 - `hotspot_count`: int = 10 - Number of top hotspot positions (for hotspot_focused mode)
 - `combination_strategy`: str = "average" - Strategy for combining multiple tables (average, maximum, stack, round_robin)
 
-**Outputs**:
-- `sequences`: CSV file with composed sequences
-- `tables.sequences`:
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`:
 
   | id | sequence | mutations | mutation_positions |
   |----|----------|-----------|-------------------|
@@ -166,14 +169,15 @@ Performs site-directed mutagenesis at specified positions. Generates systematic 
 - `exclude`: str = "" - Amino acids to exclude (single letter codes as string, e.g., "CP")
 - `prefix`: str = "" - Prefix for sequence IDs
 
-**Outputs**:
-- `sequences`: CSV file with mutant sequences
-- `tables.sequences`:
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`:
 
   | id | sequence | mutation | position | original_aa | new_aa |
   |----|----------|----------|----------|-------------|--------|
 
-- `tables.missing_sequences`:
+- `missing_sequences`:
 
   | id | sequence | reason |
   |----|----------|--------|
@@ -205,9 +209,10 @@ Concatenates multiple protein sequences with flexible linkers. Creates fusion pr
 - `linker`: str = "GGGGSGGGGSGGGGSGGGGS" - Linker sequence that will be cut based on `linker_lengths` if specified
 - `linker_lengths`: List[str] = None - List of length ranges for each junction to generate multiple variants by cutting the linker (e.g., ["1-6", "1-6"])
 
-**Outputs**:
-- `sequences`: CSV file with fused sequences
-- `tables.sequences`:
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`:
 
   | id | sequence | lengths | D1 | L1 | D2 | L2 | D3 | ... |
   |----|----------|---------|----|----|----|----|----| --- |
@@ -264,9 +269,10 @@ Combines a template sequence with two types of modifications: **substitutions** 
 
 **Concatenation Mode**: When `template` is omitted and `indels` keys are integers (1, 2, 3...), sequences are concatenated in order.
 
-**Outputs**:
-- `sequences`: CSV file with stitched sequences
-- `tables.sequences`:
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`:
 
   | id | sequence |
   |----|----------|
@@ -346,9 +352,10 @@ Splits concatenated single-chain sequences into multi-chain sequences. Takes seq
 - `split_positions`: List[int] (required) - Positions where to split sequences (1-indexed). For example, [197] splits at position 197 creating chains seq[0:197] and seq[197:]
 - `chain_names`: Optional[List[str]] = None - Names for the chains (e.g., ["ChainA", "ChainB"]). If not provided, uses numeric suffixes (_1, _2, etc.)
 
-**Outputs**:
-- `sequences`: CSV file with split chain sequences
-- `tables.sequences`:
+**Streams**: `sequences`
+
+**Tables**:
+- `sequences`:
 
   | id | sequence | source_id | complex_id | chain_index | chain_name | chain_length |
   |----|----------|-----------|------------|-------------|------------|--------------|
@@ -390,8 +397,8 @@ Reverse-translates protein sequences to DNA with organism-specific codon optimiz
   - "HS" (Homo sapiens)
   - Combinations: "EC&HS", "EC&SC", "HS&SC", "EC&HS&SC"
 
-**Outputs**:
-- `tables.dna`:
+**Tables**:
+- `dna`:
 
   | id | protein_sequence | dna_sequence | organism | method |
   |----|------------------|--------------|----------|--------|

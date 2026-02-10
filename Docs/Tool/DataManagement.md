@@ -40,10 +40,11 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 | `melt(id_vars)` | `Panda.melt(id_vars="id")` |
 | `average_by_source()` | `Panda.average_by_source()` |
 
-**Outputs**:
-- `tables.result` - Transformed table
-- `tables.missing` - Filtered out IDs (pool mode)
-- Pool mode: structures/compounds/sequences matching IDs
+**Streams** (pool mode): `structures`, `sequences`, `compounds` (matching filtered IDs)
+
+**Tables**:
+- `result` - Transformed table
+- `missing` - Filtered out IDs (pool mode)
 
 **Examples**:
 
@@ -114,8 +115,8 @@ Creates separate CSV files per metric for statistical software (GraphPad Prism).
 - `metrics`: List[str] - Column names to extract
 - `table_names`: List[str] = None - Custom column names
 
-**Outputs**:
-- `tables.{metric}` - One CSV per metric with columns for each table
+**Tables**:
+- `{metric}` - One CSV per metric with columns for each table
 
 **Example**:
 
@@ -146,8 +147,8 @@ Modifies PyMOL selection strings (e.g., "3-45+58-60") with structure-aware opera
 - `shift`: int = 0 - Shift all intervals (+/-)
 - `invert`: bool = False - Select complement
 
-**Outputs**:
-- `tables.selections`: | id | pdb | {column} | original_{column} |
+**Tables**:
+- `selections`: | id | pdb | {column} | original_{column} |
 
 **Example**:
 
