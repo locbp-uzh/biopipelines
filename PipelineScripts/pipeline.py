@@ -373,6 +373,7 @@ class Pipeline:
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 log_file.write(line)
+                log_file.flush()
             process.wait()
 
         if process.returncode != 0:
