@@ -331,36 +331,32 @@ with Pipeline("Examples", "interactive_test",
 You can also force on-the-fly mode explicitly with `on_the_fly=True` (e.g., when running locally with plain Python outside a notebook).
 
 Key differences from normal mode:
-- `Resources()` is **optional** (no SLURM resources needed for local execution)
+- `Resources()` is **optional** and ignored for execution purposes
 - Tools run sequentially as they are added — each tool finishes before the next one starts
 - stdout/stderr is streamed in real-time (visible in notebooks and terminals)
 - SLURM submission is skipped on context exit
 - The completion check mechanism is preserved, so re-running a notebook skips already-completed steps
 
-You can still call `Resources()` if you want to (it will be accepted but ignored for execution purposes).
-
 ---
 
 ## Job Submission
 
-**Submit to SLURM** (cluster):
+**Submit to SLURM**:
 ```bash
 biopipelines-submit /path/to/pipeline.py
 ```
 
-**Run locally** (no SLURM needed):
+**Run directly**:
 ```bash
 biopipelines-run /path/to/pipeline.py
 ```
 
-These commands work from any directory. Alternatively, you can run the scripts directly from the biopipelines root:
+These commands work from any directory as long as biopipelines environment is activated. Alternatively, you can run the scripts directly from the biopipelines root:
 ```bash
 cd biopipelines
 ./submit /path/to/pipeline.py
 ./run /path/to/pipeline.py
 ```
-
-`./run` / `biopipelines-run` executes the generated bash scripts directly on your machine instead of submitting them to SLURM. Tools that require unavailable resources (GPUs, specific conda environments) will fail naturally. This is useful for testing pipeline logic or running lightweight tools locally.
 
 **Resubmit** existing job:
 
