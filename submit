@@ -16,8 +16,6 @@
 # Get the directory where submit script is located (biopipelines root)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 CONFIG_FILE="$SCRIPT_DIR/config.yaml"
-ENV_FILE="$SCRIPT_DIR/Environments/biopipelines.yaml"
-
 # Read cluster config from config.yaml (before Python is available)
 # env_manager: "mamba" or "conda"
 ENV_MANAGER=$(grep '^\s*env_manager:' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*env_manager:\s*["'\'']\{0,1\}\([a-zA-Z]*\)["'\'']\{0,1\}.*/\1/' | tr -d '[:space:]')
@@ -44,44 +42,8 @@ fi
 
 set -e  # Exit on any error
 
-# Read required version from yaml header comment
-if [ -f "$ENV_FILE" ]; then
-    REQUIRED_VERSION=$(grep "^# Version:" "$ENV_FILE" | sed 's/# Version: //' | tr -d '[:space:]')
-    if [ -z "$REQUIRED_VERSION" ]; then
-        echo "ERROR: Could not parse version from $ENV_FILE"
-        exit 1
-    fi
-else
-    echo "ERROR: biopipelines.yaml not found"
-    exit 1
-fi
-
-# Function to get installed version from conda env
-get_installed_version() {
-    local env_prefix=$($ENV_MANAGER run -n biopipelines printenv CONDA_PREFIX 2>/dev/null || echo "")
-    if [ -n "$env_prefix" ] && [ -f "$env_prefix/.biopipelines_version" ]; then
-        cat "$env_prefix/.biopipelines_version" | tr -d '[:space:]'
-    else
-        echo ""
-    fi
-}
-
-# Check if biopipelines env exists and verify version
+# Check if biopipelines env exists
 if $ENV_MANAGER env list | grep -qw "biopipelines"; then
-    INSTALLED_VERSION=$(get_installed_version)
-    if [ "$INSTALLED_VERSION" = "$REQUIRED_VERSION" ]; then
-        echo "biopipelines environment found (version $INSTALLED_VERSION)"
-    else
-        echo "WARNING: biopipelines environment version mismatch!"
-        echo "  Installed: ${INSTALLED_VERSION:-unknown}"
-        echo "  Required:  $REQUIRED_VERSION"
-        echo ""
-        echo "Please update your environment:"
-        echo "  $ENV_MANAGER activate biopipelines"
-        echo "  $ENV_MANAGER env update -n biopipelines -f Environments/biopipelines.yaml --prune"
-        echo "  pip install -e ."
-        echo ""
-    fi
     echo "Activating biopipelines environment..."
     $ENV_MANAGER activate biopipelines
 else
