@@ -316,29 +316,37 @@ with Pipeline("Project", "Job", "Description"):
 
 ## On-the-fly Execution
 
-For interactive prototyping in Jupyter notebooks or Google Colab, on-the-fly mode is **enabled automatically** — no extra arguments needed. Each tool's bash script is executed immediately when the tool is added, so you see results step by step:
+For interactive prototyping in Jupyter notebooks or Google Colab, on-the-fly mode is **enabled automatically** — no extra arguments needed. Each tool's bash script is executed immediately when the tool is added, so you see results step by step. The pipeline stays active across notebook cells, so each cell can add new tools:
 
 ```python
-# In a Jupyter notebook or Google Colab: on_the_fly is auto-detected
-with Pipeline("Examples", "interactive_test",
-              description="Quick test run"):
-    lysozyme = PDB("168L")
-    rfd = RFdiffusion(pdb=lysozyme,
-                      contigs='50-70/A81-140',
-                      num_designs=3)
-    # rfd has already finished running at this point
-    pmpnn = ProteinMPNN(structures=rfd, num_sequences=2)
-    # pmpnn has already finished running at this point
+# Cell 1: Create pipeline and run first tools
+Pipeline("Examples", "interactive_test",
+         description="Quick test run")
+
+lysozyme = PDB("168L")
+rfd = RFdiffusion(pdb=lysozyme,
+                  contigs='50-70/A81-140',
+                  num_designs=3)
+# rfd has already finished running at this point
+```
+
+```python
+# Cell 2: Continue adding tools to the same pipeline
+pmpnn = ProteinMPNN(structures=rfd, num_sequences=2)
+# pmpnn has already finished running at this point
 ```
 
 You can also force on-the-fly mode explicitly with `on_the_fly=True` (e.g., when running locally with plain Python outside a notebook).
 
 Key differences from normal mode:
+- The `with` statement is **optional** — the pipeline context stays active across cells
 - `Resources()` is **optional** and ignored for execution purposes
 - Tools run sequentially as they are added — each tool finishes before the next one starts
 - stdout/stderr is streamed in real-time (visible in notebooks and terminals)
-- SLURM submission is skipped on context exit
+- SLURM submission is skipped
+- Output is written to `./BioPipelines/` (current directory) instead of shared storage
 - The completion check mechanism is preserved, so re-running a notebook skips already-completed steps
+- Re-running the cell that creates the `Pipeline()` starts a new pipeline
 
 ---
 

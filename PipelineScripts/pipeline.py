@@ -103,6 +103,12 @@ class Pipeline:
         # Context manager state
         self._explicit_save_called = False  # Track if Save() was explicitly called
 
+        # In on_the_fly mode, activate the pipeline context immediately
+        # so tools can auto-register across notebook cells without requiring
+        # the `with` statement. Replace any previously active pipeline.
+        if self.on_the_fly:
+            _active_pipeline.set(self)
+
     @staticmethod
     def _detect_notebook() -> bool:
         """
@@ -133,10 +139,12 @@ class Pipeline:
             self (Pipeline instance)
 
         Raises:
-            RuntimeError: If another pipeline context is already active (nested contexts not allowed)
+            RuntimeError: If a different pipeline context is already active
+                         (nested contexts not allowed, unless on_the_fly already
+                         set this pipeline as active)
         """
         current_pipeline = _active_pipeline.get()
-        if current_pipeline is not None:
+        if current_pipeline is not None and current_pipeline is not self:
             raise RuntimeError(
                 f"Cannot nest Pipeline contexts. "
                 f"Pipeline '{current_pipeline.project}' is already active."
@@ -146,11 +154,11 @@ class Pipeline:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
-        Exit context manager - clear the active pipeline context and auto-submit to SLURM.
+        Exit context manager - auto-submit to SLURM or keep context alive.
 
-        Automatically calls self.slurm() on exit unless:
-        - An exception occurred during execution
-        - Save() was explicitly called (which saves without submitting)
+        In normal mode: clears the active pipeline and auto-submits to SLURM.
+        In on_the_fly mode: keeps the pipeline active so subsequent notebook
+        cells can continue adding tools.
 
         Args:
             exc_type: Exception type if an exception occurred
@@ -160,15 +168,16 @@ class Pipeline:
         Returns:
             False (don't suppress exceptions)
         """
+        if self.on_the_fly:
+            # Keep the pipeline active for subsequent notebook cells
+            return False
+
         try:
             # Only auto-submit if no exception and Save() wasn't explicitly called
-            if exc_type is None and not self._explicit_save_called and not self.on_the_fly:
+            if exc_type is None and not self._explicit_save_called:
                 self.slurm()
-            elif exc_type is None and self.on_the_fly:
-                print(f"\nPipeline completed (on_the_fly mode)")
-                print(f"Results in: {self.folders['output']}")
         finally:
-            # Always clear the active pipeline context
+            # Clear the active pipeline context
             _active_pipeline.set(None)
 
         return False  # Don't suppress exceptions
