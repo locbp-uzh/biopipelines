@@ -30,7 +30,8 @@ with Pipeline(project="Examples",
                         num_designs=3)
 
     pmpnn = ProteinMPNN(structures=rfd,
-                        num_sequences=2)
+                        num_sequences=2,
+                        redesigned=rfd.tables.structures.designed)
     
     af = AlphaFold(proteins=pmpnn)
 
