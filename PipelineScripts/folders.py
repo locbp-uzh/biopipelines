@@ -9,6 +9,7 @@ Handles automatic creation and organization of all pipeline-related directories
 following the established conventions from the biopipelines.
 """
 
+import getpass
 import os
 import re
 from typing import Dict
@@ -41,17 +42,18 @@ class FolderManager:
     following conventions established in the biopipelines.
     """
 
-    def __init__(self, project: str, job: str, debug: bool=False):
+    def __init__(self, project: str, job: str, local_output: bool=False):
         """
         Initialize folder manager for a pipeline.
 
         Args:
             project: Name of the folder (used for output folders)
             job: Name of the specific job (a unique numeric id NNN will be appended to it) (used for output folders)
-            debug: if True, it will not attempt to generate folder. Useful to check locally the expected input output of models
+            local_output: If True, write output to ./BioPipelines/ (current working
+                        directory) instead of the config-configured path.
         """
         self._folders: Dict[str, str] = {}
-        self._debug = debug
+        self._local_output = local_output
 
         # Load configuration
         config_manager = ConfigManager()
@@ -63,18 +65,24 @@ class FolderManager:
         # Resolve all config sections in order
         self._resolve_config_sections(folder_config)
 
+        # Override biopipelines_output for local output mode
+        if local_output:
+            self._folders["biopipelines_output"] = os.path.join(os.getcwd(), "BioPipelines")
+
         # Setup runtime paths (project, output, runtime, logs)
         self._setup_runtime_paths(project, job)
 
     def _inject_runtime_values(self):
         """Inject runtime values that are computed from the environment."""
-        biopipelines_folder = os.getcwd() if not self._debug else "biopipelines"
-        user_name = os.path.basename(os.path.dirname(biopipelines_folder)) if not self._debug else "USER"
+        # Resolve from package location (parent of PipelineScripts/)
+        # This works regardless of the current working directory,
+        biopipelines_folder = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        user_name = getpass.getuser()
         self.user_name = user_name
 
         # These are the runtime placeholders available in config
         # - username: actual username (e.g., gquarg)
-        # - cwd: current working directory
+        # - cwd: biopipelines root directory
         self._folders["username"] = user_name
         self._folders["cwd"] = biopipelines_folder
 
@@ -128,15 +136,14 @@ class FolderManager:
     def _setup_runtime_paths(self, project: str, job: str):
         """Setup runtime paths that depend on project/job names."""
         # Project path
-        if not self._debug:
-            self._folders["project"] = os.path.join(self._folders["biopipelines_output"], project)
-        else:
-            self._folders["project"] = "Debug"
+        self._folders["project"] = os.path.join(self._folders["biopipelines_output"], project)
 
         # Create necessary directories
-        for folder_key in ["user", "biopipelines_output", "PDBs", "Ligands"]:
-            if not self._debug:
-                os.makedirs(self._folders[folder_key], exist_ok=True)
+        folders_to_create = ["biopipelines_output", "PDBs", "Ligands"]
+        if not self._local_output:
+            folders_to_create.append("user")
+        for folder_key in folders_to_create:
+            os.makedirs(self._folders[folder_key], exist_ok=True)
         os.makedirs(self._folders["project"], exist_ok=True)
 
         # Output path with unique name

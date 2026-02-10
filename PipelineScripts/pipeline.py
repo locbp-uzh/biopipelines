@@ -45,7 +45,7 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, project: str, job: str, description: str="Description missing", debug: bool=False, on_the_fly: Optional[bool]=None):
+    def __init__(self, project: str, job: str, description: str="Description missing", on_the_fly: Optional[bool]=None, local_output: Optional[bool]=None):
         """
         Initialize a new pipeline instance.
 
@@ -53,25 +53,30 @@ class Pipeline:
             project: Name of the folder (used for output folders)
             job: Name of the specific job (a unique numeric id NNN will be appended to it) (used for output folders)
             description: Optional description of what this job does
-            debug: If True, runs in debug mode without creating folders (to test locally)
             on_the_fly: If True, each tool's script is executed immediately when added.
                         Useful for interactive use in Jupyter notebooks or running locally
                         with plain Python. Skips SLURM submission on exit.
                         If None (default), auto-detects: True when running in a Jupyter
                         notebook (.ipynb), False otherwise.
+            local_output: If True, write output to ./BioPipelines/ (current working
+                        directory) instead of the config-defined path.
+                        If None (default), follows on_the_fly.
         """
         if ' ' in job: job=job.replace(' ','_') #It will create issues at runtime otherwise
 
         self.project = project
         self.job = job
         self.description = description
-        self.debug = debug
 
         if on_the_fly is None:
             on_the_fly = self._detect_notebook()
         self.on_the_fly = on_the_fly
 
-        self.folder_manager = FolderManager(project, job, debug)
+        if local_output is None:
+            local_output = on_the_fly
+        self.local_output = local_output
+
+        self.folder_manager = FolderManager(project, job, local_output=local_output)
         self.folders = self.folder_manager.get_folders()
         
         # Tool management

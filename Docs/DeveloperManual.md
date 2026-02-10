@@ -552,8 +552,8 @@ Open biopipelines folder and start with `prompt.txt` to give Claude repository c
 # Quick syntax check
 python -c "from PipelineScripts.my_tool import MyTool; print('OK')"
 
-# Test in debug pipeline
-with Pipeline("Test", "Debug", "Testing", debug=True):
+# Test with local output (writes to ./BioPipelines/)
+with Pipeline("Test", "Debug", "Testing", local_output=True):
     result = MyTool(...)
     print(result)
 ```

@@ -60,6 +60,9 @@ mamba activate biopipelines
 
 # 3. Install the package (editable mode, so updates via git pull take effect immediately)
 pip install -e .
+
+# 4. Optional, for usage in Jupyter notebooks
+ipython kernel install --user --name biopipelines
 ```
 
 Edit config.yaml to fit your cluster configuration.
@@ -467,12 +470,14 @@ Configure paths and environments in `config.yaml` at repository root.
 
 **Missing files**: Check `Logs/<NNN>_<tool>.log`.
 
-**Debug mode**: Test locally without SLURM:
+**Local output**: Write results to the current directory instead of the config-defined path:
 
 ```python
-with Pipeline("Test", "Debug", "Testing", debug=True):
+with Pipeline("Test", "Debug", "Testing", local_output=True):
     ...
 ```
+
+Note: `local_output` defaults to `True` automatically when `on_the_fly` is enabled (i.e., in Jupyter notebooks).
 
 **Load previous outputs**:
 
