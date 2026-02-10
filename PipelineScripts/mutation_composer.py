@@ -153,16 +153,16 @@ class MutationComposer(BaseConfig):
 
         for i, mutation_input in enumerate(self.mutation_inputs):
             if isinstance(mutation_input, TableInfo):
-                frequency_path = mutation_input.path
+                frequency_path = mutation_input.info.path
             elif isinstance(mutation_input, str):
                 frequency_path = mutation_input
             elif isinstance(mutation_input, StandardizedOutput):
                 # StandardizedOutput - look for absolute_frequencies or similar
                 tables = mutation_input.tables
                 if hasattr(tables, 'absolute_frequencies'):
-                    frequency_path = tables.absolute_frequencies.path
+                    frequency_path = tables.absolute_frequencies.info.path
                 elif hasattr(tables, 'frequencies'):
-                    frequency_path = tables.frequencies.path
+                    frequency_path = tables.frequencies.info.path
                 else:
                     raise ValueError(f"No frequency table found in frequencies[{i}]")
             else:

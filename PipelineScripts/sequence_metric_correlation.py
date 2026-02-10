@@ -137,12 +137,12 @@ class SequenceMetricCorrelation(BaseConfig):
         if isinstance(input_obj, str):
             return input_obj
         elif isinstance(input_obj, TableInfo):
-            return input_obj.path
+            return input_obj.info.path
         elif isinstance(input_obj, DataStream):
             return input_obj.map_table
         elif isinstance(input_obj, StandardizedOutput):
             if input_type == "sequences" and hasattr(input_obj.tables, 'sequences'):
-                return input_obj.tables.sequences.path
+                return input_obj.tables.sequences.info.path
             raise ValueError(f"Could not extract {input_type} path from StandardizedOutput")
         else:
             raise ValueError(f"Unsupported input type: {type(input_obj)}")
@@ -160,7 +160,7 @@ class SequenceMetricCorrelation(BaseConfig):
 
         if isinstance(ref_input, StandardizedOutput):
             if hasattr(ref_input.tables, 'sequences'):
-                return f"@{ref_input.tables.sequences.path}"
+                return f"@{ref_input.tables.sequences.info.path}"
 
         raise ValueError("original must be a sequence string, DataStream, or StandardizedOutput")
 

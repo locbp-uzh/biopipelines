@@ -112,7 +112,7 @@ class ExtractMetrics(BaseConfig):
         if isinstance(input_obj, str):
             return input_obj
         elif isinstance(input_obj, TableInfo):
-            return input_obj.path
+            return input_obj.info.path
         else:
             raise ValueError(f"Could not extract path from {input_type}: {type(input_obj)}")
 

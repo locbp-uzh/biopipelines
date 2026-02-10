@@ -191,7 +191,7 @@ class StitchSequences(BaseConfig):
                 key_str = pos_key
             elif isinstance(pos_key, tuple) and len(pos_key) == 2:
                 table_info, column_name = pos_key
-                table_path = table_info.path if hasattr(table_info, 'path') else str(table_info)
+                table_path = table_info.info.path if hasattr(table_info, 'info') else str(table_info)
                 key_info = {"type": "table", "table_path": table_path, "column": column_name}
                 key_str = f"table:{column_name}"
             else:
@@ -210,7 +210,7 @@ class StitchSequences(BaseConfig):
                 key_str = pos_key
             elif isinstance(pos_key, tuple) and len(pos_key) == 2:
                 table_info, column_name = pos_key
-                table_path = table_info.path if hasattr(table_info, 'path') else str(table_info)
+                table_path = table_info.info.path if hasattr(table_info, 'info') else str(table_info)
                 key_info = {"type": "table", "table_path": table_path, "column": column_name}
                 key_str = f"table:{column_name}"
             else:
@@ -265,8 +265,8 @@ class StitchSequences(BaseConfig):
                 raise ValueError(f"{name}: StandardizedOutput must have tables.sequences")
 
             sequences_table = source.tables.sequences
-            if hasattr(sequences_table, 'path'):
-                sequences_file = sequences_table.path
+            if hasattr(sequences_table, 'info'):
+                sequences_file = sequences_table.info.path
             elif isinstance(sequences_table, str):
                 sequences_file = sequences_table
             else:

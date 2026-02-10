@@ -310,12 +310,12 @@ class Boltz2(BaseConfig):
 
         if hasattr(self.msas, 'tables'):
             if hasattr(self.msas.tables, '_tables') and 'msas' in self.msas.tables._tables:
-                msa_table_path = self.msas.tables._tables['msas'].path
+                msa_table_path = self.msas.tables._tables['msas'].info.path
                 return f'--msa-table "{msa_table_path}"'
             elif hasattr(self.msas.tables, 'msas'):
                 msa_table = self.msas.tables.msas
-                if hasattr(msa_table, 'path'):
-                    return f'--msa-table "{msa_table.path}"'
+                if hasattr(msa_table, 'info'):
+                    return f'--msa-table "{msa_table.info.path}"'
 
         return ""
 
@@ -455,11 +455,11 @@ mkdir -p {self.config_files_dir}
         msa_table_path = None
         if hasattr(self.msas, 'tables'):
             if hasattr(self.msas.tables, '_tables') and 'msas' in self.msas.tables._tables:
-                msa_table_path = self.msas.tables._tables['msas'].path
+                msa_table_path = self.msas.tables._tables['msas'].info.path
             elif hasattr(self.msas.tables, 'msas'):
                 msa_table = self.msas.tables.msas
-                if hasattr(msa_table, 'path'):
-                    msa_table_path = msa_table.path
+                if hasattr(msa_table, 'info'):
+                    msa_table_path = msa_table.info.path
 
         if msa_table_path:
             return f"""

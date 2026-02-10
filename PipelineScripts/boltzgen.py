@@ -238,7 +238,7 @@ class BoltzGen(BaseConfig):
                 # compounds is a DataStream, get map_table
                 self.ligand_compounds_csv = ligand.streams.compounds.map_table
             elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
-                self.ligand_compounds_csv = ligand.tables.compounds.path
+                self.ligand_compounds_csv = ligand.tables.compounds.info.path
             else:
                 raise ValueError("Ligand StandardizedOutput has no compounds attribute")
         elif isinstance(ligand, DataStream):
@@ -1260,11 +1260,11 @@ class BoltzGenImport(BaseConfig):
             # Look for sequences table or CSV
             if hasattr(sequences, 'tables'):
                 if hasattr(sequences.tables, 'sequences'):
-                    self.sequences_csv = sequences.tables.sequences.path
+                    self.sequences_csv = sequences.tables.sequences.info.path
                 elif hasattr(sequences.tables, '_tables'):
                     for name, info in sequences.tables._tables.items():
                         if 'sequence' in name.lower() or name == 'main':
-                            self.sequences_csv = info.path
+                            self.sequences_csv = info.info.path
                             break
             if not self.sequences_csv and sequences.sequences and len(sequences.sequences) > 0:
                 self.sequences_csv = sequences.sequences.map_table
@@ -1288,7 +1288,7 @@ class BoltzGenImport(BaseConfig):
             if ligand.streams.compounds and len(ligand.streams.compounds) > 0:
                 self.ligand_compounds_csv = ligand.streams.compounds.map_table
             elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
-                self.ligand_compounds_csv = ligand.tables.compounds.path
+                self.ligand_compounds_csv = ligand.tables.compounds.info.path
         elif isinstance(ligand, DataStream):
             self.ligand_compounds_csv = ligand.map_table
         else:

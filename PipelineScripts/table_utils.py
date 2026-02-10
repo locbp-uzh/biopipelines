@@ -52,8 +52,8 @@ def get_table_path(source: Any, name: str) -> str:
     table = get_table(source, name)
 
     # TableInfo object
-    if hasattr(table, 'path'):
-        return table.path
+    if hasattr(table, 'info'):
+        return table.info.path
 
     # Dict format with 'path' key
     if isinstance(table, dict) and 'path' in table:

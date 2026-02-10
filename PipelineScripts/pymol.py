@@ -544,16 +544,16 @@ class PyMOL(BaseConfig):
                 # Direct TableInfo reference (for data_table in RenderEach)
                 result[key] = {
                     "type": "table_info",
-                    "table_path": value.path,
-                    "columns": value.columns if hasattr(value, 'columns') else []
+                    "table_path": value.info.path,
+                    "columns": value.info.columns
                 }
             elif isinstance(value, tuple) and len(value) == 2:
                 # Table column reference: (TableInfo, column_name)
                 table_info, column_name = value
-                if hasattr(table_info, 'path'):
+                if hasattr(table_info, 'info'):
                     result[key] = {
                         "type": "table_column",
-                        "table_path": table_info.path,
+                        "table_path": table_info.info.path,
                         "column_name": column_name
                     }
                 else:

@@ -643,8 +643,8 @@ class Panda(BaseConfig):
                     for table_name, table_info in pool.tables._tables.items():
                         if table_name not in ('result', 'missing'):  # Skip Panda's own tables
                             table_map[table_name] = {
-                                "path": table_info.path,
-                                "columns": list(table_info.columns) if table_info.columns else []
+                                "path": table_info.info.path,
+                                "columns": list(table_info.info.columns) if table_info.info.columns else []
                             }
                 self.pool_table_maps.append(table_map)
 
@@ -661,8 +661,8 @@ class Panda(BaseConfig):
         # Handle tuple from column reference (table_info, column_name)
         if isinstance(table_input, tuple) and len(table_input) == 2:
             table_info, _ = table_input
-            if hasattr(table_info, 'path'):
-                return table_info.path
+            if hasattr(table_info, 'info'):
+                return table_info.info.path
 
         # Direct path string
         if isinstance(table_input, str):
@@ -670,7 +670,7 @@ class Panda(BaseConfig):
 
         # TableInfo object
         if isinstance(table_input, TableInfo):
-            return table_input.path
+            return table_input.info.path
 
         # StandardizedOutput object
         if hasattr(table_input, 'tables'):
@@ -678,8 +678,8 @@ class Panda(BaseConfig):
             if hasattr(tables, '_tables'):
                 if len(tables._tables) == 1:
                     ds_info = next(iter(tables._tables.values()))
-                    if hasattr(ds_info, 'path'):
-                        return ds_info.path
+                    if hasattr(ds_info, 'info'):
+                        return ds_info.info.path
                 else:
                     table_names = list(tables._tables.keys())
                     raise ValueError(
@@ -707,14 +707,14 @@ class Panda(BaseConfig):
         columns = []
 
         if self.table_input is not None:
-            if isinstance(self.table_input, TableInfo) and self.table_input.columns:
-                columns = list(self.table_input.columns)
+            if isinstance(self.table_input, TableInfo) and self.table_input.info.columns:
+                columns = list(self.table_input.info.columns)
         elif self.tables_input:
             # For merge, we'd have columns from all tables
             # For concat, we'd have common columns
             first_table = self.tables_input[0]
-            if isinstance(first_table, TableInfo) and first_table.columns:
-                columns = list(first_table.columns)
+            if isinstance(first_table, TableInfo) and first_table.info.columns:
+                columns = list(first_table.info.columns)
 
         # Apply operation effects
         for op in self.operations:
@@ -934,13 +934,13 @@ fi
             if hasattr(first_pool, 'tables') and hasattr(first_pool.tables, '_tables'):
                 for name, info in first_pool.tables._tables.items():
                     if name not in tables:  # Don't overwrite our result table
-                        filename = os.path.basename(info.path)
+                        filename = os.path.basename(info.info.path)
                         tables[name] = TableInfo(
                             name=name,
                             path=os.path.join(self.output_folder, filename),
-                            columns=info.columns,
-                            description=info.description,
-                            count=info.count
+                            columns=info.info.columns,
+                            description=info.info.description,
+                            count=info.info.count
                         )
 
             output_streams["tables"] = tables

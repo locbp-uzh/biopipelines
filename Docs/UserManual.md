@@ -124,15 +124,15 @@ DataStream types accessed via `tool.streams.<name>`:
 **Tables (TableInfo)** - Rich metadata about CSV files. They do not track IDs.
 
 ```python
-# Access table path
-path = tool.tables.confidence  # Returns path string
-
-# Access table metadata
-info = tool.tables.info("confidence")
+# Access table metadata via .info
+info = tool.tables.confidence.info
 print(info.path)        # /path/to/confidence.csv
-print(info.columns)     # ["id", ""pTM", "complex_plddt", ...]
+print(info.columns)     # ["id", "pTM", "complex_plddt", ...]
 print(info.description) # "Confidence scores"
 print(info.count)       # Number of rows
+
+# Access column references for downstream tools
+tool.tables.confidence.plddt  # Returns (TableInfo, "plddt") tuple
 ```
 
 In the ToolReference, one can find for each tool what is the expected output in terms of streams and tables, and use this information to write pipelines.

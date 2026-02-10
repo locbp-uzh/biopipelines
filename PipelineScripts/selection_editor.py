@@ -117,8 +117,8 @@ class SelectionEditor(BaseConfig):
         self.folders = pipeline_folders
 
         # Get the selection table path
-        if hasattr(self.selection_table, 'path'):
-            self.selection_table_path = self.selection_table.path
+        if hasattr(self.selection_table, 'info'):
+            self.selection_table_path = self.selection_table.info.path
         else:
             raise ValueError("Invalid selection table reference")
 
@@ -129,7 +129,7 @@ class SelectionEditor(BaseConfig):
         config_lines.extend([
             f"INPUT STRUCTURES: {len(self.structures_stream)} files",
             f"SELECTION COLUMN: {self.selection_column}",
-            f"SELECTION SOURCE: {self.selection_table.name}"
+            f"SELECTION SOURCE: {self.selection_table.info.name}"
         ])
 
         # Operations
@@ -244,7 +244,7 @@ echo "Modified selections saved to: {self.selections_csv}"
         base_dict.update({
             "selection_editor_params": {
                 "selection_column": self.selection_column,
-                "selection_table": self.selection_table.name,
+                "selection_table": self.selection_table.info.name,
                 "expand": self.expand,
                 "shrink": self.shrink,
                 "shift": self.shift,

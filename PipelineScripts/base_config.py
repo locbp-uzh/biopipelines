@@ -411,14 +411,7 @@ fi
                 return f"<circular reference to {type(obj).__name__}>"
 
             if isinstance(obj, TableInfo):
-                # Explicitly convert TableInfo to plain dict, avoiding all attributes
-                return {
-                    "name": obj.name,
-                    "path": obj.path,
-                    "columns": list(obj.columns) if obj.columns else [],
-                    "description": obj.description,
-                    "count": obj.count
-                }
+                return obj.to_dict()
             elif isinstance(obj, dict):
                 seen.add(obj_id)
                 result = {k: make_json_safe(v, seen) for k, v in obj.items()}
@@ -431,15 +424,9 @@ fi
                 return result
             elif hasattr(obj, '__dict__'):
                 # Handle custom objects - check for TableInfo first
-                if hasattr(obj, 'name') and hasattr(obj, 'path') and hasattr(obj, 'columns'):
+                if hasattr(obj, 'info') and hasattr(obj, 'to_dict') and isinstance(obj, TableInfo):
                     # This looks like a TableInfo object that wasn't caught above
-                    return {
-                        "name": getattr(obj, 'name', ''),
-                        "path": getattr(obj, 'path', ''),
-                        "columns": list(getattr(obj, 'columns', [])),
-                        "description": getattr(obj, 'description', ''),
-                        "count": getattr(obj, 'count', None)
-                    }
+                    return obj.to_dict()
                 # Handle DataStream objects - use to_dict() for consistent serialization
                 elif hasattr(obj, 'files') and hasattr(obj, 'ids') and hasattr(obj, 'map_table'):
                     return obj.to_dict()
@@ -551,8 +538,8 @@ fi
             table_object, column_name = reference
 
             # Get the table path from the object
-            if hasattr(table_object, 'path'):
-                table_path = table_object.path
+            if hasattr(table_object, 'info'):
+                table_path = table_object.info.path
             else:
                 raise ValueError(f"Invalid table object in tuple reference: {table_object}")
 
@@ -610,7 +597,7 @@ fi
         # Check StandardizedOutput format
         if hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'tables'):
             if hasattr(self.standardized_input.tables, '_tables') and table_name in self.standardized_input.tables._tables:
-                return self.standardized_input.tables._tables[table_name].path
+                return self.standardized_input.tables._tables[table_name].info.path
         
         # Check dictionary format
         if hasattr(self, 'input_tables') and isinstance(self.input_tables, dict) and table_name in self.input_tables:
@@ -618,7 +605,7 @@ fi
         
         # Check TableContainer format  
         if hasattr(self, 'input_tables') and hasattr(self.input_tables, '_tables') and table_name in self.input_tables._tables:
-            return self.input_tables._tables[table_name].path
+            return self.input_tables._tables[table_name].info.path
         
         return None
     
@@ -631,7 +618,7 @@ fi
         if isinstance(reference, tuple):
             if len(reference) == 2:
                 table_object, column_name = reference
-                if hasattr(table_object, 'path') and isinstance(column_name, str):
+                if hasattr(table_object, 'info') and isinstance(column_name, str):
                     # Valid tuple format
                     return
                 else:
@@ -673,21 +660,21 @@ fi
                 tables = input_source.tables
                 if hasattr(tables, '_tables') and 'missing' in tables._tables:
                     missing_info = tables._tables['missing']
-                    return missing_info.path if hasattr(missing_info, 'path') else str(missing_info)
+                    return missing_info.info.path if hasattr(missing_info, 'info') else str(missing_info)
                 elif isinstance(tables, dict) and 'missing' in tables:
                     missing_info = tables['missing']
                     if isinstance(missing_info, dict) and 'path' in missing_info:
                         return missing_info['path']
-                    elif hasattr(missing_info, 'path'):
-                        return missing_info.path
+                    elif hasattr(missing_info, 'info'):
+                        return missing_info.info.path
                     else:
                         return str(missing_info)
 
         return None
 
 
-class TableInfo:
-    """Information about a table including name, path, and expected columns."""
+class TableMetadata:
+    """Holds table metadata (name, path, columns, description, count)."""
 
     def __init__(self, name: str, path: str, columns: List[str] = None,
                  description: str = "", count: int = 0):
@@ -697,44 +684,57 @@ class TableInfo:
         self.description = description
         self.count = count
 
+    def __repr__(self) -> str:
+        return f"TableMetadata(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
+
+
+class TableInfo:
+    """Information about a table including name, path, and expected columns.
+
+    Metadata is accessed via the .info property:
+        table.info.path, table.info.columns, table.info.count, etc.
+
+    All other attribute access returns column reference tuples (TableInfo, column_name).
+    """
+
+    def __init__(self, name: str, path: str, columns: List[str] = None,
+                 description: str = "", count: int = 0):
+        self._info = TableMetadata(name, path, columns, description, count)
+
         # Set column attributes for IDE autocompletion
-        # Avoid overwriting existing attributes (name, path, columns, description, count)
-        reserved_attributes = {'name', 'path', 'columns', 'description', 'count'}
-        for column in self.columns:
-            if column not in reserved_attributes:
-                setattr(self, column, self._create_column_reference(column))
+        for column in self._info.columns:
+            setattr(self, column, self._create_column_reference(column))
+
+    @property
+    def info(self) -> TableMetadata:
+        """Access table metadata (name, path, columns, description, count)."""
+        return self._info
 
     def _create_column_reference(self, column_name: str):
         """Create a column reference tuple for table access."""
         return (self, column_name)
 
     def __getattr__(self, column_name: str):
-        """
-        Handle access to any column name.
-        This enables both IDE autocompletion for known columns and dynamic access.
-        """
-        # Return column reference tuple for any column name
+        """Return column reference tuple for any attribute access."""
         return self._create_column_reference(column_name)
 
     def __str__(self) -> str:
-        if self.columns:
-            # Show all columns
-            col_display = ', '.join(self.columns)
-            return f"${self.name} ({col_display})"
-        return f"${self.name}"
+        if self._info.columns:
+            col_display = ', '.join(self._info.columns)
+            return f"${self._info.name} ({col_display})"
+        return f"${self._info.name}"
 
     def __repr__(self) -> str:
-        return f"TableInfo(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
+        return f"TableInfo(name='{self._info.name}', path='{self._info.path}', columns={self._info.columns}, count={self._info.count})"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert TableInfo to dictionary for JSON serialization."""
-        # Only return core data, not the dynamically set column attributes which contain circular references
         return {
-            "name": self.name,
-            "path": self.path,
-            "columns": self.columns.copy() if self.columns else [],
-            "description": self.description,
-            "count": self.count
+            "name": self._info.name,
+            "path": self._info.path,
+            "columns": self._info.columns.copy() if self._info.columns else [],
+            "description": self._info.description,
+            "count": self._info.count
         }
 
 
@@ -752,7 +752,7 @@ class TableContainer:
     def __getitem__(self, key: str) -> str:
         """Get table path by name with legacy 'main' support."""
         if key in self._tables:
-            return self._tables[key].path
+            return self._tables[key].info.path
 
         raise KeyError(f"No table named '{key}' in tables")
     
@@ -766,19 +766,9 @@ class TableContainer:
         """Get all table names."""
         return self._tables.keys()
 
-    def info(self, name: str) -> TableInfo:
-        """Get TableInfo object by name."""
-        if name in self._tables:
-            return self._tables[name]
-        raise ValueError(f"No table named '{name}'")
-    
     def items(self):
         """Get all name, path pairs."""
-        return [(name, info.path) for name, info in self._tables.items()]
-    
-    def info(self, name: str) -> TableInfo:
-        """Get full TableInfo object."""
-        return self._tables.get(name)
+        return [(name, info.info.path) for name, info in self._tables.items()]
     
     def __contains__(self, key: str) -> bool:
         """Support 'in' operator: 'table_name' in tables"""
@@ -799,7 +789,7 @@ class TableContainer:
         for name, info in self._tables.items():
             # Format: table name with columns, then indented file path
             # Extract just the filename from the full path
-            filename = info.path.split('/')[-1]
+            filename = info.info.path.split('/')[-1]
             path_display = f"<output_folder>/{filename}"
             lines.append(f"    {str(info)}:")
             lines.append(f"        – '{path_display}'")
@@ -992,14 +982,14 @@ class StandardizedOutput:
         # Check in tables container
         if hasattr(self.tables, name):
             table_info = getattr(self.tables, name)
-            return table_info.path if hasattr(table_info, 'path') else str(table_info)
-        
+            return table_info.info.path if hasattr(table_info, 'info') else str(table_info)
+
         # For "main", try common table types in order of preference
         if name == "main":
             for fallback_name in ['sequences', 'structures', 'compounds']:
                 if hasattr(self.tables, fallback_name):
                     table_info = getattr(self.tables, fallback_name)
-                    return table_info.path if hasattr(table_info, 'path') else str(table_info)
+                    return table_info.info.path if hasattr(table_info, 'info') else str(table_info)
         
         return ""
     
@@ -1060,9 +1050,9 @@ class StandardizedOutput:
         if 'tables' in self._data and hasattr(self.tables, '_tables'):
             lines.append("tables:")
             for name, info in self.tables._tables.items():
-                col_display = ', '.join(info.columns[:]) if info.columns else ''
+                col_display = ', '.join(info.info.columns[:]) if info.info.columns else ''
                 lines.append(f"    ${name} ({col_display}):")
-                relative_path = make_relative_path(info.path)
+                relative_path = make_relative_path(info.info.path)
                 lines.append(f"        – '{relative_path}'")
 
         # Output folder

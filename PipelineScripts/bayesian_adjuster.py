@@ -168,8 +168,8 @@ class BayesianAdjuster(BaseConfig):
         self.folders = pipeline_folders
 
         # Extract table paths
-        self.frequencies_path = self.frequencies_input.path if isinstance(self.frequencies_input, TableInfo) else self.frequencies_input
-        self.correlations_path = self.correlations_input.path if isinstance(self.correlations_input, TableInfo) else self.correlations_input
+        self.frequencies_path = self.frequencies_input.info.path if isinstance(self.frequencies_input, TableInfo) else self.frequencies_input
+        self.correlations_path = self.correlations_input.info.path if isinstance(self.correlations_input, TableInfo) else self.correlations_input
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""

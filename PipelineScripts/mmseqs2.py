@@ -202,8 +202,8 @@ echo "MMseqs2 processing completed"
         if isinstance(self.mask_positions, tuple):
             if len(self.mask_positions) == 2:
                 table_info, column_name = self.mask_positions
-                if hasattr(table_info, 'path'):
-                    return f' \\\n    --mask_table "{table_info.path}" \\\n    --mask_column "{column_name}" \\\n    --id_map "{id_map_json}"'
+                if hasattr(table_info, 'info'):
+                    return f' \\\n    --mask_table "{table_info.info.path}" \\\n    --mask_column "{column_name}" \\\n    --id_map "{id_map_json}"'
                 else:
                     raise ValueError(f"Invalid table reference in mask parameter: {self.mask_positions}")
             else:

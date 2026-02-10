@@ -392,11 +392,11 @@ class Plot(BaseConfig):
 
         # Track data sources
         for i, source in enumerate(self._data_sources):
-            if hasattr(source, 'path'):
+            if hasattr(source, 'info'):
                 # TableInfo
                 self.input_sources[f"data_{i}"] = {
-                    'path': source.path,
-                    'name': getattr(source, 'name', f'table_{i}')
+                    'path': source.info.path,
+                    'name': source.info.name
                 }
             elif hasattr(source, 'output_folder'):
                 # StandardizedOutput or ToolOutput
@@ -407,26 +407,26 @@ class Plot(BaseConfig):
     def _get_table_path(self, data) -> str:
         """Extract table path from various data source types."""
         if isinstance(data, TableInfo):
-            return data.path
+            return data.info.path
         elif hasattr(data, 'tables'):
             tables = data.tables
             if hasattr(tables, '_tables'):
                 # Get first table
                 first_name, info = next(iter(tables._tables.items()))
-                return info.path
+                return info.info.path
             elif isinstance(tables, dict):
                 first_name, info = next(iter(tables.items()))
                 if isinstance(info, dict) and 'path' in info:
                     return info['path']
-                elif hasattr(info, 'path'):
-                    return info.path
+                elif hasattr(info, 'info'):
+                    return info.info.path
                 return str(info)
         raise ValueError(f"Cannot extract table path from: {type(data)}")
 
     def _get_table_name(self, data) -> str:
         """Extract table name from various data source types."""
         if isinstance(data, TableInfo):
-            return data.name
+            return data.info.name
         elif hasattr(data, 'tables'):
             tables = data.tables
             if hasattr(tables, '_tables'):
@@ -441,8 +441,8 @@ class Plot(BaseConfig):
         if isinstance(data, TableInfo):
             return {
                 "type": "table_info",
-                "path": data.path,
-                "name": data.name
+                "path": data.info.path,
+                "name": data.info.name
             }
         elif hasattr(data, 'output_folder'):
             # StandardizedOutput or similar
