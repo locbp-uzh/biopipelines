@@ -95,18 +95,48 @@ Two phases (biopipelines-submit):
 | **Pipeline** | Generation of bash scripts, prediction of output paths and files | Python | Cluster |
 | **SLURM** | Bash scripts execute, files are created | Slurm | Cluster |
 
-Tools predict their outputs before execution. These predictions enable chaining:
+### DataStream vs Tables
+
+Tools output two types of data containers:
+
+**DataStream** - Unified container supporting ID tracking, and association of IDs to files (e.g. .pdb, .cif, .sdf) or values (e.g. protein/dna sequences):
 
 ```python
-rfd = RFdiffusion(contigs="50-100", num_designs=5)
-# rfd contains predicted paths (files don't exist yet)
-mpnn = ProteinMPNN(structures=rfd, num_sequences=2)
-# mpnn uses rfd's predicted outputs
+# Access structures from a tool via the streams container
+for struct_id, pdb_path in boltz.streams.structures:
+    print(f"{struct_id}: {pdb_path}")
+
+# Count items
+print(f"Generated {len(boltz.streams.structures)} structures")
+print(f"Expected ids: {boltz.streams.structures.ids}")
 ```
 
-### Entity Types
+DataStream types accessed via `tool.streams.<name>`:
+- `streams.structures` - PDB/CIF files
+- `streams.sequences` - ID-tracked table with id, sequence columns
+- `streams.compounds` - CSV with SMILES column, or SDF/PDB files
+- `streams.msas` - A3M or CSV files
+- `streams.images` - PNG files
 
-Basic input types can be imported from `PipelineScripts/entities.py`. Importantly, for models having entities such as PDB structures, proteins sequences or ligand smiles as parameters, we always pass an entity object rather than a string to ensure representation adherence across the repository.
+**Tables (TableInfo)** - Rich metadata about CSV files. They do not track IDs.
+
+```python
+# Access table path
+path = tool.tables.confidence  # Returns path string
+
+# Access table metadata
+info = tool.tables.info("confidence")
+print(info.path)        # /path/to/confidence.csv
+print(info.columns)     # ["id", ""pTM", "complex_plddt", ...]
+print(info.description) # "Confidence scores"
+print(info.count)       # Number of rows
+```
+
+In the ToolReference, one can find for each tool what is the expected output in terms of streams and tables, and use this information to write pipelines.
+
+### Common inputs
+
+Basic input types can be imported from `PipelineScripts/entities.py`. Importantly, for models having entities such as PDB paths, proteins sequences or ligand smiles as parameters, we always pass an entity object rather than a string to ensure representation coherence across the repository.
 
 | Entity | Purpose |
 |--------|---------|
@@ -117,7 +147,7 @@ Basic input types can be imported from `PipelineScripts/entities.py`. Importantl
 | `Table` | Load existing CSV files |
 
 **PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/PDBs/` → RCSB download. 
-It also generate protein sequences for each of the proteins. 
+It also generates protein sequences for each of the proteins. 
 If an RCSB code is provided, ligands will also be downloaded and will be available with their smiles/ccd.
 
 ```python
@@ -141,7 +171,7 @@ seq = Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ", ids="my_protein")
 seqs = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
 
 # Multiple DNA sequences from a file
-seqs = Sequence("/path/to/sequences.csv", type="dna")
+seqs = Sequence("/path/to/sequences.csv", type="dna") # must have columns id, sequence
 ```
 
 **Ligand** - Fetches from RCSB (CCD codes) or PubChem (names, CID, CAS):
@@ -198,42 +228,6 @@ ProteinMPNN(
 # Custom table name
 previous = Table("/path/to/results.csv", name="previous_run")
 # Access via: previous.tables.previous_run
-```
-
-### DataStream vs Tables
-
-Tools output two types of data containers:
-
-**DataStream** - Unified container supporting ID tracking, and association of IDs to files (e.g. PDBs) or values (e.g. protein sequence):
-
-```python
-# Access structures from a tool via the streams container
-for struct_id, pdb_path in boltz.streams.structures:
-    print(f"{struct_id}: {pdb_path}")
-
-# Count items
-print(f"Generated {len(boltz.streams.structures)} structures")
-print(f"Expected ids: {boltz.streams.structures.ids}")
-```
-
-DataStream types accessed via `tool.streams.<type>`:
-- `streams.structures` - PDB/CIF files
-- `streams.sequences` - Table with id, sequence columns
-- `streams.compounds` - CSV with SMILES column, or SDF/PDB files
-- `streams.msas` - A3M or CSV files
-
-**Tables (TableInfo)** - Rich metadata about CSV files. They do not track IDs.
-
-```python
-# Access table path
-path = tool.tables.confidence  # Returns path string
-
-# Access table metadata
-info = tool.tables.info("confidence")
-print(info.path)        # /path/to/confidence.csv
-print(info.columns)     # ["id", ""pTM", "complex_plddt", ...]
-print(info.description) # "Confidence scores"
-print(info.count)       # Number of rows
 ```
 
 ### Combinatorics: Bundle and Each
