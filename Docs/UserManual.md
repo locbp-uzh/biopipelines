@@ -55,7 +55,6 @@ git clone https://gitlab.uzh.ch/locbp/public/biopipelines
 cd biopipelines
 
 # 2. Create the biopipelines conda environment
-module load miniforge3
 mamba env create -f Environments/biopipelines.yaml
 mamba activate biopipelines
 
@@ -83,12 +82,18 @@ Note: you must have installed the relevant environments and configured them in c
 
 ### Pipeline and SLURM Runtime
 
-BioPipelines operates in two phases:
+BioPipelines operates alternatively in one or two phases:
 
+One phase (Jupyter/Colab notebooks):
 | Phase | What Happens | Executer | Where |
 |-------|--------------|-------|-------|
-| **Pipeline time** | Generation of bash scripts, prediction of output paths and files | Python | Cluster |
-| **SLURM time** | Bash scripts execute, files are created | Slurm | Cluster |
+| **Notebook cell** | Generation and running of bash scripts, prediction of output paths and files | Python + bash | Cluster |
+
+Two phases (biopipelines-submit):
+| Phase | What Happens | Executer | Where |
+|-------|--------------|-------|-------|
+| **Pipeline** | Generation of bash scripts, prediction of output paths and files | Python | Cluster |
+| **SLURM** | Bash scripts execute, files are created | Slurm | Cluster |
 
 Tools predict their outputs before execution. These predictions enable chaining:
 
@@ -314,12 +319,12 @@ with Pipeline("Project", "Job", "Description"):
 
 ## On-the-fly Execution
 
-For interactive prototyping in Jupyter notebooks or running locally with plain Python, use `on_the_fly=True`. Each tool's bash script is executed immediately when the tool is added, so you see results step by step:
+For interactive prototyping in Jupyter notebooks or Google Colab, on-the-fly mode is **enabled automatically** — no extra arguments needed. Each tool's bash script is executed immediately when the tool is added, so you see results step by step:
 
 ```python
+# In a Jupyter notebook or Google Colab: on_the_fly is auto-detected
 with Pipeline("Examples", "interactive_test",
-              description="Quick test run",
-              on_the_fly=True):
+              description="Quick test run"):
     lysozyme = PDB("168L")
     rfd = RFdiffusion(pdb=lysozyme,
                       contigs='50-70/A81-140',
@@ -328,6 +333,8 @@ with Pipeline("Examples", "interactive_test",
     pmpnn = ProteinMPNN(structures=rfd, num_sequences=2)
     # pmpnn has already finished running at this point
 ```
+
+You can also force on-the-fly mode explicitly with `on_the_fly=True` (e.g., when running locally with plain Python outside a notebook).
 
 Key differences from normal mode:
 - `Resources()` is **optional** (no SLURM resources needed for local execution)

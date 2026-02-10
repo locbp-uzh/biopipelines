@@ -2,11 +2,11 @@
 
 ## Overview
 
-A Python framework for automated computational protein design workflows that generates SLURM-executable bash scripts for high-performance computing clusters. BioPipelines creates modular, reproducible workflows by connecting bioinformatics tools through standardized interfaces. 
+A Python framework for automated computational protein design workflows that can run in Jupyter/Colab notebooks as well as on SLURM-based computing clusters. BioPipelines provides standardized interfaces to connect bioinformatics tools. 
 
 ## Example pipeline
 
-PDB download -> RFdiffusion -> ProteinMPNN -> AlphaFold
+PDB download -> RFdiffusion -> ProteinMPNN -> AlphaFold.
 
 ```python
 #imports omitted

@@ -45,7 +45,7 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, project: str, job: str, description: str="Description missing", debug: bool=False, on_the_fly: bool=False):
+    def __init__(self, project: str, job: str, description: str="Description missing", debug: bool=False, on_the_fly: Optional[bool]=None):
         """
         Initialize a new pipeline instance.
 
@@ -57,6 +57,8 @@ class Pipeline:
             on_the_fly: If True, each tool's script is executed immediately when added.
                         Useful for interactive use in Jupyter notebooks or running locally
                         with plain Python. Skips SLURM submission on exit.
+                        If None (default), auto-detects: True when running in a Jupyter
+                        notebook (.ipynb), False otherwise.
         """
         if ' ' in job: job=job.replace(' ','_') #It will create issues at runtime otherwise
 
@@ -64,6 +66,9 @@ class Pipeline:
         self.job = job
         self.description = description
         self.debug = debug
+
+        if on_the_fly is None:
+            on_the_fly = self._detect_notebook()
         self.on_the_fly = on_the_fly
 
         self.folder_manager = FolderManager(project, job, debug)
@@ -92,6 +97,28 @@ class Pipeline:
 
         # Context manager state
         self._explicit_save_called = False  # Track if Save() was explicitly called
+
+    @staticmethod
+    def _detect_notebook() -> bool:
+        """
+        Detect whether the pipeline is being run from a Jupyter notebook.
+
+        Checks the call stack for IPython's interactiveshell module,
+        which is present when code executes inside a Jupyter notebook.
+
+        Returns:
+            True if running inside a Jupyter notebook, False otherwise.
+        """
+        try:
+            from IPython import get_ipython
+            shell = get_ipython()
+            if shell is not None:
+                if (shell.__class__.__name__ == 'ZMQInteractiveShell'
+                        or shell.__class__.__module__ == 'google.colab._shell'):
+                    return True
+        except (ImportError, NameError):
+            pass
+        return False
 
     def __enter__(self):
         """
