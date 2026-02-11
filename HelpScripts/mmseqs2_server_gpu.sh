@@ -36,6 +36,7 @@ JOB_QUEUE_DIR="$MMSEQS2_SHARED_FOLDER/job_queue"
 RESULTS_DIR="$MMSEQS2_SHARED_FOLDER/results"
 DB_DIR=$(require_folder "${MMSEQS2_DB_DIR:-}" "MMSEQS2_DB_DIR" "MMseqs2Databases")
 DATA_DIR=$(require_folder "${BIOPIPELINES_DATA_DIR:-}" "BIOPIPELINES_DATA_DIR" "data")
+MMSEQS2_DIR=$(require_folder "${MMSEQS2_DIR:-}" "MMSEQS2_DIR" "MMseqs2")
 
 TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp"
 GPU_TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp/gpu"
@@ -56,12 +57,13 @@ log() {
 }
 
 check_mmseqs_installation() {
-    local mmseqs_dir="$DATA_DIR/mmseqs"
-    local mmseqs_bin="$mmseqs_dir/bin/mmseqs"
+    local mmseqs_bin="$MMSEQS2_DIR/bin/mmseqs"
 
     if [[ ! -f "$mmseqs_bin" ]]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - MMseqs2 not found at $mmseqs_bin, downloading..."
-        cd "$DATA_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot access $DATA_DIR"; exit 1; }
+        local parent_dir
+        parent_dir="$(dirname "$MMSEQS2_DIR")"
+        cd "$parent_dir" || { echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot access $parent_dir"; exit 1; }
 
         # Download MMseqs2
         wget https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
@@ -126,7 +128,7 @@ convert_to_a3m() {
     local scratch_a3m="$tmp_dir/raw.a3m"
     local final_a3m="$output_file"
 
-    $DATA_DIR/mmseqs/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
+    $MMSEQS2_DIR/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
         --msa-format-mode 5 \
         --threads "$OMP_NUM_THREADS"
 
@@ -157,7 +159,7 @@ convert_a3m_to_csv() {
 
 # Start GPU server with optimized settings
 log "Starting MMseqs2 GPU server for $DB_PATH"
-CUDA_VISIBLE_DEVICES=0 $DATA_DIR/mmseqs/bin/mmseqs gpuserver "$DB_PATH" \
+CUDA_VISIBLE_DEVICES=0 $MMSEQS2_DIR/bin/mmseqs gpuserver "$DB_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
@@ -331,7 +333,7 @@ while true; do
     cp "$fasta" "$tmp/query.fasta"
     query_db="$tmp/queryDB"
     log "Creating queryDB"
-    $DATA_DIR/mmseqs/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
+    $MMSEQS2_DIR/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
 
     # Result database (not m8 format)
     result_db="$tmp/resultDB"
@@ -346,7 +348,7 @@ while true; do
     gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory before search: ${gpu_mem_before}MB"
 
-    if ! CUDA_VISIBLE_DEVICES=0 $DATA_DIR/mmseqs/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
+    if ! CUDA_VISIBLE_DEVICES=0 $MMSEQS2_DIR/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
       --gpu 1 \
       --gpu-server 1 \
       --prefilter-mode 1 \

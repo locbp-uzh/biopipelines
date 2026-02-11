@@ -13,7 +13,6 @@ Debug/
 # Personal pipelines
 MyPipelines/*
 !MyPipelines/README.md
-wip.txt
 
 # Ligands folder (cached ligand files)
 Ligands/*
@@ -34,11 +33,3 @@ LocalResults/
 # OS
 .DS_Store
 Thumbs.db
-.claude/settings.local.json
-claude_fork.bat
-claude.bat
-
-Docs/Paper.md
-
-Docs/biopipelines_draft.docx
-Docs/Paper_Computational.md

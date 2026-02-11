@@ -40,6 +40,7 @@ TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp"
 # Database directory (ColabFold databases setup with setup_databases.sh)
 DB_DIR=$(require_folder "${COLABFOLD_DB_DIR:-}" "COLABFOLD_DB_DIR" "ColabFoldDatabases")
 DATA_DIR=$(require_folder "${BIOPIPELINES_DATA_DIR:-}" "BIOPIPELINES_DATA_DIR" "data")
+MMSEQS2_DIR=$(require_folder "${MMSEQS2_DIR:-}" "MMSEQS2_DIR" "MMseqs2")
 ALPHAFOLD_DIR=$(require_folder "${BIOPIPELINES_ALPHAFOLD_DIR:-}" "BIOPIPELINES_ALPHAFOLD_DIR" "AlphaFold")
 UNIREF_DB="uniref30_2302_db"
 ENVDB="colabfold_envdb_202108_db"
@@ -58,12 +59,13 @@ log() {
 }
 
 check_mmseqs_installation() {
-    local mmseqs_dir="$DATA_DIR/mmseqs"
-    local mmseqs_bin="$mmseqs_dir/bin/mmseqs"
+    local mmseqs_bin="$MMSEQS2_DIR/bin/mmseqs"
 
     if [[ ! -f "$mmseqs_bin" ]]; then
         log "MMseqs2 not found at $mmseqs_bin, downloading..."
-        cd "$DATA_DIR" || { log "ERROR: Cannot access $DATA_DIR"; exit 1; }
+        local parent_dir
+        parent_dir="$(dirname "$MMSEQS2_DIR")"
+        cd "$parent_dir" || { log "ERROR: Cannot access $parent_dir"; exit 1; }
 
         # Download MMseqs2
         wget https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
@@ -141,7 +143,7 @@ check_colabfold_search
 check_databases
 
 # Paths to binaries
-MMSEQS_BIN="$DATA_DIR/mmseqs/bin/mmseqs"
+MMSEQS_BIN="$MMSEQS2_DIR/bin/mmseqs"
 COLABFOLD_SEARCH="$ALPHAFOLD_DIR/colabfold-conda/bin/colabfold_search"
 
 # Optimized Memory Settings

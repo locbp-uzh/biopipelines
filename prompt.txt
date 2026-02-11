@@ -7,4 +7,3 @@ Remember that tools shouldn't write python code, only bash code, and python code
 Read Docs/ToolReference.md for a broad idea of which tools are available.
 Read HelpScripts/biopipelines_io.py.
 When implementing new code or refactoring, never introduce unnecessary fallbacks or guessed default values.
-Make sure you don't leave tmpclaude-XXXX-cwd files behind in the repository. 

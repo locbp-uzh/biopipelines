@@ -91,8 +91,8 @@ Filter, transform, and manipulate tables.
 - [SelectionEditor](Tool/DataManagement.md#selectioneditor) - Selection string manipulation
 
 ## Under development
-- PLIP (Protein-Ligand Interaction Profiler) - Interaction analysis
-- DynamicBind- Ligand-specific conformations
-- SequenceMetricAnalysis - Multi-metric mutation analysis
-- ESMFold - Fast single-sequence prediction (under development)
-- MMSeqs2_LCF - Full MSA from local MMseqs2
+- PLIP (Protein-Ligand Interaction Profiler)
+- DynamicBind
+- ESMFold
+- MMSeqs2_LCF (LocalColabFold)
+- Gnina

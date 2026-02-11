@@ -24,7 +24,6 @@ folders:
   # Infrastructure paths
   infrastructure:
     HelpScripts: "<biopipelines>/HelpScripts"
-    MMseqs2: "<biopipelines>/MMseqs2"
     PDBs: "<biopipelines>/PDBs"
     Ligands: "<biopipelines>/Ligands"
     cache: "<group>/cache"
@@ -44,6 +43,7 @@ folders:
     ESMFold: "<data>/esmfold"
     DynamicBind: "<data>/DynamicBind"
     Gnina: "<data>/gnina"
+    MMseqs2: "<data>/mmseqs"
     ModelForge: "<data>/modelforge"
 
   # Cache paths (shared on group storage)
