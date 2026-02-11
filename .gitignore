@@ -28,6 +28,9 @@ Ligands/*
 # Claude Code
 .claude/settings.local.json
 
+# Local results
+LocalResults/
+
 # OS
 .DS_Store
 Thumbs.db
