@@ -29,10 +29,10 @@ IMPORTANT - Affinity calculation order:
   - Bundle(ATP, Each(library)): affinity calculated for ATP (in presence of each library ligand)
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import *
-from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.combinatorics import Bundle, Each
+from biopipelines.pipeline import *
+from biopipelines.entities import *
+from biopipelines.boltz2 import Boltz2
+from biopipelines.combinatorics import Bundle, Each
 
 with Pipeline(project="Examples",
               job="Boltz2",

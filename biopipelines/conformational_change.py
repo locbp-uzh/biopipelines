@@ -47,7 +47,7 @@ class ConformationalChange(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba"):
         return """echo "=== ConformationalChange ==="
-echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
 echo "=== ConformationalChange ready ==="
 """

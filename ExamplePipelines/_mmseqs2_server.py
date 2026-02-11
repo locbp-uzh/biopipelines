@@ -6,8 +6,8 @@
 This pipeline should not be modified as it is used by the gpu server
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.mmseqs2 import MMseqs2Server
+from biopipelines.pipeline import *
+from biopipelines.mmseqs2 import MMseqs2Server
 
 with Pipeline(project="MMseqs2Server",
               job="GPU",

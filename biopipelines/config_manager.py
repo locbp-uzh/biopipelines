@@ -46,7 +46,7 @@ class ConfigManager:
         Returns:
             Absolute path to config.yaml in the repository root
         """
-        # Get repository root (assumes this file is in PipelineScripts/)
+        # Get repository root (assumes this file is in biopipelines/)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(script_dir)
         return os.path.join(repo_root, "config.yaml")

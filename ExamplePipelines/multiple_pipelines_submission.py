@@ -6,9 +6,9 @@
 This pipeline shows how to use boltz2
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import * # import PDB, Sequence, Ligand
-from PipelineScripts.boltz2 import Boltz2
+from biopipelines.pipeline import *
+from biopipelines.entities import * # import PDB, Sequence, Ligand
+from biopipelines.boltz2 import Boltz2
 
 """
 when running via submit, all the sbatch commands generated in the python script will be submitted

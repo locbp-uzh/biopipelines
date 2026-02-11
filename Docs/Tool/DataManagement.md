@@ -49,7 +49,7 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 **Examples**:
 
 ```python
-from PipelineScripts.panda import Panda
+from biopipelines.panda import Panda
 
 # Filter
 filtered = Panda(
@@ -121,7 +121,7 @@ Creates separate CSV files per metric for statistical software (GraphPad Prism).
 **Example**:
 
 ```python
-from PipelineScripts.extract_metrics import ExtractMetrics
+from biopipelines.extract_metrics import ExtractMetrics
 
 metrics = ExtractMetrics(
     tables=[cycle0.tables.merged, cycle1.tables.merged, cycle2.tables.merged],
@@ -153,8 +153,8 @@ Modifies PyMOL selection strings (e.g., "3-45+58-60") with structure-aware opera
 **Example**:
 
 ```python
-from PipelineScripts.selection_editor import SelectionEditor
-from PipelineScripts.distance_selector import DistanceSelector
+from biopipelines.selection_editor import SelectionEditor
+from biopipelines.distance_selector import DistanceSelector
 
 distances = DistanceSelector(structures=rfdaa, ligand="LIG", distance=5)
 

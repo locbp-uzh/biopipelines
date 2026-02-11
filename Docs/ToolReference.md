@@ -42,7 +42,7 @@ Design and manipulate sequences.
 - [ProteinMPNN](Tool/SequenceDesign.md#proteinmpnn) - Sequence design for backbones
 - [LigandMPNN](Tool/SequenceDesign.md#ligandmpnn) - Ligand-aware sequence design
 - [MutationComposer](Tool/SequenceDesign.md#mutationcomposer) - Combinatorial mutants
-- [SDM](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic substitutions
+- [Mutagenesis](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic substitutions
 - [Fuse](Tool/SequenceDesign.md#fuse) - Fusion proteins with linkers
 - [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Sequence combinations
 - [SplitChains](Tool/SequenceDesign.md#splitchains) - Split concatenated sequences

@@ -6,16 +6,16 @@
 This pipeline shows how improve the difference in predicted binding affinity between benzamide and triazole chloroalkanes and halotag7 starting from a Boltz model of both.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import *
-from PipelineScripts.ligand_mpnn import LigandMPNN
-from PipelineScripts.mutation_profiler import MutationProfiler
-from PipelineScripts.mutation_composer import MutationComposer
-from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.distance import Distance
-from PipelineScripts.panda import Panda
-from PipelineScripts.plot import Plot
-from PipelineScripts.pymol import PyMOL
+from biopipelines.pipeline import *
+from biopipelines.entities import *
+from biopipelines.ligand_mpnn import LigandMPNN
+from biopipelines.mutation_profiler import MutationProfiler
+from biopipelines.mutation_composer import MutationComposer
+from biopipelines.boltz2 import Boltz2
+from biopipelines.distance import Distance
+from biopipelines.panda import Panda
+from biopipelines.plot import Plot
+from biopipelines.pymol import PyMOL
 
 # This function will be used to make sure new sequences generated at each cycle haven't been folded before
 def drop_duplicates_history(new_sequences, all_sequences_seen):

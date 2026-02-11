@@ -64,18 +64,18 @@ folders:
 # If the tool itsef manages the change to an environment (e.g. when it needs more than one environment), set it to null
 environments:
   # Structure generation
-  RFdiffusion: "ProteinEnv"
-  RFdiffusionAllAtom: "ProteinEnv"
+  RFdiffusion: "SE3nv"
+  RFdiffusionAllAtom: "SE3nv"
   RFdiffusion3: "foundry"
   BoltzGen: "boltzgen"
   BoltzGenMerge: "boltzgen"
   BoltzGenImport: "boltzgen"
 
   # Sequence design
-  ProteinMPNN: "ProteinEnv"
+  ProteinMPNN: "SE3nv"
   LigandMPNN: "ligandmpnn_env"
   MutationComposer: "MutationEnv"
-  SDM: "MutationEnv"
+  Mutagenesis: "MutationEnv"
   Fuse: "biopipelines"
   StitchSequences: "biopipelines"
   SplitChains: "biopipelines"
@@ -105,11 +105,12 @@ environments:
   SequenceMetricAnalysis: "MutationEnv"
   Contacts: "ProteinEnv"
   PoseChange: "ProteinEnv"
+  SASA: "ProteinEnv"
 
   # Data management
   Panda: "biopipelines"
   ExtractMetrics: "biopipelines"
-  SelectinEditor: "ProteinEnv"
+  SelectionEditor: "ProteinEnv"
 
   # Utilities
   LoadOutput: "biopipelines"

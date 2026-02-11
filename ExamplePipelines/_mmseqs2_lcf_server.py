@@ -9,8 +9,8 @@ MMseqs2 LCF (LocalColabFold) server uses colabfold_search for MSA generation,
 searching both UniRef30 and ColabFoldDB for richer alignments.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.mmseqs2_lcf import MMseqs2ServerLCF
+from biopipelines.pipeline import *
+from biopipelines.mmseqs2_lcf import MMseqs2ServerLCF
 
 with Pipeline(project="MMseqs2LCFServer",
               job="GPU",

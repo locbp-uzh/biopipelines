@@ -27,7 +27,7 @@
 
 | Phase | Location | What Happens |
 |-------|----------|--------------|
-| **Pipeline time** | PipelineScripts/ | Python generates bash scripts, predicts outputs |
+| **Pipeline time** | biopipelines/ | Python generates bash scripts, predicts outputs |
 | **SLURM time** | HelpScripts/ | Bash scripts execute, `pipe_*.py` scripts run |
 
 Tools never execute computations directly. They:
@@ -112,7 +112,7 @@ mpnn = ProteinMPNN(structures=rfd, num_sequences=2)
 
 ### Creating a Tool
 
-1. Create `PipelineScripts/my_tool.py`
+1. Create `biopipelines/my_tool.py`
 2. Inherit from `BaseConfig`
 3. Implement required methods
 4. Create helper script `HelpScripts/pipe_my_tool.py` if needed
@@ -494,14 +494,14 @@ git status
 git pull origin main
 git checkout -b feature/my-tool
 # Make changes
-git add PipelineScripts/my_tool.py
+git add biopipelines/my_tool.py
 git commit -m "Add MyTool"
 git push origin feature/my-tool
 ```
 
 ### What to Commit
 
-- Tool implementations (`PipelineScripts/`)
+- Tool implementations (`biopipelines/`)
 - Helper scripts (`HelpScripts/`)
 - Documentation (`Docs/`)
 
@@ -550,7 +550,7 @@ Open biopipelines folder and start with `prompt.txt` to give Claude repository c
 
 ```bash
 # Quick syntax check
-python -c "from PipelineScripts.my_tool import MyTool; print('OK')"
+python -c "from biopipelines.my_tool import MyTool; print('OK')"
 
 # Test with local output (writes to ./BioPipelines/)
 with Pipeline("Test", "Debug", "Testing", local_output=True):

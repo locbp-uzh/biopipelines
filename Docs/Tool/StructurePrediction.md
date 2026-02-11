@@ -52,7 +52,7 @@ rm install_colabbatch_linux.sh
 
 **Example**:
 ```python
-from PipelineScripts.alphafold import AlphaFold
+from biopipelines.alphafold import AlphaFold
 
 # Standard prediction with MSA
 af = AlphaFold(
@@ -125,7 +125,7 @@ pip install boltz[cuda] -U
 
 **Example**:
 ```python
-from PipelineScripts.boltz2 import Boltz2
+from biopipelines.boltz2 import Boltz2
 
 # Basic apo and holo prediction
 boltz_apo = Boltz2(proteins=lmpnn)
@@ -211,7 +211,7 @@ pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 sci
 
 **Example**:
 ```python
-from PipelineScripts.onion_net import OnionNet2
+from biopipelines.onion_net import OnionNet2
 
 # Predict affinities with OnionNet-2
 affinity = OnionNet2(

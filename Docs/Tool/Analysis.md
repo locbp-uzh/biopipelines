@@ -8,7 +8,7 @@
 
 Measures distances between specific atoms and residues in structures. Useful for tracking ligand-protein interactions or structural features.
 
-**Environment**: `ProteinEnv`
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `structures`: Union[ToolOutput, StandardizedOutput] (required) - Input structures
@@ -25,7 +25,7 @@ Measures distances between specific atoms and residues in structures. Useful for
 
 **Example**:
 ```python
-from PipelineScripts.distance import Distance
+from biopipelines.distance import Distance
 
 distances = Distance(
     structures=boltz,
@@ -69,7 +69,7 @@ Same as Distance, with additional support for `residue.atom` format:
 
 **Example**:
 ```python
-from PipelineScripts.angle import Angle
+from biopipelines.angle import Angle
 
 # Bond angle at CA (N-CA-C angle)
 bond_angle = Angle(
@@ -129,7 +129,7 @@ Selects protein residues based on proximity to ligands or other reference points
 
 **Example**:
 ```python
-from PipelineScripts.distance_selector import DistanceSelector
+from biopipelines.distance_selector import DistanceSelector
 
 selector = DistanceSelector(
     structures=boltz,
@@ -162,7 +162,7 @@ Quantifies structural changes between reference and target structures. Calculate
 
 **Example**:
 ```python
-from PipelineScripts.conformational_change import ConformationalChange
+from biopipelines.conformational_change import ConformationalChange
 
 conf_change = ConformationalChange(
     reference_structures=apo_structures,
@@ -205,7 +205,7 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 
 **Example**:
 ```python
-from PipelineScripts.contacts import Contacts
+from biopipelines.contacts import Contacts
 
 # Analyze contacts with specific protein regions
 contacts = Contacts(
@@ -261,10 +261,10 @@ Measures ligand pose distance between reference holo structure and sample struct
 
 **Example**:
 ```python
-from PipelineScripts.pose_change import PoseChange
-from PipelineScripts.pdb import PDB
-from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.filter import Filter
+from biopipelines.pose_change import PoseChange
+from biopipelines.pdb import PDB
+from biopipelines.boltz2 import Boltz2
+from biopipelines.filter import Filter
 
 # Compare designed structures to XRC reference
 xrc = PDB(pdbs="4ufc", ids="reference")

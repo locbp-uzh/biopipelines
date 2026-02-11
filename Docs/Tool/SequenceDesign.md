@@ -39,7 +39,7 @@ git clone https://github.com/dauparas/ProteinMPN
 
 **Example**:
 ```python
-from PipelineScripts.protein_mpnn import ProteinMPNN
+from biopipelines.protein_mpnn import ProteinMPNN
 
 pmpnn = ProteinMPNN(
     structures=rfd,
@@ -88,7 +88,7 @@ pip3 install -r requirements.txt
 
 **Example**:
 ```python
-from PipelineScripts.ligand_mpnn import LigandMPNN
+from biopipelines.ligand_mpnn import LigandMPNN
 
 lmpnn = LigandMPNN(
     structures=rfdaa,
@@ -131,8 +131,8 @@ Generates new protein sequences by composing mutations based on frequency analys
 
 **Example**:
 ```python
-from PipelineScripts.mutation_composer import MutationComposer
-from PipelineScripts.mutation_profiler import MutationProfiler
+from biopipelines.mutation_composer import MutationComposer
+from biopipelines.mutation_profiler import MutationProfiler
 
 profiler = MutationProfiler(original=ref, mutants=variants)
 composer = MutationComposer(
@@ -145,16 +145,18 @@ composer = MutationComposer(
 
 ---
 
-### SDM (SiteDirectedMutagenesis)
+### Mutagenesis
 
-Performs site-directed mutagenesis at specified positions. Generates systematic amino acid substitutions for experimental library design or computational scanning.
+Performs mutagenesis at specified positions. Generates systematic amino acid substitutions for experimental library design or computational scanning.
 
-**Environment**: `ProteinEnv`
+**Environment**: `MutationEnv`
 
 **Parameters**:
 - `original`: Union[str, ToolOutput, StandardizedOutput] (required) - Input structure/sequence
 - `position`: int (required) - Target position for mutagenesis (1-indexed)
-- `mode`: str = "saturation" - Mutagenesis strategy:
+- `mutate_to`: str = "" - Target amino acid(s) for "specific" mode (e.g., "A" for alanine, "AV" for alanine and valine). Required when mode is "specific".
+- `mode`: str = "specific" - Mutagenesis strategy:
+  - "specific": Only the amino acid(s) given in `mutate_to` (default)
   - "saturation": All 20 amino acids
   - "hydrophobic": Hydrophobic residues only
   - "hydrophilic": Hydrophilic residues only
@@ -184,14 +186,13 @@ Performs site-directed mutagenesis at specified positions. Generates systematic 
 
 **Example**:
 ```python
-from PipelineScripts.site_directed_mutagenesis import SDM
+from biopipelines.mutagenesis import Mutagenesis
 
-sdm = SDM(
-    original=template,
-    position=42,
-    mode="saturation",
-    exclude="CP"
-)
+# Convert position 42 to alanine
+sdm = Mutagenesis(original=template, position=42, mutate_to="A")
+
+# Saturation mutagenesis at position 42 (excluding cysteine and proline)
+sdm = Mutagenesis(original=template, position=42, mode="saturation", exclude="CP")
 ```
 
 ---
@@ -200,7 +201,7 @@ sdm = SDM(
 
 Concatenates multiple protein sequences with flexible linkers. Creates fusion proteins with customizable linker lengths for domain engineering. Outputs include domain/linker position columns in PyMOL selection format for easy visualization.
 
-**Environment**: `ProteinEnv`
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `proteins`: Union[List[str], str] (required) - List of protein sequences or PDB file paths
@@ -224,8 +225,8 @@ Concatenates multiple protein sequences with flexible linkers. Creates fusion pr
 
 **Example**:
 ```python
-from PipelineScripts.fuse import Fuse
-from PipelineScripts.pdb import PDB
+from biopipelines.fuse import Fuse
+from biopipelines.pdb import PDB
 
 N="GNH..."
 mid=PDB("...")
@@ -244,7 +245,7 @@ fused = Fuse(
 
 Combines a template sequence with two types of modifications: **substitutions** (position-to-position copying from equal-length sequences) and **indels** (segment replacement that can change sequence length). Generates all Cartesian product combinations.
 
-**Environment**: `ProteinEnv`
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `template`: Union[str, ToolOutput, StandardizedOutput] - Base sequence (raw string or tool output). Optional if using concatenation mode.
@@ -279,7 +280,7 @@ Combines a template sequence with two types of modifications: **substitutions** 
 
 **Examples**:
 ```python
-from PipelineScripts.stitch_sequences import StitchSequences
+from biopipelines.stitch_sequences import StitchSequences
 
 # Position-to-position substitution from ToolOutput
 # Both template and substitution sequences are 180 residues
@@ -364,7 +365,7 @@ Note: `complex_id` is an alias for `source_id` and is used by Boltz2 to group ch
 
 **Example**:
 ```python
-from PipelineScripts.split_chains import SplitChains
+from biopipelines.split_chains import SplitChains
 
 # Split a 400-residue fusion into two chains at position 200
 split = SplitChains(
@@ -407,7 +408,7 @@ Reverse-translates protein sequences to DNA with organism-specific codon optimiz
 
 **Example**:
 ```python
-from PipelineScripts.dna_encoder import DNAEncoder
+from biopipelines.dna_encoder import DNAEncoder
 
 dna = DNAEncoder(
     sequences=lmpnn,

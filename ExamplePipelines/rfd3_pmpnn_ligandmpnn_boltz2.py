@@ -6,17 +6,17 @@
 This pipeline shows how to run RFdiffusion3, generate sequences far from the ligand with ProteinMPNN and close with LigandMPNN, and fold the sequences with Boltz2.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import * # PDB, Ligand, Sequence
-from PipelineScripts.rfdiffusion3 import RFdiffusion3
-from PipelineScripts.distance_selector import DistanceSelector
-from PipelineScripts.protein_mpnn import ProteinMPNN
-from PipelineScripts.ligand_mpnn import LigandMPNN
-from PipelineScripts.stitch_sequences import StitchSequences
-from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.panda import Panda
-from PipelineScripts.plot import Plot
-from PipelineScripts.pymol import PyMOL
+from biopipelines.pipeline import *
+from biopipelines.entities import * # PDB, Ligand, Sequence
+from biopipelines.rfdiffusion3 import RFdiffusion3
+from biopipelines.distance_selector import DistanceSelector
+from biopipelines.protein_mpnn import ProteinMPNN
+from biopipelines.ligand_mpnn import LigandMPNN
+from biopipelines.stitch_sequences import StitchSequences
+from biopipelines.boltz2 import Boltz2
+from biopipelines.panda import Panda
+from biopipelines.plot import Plot
+from biopipelines.pymol import PyMOL
 
 with Pipeline(project="Examples",
               job="RFD3-ProteinMPNN-LigandMPNN-Boltz",

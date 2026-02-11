@@ -44,7 +44,7 @@ class PoseChange(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba"):
         return """echo "=== PoseChange ==="
-echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
 echo "=== PoseChange ready ==="
 """

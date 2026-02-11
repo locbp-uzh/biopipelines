@@ -6,14 +6,14 @@
 This pipeline shows how to run RFdiffusion, generate sequences with ProteinMPNN, and fold the sequences with Boltz2.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import * # PDB, Ligand, Sequence
-from PipelineScripts.rfdiffusion import RFdiffusion
-from PipelineScripts.protein_mpnn import ProteinMPNN
-from PipelineScripts.alphafold import AlphaFold
-from PipelineScripts.panda import Panda
-from PipelineScripts.plot import Plot
-from PipelineScripts.pymol import PyMOL
+from biopipelines.pipeline import *
+from biopipelines.entities import * # PDB, Ligand, Sequence
+from biopipelines.rfdiffusion import RFdiffusion
+from biopipelines.protein_mpnn import ProteinMPNN
+from biopipelines.alphafold import AlphaFold
+from biopipelines.panda import Panda
+from biopipelines.plot import Plot
+from biopipelines.pymol import PyMOL
 
 with Pipeline(project="Examples",
               job="RFD-ProteinMPNN-AlphaFold2",

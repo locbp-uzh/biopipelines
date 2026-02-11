@@ -10,13 +10,13 @@ Generates novel protein backbone structures using diffusion models. Designs de n
 
 **References**: https://www.nature.com/articles/s41586-023-06415-8
 
-**Installation**: Go to the data directory, then clone the RFdiffusion git repository and download the weights as indicated in https://github.com/RosettaCommons/RFdiffusion. The environment they provide won't work on our cluster, so instead go to the biopipelines directory and run this:
+**Installation**: Go to the data directory, then clone the RFdiffusion git repository and download the weights as indicated in https://github.com/RosettaCommons/RFdiffusion. Create the SE3nv environment from the biopipelines directory:
 ```bash
-mamba env create -f Environments/ProteinEnv.yaml
-mamba activate ProteinEnv
-pip install -r Environments/ProteinEnv_pip_requirements.txt
+mamba env create -f Environments/SE3nv.yaml
+mamba activate SE3nv
+pip install -r Environments/SE3nv_pip_requirements.txt
 ```
-Followed by the original instructions:
+If the BioPipelines SE3nv.yaml fails (e.g., due to CUDA version mismatch), try the official environment file from the cloned RFdiffusion repository instead: `mamba env create -f env/SE3nv.yml`. Then install SE3Transformer and RFdiffusion:
 ```bash
 cd env/SE3Transformer
 pip install --no-cache-dir -r requirements.txt
@@ -46,7 +46,7 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 
 **Example**:
 ```python
-from PipelineScripts.rfdiffusion import RFdiffusion
+from biopipelines.rfdiffusion import RFdiffusion
 
 rfd = RFdiffusion(
     contigs="50-100",
@@ -62,7 +62,7 @@ Generates protein structures with explicit modeling of ligands and small molecul
 
 **References**: https://www.science.org/doi/10.1126/science.adl2528.
 
-**Installation**: Works in ProteinEnv environment as installed in RFdiffusion.
+**Installation**: Works in SE3nv environment as installed with RFdiffusion.
 
 **Parameters**:
 - `ligand`: str (required) - Ligand identifier in PDB (e.g., 'LIG', 'ATP')
@@ -99,7 +99,7 @@ Generates protein structures with explicit modeling of ligands and small molecul
 
 **Example**:
 ```python
-from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
+from biopipelines.rfdiffusion_allatom import RFdiffusionAllAtom
 
 rfdaa = RFdiffusionAllAtom(
     pdb=template,
@@ -162,7 +162,7 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 
 **Example**:
 ```python
-from PipelineScripts.rfdiffusion3 import RFdiffusion3
+from biopipelines.rfdiffusion3 import RFdiffusion3
 
 # De novo protein design
 rfd3 = RFdiffusion3(
@@ -260,7 +260,7 @@ Our computational design pipeline generated on the order of 10 or 20 thousands d
 
 **Example**:
 ```python
-from PipelineScripts.boltzgen import BoltzGen
+from biopipelines.boltzgen import BoltzGen
 
 # YAML design specification
 design_yaml = """
@@ -289,7 +289,7 @@ best_designs = boltzgen.tables.final_metrics
 
 **Example with File**:
 ```python
-from PipelineScripts.boltzgen import BoltzGen
+from biopipelines.boltzgen import BoltzGen
 
 # Using external YAML file
 boltzgen = BoltzGen(

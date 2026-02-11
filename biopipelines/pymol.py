@@ -60,10 +60,14 @@ class PyMOL(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba"):
-        return """echo "=== PyMOL ==="
-echo "Requires ProteinEnv (installed with RFdiffusion.install())"
-echo "No additional installation needed."
-echo "=== PyMOL ready ==="
+        biopipelines = folders.get("biopipelines", "")
+        return f"""echo "=== Installing PyMOL (ProteinEnv) ==="
+{env_manager} env create -f {biopipelines}/Environments/ProteinEnv.yaml
+if [ $? -ne 0 ]; then
+    echo "ERROR: ProteinEnv creation failed."
+    exit 1
+fi
+echo "=== PyMOL (ProteinEnv) installation complete ==="
 """
 
     # Lazy path descriptors

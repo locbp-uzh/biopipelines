@@ -3,7 +3,7 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Site-Directed Mutagenesis (SDM) tool for generating amino acid substitutions.
+Mutagenesis (Mutagenesis) tool for generating amino acid substitutions.
 
 Creates systematic amino acid substitutions at specified positions using
 various class-based strategies for comprehensive mutagenesis studies.
@@ -24,23 +24,23 @@ except ImportError:
     from datastream import DataStream
 
 
-class SDM(BaseConfig):
+class Mutagenesis(BaseConfig):
     """
-    Site-Directed Mutagenesis tool for systematic amino acid substitutions.
+    Mutagenesis tool for systematic amino acid substitutions.
 
     Generates amino acid substitutions at specified positions using various
     class-based strategies including saturation mutagenesis and targeted
     amino acid class substitutions.
     """
 
-    TOOL_NAME = "SDM"
+    TOOL_NAME = "Mutagenesis"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba"):
-        return """echo "=== SDM (Site-Directed Mutagenesis) ==="
+        return """echo "=== Mutagenesis (Mutagenesis) ==="
 echo "Requires MutationEnv (installed with MutationProfiler.install())"
 echo "No additional installation needed."
-echo "=== SDM ready ==="
+echo "=== Mutagenesis ready ==="
 """
 
     AMINO_ACID_CLASSES = {
@@ -59,26 +59,31 @@ echo "=== SDM ready ==="
     # Lazy path descriptors
     sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
     missing_sequences_csv = Path(lambda self: os.path.join(self.output_folder, "missing_sequences.csv"))
-    sdm_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_site_directed_mutagenesis.py"))
+    mutagenesis_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutagenesis.py"))
 
     def __init__(self,
                  original: Union[str, DataStream, StandardizedOutput],
                  position: int,
-                 mode: str = "saturation",
+                 mutate_to: str = "",
+                 mode: str = "specific",
                  include_original: bool = False,
                  exclude: str = "",
                  prefix: str = "",
                  **kwargs):
         """
-        Initialize Site-Directed Mutagenesis tool.
+        Initialize Mutagenesis tool.
 
         Args:
             original: Input sequence - can be:
                 - DataStream or StandardizedOutput containing sequences
                 - Direct protein sequence string
             position: Target position for mutagenesis (1-indexed)
+            mutate_to: Target amino acid(s) for "specific" mode, as single letter
+                codes (e.g., "A" for alanine, "AV" for alanine and valine).
+                Required when mode is "specific".
             mode: Mutagenesis strategy - one of:
-                - "saturation": All amino acids except original
+                - "specific": Only the amino acid(s) given in `mutate_to` (default)
+                - "saturation": All 20 amino acids
                 - "hydrophobic": A, F, I, L, M, V, W, Y
                 - "hydrophilic": D, E, H, K, N, Q, R, S, T
                 - "charged": D, E, H, K, R
@@ -94,19 +99,22 @@ echo "=== SDM ready ==="
             **kwargs: Additional parameters
 
         Examples:
-            # Saturation mutagenesis from tool output
-            sdm = pipeline.add(SDM(original=boltz_output, position=167, mode="saturation"))
+            # Convert position 50 to alanine
+            sdm = Mutagenesis(original=structure, position=50, mutate_to="A")
 
-            # Hydrophobic substitutions from sequence string
-            sdm = pipeline.add(SDM(original="MKLLVV...", position=5,
-                                  mode="hydrophobic", prefix="test"))
+            # Try alanine and valine at position 50
+            sdm = Mutagenesis(original=structure, position=50, mutate_to="AV")
+
+            # Saturation mutagenesis
+            sdm = Mutagenesis(original=boltz_output, position=167, mode="saturation")
 
             # Charged amino acids excluding histidine
-            sdm = pipeline.add(SDM(original=structure, position=175,
-                                  mode="charged", exclude="H"))
+            sdm = Mutagenesis(original=structure, position=175,
+                              mode="charged", exclude="H")
         """
-        # Store SDM-specific parameters
+        # Store Mutagenesis-specific parameters
         self.position = position
+        self.mutate_to = mutate_to.upper()
         self.mode = mode
         self.include_original = include_original
         self.exclude = exclude.upper()
@@ -139,11 +147,23 @@ echo "=== SDM ready ==="
         super().__init__(**kwargs)
 
     def validate_params(self):
-        """Validate SDM-specific parameters."""
+        """Validate Mutagenesis-specific parameters."""
+        valid_aas = set("ACDEFGHIKLMNPQRSTVWY")
+
         # Validate mode
-        if self.mode not in self.AMINO_ACID_CLASSES:
-            valid_modes = list(self.AMINO_ACID_CLASSES.keys())
+        valid_modes = ["specific"] + list(self.AMINO_ACID_CLASSES.keys())
+        if self.mode not in valid_modes:
             raise ValueError(f"Invalid mode '{self.mode}'. Valid modes: {valid_modes}")
+
+        # Validate specific mode requires mutate_to
+        if self.mode == "specific":
+            if not self.mutate_to:
+                raise ValueError("mutate_to is required when mode is 'specific'. "
+                                 "Provide target amino acid(s) (e.g., mutate_to='A') "
+                                 "or use a different mode (e.g., mode='saturation').")
+            invalid_aas_target = set(self.mutate_to) - valid_aas
+            if invalid_aas_target:
+                raise ValueError(f"Invalid amino acids in mutate_to: {invalid_aas_target}")
 
         # Validate position
         if self.position <= 0:
@@ -151,7 +171,6 @@ echo "=== SDM ready ==="
 
         # Validate exclude string
         if self.exclude:
-            valid_aas = set("ACDEFGHIKLMNPQRSTVWY")
             invalid_aas = set(self.exclude) - valid_aas
             if invalid_aas:
                 raise ValueError(f"Invalid amino acids in exclude: {invalid_aas}")
@@ -165,9 +184,9 @@ echo "=== SDM ready ==="
         self.folders = pipeline_folders
 
     def generate_script(self, script_path: str) -> str:
-        """Generate SDM execution script."""
+        """Generate Mutagenesis execution script."""
         script_content = "#!/bin/bash\n"
-        script_content += "# Site-Directed Mutagenesis execution script\n"
+        script_content += "# Mutagenesis execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
 
@@ -190,25 +209,27 @@ echo "=== SDM ready ==="
         return script_content
 
     def _generate_script_run_sdm(self, sequence_source: str, sequence_param: str, sequence_id_param: str) -> str:
-        """Generate the SDM execution part of the script."""
-        return f"""echo "Running Site-Directed Mutagenesis"
+        """Generate the Mutagenesis execution part of the script."""
+        mutate_to_line = f'    --mutate-to "{self.mutate_to}" \\\n' if self.mutate_to else ""
+        return f"""echo "Running Mutagenesis"
 echo "Position: {self.position}"
 echo "Mode: {self.mode}"
+{"echo " + '"' + "Mutate to: " + self.mutate_to + '"' if self.mutate_to else ""}
 echo "Include original: {self.include_original}"
 echo "Exclude: {self.exclude}"
 
-# Run SDM generation
-python {self.sdm_helper_py} \\
+# Run Mutagenesis generation
+python {self.mutagenesis_helper_py} \\
     --sequence-source {sequence_source} \\
     --sequence {sequence_param} \\
     --sequence-id {sequence_id_param} \\
     --position {self.position} \\
     --mode {self.mode} \\
-    --include-original {str(self.include_original).lower()} \\
+{mutate_to_line}    --include-original {str(self.include_original).lower()} \\
     --exclude "{self.exclude}" \\
     --output "{self.sequences_csv}"
 
-echo "SDM completed successfully"
+echo "Mutagenesis completed successfully"
 echo "Generated sequences saved to: {self.sequences_csv}"
 
 """
@@ -252,9 +273,12 @@ fi
 """
 
     def get_output_files(self) -> Dict[str, Any]:
-        """Get expected output files after SDM execution."""
+        """Get expected output files after Mutagenesis execution."""
         # Calculate expected number of mutants
-        amino_acids = self.AMINO_ACID_CLASSES[self.mode]
+        if self.mode == "specific":
+            amino_acids = self.mutate_to
+        else:
+            amino_acids = self.AMINO_ACID_CLASSES[self.mode]
 
         # Remove excluded amino acids
         if self.exclude:
@@ -286,7 +310,7 @@ fi
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "sequence", "mutation", "position", "original_aa", "new_aa"],
-                description=f"Site-directed mutants at position {self.position} using {self.mode} mode",
+                description=f"mutants at position {self.position} using {self.mode} mode",
                 count=num_mutants
             )
         }
@@ -327,21 +351,22 @@ fi
         else:
             config_lines.append(f"INPUT: {len(self.sequences_stream)} sequences from DataStream")
 
-        config_lines.extend([
-            f"POSITION: {self.position}",
-            f"MODE: {self.mode}",
-            f"INCLUDE ORIGINAL: {self.include_original}",
-            f"EXCLUDE: {self.exclude if self.exclude else 'None'}"
-        ])
+        config_lines.append(f"POSITION: {self.position}")
+        config_lines.append(f"MODE: {self.mode}")
+        if self.mutate_to:
+            config_lines.append(f"MUTATE TO: {self.mutate_to}")
+        config_lines.append(f"INCLUDE ORIGINAL: {self.include_original}")
+        config_lines.append(f"EXCLUDE: {self.exclude if self.exclude else 'None'}")
 
         return config_lines
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize configuration including SDM-specific parameters."""
+        """Serialize configuration including Mutagenesis-specific parameters."""
         base_dict = super().to_dict()
         base_dict.update({
             "sdm_params": {
                 "position": self.position,
+                "mutate_to": self.mutate_to,
                 "mode": self.mode,
                 "include_original": self.include_original,
                 "exclude": self.exclude,

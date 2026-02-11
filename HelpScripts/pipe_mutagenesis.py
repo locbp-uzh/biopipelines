@@ -4,23 +4,24 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Site-Directed Mutagenesis helper script for generating amino acid substitutions.
+Mutagenesis helper script for generating amino acid substitutions.
 
 This script generates systematic amino acid substitutions at specified positions
 using various class-based strategies for mutagenesis studies.
 
 Usage:
-    python pipe_site_directed_mutagenesis.py --sequence-source [direct|file]
+    python pipe_mutagenesis.py --sequence-source [direct|file]
            --sequence [SEQUENCE|PATH] --sequence-id ID --position POS
-           --mode MODE --include-original [true|false] --exclude EXCLUDE
-           --output OUTPUT_CSV
+           --mode MODE [--mutate-to AAS] --include-original [true|false]
+           --exclude EXCLUDE --output OUTPUT_CSV
 
 Arguments:
     --sequence-source: Source type ('direct' for sequence string, 'file' for CSV file)
     --sequence: Protein sequence string or path to sequences CSV file
     --sequence-id: Identifier for the sequence
     --position: Position for mutagenesis (1-indexed)
-    --mode: Mutagenesis mode (saturation, hydrophobic, charged, etc.)
+    --mode: Mutagenesis mode (specific, saturation, hydrophobic, charged, etc.)
+    --mutate-to: Target amino acid(s) for specific mode (e.g., "A" or "AV")
     --include-original: Whether to include original amino acid (true/false)
     --exclude: Amino acids to exclude (single string, e.g., "CEFGL")
     --output: Output CSV file path
@@ -100,7 +101,8 @@ def load_sequence_from_file(file_path: str) -> Tuple[str, str]:
 
 
 def generate_mutants(sequence: str, sequence_id: str, position: int, mode: str,
-                    include_original: bool, exclude: str) -> List[Dict]:
+                    include_original: bool, exclude: str,
+                    mutate_to: str = "") -> List[Dict]:
     """
     Generate mutant sequences based on specified parameters.
 
@@ -111,6 +113,7 @@ def generate_mutants(sequence: str, sequence_id: str, position: int, mode: str,
         mode: Mutagenesis mode
         include_original: Whether to include original amino acid
         exclude: Amino acids to exclude
+        mutate_to: Target amino acid(s) for "specific" mode
 
     Returns:
         List of dictionaries with mutant information
@@ -119,11 +122,14 @@ def generate_mutants(sequence: str, sequence_id: str, position: int, mode: str,
     if position <= 0 or position > len(sequence):
         raise ValueError(f"Position {position} is out of range for sequence of length {len(sequence)}")
 
-    if mode not in AMINO_ACID_CLASSES:
-        raise ValueError(f"Unknown mode: {mode}. Available modes: {list(AMINO_ACID_CLASSES.keys())}")
-
-    # Get amino acids for this mode
-    amino_acids = AMINO_ACID_CLASSES[mode]
+    if mode == "specific":
+        if not mutate_to:
+            raise ValueError("mutate_to is required when mode is 'specific'")
+        amino_acids = mutate_to.upper()
+    elif mode in AMINO_ACID_CLASSES:
+        amino_acids = AMINO_ACID_CLASSES[mode]
+    else:
+        raise ValueError(f"Unknown mode: {mode}. Available modes: ['specific'] + {list(AMINO_ACID_CLASSES.keys())}")
 
     # Remove excluded amino acids
     if exclude:
@@ -164,7 +170,7 @@ def generate_mutants(sequence: str, sequence_id: str, position: int, mode: str,
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Generate site-directed mutants')
+    parser = argparse.ArgumentParser(description='Generate mutants')
     parser.add_argument('--sequence-source', required=True, choices=['direct', 'file'],
                        help='Source type: direct sequence string or file path')
     parser.add_argument('--sequence', required=True,
@@ -175,6 +181,8 @@ def main():
                        help='Position for mutagenesis (1-indexed)')
     parser.add_argument('--mode', required=True,
                        help='Mutagenesis mode')
+    parser.add_argument('--mutate-to', default='',
+                       help='Target amino acid(s) for specific mode (e.g., "A" or "AV")')
     parser.add_argument('--include-original', type=str, choices=['true', 'false'], default='false',
                        help='Whether to include original amino acid')
     parser.add_argument('--exclude', default='',
@@ -203,6 +211,8 @@ def main():
         print(f"Position: {args.position}")
         print(f"Original amino acid: {sequence[args.position-1]}")
         print(f"Mode: {args.mode}")
+        if args.mutate_to:
+            print(f"Mutate to: {args.mutate_to}")
         print(f"Include original: {include_original}")
         print(f"Exclude: {args.exclude}")
 
@@ -213,7 +223,8 @@ def main():
             position=args.position,
             mode=args.mode,
             include_original=include_original,
-            exclude=args.exclude
+            exclude=args.exclude,
+            mutate_to=args.mutate_to
         )
 
         print(f"Generated {len(mutants)} mutants")

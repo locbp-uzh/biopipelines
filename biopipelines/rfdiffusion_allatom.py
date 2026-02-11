@@ -38,7 +38,7 @@ class RFdiffusionAllAtom(BaseConfig):
     def _install_script(cls, folders, env_manager="mamba"):
         data = folders.get("data", "")
         return f"""echo "=== Installing RFdiffusion-AllAtom ==="
-echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "Requires SE3nv (installed with RFdiffusion.install())"
 cd {data}
 git clone https://github.com/RosettaCommons/rf_diffusion_all_atom.git
 

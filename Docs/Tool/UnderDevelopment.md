@@ -37,7 +37,7 @@ Analyzes protein-ligand interactions using PLIP. Identifies hydrogen bonds, hydr
 
 **Example**:
 ```python
-from PipelineScripts.plip import PLIP
+from biopipelines.plip import PLIP
 
 plip = PLIP(
     structures=boltz,
@@ -120,9 +120,9 @@ Model weights location: `/home/{username}/data/DynamicBind/workdir`
 **Example:**
 
 ```python
-from PipelineScripts.dynamic_bind import DynamicBind
-from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
-from PipelineScripts.compound_library import CompoundLibrary
+from biopipelines.dynamic_bind import DynamicBind
+from biopipelines.rfdiffusion_allatom import RFdiffusionAllAtom
+from biopipelines.compound_library import CompoundLibrary
 
 # Basic usage - single protein, SMILES string
 db = DynamicBind(
@@ -155,7 +155,7 @@ db = DynamicBind(proteins=rfdaa, ligands=compounds)
 
 Analyzes correlations between sequence mutations and performance metrics across pools. Tracks position-specific mutation statistics and generates scored mutation tables for data-driven sequence optimization in iterative design cycles.
 
-**Environment**: `ProteinEnv`
+**Environment**: `MutationEnv`
 
 **Parameters**:
 - `sequences`: Union[ToolOutput, StandardizedOutput] (required) - Sequence pool with 'id' and 'sequence' columns
@@ -199,7 +199,7 @@ Analyzes correlations between sequence mutations and performance metrics across 
 
 **Example**:
 ```python
-from PipelineScripts.sequence_metric_analysis import SequenceMetricAnalysis
+from biopipelines.sequence_metric_analysis import SequenceMetricAnalysis
 
 # First cycle: initialize analysis
 analysis = SequenceMetricAnalysis(
@@ -279,7 +279,7 @@ pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059
 
 **Example**:
 ```python
-from PipelineScripts.esmfold import ESMFold
+from biopipelines.esmfold import ESMFold
 
 esm = ESMFold(
     sequences=lmpnn,

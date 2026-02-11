@@ -139,7 +139,7 @@ In the ToolReference, one can find for each tool what is the expected output in 
 
 ### Common inputs
 
-Basic input types can be imported from `PipelineScripts/entities.py`. Importantly, for models having entities such as PDB paths, proteins sequences or ligand smiles as parameters, we always pass an entity object rather than a string to ensure representation coherence across the repository.
+Basic input types can be imported from `biopipelines/entities.py`. Importantly, for models having entities such as PDB paths, proteins sequences or ligand smiles as parameters, we always pass an entity object rather than a string to ensure representation coherence across the repository.
 
 | Entity | Purpose |
 |--------|---------|
@@ -243,7 +243,7 @@ Control how multiple inputs combine in tools like Boltz2:
 | `Bundle` | Group as one entity | 2 proteins bundled + 3 ligands = 3 predictions |
 
 ```python
-from PipelineScripts.combinatorics import Bundle, Each
+from biopipelines.combinatorics import Bundle, Each
 
 # Default: Each protein with each ligand (6 predictions)
 boltz = Boltz2(
@@ -391,7 +391,7 @@ with Pipeline("Project", "Job", "Description"):
 Panda provides pandas-style table transformations:
 
 ```python
-from PipelineScripts.panda import Panda
+from biopipelines.panda import Panda
 
 # Filter rows
 filtered = Panda(
@@ -490,7 +490,7 @@ Note: `local_output` defaults to `True` automatically when `on_the_fly` is enabl
 **Load previous outputs**:
 
 ```python
-from PipelineScripts.load import LoadOutput, LoadOutputs
+from biopipelines.load import LoadOutput, LoadOutputs
 
 # Single output
 prev = LoadOutput("/path/to/ToolOutputs/001_Boltz2.json")

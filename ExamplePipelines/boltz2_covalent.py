@@ -12,9 +12,9 @@ Demonstrates:
 4. Contact constraints to guide ligand placement
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import *
-from PipelineScripts.boltz2 import Boltz2
+from biopipelines.pipeline import *
+from biopipelines.entities import *
+from biopipelines.boltz2 import Boltz2
 
 with Pipeline(project="Examples",
               job="BoltzCovalent",

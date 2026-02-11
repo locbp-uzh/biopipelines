@@ -74,7 +74,7 @@ class FolderManager:
 
     def _inject_runtime_values(self):
         """Inject runtime values that are computed from the environment."""
-        # Resolve from package location (parent of PipelineScripts/)
+        # Resolve from package location (parent of biopipelines/)
         # This works regardless of the current working directory,
         biopipelines_folder = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         user_name = getpass.getuser()

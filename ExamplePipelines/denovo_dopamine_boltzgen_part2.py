@@ -6,9 +6,9 @@
 De novo antibiotic binding protein design using BoltzGen.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.load import LoadOutput
-from PipelineScripts.boltzgen import BoltzGenMerge, BoltzGen
+from biopipelines.pipeline import *
+from biopipelines.load import LoadOutput
+from biopipelines.boltzgen import BoltzGenMerge, BoltzGen
 
 with Pipeline(project="Examples",
             job="Dopamine_BoltzGen_10x1000designs_AnalysisFiltering",

@@ -48,7 +48,7 @@ class Contacts(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba"):
         return """echo "=== Contacts ==="
-echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
 echo "=== Contacts ready ==="
 """

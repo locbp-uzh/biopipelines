@@ -41,7 +41,7 @@ mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 
 **Example**:
 ```python
-from PipelineScripts.mutation_profiler import MutationProfiler
+from biopipelines.mutation_profiler import MutationProfiler
 
 profiler = MutationProfiler(
     original=template,
@@ -98,7 +98,7 @@ Note: When n ≤ 1 for either group, correlation is set to 0.
 
 **Example**:
 ```python
-from PipelineScripts.sequence_metric_correlation import SequenceMetricCorrelation
+from biopipelines.sequence_metric_correlation import SequenceMetricCorrelation
 
 # Single cycle
 correlation = SequenceMetricCorrelation(
@@ -156,8 +156,8 @@ Where:
 
 **Example**:
 ```python
-from PipelineScripts.bayesian_adjuster import BayesianAdjuster
-from PipelineScripts.mutation_composer import MutationComposer
+from biopipelines.bayesian_adjuster import BayesianAdjuster
+from biopipelines.mutation_composer import MutationComposer
 
 # Basic usage
 adjuster = BayesianAdjuster(

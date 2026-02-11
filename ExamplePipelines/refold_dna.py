@@ -8,13 +8,13 @@ plot a metrics comparison between the two, add some analysis steps (apo vs holo)
 and obtain codon-optimized sequences for e coli
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import *
-from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.panda import Panda
-from PipelineScripts.plot import Plot
-from PipelineScripts.dna_encoder import DNAEncoder
-from PipelineScripts.conformational_change import ConformationalChange
+from biopipelines.pipeline import *
+from biopipelines.entities import *
+from biopipelines.boltz2 import Boltz2
+from biopipelines.panda import Panda
+from biopipelines.plot import Plot
+from biopipelines.dna_encoder import DNAEncoder
+from biopipelines.conformational_change import ConformationalChange
 
 with Pipeline(project="Examples",
               job="BoltzGen-Refold-DNA",

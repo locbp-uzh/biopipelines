@@ -17,7 +17,7 @@ import subprocess
 
 
 def _get_repo_root():
-    """Get the biopipelines repository root (parent of PipelineScripts/)."""
+    """Get the biopipelines repository root (parent of biopipelines/)."""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

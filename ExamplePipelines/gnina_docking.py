@@ -19,9 +19,9 @@ Prerequisites:
   - biopipelines environment with RDKit and OpenBabel
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import *
-from PipelineScripts.gnina import Gnina
+from biopipelines.pipeline import *
+from biopipelines.entities import *
+from biopipelines.gnina import Gnina
 
 # ============================================================================
 # Example 1: Basic docking with explicit binding box

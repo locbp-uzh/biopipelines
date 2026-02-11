@@ -6,9 +6,9 @@
 De novo antibiotic binding protein design using BoltzGen.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.ligand import Ligand
-from PipelineScripts.boltzgen import BoltzGen
+from biopipelines.pipeline import *
+from biopipelines.ligand import Ligand
+from biopipelines.boltzgen import BoltzGen
 
 
 #We run in parallel 10x 1000 designs -> 10 000 designs. Recommended is 10 to 20 thousands.

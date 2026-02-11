@@ -47,17 +47,24 @@ wget http://files.ipd.uw.edu/pub/RFdiffusion/76d00716416567174cdb7ca96e208296/In
 wget http://files.ipd.uw.edu/pub/RFdiffusion/5532d2571571dcf28e1f96f5ea73f707/ActiveSite_ckpt.pt
 cd ..
 
-# Create ProteinEnv environment (uses CUDA 11.8 by default)
-# If installation fails due to CUDA version mismatch, edit Environments/ProteinEnv.yaml
-# or visit https://github.com/RosettaCommons/RFdiffusion for compatible versions
-{env_manager} env create -f {biopipelines}/Environments/ProteinEnv.yaml
+# Create SE3nv environment
+# Try BioPipelines SE3nv.yaml first (includes additional packages for the pipeline)
+echo "Creating SE3nv environment from BioPipelines specification..."
+{env_manager} env create -f {biopipelines}/Environments/SE3nv.yaml
 if [ $? -ne 0 ]; then
-    echo "ERROR: ProteinEnv creation failed. Check CUDA version in Environments/ProteinEnv.yaml"
-    echo "Visit https://github.com/RosettaCommons/RFdiffusion for instructions"
-    exit 1
+    echo "WARNING: BioPipelines SE3nv.yaml failed. Trying official RFdiffusion environment..."
+    {env_manager} env create -f env/SE3nv.yml
+    if [ $? -ne 0 ]; then
+        echo "ERROR: SE3nv environment creation failed with both methods."
+        echo "This is likely a CUDA version mismatch for your system."
+        echo "Options:"
+        echo "  1. Edit {biopipelines}/Environments/SE3nv.yaml to match your CUDA version"
+        echo "  2. Edit RFdiffusion/env/SE3nv.yml following https://github.com/RosettaCommons/RFdiffusion"
+        exit 1
+    fi
 fi
-{env_manager} activate ProteinEnv
-pip install -r {biopipelines}/Environments/ProteinEnv_pip_requirements.txt
+{env_manager} activate SE3nv
+pip install -r {biopipelines}/Environments/SE3nv_pip_requirements.txt
 
 # Install SE3Transformer and RFdiffusion
 cd env/SE3Transformer

@@ -12,16 +12,17 @@ environment creation, model downloads, etc.) as a SLURM job.
 Uncomment/comment tools as needed for your setup.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.rfdiffusion import RFdiffusion
-from PipelineScripts.rfdiffusion_allatom import RFdiffusionAllAtom
-from PipelineScripts.rfdiffusion3 import RFdiffusion3
-from PipelineScripts.protein_mpnn import ProteinMPNN
-from PipelineScripts.ligand_mpnn import LigandMPNN
-from PipelineScripts.alphafold import AlphaFold
-from PipelineScripts.boltz2 import Boltz2
-from PipelineScripts.boltzgen import BoltzGen
-from PipelineScripts.mutation_profiler import MutationProfiler
+from biopipelines.pipeline import *
+from biopipelines.rfdiffusion import RFdiffusion
+from biopipelines.rfdiffusion_allatom import RFdiffusionAllAtom
+from biopipelines.rfdiffusion3 import RFdiffusion3
+from biopipelines.protein_mpnn import ProteinMPNN
+from biopipelines.ligand_mpnn import LigandMPNN
+from biopipelines.alphafold import AlphaFold
+from biopipelines.boltz2 import Boltz2
+from biopipelines.boltzgen import BoltzGen
+from biopipelines.mutation_profiler import MutationProfiler
+from biopipelines.pymol import PyMOL
 
 with Pipeline(project="Setup",
               job="InstallTools",
@@ -31,18 +32,19 @@ with Pipeline(project="Setup",
               memory="32GB")
 
     # Structure generation
-    RFdiffusion.install()         # Creates ProteinEnv, clones repo, downloads weights
-    RFdiffusionAllAtom.install()  # Clones repo (uses ProteinEnv from RFdiffusion)
+    RFdiffusion.install()         # Creates SE3nv, clones repo, downloads weights
+    RFdiffusionAllAtom.install()  # Clones repo (uses SE3nv from RFdiffusion)
     RFdiffusion3.install()        # Creates foundry env, downloads checkpoints
     BoltzGen.install()            # Creates boltzgen env
 
     # Sequence design
-    ProteinMPNN.install()         # Clones repo (uses ProteinEnv from RFdiffusion)
+    ProteinMPNN.install()         # Clones repo (uses SE3nv from RFdiffusion)
     LigandMPNN.install()          # Creates ligandmpnn_env, clones repo
 
     # Structure prediction
     AlphaFold.install()           # Downloads LocalColabFold installer
     Boltz2.install()              # Creates Boltz2Env
 
-    # Analysis
+    # Visualization & Analysis
+    PyMOL.install()               # Creates ProteinEnv (PyMOL, pandas, biopython, rdkit)
     MutationProfiler.install()    # Creates MutationEnv

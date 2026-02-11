@@ -6,10 +6,10 @@
 
 ## Entity Types
 
-Basic input types exported from `PipelineScripts.entities`:
+Basic input types exported from `biopipelines.entities`:
 
 ```python
-from PipelineScripts.entities import PDB, Sequence, Ligand, CompoundLibrary
+from biopipelines.entities import PDB, Sequence, Ligand, CompoundLibrary
 ```
 
 ---
@@ -41,7 +41,7 @@ Fetches protein structures with priority: `local_folder` → `PDBs/` → RCSB do
 **Examples**:
 
 ```python
-from PipelineScripts.entities import PDB
+from biopipelines.entities import PDB
 
 # Simple fetch
 protein = PDB("4ufc")
@@ -80,7 +80,7 @@ Creates sequences from strings with auto-detection (protein/DNA/RNA).
 **Examples**:
 
 ```python
-from PipelineScripts.entities import Sequence
+from biopipelines.entities import Sequence
 
 # Single sequence
 seq = Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ", ids="my_protein")
@@ -123,7 +123,7 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 **Examples**:
 
 ```python
-from PipelineScripts.entities import Ligand
+from biopipelines.entities import Ligand
 
 # RCSB by CCD code
 atp = Ligand("ATP")
@@ -167,7 +167,7 @@ Creates compound collections from dictionaries with optional combinatorial expan
 **Examples**:
 
 ```python
-from PipelineScripts.entities import CompoundLibrary
+from biopipelines.entities import CompoundLibrary
 
 # Simple dictionary (no expansion)
 library = CompoundLibrary({
@@ -203,7 +203,7 @@ Loads a single tool output JSON file.
 **Example**:
 
 ```python
-from PipelineScripts.load import LoadOutput
+from biopipelines.load import LoadOutput
 
 prev = LoadOutput(
     output_json="/path/to/ToolOutputs/003_Boltz2.json",
@@ -226,7 +226,7 @@ Loads multiple outputs from a ToolOutputs folder.
 **Example**:
 
 ```python
-from PipelineScripts.load import LoadOutputs
+from biopipelines.load import LoadOutputs
 
 # All Boltz2 outputs
 all_boltz = LoadOutputs("/path/to/job/", tool="Boltz2")
@@ -245,7 +245,7 @@ cycle10 = LoadOutputs("/path/to/job/", suffix="Cycle10")
 
 Generates multiple sequence alignments for structure prediction.
 
-**Environment**: `ProteinEnv`
+**Environment**: `biopipelines`
 
 **Parameters**:
 - `sequences`: str | List[str] | StandardizedOutput - Input sequences
@@ -260,7 +260,7 @@ Generates multiple sequence alignments for structure prediction.
 **Example**:
 
 ```python
-from PipelineScripts.mmseqs2 import MMseqs2
+from biopipelines.mmseqs2 import MMseqs2
 
 msas = MMseqs2(sequences=lmpnn, timeout=7200)
 ```
@@ -342,7 +342,7 @@ To override defaults, use `PyMOL.Set()` before other operations.
 **Examples**:
 
 ```python
-from PipelineScripts.pymol import PyMOL
+from biopipelines.pymol import PyMOL
 
 # Basic session with alignment
 PyMOL(session="my_session",
@@ -412,7 +412,7 @@ Creates publication-ready plots from CSV data.
 **Example**:
 
 ```python
-from PipelineScripts.plot import Plot
+from biopipelines.plot import Plot
 
 Plot(
     Plot.Scatter(

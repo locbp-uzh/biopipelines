@@ -32,7 +32,7 @@ class ProteinMPNN(BaseConfig):
     def _install_script(cls, folders, env_manager="mamba"):
         data = folders.get("data", "")
         return f"""echo "=== Installing ProteinMPNN ==="
-echo "Requires ProteinEnv (installed with RFdiffusion)"
+echo "Requires SE3nv (installed with RFdiffusion.install())"
 cd {data}
 git clone https://github.com/dauparas/ProteinMPNN.git
 

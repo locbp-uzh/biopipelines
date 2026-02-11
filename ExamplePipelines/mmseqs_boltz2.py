@@ -6,10 +6,10 @@
 This pipeline shows how to run RFdiffusion-AllAtom, generate sequences far from the ligand with ProteinMPNN and close with LigandMPNN, obtain alignments with MMseqs2 and fold the sequences with Boltz2.
 """
 
-from PipelineScripts.pipeline import *
-from PipelineScripts.entities import * # PDB, Ligand, Sequence
-from PipelineScripts.mmseqs2 import MMseqs2
-from PipelineScripts.boltz2 import Boltz2
+from biopipelines.pipeline import *
+from biopipelines.entities import * # PDB, Ligand, Sequence
+from biopipelines.mmseqs2 import MMseqs2
+from biopipelines.boltz2 import Boltz2
 
 with Pipeline(project="Examples",
               job="MMseqs-Boltz",
