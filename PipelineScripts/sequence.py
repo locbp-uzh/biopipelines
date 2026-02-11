@@ -36,6 +36,13 @@ class Sequence(BaseConfig):
 
     TOOL_NAME = "Sequence"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Sequence ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== Sequence ready ==="
+"""
+
     # Lazy path descriptors
     sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
     sequences_fasta = Path(lambda self: os.path.join(self.output_folder, "sequences.fasta"))

@@ -28,6 +28,47 @@ class RFdiffusion(BaseConfig):
 
     TOOL_NAME = "RFdiffusion"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        biopipelines = folders.get("biopipelines", "")
+        data = folders.get("data", "")
+        return f"""echo "=== Installing RFdiffusion ==="
+cd {data}
+git clone https://github.com/RosettaCommons/RFdiffusion.git
+cd RFdiffusion
+
+# Download model weights
+mkdir -p models && cd models
+wget http://files.ipd.uw.edu/pub/RFdiffusion/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt
+wget http://files.ipd.uw.edu/pub/RFdiffusion/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt
+wget http://files.ipd.uw.edu/pub/RFdiffusion/60f09a193fb5e5ccdc4980417708dbab/Complex_Fold_base_ckpt.pt
+wget http://files.ipd.uw.edu/pub/RFdiffusion/74f51cfb8b440f50d70878e05361d8f0/InpaintSeq_ckpt.pt
+wget http://files.ipd.uw.edu/pub/RFdiffusion/76d00716416567174cdb7ca96e208296/InpaintSeq_Fold_ckpt.pt
+wget http://files.ipd.uw.edu/pub/RFdiffusion/5532d2571571dcf28e1f96f5ea73f707/ActiveSite_ckpt.pt
+cd ..
+
+# Create ProteinEnv environment (uses CUDA 11.8 by default)
+# If installation fails due to CUDA version mismatch, edit Environments/ProteinEnv.yaml
+# or visit https://github.com/RosettaCommons/RFdiffusion for compatible versions
+{env_manager} env create -f {biopipelines}/Environments/ProteinEnv.yaml
+if [ $? -ne 0 ]; then
+    echo "ERROR: ProteinEnv creation failed. Check CUDA version in Environments/ProteinEnv.yaml"
+    echo "Visit https://github.com/RosettaCommons/RFdiffusion for instructions"
+    exit 1
+fi
+{env_manager} activate ProteinEnv
+pip install -r {biopipelines}/Environments/ProteinEnv_pip_requirements.txt
+
+# Install SE3Transformer and RFdiffusion
+cd env/SE3Transformer
+pip install --no-cache-dir -r requirements.txt
+python setup.py install
+cd ../..
+pip install -e .
+
+echo "=== RFdiffusion installation complete ==="
+"""
+
     # Lazy path descriptors
     main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion_results.csv"))
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))

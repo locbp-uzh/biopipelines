@@ -34,6 +34,13 @@ class DistanceSelector(BaseConfig):
 
     TOOL_NAME = "DistanceSelector"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== DistanceSelector ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== DistanceSelector ready ==="
+"""
+
     # Lazy path descriptors
     selections_csv = Path(lambda self: os.path.join(self.output_folder, "selections.csv"))
     structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))

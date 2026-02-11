@@ -28,6 +28,17 @@ class ProteinMPNN(BaseConfig):
 
     TOOL_NAME = "ProteinMPNN"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        data = folders.get("data", "")
+        return f"""echo "=== Installing ProteinMPNN ==="
+echo "Requires ProteinEnv (installed with RFdiffusion)"
+cd {data}
+git clone https://github.com/dauparas/ProteinMPNN.git
+
+echo "=== ProteinMPNN installation complete ==="
+"""
+
     # Lazy path descriptors
     parsed_pdbs_jsonl = Path(lambda self: os.path.join(self.output_folder, "parsed_pdbs.jsonl"))
     fixed_jsonl = Path(lambda self: os.path.join(self.output_folder, "fixed_pos.jsonl"))

@@ -41,6 +41,13 @@ class MMseqs2(BaseConfig):
 
     TOOL_NAME = "MMseqs2"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== MMseqs2 ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== MMseqs2 ready ==="
+"""
+
     # Lazy path descriptors
     output_msa_csv = Path(lambda self: os.path.join(self.output_folder, "msas.csv"))
     client_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_client.sh"))
@@ -299,6 +306,13 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
+
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== MMseqs2Server ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== MMseqs2Server ready ==="
+"""
 
     # Lazy path descriptors
     cpu_server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_server_cpu.sh"))

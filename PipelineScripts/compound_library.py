@@ -37,6 +37,13 @@ class CompoundLibrary(BaseConfig):
 
     TOOL_NAME = "CompoundLibrary"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== CompoundLibrary ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== CompoundLibrary ready ==="
+"""
+
     # Lazy path descriptors
     compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
     compound_properties_csv = Path(lambda self: os.path.join(self.output_folder, "compound_properties.csv"))

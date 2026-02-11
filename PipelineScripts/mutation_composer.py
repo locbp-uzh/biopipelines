@@ -41,6 +41,14 @@ class MutationComposer(BaseConfig):
     # Tool identification
     TOOL_NAME = "MutationComposer"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== MutationComposer ==="
+echo "Requires MutationEnv (installed with MutationProfiler.install())"
+echo "No additional installation needed."
+echo "=== MutationComposer ready ==="
+"""
+
     # Lazy path descriptors
     sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
     sequences_fasta = Path(lambda self: os.path.join(self.output_folder, "sequences.fasta"))

@@ -45,6 +45,14 @@ class Contacts(BaseConfig):
     # Tool identification
     TOOL_NAME = "Contacts"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Contacts ==="
+echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "No additional installation needed."
+echo "=== Contacts ready ==="
+"""
+
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "contacts.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_config.json"))

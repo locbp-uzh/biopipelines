@@ -36,6 +36,13 @@ class SplitChains(BaseConfig):
 
     TOOL_NAME = "SplitChains"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== SplitChains ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== SplitChains ready ==="
+"""
+
     # Lazy path descriptors
     output_sequences_csv = Path(lambda self: os.path.join(self.output_folder, "split_sequences.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "split_config.json"))

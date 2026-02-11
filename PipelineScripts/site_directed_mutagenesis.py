@@ -35,6 +35,14 @@ class SDM(BaseConfig):
 
     TOOL_NAME = "SDM"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== SDM (Site-Directed Mutagenesis) ==="
+echo "Requires MutationEnv (installed with MutationProfiler.install())"
+echo "No additional installation needed."
+echo "=== SDM ready ==="
+"""
+
     AMINO_ACID_CLASSES = {
         "saturation": "ACDEFGHIKLMNPQRSTVWY",  # All 20 amino acids
         "hydrophobic": "AFILMVWY",

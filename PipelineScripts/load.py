@@ -44,8 +44,14 @@ class LoadOutput(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "LoadOutput"
-    
-    
+
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== LoadOutput ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== LoadOutput ready ==="
+"""
+
     def __init__(self, output_json: str, filter = None, validate_files: bool = True, **kwargs):
         """
         Initialize LoadOutput tool.

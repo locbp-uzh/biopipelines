@@ -121,6 +121,21 @@ class RFdiffusion3(BaseConfig):
 
     TOOL_NAME = "RFdiffusion3"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        data = folders.get("data", "")
+        return f"""echo "=== Installing RFdiffusion3 (foundry) ==="
+{env_manager} create -n foundry python=3.12 -y
+{env_manager} activate foundry
+pip install "rc-foundry[all]"
+
+# Download model weights
+mkdir -p {data}/rfdiffusion3
+foundry install rfd3 --checkpoint-dir {data}/rfdiffusion3
+
+echo "=== RFdiffusion3 installation complete ==="
+"""
+
     # Lazy path descriptors
     json_file = Path(lambda self: os.path.join(self.output_folder, f"{self._get_prefix()}_rfd3_input.json"))
     main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_results.csv"))

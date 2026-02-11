@@ -34,6 +34,21 @@ class ESMFold(BaseConfig):
 
     TOOL_NAME = "ESMFold"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return f"""echo "=== Installing ESMFold ==="
+{env_manager} create -n esmfold python=3.9 -y
+{env_manager} activate esmfold
+
+{env_manager} install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia -y
+
+pip install "fair-esm[esmfold]"
+pip install 'dllogger @ git+https://github.com/NVIDIA/dllogger.git'
+pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059694619831a7db195b7e0988fc4ff3a307'
+
+echo "=== ESMFold installation complete ==="
+"""
+
     # Lazy path descriptors
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.csv"))
     structures_folder = Path(lambda self: os.path.join(self.output_folder, "structures"))

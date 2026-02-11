@@ -38,6 +38,13 @@ class Fuse(BaseConfig):
 
     TOOL_NAME = "Fuse"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Fuse ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== Fuse ready ==="
+"""
+
     # Lazy path descriptors
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self._get_job_base()}_queries.csv"))
     queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self._get_job_base()}_queries.fasta"))

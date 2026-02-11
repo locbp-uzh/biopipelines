@@ -44,6 +44,14 @@ class ConformationalChange(BaseConfig):
     # Tool identification
     TOOL_NAME = "ConformationalChange"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== ConformationalChange ==="
+echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "No additional installation needed."
+echo "=== ConformationalChange ready ==="
+"""
+
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "conformational_change_analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "conformational_change_config.json"))

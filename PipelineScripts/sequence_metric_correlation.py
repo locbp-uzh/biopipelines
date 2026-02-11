@@ -48,6 +48,14 @@ class SequenceMetricCorrelation(BaseConfig):
     # Tool identification
     TOOL_NAME = "SequenceMetricCorrelation"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== SequenceMetricCorrelation ==="
+echo "Requires MutationEnv (installed with MutationProfiler.install())"
+echo "No additional installation needed."
+echo "=== SequenceMetricCorrelation ready ==="
+"""
+
     # Lazy path descriptors
     correlation_1d_csv = Path(lambda self: os.path.join(self.output_folder, "correlation_1d.csv"))
     correlation_2d_csv = Path(lambda self: os.path.join(self.output_folder, "correlation_2d.csv"))

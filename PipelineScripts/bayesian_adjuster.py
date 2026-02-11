@@ -55,6 +55,14 @@ class BayesianAdjuster(BaseConfig):
     # Tool identification
     TOOL_NAME = "BayesianAdjuster"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== BayesianAdjuster ==="
+echo "Requires MutationEnv (installed with MutationProfiler.install())"
+echo "No additional installation needed."
+echo "=== BayesianAdjuster ready ==="
+"""
+
     # Lazy path descriptors
     adjusted_probs_csv = Path(lambda self: os.path.join(self.output_folder, "adjusted_probabilities.csv"))
     absolute_probs_csv = Path(lambda self: os.path.join(self.output_folder, "absolute_probabilities.csv"))

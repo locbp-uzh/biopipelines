@@ -42,6 +42,13 @@ class ExtractMetrics(BaseConfig):
 
     TOOL_NAME = "ExtractMetrics"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== ExtractMetrics ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== ExtractMetrics ready ==="
+"""
+
     # Lazy path descriptors
     config_file = Path(lambda self: os.path.join(self.output_folder, "extract_metrics_config.json"))
     extract_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_extract_metrics.py"))

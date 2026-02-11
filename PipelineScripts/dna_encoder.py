@@ -44,6 +44,13 @@ class DNAEncoder(BaseConfig):
     # Tool identification
     TOOL_NAME = "DNAEncoder"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== DNAEncoder ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== DNAEncoder ready ==="
+"""
+
     # Lazy path descriptors
     dna_csv = Path(lambda self: os.path.join(self.output_folder, "dna.csv"))
     dna_excel = Path(lambda self: os.path.join(self.output_folder, "dna_sequences.xlsx"))

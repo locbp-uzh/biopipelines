@@ -45,6 +45,16 @@ class BoltzGen(BaseConfig):
     # Tool identification
     TOOL_NAME = "BoltzGen"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return f"""echo "=== Installing BoltzGen ==="
+{env_manager} create -n boltzgen python=3.11 -y
+{env_manager} activate boltzgen
+pip install boltzgen
+
+echo "=== BoltzGen installation complete ==="
+"""
+
     # Lazy path descriptors for output files
     design_spec_yaml_file = Path(lambda self: os.path.join(self.output_folder, "design_spec.yaml"))
     config_folder = Path(lambda self: os.path.join(self.output_folder, "config"))
@@ -975,6 +985,14 @@ class BoltzGenMerge(BaseConfig):
 
     TOOL_NAME = "BoltzGenMerge"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== BoltzGenMerge ==="
+echo "Requires boltzgen environment (installed with BoltzGen.install())"
+echo "No additional installation needed."
+echo "=== BoltzGenMerge ready ==="
+"""
+
     # Lazy path descriptors
     merge_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_merge.py"))
 
@@ -1160,6 +1178,14 @@ class BoltzGenImport(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenImport"
+
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== BoltzGenImport ==="
+echo "Requires boltzgen environment (installed with BoltzGen.install())"
+echo "No additional installation needed."
+echo "=== BoltzGenImport ready ==="
+"""
 
     # Lazy path descriptors
     import_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_import.py"))

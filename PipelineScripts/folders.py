@@ -49,7 +49,7 @@ class FolderManager:
         Args:
             project: Name of the folder (used for output folders)
             job: Name of the specific job (a unique numeric id NNN will be appended to it) (used for output folders)
-            local_output: If True, write output to ./BioPipelines/ (current working
+            local_output: If True, write output to ./tests/ (current working
                         directory) instead of the config-configured path.
         """
         self._folders: Dict[str, str] = {}
@@ -67,7 +67,7 @@ class FolderManager:
 
         # Override biopipelines_output for local output mode
         if local_output:
-            self._folders["biopipelines_output"] = os.path.join(os.getcwd(), "BioPipelines")
+            self._folders["biopipelines_output"] = os.path.join(os.getcwd(), "tests")
 
         # Setup runtime paths (project, output, runtime, logs)
         self._setup_runtime_paths(project, job)

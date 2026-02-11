@@ -34,6 +34,17 @@ class RFdiffusionAllAtom(BaseConfig):
 
     TOOL_NAME = "RFdiffusionAllAtom"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        data = folders.get("data", "")
+        return f"""echo "=== Installing RFdiffusion-AllAtom ==="
+echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+cd {data}
+git clone https://github.com/RosettaCommons/rf_diffusion_all_atom.git
+
+echo "=== RFdiffusion-AllAtom installation complete ==="
+"""
+
     # Lazy path descriptors
     main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusionAA_results.csv"))
     inference_py_file = Path(lambda self: "run_inference.py")

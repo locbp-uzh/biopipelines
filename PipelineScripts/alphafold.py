@@ -42,6 +42,18 @@ class AlphaFold(BaseConfig):
 
     TOOL_NAME = "AlphaFold"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        data = folders.get("data", "")
+        return f"""echo "=== Installing AlphaFold (LocalColabFold) ==="
+cd {data}
+wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/install_colabbatch_linux.sh
+bash install_colabbatch_linux.sh
+rm install_colabbatch_linux.sh
+
+echo "=== AlphaFold installation complete ==="
+"""
+
     # Lazy path descriptors
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.csv"))
     queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.fasta"))

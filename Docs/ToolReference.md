@@ -8,7 +8,7 @@ Complete tool reference organized by category.
 
 Input entities and utility tools.
 
-**Entity Types** (from `PipelineScripts.entities`):
+**Basic Input Types**:
 - [PDB](Tool/Utilities.md#pdb) - Fetch protein structures
 - [Sequence](Tool/Utilities.md#sequence) - Create sequences from strings
 - [Ligand](Tool/Utilities.md#ligand) - Fetch small molecules
@@ -67,9 +67,18 @@ Analyze structures and interactions.
 - [Angle](Tool/Analysis.md#angle) - Bond and torsional angles
 - [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
 - [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
-- [MutationProfiler](Tool/Analysis.md#mutationprofiler) - Mutation patterns
 - [Contacts](Tool/Analysis.md#contacts) - Contact analysis
 - [PoseChange](Tool/Analysis.md#posechange) - Ligand pose comparison (to be unified with ConformationalChange)
+
+---
+
+## [Statistics](Tool/Statistics.md)
+
+Mutation analysis and frequency optimization.
+
+- [MutationProfiler](Tool/Statistics.md#mutationprofiler) - Mutation patterns
+- [SequenceMetricCorrelation](Tool/Statistics.md#sequencemetriccorrelation) - Mutation-metric correlations
+- [BayesianAdjuster](Tool/Statistics.md#bayesianadjuster) - Correlation-based frequency adjustment
 
 ---
 
@@ -82,10 +91,8 @@ Filter, transform, and manipulate tables.
 - [SelectionEditor](Tool/DataManagement.md#selectioneditor) - Selection string manipulation
 
 ## Under development
-- PLIP (Protein-Ligand Interaction Profiler) - Interaction analysis 
+- PLIP (Protein-Ligand Interaction Profiler) - Interaction analysis
 - DynamicBind- Ligand-specific conformations
-- SequenceMetricCorrelation - Mutation-metric correlations
-- BayesianAdjuster - Correlation-based frequency adjustment
 - SequenceMetricAnalysis - Multi-metric mutation analysis
 - ESMFold - Fast single-sequence prediction (under development)
 - MMSeqs2_LCF - Full MSA from local MMseqs2

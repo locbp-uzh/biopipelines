@@ -33,6 +33,20 @@ class OnionNet2(BaseConfig):
 
     TOOL_NAME = "OnionNet2"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        data = folders.get("data", "")
+        return f"""echo "=== Installing OnionNet-2 ==="
+cd {data}
+git clone https://github.com/zchwang/OnionNet-2.git
+
+{env_manager} create -n OnionNet2Env python=3.8 -y
+{env_manager} activate OnionNet2Env
+pip install tensorflow==2.3 pandas==1.3.4 scikit-learn==0.22.1 numpy==1.18.5 scipy==1.4.1
+
+echo "=== OnionNet-2 installation complete ==="
+"""
+
     # Lazy path descriptors
     config_file = Path(lambda self: os.path.join(self.output_folder, "onionnet2_config.json"))
     predictions_csv = Path(lambda self: os.path.join(self.output_folder, "affinity_predictions.csv"))

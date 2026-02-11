@@ -86,6 +86,13 @@ class Panda(BaseConfig):
 
     TOOL_NAME = "Panda"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Panda ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== Panda ready ==="
+"""
+
     # Path descriptors
     output_csv = Path(lambda self: os.path.join(self.output_folder, f"{self._get_output_name()}.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "panda_config.json"))

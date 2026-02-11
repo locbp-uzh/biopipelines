@@ -49,6 +49,16 @@ class Boltz2(BaseConfig):
 
     TOOL_NAME = "Boltz2"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return f"""echo "=== Installing Boltz2 ==="
+{env_manager} create -n Boltz2Env python=3.11 -y
+{env_manager} activate Boltz2Env
+pip install boltz[cuda] -U
+
+echo "=== Boltz2 installation complete ==="
+"""
+
     # Path descriptors - lazy evaluation after output_folder is set
     apo_config_folder = Path(lambda self: os.path.join(self.output_folder, "ApoConfig"))
     bound_config_folder = Path(lambda self: os.path.join(self.output_folder, "BoundConfig"))

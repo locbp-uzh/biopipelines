@@ -42,6 +42,14 @@ class SASA(BaseConfig):
 
     TOOL_NAME = "SASA"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== SASA ==="
+echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "No additional installation needed."
+echo "=== SASA ready ==="
+"""
+
     # Lazy path descriptors
     results_csv = Path(lambda self: os.path.join(self.output_folder, "sasa_analysis.csv"))
     structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))

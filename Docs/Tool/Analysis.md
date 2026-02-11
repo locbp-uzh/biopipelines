@@ -174,52 +174,6 @@ conf_change = ConformationalChange(
 
 ---
 
-### MutationProfiler
-
-Analyzes mutation patterns across sequence sets. Calculates position-specific amino acid frequencies for understanding sequence diversity.
-
-**Installation**: This tool only needs the a small environment:
-```bash
-mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
-```
-
-**Parameters**:
-- `original`: Union[ToolOutput, StandardizedOutput] (required) - Original/reference sequences
-- `mutants`: Union[ToolOutput, StandardizedOutput] (required) - Mutant sequences to analyze
-- `include_original`: bool = True - Include original sequence in frequency analysis
-
-**Tables**:
-- `profile`:
-
-  | position | original | count | frequency |
-  |----------|----------|-------|-----------|
-
-- `mutations`:
-
-  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
-  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-
-- `absolute_frequencies`:
-
-  | position | original | A | C | ... | Y |
-  |----------|----------|---|---|-----|---|
-
-- `relative_frequencies`:
-
-  | position | original | A | C | ... | Y |
-  |----------|----------|---|---|-----|---|
-
-**Example**:
-```python
-from PipelineScripts.mutation_profiler import MutationProfiler
-
-profiler = MutationProfiler(
-    original=template,
-    mutants=lmpnn
-)
-```
----
-
 ### Contacts
 **Environment**: `ProteinEnv`
 

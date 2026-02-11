@@ -41,6 +41,13 @@ class Distance(BaseConfig):
 
     TOOL_NAME = "Distance"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Distance ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== Distance ready ==="
+"""
+
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "distance_config.json"))

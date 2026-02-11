@@ -49,6 +49,13 @@ class MMseqs2LCF(BaseConfig):
 
     TOOL_NAME = "MMseqs2LCF"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== MMseqs2LCF ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== MMseqs2LCF ready ==="
+"""
+
     # Lazy path descriptors
     output_msa_csv = Path(lambda self: os.path.join(self.output_folder, "msas.csv"))
     client_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_lcf_client.sh"))
@@ -301,6 +308,13 @@ class MMseqs2ServerLCF(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2ServerLCF"
+
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== MMseqs2ServerLCF ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== MMseqs2ServerLCF ready ==="
+"""
 
     # Lazy path descriptors
     server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "_mmseqs2_lcf_server_gpu.sh"))

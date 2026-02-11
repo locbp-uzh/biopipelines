@@ -58,7 +58,7 @@ class Pipeline:
                         with plain Python. Skips SLURM submission on exit.
                         If None (default), auto-detects: True when running in a Jupyter
                         notebook (.ipynb), False otherwise.
-            local_output: If True, write output to ./BioPipelines/ (current working
+            local_output: If True, write output to ./tests/ (current working
                         directory) instead of the config-defined path.
                         If None (default), follows on_the_fly.
         """

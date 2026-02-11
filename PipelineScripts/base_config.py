@@ -56,6 +56,48 @@ class BaseConfig(ABC):
         """
         ...
 
+    @classmethod
+    def _install_script(cls, folders: Dict[str, str], env_manager: str = "mamba") -> Optional[str]:
+        """Override in subclasses to provide installation bash commands.
+
+        Args:
+            folders: Resolved pipeline folder paths from config.yaml
+                     (e.g., folders["data"], folders["RFdiffusion"], etc.)
+            env_manager: Environment manager command from config.yaml
+                         (e.g., "mamba" or "conda")
+
+        Returns:
+            Bash script content for installing this tool, or None if not defined.
+        """
+        return None
+
+    @classmethod
+    def install(cls):
+        """Add an installation step for this tool to the active pipeline.
+
+        Must be called within a Pipeline context. Tools must override
+        _install_script() to provide installation bash commands.
+
+        Usage:
+            with Pipeline(...):
+                Resources(...)
+                RFdiffusion.install()
+                rfd = RFdiffusion(...)
+
+        Returns:
+            StandardizedOutput (via auto-registration, just like tool instantiation)
+
+        Raises:
+            NotImplementedError: If the tool hasn't defined _install_script()
+        """
+        # Verify _install_script is overridden (call with empty dict/default to check)
+        if cls._install_script({}, "mamba") is None:
+            raise NotImplementedError(
+                f"{cls.__name__} does not define installation steps. "
+                f"Override _install_script() to provide bash commands."
+            )
+        return _Installer(parent_tool_cls=cls)
+
     def __new__(cls, *args, **kwargs):
         """
         Create a new tool instance with optional auto-registration.
@@ -671,6 +713,50 @@ fi
                         return str(missing_info)
 
         return None
+
+
+class _Installer(BaseConfig):
+    """Generic installer step added to the pipeline by BaseConfig.install()."""
+
+    TOOL_NAME = "install"  # Overridden dynamically in __init__
+
+    def __init__(self, parent_tool_cls: type, **kwargs):
+        self._parent_tool_cls = parent_tool_cls
+        self.TOOL_NAME = f"{parent_tool_cls.TOOL_NAME}_installation"
+        self._parent_tool_name = parent_tool_cls.TOOL_NAME
+        super().__init__(**kwargs)
+
+    def _load_environments(self):
+        """Use biopipelines environment since install scripts create their own environments."""
+        self.environments = ["biopipelines"]
+
+    def validate_params(self):
+        pass
+
+    def configure_inputs(self, pipeline_folders):
+        self.folders = pipeline_folders
+
+    def generate_script(self, script_path: str) -> str:
+        config_manager = ConfigManager()
+        env_manager = config_manager.get_env_manager()
+        install_commands = self._parent_tool_cls._install_script(self.folders, env_manager)
+        script = "#!/bin/bash\n"
+        script += f"# Installation: {self._parent_tool_name}\n"
+        script += self.generate_completion_check_header()
+        script += self.activate_environment()
+        script += install_commands + "\n"
+        script += self.generate_completion_check_footer()
+        return script
+
+    def get_output_files(self):
+        from .datastream import DataStream
+        return {
+            "structures": DataStream.empty("structures", "pdb"),
+            "sequences": DataStream.empty("sequences", "fasta"),
+            "compounds": DataStream.empty("compounds", "sdf"),
+            "tables": {},
+            "output_folder": self.output_folder
+        }
 
 
 class TableMetadata:

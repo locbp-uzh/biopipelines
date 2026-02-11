@@ -28,6 +28,22 @@ class LigandMPNN(BaseConfig):
 
     TOOL_NAME = "LigandMPNN"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        data = folders.get("data", "")
+        return f"""echo "=== Installing LigandMPNN ==="
+cd {data}
+git clone https://github.com/dauparas/LigandMPNN.git
+cd LigandMPNN
+bash get_model_params.sh "./model_params"
+
+{env_manager} create -n ligandmpnn_env python=3.11 -y
+{env_manager} activate ligandmpnn_env
+pip install -r requirements.txt
+
+echo "=== LigandMPNN installation complete ==="
+"""
+
     # Lazy path descriptors
     seqs_folder = Path(lambda self: os.path.join(self.output_folder, "seqs"))
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"queries.csv"))

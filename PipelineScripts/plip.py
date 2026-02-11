@@ -36,6 +36,19 @@ class PLIP(BaseConfig):
 
     TOOL_NAME = "PLIP"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        containers = folders.get("containers", "")
+        return f"""echo "=== Installing PLIP ==="
+echo "Downloading PLIP singularity container to {containers}"
+mkdir -p {containers}
+cd {containers}
+singularity pull docker://pharmai/plip:3.0.0
+mv plip_3.0.0.sif plip_3.0.0.simg
+
+echo "=== PLIP installation complete ==="
+"""
+
     # Lazy path descriptors
     results_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_interactions.csv"))
     summary_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_summary.csv"))

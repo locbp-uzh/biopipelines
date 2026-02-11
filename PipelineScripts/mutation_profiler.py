@@ -45,6 +45,14 @@ class MutationProfiler(BaseConfig):
     # Tool identification
     TOOL_NAME = "MutationProfiler"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return f"""echo "=== Installing MutationEnv ==="
+{env_manager} create -n MutationEnv seaborn matplotlib pandas logomaker scipy -y
+
+echo "=== MutationEnv installation complete ==="
+"""
+
     # Lazy path descriptors
     profile_csv = Path(lambda self: os.path.join(self.output_folder, "profile.csv"))
     mutations_csv = Path(lambda self: os.path.join(self.output_folder, "mutations.csv"))

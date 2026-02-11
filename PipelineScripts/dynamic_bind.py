@@ -35,6 +35,50 @@ class DynamicBind(BaseConfig):
 
     TOOL_NAME = "DynamicBind"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        data = folders.get("data", "")
+        return f"""echo "=== Installing DynamicBind ==="
+echo "WARNING: DynamicBind is under development. Installation may fail."
+echo "Visit https://github.com/luwei0917/DynamicBind for troubleshooting."
+cd {data}
+git clone https://github.com/luwei0917/DynamicBind.git
+cd DynamicBind
+wget https://zenodo.org/records/10183369/files/workdir.zip
+unzip workdir.zip
+rm workdir.zip
+
+# Create dynamicbind environment
+{env_manager} create -n dynamicbind python=3.9 -y
+{env_manager} activate dynamicbind
+pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
+
+# Setup LD_LIBRARY_PATH inside the environment
+mkdir -p $CONDA_PREFIX/etc/{env_manager}/activate.d
+echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH' > \\
+     $CONDA_PREFIX/etc/{env_manager}/activate.d/env_vars.sh
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+{env_manager} install -c conda-forge rdkit biopython scipy pandas pyyaml networkx -y
+pip install numpy==1.26.4 e3nn==0.4.4 spyrmsd fair-esm tqdm
+pip install \\
+    torch-scatter==2.1.1+pt113cu117 \\
+    torch-sparse==0.6.17+pt113cu117 \\
+    torch-cluster==1.6.1+pt113cu117 \\
+    torch-spline-conv \\
+    pyg_lib \\
+    -f https://data.pyg.org/whl/torch-1.13.1+cu117.html \\
+    --no-cache-dir
+pip install torch-geometric
+
+# Create relax environment
+{env_manager} create --name relax python=3.8 -y
+{env_manager} activate relax
+{env_manager} install -c conda-forge openmm pdbfixer biopython openmmforcefields openff-toolkit ambertools=22 compilers -y
+
+echo "=== DynamicBind installation complete ==="
+"""
+
     # Lazy path descriptors
     main_table = Path(lambda self: os.path.join(self.output_folder, "dynamicbind_results.csv"))
     output_compounds_table = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))

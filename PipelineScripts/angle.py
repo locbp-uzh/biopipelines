@@ -45,6 +45,13 @@ class Angle(BaseConfig):
 
     TOOL_NAME = "Angle"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Angle ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== Angle ready ==="
+"""
+
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "angle_config.json"))

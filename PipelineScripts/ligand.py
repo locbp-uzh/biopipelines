@@ -39,6 +39,13 @@ class Ligand(BaseConfig):
 
     TOOL_NAME = "Ligand"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Ligand ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== Ligand ready ==="
+"""
+
     # Lazy path descriptors
     compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
     failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))

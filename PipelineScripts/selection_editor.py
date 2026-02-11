@@ -36,6 +36,14 @@ class SelectionEditor(BaseConfig):
 
     TOOL_NAME = "SelectionEditor"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== SelectionEditor ==="
+echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "No additional installation needed."
+echo "=== SelectionEditor ready ==="
+"""
+
     # Lazy path descriptors
     selections_csv = Path(lambda self: os.path.join(self.output_folder, "selections.csv"))
     config_json = Path(lambda self: os.path.join(self.output_folder, "config.json"))

@@ -58,6 +58,14 @@ class PyMOL(BaseConfig):
 
     TOOL_NAME = "PyMOL"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== PyMOL ==="
+echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "No additional installation needed."
+echo "=== PyMOL ready ==="
+"""
+
     # Lazy path descriptors
     config_file = Path(lambda self: os.path.join(self.output_folder, "pymol_config.json"))
     session_file = Path(lambda self: os.path.join(self.output_folder, f"{self.session_name}.pse"))

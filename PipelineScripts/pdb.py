@@ -67,6 +67,13 @@ class PDB(BaseConfig):
 
     TOOL_NAME = "PDB"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== PDB ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== PDB ready ==="
+"""
+
     # Lazy path descriptors
     structures_csv = Path(lambda self: os.path.join(self.output_folder, "structures.csv"))
     sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))

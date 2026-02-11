@@ -87,6 +87,13 @@ class Plot(BaseConfig):
 
     TOOL_NAME = "Plot"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== Plot ==="
+echo "Uses biopipelines environment (no additional installation needed)."
+echo "=== Plot ready ==="
+"""
+
     # Lazy path descriptors
     config_file = Path(lambda self: os.path.join(self.output_folder, "plot_config.json"))
     metadata_csv = Path(lambda self: os.path.join(self.output_folder, "plot_metadata.csv"))

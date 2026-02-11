@@ -41,6 +41,14 @@ class PoseChange(BaseConfig):
 
     TOOL_NAME = "PoseChange"
 
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba"):
+        return """echo "=== PoseChange ==="
+echo "Requires ProteinEnv (installed with RFdiffusion.install())"
+echo "No additional installation needed."
+echo "=== PoseChange ready ==="
+"""
+
     # Lazy path descriptors
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "pose_analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "pose_config.json"))
