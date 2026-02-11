@@ -43,6 +43,7 @@ folders:
     GhostFold: "<data>/ghostfold"
     ESMFold: "<data>/esmfold"
     DynamicBind: "<data>/DynamicBind"
+    Gnina: "<data>/gnina"
     ModelForge: "<data>/modelforge"
 
   # Cache paths (shared on group storage)
@@ -93,6 +94,7 @@ environments:
   DynamicBind:
     - "dynamicbind"
     - "relax"
+  Gnina: "biopipelines"
   Distance: "biopipelines"
   PLIP: "biopipelines"
   DistanceSelector: "biopipelines"
@@ -152,3 +154,22 @@ cluster:
   slurm_modules:
     - "miniforge3"
     - "apptainer"
+
+# GNINA-specific runtime configuration
+# CUDA modules and library paths needed for GNINA's CNN scoring
+# Adjust these to match your HPC environment
+#
+# Installation:
+#   1. Download GNINA binary (v1.3.2):
+#      cd ~/data && mkdir -p gnina && cd gnina
+#      wget https://github.com/gnina/gnina/releases/download/v1.3.2/gnina.1.3.2
+#      chmod +x gnina.1.3.2 && ln -s gnina.1.3.2 gnina
+#   2. Verify CUDA modules: module avail cuda && module avail cudnn
+#   3. Test: module load cuda/<ver> cudnn/<ver> && ~/data/gnina/gnina --help
+#   4. Set modules and ld_library_path below to match your system
+#      Use 'module show cuda/<version>' to find the library path
+gnina:
+  modules:
+    - "cuda/12.6.3"
+    - "cudnn/9.8.0.87-12"
+  ld_library_path: "/apps/u24/opt/x86_64_v3/cuda-12.6.3-ok2c7hqa5kefkh3iyolgxrajfpepvh6h/targets/x86_64-linux/lib"
