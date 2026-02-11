@@ -34,6 +34,7 @@ from .angle import Angle
 from .stitch_sequences import StitchSequences
 from .split_chains import SplitChains
 from .dynamic_bind import DynamicBind
+from .gnina import Gnina
 from .dna_encoder import DNAEncoder
 from .load import LoadOutput, LoadOutputs
 from .sequence_metric_correlation import SequenceMetricCorrelation
@@ -96,6 +97,7 @@ __all__ = [
     'StitchSequences',
     'SplitChains',
     'DynamicBind',
+    'Gnina',
     'DNAEncoder',
     'LoadOutput',
     'LoadOutputs',
