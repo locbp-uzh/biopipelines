@@ -5,9 +5,8 @@
 """
 ConformationalChange analysis for measuring structural changes between reference and target structures.
 
-Analyzes protein structures to quantify conformational changes through multiple metrics including
-RMSD, maximum distance, mean distance, and sum over square root normalization.
-Supports structural alignment using PyMOL's align, super, or cealign methods.
+Analyzes protein structures to quantify conformational changes via RMSD computed
+by PyMOL's align, super, or cealign methods.
 """
 
 import os
@@ -151,7 +150,7 @@ echo "=== ConformationalChange ready ==="
             f"TARGET STRUCTURES: {len(self.target_stream)} files",
             f"SELECTION: {selection_display}",
             f"ALIGNMENT METHOD: {self.alignment_method}",
-            f"METRICS: RMSD, max_distance, mean_distance, sum_over_square_root"
+            f"METRICS: RMSD (from PyMOL {self.alignment_method})"
         ])
 
         return config_lines
@@ -215,7 +214,7 @@ python "{self.analysis_py}" --config "{self.config_file}"
                 name="changes",
                 path=self.analysis_csv,
                 columns=["id", "reference_structure", "target_structure", "selection",
-                        "num_residues", "RMSD", "max_distance", "mean_distance", "sum_over_square_root"],
+                        "num_aligned_atoms", "RMSD"],
                 description="Conformational change analysis between reference and target structures",
                 count=len(self.target_stream)
             )

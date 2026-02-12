@@ -142,23 +142,21 @@ selector = DistanceSelector(
 
 ### ConformationalChange
 
-Quantifies structural changes between reference and target structures. Calculates RMSD and distance metrics for specified regions.
+Quantifies structural changes between reference and target structures using PyMOL's alignment RMSD.
 
-**Environment**: `biopipelines`
-
-**Note**: This tool is not fully debugged yet and may require adjustments.
+**Environment**: `ProteinEnv`
 
 **Parameters**:
-- `reference_structures`: Union[str, ToolOutput, StandardizedOutput] (required) - Reference structures. Can be one or the same number as targets.
-- `target_structures`: Union[ToolOutput, StandardizedOutput] (required) - Target structures to compare
-- `selection`: Union[str, ToolOutput] (required) - Region specification (PyMOL selection or table reference)
-- `alignment`: str = "align" - Alignment method, as available in pymol (align, super, cealign) Rule of thumb: sequence similarity > 50% -> align; otherwise cealign.
+- `reference_structures`: Union[DataStream, StandardizedOutput] (required) - Reference structures. Can be one or the same number as targets.
+- `target_structures`: Union[DataStream, StandardizedOutput] (required) - Target structures to compare
+- `selection`: Optional[str] = None - Residue range (e.g., '10-20+30-40'). None = all CA atoms.
+- `alignment`: str = "align" - Alignment method (align, super, cealign). Rule of thumb: sequence similarity > 50% -> align; otherwise cealign.
 
 **Tables**:
 - `changes`:
 
-  | id | reference_structure | target_structure | selection | num_residues | RMSD | max_distance | mean_distance | sum_over_square_root |
-  |----|---------------------|------------------|-----------|--------------|------|--------------|---------------|---------------------|
+  | id | reference_structure | target_structure | selection | num_aligned_atoms | RMSD |
+  |----|---------------------|------------------|-----------|-------------------|------|
 
 **Example**:
 ```python
@@ -167,7 +165,7 @@ from biopipelines.conformational_change import ConformationalChange
 conf_change = ConformationalChange(
     reference_structures=apo_structures,
     target_structures=holo_structures,
-    selection="resi 10-50",  # PyMOL selection
+    selection="10-50",
     alignment="super"
 )
 ```

@@ -6,13 +6,8 @@
 """
 Runtime helper script for ConformationalChange analysis.
 
-This script analyzes protein structures to quantify conformational changes using multiple metrics:
-- RMSD: Root Mean Square Deviation of Cα atoms
-- max_distance: Maximum distance between any Cα pair
-- mean_distance: Mean distance between Cα atoms
-- sum_over_square_root: Sum of distances normalized by √(number of residues)
-
-Supports structural alignment using PyMOL's align, super, or cealign methods.
+This script analyzes protein structures to quantify conformational changes by computing
+RMSD using PyMOL's align, super, or cealign methods.
 """
 
 import os
@@ -20,9 +15,7 @@ import sys
 import argparse
 import json
 import pandas as pd
-import numpy as np
-import math
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 # Import PyMOL for structure analysis
 import pymol
@@ -33,19 +26,22 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from biopipelines_io import load_datastream, iterate_files
 
 
-def align_structures(ref_obj: str, target_obj: str, selection: str, alignment_method: str) -> None:
+def align_and_compute_rmsd(ref_obj: str, target_obj: str, selection: str,
+                           alignment_method: str) -> Dict[str, Any]:
     """
-    Align target structure to reference using specified method.
+    Align target structure to reference and return RMSD from PyMOL.
 
     Args:
         ref_obj: Reference PyMOL object name
         target_obj: Target PyMOL object name (will be aligned to reference)
-        selection: Selection specification for alignment, or None/"all" for whole structure
+        selection: Selection specification, or None/"all" for whole structure
         alignment_method: "align", "super", or "cealign"
+
+    Returns:
+        Dictionary with RMSD and num_aligned_atoms from PyMOL's alignment
     """
-    # Create selection strings
+    # Create selection strings for CA atoms
     if selection is None or selection == "all":
-        # Use all CA atoms
         ref_sel = f"{ref_obj} and name CA"
         target_sel = f"{target_obj} and name CA"
     else:
@@ -53,96 +49,28 @@ def align_structures(ref_obj: str, target_obj: str, selection: str, alignment_me
         target_sel = f"{target_obj} and resi {selection} and name CA"
 
     if alignment_method == "align":
-        # Sequence-dependent alignment
-        cmd.align(target_sel, ref_sel)
+        # Returns: [RMSD_after, atoms_after, cycles, RMSD_before, atoms_before, score, residues_aligned]
+        result = cmd.align(target_sel, ref_sel)
+        rmsd = result[0]
+        num_atoms = result[1]
     elif alignment_method == "super":
-        # Structure-based superposition
-        cmd.super(target_sel, ref_sel)
+        # Same return format as align
+        result = cmd.super(target_sel, ref_sel)
+        rmsd = result[0]
+        num_atoms = result[1]
     elif alignment_method == "cealign":
-        # Combinatorial extension alignment
-        cmd.cealign(ref_sel, target_sel)
+        # Returns: {'RMSD': float, 'alignment_length': int, ...}
+        result = cmd.cealign(ref_sel, target_sel)
+        rmsd = result['RMSD']
+        num_atoms = result['alignment_length']
     else:
         raise ValueError(f"Unknown alignment method: {alignment_method}")
 
-    print(f"  - Aligned using: {alignment_method}")
-
-
-def calculate_metrics(ref_obj: str, target_obj: str, selection: str) -> Dict[str, float]:
-    """
-    Calculate multiple conformational change metrics between reference and target structures.
-
-    Args:
-        ref_obj: Reference PyMOL object name
-        target_obj: Target PyMOL object name
-        selection: Selection specification for analysis, or None/"all" for whole structure
-
-    Returns:
-        Dictionary with metrics: num_residues, RMSD, max_distance, mean_distance, sum_over_square_root
-    """
-    # Fetch Cα atoms for selection in each object
-    if selection is None or selection == "all":
-        ref_model = cmd.get_model(f"{ref_obj} and name CA")
-        target_model = cmd.get_model(f"{target_obj} and name CA")
-    else:
-        ref_model = cmd.get_model(f"{ref_obj} and resi {selection} and name CA")
-        target_model = cmd.get_model(f"{target_obj} and resi {selection} and name CA")
-
-    # Index target atoms by (chain, resi) for quick lookup
-    target_coords = {(a.chain, a.resi): np.array([a.coord[0], a.coord[1], a.coord[2]])
-                     for a in target_model.atom}
-
-    # Collect matched coordinates
-    ref_coords_list = []
-    target_coords_list = []
-    distances = []
-
-    for ref_atom in ref_model.atom:
-        key = (ref_atom.chain, ref_atom.resi)
-        if key in target_coords:
-            ref_coord = np.array([ref_atom.coord[0], ref_atom.coord[1], ref_atom.coord[2]])
-            target_coord = target_coords[key]
-
-            ref_coords_list.append(ref_coord)
-            target_coords_list.append(target_coord)
-
-            # Calculate distance
-            dist = np.linalg.norm(ref_coord - target_coord)
-            distances.append(dist)
-
-    num_residues = len(distances)
-
-    if num_residues == 0:
-        return {
-            'num_residues': 0,
-            'RMSD': 0.0,
-            'max_distance': 0.0,
-            'mean_distance': 0.0,
-            'sum_over_square_root': 0.0
-        }
-
-    # Convert to numpy arrays
-    ref_coords_array = np.array(ref_coords_list)
-    target_coords_array = np.array(target_coords_list)
-    distances_array = np.array(distances)
-
-    # Calculate RMSD: sqrt(mean(distances²))
-    rmsd = np.sqrt(np.mean(distances_array ** 2))
-
-    # Calculate max distance
-    max_distance = np.max(distances_array)
-
-    # Calculate mean distance
-    mean_distance = np.mean(distances_array)
-
-    # Calculate sum over square root: sum(distances) / sqrt(n)
-    sum_over_square_root = np.sum(distances_array) / np.sqrt(num_residues)
+    print(f"  - Aligned using: {alignment_method}, RMSD: {rmsd:.3f}, atoms: {num_atoms}")
 
     return {
-        'num_residues': num_residues,
         'RMSD': rmsd,
-        'max_distance': max_distance,
-        'mean_distance': mean_distance,
-        'sum_over_square_root': sum_over_square_root
+        'num_aligned_atoms': num_atoms
     }
 
 
@@ -228,7 +156,7 @@ def analyze_conformational_change(ref_path: str, target_path: str, selection: st
         alignment_method: Alignment method ("align", "super", or "cealign")
 
     Returns:
-        Dictionary with metrics or None if calculation failed
+        Dictionary with RMSD and num_aligned_atoms, or None if failed
     """
     try:
         # Extract structure IDs from filenames for PyMOL object names
@@ -246,17 +174,8 @@ def analyze_conformational_change(ref_path: str, target_path: str, selection: st
         print(f"  - Loaded target: {target_obj}")
         print(f"  - Selection: {selection}")
 
-        # Align structures
-        align_structures(ref_obj, target_obj, selection, alignment_method)
-
-        # Calculate metrics
-        metrics = calculate_metrics(ref_obj, target_obj, selection)
-
-        print(f"  - Num residues: {metrics['num_residues']}")
-        print(f"  - RMSD: {metrics['RMSD']:.3f}")
-        print(f"  - Max distance: {metrics['max_distance']:.3f}")
-        print(f"  - Mean distance: {metrics['mean_distance']:.3f}")
-        print(f"  - Sum over sqrt: {metrics['sum_over_square_root']:.3f}")
+        # Align and get RMSD from PyMOL
+        metrics = align_and_compute_rmsd(ref_obj, target_obj, selection, alignment_method)
 
         # Clean up PyMOL objects
         cmd.delete(ref_obj)
@@ -381,11 +300,8 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
             'reference_structure': ref_path,
             'target_structure': target_path,
             'selection': selection,
-            'num_residues': metrics['num_residues'],
-            'RMSD': metrics['RMSD'],
-            'max_distance': metrics['max_distance'],
-            'mean_distance': metrics['mean_distance'],
-            'sum_over_square_root': metrics['sum_over_square_root']
+            'num_aligned_atoms': metrics['num_aligned_atoms'],
+            'RMSD': metrics['RMSD']
         }
         results.append(result)
 
@@ -410,16 +326,14 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         print(f"\nResults summary:")
         print(df)
 
-        # Statistics for each metric
-        print(f"\nMetrics statistics:")
-        for metric in ['RMSD', 'max_distance', 'mean_distance', 'sum_over_square_root']:
-            values = df[metric].dropna()
-            if len(values) > 0:
-                print(f"\n{metric}:")
-                print(f"  Min: {values.min():.3f}")
-                print(f"  Max: {values.max():.3f}")
-                print(f"  Mean: {values.mean():.3f}")
-                print(f"  Std: {values.std():.3f}")
+        # Statistics
+        values = df['RMSD'].dropna()
+        if len(values) > 0:
+            print(f"\nRMSD statistics:")
+            print(f"  Min: {values.min():.3f}")
+            print(f"  Max: {values.max():.3f}")
+            print(f"  Mean: {values.mean():.3f}")
+            print(f"  Std: {values.std():.3f}")
     else:
         raise ValueError("No valid results generated - check structure files and selections")
 

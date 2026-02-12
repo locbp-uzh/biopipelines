@@ -39,8 +39,9 @@ with Pipeline(project="Examples",
                 "delta_sasa_refolded": 2.0
             }
     ) for bg1000 in boltzgens]
-    # We merge and rename design_spec_001 -> batch00_design_spec_001, batch01_design_spec_001, etc.
-    merge=BoltzGenMerge(analyzed, id_template="batch{i:02d}_") # this step only works with id_template if analysis has been conducted before (it will merge the analysis results)
+
+    merge=BoltzGenMerge(analyzed)
+    
     # Final filtering.
     BoltzGen(reuse=merge, # After this is done, one can run the filtering again by loading the merge json.
             steps=["filtering"],
