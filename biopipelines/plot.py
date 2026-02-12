@@ -187,7 +187,10 @@ echo "=== Plot ready ==="
             ylabel: str = None,
             x_name: str = None,
             y_name: str = None,
-            figsize: Tuple[float, float] = (8, 6)) -> PlotOperation:
+            figsize: Tuple[float, float] = (8, 6),
+            x_tick_rotation: float = 0,
+            y_tick_rotation: float = 0,
+            grid: bool = True) -> PlotOperation:
         """
         Create bar chart for categorical X axis.
 
@@ -201,13 +204,18 @@ echo "=== Plot ready ==="
             x_name: Display name for X variable (alternative to xlabel)
             y_name: Display name for Y variable (alternative to ylabel)
             figsize: Figure size as (width, height) in inches
+            x_tick_rotation: Rotation angle for x-axis tick labels in degrees
+            y_tick_rotation: Rotation angle for y-axis tick labels in degrees
+            grid: Show grid lines (default True)
 
         Returns:
             PlotOperation for bar chart
         """
         return PlotOperation("bar", data=data, x=x, y=y,
                             title=title, xlabel=xlabel, ylabel=ylabel,
-                            x_name=x_name, y_name=y_name, figsize=figsize)
+                            x_name=x_name, y_name=y_name, figsize=figsize,
+                            x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                            grid=grid)
 
     @staticmethod
     def Column(data: List[Union[StandardizedOutput, TableInfo]],

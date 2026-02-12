@@ -260,6 +260,9 @@ class PlotBuilder:
         xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
         figsize = tuple(op.get("figsize", [8, 6]))
+        x_tick_rotation = op.get("x_tick_rotation", 0)
+        y_tick_rotation = op.get("y_tick_rotation", 0)
+        grid = op.get("grid", True)
 
         df = self._resolve_data_source(data_ref)
 
@@ -281,9 +284,11 @@ class PlotBuilder:
         ax.bar(x_positions, agg_df[y_col], color='#1f77b4', edgecolor='white', alpha=0.8)
 
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(agg_df[x_col], rotation=45, ha='right')
+        ax.set_xticklabels(agg_df[x_col])
 
-        self._apply_style(ax, title, xlabel, ylabel, grid=True)
+        self._apply_style(ax, title, xlabel, ylabel,
+                         x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                         grid=grid)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
