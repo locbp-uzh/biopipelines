@@ -31,17 +31,18 @@ class RFdiffusion(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
-        data = folders.get("data", "")
+        repo_dir = folders.get("RFdiffusion", "")
+        parent_dir = os.path.dirname(repo_dir)
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{data}/RFdiffusion/models" ] && [ -f "{data}/RFdiffusion/models/Base_ckpt.pt" ] && {env_manager} env list 2>/dev/null | grep -q "SE3nv"; then
+if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] && {env_manager} env list 2>/dev/null | grep -q "SE3nv"; then
     echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
     exit 0
 fi
 """
         return f"""echo "=== Installing RFdiffusion ==="
-{skip}cd {data}
+{skip}cd {parent_dir}
 git clone https://github.com/RosettaCommons/RFdiffusion.git
-cd RFdiffusion
+cd {repo_dir}
 
 # Download model weights
 mkdir -p models && cd models

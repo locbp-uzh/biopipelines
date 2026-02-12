@@ -30,16 +30,17 @@ class ProteinMPNN(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        data = folders.get("data", "")
+        repo_dir = folders.get("ProteinMPNN", "")
+        parent_dir = os.path.dirname(repo_dir)
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{data}/ProteinMPNN" ]; then
+if [ -d "{repo_dir}" ]; then
     echo "ProteinMPNN already installed, skipping. Use force_reinstall=True to reinstall."
     exit 0
 fi
 """
         return f"""echo "=== Installing ProteinMPNN ==="
 {skip}echo "Requires SE3nv (installed with RFdiffusion.install())"
-cd {data}
+cd {parent_dir}
 git clone https://github.com/dauparas/ProteinMPNN.git
 
 echo "=== ProteinMPNN installation complete ==="

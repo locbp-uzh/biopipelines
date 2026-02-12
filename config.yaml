@@ -35,8 +35,9 @@ folders:
     RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
     RFdiffusion3: "<data>/rfdiffusion3"
     ProteinMPNN: "<data>/ProteinMPNN"
+    LigandMPNN: "<data>/LigandMPNN"
     AlphaFold: "<data>/localcolabfold"
-    OmegaFold: "<data>/OmegaFold"
+
     Boltz: "<data>/boltz"
     BoltzGen: "<data>/boltzgen"
     GhostFold: "<data>/ghostfold"

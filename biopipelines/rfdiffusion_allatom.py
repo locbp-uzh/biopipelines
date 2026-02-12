@@ -38,8 +38,8 @@ class RFdiffusionAllAtom(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        data = folders.get("data", "")
-        repo_dir = f"{data}/rf_diffusion_all_atom"
+        repo_dir = folders.get("RFdiffusionAllAtom", "")
+        parent_dir = os.path.dirname(repo_dir)
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] && [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ]; then
     echo "RFdiffusion-AllAtom already installed, skipping. Use force_reinstall=True to reinstall."
@@ -47,9 +47,9 @@ if [ -d "{repo_dir}" ] && [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ]; th
 fi
 """
         return f"""echo "=== Installing RFdiffusion-AllAtom ==="
-{skip}cd {data}
+{skip}cd {parent_dir}
 git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git
-cd rf_diffusion_all_atom
+cd {repo_dir}
 
 # Download container (for container mode, see config.yaml containers section)
 wget http://files.ipd.uw.edu/pub/RF-All-Atom/containers/rf_se3_diffusion.sif

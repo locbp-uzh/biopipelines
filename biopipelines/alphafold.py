@@ -44,18 +44,24 @@ class AlphaFold(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        data = folders.get("data", "")
+        repo_dir = folders.get("AlphaFold", "")
+        parent_dir = os.path.dirname(repo_dir)
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{data}/localcolabfold" ]; then
+if [ -d "{repo_dir}" ]; then
     echo "AlphaFold (LocalColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
     exit 0
 fi
 """
         return f"""echo "=== Installing AlphaFold (LocalColabFold) ==="
-{skip}cd {data}
-wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/refs/heads/main/v1.5.5_old_installers/install_colabbatch_linux.sh
-bash install_colabbatch_linux.sh
-rm install_colabbatch_linux.sh
+{skip}cd {parent_dir}
+wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/v1.0.0/install_colabfold_linux.sh
+# Replace conda commands with the configured environment manager
+sed -i 's/conda create/{env_manager} create/g' install_colabfold_linux.sh
+sed -i 's/conda activate/{env_manager} activate/g' install_colabfold_linux.sh
+sed -i 's/conda update/{env_manager} update/g' install_colabfold_linux.sh
+sed -i 's/conda install/{env_manager} install/g' install_colabfold_linux.sh
+bash install_colabfold_linux.sh
+rm install_colabfold_linux.sh
 
 echo "=== AlphaFold installation complete ==="
 """

@@ -123,9 +123,9 @@ class RFdiffusion3(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        data = folders.get("data", "")
+        repo_dir = folders.get("RFdiffusion3", "")
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{data}/rfdiffusion3" ] && {env_manager} env list 2>/dev/null | grep -q "foundry"; then
+if [ -d "{repo_dir}" ] && {env_manager} env list 2>/dev/null | grep -q "foundry"; then
     echo "RFdiffusion3 already installed, skipping. Use force_reinstall=True to reinstall."
     exit 0
 fi
@@ -136,8 +136,8 @@ fi
 pip install "rc-foundry[all]"
 
 # Download model weights
-mkdir -p {data}/rfdiffusion3
-foundry install rfd3 --checkpoint-dir {data}/rfdiffusion3
+mkdir -p {repo_dir}
+foundry install rfd3 --checkpoint-dir {repo_dir}
 
 echo "=== RFdiffusion3 installation complete ==="
 """
