@@ -29,7 +29,7 @@ with Pipeline(project="GFPSensor", job="GeneSynthesis"):
             Panda.merge(),
             Panda.filter("RMSD < 1.5 and plddt > 80")
         ],
-        pool=folded
+        pool=sequences
     )
 
     dna = DNAEncoder(sequences=filtered, organism="EC")

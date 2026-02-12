@@ -53,6 +53,7 @@ cd biopipelines
 mamba env create -f Environments/biopipelines.yaml
 mamba activate biopipelines
 pip install -e .
+ipython kernel install --user --name biopipelines
 ```
 
 Edit `config.yaml` to match your cluster configuration.
