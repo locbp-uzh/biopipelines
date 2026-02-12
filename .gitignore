@@ -18,6 +18,9 @@ MyPipelines/*
 Ligands/*
 !Ligands/README.md
 
+# MkDocs build output
+site/
+
 # IDEs
 .vscode/
 .idea/

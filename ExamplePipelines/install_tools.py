@@ -42,9 +42,10 @@ with Pipeline(project="Setup",
     LigandMPNN.install()          # Creates ligandmpnn_env, clones repo
 
     # Structure prediction
-    AlphaFold.install()           # Downloads LocalColabFold installer
+    AlphaFold.install()           # LocalColabFold installation
     Boltz2.install()              # Creates Boltz2Env
 
     # Visualization & Analysis
     PyMOL.install()               # Creates ProteinEnv (PyMOL, pandas, biopython, rdkit)
     MutationProfiler.install()    # Creates MutationEnv
+

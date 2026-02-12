@@ -1,0 +1,70 @@
+site_name: BioPipelines
+site_description: A Python framework for automated computational protein design workflows
+site_url: https://biopipelines.readthedocs.io/
+repo_url: https://github.com/locbp-uzh/biopipelines
+repo_name: locbp-uzh/biopipelines
+
+docs_dir: Docs
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: teal
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+nav:
+  - Home: index.md
+  - User Guide: UserManual.md
+  - Tool Reference:
+      - Overview: ToolReference.md
+      - Utilities & Inputs: Tool/Utilities.md
+      - Structure Generation: Tool/StructureGeneration.md
+      - Sequence Design: Tool/SequenceDesign.md
+      - Structure Prediction: Tool/StructurePrediction.md
+      - Analysis: Tool/Analysis.md
+      - Statistics: Tool/Statistics.md
+      - Data Management: Tool/DataManagement.md
+      - Under Development: Tool/UnderDevelopment.md
+  - Examples: examples.md
+  - Developer Guide: DeveloperManual.md
