@@ -27,12 +27,12 @@ with Pipeline(project="Examples",
     af = AlphaFold(proteins=pmpnn)
 ```
 
-## More info
+## Documentation
 
-Check out the following resources for a detailed explanation of it.
+Full documentation is available at **[biopipelines.readthedocs.io](https://biopipelines.readthedocs.io/en/latest/)**.
 
 - **[User Manual](Docs/UserManual.md)**
 - **[Tool Reference](Docs/ToolReference.md)**
 - **[Examples](ExamplePipelines/)**
-- **[Developer Manual](DocsDeveloperManual.md)**
+- **[Developer Manual](Docs/DeveloperManual.md)**
 
