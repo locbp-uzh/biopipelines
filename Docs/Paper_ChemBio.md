@@ -51,7 +51,7 @@ Additionally, authors should note whether the manuscript was discussed with an A
 
 **Gianluca Quargnali**, **Pablo Rivera-Fuentes**
 
-Laboratory of Computational Biophysics and Protein Design (LOCBP), Department of Chemistry, University of Zurich, Switzerland
+Laboratory of Chemical and Biological Probes (LOCBP), Department of Chemistry, University of Zurich, Switzerland
 
 ## Abstract
 
