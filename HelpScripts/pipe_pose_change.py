@@ -22,8 +22,7 @@ from biopipelines_io import load_datastream, iterate_files
 
 
 def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
-                            ligand, alignment_selection, calculate_centroid,
-                            calculate_orientation):
+                            ligand, alignment_selection):
     """
     Calculate pose distance metrics for a single target structure.
 
@@ -35,8 +34,6 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
         target_id: ID for target structure
         ligand: Ligand residue name in target
         alignment_selection: PyMOL selection for protein alignment
-        calculate_centroid: Whether to calculate centroid distance
-        calculate_orientation: Whether to calculate orientation angle
 
     Returns:
         Dictionary with pose distance metrics
@@ -94,41 +91,50 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
             'alignment_method': 'whole_structure'
         }
 
-        # Calculate centroid distance if requested
-        if calculate_centroid:
-            try:
-                # Get centroid coordinates
-                ref_center = cmd.centerofmass(ref_ligand_sel)
-                tgt_center = cmd.centerofmass(tgt_ligand_sel)
+        # Calculate centroid distance
+        try:
+            ref_center = cmd.centerofmass(ref_ligand_sel)
+            tgt_center = cmd.centerofmass(tgt_ligand_sel)
 
-                # Calculate Euclidean distance
-                import math
-                centroid_dist = math.sqrt(
-                    sum((r - t)**2 for r, t in zip(ref_center, tgt_center))
-                )
-                result['centroid_distance'] = round(centroid_dist, 3)
+            import math
+            centroid_dist = math.sqrt(
+                sum((r - t)**2 for r, t in zip(ref_center, tgt_center))
+            )
+            result['centroid_distance'] = round(centroid_dist, 3)
 
-            except Exception as e:
-                print(f"Warning: Centroid calculation failed for {target_id}: {e}")
-                result['centroid_distance'] = None
+        except Exception as e:
+            print(f"Warning: Centroid calculation failed for {target_id}: {e}")
+            result['centroid_distance'] = None
 
-        # Calculate orientation angle if requested
-        if calculate_orientation:
-            try:
-                # Calculate principal axes for both ligands
-                ref_inertia = cmd.intra_fit(ref_ligand_sel, 0)
-                tgt_inertia = cmd.intra_fit(tgt_ligand_sel, 0)
+        # Calculate orientation angle
+        try:
+            import numpy as np
 
-                # Note: This is a simplified orientation metric
-                # For more sophisticated analysis, use moment of inertia tensors
-                result['orientation_angle'] = None  # Placeholder
-                result['orientation_axis'] = None   # Placeholder
-                print(f"Warning: Orientation calculation not fully implemented yet")
+            ref_coords = cmd.get_coords(ref_ligand_sel)
+            tgt_coords = cmd.get_coords(tgt_ligand_sel)
 
-            except Exception as e:
-                print(f"Warning: Orientation calculation failed for {target_id}: {e}")
+            if ref_coords is not None and tgt_coords is not None and len(ref_coords) >= 3:
+                def principal_axis(coords):
+                    centered = coords - coords.mean(axis=0)
+                    _, _, vt = np.linalg.svd(centered)
+                    return vt[0]
+
+                ref_axis = principal_axis(np.array(ref_coords))
+                tgt_axis = principal_axis(np.array(tgt_coords))
+
+                cos_angle = np.clip(np.abs(np.dot(ref_axis, tgt_axis)), -1.0, 1.0)
+                angle_deg = np.degrees(np.arccos(cos_angle))
+
+                result['orientation_angle'] = round(float(angle_deg), 2)
+                result['orientation_axis'] = f"{tgt_axis[0]:.3f},{tgt_axis[1]:.3f},{tgt_axis[2]:.3f}"
+            else:
                 result['orientation_angle'] = None
                 result['orientation_axis'] = None
+
+        except Exception as e:
+            print(f"Warning: Orientation calculation failed for {target_id}: {e}")
+            result['orientation_angle'] = None
+            result['orientation_axis'] = None
 
         return result
 
@@ -151,8 +157,6 @@ def main():
     reference_ligand = config['reference_ligand']
     ligand = config['ligand']
     alignment_selection = config['alignment_selection']
-    calculate_centroid = config['calculate_centroid']
-    calculate_orientation = config['calculate_orientation']
     output_csv = config['output_csv']
 
     # Load sample structures DataStream using pipe_biopipelines_io
@@ -193,9 +197,7 @@ def main():
                 target_pdb=target_pdb,
                 target_id=target_id,
                 ligand=ligand,
-                alignment_selection=alignment_selection,
-                calculate_centroid=calculate_centroid,
-                calculate_orientation=calculate_orientation
+                alignment_selection=alignment_selection
             )
             results.append(result)
             print(f"OK (RMSD: {result['ligand_rmsd']:.2f} A)")
@@ -218,7 +220,7 @@ def main():
         print(f"  Min:    {df['ligand_rmsd'].min():.3f} A")
         print(f"  Max:    {df['ligand_rmsd'].max():.3f} A")
 
-        if calculate_centroid and 'centroid_distance' in df.columns:
+        if 'centroid_distance' in df.columns:
             print(f"Centroid distance statistics:")
             print(f"  Mean:   {df['centroid_distance'].mean():.3f} A")
             print(f"  Median: {df['centroid_distance'].median():.3f} A")

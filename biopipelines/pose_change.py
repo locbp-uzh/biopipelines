@@ -61,8 +61,6 @@ echo "=== PoseChange ready ==="
                  reference_ligand: str,
                  sample_ligand: Optional[str] = None,
                  alignment_selection: str = "protein",
-                 calculate_centroid: bool = True,
-                 calculate_orientation: bool = False,
                  **kwargs):
         """
         Initialize PoseChange tool.
@@ -74,8 +72,6 @@ echo "=== PoseChange ready ==="
             sample_ligand: Ligand residue name in sample structures (default: same as reference_ligand)
             alignment_selection: Selection for protein alignment before pose comparison
                                (default: "protein", can be PyMOL selection like "chain A")
-            calculate_centroid: Calculate ligand centroid distance (default: True)
-            calculate_orientation: Calculate orientation angle difference (default: False)
             **kwargs: Additional parameters passed to BaseConfig
         """
         # Resolve reference structure to DataStream
@@ -97,8 +93,6 @@ echo "=== PoseChange ready ==="
         self.reference_ligand = reference_ligand
         self.sample_ligand = sample_ligand or reference_ligand
         self.alignment_selection = alignment_selection
-        self.calculate_centroid = calculate_centroid
-        self.calculate_orientation = calculate_orientation
 
         super().__init__(**kwargs)
 
@@ -142,7 +136,7 @@ echo "=== PoseChange ready ==="
             f"REFERENCE LIGAND: {self.reference_ligand}",
             f"SAMPLE LIGAND: {self.sample_ligand}",
             f"ALIGNMENT: {self.alignment_selection}",
-            f"METRICS: RMSD" + (", centroid" if self.calculate_centroid else "") + (", orientation" if self.calculate_orientation else "")
+            f"METRICS: RMSD, centroid, orientation"
         ])
 
         return config_lines
@@ -174,8 +168,6 @@ echo "=== PoseChange ready ==="
             "samples_json": self.samples_ds_json,
             "ligand": self.sample_ligand,
             "alignment_selection": self.alignment_selection,
-            "calculate_centroid": self.calculate_centroid,
-            "calculate_orientation": self.calculate_orientation,
             "output_csv": self.analysis_csv
         }
 
@@ -196,25 +188,18 @@ python "{self.pose_change_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files."""
-        # Determine output columns based on metrics
         columns = [
             "id",
             "target_structure",
             "reference_structure",
-            "ligand_rmsd"
-        ]
-
-        if self.calculate_centroid:
-            columns.append("centroid_distance")
-
-        if self.calculate_orientation:
-            columns.extend(["orientation_angle", "orientation_axis"])
-
-        columns.extend([
+            "ligand_rmsd",
+            "centroid_distance",
+            "orientation_angle",
+            "orientation_axis",
             "alignment_rmsd",
             "num_ligand_atoms",
             "alignment_method"
-        ])
+        ]
 
         tables = {
             "changes": TableInfo(
@@ -241,9 +226,7 @@ python "{self.pose_change_py}" --config "{self.config_file}"
             "tool_params": {
                 "sample_ligand": self.sample_ligand,
                 "reference_ligand": self.reference_ligand,
-                "alignment_selection": self.alignment_selection,
-                "calculate_centroid": self.calculate_centroid,
-                "calculate_orientation": self.calculate_orientation
+                "alignment_selection": self.alignment_selection
             }
         })
         return base_dict

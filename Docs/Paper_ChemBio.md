@@ -17,14 +17,7 @@ The paper should be framed not as a software architecture contribution, but as a
 - Concrete applications: enzyme engineering, drug-target screening, ligand-binding optimization
 - Accessibility: no programming beyond a few lines of Python, no infrastructure expertise needed
 
-Technical details (DataStreams, auto-registration, `__new__` override) should be minimized or moved to Supporting Information. The architecture section should focus on *what the user experiences*, not how the internals work.
-
-### What strengthens the paper for this audience
-
-- **Real experimental validation** — even a single experimentally characterized design would dramatically strengthen the manuscript
-- **Accessible language** — avoid software engineering jargon; explain in terms of the scientific workflow
-- **Figures showing molecular outputs** — structures, binding poses, affinity distributions, not software architecture diagrams
-- **Comparison framed as accessibility** — not "fewer lines of code" but "accessible to non-specialists"
+Technical details should be minimized or moved to Supporting Information. The architecture section should focus on *what the user experiences*, not how the internals work.
 
 ### From journal page:
 
@@ -42,6 +35,12 @@ a description of any Supporting Information and/or Review-Only Material.
 Additionally, authors should note whether the manuscript was discussed with an ACS Chemical Biology editor before submission.
 
 
+### To do
+
+- **Figures showing molecular outputs** — structures, binding poses, affinity distributions, not software architecture diagrams
+- **Proper references** — not "fewer lines of code" but "accessible to non-specialists"
+- **Debug** — especially google colab should be tested
+
 ---
 
 ## Part 2: Paper Draft
@@ -56,101 +55,284 @@ Laboratory of Computational Biophysics and Protein Design (LOCBP), Department of
 
 ## Abstract
 
-Deep learning methods for protein structure generation, sequence design, and structure prediction have created unprecedented opportunities for protein engineering and drug discovery. However, using these tools requires navigating incompatible software environments, diverse input/output formats, and high-performance computing infrastructure — barriers that limit adoption by chemical biology laboratories. Here we present BioPipelines, an open-source Python framework that allows researchers to define multi-step computational design workflows in a few lines of code. BioPipelines handles environment management, data conversion between tools, and job scheduling on computing clusters, enabling researchers to focus on the scientific question rather than computational logistics. The framework integrates over 30 tools for structure generation, sequence design, structure prediction, compound screening, and analysis. The same workflow code can be prototyped interactively in a Jupyter notebook and then submitted for production-scale runs without modification. We demonstrate applications in de novo protein design, binding site optimization, compound library screening, iterative sequence engineering, fusion protein linker optimization, ligand pose sensitivity analysis, and gene synthesis preparation. BioPipelines is available under the MIT license at https://github.com/[TODO]/biopipelines.
+Deep learning methods for protein structure generation, sequence design, and structure prediction have created unprecedented opportunities for protein engineering and drug discovery. However, using these tools requires navigating incompatible software environments, diverse input/output formats, and high-performance computing infrastructure — barriers that limit adoption by chemical biology laboratories. Here we present BioPipelines, an open-source Python framework that allows researchers to define multi-step computational design workflows in a few lines of code. Further, its robust yet modular architecture provides a straightforward way to expand the toolkit with different functionalities with little effort. The framework currently integrates over 30 tools for structure generation, sequence design, structure prediction, compound screening, and analysis. The same workflow code can be prototyped interactively in a Jupyter notebook and then submitted for production-scale runs without modification. We demonstrate applications in de novo protein design, binding site optimization, compound library screening, iterative sequence engineering, fusion protein linker optimization, ligand pose sensitivity analysis, and gene synthesis preparation. We hope this framework will empower researchers allowing them to focus on the scientific question rather than computational logistics. BioPipelines is available under the MIT license at https://github.com/[TODO]/biopipelines.
 
 **Keywords:** protein design, protein engineering, computational workflow, drug discovery, deep learning
 
 ## Introduction
 
-Computational protein design has progressed from an expert-only discipline to a broadly useful tool for chemical biology. Deep network hallucination first demonstrated that neural networks trained for structure prediction could be repurposed to generate novel protein folds,^10^ and diffusion-based methods including RFdiffusion,^1^ Chroma,^11^ and FrameDiff^12^ have since made backbone generation routine, producing designable scaffolds with programmable structural features. In parallel, inverse folding models — notably ProteinMPNN^2^ and ESM-IF^13^ — have enabled rapid sequence design for target structures, with extensions such as LigandMPNN^3^ accommodating small-molecule binding partners. On the prediction side, AlphaFold2^4^ transformed structure prediction, and subsequent methods including RoseTTAFold,^14^ ESMFold,^15^ AlphaFold3,^16^ and Boltz-2^5^ have extended prediction to biomolecular complexes encompassing proteins, nucleic acids, and small molecules, with binding affinity estimation. Generative protein language models such as ProGen^17^ have further expanded the design toolkit by generating functional sequences directly from learned evolutionary distributions, without requiring an explicit structural template. Together, these advances provide a comprehensive computational pipeline — from backbone generation through sequence design, structure prediction, and experimental gene synthesis — that can dramatically accelerate protein engineering campaigns.
+Computational protein design has progressed from an expert-only discipline to a broadly useful tool for chemical biology. Deep network hallucination first demonstrated that neural networks trained for structure prediction could be repurposed to generate novel protein folds,^10^ and diffusion-based methods including RFdiffusion,^1^ Chroma,^11^ and FrameDiff^12^ have since made backbone generation routine, producing designable scaffolds with programmable structural features. In parallel, inverse folding models — notably ProteinMPNN^2^ and ESM-IF^13^ — have enabled rapid sequence design for target structures, with extensions such as LigandMPNN^3^ accommodating small-molecule binding partners. On the prediction side, AlphaFold2^4^ transformed the field of structural biology, and subsequent methods including RoseTTAFold,^14^ ESMFold,^15^ AlphaFold3,^16^ and Boltz-2^5^ have extended prediction to biomolecular complexes encompassing proteins, nucleic acids, and small molecules, with binding affinity estimation.
 
-These advances are especially relevant to chemical biology, where researchers routinely need to engineer proteins with altered binding specificity, design enzyme variants for new substrates, or screen compound libraries against protein targets. A typical computational campaign might involve generating protein scaffolds around a ligand binding site, designing sequences compatible with that scaffold, predicting the structures of the resulting designs, and ranking them by predicted binding affinity — all before any experimental work begins. In practice, however, chaining these tools together presents significant challenges for laboratories without dedicated computational support. Each tool requires its own software environment, uses different input and output file formats, and must be configured for the computing cluster. Running a multi-tool workflow manually involves writing and debugging shell scripts, tracking intermediate files across tools, and managing job dependencies on the cluster scheduler. These logistical hurdles — rather than the underlying science — are often the rate-limiting step in adopting computational design.
+These advances are especially relevant to chemical biology, where researchers routinely need to engineer proteins with altered binding specificity, design enzyme variants for new substrates, or screen compound libraries against protein targets. A typical computational campaign might involve generating protein scaffolds around a ligand binding site, designing sequences compatible with that scaffold, predicting the structures of the resulting designs, and ranking them by predicted binding affinity. In practice, however, chaining these tools together presents significant challenges for laboratories without dedicated computational support. Each tool requires its own software environment, uses different input and output file formats, and must be configured for the computing cluster. Running a multi-tool workflow manually involves writing and debugging shell scripts, tracking intermediate files across tools, and managing job dependencies on the cluster scheduler. These logistical hurdles — rather than the underlying science — are often the rate-limiting step in adopting computational design.
 
-Several workflow frameworks have been developed to address this problem (Table 1). ProtFlow^6^  (under development) provides Python wrappers around design tools with cluster job management but the absence of typed data for common entities in chemical biology (ligands, proteins, ...) impairs its modularity. Moreover, it requires writing verbose configuration code and maintaining a running Python process throughout execution. Ovo^7^ offers a web interface built on the Nextflow workflow engine but requires a database server and containerization infrastructure. ProteinDJ^8^ achieves efficient multi-GPU parallelism but restricts users to nine predefined pipeline configurations without support for custom workflows or iterative optimization.
+Some workflow frameworks have been developed to address this problem (Table 1). ProtFlow^6^  (unpublished) provides Python wrappers around design tools with cluster job management but the absence of typed data for common entities in chemical biology (ligands, proteins, ...) impairs its modularity. Moreover, it requires writing verbose configuration code and maintaining a running Python process throughout execution. Ovo^7^ offers a web interface built on the Nextflow workflow engine but requires a database server and containerization infrastructure. ProteinDJ^8^ achieves efficient multi-GPU parallelism but restricts users to nine predefined pipeline configurations without support for custom workflows or iterative optimization.
 
-Here we present BioPipelines, a framework designed to make computational protein and ligand design accessible to research groups with minimal computational expertise. The key design goals are conciseness (workflows defined in a few lines of Python), transparency (every computation generates human-readable scripts that can be inspected), and flexibility (arbitrary tool combinations including iterative multi-cycle optimization).
+Here we present BioPipelines, a framework designed to make computational protein and ligand design accessible to research groups with minimal computational expertise. The key design goals are clarity and conciseness (workflows defined in a few lines of Python), transparency (every computation generates human-readable scripts that can be inspected), and flexibility (arbitrary tool combinations including iterative multi-cycle optimization). A BioPipeline workflow is meant to read like a description of a scientific experiment. We showcase how this framework can be employed in simple and self-explanatory pipelines.
 
 ## Results and Discussion
 
-### Workflow definition
+### Enhancing stability and solubility of a protein
 
-A BioPipelines workflow reads like a description of the scientific experiment. The following example redesigns a portion of lysozyme, generates sequences for the new backbone, and predicts whether those sequences will fold correctly:
+In the following pipeline, the protein of interest Human Carbonic Anhydrase II (PDB: 3KS3) is loaded from the Protein DataBank. The sequence, excluding residues from the active site, is redesigned with the ProteinMPNN model trained on soluble proteins, and the resulting sequences are folded with AlphaFold2 for inspection. Finally, it produces codon-optimized DNA sequences ready for synthesis. The `DNAEncoder` uses organism-specific codon usage tables from CoCoPUTs (HIVE, April 2024), applying as a default a thresholded weighted sampling to avoid rare codons while reducing gene repeats. Multi-organism optimization (e.g., `organism="EC&HS"` for dual expression in *E. coli* and human cells) is supported for constructs that must be expressed in multiple hosts.
 
 ```python
 from biopipelines.pipeline import *
 from biopipelines.entities import *
-from biopipelines.rfdiffusion import RFdiffusion
 from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.alphafold import AlphaFold
+from biopipelines.dna_encoder import DNAEncoder
 
-with Pipeline(project="Lysozyme", job="Redesign"):
+with Pipeline(project="GFPSensor", job="GeneSynthesis"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
 
-    lysozyme = PDB("168L")
+    caII = PDB("3KS3")
 
-    backbones = RFdiffusion(pdb=lysozyme,
-                            contigs='50-70/A81-140',
+    sequences = ProteinMPNN(structures=caII,
+                            fixed="94+96+119",
+                            num_sequences=10,
+                            soluble_model=True)
+
+    folded = AlphaFold(proteins=sequences)
+
+    dna = DNAEncoder(sequences=sequences, organism="EC")
+```
+
+Instead of relying on manual inspection, analysis and filtering within the pipeline is also possible. Commonly, one would discard folds that don't resemble the original, or that AlphaFold2 predicts with low confidence. This can easily be done with integrated tools in BioPipelines:
+
+```python
+# imports omitted
+    conf_change = ConformationalChange(reference_structures = caII,
+                                       target_structures = folded)
+
+    filtered = Panda(
+        tables=[folded.tables.confidence,conf_change.tables.changes],
+        operations=[
+            Panda.merge(),
+            Panda.filter("RMSD < 1.5 and plddt > 80")
+        ],
+        pool=folded
+    )
+
+    dna = DNAEncoder(sequences=filtered, organism="EC")
+```
+
+### Redesign of a protein domain
+
+The following example redesigns the LID, non-essential domain of the protein adenylate kinase (PDB: 4AKE). RFdiffusion is employed to generate ten new protein backbones, replacing the segment A118-160 with a new backbone of length between 50 and 70. ProteinMPNN is used for the inverse-fold of the new backbones, generating two sequences that can fold with the geometry suggested by RFdiffusion. Finally, AlphaFold2 is used for validation. 
+
+```python
+# imports omitted
+with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
+    Resources(gpu="A100", time="4:00:00", memory="16GB")
+
+    kinase = PDB("4AKE")
+
+    backbones = RFdiffusion(pdb=kinase,
+                            contigs='A1-117/50-70/A161-214', 
                             num_designs=10)
 
     sequences = ProteinMPNN(structures=backbones,
-                            num_sequences=5,
+                            num_sequences=2,
                             redesigned=backbones.tables.structures.designed)
 
     refolded = AlphaFold(proteins=sequences)
 ```
 
-This pipeline (i) fetches the lysozyme crystal structure from the PDB, (ii) generates 10 backbone designs where residues 1-80 are replaced with 50-70 new residues while keeping the C-terminal domain fixed, (iii) designs 5 sequences per backbone with ProteinMPNN — automatically restricting redesign to only the residues that RFdiffusion generated — and (iv) folds all 50 sequences with AlphaFold2 to assess structural plausibility. The framework handles all file conversions, environment switching, and job scheduling.
-
-The `redesigned=backbones.tables.structures.designed` argument illustrates how information flows between tools: each backbone has different designed positions (determined by RFdiffusion at runtime), and this per-structure information is automatically passed to ProteinMPNN without any manual file parsing.
-
-### Interactive prototyping and production runs
-
-A key feature for adoption in experimental laboratories is that the same workflow code can be tested and manually inspected prior to scaling up This feature is built in the architecture of BioPipelines tools. When run in a Jupyter notebook — a familiar interface for many experimentalists — each tool executes immediately, and provides intermediate visualization output, allowing researchers to inspect intermediate results, adjust parameters, and build the workflow step by step. When the workflow is ready for production, the same script is submitted to the cluster with a `biopipelines-submit` command. This means a researcher can prototype a design campaign interactively on a single GPU, verify that the workflow produces sensible intermediate results, and then submit the identical script for a production run with hundreds of designs — all without rewriting any code or learning a separate batch submission workflow.
-
-### Compound library screening
-
-Computational screening of compound libraries against protein targets is a common need in chemical biology, particularly for identifying lead compounds or optimizing binding interactions. BioPipelines provides tools for building combinatorial compound libraries and screening them with structure prediction:
+The `redesigned=backbones.tables.structures.designed` argument illustrates how information flows between tools: each backbone has different designed positions (determined by RFdiffusion at runtime), and this per-structure information is automatically passed to ProteinMPNN without any manual file parsing. Pipelines involving RFdiffusion usually involve hundreds if not thousands of designs, hence here instead of only filtering based on the conformational change of the non-designed portion of the protein, we sort them and obtain the best designed based on the model confidence.
 
 ```python
+    # imports omitted
+    conf_change = ConformationalChange(reference_structures = kinase,
+                                       target_structures = refolded)
+
+    top3 = Panda(
+        tables=[folded.tables.confidence,conf_change.tables.changes],
+        operations=[
+            Panda.merge(),
+            Panda.filter("RMSD < 1.5 and plddt > 80"),
+            Panda.sort("plddt"),
+            Panda.head(3)
+        ],
+        pool=folded
+    )
+```
+
+
+### Screening a library of compounds against a target protein
+
+Computational screening of compound libraries against protein targets is a common need in chemical biology, particularly for identifying lead compounds or optimizing binding interactions. BioPipelines provides tools for building combinatorial compound libraries and screening them with structure prediction. In the following pipeline, different modification of salicylic acid are screened against homodimer.
+
+```python
+# imports omitted
 with Pipeline(project="Screening", job="FragmentScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")
 
-    target = Sequence("MDPLNLS...", ids="DRD2")
-    cofactor = Ligand("ATP")
+    target = Sequence("LFNEIIPLGRLIHMVNQKKDRLLNEYLSPLDITAAQFKVLCSIRCAACITPVELKKVLSVDLGALTRMLDRLVCKGWVERLPNPNDKRGVLVKLTTGGAAICEQCHQLVGQDLHQELTKNLTADEVATLEYLLKKVLP", ids="MarR")
 
     library = CompoundLibrary(
         library={
-            "candidate": "<aryl><linker><amide>",
-            "aryl": ["<methoxyphenyl>", "<fluorophenyl>"],
-            "methoxyphenyl": r"c1cc(OC)cc(c1)",
-            "fluorophenyl": r"c1cc(F)ccc1",
-            "linker": ["CC", "CCC", "CCCC"],
-            "amide": ["C(=O)N", "C(=O)NC"],
+            "candidate": "<aryl><carboxylate>",
+            "aryl": ["<o-hydroxyphenyl>", "<m-hydroxyphenyl>","<p-hydroxyphenyl>"],
+            "o-hydroxyphenyl": r"c1ccc(O)c(c1)",
+            "m-hydroxyphenyl": r"c1cc(O)cc(c1)",
+            "p-hydroxyphenyl": r"c1c(O)ccc(c1)",
+            "carboxylate": r"C(=O)[O-]",
         },
         primary_key="candidate"
     )
-    # Generates 2 x 3 x 2 = 12 compounds with fragment tracking
 
     boltz = Boltz2(
-        proteins=target,
-        ligands=Bundle(Each(library), cofactor),
+        proteins=Bundle(target, target), # both at once -> homodimer
+        ligands=Each(library),
         affinity=True
     )
-    # 12 predictions, each compound co-predicted with the ATP cofactor
+
+    merged = Panda(
+        tables=[boltz.tables.affinity, library.tables.compounds],
+        operations=[Panda.merge(on="id")]
+    )
+
+    Plot(
+        Plot.Scatter(
+            data=merged.tables.result,
+            x="aryl", y="affinity_pred_value",
+            title="Predicted Affinity by Aryl Substituent",
+            xlabel="Aryl Group", ylabel="Predicted Affinity", grid=True
+        ),
+    )
 ```
 
-The `CompoundLibrary` tool expands a combinatorial template defined in SMILES notation into all possible compounds, tracking which fragment was used at each position. The `Bundle(Each(library), cofactor)` expression ensures that each library compound is predicted in the presence of ATP as a cofactor — a common experimental scenario. The framework records which fragments contributed to each prediction, enabling structure-activity analysis at the fragment level.
+### Measuring the influence of mutations on the binding affinity
+
+Understanding how protein mutations affect small-molecule binding is fundamental to medicinal chemistry and resistance biology. A common question is: which residue positions tolerate substitution without disrupting the drug binding pose, and which mutations cause the ligand to shift or dissociate? BioPipelines tools can easily be combined to address this with a saturation mutagenesis-to-pose analysis pipeline. The following pipeline performs computational saturation mutagenesis at the gatekeeper position (Thr315) of ABL1 kinase — the clinically important residue whose T315I mutation confers resistance to imatinib in chronic myeloid leukemia.^9^ All 20 amino acid variants are generated by `Mutagenesis`, and each mutant–imatinib complex is predicted with Boltz-2 including binding affinity estimation. `PoseChange` then superimposes each predicted complex onto the wild-type crystal structure and measures how far the imatinib pose has shifted (RMSD, centroid distance, and orientation angle). By merging these metrics, the pipeline produces a comprehensive structure-activity landscape: mutations that maintain low RMSD and low affinity are predicted to preserve drug sensitivity, while those with large pose deviations suggest resistance mechanisms — directly connecting structural predictions to clinically relevant phenotypes.
+
+```python
+# imports omitted
+with Pipeline(project="Imatinib", job="PoseSensitivity"):
+    Resources(gpu="A100", time="8:00:00", memory="32GB")
+
+    abl1 = PDB("3QRK")
+    imatinib = Ligand("STI")
+
+    original = Boltz2(proteins=abl1,
+                      ligands=imatinib)
+
+    mutants_sequences = Mutagenesis(original=abl1,
+                                    position=93, #AUTH 315
+                                    mode="saturation")
+
+    mutants = Boltz2(proteins=mutants_sequences,
+                    ligands=imatinib)
+
+    pose = PoseChange(reference_structure=original,
+                      sample_structures=mutants,
+                      reference_ligand="ATP",
+                      sample_ligand="LIG")
+
+    analysis = Panda(
+        tables=[pose.tables.changes, mutants.tables.affinity,
+                mutants_sequences.tables.sequences],
+        operations=[Panda.merge()])
+
+    Plot(
+        Plot.Scatter(
+            data=analysis.tables.result,
+            x="ligand_rmsd", y="affinity_pred_value",
+            title="Pose Deviation vs Predicted Affinity",
+            xlabel="Ligand RMSD (A)",
+            ylabel="Predicted Affinity", grid=True
+        ),
+        Plot.Bar(
+            data=analysis.tables.result,
+            x="mutation", y="affinity_pred_value",
+            title="Predicted Affinity per Mutant",
+            xlabel="Mutation", ylabel="Predicted Affinity",
+            x_tick_rotation=45, grid=True
+        ),
+        Plot.Bar(
+            data=analysis.tables.result,
+            x="mutation", y="ligand_rmsd",
+            title="Ligand RMSD per Mutant",
+            xlabel="Mutation", ylabel="Ligand RMSD (A)",
+            x_tick_rotation=45, grid=True
+        ),
+    )
+```
+
+
+### Designing a FRET-based calcium sensor
+
+Genetically encoded FRET sensors typically sandwich a conformationally responsive sensing domain between a donor and acceptor fluorescent protein. A critical design question is which linker lengths keep both fluorescent domains properly folded while maximizing the change in FRET efficiency upon ligand binding. BioPipelines enables systematic screening of linker variants with structural validation under both apo and holo conditions. The following pipeline constructs a calmodulin-based calcium sensor by fusing ECFP (donor), calmodulin (sensing domain), and EYFP (acceptor) with variable-length flexible linkers. Both apo and Ca2+-bound forms are predicted with AlphaFold, and the chromophore distance and inter-domain orientation are compared between states.
+
+```python
+# imports omitted
+with Pipeline(project="Biosensor", job="CaFRET"):
+    Resources(gpu="A100", time="8:00:00", memory="16GB")
+
+    donor = Sequence("MVSKGEELFTGV...")     # ECFP
+    cam = PDB("1CFD")                       # Calmodulin
+    acceptor = Sequence("MVSKGEELFTG...")   # EYFP
+    calcium = Ligand("CA")
+
+    fusions = Fuse(proteins=[donor, cam, acceptor],
+                   name="CaFRET",
+                   linker="GSGAG",
+                   linker_lengths=["3-5", "3-5"])
+
+    apo = Boltz2(proteins=fusions)
+    holo = Boltz2(proteins=fusions, 
+                  ligands=calcium,
+                  msas=apo) # recycle msas
+
+    dist_apo = Distance(structures=apo,
+                        residue=["66", "-173"], method="min",
+                        metric_name="FRET_distance_apo")
+    dist_holo = Distance(structures=holo,
+                         residue=["66", "-173"], method="min",
+                         metric_name="FRET_distance_holo")
+
+    # Measure inter-domain orientation
+    dihedral_apo = Angle(structures=apo,
+                         atoms=["64.CA", "66.CA", "-175.CA", "-173.CA"],
+                         metric_name="domain_orientation_apo")
+
+    dihedral_holo = Angle(structures=holo,
+                          atoms=["64.CA", "66.CA", "-175.CA", "-173.CA"],
+                          metric_name="domain_orientation_holo")
+
+    # Merge apo and holo metrics, compute FRET distance change per linker variant
+    analysis = Panda(
+        tables=[dist_apo.tables.distances, dist_holo.tables.distances,
+                dihedral_apo.tables.angles, dihedral_holo.tables.angles],
+        operations=[Panda.merge(on="id"),
+                    Panda.calculate({"delta_distance": "FRET_distance_holo - FRET_distance_apo",
+                                     "delta_orientation": "domain_orientation_holo - domain_orientation_apo"})])
+
+    Plot(
+        Plot.Scatter(
+            data=analysis.tables.result,
+            x="delta_distance", y="delta_orientation",
+            title="Calcium-Induced FRET Geometry Change",
+            xlabel="Distance Change, Apo to Holo (A)",
+            ylabel="Orientation Change (deg)", grid=True
+        )
+    )
+```
+
+The `Fuse` tool generates all linker-length combinations (3 x 3 = 9 constructs), concatenating the three domains with short flexible linkers. Both apo and holo forms are predicted for each construct, and the `Distance` and `Angle` tools measure the chromophore separation (residue 66 in the donor, residue -173 counting from the C-terminus in the acceptor) and inter-domain orientation — the two geometric parameters that determine FRET efficiency. The scatter plot reveals which linker combinations produce the largest calcium-dependent change in FRET geometry, directly guiding sensor optimization.
+
 
 ### Iterative sequence optimization
 
 Many protein engineering campaigns involve multiple rounds of design and evaluation. BioPipelines supports this directly within a single workflow definition:
 
 ```python
+# imports omitted
 with Pipeline(project="Optimization", job="BindingOptimization"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
 
     protein = PDB("6U32")
-    ligand = Ligand(smiles="O=C(...)NCCOCCCCCCCl", ids="HALOTAG_LIGAND")
+    ligand = Ligand("JF646-HaloTag ligand", ids="JF646")
 
     current_best = Boltz2(proteins=protein, ligands=ligand)
     current_best = Panda(table=current_best.tables.affinity,
@@ -190,192 +372,12 @@ with Pipeline(project="Optimization", job="BindingOptimization"):
 
 Each cycle generates sequence variants near the binding pocket, profiles mutation frequencies, composes new candidates by weighted sampling from the observed distribution, predicts their structures, and selects the overall best design. The `current_best` variable accumulates the best result across cycles, carrying forward the corresponding structure files. This iterative refinement — analogous to directed evolution but performed computationally — can identify beneficial mutations in specific positions before any experimental testing.
 
-### From designed protein to DNA: gene synthesis preparation
-
-A common endpoint of any computational design campaign is ordering synthetic genes for experimental characterization. This final step — reverse-translating a protein sequence into codon-optimized DNA — is typically performed manually through vendor websites, one sequence at a time. BioPipelines integrates this step directly into the workflow, so the top designs from a structure prediction run can be converted to synthesis-ready DNA sequences without leaving the pipeline:
-
-```python
-from biopipelines.pipeline import *
-from biopipelines.entities import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
-from biopipelines.panda import Panda
-from biopipelines.dna_encoder import DNAEncoder
-
-with Pipeline(project="GFPSensor", job="GeneSynthesis"):
-    Resources(gpu="A100", time="4:00:00", memory="16GB")
-
-    gfp = PDB("1GFL")
-
-    backbones = RFdiffusion(pdb=gfp,
-                            contigs='A1-142/10-20/A157-230',
-                            num_designs=10)
-
-    sequences = ProteinMPNN(structures=backbones,
-                            num_sequences=10,
-                            redesigned=backbones.tables.structures.designed)
-
-    predictions = AlphaFold(proteins=sequences)
-
-    best = Panda(
-        table=predictions.tables.confidence,
-        operations=[
-            Panda.filter("plddt > 85"),
-            Panda.sort("ptm", ascending=False),
-            Panda.head(5)
-        ],
-        pool=predictions,
-        rename="top"
-    )
-
-    # Reverse-translate to E. coli-optimized DNA for gene synthesis
-    dna = DNAEncoder(sequences=best, organism="EC")
-```
-
-This pipeline redesigns the loop connecting beta-strands 7 and 8 in GFP (a common target for engineering split-GFP complementation sensors), designs and validates sequences computationally, selects the top 5 by AlphaFold confidence, and produces codon-optimized DNA sequences ready for synthesis ordering. The `DNAEncoder` uses organism-specific codon usage tables from CoCoPUTs (HIVE, April 2024), applying thresholded weighted sampling to avoid rare codons. Multi-organism optimization (e.g., `organism="EC&HS"` for dual expression in *E. coli* and human cells) is supported for constructs that must be expressed in multiple hosts.
-
-### Fusion protein linker optimization
-
-Fusion proteins are central to chemical biology — FRET biosensors, targeted protein degraders (PROTACs/molecular glues), and reporter systems all depend on connecting two functional domains with a linker of appropriate length and flexibility. The critical design question is which linker length keeps both domains properly folded and correctly oriented. BioPipelines enables systematic screening of linker variants with structural validation:
-
-```python
-with Pipeline(project="Biosensor", job="LinkerScreen"):
-    Resources(gpu="A100", time="8:00:00", memory="16GB")
-
-    donor = PDB("5WJ2")     # mClover3
-    acceptor = PDB("5WJ4")  # mRuby3
-
-    fusions = Fuse(
-        proteins=[donor, acceptor],
-        name="FRET_sensor",
-        linker="GGGGSGGGGSGGGGSGGGGSGGGGSGGGGS",
-        linker_lengths=["5-25"]
-    )
-
-    folded = AlphaFold(proteins=fusions)
-
-    chromophore_dist = Distance(
-        structures=folded,
-        residue=["66", "-66"],
-        method="min",
-        metric_name="FRET_distance"
-    )
-
-    orientation = Angle(
-        structures=folded,
-        atoms=["66.CA", "1.CA", "-1.CA", "-66.CA"],
-        metric_name="domain_orientation"
-    )
-
-    combined = Panda(
-        tables=[chromophore_dist.tables.distances, orientation.tables.angles],
-        operations=[
-            Panda.merge(on="id"),
-            Panda.sort("FRET_distance", ascending=True),
-        ],
-        pool=folded
-    )
-
-    Plot(
-        Plot.Scatter(
-            data=combined.tables.result,
-            x="FRET_distance", y="domain_orientation",
-            title="Linker Length vs FRET Geometry",
-            xlabel="Chromophore Distance (A)",
-            ylabel="Domain Orientation (deg)", grid=True
-        ),
-    )
-
-    PyMOL(
-        PyMOL.Load(folded),
-        PyMOL.ColorAF(folded),
-        PyMOL.Color(folded,
-                    selection=fusions.tables.sequences.L1,
-                    color="yellow"),
-        PyMOL.Align(),
-        session="FRET_linker_screen"
-    )
-```
-
-The `Fuse` tool generates all linker-length variants from 5 to 25 residues (21 constructs), concatenating the donor and acceptor sequences with truncated segments of a (GGGGS)~n~ repeat. AlphaFold predicts the structure of each fusion, and the `Distance` and `Angle` tools measure the chromophore separation and inter-domain orientation — the two geometric parameters that determine FRET efficiency. The results are merged into a single table, enabling direct comparison of how linker length affects sensor geometry. In the PyMOL session, the linker region is highlighted in yellow using the per-construct positional information that `Fuse` records automatically, while the two domains are colored by AlphaFold confidence.
-
-### Ligand pose sensitivity analysis
-
-Understanding how protein mutations affect small-molecule binding is fundamental to medicinal chemistry and resistance biology. A common question is: which residue positions tolerate substitution without disrupting the drug binding pose, and which mutations cause the ligand to shift or dissociate? BioPipelines addresses this with a saturation mutagenesis-to-pose analysis pipeline:
-
-```python
-with Pipeline(project="Imatinib", job="PoseSensitivity"):
-    Resources(gpu="A100", time="8:00:00", memory="32GB")
-
-    abl1 = PDB("1IEP")
-    imatinib = Ligand("STI")
-
-    mutants = Mutagenesis(original=abl1,
-                          position=315,
-                          mode="saturation",
-                          include_original=True)
-
-    predictions = Boltz2(proteins=mutants,
-                         ligands=imatinib,
-                         affinity=True)
-
-    pose = PoseChange(reference_structure=abl1,
-                      sample_structures=predictions,
-                      reference_ligand="STI",
-                      calculate_centroid=True,
-                      calculate_orientation=True)
-
-    contacts = Contacts(structures=predictions,
-                        ligand="STI",
-                        contact_threshold=4.0)
-
-    analysis = Panda(
-        tables=[
-            pose.tables.changes,
-            contacts.tables.contacts,
-            predictions.tables.affinity,
-        ],
-        operations=[
-            Panda.merge(on="id"),
-            Panda.sort("ligand_rmsd", ascending=True),
-        ],
-        pool=predictions
-    )
-
-    Plot(
-        Plot.Scatter(
-            data=analysis.tables.result,
-            x="ligand_rmsd", y="contacts",
-            title="Pose Deviation vs Binding Contacts",
-            xlabel="Ligand RMSD (A)",
-            ylabel="Contacts (<4 A)", grid=True
-        ),
-        Plot.Scatter(
-            data=analysis.tables.result,
-            x="ligand_rmsd", y="affinity_pred_value",
-            title="Pose Deviation vs Predicted Affinity",
-            xlabel="Ligand RMSD (A)",
-            ylabel="Predicted Affinity", grid=True
-        ),
-    )
-
-    PyMOL(
-        PyMOL.Load(predictions),
-        PyMOL.ColorAF(predictions),
-        PyMOL.Align(),
-        session="abl1_imatinib_mutants"
-    )
-```
-
-This pipeline performs computational saturation mutagenesis at the gatekeeper position (Thr315) of ABL1 kinase — the clinically important residue whose T315I mutation confers resistance to imatinib in chronic myeloid leukemia.^9^ All 20 amino acid variants are generated by `Mutagenesis`, and each mutant–imatinib complex is predicted with Boltz-2 including binding affinity estimation. `PoseChange` then superimposes each predicted complex onto the wild-type crystal structure and measures how far the imatinib pose has shifted (RMSD, centroid distance, and orientation angle), while `Contacts` counts the number of binding site interactions preserved. By merging these metrics, the pipeline produces a comprehensive structure-activity landscape: mutations that maintain low RMSD and high contact counts are predicted to preserve drug sensitivity, while those with large pose deviations suggest resistance mechanisms — directly connecting structural predictions to clinically relevant phenotypes.
-
 ### Data management and analysis
 
-After structure prediction, researchers typically need to filter results by quality metrics, merge data from multiple sources, and generate visualizations. The `Panda` tool provides declarative table operations (filtering, sorting, merging, grouping, and calculated columns) that also manage the associated structure files:
+After structure prediction, researchers typically need to filter results by quality metrics, merge data from multiple sources, and generate visualizations. The `Panda` tool in BioPipelines, based on python package pandas, provides declarative table operations (filtering, sorting, merging, grouping, and calculated columns) that also manage the associated structure files. The `pool` argument links table operations to their associated files: when filtering reduces a table to 20 rows, the corresponding 20 structure files are automatically copied to the output folder. This keeps data and structures synchronized without manual file management.
 
 ```python
-# Filter by confidence, sort, and keep top designs with their structure files
+# imports omitted
 best_designs = Panda(
     table=predictions.tables.confidence,
     operations=[
@@ -386,8 +388,14 @@ best_designs = Panda(
     pool=predictions,
     rename="top"
 )
+```
 
-# Generate publication-ready plots
+### Interactive prototyping and production runs
+
+A key feature for adoption in experimental laboratories is that the same workflow code can be tested and manually inspected prior to scaling up. This feature is built in the architecture of BioPipelines tools. When run in a Jupyter notebook each tool executes immediately, allowing researchers to inspect intermediate results, adjust parameters, and build the workflow step by step. When running in a Jupyter notebook, all tools that produce structures (e.g., AlphaFold, Boltz-2, RFdiffusion) automatically render an interactive py3Dmol 3D viewer inline, allowing researchers to rotate and inspect predicted structures without leaving the notebook. The `Plot` tool generates publication-ready figures as PNG files using matplotlib, which are displayed inline in Jupyter and saved to the output folder during cluster execution. The `PyMOL` tool generates a `.pse` session file when executed on the cluster; in Jupyter, it instead renders an interactive py3Dmol viewer showing the loaded structures, providing immediate visual feedback without requiring a local PyMOL installation. This consistent notebook integration means that every step of a pipeline produces inspectable output during prototyping.
+
+```python
+# imports omitted
 Plot(
     Plot.Scatter(data=predictions.tables.confidence,
                  x="plddt", y="ptm",
@@ -406,7 +414,7 @@ PyMOL(
 )
 ```
 
-The `pool` argument links table operations to their associated files: when filtering reduces a table to 20 rows, the corresponding 20 structure files are automatically copied to the output folder. This keeps data and structures synchronized without manual file management.
+When the workflow is ready for production, the same script is submitted to the cluster with a `biopipelines-submit` command. This means a researcher can prototype a design campaign interactively on a single GPU, verify that the workflow produces sensible intermediate results, and then submit the identical script for a production run with hundreds of designs — all without rewriting any code or learning a separate batch submission workflow.
 
 ### Cluster configuration and installation
 
@@ -416,19 +424,17 @@ BioPipelines addresses this with a built-in installation system. Each tool defin
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.boltz2 import Boltz2
+from biopipelines.pymol import PyMOL
 
 with Pipeline(project="Setup", job="InstallTools"):
     Resources(time="8:00:00", memory="32GB")
 
     RFdiffusion.install()   # Clones repository, downloads weights, creates environment
-    ProteinMPNN.install()   # Clones repository (shares environment with RFdiffusion)
-    Boltz2.install()        # Creates environment, installs via pip
+    PyMOL.install()         # Creates environment
 ```
 
-Each `install()` call adds an installation step to the pipeline, just like any other tool. When submitted to the cluster, each step runs the tool's installation script — cloning repositories, creating conda environments, downloading model weights — as a scheduled job. This means installation uses the same familiar workflow as running a design campaign, and the generated scripts can be inspected or rerun if a step fails. Tools that share an environment (e.g., ProteinMPNN uses the same environment as RFdiffusion) indicate this dependency clearly, and tools that require only the base BioPipelines environment need no separate installation.
+Each `install()` call adds an installation step to the pipeline, just like any other tool. This is particularly important on Google Colab, when often tools have to be installed at every new session. When submitted to the cluster, each step runs the tool's installation script — cloning repositories, creating conda environments, downloading model weights — as a scheduled job. This means installation uses the same familiar workflow as running a design campaign, and the generated scripts can be inspected or rerun if a step fails. Tools that share an environment (e.g., ProteinMPNN uses the same environment as RFdiffusion) indicate this dependency clearly, and tools that require only the base BioPipelines environment need no separate installation. 
 
 ### Supported tools
 
@@ -455,23 +461,6 @@ New tools can be added by implementing four methods (parameter validation, input
 
 **AI-assisted tool development.** The standardized tool interface also makes it straightforward to extend BioPipelines with new tools using large language model coding assistants. In practice, we have found that tools corresponding to published GitHub repositories can be implemented by providing Claude Code (Anthropic, Opus 4.6 model) with the repository URL and a single instruction: *"Implement a BioPipelines tool for this repository, conforming to the existing tool standard."* The assistant reads the repository's installation instructions, input/output formats, and command-line interface, then generates a complete tool module — including the installation script, parameter validation, bash script generation, and output parsing — that integrates directly into the framework. A representative example of this process is provided in the Supporting Information (Appendix A). This approach dramatically reduces the effort required to keep the framework current with the rapidly evolving landscape of computational biology tools, and enables individual laboratories to add specialized or in-house tools without deep familiarity with the framework internals.
 
-### Comparison with existing frameworks
-
-Table 1 compares BioPipelines with other available frameworks. The key distinctions for chemical biology users are: (i) pipeline definitions require minimal code and no infrastructure configuration beyond a single settings file; (ii) the same code works interactively in notebooks and in production on the cluster; (iii) compound library screening with combinatorial control is built in; and (iv) iterative multi-cycle optimization workflows are supported.
-
-*Table 1. Comparison of protein design workflow frameworks.*
-
-| | BioPipelines | ProtFlow | Ovo | ProteinDJ |
-|--|-------------|----------|-----|-----------|
-| User interface | Python (few lines) | Python (verbose) | Web UI + Nextflow | Nextflow config |
-| Interactive prototyping | Jupyter (same code as production) | Jupyter (different from batch) | Web interface | Not supported |
-| Custom workflows | Unlimited combinations | Unlimited combinations | Nextflow pipelines | 9 predefined modes |
-| Compound screening | Built-in combinatorics | Not supported | Not supported | Not supported |
-| Iterative optimization | Built-in (Python loops) | Manual implementation | Not supported | Not supported |
-| Infrastructure needed | Python + SLURM | Python + SLURM | Nextflow + database + web server | Nextflow + Apptainer |
-| Inspectable outputs | Human-readable bash scripts | None | Nextflow DAG | Nextflow DAG |
-| Tool count | 30+ | ~15 | ~10 | 9 |
-
 ## Conclusion
 
 BioPipelines makes computational protein and ligand design accessible to chemical biology laboratories by handling the computational logistics — environment management, file format conversion, cluster job scheduling, and data tracking — that typically require dedicated bioinformatics support. Researchers define workflows as concise Python scripts that read as descriptions of the scientific experiment, prototype interactively in Jupyter notebooks, and submit the same code for production runs. The framework's support for compound library screening, iterative optimization, fusion protein engineering, ligand pose sensitivity analysis, and end-to-end gene synthesis preparation addresses common needs in chemical biology that are not covered by existing frameworks.
@@ -480,7 +469,7 @@ BioPipelines is freely available under the MIT license at https://github.com/[TO
 
 ## Associated Content
 
-**Supporting Information.** Technical architecture details, DataStream specification, auto-registration mechanism, full tool parameter reference, and additional pipeline examples. **Appendix A:** Transcript of an AI-assisted tool implementation session, showing how a new tool was added to BioPipelines from a GitHub repository URL using a single natural-language instruction to Claude Code.
+**Supporting Information.** Technical architecture details, DataStream specification, auto-registration mechanism, full tool parameter reference, and additional pipeline examples. **Appendix A:** Transcript of an AI-assisted tool implementation session, showing how a new tool was added to BioPipelines from a GitHub repository URL using a Claude Code Opus 4.6.
 
 ## Author Information
 
