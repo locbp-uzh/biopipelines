@@ -340,12 +340,109 @@ echo "=============================="
     def get_output_files(self) -> Dict[str, List[str]]:
         """
         Get expected output files after execution.
-        
+
         Returns:
             Dictionary mapping output type to file paths
         """
         pass
-    
+
+    def _repr_notebook_html(self, output: 'StandardizedOutput') -> str:
+        """
+        Generate custom HTML visualization for notebook display.
+
+        Override in subclasses to provide tool-specific visualization.
+        The default implementation renders an interactive py3Dmol viewer
+        if the tool outputs a non-empty structures stream.
+
+        Args:
+            output: The StandardizedOutput being displayed
+
+        Returns:
+            HTML string for notebook display, or empty string if nothing to show
+        """
+        from .datastream import DataStream
+        import py3Dmol
+
+        structures_ds = output.streams.get("structures")
+        if not isinstance(structures_ds, DataStream) or len(structures_ds) == 0:
+            return ""
+
+        return self._build_py3dmol_html(structures_ds)
+
+    @staticmethod
+    def _build_py3dmol_html(structures_ds, max_structures: int = 20) -> str:
+        """
+        Build py3Dmol interactive 3D viewer HTML from a DataStream.
+
+        Args:
+            structures_ds: DataStream containing structure files (pdb/cif)
+            max_structures: Maximum number of structures to display
+
+        Returns:
+            HTML string with the 3D viewer
+        """
+        import py3Dmol
+
+        if structures_ds.format not in ("pdb", "cif"):
+            return ""
+
+        pdb_data = []
+        for struct_id, file_path in structures_ds:
+            if file_path and os.path.isfile(file_path):
+                try:
+                    with open(file_path, "r") as f:
+                        pdb_data.append((struct_id, f.read()))
+                except Exception:
+                    pass
+            if len(pdb_data) >= max_structures:
+                break
+
+        if not pdb_data:
+            return ""
+
+        colors = [
+            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+            "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+        ]
+        fmt = "pdb" if structures_ds.format == "pdb" else "cif"
+
+        viewer = py3Dmol.view(width=800, height=500)
+        for i, (struct_id, content) in enumerate(pdb_data):
+            viewer.addModel(content, fmt)
+            viewer.setStyle({"model": i}, {"cartoon": {"color": colors[i % len(colors)]}})
+        viewer.zoomTo()
+
+        parts = []
+        truncated = len(structures_ds) > max_structures
+
+        parts.append(
+            f'<div style="margin-top: 12px;">'
+            f'<strong>3D Structure Viewer</strong> '
+            f'({len(pdb_data)} structure{"s" if len(pdb_data) != 1 else ""})'
+        )
+        if truncated:
+            parts.append(
+                f' <span style="color: #888;">'
+                f"(showing first {max_structures} of {len(structures_ds)})</span>"
+            )
+        parts.append("</div>")
+        parts.append(viewer._repr_html_())
+
+        # Color legend
+        parts.append('<div style="margin-top: 4px; font-size: 0.85em;">')
+        for i, (struct_id, _) in enumerate(pdb_data):
+            color = colors[i % len(colors)]
+            parts.append(
+                f'<span style="display: inline-block; margin-right: 12px;">'
+                f'<span style="display: inline-block; width: 12px; height: 12px; '
+                f"background: {color}; border-radius: 2px; vertical-align: middle;"
+                f' margin-right: 4px;"></span>'
+                f"{struct_id}</span>"
+            )
+        parts.append("</div>")
+
+        return "\n".join(parts)
+
     def get_expected_output_paths(self) -> Dict[str, List[str]]:
         """
         Get expected output file paths without validating existence.
@@ -1146,8 +1243,7 @@ class StandardizedOutput:
             return result
 
         # Main DataStream attributes
-        for attr_name in ('structures', 'sequences', 'compounds', 'msas'):
-            ds = getattr(self, attr_name, None)
+        for attr_name, ds in self.streams.items():
             if isinstance(ds, DataStream) and len(ds) > 0:
                 lines.extend(format_datastream(attr_name, ds))
 
@@ -1196,7 +1292,175 @@ class StandardizedOutput:
     def __repr__(self) -> str:
         """Detailed representation."""
         return f"StandardizedOutput({dict(self._data)})"
-    
+
+    # Image formats recognized for inline display in notebooks
+    _IMAGE_FORMATS = {"png", "jpg", "jpeg", "svg", "gif", "bmp", "tiff", "webp"}
+
+    @staticmethod
+    def _is_notebook() -> bool:
+        """Check if currently running in a Jupyter/Colab notebook."""
+        try:
+            from IPython import get_ipython
+            shell = get_ipython()
+            if shell is not None:
+                if (shell.__class__.__name__ == "ZMQInteractiveShell"
+                        or getattr(shell.__class__, "__module__", "") == "google.colab._shell"):
+                    return True
+        except (ImportError, NameError):
+            pass
+        return False
+
+    def _repr_html_(self) -> Optional[str]:
+        """
+        Rich HTML display for Jupyter notebooks.
+
+        Renders streams as HTML tables, displays images inline,
+        and delegates tool-specific visualization (e.g. 3D viewer)
+        to the tool's _repr_notebook_html() method.
+        """
+        if not self._is_notebook():
+            return None
+
+        from .datastream import DataStream
+        import base64
+        import html as html_module
+
+        html_parts = []
+        css = """<style>
+.bp-table { border-collapse: collapse; font-family: monospace; font-size: 0.9em; margin: 4px 0 12px 0; }
+.bp-table th { background: #f0f0f0; padding: 4px 10px; border: 1px solid #ddd; text-align: left; }
+.bp-table td { padding: 4px 10px; border: 1px solid #ddd; }
+.bp-table tr:nth-child(even) { background: #fafafa; }
+.bp-table .bp-ellipsis td { color: #888; font-style: italic; text-align: center; }
+.bp-section { margin-top: 8px; font-family: monospace; }
+.bp-section-title { font-weight: bold; margin-bottom: 4px; }
+</style>"""
+
+        # Helper: make path relative to output_folder
+        def rel(path: str) -> str:
+            if self.output_folder and path.startswith(self.output_folder):
+                return "<output_folder>/" + os.path.relpath(path, self.output_folder)
+            return path
+
+        # --- Streams as HTML tables ---
+        for stream_name, stream in self.streams.items():
+            if not isinstance(stream, DataStream) or len(stream) == 0:
+                continue
+
+            # Skip image streams here; they'll be rendered as inline images below
+            if stream.format.lower() in self._IMAGE_FORMATS:
+                continue
+
+            html_parts.append(
+                f'<div class="bp-section">'
+                f'<div class="bp-section-title">{stream_name} '
+                f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
+            )
+            html_parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
+
+            items = list(stream)
+            if len(items) <= 6:
+                for item_id, item_file in items:
+                    html_parts.append(
+                        f"<tr><td>{html_module.escape(str(item_id))}</td>"
+                        f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
+                    )
+            else:
+                for item_id, item_file in items[:3]:
+                    html_parts.append(
+                        f"<tr><td>{html_module.escape(str(item_id))}</td>"
+                        f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
+                    )
+                html_parts.append(
+                    f'<tr class="bp-ellipsis"><td colspan="2">... {len(items) - 6} more ...</td></tr>'
+                )
+                for item_id, item_file in items[-3:]:
+                    html_parts.append(
+                        f"<tr><td>{html_module.escape(str(item_id))}</td>"
+                        f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
+                    )
+
+            html_parts.append("</table></div>")
+
+        # --- Tables as HTML tables ---
+        if "tables" in self._data and hasattr(self.tables, "_tables") and self.tables._tables:
+            html_parts.append(
+                '<div class="bp-section">'
+                '<div class="bp-section-title">tables</div>'
+            )
+            html_parts.append(
+                '<table class="bp-table">'
+                "<tr><th>name</th><th>columns</th><th>path</th></tr>"
+            )
+            for name, info in self.tables._tables.items():
+                cols = ", ".join(info.info.columns) if info.info.columns else ""
+                path = rel(info.info.path) if info.info.path else ""
+                html_parts.append(
+                    f"<tr><td>{html_module.escape(name)}</td>"
+                    f"<td>{html_module.escape(cols)}</td>"
+                    f"<td>{html_module.escape(path)}</td></tr>"
+                )
+            html_parts.append("</table></div>")
+
+        # --- Image streams: display inline ---
+        for stream_name, stream in self.streams.items():
+            if not isinstance(stream, DataStream) or len(stream) == 0:
+                continue
+            if stream.format.lower() not in self._IMAGE_FORMATS:
+                continue
+
+            html_parts.append(
+                f'<div class="bp-section">'
+                f'<div class="bp-section-title">{stream_name} '
+                f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
+            )
+
+            for item_id, file_path in stream:
+                if not file_path or not os.path.isfile(file_path):
+                    continue
+
+                if stream.format.lower() == "svg":
+                    try:
+                        with open(file_path, "r") as f:
+                            svg_content = f.read()
+                        html_parts.append(
+                            f'<div style="margin: 4px 0;">'
+                            f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
+                            f"{svg_content}</div>"
+                        )
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        with open(file_path, "rb") as f:
+                            img_data = base64.b64encode(f.read()).decode("utf-8")
+                        mime = f"image/{stream.format.lower()}"
+                        if stream.format.lower() in ("jpg", "jpeg"):
+                            mime = "image/jpeg"
+                        html_parts.append(
+                            f'<div style="margin: 4px 0;">'
+                            f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
+                            f'<img src="data:{mime};base64,{img_data}" '
+                            f'style="max-width: 100%; height: auto;" /></div>'
+                        )
+                    except Exception:
+                        pass
+
+            html_parts.append("</div>")
+
+        # --- Tool-specific visualization (e.g. 3D viewer) ---
+        if hasattr(self, "tool") and hasattr(self.tool, "_repr_notebook_html"):
+            try:
+                tool_html = self.tool._repr_notebook_html(self)
+                if tool_html:
+                    html_parts.append(tool_html)
+            except Exception:
+                pass
+
+        if not html_parts:
+            return None
+        return css + "\n" + "\n".join(html_parts)
+
     def get_filter_info(self) -> Dict[str, Any]:
         """
         Get filtering information if this is filtered output.

@@ -9,6 +9,7 @@ Provides biopipelines-submit, biopipelines-run, and biopipelines-config
 commands that work from any directory by locating the repository root automatically.
 """
 
+import json
 import os
 import re
 import sys
@@ -19,6 +20,44 @@ import subprocess
 def _get_repo_root():
     """Get the biopipelines repository root (parent of biopipelines/)."""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _notebook_to_script(notebook_path):
+    """Convert a Jupyter notebook to a temporary Python script.
+
+    Extracts code cells, skipping IPython magics and shell commands,
+    and writes them to a temporary .py file in the same directory
+    so that relative paths in the pipeline still work.
+    """
+    with open(notebook_path, 'r', encoding='utf-8') as f:
+        nb = json.load(f)
+
+    code_lines = []
+    for cell in nb.get('cells', []):
+        if cell.get('cell_type') != 'code':
+            continue
+        source = cell.get('source', [])
+        # Join source lines (they may or may not end with \n)
+        cell_code = ''.join(source).strip()
+        if not cell_code:
+            continue
+        # Skip IPython magics and shell commands
+        first_line = cell_code.split('\n')[0].strip()
+        if first_line.startswith(('%', '!')):
+            continue
+        code_lines.append(cell_code)
+
+    script_content = '\n\n'.join(code_lines) + '\n'
+
+    # Write to temp file in same directory (preserves relative paths)
+    notebook_dir = os.path.dirname(notebook_path)
+    stem = os.path.splitext(os.path.basename(notebook_path))[0]
+    tmp_path = os.path.join(notebook_dir, f'._biopipelines_tmp_{stem}.py')
+
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        f.write(script_content)
+
+    return tmp_path
 
 
 def _run_script(script_name):
@@ -34,15 +73,25 @@ def _run_script(script_name):
     # Resolve it to an absolute path so the bash script finds it
     # regardless of its cwd.
     args = sys.argv[1:]
+    tmp_script = None
     for i, arg in enumerate(args):
         if not arg.startswith("-"):
             args[i] = os.path.abspath(arg)
+            # Convert notebook to temporary Python script if needed
+            if args[i].endswith('.ipynb'):
+                tmp_script = _notebook_to_script(args[i])
+                args[i] = tmp_script
             break
 
-    result = subprocess.run(
-        ["bash", script_path] + args,
-        cwd=repo_root
-    )
+    try:
+        result = subprocess.run(
+            ["bash", script_path] + args,
+            cwd=repo_root
+        )
+    finally:
+        if tmp_script and os.path.exists(tmp_script):
+            os.remove(tmp_script)
+
     sys.exit(result.returncode)
 
 

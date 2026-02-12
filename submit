@@ -64,10 +64,11 @@ usage() {
     echo "Run a BioPipelines script and submit the generated job to SLURM"
     echo ""
     echo "Arguments:"
-    echo "  pipeline_script  Path to pipeline script"
+    echo "  pipeline_script  Path to pipeline script (.py or .ipynb)"
     echo ""
     echo "Examples:"
     echo "  $0 pipeline.py                               # Run pipeline.py"
+    echo "  $0 pipeline.ipynb                             # Run from notebook"
     echo "  $0 ExamplePipelines/ligandmpnn_boltz2.py    # Run specific pipeline"
     echo ""
 }

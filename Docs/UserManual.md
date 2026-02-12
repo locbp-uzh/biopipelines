@@ -74,7 +74,8 @@ Edit config.yaml to fit your cluster configuration.
 Navigate to the ExamplePipelines folder and, after activating the biopipelines environment, run:
 
 ```bash
-biopipelines-submit <example pipeline name>.py
+biopipelines-submit <example pipeline name>.py    # from a .py script
+biopipelines-submit <example pipeline name>.ipynb  # from a Jupyter notebook
 ```
 
 Note: you must have installed the relevant environments and configured them in config.yaml
@@ -355,12 +356,16 @@ Key differences from normal mode:
 **Submit to SLURM**:
 ```bash
 biopipelines-submit /path/to/pipeline.py
+biopipelines-submit /path/to/pipeline.ipynb   # directly from a notebook
 ```
 
 **Run directly**:
 ```bash
 biopipelines-run /path/to/pipeline.py
+biopipelines-run /path/to/pipeline.ipynb       # directly from a notebook
 ```
+
+Both `.py` scripts and `.ipynb` notebooks are supported. When a notebook is provided, code cells are automatically extracted (skipping shell commands and IPython magics) and executed as a script.
 
 These commands work from any directory as long as biopipelines environment is activated. Alternatively, you can run the scripts directly from the biopipelines root:
 ```bash
