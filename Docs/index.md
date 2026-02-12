@@ -57,6 +57,8 @@ pip install -e .
 
 Edit `config.yaml` to match your cluster configuration.
 
+Individual models have to be installed separately. We provide a pipeline (ExamplePipelines/install_tools.py) to install all the tools used in the repository at once, but please refer to the respective official documentation in case your particular cluster configuration requires adjustments.  
+
 ### Run an Example
 
 ```bash
