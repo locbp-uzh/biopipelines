@@ -154,6 +154,20 @@ class ConfigManager:
             raise KeyError("'container_executor' not set in config.yaml cluster section.")
         return val
 
+    def get_container(self, tool_name: str) -> Optional[str]:
+        """Get container path for a tool, or None if not configured.
+
+        Args:
+            tool_name: Name of the tool (e.g., "RFdiffusionAllAtom", "PLIP")
+
+        Returns:
+            Container path string (may contain folder placeholders), or None
+        """
+        containers = self._config.get('containers', {})
+        if containers is None:
+            return None
+        return containers.get(tool_name)
+
     def get_slurm_modules(self) -> List[str]:
         """Get list of modules to load in SLURM wrapper scripts."""
         val = self._get_cluster_config().get('slurm_modules')

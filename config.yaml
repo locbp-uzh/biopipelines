@@ -127,9 +127,12 @@ environments:
 
 # Containers
 # Singularity/Apptainer container images for tools that use containerized execution
+# When a container is configured for a tool, it will be used instead of the conda environment
 containers:
   # Add container paths here as needed
   # Example: ToolName: "<containers>/tool.sif"
+  PLIP: "<containers>/plip_3.0.0.simg"
+  #RFdiffusionAllAtom: "<RFdiffusionAllAtom>/rf_se3_diffusion.sif"
 
 # Cluster / Site Configuration
 # Settings that vary between computing environments (HPC clusters, local machines)

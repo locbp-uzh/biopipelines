@@ -78,6 +78,9 @@ class Pipeline:
 
         self.folder_manager = FolderManager(project, job, local_output=local_output)
         self.folders = self.folder_manager.get_folders()
+        # Include resolved container paths as container:<ToolName> keys
+        for tool_name, container_path in self.folder_manager.get_containers().items():
+            self.folders[f"container:{tool_name}"] = container_path
         
         # Tool management
         self.tools = []

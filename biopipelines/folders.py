@@ -53,6 +53,7 @@ class FolderManager:
                         directory) instead of the config-configured path.
         """
         self._folders: Dict[str, str] = {}
+        self._containers: Dict[str, str] = {}
         self._local_output = local_output
 
         # Load configuration
@@ -64,6 +65,9 @@ class FolderManager:
 
         # Resolve all config sections in order
         self._resolve_config_sections(folder_config)
+
+        # Resolve containers (uses already-resolved folder placeholders)
+        self._resolve_containers(config_manager)
 
         # Override biopipelines_output for local output mode
         if local_output:
@@ -93,6 +97,15 @@ class FolderManager:
             for key, path_template in section.items():
                 resolved_path = self._resolve_path(path_template, key)
                 self._folders[key] = resolved_path
+
+    def _resolve_containers(self, config_manager: 'ConfigManager'):
+        """Resolve container paths using already-resolved folder placeholders."""
+        containers_raw = config_manager._config.get('containers') or {}
+        for tool_name, path_template in containers_raw.items():
+            if path_template:
+                self._containers[tool_name] = self._resolve_path(
+                    path_template, f"containers.{tool_name}"
+                )
 
     def _resolve_path(self, path_template: str, key_being_resolved: str) -> str:
         """
@@ -174,6 +187,15 @@ class FolderManager:
             Dictionary mapping folder names to absolute paths
         """
         return self._folders.copy()
+
+    def get_containers(self) -> Dict[str, str]:
+        """
+        Get dictionary of resolved container paths.
+
+        Returns:
+            Dictionary mapping tool names to resolved container paths
+        """
+        return self._containers.copy()
 
     def unique_name(directory: str, root: str, ext: str = "", w: int = 3, full_path: bool = False) -> str:
         """

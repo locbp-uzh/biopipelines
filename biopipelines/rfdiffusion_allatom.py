@@ -16,12 +16,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
+    from .config_manager import ConfigManager
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
+    from config_manager import ConfigManager
 
 
 class RFdiffusionAllAtom(BaseConfig):
@@ -37,24 +39,41 @@ class RFdiffusionAllAtom(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         data = folders.get("data", "")
+        repo_dir = f"{data}/rf_diffusion_all_atom"
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{data}/rf_diffusion_all_atom" ]; then
+if [ -d "{repo_dir}" ] && [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ]; then
     echo "RFdiffusion-AllAtom already installed, skipping. Use force_reinstall=True to reinstall."
     exit 0
 fi
 """
         return f"""echo "=== Installing RFdiffusion-AllAtom ==="
-{skip}echo "Requires SE3nv (installed with RFdiffusion.install())"
-cd {data}
-git clone https://github.com/RosettaCommons/rf_diffusion_all_atom.git
+{skip}cd {data}
+git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git
+cd rf_diffusion_all_atom
+
+# Download container (for container mode, see config.yaml containers section)
+wget http://files.ipd.uw.edu/pub/RF-All-Atom/containers/rf_se3_diffusion.sif
+
+# Download model weights
+wget http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt
+
+# Initialize git submodules
+git submodule init
+git submodule update
 
 echo "=== RFdiffusion-AllAtom installation complete ==="
+echo "Container mode: configure containers.RFdiffusionAllAtom in config.yaml"
+echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv environment"
 """
 
     # Lazy path descriptors
     main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusionAA_results.csv"))
     inference_py_file = Path(lambda self: "run_inference.py")
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
+
+    def _use_container(self) -> bool:
+        """Check if container mode is configured for this tool."""
+        return f"container:{self.TOOL_NAME}" in self.folders
 
     def __init__(self,
                  ligand: str,
@@ -182,7 +201,9 @@ echo "=== RFdiffusion-AllAtom installation complete ==="
         """Get RFdiffusion-AllAtom configuration display lines."""
         config_lines = super().get_config_display()
 
+        mode = "container" if self._use_container() else "environment (SE3nv)"
         config_lines.extend([
+            f"MODE: {mode}",
             f"CONTIGS: {self.contigs}",
             f"NUM DESIGNS: {self.num_designs}",
             f"ACTIVE SITE: {self.active_site}",
@@ -224,15 +245,21 @@ echo "=== RFdiffusion-AllAtom installation complete ==="
         script_content = "#!/bin/bash\n"
         script_content += "# RFdiffusion-AllAtom execution script\n"
         script_content += self.generate_completion_check_header()
-        script_content += self.activate_environment()
-        script_content += self._generate_script_run_rfdiffusion()
+        if self._use_container():
+            # Container mode: no conda env needed for inference,
+            # but activate biopipelines for the table creation helper script
+            script_content += self._generate_script_run_rfdiffusion()
+            script_content += self.activate_environment(name="biopipelines")
+        else:
+            script_content += self.activate_environment()
+            script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def _generate_script_run_rfdiffusion(self) -> str:
-        """Generate the RFdiffusion-AllAtom execution part of the script."""
+    def _build_inference_args(self) -> List[str]:
+        """Build the inference argument list (shared between container and env modes)."""
         aa_args = []
 
         # Core parameters
@@ -287,12 +314,33 @@ echo "=== RFdiffusion-AllAtom installation complete ==="
         if self.guiding_potentials:
             aa_args.append(f"potentials.guiding_potentials={self.guiding_potentials}")
 
-        return f"""echo "Starting RFdiffusion-AllAtom"
-echo "Arguments: {' '.join(aa_args)}"
+        return aa_args
+
+    def _generate_script_run_rfdiffusion(self) -> str:
+        """Generate the RFdiffusion-AllAtom execution part of the script."""
+        aa_args = self._build_inference_args()
+        args_str = ' '.join(aa_args)
+        repo_dir = self.folders["RFdiffusionAllAtom"]
+
+        if self._use_container():
+            container_path = self.folders[f"container:{self.TOOL_NAME}"]
+            container_exec = ConfigManager().get_container_executor()
+            return f"""echo "Starting RFdiffusion-AllAtom (container mode)"
+echo "Container: {container_path}"
+echo "Arguments: {args_str}"
 echo "Output folder: {self.output_folder}"
 
-cd {self.folders["RFdiffusionAllAtom"]}
-python {self.inference_py_file} {' '.join(aa_args)}
+cd {repo_dir}
+{container_exec} run --nv {container_path} -u {self.inference_py_file} {args_str}
+
+"""
+        else:
+            return f"""echo "Starting RFdiffusion-AllAtom (environment mode)"
+echo "Arguments: {args_str}"
+echo "Output folder: {self.output_folder}"
+
+cd {repo_dir}
+python {self.inference_py_file} {args_str}
 
 """
 
