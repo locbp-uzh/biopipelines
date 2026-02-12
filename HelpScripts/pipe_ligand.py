@@ -715,7 +715,7 @@ def fetch_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
         url = f"https://data.rcsb.org/rest/v1/core/chemcomp/{ligand_code}"
 
         headers = {
-            'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+            'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'
         }
 
         response = requests.get(url, headers=headers, timeout=10)
@@ -757,7 +757,7 @@ def fetch_smiles_from_pubchem(lookup: str, lookup_type: str) -> Optional[str]:
         import requests
 
         base_url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
-        headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+        headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'}
 
         # Resolve to CID first
         if lookup_type == "cid":
@@ -803,7 +803,7 @@ def fetch_properties_from_rcsb(ligand_code: str) -> Dict[str, Any]:
 
         url = f"https://data.rcsb.org/rest/v1/core/chemcomp/{ligand_code}"
         headers = {
-            'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+            'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'
         }
 
         response = requests.get(url, headers=headers, timeout=10)
@@ -907,7 +907,7 @@ def fetch_properties_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, An
     import requests
 
     base_url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
-    headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+    headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'}
 
     # Step 1: Resolve to CID
     if lookup_type == "cid":
@@ -973,7 +973,7 @@ def fetch_sdf_from_pubchem(cid: str) -> str:
     import requests
 
     base_url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
-    headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+    headers = {'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'}
 
     # Try 3D SDF first, fall back to 2D
     sdf_url = f"{base_url}/compound/cid/{cid}/SDF?record_type=3d"
@@ -1054,7 +1054,7 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
             print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
             sdf_url = f"https://files.rcsb.org/ligands/download/{ligand_code}_ideal.sdf"
             headers = {
-                'User-Agent': 'BioPipelines-Ligand/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+                'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'
             }
             response = requests.get(sdf_url, headers=headers, timeout=30)
             response.raise_for_status()

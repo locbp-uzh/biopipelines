@@ -40,7 +40,7 @@ def download_1pef(pdbs_folder: str) -> str:
 
         url = "https://files.rcsb.org/download/1PEF.pdb"
         headers = {
-            'User-Agent': 'BioPipelines-RFDAA/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+            'User-Agent': 'BioPipelines-RFDAA/1.0 (https://github.com/locbp-uzh/biopipelines)'
         }
 
         response = requests.get(url, headers=headers, timeout=30)

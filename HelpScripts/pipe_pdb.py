@@ -371,7 +371,7 @@ def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
         url = f"https://data.rcsb.org/rest/v1/core/chemcomp/{ligand_code}"
 
         headers = {
-            'User-Agent': 'BioPipelines-PDB/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+            'User-Agent': 'BioPipelines-PDB/1.0 (https://github.com/locbp-uzh/biopipelines)'
         }
 
         response = requests.get(url, headers=headers, timeout=10)
@@ -635,7 +635,7 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
 
         # Download with proper headers
         headers = {
-            'User-Agent': 'BioPipelines-PDB/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'
+            'User-Agent': 'BioPipelines-PDB/1.0 (https://github.com/locbp-uzh/biopipelines)'
         }
 
         response = requests.get(url, headers=headers, timeout=30)
@@ -742,7 +742,7 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
             try:
                 print(f"  Downloading {pdb_id} from RCSB: {url}")
                 import requests
-                headers = {'User-Agent': 'BioPipelines-PDB/1.0 (https://gitlab.uzh.ch/locbp/public/biopipelines)'}
+                headers = {'User-Agent': 'BioPipelines-PDB/1.0 (https://github.com/locbp-uzh/biopipelines)'}
                 response = requests.get(url, headers=headers, timeout=30)
                 response.raise_for_status()
 

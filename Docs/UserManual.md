@@ -51,7 +51,7 @@ Clone the repository and set up the environment:
 
 ```bash
 # 1. Clone the repository
-git clone https://gitlab.uzh.ch/locbp/public/biopipelines
+git clone https://github.com/locbp-uzh/biopipelines
 cd biopipelines
 
 # 2. Create the biopipelines conda environment
