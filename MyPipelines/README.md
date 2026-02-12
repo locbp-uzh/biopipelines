@@ -2,7 +2,7 @@
 
 This folder is for personal pipeline development and testing.
 
-- **Not committed**: Your pipeline files here are gitignored (except this README)
+- **Not committed**: Your pipeline files here are gitignored (except this README) 
 
 ## File Organization
 
