@@ -60,7 +60,7 @@ class StitchSequences(BaseConfig):
     TOOL_NAME = "StitchSequences"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== StitchSequences ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== StitchSequences ready ==="

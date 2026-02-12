@@ -59,10 +59,16 @@ class PyMOL(BaseConfig):
     TOOL_NAME = "PyMOL"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if {env_manager} env list 2>/dev/null | grep -q "ProteinEnv"; then
+    echo "PyMOL (ProteinEnv) already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing PyMOL (ProteinEnv) ==="
-{env_manager} env create -f {biopipelines}/Environments/ProteinEnv.yaml
+{skip}{env_manager} env create -f {biopipelines}/Environments/ProteinEnv.yaml
 if [ $? -ne 0 ]; then
     echo "ERROR: ProteinEnv creation failed."
     exit 1

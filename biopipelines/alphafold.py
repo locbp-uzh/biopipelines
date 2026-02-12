@@ -43,10 +43,16 @@ class AlphaFold(BaseConfig):
     TOOL_NAME = "AlphaFold"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         data = folders.get("data", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{data}/localcolabfold" ]; then
+    echo "AlphaFold (LocalColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing AlphaFold (LocalColabFold) ==="
-cd {data}
+{skip}cd {data}
 wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/install_colabbatch_linux.sh
 bash install_colabbatch_linux.sh
 rm install_colabbatch_linux.sh

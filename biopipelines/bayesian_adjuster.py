@@ -56,7 +56,7 @@ class BayesianAdjuster(BaseConfig):
     TOOL_NAME = "BayesianAdjuster"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== BayesianAdjuster ==="
 echo "Requires MutationEnv (installed with MutationProfiler.install())"
 echo "No additional installation needed."

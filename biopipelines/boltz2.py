@@ -50,9 +50,15 @@ class Boltz2(BaseConfig):
     TOOL_NAME = "Boltz2"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        skip = "" if force_reinstall else f"""# Check if already installed
+if {env_manager} env list 2>/dev/null | grep -q "Boltz2Env"; then
+    echo "Boltz2 already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing Boltz2 ==="
-{env_manager} create -n Boltz2Env python=3.11 -y
+{skip}{env_manager} create -n Boltz2Env python=3.11 -y
 {env_manager} activate Boltz2Env
 pip install boltz[cuda] -U
 

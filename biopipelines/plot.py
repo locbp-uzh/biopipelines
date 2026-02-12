@@ -88,7 +88,7 @@ class Plot(BaseConfig):
     TOOL_NAME = "Plot"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Plot ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== Plot ready ==="

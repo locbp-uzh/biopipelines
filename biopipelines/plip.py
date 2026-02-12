@@ -37,10 +37,16 @@ class PLIP(BaseConfig):
     TOOL_NAME = "PLIP"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         containers = folders.get("containers", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if [ -f "{containers}/plip_3.0.0.simg" ]; then
+    echo "PLIP already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing PLIP ==="
-echo "Downloading PLIP singularity container to {containers}"
+{skip}echo "Downloading PLIP singularity container to {containers}"
 mkdir -p {containers}
 cd {containers}
 singularity pull docker://pharmai/plip:3.0.0

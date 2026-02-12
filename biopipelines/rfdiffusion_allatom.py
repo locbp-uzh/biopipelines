@@ -35,10 +35,16 @@ class RFdiffusionAllAtom(BaseConfig):
     TOOL_NAME = "RFdiffusionAllAtom"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         data = folders.get("data", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{data}/rf_diffusion_all_atom" ]; then
+    echo "RFdiffusion-AllAtom already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing RFdiffusion-AllAtom ==="
-echo "Requires SE3nv (installed with RFdiffusion.install())"
+{skip}echo "Requires SE3nv (installed with RFdiffusion.install())"
 cd {data}
 git clone https://github.com/RosettaCommons/rf_diffusion_all_atom.git
 

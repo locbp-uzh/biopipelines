@@ -68,7 +68,7 @@ class PDB(BaseConfig):
     TOOL_NAME = "PDB"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== PDB ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== PDB ready ==="

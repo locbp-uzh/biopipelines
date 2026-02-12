@@ -87,7 +87,7 @@ class Panda(BaseConfig):
     TOOL_NAME = "Panda"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Panda ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== Panda ready ==="

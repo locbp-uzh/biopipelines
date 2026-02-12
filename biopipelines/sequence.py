@@ -37,7 +37,7 @@ class Sequence(BaseConfig):
     TOOL_NAME = "Sequence"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Sequence ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== Sequence ready ==="

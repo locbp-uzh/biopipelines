@@ -29,10 +29,16 @@ class LigandMPNN(BaseConfig):
     TOOL_NAME = "LigandMPNN"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         data = folders.get("data", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{data}/LigandMPNN" ] && {env_manager} env list 2>/dev/null | grep -q "ligandmpnn_env"; then
+    echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing LigandMPNN ==="
-cd {data}
+{skip}cd {data}
 git clone https://github.com/dauparas/LigandMPNN.git
 cd LigandMPNN
 bash get_model_params.sh "./model_params"

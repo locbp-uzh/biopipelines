@@ -49,7 +49,7 @@ class Table(BaseConfig):
     TOOL_NAME = "Table"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Table ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== Table ready ==="

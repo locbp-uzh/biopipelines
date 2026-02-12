@@ -29,11 +29,17 @@ class RFdiffusion(BaseConfig):
     TOOL_NAME = "RFdiffusion"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
         data = folders.get("data", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{data}/RFdiffusion/models" ] && [ -f "{data}/RFdiffusion/models/Base_ckpt.pt" ] && {env_manager} env list 2>/dev/null | grep -q "SE3nv"; then
+    echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing RFdiffusion ==="
-cd {data}
+{skip}cd {data}
 git clone https://github.com/RosettaCommons/RFdiffusion.git
 cd RFdiffusion
 

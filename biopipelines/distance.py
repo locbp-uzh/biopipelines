@@ -42,7 +42,7 @@ class Distance(BaseConfig):
     TOOL_NAME = "Distance"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Distance ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== Distance ready ==="

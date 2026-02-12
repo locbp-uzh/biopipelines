@@ -35,9 +35,15 @@ class ESMFold(BaseConfig):
     TOOL_NAME = "ESMFold"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        skip = "" if force_reinstall else f"""# Check if already installed
+if {env_manager} env list 2>/dev/null | grep -q "esmfold"; then
+    echo "ESMFold already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing ESMFold ==="
-{env_manager} create -n esmfold python=3.9 -y
+{skip}{env_manager} create -n esmfold python=3.9 -y
 {env_manager} activate esmfold
 
 {env_manager} install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia -y

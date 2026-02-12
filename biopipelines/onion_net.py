@@ -34,10 +34,16 @@ class OnionNet2(BaseConfig):
     TOOL_NAME = "OnionNet2"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         data = folders.get("data", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{data}/OnionNet-2" ] && {env_manager} env list 2>/dev/null | grep -q "OnionNet2Env"; then
+    echo "OnionNet-2 already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing OnionNet-2 ==="
-cd {data}
+{skip}cd {data}
 git clone https://github.com/zchwang/OnionNet-2.git
 
 {env_manager} create -n OnionNet2Env python=3.8 -y

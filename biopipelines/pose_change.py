@@ -42,7 +42,7 @@ class PoseChange(BaseConfig):
     TOOL_NAME = "PoseChange"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== PoseChange ==="
 echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."

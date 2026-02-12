@@ -46,9 +46,15 @@ class BoltzGen(BaseConfig):
     TOOL_NAME = "BoltzGen"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        skip = "" if force_reinstall else f"""# Check if already installed
+if {env_manager} env list 2>/dev/null | grep -q "boltzgen"; then
+    echo "BoltzGen already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing BoltzGen ==="
-{env_manager} create -n boltzgen python=3.11 -y
+{skip}{env_manager} create -n boltzgen python=3.11 -y
 {env_manager} activate boltzgen
 pip install boltzgen
 
@@ -986,7 +992,7 @@ class BoltzGenMerge(BaseConfig):
     TOOL_NAME = "BoltzGenMerge"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== BoltzGenMerge ==="
 echo "Requires boltzgen environment (installed with BoltzGen.install())"
 echo "No additional installation needed."
@@ -1180,7 +1186,7 @@ class BoltzGenImport(BaseConfig):
     TOOL_NAME = "BoltzGenImport"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== BoltzGenImport ==="
 echo "Requires boltzgen environment (installed with BoltzGen.install())"
 echo "No additional installation needed."

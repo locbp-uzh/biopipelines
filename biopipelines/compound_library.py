@@ -38,7 +38,7 @@ class CompoundLibrary(BaseConfig):
     TOOL_NAME = "CompoundLibrary"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== CompoundLibrary ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== CompoundLibrary ready ==="

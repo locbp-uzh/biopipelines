@@ -46,9 +46,15 @@ class MutationProfiler(BaseConfig):
     TOOL_NAME = "MutationProfiler"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        skip = "" if force_reinstall else f"""# Check if already installed
+if {env_manager} env list 2>/dev/null | grep -q "MutationEnv"; then
+    echo "MutationEnv already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing MutationEnv ==="
-{env_manager} create -n MutationEnv seaborn matplotlib pandas logomaker scipy -y
+{skip}{env_manager} create -n MutationEnv seaborn matplotlib pandas logomaker scipy -y
 
 echo "=== MutationEnv installation complete ==="
 """

@@ -42,7 +42,7 @@ class MMseqs2(BaseConfig):
     TOOL_NAME = "MMseqs2"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MMseqs2 ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== MMseqs2 ready ==="
@@ -308,7 +308,7 @@ class MMseqs2Server(BaseConfig):
     TOOL_NAME = "MMseqs2Server"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MMseqs2Server ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== MMseqs2Server ready ==="

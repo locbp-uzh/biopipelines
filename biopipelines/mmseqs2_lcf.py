@@ -50,7 +50,7 @@ class MMseqs2LCF(BaseConfig):
     TOOL_NAME = "MMseqs2LCF"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MMseqs2LCF ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== MMseqs2LCF ready ==="
@@ -310,7 +310,7 @@ class MMseqs2ServerLCF(BaseConfig):
     TOOL_NAME = "MMseqs2ServerLCF"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MMseqs2ServerLCF ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== MMseqs2ServerLCF ready ==="

@@ -37,7 +37,7 @@ class SelectionEditor(BaseConfig):
     TOOL_NAME = "SelectionEditor"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== SelectionEditor ==="
 echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."

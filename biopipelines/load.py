@@ -46,7 +46,7 @@ class LoadOutput(BaseConfig):
     TOOL_NAME = "LoadOutput"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== LoadOutput ==="
 echo "Uses biopipelines environment (no additional installation needed)."
 echo "=== LoadOutput ready ==="

@@ -57,7 +57,8 @@ class BaseConfig(ABC):
         ...
 
     @classmethod
-    def _install_script(cls, folders: Dict[str, str], env_manager: str = "mamba") -> Optional[str]:
+    def _install_script(cls, folders: Dict[str, str], env_manager: str = "mamba",
+                        force_reinstall: bool = False, **kwargs) -> Optional[str]:
         """Override in subclasses to provide installation bash commands.
 
         Args:
@@ -65,6 +66,11 @@ class BaseConfig(ABC):
                      (e.g., folders["data"], folders["RFdiffusion"], etc.)
             env_manager: Environment manager command from config.yaml
                          (e.g., "mamba" or "conda")
+            force_reinstall: If False, skip installation when the tool is
+                             already installed (e.g. repo already cloned,
+                             environment already created). If True, always run
+                             the full installation.
+            **kwargs: Additional tool-specific arguments.
 
         Returns:
             Bash script content for installing this tool, or None if not defined.
@@ -72,7 +78,7 @@ class BaseConfig(ABC):
         return None
 
     @classmethod
-    def install(cls):
+    def install(cls, force_reinstall: bool = False, **kwargs):
         """Add an installation step for this tool to the active pipeline.
 
         Must be called within a Pipeline context. Tools must override
@@ -81,8 +87,15 @@ class BaseConfig(ABC):
         Usage:
             with Pipeline(...):
                 Resources(...)
-                RFdiffusion.install()
+                RFdiffusion.install()                    # skip if already installed
+                RFdiffusion.install(force_reinstall=True) # always reinstall
                 rfd = RFdiffusion(...)
+
+        Args:
+            force_reinstall: If False (default), skip installation when the tool
+                is already installed. If True, always run the full installation.
+            **kwargs: Additional tool-specific arguments forwarded to
+                _install_script().
 
         Returns:
             StandardizedOutput (via auto-registration, just like tool instantiation)
@@ -96,7 +109,8 @@ class BaseConfig(ABC):
                 f"{cls.__name__} does not define installation steps. "
                 f"Override _install_script() to provide bash commands."
             )
-        return _Installer(parent_tool_cls=cls)
+        return _Installer(parent_tool_cls=cls, force_reinstall=force_reinstall,
+                          install_kwargs=kwargs)
 
     def __new__(cls, *args, **kwargs):
         """
@@ -720,10 +734,13 @@ class _Installer(BaseConfig):
 
     TOOL_NAME = "install"  # Overridden dynamically in __init__
 
-    def __init__(self, parent_tool_cls: type, **kwargs):
+    def __init__(self, parent_tool_cls: type, force_reinstall: bool = False,
+                 install_kwargs: Dict[str, Any] = None, **kwargs):
         self._parent_tool_cls = parent_tool_cls
         self.TOOL_NAME = f"{parent_tool_cls.TOOL_NAME}_installation"
         self._parent_tool_name = parent_tool_cls.TOOL_NAME
+        self._force_reinstall = force_reinstall
+        self._install_kwargs = install_kwargs or {}
         super().__init__(**kwargs)
 
     def _load_environments(self):
@@ -739,7 +756,9 @@ class _Installer(BaseConfig):
     def generate_script(self, script_path: str) -> str:
         config_manager = ConfigManager()
         env_manager = config_manager.get_env_manager()
-        install_commands = self._parent_tool_cls._install_script(self.folders, env_manager)
+        install_commands = self._parent_tool_cls._install_script(
+            self.folders, env_manager,
+            force_reinstall=self._force_reinstall, **self._install_kwargs)
         script = "#!/bin/bash\n"
         script += f"# Installation: {self._parent_tool_name}\n"
         script += self.generate_completion_check_header()

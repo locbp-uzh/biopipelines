@@ -36,10 +36,16 @@ class DynamicBind(BaseConfig):
     TOOL_NAME = "DynamicBind"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba"):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         data = folders.get("data", "")
+        skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{data}/DynamicBind" ] && {env_manager} env list 2>/dev/null | grep -q "dynamicbind"; then
+    echo "DynamicBind already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
         return f"""echo "=== Installing DynamicBind ==="
-echo "WARNING: DynamicBind is under development. Installation may fail."
+{skip}echo "WARNING: DynamicBind is under development. Installation may fail."
 echo "Visit https://github.com/luwei0917/DynamicBind for troubleshooting."
 cd {data}
 git clone https://github.com/luwei0917/DynamicBind.git
