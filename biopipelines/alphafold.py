@@ -53,7 +53,7 @@ fi
 """
         return f"""echo "=== Installing AlphaFold (LocalColabFold) ==="
 {skip}cd {data}
-wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/install_colabbatch_linux.sh
+wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/refs/heads/main/v1.5.5_old_installers/install_colabbatch_linux.sh
 bash install_colabbatch_linux.sh
 rm install_colabbatch_linux.sh
 

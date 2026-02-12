@@ -90,9 +90,3 @@ Filter, transform, and manipulate tables.
 - [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric extraction for Prism
 - [SelectionEditor](Tool/DataManagement.md#selectioneditor) - Selection string manipulation
 
-## Under development
-- PLIP (Protein-Ligand Interaction Profiler)
-- DynamicBind
-- ESMFold
-- MMSeqs2_LCF (LocalColabFold)
-- Gnina

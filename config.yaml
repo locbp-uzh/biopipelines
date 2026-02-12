@@ -40,9 +40,6 @@ folders:
     Boltz: "<data>/boltz"
     BoltzGen: "<data>/boltzgen"
     GhostFold: "<data>/ghostfold"
-    ESMFold: "<data>/esmfold"
-    DynamicBind: "<data>/DynamicBind"
-    Gnina: "<data>/gnina"
     MMseqs2: "<data>/mmseqs"
     ModelForge: "<data>/modelforge"
 
@@ -56,7 +53,6 @@ folders:
   # Server paths
   server:
     MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
-    MMseqs2LCFServer: "<biopipelines_output>/MMseqs2LCFServer"
 
 # Default Environments
 # Each tool can have a default conda environment specified here
@@ -84,25 +80,16 @@ environments:
   # Structure prediction
   AlphaFold: "biopipelines"
   GhostFold: "ghostfold"
-  ESMFold: "esmfold"
   Boltz2: "Boltz2Env"
   RF3: "modelforge"
-  OnionNet: "OnionNetEnv"
-  OnionNet2: "OnionNet2Env"
 
   # Analysis
-  DynamicBind:
-    - "dynamicbind"
-    - "relax"
-  Gnina: "biopipelines"
   Distance: "biopipelines"
-  PLIP: "biopipelines"
   DistanceSelector: "biopipelines"
   ConformationalChange: "ProteinEnv"
   MutationProfiler: "MutationEnv"
   SequenceMetricCorrelation: "MutationEnv"
   BayesianAdjuster: "MutationEnv"
-  SequenceMetricAnalysis: "MutationEnv"
   Contacts: "ProteinEnv"
   PoseChange: "ProteinEnv"
   SASA: "ProteinEnv"
@@ -116,8 +103,6 @@ environments:
   LoadOutput: "biopipelines"
   MMseqs2: "biopipelines"
   MMseqs2Server: "biopipelines"
-  MMseqs2LCF: "biopipelines"
-  MMseqs2ServerLCF: "biopipelines"
   CompoundLibrary: "biopipelines"
   PDB: "biopipelines"
   Ligand: "biopipelines"
@@ -131,7 +116,6 @@ environments:
 containers:
   # Add container paths here as needed
   # Example: ToolName: "<containers>/tool.sif"
-  PLIP: "<containers>/plip_3.0.0.simg"
   #RFdiffusionAllAtom: "<RFdiffusionAllAtom>/rf_se3_diffusion.sif"
 
 # Cluster / Site Configuration
@@ -149,7 +133,7 @@ cluster:
   env_manager: "mamba"
 
   # Container executor: "apptainer" or "singularity"
-  # Used for tools that run inside containers (e.g., PLIP)
+  # Used for tools that run inside containers (e.g., RFdiffusionAllAtom)
   container_executor: "apptainer"
 
   # Module load commands for SLURM scripts
@@ -158,22 +142,3 @@ cluster:
   slurm_modules:
     - "miniforge3"
     - "apptainer"
-
-# GNINA-specific runtime configuration
-# CUDA modules and library paths needed for GNINA's CNN scoring
-# Adjust these to match your HPC environment
-#
-# Installation:
-#   1. Download GNINA binary (v1.3.2):
-#      cd ~/data && mkdir -p gnina && cd gnina
-#      wget https://github.com/gnina/gnina/releases/download/v1.3.2/gnina.1.3.2
-#      chmod +x gnina.1.3.2 && ln -s gnina.1.3.2 gnina
-#   2. Verify CUDA modules: module avail cuda && module avail cudnn
-#   3. Test: module load cuda/<ver> cudnn/<ver> && ~/data/gnina/gnina --help
-#   4. Set modules and ld_library_path below to match your system
-#      Use 'module show cuda/<version>' to find the library path
-gnina:
-  modules:
-    - "cuda/12.6.3"
-    - "cudnn/9.8.0.87-12"
-  ld_library_path: "/apps/u24/opt/x86_64_v3/cuda-12.6.3-ok2c7hqa5kefkh3iyolgxrajfpepvh6h/targets/x86_64-linux/lib"
