@@ -60,7 +60,7 @@ class Panda(BaseConfig):
     Examples:
         # Single table operations
         result = Panda(
-            table=boltz.tables.confidence,
+            tables=boltz.tables.confidence,
             operations=[
                 Panda.filter("pLDDT > 80"),
                 Panda.sort("affinity", ascending=False),
@@ -452,18 +452,20 @@ echo "=== Panda ready ==="
     # ========== Tool implementation ==========
 
     def __init__(self,
-                 table: Union[TableInfo, StandardizedOutput, str, None] = None,
-                 tables: Optional[List[Union[TableInfo, StandardizedOutput, str]]] = None,
+                 tables: Union[TableInfo, StandardizedOutput, str,
+                               List[Union[TableInfo, StandardizedOutput, str]], None] = None,
                  operations: Optional[List[Operation]] = None,
                  pool: Optional[Union[StandardizedOutput, List[StandardizedOutput]]] = None,
                  rename: Optional[str] = None,
+                 table: Union[TableInfo, StandardizedOutput, str, None] = None,
                  **kwargs):
         """
         Initialize Panda tool.
 
         Args:
-            table: Single table input (mutually exclusive with tables)
-            tables: Multiple table inputs for merge/concat operations
+            tables: Table input(s). Can be a single table or a list of tables.
+                    Single table: Panda(tables=boltz.tables.confidence, ...)
+                    Multiple tables: Panda(tables=[apo.tables.affinity, holo.tables.affinity], ...)
             operations: List of operations to apply sequentially
             pool: Tool output(s) for pool mode - structures matching filtered IDs will be copied.
                   Can be a single pool or a list of pools matching `tables` for multi-pool selection.
@@ -471,12 +473,13 @@ echo "=== Panda ready ==="
                   the pool corresponding to each row's source_table index.
             rename: If provided, output IDs will be renamed to {rename}_1, {rename}_2, etc.
                     Useful after sorting to get ranked IDs (e.g., rename="best" -> best_1, best_2, ...)
+            table: Deprecated alias for tables (single table). Use tables instead.
             **kwargs: Additional parameters
 
         Examples:
             # Single table with operations
             result = Panda(
-                table=boltz.tables.confidence,
+                tables=boltz.tables.confidence,
                 operations=[Panda.filter("pLDDT > 80"), Panda.sort("score")]
             )
 
@@ -488,14 +491,14 @@ echo "=== Panda ready ==="
 
             # With pool mode - copy structures matching filtered IDs
             filtered = Panda(
-                table=combined.tables.merged,
+                tables=combined.tables.merged,
                 operations=[Panda.filter("delta > 0")],
                 pool=boltz_output
             )
 
             # Sort and rename to get ranked output
             ranked = Panda(
-                table=boltz.tables.confidence,
+                tables=boltz.tables.confidence,
                 operations=[Panda.sort("confidence_score", ascending=False)],
                 rename="best",  # Output will have IDs: best_1, best_2, ...
                 pool=boltz
@@ -513,15 +516,24 @@ echo "=== Panda ready ==="
                 rename="best"
             )
         """
-        # Validate mutual exclusivity
-        if table is not None and tables is not None:
-            raise ValueError("Cannot specify both 'table' and 'tables'. Use 'table' for single table, 'tables' for multiple.")
+        # Handle deprecated 'table' parameter
+        if table is not None:
+            if tables is not None:
+                raise ValueError("Cannot specify both 'table' and 'tables'. Use 'tables' for both single and multiple inputs.")
+            tables = table
 
-        if table is None and tables is None:
-            raise ValueError("Must specify either 'table' (single) or 'tables' (multiple)")
+        if tables is None:
+            raise ValueError("Must specify 'tables' (single table or list of tables)")
 
-        self.table_input = table
-        self.tables_input = tables or []
+        # Normalize: wrap single table in a list
+        if isinstance(tables, list):
+            self.tables_input = tables
+        else:
+            self.tables_input = [tables]
+
+        # Keep table_input for internal backwards compat (single table = first element)
+        self.table_input = self.tables_input[0] if len(self.tables_input) == 1 else None
+
         self.operations = operations or []
         self.rename = rename
 
@@ -549,16 +561,11 @@ echo "=== Panda ready ==="
         has_merge = any(op.type == "merge" for op in self.operations)
         has_concat = any(op.type == "concat" for op in self.operations)
 
-        if (has_merge or has_concat) and self.table_input is not None:
+        if (has_merge or has_concat) and len(self.tables_input) < 2:
             raise ValueError(
                 f"Operations 'merge' and 'concat' require multiple tables. "
-                f"Use 'tables=[...]' instead of 'table=...'"
+                f"Use 'tables=[table1, table2, ...]'"
             )
-
-        if not (has_merge or has_concat) and self.tables_input:
-            # If multiple tables but no merge/concat, use first table only
-            # (user might want to do other operations after merge/concat)
-            pass
 
     def validate_params(self):
         """Validate Panda parameters."""
@@ -598,12 +605,7 @@ echo "=== Panda ready ==="
         """Configure input tables from previous tools."""
         self.folders = pipeline_folders
 
-        if self.table_input is not None:
-            # Single table mode
-            self.input_csv_paths = [self._resolve_table_path(self.table_input)]
-        else:
-            # Multi-table mode
-            self.input_csv_paths = [self._resolve_table_path(t) for t in self.tables_input]
+        self.input_csv_paths = [self._resolve_table_path(t) for t in self.tables_input]
 
         # Extract id_map from merge operation if present (maps new_id -> [old_ids])
         # We store both directions for different use cases:
@@ -713,12 +715,7 @@ echo "=== Panda ready ==="
         # Start with input columns if available
         columns = []
 
-        if self.table_input is not None:
-            if isinstance(self.table_input, TableInfo) and self.table_input.info.columns:
-                columns = list(self.table_input.info.columns)
-        elif self.tables_input:
-            # For merge, we'd have columns from all tables
-            # For concat, we'd have common columns
+        if self.tables_input:
             first_table = self.tables_input[0]
             if isinstance(first_table, TableInfo) and first_table.info.columns:
                 columns = list(first_table.info.columns)
@@ -751,10 +748,8 @@ echo "=== Panda ready ==="
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
-        if self.table_input is not None:
-            config_lines.append(f"INPUT: 1 table")
-        else:
-            config_lines.append(f"INPUTS: {len(self.tables_input)} tables")
+        n_tables = len(self.tables_input)
+        config_lines.append(f"INPUT{'S' if n_tables > 1 else ''}: {n_tables} table{'s' if n_tables > 1 else ''}")
 
         config_lines.append(f"OPERATIONS: {len(self.operations)}")
         for i, op in enumerate(self.operations):

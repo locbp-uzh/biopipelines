@@ -53,13 +53,13 @@ from biopipelines.panda import Panda
 
 # Filter
 filtered = Panda(
-    table=boltz.tables.confidence,
+    tables=boltz.tables.confidence,
     operations=[Panda.filter("confidence_score > 0.8")]
 )
 
 # Sort + head (replaces SelectBest)
 best = Panda(
-    table=boltz.tables.confidence,
+    tables=boltz.tables.confidence,
     operations=[
         Panda.sort("confidence_score", ascending=False),
         Panda.head(5)
@@ -68,7 +68,7 @@ best = Panda(
 
 # Rank with renamed IDs
 ranked = Panda(
-    table=boltz.tables.confidence,
+    tables=boltz.tables.confidence,
     operations=[Panda.sort("score", ascending=False)],
     rename="best",  # Output: best_1, best_2, ...
     pool=boltz

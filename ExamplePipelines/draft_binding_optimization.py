@@ -6,17 +6,15 @@ from biopipelines.distance_selector import DistanceSelector
 from biopipelines.mutation_profiler import MutationProfiler
 from biopipelines.mutation_composer import MutationComposer
 from biopipelines.panda import Panda
-from biopipelines.plot import Plot
-from biopipelines.pymol import PyMOL
 
 with Pipeline(project="Optimization", job="BindingOptimization"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
 
     protein = PDB("6U32")
-    ligand = Ligand(smiles="O=C(...)NCCOCCCCCCCl", ids="HALOTAG_LIGAND")
+    ligand = Ligand("JF646-HaloTag ligand", ids="JF646")
 
     current_best = Boltz2(proteins=protein, ligands=ligand)
-    current_best = Panda(table=current_best.tables.affinity,
+    current_best = Panda(tables=current_best.tables.affinity,
                          operations=[], pool=current_best)
 
     for cycle in range(3):
@@ -49,21 +47,3 @@ with Pipeline(project="Optimization", job="BindingOptimization"):
             ],
             pool=[current_best, predicted]
         )
-
-    # Plot final affinity trajectory and confidence
-    Plot(
-        Plot.Scatter(
-            data=predicted.tables.confidence,
-            x="complex_plddt", y="ptm",
-            title="Final Cycle Confidence",
-            xlabel="Complex pLDDT", ylabel="pTM", grid=True
-        ),
-    )
-
-    # PyMOL session of the best design
-    PyMOL(
-        PyMOL.Load(current_best),
-        PyMOL.ColorAF(current_best),
-        PyMOL.Align(),
-        session="binding_optimization_best"
-    )

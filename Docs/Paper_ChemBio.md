@@ -41,6 +41,29 @@ Additionally, authors should note whether the manuscript was discussed with an A
 - **Proper references** — not "fewer lines of code" but "accessible to non-specialists"
 - **Debug** — especially google colab should be tested
 
+### Google Colab compatibility assessment
+
+**What already works:**
+- Notebook detection is built-in — `pipeline.py` checks for `google.colab._shell` and auto-enables `on_the_fly=True`
+- On-the-fly execution — tools run immediately (no SLURM), output streams to cells
+- `Resources()` is silently ignored in notebook mode
+- py3Dmol visualization renders inline
+- Local output mode (`./tests/`) is automatic
+
+**What does NOT work:**
+- `install()` methods — all generate conda/mamba commands (`mamba create -n Boltz2Env`, `conda activate SE3nv`, etc.). Colab has no conda.
+- Environment activation — every tool expects `conda activate <EnvName>` before running its bash script
+- Path resolution — defaults to cluster paths (`/shares/locbp.chem.uzh/`, `/home/<user>/data/`)
+- Persistent storage — model weights (5-10+ GB) lost between sessions
+
+**Plan to fix:**
+1. In each tool's `_install_script()`, detect Colab and fall back to `pip install` (no conda). E.g. Boltz2 becomes `pip install boltz[cuda]`, RFdiffusion uses `git clone` + `pip install` without conda env creation.
+2. Skip `conda activate` in `activate_environment()` when running on Colab (everything runs in the base Python env).
+3. For model persistence, mount Google Drive and redirect data/models folder: `drive.mount('/content/drive')`.
+4. Provide a Colab-specific `config.yaml` or auto-override paths when Colab is detected.
+5. Create an example Colab notebook with a setup cell showing how to install biopipelines + individual tools via pip.
+6. AlphaFold: the install already references LocalColabFold — verify it works as-is on Colab.
+
 ---
 
 ## Part 2: Paper Draft
@@ -146,15 +169,13 @@ The `redesigned=backbones.tables.structures.designed` argument illustrates how i
                                        target_structures = refolded)
 
     top3 = Panda(
-        tables=[folded.tables.confidence,conf_change.tables.changes],
-        operations=[
-            Panda.merge(),
+        tables=[refolded.tables.confidence,conf_change.tables.changes],
+        operations=[Panda.merge(),
             Panda.filter("RMSD < 1.5 and plddt > 80"),
             Panda.sort("plddt"),
             Panda.head(3)
         ],
-        pool=folded
-    )
+        pool=refolded)
 ```
 
 
@@ -335,7 +356,7 @@ with Pipeline(project="Optimization", job="BindingOptimization"):
     ligand = Ligand("JF646-HaloTag ligand", ids="JF646")
 
     current_best = Boltz2(proteins=protein, ligands=ligand)
-    current_best = Panda(table=current_best.tables.affinity,
+    current_best = Panda(tables=current_best.tables.affinity,
                          operations=[], pool=current_best)
 
     for cycle in range(3):
@@ -379,7 +400,7 @@ After structure prediction, researchers typically need to filter results by qual
 ```python
 # imports omitted
 best_designs = Panda(
-    table=predictions.tables.confidence,
+    tables=predictions.tables.confidence,
     operations=[
         Panda.filter("plddt > 80"),
         Panda.sort("ptm", ascending=False),

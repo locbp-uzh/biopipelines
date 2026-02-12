@@ -22,13 +22,13 @@ def drop_duplicates_history(new_sequences, all_sequences_seen):
     if all_sequences_seen is None:
         # First cycle - just deduplicate within current batch
         unique_new_sequences = Panda(
-            table=new_sequences.tables.sequences,
+            tables=new_sequences.tables.sequences,
             operations=[Panda.drop_duplicates(subset="sequence", keep="first")],
             pool=new_sequences  # Pool mode copies sequence files for filtered IDs
         )
         # Initialize history (table only, no pool needed)
         all_sequences_updated = Panda(
-            table=unique_new_sequences.tables.result,
+            tables=unique_new_sequences.tables.result,
             operations=[]
         )
     else:
@@ -38,7 +38,7 @@ def drop_duplicates_history(new_sequences, all_sequences_seen):
             operations=[Panda.concat(add_source=True)]
         )
         unique_new_sequences = Panda(
-            table=combined.tables.result,
+            tables=combined.tables.result,
             operations=[
                 Panda.drop_duplicates(subset="sequence", keep="first"),
                 Panda.filter("source_table == 0")  # Keep only new sequences (source_table is int)
@@ -47,7 +47,7 @@ def drop_duplicates_history(new_sequences, all_sequences_seen):
         )
         # Update history (table only, no pool needed)
         all_sequences_updated = Panda(
-            table=combined.tables.result,
+            tables=combined.tables.result,
             operations=[Panda.drop_duplicates(subset="sequence", keep="first")]
         )
     return unique_new_sequences,all_sequences_updated
@@ -173,7 +173,7 @@ with Pipeline(project="Examples",
 
     # Average metrics by cycle (source table)
     cycle_averages = Panda(
-        table=combined_results.tables.result,
+        tables=combined_results.tables.result,
         operations=[Panda.average_by_source()]
     )
 

@@ -400,13 +400,13 @@ from biopipelines.panda import Panda
 
 # Filter rows
 filtered = Panda(
-    table=boltz.tables.confidence,
+    tables=boltz.tables.confidence,
     operations=[Panda.filter("pLDDT > 80")]
 )
 
 # Sort and take top N
 best = Panda(
-    table=boltz.tables.confidence,
+    tables=boltz.tables.confidence,
     operations=[
         Panda.sort("confidence_score", ascending=False),
         Panda.head(5)
@@ -430,14 +430,14 @@ combined = Panda(
 
 # Pool mode: copy structures matching filtered IDs
 filtered_with_files = Panda(
-    table=boltz.tables.confidence,
+    tables=boltz.tables.confidence,
     operations=[Panda.filter("pLDDT > 80")],
     pool=boltz  # Copy matching structures
 )
 
 # Rename output IDs after sorting
 ranked = Panda(
-    table=boltz.tables.confidence,
+    tables=boltz.tables.confidence,
     operations=[Panda.sort("score", ascending=False)],
     rename="best",  # Output: best_1, best_2, ...
     pool=boltz
