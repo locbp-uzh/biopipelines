@@ -1,3 +1,9 @@
+# Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+#
+# Licensed under the MIT License. See LICENSE file in the project root for details.
+
+# debugged: 13.2.2026
+
 from biopipelines.pipeline import *
 from biopipelines.entities import *
 from biopipelines.compound_library import CompoundLibrary

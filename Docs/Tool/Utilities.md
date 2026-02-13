@@ -396,7 +396,7 @@ PyMOL(session="alignment_view",
 
 ### Plot
 
-Creates publication-ready plots from CSV data.
+Creates plots from CSV data.
 
 **Environment**: None (uses matplotlib at SLURM time)
 

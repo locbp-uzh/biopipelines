@@ -1,3 +1,9 @@
+# Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+#
+# Licensed under the MIT License. See LICENSE file in the project root for details.
+
+# debug 13.02: pose change has to align based on proteins only, FAILED
+
 from biopipelines.pipeline import *
 from biopipelines.entities import *
 from biopipelines.mutagenesis import Mutagenesis

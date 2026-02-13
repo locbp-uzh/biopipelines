@@ -241,21 +241,22 @@ Measures ligand pose distance between reference holo structure and sample struct
 - `sample_structures`: Union[str, List[str], ToolOutput, StandardizedOutput] (required) - Designed/predicted structures to compare
 - `reference_ligand`: str (required) - Ligand residue name in reference structure (e.g., 'LIG', 'ATP')
 - `sample_ligand`: Optional[str] = None - Ligand residue name in sample structures (default: same as reference_ligand)
-- `alignment_selection`: str = "protein" - PyMOL selection for protein alignment (e.g., "chain A", "backbone")
-- `calculate_centroid`: bool = True - Calculate ligand centroid distance
-- `calculate_orientation`: bool = False - Calculate orientation angle difference
+- `reference_alignment`: Optional[str] = None - PyMOL selection for reference structure alignment (default: "not resn {reference_ligand}")
+- `target_alignment`: Optional[str] = None - PyMOL selection for target structure alignment (default: "not resn {sample_ligand}")
 
 **Tables**:
 - `changes`:
 
-  | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | alignment_rmsd | num_ligand_atoms | alignment_selection |
-  |----|------------------|---------------------|-------------|-------------------|----------------|------------------|---------------------|
+  | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | alignment_rmsd | num_ligand_atoms | reference_alignment | target_alignment |
+  |----|------------------|---------------------|-------------|-------------------|----------------|------------------|---------------------|------------------|
 
 **Output Columns**:
 - `ligand_rmsd`: RMSD between ligand poses after protein alignment (Å)
 - `centroid_distance`: Distance between ligand centroids (Å)
 - `alignment_rmsd`: RMSD of protein alignment (Å)
 - `num_ligand_atoms`: Number of atoms in ligand
+- `reference_alignment`: PyMOL selection used for reference structure alignment
+- `target_alignment`: PyMOL selection used for target structure alignment
 
 **Example**:
 ```python
@@ -273,7 +274,10 @@ pose_analysis = PoseChange(
     sample_structures=designed,
     reference_ligand="ATP",
     sample_ligand="LIG",
-    alignment_selection="chain A and backbone"
+    # By default aligns on "not resn ATP" (reference) and "not resn LIG" (target)
+    # Override individually if needed:
+    # reference_alignment="chain A and not resn ATP",
+    # target_alignment="chain A and not resn LIG"
 )
 
 # Filter structures with RMSD < 2.0 Å

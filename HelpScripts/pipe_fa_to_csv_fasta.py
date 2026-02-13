@@ -50,10 +50,10 @@ for fa in fa_files:
                 raw_sequence = lines[i+1]
                 # Detect gap positions (X = unknown/missing residues)
                 gap_indices = [pos + 1 for pos, aa in enumerate(raw_sequence) if aa == "X"]
-                seq_data["gap_positions"] = "+".join(str(p) for p in gap_indices) if gap_indices else ""
+                seq_data["gaps"] = "+".join(str(p) for p in gap_indices) if gap_indices else ""
                 if gap_indices and args.fill_gaps:
                     raw_sequence = raw_sequence.replace("X", args.fill_gaps)
-                    print(f"  Filled {len(gap_indices)} gap(s) at position(s) {seq_data['gap_positions']} with {args.fill_gaps}")
+                    print(f"  Filled {len(gap_indices)} gap(s) at position(s) {seq_data['gaps']} with {args.fill_gaps}")
                 seq_data["sequence"] = raw_sequence
                 params = lines[i][1:].split(", ")
                 for p in params:

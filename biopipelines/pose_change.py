@@ -60,7 +60,8 @@ echo "=== PoseChange ready ==="
                  sample_structures: Union[DataStream, StandardizedOutput],
                  reference_ligand: str,
                  sample_ligand: Optional[str] = None,
-                 alignment_selection: str = "protein",
+                 reference_alignment: Optional[str] = None,
+                 target_alignment: Optional[str] = None,
                  **kwargs):
         """
         Initialize PoseChange tool.
@@ -70,8 +71,10 @@ echo "=== PoseChange ready ==="
             sample_structures: Sample structures to compare against reference as DataStream or StandardizedOutput
             reference_ligand: Ligand residue name in reference structure (e.g., 'LIG', 'ATP')
             sample_ligand: Ligand residue name in sample structures (default: same as reference_ligand)
-            alignment_selection: Selection for protein alignment before pose comparison
-                               (default: "protein", can be PyMOL selection like "chain A")
+            reference_alignment: PyMOL selection for reference structure alignment
+                                (default: "not resn {reference_ligand}" — everything except the ligand)
+            target_alignment: PyMOL selection for target structure alignment
+                             (default: "not resn {sample_ligand}" — everything except the ligand)
             **kwargs: Additional parameters passed to BaseConfig
         """
         # Resolve reference structure to DataStream
@@ -92,7 +95,8 @@ echo "=== PoseChange ready ==="
 
         self.reference_ligand = reference_ligand
         self.sample_ligand = sample_ligand or reference_ligand
-        self.alignment_selection = alignment_selection
+        self.reference_alignment = reference_alignment or f"not resn {self.reference_ligand}"
+        self.target_alignment = target_alignment or f"not resn {self.sample_ligand}"
 
         super().__init__(**kwargs)
 
@@ -119,8 +123,11 @@ echo "=== PoseChange ready ==="
         if self.sample_ligand and (len(self.sample_ligand) < 1 or len(self.sample_ligand) > 3):
             raise ValueError(f"sample_ligand must be 1-3 characters, got '{self.sample_ligand}'")
 
-        if not self.alignment_selection:
-            raise ValueError("alignment_selection cannot be empty")
+        if not self.reference_alignment:
+            raise ValueError("reference_alignment cannot be empty")
+
+        if not self.target_alignment:
+            raise ValueError("target_alignment cannot be empty")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -135,7 +142,8 @@ echo "=== PoseChange ready ==="
             f"SAMPLE STRUCTURES: {len(self.samples_stream)}",
             f"REFERENCE LIGAND: {self.reference_ligand}",
             f"SAMPLE LIGAND: {self.sample_ligand}",
-            f"ALIGNMENT: {self.alignment_selection}",
+            f"REFERENCE ALIGNMENT: {self.reference_alignment}",
+            f"TARGET ALIGNMENT: {self.target_alignment}",
             f"METRICS: RMSD, centroid, orientation"
         ])
 
@@ -167,7 +175,8 @@ echo "=== PoseChange ready ==="
             "reference_ligand": self.reference_ligand,
             "samples_json": self.samples_ds_json,
             "ligand": self.sample_ligand,
-            "alignment_selection": self.alignment_selection,
+            "reference_alignment": self.reference_alignment,
+            "target_alignment": self.target_alignment,
             "output_csv": self.analysis_csv
         }
 
@@ -179,7 +188,8 @@ echo "Reference: {os.path.basename(self.reference_stream.files[0])}"
 echo "Reference ligand: {self.reference_ligand}"
 echo "Sample structures: {len(self.samples_stream)}"
 echo "Sample ligand: {self.sample_ligand}"
-echo "Alignment: {self.alignment_selection}"
+echo "Reference alignment: {self.reference_alignment}"
+echo "Target alignment: {self.target_alignment}"
 echo "Output: {self.analysis_csv}"
 
 python "{self.pose_change_py}" --config "{self.config_file}"
@@ -198,7 +208,8 @@ python "{self.pose_change_py}" --config "{self.config_file}"
             "orientation_axis",
             "alignment_rmsd",
             "num_ligand_atoms",
-            "alignment_method"
+            "reference_alignment",
+            "target_alignment"
         ]
 
         tables = {
@@ -226,7 +237,8 @@ python "{self.pose_change_py}" --config "{self.config_file}"
             "tool_params": {
                 "sample_ligand": self.sample_ligand,
                 "reference_ligand": self.reference_ligand,
-                "alignment_selection": self.alignment_selection
+                "reference_alignment": self.reference_alignment,
+                "target_alignment": self.target_alignment
             }
         })
         return base_dict

@@ -22,7 +22,7 @@ from biopipelines_io import load_datastream, iterate_files
 
 
 def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
-                            ligand, alignment_selection):
+                            ligand, reference_alignment, target_alignment):
     """
     Calculate pose distance metrics for a single target structure.
 
@@ -33,7 +33,8 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
         target_pdb: Path to target structure
         target_id: ID for target structure
         ligand: Ligand residue name in target
-        alignment_selection: PyMOL selection for protein alignment
+        reference_alignment: PyMOL selection for reference structure alignment
+        target_alignment: PyMOL selection for target structure alignment
 
     Returns:
         Dictionary with pose distance metrics
@@ -56,11 +57,11 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
                 f"Ligand '{ligand}' not found in target structure {target_pdb}"
             )
 
-        # Align proteins (not ligands) first
+        # Align structures using the specified selections (excluding ligands by default)
         try:
-            # Align entire structures by their object names
-            # This is more robust than using selection keywords like "protein"
-            alignment_result = cmd.align('target', 'reference')
+            ref_align_sel = f'reference and ({reference_alignment})'
+            tgt_align_sel = f'target and ({target_alignment})'
+            alignment_result = cmd.align(tgt_align_sel, ref_align_sel)
             alignment_rmsd = alignment_result[0]  # RMSD after alignment
 
         except Exception as e:
@@ -88,7 +89,8 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
             'ligand_rmsd': round(ligand_rmsd, 3),
             'alignment_rmsd': round(alignment_rmsd, 3),
             'num_ligand_atoms': num_ligand_atoms,
-            'alignment_method': 'whole_structure'
+            'reference_alignment': reference_alignment,
+            'target_alignment': target_alignment
         }
 
         # Calculate centroid distance
@@ -156,7 +158,8 @@ def main():
     reference_pdb = config['reference_pdb']
     reference_ligand = config['reference_ligand']
     ligand = config['ligand']
-    alignment_selection = config['alignment_selection']
+    reference_alignment = config['reference_alignment']
+    target_alignment = config['target_alignment']
     output_csv = config['output_csv']
 
     # Load sample structures DataStream using pipe_biopipelines_io
@@ -179,7 +182,8 @@ def main():
     print(f"Reference: {os.path.basename(reference_pdb)}")
     print(f"Reference ligand: {reference_ligand}")
     print(f"Target ligand: {ligand}")
-    print(f"Alignment: {alignment_selection}")
+    print(f"Reference alignment: {reference_alignment}")
+    print(f"Target alignment: {target_alignment}")
 
     # Process each target structure using iterate_files for proper ID-file matching
     results = []
@@ -197,7 +201,8 @@ def main():
                 target_pdb=target_pdb,
                 target_id=target_id,
                 ligand=ligand,
-                alignment_selection=alignment_selection
+                reference_alignment=reference_alignment,
+                target_alignment=target_alignment
             )
             results.append(result)
             print(f"OK (RMSD: {result['ligand_rmsd']:.2f} A)")

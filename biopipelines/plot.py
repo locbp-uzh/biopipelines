@@ -43,7 +43,7 @@ class Plot(BaseConfig):
     Plot tool with declarative operation-based API for data visualization.
 
     Uses a sequence of operations (Scatter, Histogram, Bar, Column) to create
-    publication-ready plots from CSV data. Supports multiple data sources for
+    plots from CSV data. Supports multiple data sources for
     comparison and table column references for data access.
 
     Example:

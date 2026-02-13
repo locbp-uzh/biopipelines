@@ -7,7 +7,7 @@
 Plot generation helper script for BioPipelines.
 
 Executes a sequence of plot operations (Scatter, Histogram, Bar, Column)
-based on a JSON configuration file. Produces publication-ready PNG figures
+based on a JSON configuration file. Produces PNG figures
 using matplotlib and seaborn.
 """
 
@@ -26,7 +26,7 @@ import matplotlib.patches as mpatches
 # Set matplotlib backend for headless rendering
 plt.switch_backend('Agg')
 
-# Apply publication-ready style
+# Apply style
 plt.style.use('seaborn-v0_8-whitegrid')
 
 

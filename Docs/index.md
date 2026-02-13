@@ -39,7 +39,7 @@ with Pipeline(project="Examples",
 
 **Data management** -- DataStreams for file tracking, Tables for metrics, and Panda for pandas-style transformations (filter, sort, merge, concat).
 
-**Visualization** -- Automated PyMOL sessions and publication-ready plots.
+**Visualization** -- Automated PyMOL sessions and plots.
 
 ---
 

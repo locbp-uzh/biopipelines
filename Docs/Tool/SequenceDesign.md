@@ -26,14 +26,15 @@ git clone https://github.com/dauparas/ProteinMPN
 - `sampling_temp`: float = 0.1 - Sampling temperature
 - `model_name`: str = "v_48_020" - ProteinMPNN model variant
 - `soluble_model`: bool = True - Use soluble protein model
+- `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine). 
 
 **Streams**: `sequences`
 
 **Tables**:
 - `sequences`:
 
-  | id | source_id | source_pdb | sequence | score | seq_recovery | rmsd |
-  |----|-----------|------------|----------|-------|--------------|------|
+  | id | source_id | source_pdb | sequence | score | seq_recovery | rmsd | gaps |
+  |----|-----------|------------|----------|-------|--------------|------|------|
 
 **Note**: Sample 0 is the original/template sequence, samples 1+ are designs.
 
@@ -77,14 +78,15 @@ pip3 install -r requirements.txt
 - `design_within`: float = 5.0 - Distance in Angstroms from ligand for post-generation analysis only (does not control design). For actually designing residues within a distance, use [DistanceSelector](Analysis.md#distanceselector) to select positions first.
 - `model`: str = "v_32_010" - LigandMPNN model version (v_32_005, v_32_010, v_32_020, v_32_025)
 - `num_batches`: int = 1 - Number of batches to run. Total sequences = num_sequences × num_batches
+- `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine). 
 
 **Streams**: `sequences`
 
 **Tables**:
 - `sequences`:
 
-  | id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec |
-  |----|----------|--------|---|------|-------------------|-------------------|---------|
+  | id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps |
+  |----|----------|--------|---|------|-------------------|-------------------|---------|------|
 
 **Example**:
 ```python

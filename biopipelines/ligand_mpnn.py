@@ -311,7 +311,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "sequences": TableInfo(
                 name="sequences",
                 path=self.queries_csv,
-                columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec", "gap_positions"],
+                columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec", "gaps"],
                 description="LigandMPNN ligand-aware sequence generation results with binding scores",
                 count=len(sequence_ids)
             ),

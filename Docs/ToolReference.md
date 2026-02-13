@@ -20,7 +20,7 @@ Input entities and utility tools.
 
 **Visualization**:
 - [PyMOL](Tool/Utilities.md#pymol) - Session creation
-- [Plot](Tool/Utilities.md#plot) - Publication-ready plots
+- [Plot](Tool/Utilities.md#plot) - plots
 
 ---
 

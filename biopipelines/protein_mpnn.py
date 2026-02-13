@@ -286,7 +286,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "sequences": TableInfo(
                 name="sequences",
                 path=self.queries_csv,
-                columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery", "gap_positions"],
+                columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery", "gaps"],
                 description="ProteinMPNN sequence results",
                 count=len(sequence_ids)
             ),
