@@ -7,13 +7,13 @@ from biopipelines.mutation_profiler import MutationProfiler
 from biopipelines.mutation_composer import MutationComposer
 from biopipelines.panda import Panda
 
-with Pipeline(project="Optimization", job="BindingOptimization"):
+with Pipeline(project="Optimization", job="IterativeBinding"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
 
     protein = PDB("6U32")
     ligand = Ligand("JF646-HaloTag ligand", ids="JF646")
 
-    current_best = Boltz2(proteins=protein, ligands=ligand)
+    current_best = Boltz2(proteins=protein, ligands=ligand) # problem: id of sequence is 6U32 instead of actual id
     current_best = Panda(tables=current_best.tables.affinity,
                          operations=[], pool=current_best)
 
@@ -31,7 +31,8 @@ with Pipeline(project="Optimization", job="BindingOptimization"):
                               redesigned=pocket.tables.selections.within)
 
         # Analyze mutation frequencies and compose new candidates
-        profile = MutationProfiler(original=current_best, mutants=variants)
+        profile = MutationProfiler(original=current_best, 
+                                   mutants=variants)
         candidates = MutationComposer(
             frequencies=profile.tables.absolute_frequencies,
             num_sequences=3, mode="weighted_random", max_mutations=3)

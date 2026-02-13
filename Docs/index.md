@@ -56,6 +56,12 @@ pip install -e .
 ipython kernel install --user --name biopipelines
 ```
 
+Some clusters are configured to give low memory to the default bash shell, which might result in failure of the above procedure (std_alloc). You can avoid this by running the following prior to the installation:
+
+```bash
+srun --mem=16GB --time=1:00:00 --pty bash
+```
+
 Edit `config.yaml` to match your cluster configuration.
 
 Individual models have to be installed separately. We provide a pipeline (ExamplePipelines/install_tools.py) to install all the tools used in the repository at once, but please refer to the respective official documentation in case your particular cluster configuration requires adjustments:

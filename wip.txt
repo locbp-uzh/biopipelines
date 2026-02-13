@@ -1,0 +1,3 @@
+- colab
+- installation of biopipelines without conda/mamba, pip package
+- Panda.filter("RMSD < 1.5 and plddt > 80") 1 vs 2, different reasons?

@@ -38,6 +38,6 @@ with Pipeline(project="CAII", job="InverseFoldingTranslation"):
         pool=sequences
     )
 
-    dna = DNAEncoder(sequences=filtered_sequences, organism="EC") # Similar
+    dna = DNAEncoder(sequences=filtered_sequences, organism="EC") 
 
 
