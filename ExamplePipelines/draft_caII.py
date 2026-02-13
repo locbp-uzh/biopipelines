@@ -14,30 +14,25 @@ from biopipelines.dna_encoder import DNAEncoder
 
 with Pipeline(project="CAII", job="InverseFoldingTranslation"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
-
     caII = PDB("3KS3")
-
     sequences = ProteinMPNN(structures=caII,
                             fixed="94+96+119",
                             num_sequences=10,
                             soluble_model=True)
-
     folded = AlphaFold(proteins=sequences)
-
     dna = DNAEncoder(sequences=sequences, organism="EC")
-
     conf_change = ConformationalChange(reference_structures = caII,
                                        target_structures = folded)
-
-    filtered_sequences = Panda(
-        tables=[folded.tables.confidence,conf_change.tables.changes],
-        operations=[
-            Panda.merge(),
-            Panda.filter("RMSD < 1.5 and plddt > 80")
-        ],
-        pool=sequences
-    )
+    filtered_sequences = Panda(tables=[folded.tables.confidence,
+                                       conf_change.tables.changes],
+                               operations=[Panda.merge(),
+                                           Panda.filter("RMSD < 1.5 and plddt > 80")],
+                               pool=sequences)
 
     dna = DNAEncoder(sequences=filtered_sequences, organism="EC") 
+
+
+
+
 
 
