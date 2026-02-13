@@ -28,8 +28,9 @@ with Pipeline(project="CAII", job="InverseFoldingTranslation"):
                                operations=[Panda.merge(),
                                            Panda.filter("RMSD < 1.5 and plddt > 80")],
                                pool=sequences)
-
     dna = DNAEncoder(sequences=filtered_sequences, organism="EC") 
+
+
 
 
 
