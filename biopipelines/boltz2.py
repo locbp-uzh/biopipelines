@@ -571,10 +571,9 @@ fi
         )
 
         # Sequences DataStream (from input)
-        sequence_ids = list(self.proteins_stream.ids) if self.proteins_stream else predicted_ids
         sequences = DataStream(
             name="sequences",
-            ids=sequence_ids,
+            ids=predicted_ids,
             files=[],  # Sequences are value-based, stored in map_table
             map_table=self.sequences_csv,
             format="sequence"
@@ -618,7 +617,7 @@ fi
                 path=self.sequences_csv,
                 columns=["id", "sequence"],
                 description="Input protein sequences",
-                count=len(sequence_ids)
+                count=len(predicted_ids)
             ),
             "msas": TableInfo(
                 name="msas",

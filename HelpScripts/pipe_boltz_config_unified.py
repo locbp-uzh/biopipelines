@@ -743,18 +743,26 @@ def write_sequence_ids(ids: List[str], output_dir: str):
     print(f"Created sequence IDs file: {ids_file}")
 
 
-def write_protein_sequences(proteins: List[Dict], output_path: str):
-    """Write protein sequences CSV with id and sequence columns."""
+def write_protein_sequences(configs: List[tuple], output_path: str):
+    """Write protein sequences CSV with id and sequence columns.
+
+    Uses config_id as the sequence ID to ensure consistency with
+    generated_ids used by the rest of the pipeline.
+    """
     with open(output_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['id', 'sequence'])
         seen = set()
-        for protein in proteins:
-            pid = protein.get('id', '')
-            seq = protein.get('sequence', '')
-            if pid and pid not in seen:
-                writer.writerow([pid, seq])
-                seen.add(pid)
+        for config_id, config in configs:
+            if config_id and config_id not in seen:
+                # Extract protein sequence from the first protein entry in the config
+                seq = ''
+                for entry in config.get('sequences', []):
+                    if 'protein' in entry:
+                        seq = entry['protein'].get('sequence', '')
+                        break
+                writer.writerow([config_id, seq])
+                seen.add(config_id)
     print(f"Created protein sequences file: {output_path}")
 
 
@@ -811,8 +819,7 @@ def main():
 
     # Write protein sequences CSV with id and sequence columns
     if args.sequences_csv:
-        all_proteins = proteins_iterated + proteins_static
-        write_protein_sequences(all_proteins, args.sequences_csv)
+        write_protein_sequences(configs, args.sequences_csv)
 
     print(f"\nGenerated {len(configs)} config files")
 
