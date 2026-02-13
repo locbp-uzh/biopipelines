@@ -58,7 +58,7 @@ echo "=== PoseChange ready ==="
     def __init__(self,
                  reference_structure: Union[DataStream, StandardizedOutput],
                  sample_structures: Union[DataStream, StandardizedOutput],
-                 reference_ligand: str,
+                 reference_ligand: str = "LIG",
                  sample_ligand: Optional[str] = None,
                  reference_alignment: Optional[str] = None,
                  target_alignment: Optional[str] = None,
