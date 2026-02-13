@@ -16,95 +16,51 @@ from biopipelines.plot import Plot
 from biopipelines.dna_encoder import DNAEncoder
 from biopipelines.conformational_change import ConformationalChange
 
-with Pipeline(project="Examples",
-              job="BoltzGen-Refold-DNA",
-              description="Refold of filtered designs from a BoltzGen run and produce optimized DNA"):
-
-    Resources(gpu="any",
-              time="24:00:00",
-              memory="16GB")
-
-    # Load sequences from previous BoltzGen run
+with Pipeline(project="DopamineBinder", job="BoltzGen-Refold-DNA"):
+    Resources(gpu="any", time="24:00:00", memory="16GB")
     final_metrics_csv = "/path/to/final_designs_metrics_100.csv"
-    final_sequences = Sequence(final_metrics_csv) # extracts columns id, sequence
-    DNAEncoder(final_sequences, organism="EC") # Generate DNA sequences optimized for both expression (E coli) and synthesis
-
-    # Load previous results table (BoltzGen metrics with partial MSA)
-    boltzgen_data = Table(final_metrics_csv) # we load it again as a table with all the data, not just id and sequence, so we can use it in Panda
+    final_sequences = Sequence(final_metrics_csv)
+    DNAEncoder(final_sequences, 
+               organism="EC")
+    boltzgen_data = Table(final_metrics_csv) 
     ligand = Ligand("dopamine")
-
-    # Refold with full MSA: apo and holo
     boltz_apo  = Boltz2(proteins=final_sequences)
     boltz_holo = Boltz2(proteins=final_sequences,
                         ligands=ligand,
                         msas=boltz_apo)
-
-    # Calculate conformational change between apo and holo
     conf_change = ConformationalChange(reference_structures=boltz_apo,
                                        target_structures=boltz_holo)
-
-    # Merge all metrics: BoltzGen (partial MSA) vs Boltz apo/holo (full MSA)
-    merged = Panda(
-        tables=[boltzgen_data.tables.data,
-                boltz_apo.tables.confidence,
-                boltz_holo.tables.confidence,
-                boltz_holo.tables.affinity,
-                conf_change.tables.changes],
-        operations=[
-            Panda.merge(on="id", prefixes=["", "apo_", "holo_", "holo_", ""]),
-            Panda.rank("holo_affinity_pred_value", ascending=True)
-        ]
-    )
-
-    # Generate comparison plots
-    Plot(
-        # Scatter: BoltzGen vs Boltz pTM
-        Plot.Scatter(
-            data=merged.tables.result,
-            x="ptm",
-            y="holo_ptm",
-            title="pTM: BoltzGen (partial MSA) vs Boltz (full MSA)",
-            xlabel="BoltzGen pTM",
-            ylabel="Boltz Holo pTM",
-            grid=True
-        ),
-        # Scatter: BoltzGen vs Boltz affinity
-        Plot.Scatter(
-            data=merged.tables.result,
-            x="affinity_pred_value",
-            y="holo_affinity_pred_value",
-            title="Affinity: BoltzGen vs Boltz",
-            xlabel="BoltzGen Affinity",
-            ylabel="Boltz Holo Affinity",
-            grid=True
-        ),
-        # Scatter: BoltzGen vs Boltz affinity probability
-        Plot.Scatter(
-            data=merged.tables.result,
-            x="affinity_probability_binary",
-            y="holo_affinity_probability_binary",
-            title="Affinity Probability: BoltzGen vs Boltz",
-            xlabel="BoltzGen Affinity Probability",
-            ylabel="Boltz Holo Affinity Probability",
-            grid=True
-        ),
-        # Column plot: complex_pLDDT comparison (apo vs holo)
-        Plot.Column(
-            data=[boltz_apo.tables.confidence, boltz_holo.tables.confidence],
-            y="complex_plddt",
-            labels=["Apo", "Holo"],
-            title="Complex pLDDT: Apo vs Holo",
-            ylabel="complex_pLDDT",
-            style="column"
-        ),
-        # Histogram: RMSD distribution
-        Plot.Histogram(
-            data=conf_change.tables.changes,
-            x="RMSD",
-            bins=20,
-            title="Apo-Holo RMSD Distribution",
-            xlabel="RMSD (Å)",
-            ylabel="Count"
-        )
-    )
+    merged = Panda(tables=[boltzgen_data.tables.data,
+                           boltz_apo.tables.confidence,
+                           boltz_holo.tables.confidence,
+                           boltz_holo.tables.affinity,
+                           conf_change.tables.changes],
+                   operations=[Panda.merge(on="id", 
+                                           prefixes=["boltzgen_", 
+                                                     "apo_", 
+                                                     "holo_", 
+                                                     "holo_", 
+                                                     ""]),
+                               Panda.rank("holo_affinity_pred_value", 
+                                          ascending=True)])
+    Plot(Plot.Scatter(data=merged.tables.result,
+                      x="boltzgen_affinity_pred_value",
+                      y="holo_affinity_pred_value",
+                      title="Affinity: BoltzGen vs Boltz",
+                      xlabel="BoltzGen Affinity",
+                      ylabel="Boltz Holo Affinity",
+                      grid=True),
+        Plot.Scatter(data=merged.tables.result,
+                     x="boltzgen_affinity_probability_binary",
+                     y="holo_affinity_probability_binary",
+                     title="Affinity Probability: BoltzGen vs Boltz",
+                     xlabel="BoltzGen Affinity Probability",
+                     ylabel="Boltz Holo Affinity Probability",
+                     grid=True),
+        Plot.Histogram(data=conf_change.tables.changes,
+                       x="RMSD",
+                       bins=20,
+                       title="Apo-Holo RMSD Distribution",
+                       xlabel="RMSD (Å)",
+                       ylabel="Count"))
 
