@@ -58,12 +58,17 @@ ipython kernel install --user --name biopipelines
 
 Edit `config.yaml` to match your cluster configuration.
 
-Individual models have to be installed separately. We provide a pipeline (ExamplePipelines/install_tools.py) to install all the tools used in the repository at once, but please refer to the respective official documentation in case your particular cluster configuration requires adjustments.  
+Individual models have to be installed separately. We provide a pipeline (ExamplePipelines/install_tools.py) to install all the tools used in the repository at once, but please refer to the respective official documentation in case your particular cluster configuration requires adjustments:
+
+```bash
+cd ExamplePipelines
+biopipelines-submit install_tools.py
+```
 
 ### Run an Example
 
 ```bash
-biopipelines-submit ExamplePipelines/rfd_pmpnn_af2.py
+biopipelines-submit rfd_pmpnn_af2.py
 ```
 
 ---
