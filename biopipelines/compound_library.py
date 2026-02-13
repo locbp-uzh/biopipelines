@@ -192,7 +192,9 @@ echo "=== CompoundLibrary ready ==="
                             for option in key_options:
                                 new_smiles = compound['smiles'].replace(key_pattern, option, 1)
                                 new_branching = compound['branching'].copy()
-                                new_branching[key] = option
+                                # Strip <> from option for display (e.g. "<o-hydroxyphenyl>" -> "o-hydroxyphenyl")
+                                clean_option = option.strip("<>") if option.startswith("<") and option.endswith(">") else option
+                                new_branching[key] = clean_option
                                 updated_compounds.append({'smiles': new_smiles, 'branching': new_branching})
                             # Process one key per compound per iteration
                             break
