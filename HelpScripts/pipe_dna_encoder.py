@@ -142,6 +142,9 @@ def encode_sequence_thresholded_weighted(sequence: str, aa_codon_freq: Dict[str,
     """
     dna_codons = []
     for aa in sequence:
+        if aa == "X":
+            dna_codons.append("NNN")
+            continue
         if aa not in aa_codon_freq:
             raise ValueError(f"Invalid amino acid: {aa}")
 

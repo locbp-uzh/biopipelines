@@ -178,6 +178,14 @@ class PlotBuilder:
 
         print(f"  Created scatter plot: {output_path}")
 
+        # Export CSV with plot data
+        csv_path = os.path.splitext(output_path)[0] + ".csv"
+        export_cols = [x_col, y_col]
+        if color_col and color_col in df.columns:
+            export_cols.append(color_col)
+        df[export_cols].to_csv(csv_path, index=False)
+        print(f"  Exported data: {csv_path}")
+
         # Record metadata
         self.metadata.append({
             "filename": os.path.basename(output_path),
@@ -234,6 +242,11 @@ class PlotBuilder:
         plt.close()
 
         print(f"  Created histogram: {output_path}")
+
+        # Export CSV with plot data
+        csv_path = os.path.splitext(output_path)[0] + ".csv"
+        values.reset_index(drop=True).to_frame(name=x_col).to_csv(csv_path, index=False)
+        print(f"  Exported data: {csv_path}")
 
         # Record metadata
         self.metadata.append({
@@ -295,6 +308,11 @@ class PlotBuilder:
         plt.close()
 
         print(f"  Created bar chart: {output_path}")
+
+        # Export CSV with plot data (aggregated if applicable)
+        csv_path = os.path.splitext(output_path)[0] + ".csv"
+        agg_df.to_csv(csv_path, index=False)
+        print(f"  Exported data: {csv_path}")
 
         # Record metadata
         self.metadata.append({
@@ -490,6 +508,15 @@ class PlotBuilder:
 
         print(f"  Created column plot ({style}): {output_path}")
 
+        # Export CSV with plot data — one column per group, label as header
+        csv_path = os.path.splitext(output_path)[0] + ".csv"
+        export_series = {}
+        for label, df in zip(group_labels, dataframes):
+            export_series[label] = df[y_col].dropna().reset_index(drop=True)
+        export_df = pd.DataFrame(export_series)
+        export_df.to_csv(csv_path, index=False)
+        print(f"  Exported data: {csv_path}")
+
         # Record metadata
         self.metadata.append({
             "filename": os.path.basename(output_path),
@@ -599,6 +626,14 @@ class PlotBuilder:
         plt.close()
 
         print(f"  Created heatmap: {output_path}")
+
+        # Export CSV with the matrix data
+        csv_path = os.path.splitext(output_path)[0] + ".csv"
+        if columns:
+            corr_matrix.to_csv(csv_path)
+        else:
+            pivot_df.to_csv(csv_path)
+        print(f"  Exported data: {csv_path}")
 
         # Record metadata
         mode = "correlation" if columns else "pivot"

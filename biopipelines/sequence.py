@@ -233,6 +233,23 @@ echo "=== Sequence ready ==="
         if len(self.custom_ids) != len(self.sequences):
             raise ValueError(f"ids length ({len(self.custom_ids)}) must match sequences length ({len(self.sequences)})")
 
+        # Validate sequence characters based on detected type
+        valid_chars = {
+            "protein": set("ACDEFGHIKLMNPQRSTVWY"),
+            "dna": set("ACGT"),
+            "rna": set("ACGU"),
+        }
+        for seq_id, seq, seq_type in zip(self.custom_ids, self.sequences, self.detected_types):
+            allowed = valid_chars[seq_type]
+            clean = seq.upper().replace(" ", "")
+            invalid = set(clean) - allowed
+            if invalid:
+                raise ValueError(
+                    f"Sequence '{seq_id}' contains invalid characters for {seq_type}: "
+                    f"{''.join(sorted(invalid))}. "
+                    f"Allowed characters: {''.join(sorted(allowed))}"
+                )
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters."""
         self.folders = pipeline_folders

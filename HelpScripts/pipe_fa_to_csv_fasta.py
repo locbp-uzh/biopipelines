@@ -19,6 +19,8 @@ parser.add_argument('--step-tool-name', type=str, default=None,
                     help='Step and tool name for missing.csv removed_by column (e.g. 005_ProteinMPNN)')
 parser.add_argument('--upstream-missing', type=str, default=None,
                     help='Path to upstream missing.csv to propagate')
+parser.add_argument('--fill-gaps', type=str, default=None,
+                    help='Replace X (unknown/gap residues) with this amino acid (e.g., G for glycine)')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -45,7 +47,14 @@ for fa in fa_files:
             for i in range(2,len(lines),2):
                 seq_data = dict()
                 seq_data["id"] = "" #put here just to preserve the order
-                seq_data["sequence"] = lines[i+1]
+                raw_sequence = lines[i+1]
+                # Detect gap positions (X = unknown/missing residues)
+                gap_indices = [pos + 1 for pos, aa in enumerate(raw_sequence) if aa == "X"]
+                seq_data["gap_positions"] = "+".join(str(p) for p in gap_indices) if gap_indices else ""
+                if gap_indices and args.fill_gaps:
+                    raw_sequence = raw_sequence.replace("X", args.fill_gaps)
+                    print(f"  Filled {len(gap_indices)} gap(s) at position(s) {seq_data['gap_positions']} with {args.fill_gaps}")
+                seq_data["sequence"] = raw_sequence
                 params = lines[i][1:].split(", ")
                 for p in params:
                     if not '=' in p:

@@ -6,7 +6,7 @@ from biopipelines.conformational_change import ConformationalChange
 from biopipelines.panda import Panda
 from biopipelines.dna_encoder import DNAEncoder
 
-with Pipeline(project="GFPSensor", job="GeneSynthesis"):
+with Pipeline(project="CAII", job="InverseFoldingTranslation"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
 
     caII = PDB("3KS3")
@@ -23,7 +23,7 @@ with Pipeline(project="GFPSensor", job="GeneSynthesis"):
     conf_change = ConformationalChange(reference_structures = caII,
                                        target_structures = folded)
 
-    filtered = Panda(
+    filtered_sequences = Panda(
         tables=[folded.tables.confidence,conf_change.tables.changes],
         operations=[
             Panda.merge(),
@@ -32,4 +32,6 @@ with Pipeline(project="GFPSensor", job="GeneSynthesis"):
         pool=sequences
     )
 
-    dna = DNAEncoder(sequences=filtered, organism="EC")
+    dna = DNAEncoder(sequences=filtered_sequences, organism="EC") # Similar
+
+

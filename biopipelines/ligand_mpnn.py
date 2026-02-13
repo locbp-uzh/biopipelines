@@ -77,6 +77,7 @@ echo "=== LigandMPNN installation complete ==="
                  model: str = "v_32_010",
                  num_batches: int = 1,
                  remove_duplicates: bool = True,
+                 fill_gaps: str = "G",
                  **kwargs):
         """
         Initialize LigandMPNN configuration.
@@ -95,6 +96,8 @@ echo "=== LigandMPNN installation complete ==="
             model: LigandMPNN model version to use
             num_batches: Number of batches to run
             remove_duplicates: Remove duplicate sequences from output (default True)
+            fill_gaps: Amino acid to replace X (unknown/gap residues) with (default "G" for glycine).
+                       Empty string means no filling (X is kept as-is).
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
@@ -113,6 +116,7 @@ echo "=== LigandMPNN installation complete ==="
         self.model = model
         self.num_batches = num_batches
         self.remove_duplicates = remove_duplicates
+        self.fill_gaps = fill_gaps
 
         super().__init__(**kwargs)
 
@@ -252,6 +256,7 @@ bash {self.commands_file}
     def _generate_script_convert_outputs(self) -> str:
         """Generate the output conversion part of the script."""
         duplicates_flag = " --duplicates" if not self.remove_duplicates else ""
+        fill_gaps_flag = f' --fill-gaps "{self.fill_gaps}"' if self.fill_gaps else ""
         step_tool_name = os.path.basename(self.output_folder)
 
         # Check for upstream missing table
@@ -261,7 +266,7 @@ bash {self.commands_file}
         upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
 
         return f"""echo "Converting FASTA outputs to CSV format"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag} --id-map {self.id_map_json} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag}{fill_gaps_flag} --id-map {self.id_map_json} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 
 """
 
@@ -306,7 +311,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "sequences": TableInfo(
                 name="sequences",
                 path=self.queries_csv,
-                columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec"],
+                columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec", "gap_positions"],
                 description="LigandMPNN ligand-aware sequence generation results with binding scores",
                 count=len(sequence_ids)
             ),

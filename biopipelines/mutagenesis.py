@@ -58,7 +58,7 @@ echo "=== Mutagenesis ready ==="
 
     # Lazy path descriptors
     sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    missing_sequences_csv = Path(lambda self: os.path.join(self.output_folder, "missing_sequences.csv"))
+    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
     mutagenesis_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutagenesis.py"))
 
     def __init__(self,
@@ -236,9 +236,10 @@ echo "Generated sequences saved to: {self.sequences_csv}"
 
     def _generate_script_missing_sequences(self) -> str:
         """Generate the missing sequences creation part of the script."""
-        return f"""# Generate missing sequences CSV if original is excluded
+        step_tool_name = os.path.basename(self.output_folder)
+        return f"""# Generate missing.csv if original is excluded
 if [ "{str(self.include_original).lower()}" = "false" ]; then
-    echo "Creating missing sequences table..."
+    echo "Creating missing table..."
     python -c "
 import pandas as pd
 import sys
@@ -248,26 +249,28 @@ try:
     sequences_df = pd.read_csv('{self.sequences_csv}')
     if len(sequences_df) > 0:
         first_row = sequences_df.iloc[0]
-        original_sequence = first_row['sequence']
         base_id = first_row['id'].rsplit('_', 1)[0]  # Remove _position_aa suffix
         original_aa = first_row['original_aa']
 
-        # Create missing sequence entry
+        # Create missing entry with standard columns
         original_id = f'{{base_id}}_{self.position}{{original_aa}}'
         missing_data = [{{
             'id': original_id,
-            'sequence': original_sequence[:({self.position}-1)] + original_aa + original_sequence[{self.position}:],
-            'reason': 'Original amino acid excluded from mutagenesis'
+            'removed_by': '{step_tool_name}',
+            'cause': f'Original amino acid ({{original_aa}}) excluded from mutagenesis'
         }}]
 
         missing_df = pd.DataFrame(missing_data)
-        missing_df.to_csv('{self.missing_sequences_csv}', index=False)
-        print(f'Created missing sequences CSV: {self.missing_sequences_csv}')
+        missing_df.to_csv('{self.missing_csv}', index=False)
+        print(f'Created missing.csv: {self.missing_csv}')
     else:
         print('Warning: No sequences found in main CSV')
+        pd.DataFrame(columns=['id', 'removed_by', 'cause']).to_csv('{self.missing_csv}', index=False)
 except Exception as e:
-    print(f'Error creating missing sequences CSV: {{e}}')
+    print(f'Error creating missing.csv: {{e}}')
 "
+else
+    echo "id,removed_by,cause" > "{self.missing_csv}"
 fi
 
 """
@@ -315,13 +318,13 @@ fi
             )
         }
 
-        # Add missing sequences table if original is excluded
+        # Add missing table if original is excluded
         if not self.include_original:
-            tables["missing_sequences"] = TableInfo(
-                name="missing_sequences",
-                path=self.missing_sequences_csv,
-                columns=["id", "sequence", "reason"],
-                description="Sequences excluded from mutagenesis (original amino acid)",
+            tables["missing"] = TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed (original amino acid excluded from mutagenesis)",
                 count=1
             )
 

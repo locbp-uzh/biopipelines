@@ -561,6 +561,20 @@ python "{self.plot_py}" --config "{self.config_file}"
             )
         }
 
+        # Add a table entry for each plot's exported CSV data
+        for i, op in enumerate(self.operations):
+            png_filename = self._generate_plot_filename(op, i)
+            csv_filename = os.path.splitext(png_filename)[0] + ".csv"
+            csv_path = os.path.join(self.output_folder, csv_filename)
+            table_name = os.path.splitext(png_filename)[0]
+            tables[table_name] = TableInfo(
+                name=table_name,
+                path=csv_path,
+                columns=[],
+                description=f"Data for plot: {op.params.get('title', op.op_type)}",
+                count="variable"
+            )
+
         return {
             "structures": DataStream.empty("structures", "pdb"),
             "sequences": DataStream.empty("sequences", "fasta"),

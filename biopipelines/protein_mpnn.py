@@ -79,6 +79,7 @@ echo "=== ProteinMPNN installation complete ==="
                  model_name: str = "v_48_020",
                  soluble_model: bool = True,
                  remove_duplicates: bool = True,
+                 fill_gaps: str = "G",
                  **kwargs):
         """
         Initialize ProteinMPNN configuration.
@@ -98,6 +99,8 @@ echo "=== ProteinMPNN installation complete ==="
             model_name: ProteinMPNN model variant
             soluble_model: Use soluble protein model
             remove_duplicates: Remove duplicate sequences from output (default True)
+            fill_gaps: Amino acid to replace X (unknown/gap residues) with (default "G" for glycine).
+                       Empty string means no filling (X is kept as-is).
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
@@ -117,6 +120,7 @@ echo "=== ProteinMPNN installation complete ==="
         self.model_name = model_name
         self.soluble_model = soluble_model
         self.remove_duplicates = remove_duplicates
+        self.fill_gaps = fill_gaps
 
         super().__init__(**kwargs)
 
@@ -226,6 +230,7 @@ python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_j
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
         duplicates_flag = " --duplicates" if not self.remove_duplicates else ""
+        fill_gaps_flag = f' --fill-gaps "{self.fill_gaps}"' if self.fill_gaps else ""
         step_tool_name = os.path.basename(self.output_folder)
 
         # Check for upstream missing table
@@ -238,7 +243,7 @@ python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_j
 python {self.table_py} {self.seqs_folder} {self.pipeline_name} "-" {self.main_table}
 
 echo "Creating queries CSV and FASTA from results table"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}{duplicates_flag} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}{duplicates_flag}{fill_gaps_flag} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 
 """
 
@@ -281,7 +286,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "sequences": TableInfo(
                 name="sequences",
                 path=self.queries_csv,
-                columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery"],
+                columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery", "gap_positions"],
                 description="ProteinMPNN sequence results",
                 count=len(sequence_ids)
             ),

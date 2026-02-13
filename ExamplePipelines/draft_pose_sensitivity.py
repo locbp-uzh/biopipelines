@@ -24,7 +24,7 @@ with Pipeline(project="Imatinib", job="PoseSensitivity"):
 
     pose = PoseChange(reference_structure=original,
                       sample_structures=mutants,
-                      reference_ligand="ATP",
+                      reference_ligand="LIG",
                       sample_ligand="LIG")
 
     analysis = Panda(
