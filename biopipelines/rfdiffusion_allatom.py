@@ -48,7 +48,8 @@ fi
 """
         if env_manager == "pip":
             return f"""echo "=== Installing RFdiffusion-AllAtom (pip) ==="
-{skip}cd {parent_dir}
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
 if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git
 fi

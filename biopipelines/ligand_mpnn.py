@@ -40,7 +40,8 @@ if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ]; then
 fi
 """
             return f"""echo "=== Installing LigandMPNN (pip) ==="
-{skip}cd {parent_dir}
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
 if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/dauparas/LigandMPNN.git
 fi

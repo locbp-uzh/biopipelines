@@ -41,7 +41,8 @@ if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
 fi
 """
             return f"""echo "=== Installing RFdiffusion (pip) ==="
-{skip}cd {parent_dir}
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
 if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/RosettaCommons/RFdiffusion.git
 fi

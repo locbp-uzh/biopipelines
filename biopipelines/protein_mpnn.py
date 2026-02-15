@@ -40,7 +40,8 @@ fi
 """
         # ProteinMPNN is git clone only — same for pip and conda
         return f"""echo "=== Installing ProteinMPNN ==="
-{skip}cd {parent_dir}
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
 git clone https://github.com/dauparas/ProteinMPNN.git
 
 echo "=== ProteinMPNN installation complete ==="
