@@ -6,8 +6,8 @@
 """
 Runtime helper script for Fuse tool.
 
-Generates fusion sequences by combining multiple proteins with linkers of variable lengths.
-Outputs CSV with sequence information including domain/linker position selections in PyMOL format.
+Generates fusion sequences by combining multiple sequences with linkers of variable lengths.
+Outputs CSV with sequence information including sequence/linker position selections in PyMOL format.
 """
 
 import os
@@ -81,36 +81,29 @@ def extract_sequence(protein_input: str) -> str:
 
 
 def generate_fusion_sequences(
-    proteins: List[str],
+    sequences: List[str],
     linker: str,
     linker_lengths: List[str],
     name_base: str
 ) -> List[Dict[str, Any]]:
     """
-    Generate all fusion sequence combinations with domain/linker position information.
+    Generate all fusion sequence combinations with sequence/linker position information.
 
     Args:
-        proteins: List of protein sequences (or PDB file paths)
+        sequences: List of sequences (or PDB file paths)
         linker: Linker sequence template
         linker_lengths: List of length range specifications for each junction
         name_base: Base name for output sequence IDs
 
     Returns:
-        List of dicts with sequence info including D1, L1, D2, L2, D3, etc.
+        List of dicts with sequence info including S1, L1, S2, L2, S3, etc.
     """
-    # Extract sequences from proteins (handles both sequences and PDB files)
-    protein_sequences = []
-    protein_names = []
+    # Extract sequences (handles both raw sequences and PDB files)
+    input_sequences = []
 
-    for i, protein in enumerate(proteins):
-        seq = extract_sequence(protein)
-        protein_sequences.append(seq)
-
-        # Generate protein name for ID
-        if protein.endswith('.pdb') or protein.endswith('.cif'):
-            protein_names.append(os.path.splitext(os.path.basename(protein))[0])
-        else:
-            protein_names.append(f"D{i+1}")
+    for i, seq_input in enumerate(sequences):
+        seq = extract_sequence(seq_input)
+        input_sequences.append(seq)
 
     # Parse linker length ranges
     length_ranges = [parse_length_spec(spec) for spec in linker_lengths]
@@ -121,17 +114,17 @@ def generate_fusion_sequences(
     for length_combo in product(*length_ranges):
         # Build the fused sequence and track positions
         fused_sequence = ""
-        positions = []  # List of (type, start, end) where type is 'D' or 'L'
+        positions = []  # List of (type, idx, start, end) where type is 'S' or 'L'
 
-        for i, protein_seq in enumerate(protein_sequences):
-            # Add domain
+        for i, seq in enumerate(input_sequences):
+            # Add sequence
             start = len(fused_sequence) + 1  # 1-indexed
-            fused_sequence += protein_seq
+            fused_sequence += seq
             end = len(fused_sequence)
-            positions.append(('D', i + 1, start, end))
+            positions.append(('S', i + 1, start, end))
 
-            # Add linker if not last protein
-            if i < len(protein_sequences) - 1:
+            # Add linker if not last sequence
+            if i < len(input_sequences) - 1:
                 linker_len = length_combo[i]
                 linker_seq = linker[:linker_len]
 
@@ -153,7 +146,7 @@ def generate_fusion_sequences(
             'lengths': lengths_str
         }
 
-        # Add D1, L1, D2, L2, D3, etc. columns in PyMOL selection format
+        # Add S1, L1, S2, L2, S3, etc. columns in PyMOL selection format
         for pos_type, idx, start, end in positions:
             col_name = f"{pos_type}{idx}"
             if start == end:
@@ -188,7 +181,7 @@ def main():
         description='Generate fusion sequences with linker combinations'
     )
     parser.add_argument('name', help='Base name for output sequence IDs')
-    parser.add_argument('proteins', help='Semicolon-separated list of protein sequences or PDB file paths')
+    parser.add_argument('sequences', help='Semicolon-separated list of sequences or PDB file paths')
     parser.add_argument('linker', help='Linker sequence template')
     parser.add_argument('linker_lengths', help='Linker length specifications (e.g., "L2-4;2-4L")')
     parser.add_argument('output_csv', help='Output CSV file path')
@@ -196,14 +189,14 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse proteins
-    proteins = args.proteins.split(';')
-    print(f"Processing {len(proteins)} proteins")
-    for i, p in enumerate(proteins):
-        if p.endswith('.pdb') or p.endswith('.cif'):
-            print(f"  Protein {i+1}: {os.path.basename(p)} (PDB file)")
+    # Parse sequences
+    sequences = args.sequences.split(';')
+    print(f"Processing {len(sequences)} sequences")
+    for i, s in enumerate(sequences):
+        if s.endswith('.pdb') or s.endswith('.cif'):
+            print(f"  Sequence {i+1}: {os.path.basename(s)} (PDB file)")
         else:
-            print(f"  Protein {i+1}: {len(p)} residues (sequence)")
+            print(f"  Sequence {i+1}: {len(s)} residues")
 
     # Parse linker lengths - strip leading/trailing L markers
     linker_lengths_str = args.linker_lengths
@@ -217,16 +210,16 @@ def main():
     print(f"Linker length ranges: {linker_lengths}")
 
     # Validate
-    expected_junctions = len(proteins) - 1
+    expected_junctions = len(sequences) - 1
     if len(linker_lengths) != expected_junctions:
         raise ValueError(
-            f"Expected {expected_junctions} linker length specs for {len(proteins)} proteins, "
+            f"Expected {expected_junctions} linker length specs for {len(sequences)} sequences, "
             f"got {len(linker_lengths)}"
         )
 
     # Generate fusion sequences
     results = generate_fusion_sequences(
-        proteins=proteins,
+        sequences=sequences,
         linker=args.linker,
         linker_lengths=linker_lengths,
         name_base=args.name
@@ -239,12 +232,12 @@ def main():
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    # Determine column order dynamically based on number of proteins
-    num_proteins = len(proteins)
+    # Determine column order dynamically based on number of sequences
+    num_sequences = len(sequences)
     position_columns = []
-    for i in range(1, num_proteins + 1):
-        position_columns.append(f"D{i}")
-        if i < num_proteins:
+    for i in range(1, num_sequences + 1):
+        position_columns.append(f"S{i}")
+        if i < num_sequences:
             position_columns.append(f"L{i}")
 
     # Write CSV with ordered columns

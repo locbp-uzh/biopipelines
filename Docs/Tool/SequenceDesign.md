@@ -201,13 +201,12 @@ sdm = Mutagenesis(original=template, position=42, mode="saturation", exclude="CP
 
 ### Fuse
 
-Concatenates multiple protein sequences with flexible linkers. Creates fusion proteins with customizable linker lengths for domain engineering. Outputs include domain/linker position columns in PyMOL selection format for easy visualization.
+Concatenates multiple sequences with flexible linkers. Creates fusion sequences with customizable linker lengths for domain engineering. Works with both protein and DNA sequences. Outputs include sequence/linker position columns in PyMOL selection format for easy visualization.
 
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `proteins`: Union[List[str], str] (required) - List of protein sequences or PDB file paths
-- `sequences`: Union[List[str], str] = None - Alias for proteins
+- `sequences`: Union[List[str], str] (required) - List of sequences or PDB file paths
 - `name`: str = "" - Job name for output files
 - `linker`: str = "GGGGSGGGGSGGGGSGGGGS" - Linker sequence that will be cut based on `linker_lengths` if specified
 - `linker_lengths`: List[str] = None - List of length ranges for each junction to generate multiple variants by cutting the linker (e.g., ["1-6", "1-6"])
@@ -217,13 +216,13 @@ Concatenates multiple protein sequences with flexible linkers. Creates fusion pr
 **Tables**:
 - `sequences`:
 
-  | id | sequence | lengths | D1 | L1 | D2 | L2 | D3 | ... |
+  | id | sequence | lengths | S1 | L1 | S2 | L2 | S3 | ... |
   |----|----------|---------|----|----|----|----|----| --- |
 
-  - `lengths`: Shortname of the lengths e.e. 2_4, 5_2_4, ...
-  - `D1`, `D2`, `D3`, ...: Domain positions in PyMOL selection format (e.g., "1-73", "76-237")
+  - `lengths`: Shortname of the lengths e.g. 2-4, 5-2-4, ...
+  - `S1`, `S2`, `S3`, ...: Sequence positions in PyMOL selection format (e.g., "1-73", "76-237")
   - `L1`, `L2`, ...: Linker positions in PyMOL selection format (e.g., "74-75", "238-240")
-  - Number of columns depends on number of input proteins: n proteins → n domain columns (D1...Dn) and n-1 linker columns (L1...Ln-1)
+  - Number of columns depends on number of input sequences: n sequences → n sequence columns (S1...Sn) and n-1 linker columns (L1...Ln-1)
 
 **Example**:
 ```python
@@ -234,7 +233,7 @@ N="GNH..."
 mid=PDB("...")
 C="EFT..."
 fused = Fuse(
-    proteins=[N, mid, C],
+    sequences=[N, mid, C],
     linker="GSGAG",
     linker_lengths=["2-4", "2-4"],
     name="protein_fusion"

@@ -13,7 +13,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     donor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTWGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYISHNVYITADKQKNGIKANFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITLGMDELYK")     # ECFP
     cam = PDB("1CFD") # Calmodulin
     acceptor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFGYGLQCFARYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSYQSALSKDPNEKRDHMVLLEFVTAAGITLGMDELYK")   # EYFP
-    fusions = Fuse(proteins=[donor, cam, acceptor],
+    fusions = Fuse(sequences=[donor, cam, acceptor],
                    name="CaFRET",
                    linker="GSGAG",
                    linker_lengths=["3-5", "3-5"])
@@ -56,10 +56,10 @@ with Pipeline(project="Biosensor", job="CaFRET"):
         PyMOL.Load(best_apo),
         PyMOL.Load(best_holo),
         PyMOL.Color("white"),
-        PyMOL.Color("cyan", selection=analysis.tables.result.D1),
-        PyMOL.Color("pink", selection=analysis.tables.result.D2),
-        PyMOL.Color("yellow", selection=analysis.tables.result.D3),
-        PyMOL.Align(selection=analysis.tables.result.D2),
+        PyMOL.Color("cyan", selection=fusions.tables.sequences.S1),
+        PyMOL.Color("pink", selection=fusions.tables.sequences.S2),
+        PyMOL.Color("yellow", selection=fusions.tables.sequences.S3),
+        PyMOL.Align(selection=fusions.tables.sequences.S2),
         session="CaFRET_best"
     )
     

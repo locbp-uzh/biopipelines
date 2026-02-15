@@ -3,11 +3,11 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Fuse configuration for protein fusion sequence generation.
+Fuse configuration for fusion sequence generation.
 
-Creates fusion sequences by linking multiple proteins with flexible linkers
+Creates fusion sequences by linking multiple sequences with flexible linkers
 of varying lengths, generating all possible combinations for downstream
-folding and analysis.
+folding and analysis. Works with both protein and DNA sequences.
 """
 
 import os
@@ -29,11 +29,11 @@ except ImportError:
 
 class Fuse(BaseConfig):
     """
-    Configuration for protein fusion sequence generation.
+    Configuration for fusion sequence generation.
 
-    Generates all combinations of protein fusions with variable linker lengths,
+    Generates all combinations of sequence fusions with variable linker lengths,
     producing meaningful sequence IDs and structured output for downstream
-    folding tools like AlphaFold.
+    folding tools like AlphaFold. Works with both protein and DNA sequences.
     """
 
     TOOL_NAME = "Fuse"
@@ -51,7 +51,7 @@ echo "=== Fuse ready ==="
     fuse_queries_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fuse_queries.py"))
 
     def __init__(self,
-                 proteins: Union[List[Union[str, DataStream, StandardizedOutput]], DataStream, StandardizedOutput],
+                 sequences: Union[List[Union[str, DataStream, StandardizedOutput]], DataStream, StandardizedOutput],
                  name: str = "",
                  linker: str = "GGGGSGGGGSGGGGSGGGGS",
                  linker_lengths: List[str] = None,
@@ -60,19 +60,19 @@ echo "=== Fuse ready ==="
         Initialize Fuse configuration.
 
         Args:
-            proteins: List of protein sequences/structures/DataStreams/StandardizedOutputs,
-                     or a single DataStream/StandardizedOutput containing multiple sequences
+            sequences: List of sequences/structures/DataStreams/StandardizedOutputs,
+                      or a single DataStream/StandardizedOutput containing multiple sequences
             name: Job name for output files
             linker: Linker sequence to use (will be truncated to specified lengths)
             linker_lengths: List of length ranges for each junction (e.g., ["1-6", "1-6"])
             **kwargs: Additional parameters
         """
-        # Resolve input proteins to a list of strings (sequences or file paths)
-        self.input_proteins = self._resolve_proteins(proteins)
+        # Resolve input sequences to a list of strings (sequences or file paths)
+        self.input_sequences = self._resolve_sequences(sequences)
 
-        # Validate we have enough proteins for fusion
-        if len(self.input_proteins) < 2:
-            raise ValueError("Fuse requires at least 2 proteins for fusion")
+        # Validate we have enough sequences for fusion
+        if len(self.input_sequences) < 2:
+            raise ValueError("Fuse requires at least 2 sequences for fusion")
 
         # Store Fuse-specific parameters
         self.name = name
@@ -80,48 +80,48 @@ echo "=== Fuse ready ==="
 
         # Set default linker_lengths based on number of proteins if not provided
         if linker_lengths is None:
-            expected_junctions = len(self.input_proteins) - 1
+            expected_junctions = len(self.input_sequences) - 1
             self.linker_lengths = ["1-6"] * expected_junctions
         else:
             self.linker_lengths = linker_lengths
 
         # Validate linker_lengths matches protein count
-        expected_junctions = len(self.input_proteins) - 1
+        expected_junctions = len(self.input_sequences) - 1
         if len(self.linker_lengths) != expected_junctions:
-            raise ValueError(f"linker_lengths must have {expected_junctions} entries for {len(self.input_proteins)} proteins")
+            raise ValueError(f"linker_lengths must have {expected_junctions} entries for {len(self.input_sequences)} proteins")
 
         # Initialize base class
         super().__init__(**kwargs)
 
-    def _resolve_proteins(self, proteins) -> List[str]:
+    def _resolve_sequences(self, sequences) -> List[str]:
         """
-        Resolve protein input to a list of strings (sequences or file paths).
+        Resolve sequence input to a list of strings (sequences or file paths).
 
         Args:
-            proteins: Various input formats
+            sequences: Various input formats
 
         Returns:
-            List of protein strings (sequences or file paths)
+            List of sequence strings (sequences or file paths)
         """
-        if isinstance(proteins, StandardizedOutput):
+        if isinstance(sequences, StandardizedOutput):
             # Extract sequences from StandardizedOutput
-            if proteins.streams.sequences and len(proteins.streams.sequences) > 0:
-                return proteins.streams.sequences.files
-            elif proteins.streams.structures and len(proteins.streams.structures) > 0:
-                return proteins.streams.structures.files
+            if sequences.streams.sequences and len(sequences.streams.sequences) > 0:
+                return sequences.streams.sequences.files
+            elif sequences.streams.structures and len(sequences.streams.structures) > 0:
+                return sequences.streams.structures.files
             else:
                 raise ValueError("StandardizedOutput has no sequences or structures")
 
-        elif isinstance(proteins, DataStream):
+        elif isinstance(sequences, DataStream):
             # Extract files from DataStream
-            if len(proteins) == 0:
+            if len(sequences) == 0:
                 raise ValueError("DataStream is empty")
-            return proteins.files
+            return sequences.files
 
-        elif isinstance(proteins, list):
+        elif isinstance(sequences, list):
             # Process each item in the list
             resolved = []
-            for item in proteins:
+            for item in sequences:
                 if isinstance(item, StandardizedOutput):
                     # Extract first file from StandardizedOutput
                     if item.streams.structures and len(item.streams.structures) > 0:
@@ -138,10 +138,10 @@ echo "=== Fuse ready ==="
                 elif isinstance(item, str):
                     resolved.append(item)
                 else:
-                    raise ValueError(f"Unsupported protein type in list: {type(item)}")
+                    raise ValueError(f"Unsupported sequence type in list: {type(item)}")
             return resolved
         else:
-            raise ValueError(f"proteins must be List, DataStream, or StandardizedOutput, got {type(proteins)}")
+            raise ValueError(f"sequences must be List, DataStream, or StandardizedOutput, got {type(sequences)}")
 
     def _get_job_base(self) -> str:
         """Get job base name for file naming."""
@@ -149,11 +149,11 @@ echo "=== Fuse ready ==="
 
     def validate_params(self):
         """Validate Fuse-specific parameters."""
-        if not self.input_proteins:
-            raise ValueError("input_proteins parameter is required")
+        if not self.input_sequences:
+            raise ValueError("input_sequences parameter is required")
 
-        if len(self.input_proteins) < 2:
-            raise ValueError("Fuse requires at least 2 proteins")
+        if len(self.input_sequences) < 2:
+            raise ValueError("Fuse requires at least 2 sequences")
 
         if not self.linker:
             raise ValueError("linker sequence is required")
@@ -167,7 +167,7 @@ echo "=== Fuse ready ==="
                 raise ValueError(f"Invalid linker_lengths format: {length_spec}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure input proteins."""
+        """Configure input sequences."""
         self.folders = pipeline_folders
 
     def _predict_sequence_ids(self) -> List[str]:
@@ -206,7 +206,7 @@ echo "=== Fuse ready ==="
         # Generate all combinations using itertools.product
         sequence_ids = []
         for length_combo in product(*length_ranges):
-            lengths_str = "_".join(str(l) for l in length_combo)
+            lengths_str = "-".join(str(l) for l in length_combo)
             seq_id = f"{name_base}_{lengths_str}"
             sequence_ids.append(seq_id)
 
@@ -217,7 +217,7 @@ echo "=== Fuse ready ==="
         config_lines = super().get_config_display()
 
         config_lines.extend([
-            f"PROTEINS: {len(self.input_proteins)} proteins",
+            f"SEQUENCES: {len(self.input_sequences)} sequences",
             f"LINKER: {self.linker[:20]}{'...' if len(self.linker) > 20 else ''}",
             f"LINKER_LENGTHS: {', '.join(self.linker_lengths)}"
         ])
@@ -234,8 +234,8 @@ echo "=== Fuse ready ==="
         Returns:
             Script content as string
         """
-        # Build proteins string for fuse_queries.py
-        proteins_str = ";".join(self.input_proteins)
+        # Build sequences string for fuse_queries.py
+        sequences_str = ";".join(self.input_sequences)
 
         # Format linker lengths for fuse_queries.py (needs L...L wrapping)
         linker_lengths_str = f"L{';'.join(self.linker_lengths)}L"
@@ -246,16 +246,16 @@ echo "=== Fuse ready ==="
         script_content += "# Fuse execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += f"""echo "Using direct protein input"
-PROTEINS_STR="{proteins_str}"
-echo "Proteins: $PROTEINS_STR"
+        script_content += f"""echo "Using direct sequence input"
+SEQUENCES_STR="{sequences_str}"
+echo "Sequences: $SEQUENCES_STR"
 
 echo "Generating fusion sequence combinations"
 echo "Linker: {self.linker}"
 echo "Linker lengths: {linker_lengths_str}"
 
 # Call fuse_queries.py to generate all fusion combinations
-python {self.fuse_queries_py} "{job_base}" "$PROTEINS_STR" "{self.linker}" "{linker_lengths_str}" "{self.queries_csv}" "{self.queries_fasta}"
+python {self.fuse_queries_py} "{job_base}" "$SEQUENCES_STR" "{self.linker}" "{linker_lengths_str}" "{self.queries_csv}" "{self.queries_fasta}"
 
 # Check if files were created successfully
 if [ ! -f "{self.queries_csv}" ]; then
@@ -291,13 +291,13 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
         # Predict sequence IDs for downstream tools
         sequence_ids = self._predict_sequence_ids()
 
-        # Build position column names dynamically based on number of proteins
-        # For n proteins: D1, L1, D2, L2, ..., D(n-1), L(n-1), Dn
-        num_proteins = len(self.input_proteins)
+        # Build position column names dynamically based on number of sequences
+        # For n sequences: S1, L1, S2, L2, ..., S(n-1), L(n-1), Sn
+        num_sequences = len(self.input_sequences)
         position_columns = []
-        for i in range(1, num_proteins + 1):
-            position_columns.append(f"D{i}")
-            if i < num_proteins:
+        for i in range(1, num_sequences + 1):
+            position_columns.append(f"S{i}")
+            if i < num_sequences:
                 position_columns.append(f"L{i}")
 
         # Organize tables by content type
@@ -306,7 +306,7 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
                 name="sequences",
                 path=self.queries_csv,
                 columns=["id", "sequence", "lengths"] + position_columns,
-                description="Fusion sequences with domain/linker positions in PyMOL selection format",
+                description="Fusion sequences with sequence/linker positions in PyMOL selection format",
                 count=len(sequence_ids)
             )
         }
@@ -336,7 +336,7 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
                 "name": self.name,
                 "linker": self.linker,
                 "linker_lengths": self.linker_lengths,
-                "num_proteins": len(self.input_proteins)
+                "num_sequences": len(self.input_sequences)
             }
         })
         return base_dict
