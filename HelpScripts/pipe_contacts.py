@@ -27,106 +27,47 @@ from biopipelines_io import load_datastream, iterate_files
 # Import unified ID mapping utilities
 from id_map_utils import map_table_ids_to_ids
 
-
-class Atom(NamedTuple):
-    """Simple atom representation."""
-    atom_name: str
-    residue_name: str
-    residue_number: int
-    chain_id: str
-    x: float
-    y: float
-    z: float
+# Import PDB parser and selection utilities
+from pdb_parser import Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file, STANDARD_RESIDUES, parse_pymol_ranges
 
 
-def parse_pdb_file(pdb_path: str) -> List[Atom]:
+def parse_pdb_file(pdb_path: str) -> List[_PdbAtom]:
     """
-    Parse PDB file and extract atom information.
+    Parse PDB file, excluding atoms at origin (placeholder atoms).
 
-    Args:
-        pdb_path: Path to PDB file
-
-    Returns:
-        List of Atom objects (excludes atoms at origin which are likely missing/placeholder atoms)
+    Wraps :func:`pdb_parser.parse_pdb_file` and filters out (0,0,0) atoms.
     """
+    all_atoms = _pdb_parse_pdb_file(pdb_path)
+    skipped = 0
     atoms = []
-    skipped_origin_atoms = 0
-
-    with open(pdb_path, 'r') as f:
-        for line in f:
-            if line.startswith('ATOM') or line.startswith('HETATM'):
-                try:
-                    atom_name = line[12:16].strip()
-                    residue_name = line[17:20].strip()
-                    chain_id = line[21:22].strip()
-                    residue_number = int(line[22:26].strip())
-                    x = float(line[30:38].strip())
-                    y = float(line[38:46].strip())
-                    z = float(line[46:54].strip())
-
-                    # Skip atoms at or very near origin (0,0,0) - these are likely missing/placeholder atoms
-                    if abs(x) < 0.001 and abs(y) < 0.001 and abs(z) < 0.001:
-                        skipped_origin_atoms += 1
-                        continue
-
-                    atom = Atom(
-                        atom_name=atom_name,
-                        residue_name=residue_name,
-                        residue_number=residue_number,
-                        chain_id=chain_id,
-                        x=x,
-                        y=y,
-                        z=z
-                    )
-                    atoms.append(atom)
-
-                except (ValueError, IndexError) as e:
-                    print(f"Warning: Could not parse line: {line.strip()}")
-                    continue
-
-    if skipped_origin_atoms > 0:
-        print(f"  - Skipped {skipped_origin_atoms} atoms at origin (0,0,0) - likely missing/placeholder atoms")
-
+    for atom in all_atoms:
+        if abs(atom.x) < 0.001 and abs(atom.y) < 0.001 and abs(atom.z) < 0.001:
+            skipped += 1
+            continue
+        atoms.append(atom)
+    if skipped > 0:
+        print(f"  - Skipped {skipped} atoms at origin (0,0,0) - likely missing/placeholder atoms")
     return atoms
+
+
+# Use pdb_parser.Atom everywhere — alias for convenience in this module
+Atom = _PdbAtom
 
 
 def parse_residue_selection(selection_str: str) -> List[int]:
     """
     Parse residue selection string into list of residue numbers.
 
-    Args:
-        selection_str: Selection string like '10-20+30-40+145'
-
-    Returns:
-        List of residue numbers
+    Delegates range parsing to :func:`pdb_parser.parse_pymol_ranges`.
     """
-    residue_numbers = []
-
     if not selection_str or selection_str.lower() in ['all', 'none', 'null']:
-        return residue_numbers
+        return []
 
-    # Split by '+' to get individual parts
-    parts = selection_str.split('+')
-
-    for part in parts:
-        part = part.strip()
-        if '-' in part:
-            # Range specification like '10-20'
-            try:
-                start, end = part.split('-')
-                start_num = int(start.strip())
-                end_num = int(end.strip())
-                residue_numbers.extend(range(start_num, end_num + 1))
-            except ValueError:
-                print(f"Warning: Could not parse range: {part}")
-        else:
-            # Single residue number
-            try:
-                residue_numbers.append(int(part))
-            except ValueError:
-                print(f"Warning: Could not parse residue number: {part}")
-
-    return sorted(list(set(residue_numbers)))  # Remove duplicates and sort
+    ranges = parse_pymol_ranges(str(selection_str))
+    residues = []
+    for start, end in ranges:
+        residues.extend(range(start, end + 1))
+    return sorted(set(residues))
 
 
 def get_protein_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
@@ -142,15 +83,9 @@ def get_protein_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
     """
     protein_atoms = []
 
-    # Standard amino acid names
-    standard_aa = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLU', 'GLN', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
-
     for atom in atoms:
         # Include standard amino acids, exclude specified ligand
-        if atom.residue_name in standard_aa and atom.residue_name != ligand_name:
+        if atom.res_name in STANDARD_RESIDUES and atom.res_name != ligand_name:
             protein_atoms.append(atom)
 
     return protein_atoms
@@ -167,7 +102,7 @@ def get_ligand_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
     Returns:
         List of ligand atoms
     """
-    return [atom for atom in atoms if atom.residue_name == ligand_name]
+    return [atom for atom in atoms if atom.res_name == ligand_name]
 
 
 def filter_atoms_by_selection(atoms: List[Atom], residue_numbers: List[int]) -> List[Atom]:
@@ -184,7 +119,7 @@ def filter_atoms_by_selection(atoms: List[Atom], residue_numbers: List[int]) -> 
     if not residue_numbers:  # Empty list means no filtering
         return atoms
 
-    return [atom for atom in atoms if atom.residue_number in residue_numbers]
+    return [atom for atom in atoms if atom.res_num in residue_numbers]
 
 
 def calculate_distance(atom1: Atom, atom2: Atom) -> float:
@@ -248,7 +183,7 @@ def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: 
         closest_coords = {}  # Track coordinates for debugging
 
         for protein_atom in protein_atoms:
-            residue_key = (protein_atom.chain_id, protein_atom.residue_number)
+            residue_key = (protein_atom.chain, protein_atom.res_num)
 
             if residue_key not in distances:
                 distances[residue_key] = float('inf')

@@ -25,46 +25,7 @@ from typing import Dict, List, Any, Optional, Tuple
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from biopipelines_io import load_datastream, iterate_files
-from pdb_parser import parse_pdb_file, parse_selection, Atom
-
-
-def parse_atom_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
-    """
-    Parse an atom selection string with support for residue.atom syntax.
-
-    Extends the standard selection syntax to support:
-    - '10.CA' -> alpha carbon of residue 10
-    - '-1.C' -> carbonyl carbon of last residue
-    - 'LIG.C1' -> atom C1 of ligand residue LIG
-
-    Args:
-        selection: Selection string
-        atoms: List of all atoms from PDB
-
-    Returns:
-        List of selected atoms
-    """
-    # Check for residue.atom format (e.g., '10.CA', '-1.C')
-    if '.' in selection:
-        parts = selection.split('.', 1)
-        residue_part = parts[0]
-        atom_name = parts[1]
-
-        # First get residue atoms using standard selection
-        residue_atoms = parse_selection(residue_part, atoms)
-
-        # Then filter by atom name
-        selected = []
-        for atom in residue_atoms:
-            atom_clean = atom.atom_name.strip()
-            if (atom_clean == atom_name or
-                atom_clean.upper() == atom_name.upper()):
-                selected.append(atom)
-
-        return selected
-    else:
-        # Use standard selection parsing
-        return parse_selection(selection, atoms)
+from pdb_parser import parse_pdb_file, Atom, resolve_selection
 
 
 def get_atom_centroid(atoms: List[Atom]) -> Tuple[float, float, float]:
@@ -211,7 +172,7 @@ def calculate_angle(structure_path: str, atom_selections: List[str],
         # Parse each selection and get centroids
         points = []
         for i, selection in enumerate(atom_selections):
-            selected_atoms = parse_atom_selection(selection, atoms)
+            selected_atoms = resolve_selection(selection, atoms)
             print(f"  - Selection '{selection}': {len(selected_atoms)} atoms")
 
             if not selected_atoms:

@@ -338,13 +338,13 @@ python "{self.sequence_py}" --config "{self.config_file}"
             )
         }
 
-        # Create DataStream for sequences
+        # Create DataStream for sequences (value-based — sequence data lives in CSV)
         sequences = DataStream(
             name="sequences",
             ids=self.custom_ids.copy(),
-            files=[self.sequences_fasta],
+            files=[],
             map_table=self.sequences_csv,
-            format="fasta"
+            format="sequence"
         )
 
         return {

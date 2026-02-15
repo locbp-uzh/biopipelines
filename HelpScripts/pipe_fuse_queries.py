@@ -53,15 +53,20 @@ def parse_length_spec(spec: str) -> List[int]:
 
 def extract_sequence(protein_input: str) -> str:
     """
-    Extract sequence from protein input (either a sequence string or PDB file path).
+    Extract sequence from protein input.
+
+    Supported inputs:
+    - Raw amino acid sequence string
+    - Path to a PDB/CIF file
+    - Path to a CSV file with a 'sequence' column (e.g. Sequence map_table)
 
     Args:
-        protein_input: Either an amino acid sequence or path to a PDB file
+        protein_input: Sequence string, PDB path, or CSV path
 
     Returns:
         Amino acid sequence string
     """
-    # Check if it looks like a file path (ends with .pdb or .cif, or contains path separators)
+    # PDB / CIF file
     if protein_input.endswith('.pdb') or protein_input.endswith('.cif'):
         if not os.path.exists(protein_input):
             raise FileNotFoundError(f"PDB file not found: {protein_input}")
@@ -75,6 +80,16 @@ def extract_sequence(protein_input: str) -> str:
         # Concatenate all chains
         full_sequence = ''.join(sequences[chain] for chain in sorted(sequences.keys()))
         return full_sequence
+
+    # CSV file (e.g. Sequence tool map_table)
+    if protein_input.endswith('.csv'):
+        if not os.path.exists(protein_input):
+            raise FileNotFoundError(f"CSV file not found: {protein_input}")
+
+        df = pd.read_csv(protein_input)
+        if 'sequence' in df.columns:
+            return ''.join(df['sequence'].tolist())
+        raise ValueError(f"CSV file has no 'sequence' column: {protein_input}")
 
     # Otherwise treat as sequence string
     return protein_input

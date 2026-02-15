@@ -93,48 +93,71 @@ echo "=== Fuse ready ==="
         # Initialize base class
         super().__init__(**kwargs)
 
+    @staticmethod
+    def _resolve_datastream_item(ds: 'DataStream') -> str:
+        """
+        Resolve a single DataStream to a file path or map_table CSV path.
+
+        For file-based streams returns the first file.
+        For value-based streams (no files) returns the map_table CSV path
+        so that pipe_fuse_queries.py can read sequence data from it.
+        """
+        if len(ds) == 0:
+            raise ValueError("DataStream is empty")
+        if ds.files:
+            return ds.files[0]
+        if ds.map_table:
+            return ds.map_table
+        raise ValueError("DataStream has no files and no map_table")
+
     def _resolve_sequences(self, sequences) -> List[str]:
         """
-        Resolve sequence input to a list of strings (sequences or file paths).
+        Resolve sequence input to a list of strings (sequences, file paths, or CSV paths).
 
         Args:
             sequences: Various input formats
 
         Returns:
-            List of sequence strings (sequences or file paths)
+            List of sequence strings, file paths, or CSV map_table paths
         """
         if isinstance(sequences, StandardizedOutput):
             # Extract sequences from StandardizedOutput
             if sequences.streams.sequences and len(sequences.streams.sequences) > 0:
-                return sequences.streams.sequences.files
+                ds = sequences.streams.sequences
+                if ds.files:
+                    return ds.files
+                # Value-based stream — return one map_table path per ID
+                if ds.map_table:
+                    return [ds.map_table] * len(ds)
+                raise ValueError("StandardizedOutput sequences stream has no files or map_table")
             elif sequences.streams.structures and len(sequences.streams.structures) > 0:
                 return sequences.streams.structures.files
             else:
                 raise ValueError("StandardizedOutput has no sequences or structures")
 
         elif isinstance(sequences, DataStream):
-            # Extract files from DataStream
             if len(sequences) == 0:
                 raise ValueError("DataStream is empty")
-            return sequences.files
+            if sequences.files:
+                return sequences.files
+            # Value-based stream
+            if sequences.map_table:
+                return [sequences.map_table] * len(sequences)
+            raise ValueError("DataStream has no files or map_table")
 
         elif isinstance(sequences, list):
             # Process each item in the list
             resolved = []
             for item in sequences:
                 if isinstance(item, StandardizedOutput):
-                    # Extract first file from StandardizedOutput
                     if item.streams.structures and len(item.streams.structures) > 0:
                         resolved.append(item.streams.structures.files[0])
                     elif item.streams.sequences and len(item.streams.sequences) > 0:
-                        resolved.append(item.streams.sequences.files[0])
+                        resolved.append(self._resolve_datastream_item(item.streams.sequences))
                     else:
                         raise ValueError("StandardizedOutput has no structures or sequences")
                 elif isinstance(item, DataStream):
-                    # Extract first file from DataStream
-                    if len(item) == 0:
-                        raise ValueError("DataStream is empty")
-                    resolved.append(item.files[0])
+                    resolved.append(self._resolve_datastream_item(item))
                 elif isinstance(item, str):
                     resolved.append(item)
                 else:

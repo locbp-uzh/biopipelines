@@ -37,7 +37,7 @@ from pathlib import Path
 
 # Import our native PDB parser
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom
+from pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
 from typing import List, Dict, Tuple
 
 # Import unified I/O utilities
@@ -104,21 +104,15 @@ def get_residue_atoms(atoms: List[Atom], residue_selection: str) -> List[Atom]:
     if not selected_residues:
         raise ValueError(f"Could not parse residue selection: {residue_selection}")
 
-    # Standard amino acid names
-    standard_residues = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
-
     # Select atoms from specified residues
     residue_atoms = []
     for atom in atoms:
-        if atom.res_name in standard_residues and atom.res_num in selected_residues:
+        if atom.res_name in STANDARD_RESIDUES and atom.res_num in selected_residues:
             residue_atoms.append(atom)
 
     if not residue_atoms:
         # Get all available residue numbers for error message
-        available_residues = sorted(set(atom.res_num for atom in atoms if atom.res_name in standard_residues))
+        available_residues = sorted(set(atom.res_num for atom in atoms if atom.res_name in STANDARD_RESIDUES))
         raise ValueError(f"Could not find residues matching selection '{residue_selection}'. Available protein residues: {format_ligandmpnn_selection_from_list(available_residues)}")
 
     print(f"Found residues '{residue_selection}': {len(residue_atoms)} atoms")
@@ -135,15 +129,9 @@ def get_protein_residues(atoms: List[Atom]) -> Dict[int, List[Atom]]:
     Returns:
         Dictionary mapping residue number to list of atoms in that residue
     """
-    # Standard amino acid names
-    standard_residues = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
-
     protein_residues = {}
     for atom in atoms:
-        if atom.res_name in standard_residues:
+        if atom.res_name in STANDARD_RESIDUES:
             res_key = (atom.chain, atom.res_num)  # Use chain+resnum as key to handle multiple chains
             if res_key not in protein_residues:
                 protein_residues[res_key] = []
@@ -186,34 +174,29 @@ def sele_to_list(sele_str: str) -> List[int]:
     """
     Convert selection string to list of residue numbers.
 
+    Thin wrapper around :func:`pdb_parser.parse_pymol_ranges`.
+
     Args:
         sele_str: PyMOL-style selection (e.g., "10-20+30-40")
 
     Returns:
-        List of residue numbers
+        Sorted list of unique residue numbers
     """
     if not sele_str or sele_str == "-" or pd.isna(sele_str):
         return []
 
+    ranges = parse_pymol_ranges(str(sele_str))
     residues = []
-    parts = str(sele_str).split('+')
-
-    for part in parts:
-        part = part.strip()
-        if '-' in part and not part.startswith('-'):
-            # Range like "10-20"
-            start, end = map(int, part.split('-', 1))
-            residues.extend(range(start, end + 1))
-        elif part:
-            # Single residue
-            residues.append(int(part))
-
-    return sorted(set(residues))  # Remove duplicates and sort
+    for start, end in ranges:
+        residues.extend(range(start, end + 1))
+    return sorted(set(residues))
 
 
 def format_ligandmpnn_selection_from_list(res_nums: List[int]) -> str:
     """
     Format residue number list as LigandMPNN selection string.
+
+    Delegates to :func:`pdb_parser.format_pymol_ranges`.
 
     Args:
         res_nums: List of residue numbers
@@ -221,33 +204,7 @@ def format_ligandmpnn_selection_from_list(res_nums: List[int]) -> str:
     Returns:
         Selection string with ranges (e.g., "10-11+15")
     """
-    if not res_nums:
-        return ""
-
-    # Create range strings
-    res_nums = sorted(set(res_nums))
-    ranges = []
-    start = res_nums[0]
-    end = res_nums[0]
-
-    for i in range(1, len(res_nums)):
-        if res_nums[i] == end + 1:
-            end = res_nums[i]
-        else:
-            # Add completed range
-            if start == end:
-                ranges.append(f"{start}")
-            else:
-                ranges.append(f"{start}-{end}")
-            start = end = res_nums[i]
-
-    # Add final range
-    if start == end:
-        ranges.append(f"{start}")
-    else:
-        ranges.append(f"{start}-{end}")
-
-    return "+".join(ranges)
+    return format_pymol_ranges(res_nums)
 
 
 def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict[str, str] = None) -> List[int]:

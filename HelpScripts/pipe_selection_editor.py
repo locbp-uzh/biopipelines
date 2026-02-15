@@ -32,58 +32,16 @@ from typing import List, Tuple, Set
 # Import unified I/O utilities and PDB parser
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from biopipelines_io import load_datastream, iterate_files
-from pdb_parser import parse_pdb_file, Atom
+from pdb_parser import parse_pdb_file, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
 
 
 def parse_pymol_selection(selection: str) -> List[Tuple[int, int]]:
-    """
-    Parse PyMOL selection string into list of (start, end) tuples.
-
-    Args:
-        selection: PyMOL selection string (e.g., "3-45+58-60" or "10+15+20-25")
-
-    Returns:
-        List of (start, end) tuples representing ranges
-    """
-    if not selection or selection.strip() == "":
-        return []
-
-    ranges = []
-    parts = selection.split('+')
-
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-
-        if '-' in part:
-            # Range format: "3-45"
-            range_parts = part.split('-')
-            if len(range_parts) != 2:
-                raise ValueError(f"Invalid range format: {part}")
-            start = int(range_parts[0])
-            end = int(range_parts[1])
-            if start > end:
-                raise ValueError(f"Invalid range {part}: start > end")
-            ranges.append((start, end))
-        else:
-            # Single residue: "10"
-            res_num = int(part)
-            ranges.append((res_num, res_num))
-
-    return ranges
+    """Parse PyMOL selection string. Delegates to :func:`pdb_parser.parse_pymol_ranges`."""
+    return parse_pymol_ranges(selection)
 
 
 def format_pymol_selection(ranges: List[Tuple[int, int]]) -> str:
-    """
-    Format list of (start, end) tuples back to PyMOL selection string.
-
-    Args:
-        ranges: List of (start, end) tuples
-
-    Returns:
-        PyMOL selection string (e.g., "3-45+58-60")
-    """
+    """Format (start, end) tuples as PyMOL selection string."""
     if not ranges:
         return ""
 
@@ -109,16 +67,9 @@ def get_protein_residues(pdb_path: str) -> Set[int]:
     """
     atoms = parse_pdb_file(pdb_path)
 
-    # Standard amino acid names
-    standard_residues = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
-
-    # Extract unique residue numbers for protein residues
     residue_numbers = set()
     for atom in atoms:
-        if atom.res_name in standard_residues:
+        if atom.res_name in STANDARD_RESIDUES:
             residue_numbers.add(atom.res_num)
 
     if not residue_numbers:

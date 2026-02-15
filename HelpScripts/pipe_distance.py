@@ -21,7 +21,7 @@ from typing import Dict, List, Any, Optional, Tuple
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from biopipelines_io import load_datastream, iterate_files
-from pdb_parser import parse_pdb_file, parse_selection, calculate_distances, debug_ligand_atoms
+from pdb_parser import parse_pdb_file, resolve_selection, calculate_distances, debug_ligand_atoms
 
 
 
@@ -56,24 +56,24 @@ def calculate_distance(structure_path: str, atom_selection, residue_selection,
         # Determine mode and parse selections
         if isinstance(atom_selection, list) and len(atom_selection) == 2:
             # Atom-Atom mode
-            selection1 = parse_selection(atom_selection[0], atoms)
-            selection2 = parse_selection(atom_selection[1], atoms)
+            selection1 = resolve_selection(atom_selection[0], atoms)
+            selection2 = resolve_selection(atom_selection[1], atoms)
             print(f"  - Mode: Atom-Atom")
             print(f"  - Atom 1 selection '{atom_selection[0]}': {len(selection1)} atoms")
             print(f"  - Atom 2 selection '{atom_selection[1]}': {len(selection2)} atoms")
 
         elif isinstance(residue_selection, list) and len(residue_selection) == 2:
             # Residue-Residue mode
-            selection1 = parse_selection(residue_selection[0], atoms)
-            selection2 = parse_selection(residue_selection[1], atoms)
+            selection1 = resolve_selection(residue_selection[0], atoms)
+            selection2 = resolve_selection(residue_selection[1], atoms)
             print(f"  - Mode: Residue-Residue")
             print(f"  - Residue 1 selection '{residue_selection[0]}': {len(selection1)} atoms")
             print(f"  - Residue 2 selection '{residue_selection[1]}': {len(selection2)} atoms")
 
         else:
             # Atom-Residue mode (original behavior)
-            selection1 = parse_selection(atom_selection, atoms)
-            selection2 = parse_selection(residue_selection, atoms)
+            selection1 = resolve_selection(atom_selection, atoms)
+            selection2 = resolve_selection(residue_selection, atoms)
             print(f"  - Mode: Atom-Residue")
             print(f"  - Atom selection '{atom_selection}': {len(selection1)} atoms")
             print(f"  - Residue selection '{residue_selection}': {len(selection2)} atoms")

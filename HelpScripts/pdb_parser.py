@@ -11,7 +11,14 @@ Provides atom selection and distance calculation utilities.
 """
 
 import math
-from typing import List, Dict, Any, Optional, Tuple, NamedTuple
+from typing import List, Dict, Any, Optional, Tuple, NamedTuple, Set
+
+
+# Standard amino acid residue names — single source of truth
+STANDARD_RESIDUES = {
+    'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+    'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+}
 
 class Atom(NamedTuple):
     """Represents an atom from PDB file."""
@@ -77,20 +84,20 @@ def get_protein_sequence(atoms: List[Atom]) -> Dict[str, str]:
     Returns:
         Dictionary mapping chain -> sequence
     """
-    # Standard amino acid mapping
+    # Standard amino acid mapping (three-letter to one-letter)
     aa_map = {
         'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
         'GLN': 'Q', 'GLU': 'E', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
         'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
         'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
     }
-    
+
     sequences = {}
-    
+
     # Group by chain and get unique residues
     chain_residues = {}
     for atom in atoms:
-        if atom.res_name in aa_map:  # Only standard amino acids
+        if atom.res_name in STANDARD_RESIDUES:
             if atom.chain not in chain_residues:
                 chain_residues[atom.chain] = {}
             chain_residues[atom.chain][atom.res_num] = atom.res_name
@@ -131,15 +138,9 @@ def select_atoms_by_ligand(atoms: List[Atom], ligand_name: str, atom_name: str =
 
 def debug_ligand_atoms(atoms: List[Atom]) -> None:
     """Debug function to show all ligand residues and atoms."""
-    # Find all non-standard residues (likely ligands)
-    standard_residues = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
-    
     ligand_residues = {}
     for atom in atoms:
-        if atom.res_name not in standard_residues:
+        if atom.res_name not in STANDARD_RESIDUES:
             if atom.res_name not in ligand_residues:
                 ligand_residues[atom.res_name] = set()
             ligand_residues[atom.res_name].add(atom.atom_name.strip())
@@ -164,12 +165,6 @@ def select_atoms_by_residue_number(atoms: List[Atom], residue_numbers: List[int]
     Returns:
         List of selected atoms
     """
-    # Standard amino acid mapping for filtering protein residues
-    standard_residues = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
-
     # Check if any negative indices are used
     has_negative = any(num < 0 for num in residue_numbers)
 
@@ -177,7 +172,7 @@ def select_atoms_by_residue_number(atoms: List[Atom], residue_numbers: List[int]
         # Build a list of unique protein residue numbers (sorted)
         protein_residues = {}
         for atom in atoms:
-            if atom.res_name in standard_residues:
+            if atom.res_name in STANDARD_RESIDUES:
                 key = (atom.chain, atom.res_num)
                 if key not in protein_residues:
                     protein_residues[key] = atom.res_num
@@ -280,23 +275,45 @@ def select_atoms_by_sequence_context(atoms: List[Atom], target_residue: str, seq
     
     return select_atoms_by_residue_number(atoms, target_positions)
 
-def parse_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
+def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
     """
     Parse selection string and return matching atoms.
 
+    Supports:
+    - Residue.atom: ``10.CA``, ``-1.C`` (numeric before dot)
+    - Ligand.atom:  ``LIG.Cl`` (non-numeric before dot)
+    - Sequence context: ``D in IGDWG``
+    - Residue numbers: ``145``, ``-1``
+    - Ranges: ``145-150``
+    - Multiple: ``145+147+150``, ``1+-1``
+    - Atom name fallback
+
     Args:
-        selection: Selection string (e.g., 'LIG.Cl', 'D in IGDWG', '145', '-1')
+        selection: Selection string
         atoms: List of all atoms
 
     Returns:
         List of selected atoms
     """
     if '.' in selection:
-        # Ligand atom selection: 'LIG.Cl'
         parts = selection.split('.', 1)
-        ligand_name = parts[0]
+        prefix = parts[0]
         atom_name = parts[1] if len(parts) > 1 else None
-        return select_atoms_by_ligand(atoms, ligand_name, atom_name)
+
+        if prefix.lstrip('-').isdigit():
+            # Residue.atom: '10.CA', '-1.C'
+            residue_atoms = select_atoms_by_residue_number(atoms, [int(prefix)])
+            if atom_name is None:
+                return residue_atoms
+            selected = []
+            for atom in residue_atoms:
+                atom_clean = atom.atom_name.strip()
+                if atom_clean == atom_name or atom_clean.upper() == atom_name.upper():
+                    selected.append(atom)
+            return selected
+        else:
+            # Ligand.atom: 'LIG.Cl'
+            return select_atoms_by_ligand(atoms, prefix, atom_name)
 
     elif ' in ' in selection:
         # Residue in sequence context: 'D in IGDWG'
@@ -390,3 +407,90 @@ def calculate_distances(atoms1: List[Atom], atoms2: List[Atom], metric: str = "m
         return sum(distances) / len(distances)
     else:
         return min(distances)  # Default to min
+
+
+# ---------------------------------------------------------------------------
+# PyMOL range string helpers (pure string <-> tuple conversion)
+# ---------------------------------------------------------------------------
+
+def parse_pymol_ranges(selection: str) -> List[Tuple[int, int]]:
+    """
+    Parse a PyMOL-style range string into ``(start, end)`` tuples.
+
+    Pure string parsing — no atom/structure dependency.
+
+    Examples:
+        ``"3-45+58-60"``  -> ``[(3, 45), (58, 60)]``
+        ``"10"``          -> ``[(10, 10)]``
+
+    Args:
+        selection: PyMOL selection string
+
+    Returns:
+        List of (start, end) tuples
+    """
+    if not selection or selection.strip() == "":
+        return []
+
+    ranges = []
+    parts = selection.split('+')
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part:
+            range_parts = part.split('-')
+            if len(range_parts) != 2:
+                raise ValueError(f"Invalid range format: {part}")
+            start = int(range_parts[0])
+            end = int(range_parts[1])
+            if start > end:
+                raise ValueError(f"Invalid range {part}: start > end")
+            ranges.append((start, end))
+        else:
+            res_num = int(part)
+            ranges.append((res_num, res_num))
+
+    return ranges
+
+
+def format_pymol_ranges(residue_numbers: List[int]) -> str:
+    """
+    Format a list of residue numbers as a compact ``start-end+...`` string.
+
+    Inverse of :func:`parse_pymol_ranges` (but takes a flat list of ints
+    rather than tuples).
+
+    Args:
+        residue_numbers: List of residue numbers
+
+    Returns:
+        Selection string with merged ranges (e.g., ``"10-11+15"``)
+    """
+    if not residue_numbers:
+        return ""
+
+    res_nums = sorted(set(residue_numbers))
+    ranges: List[str] = []
+    start = res_nums[0]
+    end = res_nums[0]
+
+    for i in range(1, len(res_nums)):
+        if res_nums[i] == end + 1:
+            end = res_nums[i]
+        else:
+            if start == end:
+                ranges.append(f"{start}")
+            else:
+                ranges.append(f"{start}-{end}")
+            start = end = res_nums[i]
+
+    # Final range
+    if start == end:
+        ranges.append(f"{start}")
+    else:
+        ranges.append(f"{start}-{end}")
+
+    return "+".join(ranges)
