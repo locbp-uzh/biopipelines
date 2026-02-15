@@ -24,7 +24,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     apo = Boltz2(proteins=fusions)
     calcium = Ligand("CA")
     holo = Boltz2(proteins=fusions,
-                  ligands=calcium,
+                  ligands=Bundle(calcium,calcium,calcium,calcium),
                   msas=apo)
     dist_apo = Distance(structures=apo,
                         residue=["66", "-173"], 
