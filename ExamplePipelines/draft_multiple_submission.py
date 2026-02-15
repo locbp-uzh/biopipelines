@@ -7,7 +7,6 @@ This pipeline shows how to use boltz2
 """
 
 from biopipelines.pipeline import *
-from biopipelines.entities import * # import PDB, Sequence, Ligand
 from biopipelines.boltz2 import Boltz2
 
 """

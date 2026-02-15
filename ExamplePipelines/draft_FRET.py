@@ -1,9 +1,13 @@
+# Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+#
+# Licensed under the MIT License. See LICENSE file in the project root for details.
+
+# tested:
+
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.fuse import Fuse
 from biopipelines.boltz2 import Boltz2
 from biopipelines.distance import Distance
-from biopipelines.angle import Angle
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
 from biopipelines.pymol import PyMOL
@@ -39,27 +43,24 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                                  Panda.calculate(derived_metrics),
                                  Panda.sort(by="delta_FRET", ascending=False)])
     Plot(Plot.Bar(data=analysis.tables.result,
+                  title="Calcium-Induced FRET Change by Linker Length",
                   x="lengths",
                   y="FRET_E_apo",
                   y_right="FRET_E_holo",
-                  title="Calcium-Induced FRET Change by Linker Length",
                   xlabel="Linker Lengths",
                   ylabel="FRET apo",
                   ylabel_right="FRET holo"))
     best_apo = Panda(tables=[analysis.tables.result],
-                 operations=[Panda.head(1)],
-                 pool=apo)
+                     operations=[Panda.head(1)],
+                     pool=apo)
     best_holo = Panda(tables=[analysis.tables.result],
-                 operations=[Panda.head(1)],
-                 pool=holo)
-    PyMOL(
-        PyMOL.Load(best_apo),
-        PyMOL.Load(best_holo),
-        PyMOL.Color("white"),
-        PyMOL.Color("cyan", selection=fusions.tables.sequences.S1),
-        PyMOL.Color("pink", selection=fusions.tables.sequences.S2),
-        PyMOL.Color("yellow", selection=fusions.tables.sequences.S3),
-        PyMOL.Align(selection=fusions.tables.sequences.S2),
-        session="CaFRET_best"
-    )
+                      operations=[Panda.head(1)],
+                      pool=holo)
+    PyMOL(PyMOL.Load(best_apo),
+          PyMOL.Load(best_holo),
+          PyMOL.Color("white"),
+          PyMOL.Color("cyan", selection=fusions.tables.sequences.S1),
+          PyMOL.Color("pink", selection=fusions.tables.sequences.S2),
+          PyMOL.Color("yellow", selection=fusions.tables.sequences.S3),
+          PyMOL.Align(selection=fusions.tables.sequences.S2))
     

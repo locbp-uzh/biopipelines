@@ -2,10 +2,9 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
-# debugged: 13.2.2026
+# tested: 13.2.2026
 
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.compound_library import CompoundLibrary
 from biopipelines.boltz2 import Boltz2
 from biopipelines.panda import Panda

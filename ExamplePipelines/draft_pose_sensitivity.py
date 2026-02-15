@@ -5,7 +5,6 @@
 # debug 13.02: pose change has to align based on proteins only, FAILED
 
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.mutagenesis import Mutagenesis
 from biopipelines.boltz2 import Boltz2
 from biopipelines.pose_change import PoseChange

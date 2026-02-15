@@ -13,7 +13,6 @@ Demonstrates:
 """
 
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.boltz2 import Boltz2
 
 with Pipeline(project="Examples",

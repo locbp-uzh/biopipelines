@@ -7,7 +7,6 @@ This pipeline shows how to run RFdiffusion, generate sequences with ProteinMPNN,
 """
 
 from biopipelines.pipeline import *
-from biopipelines.entities import * # PDB, Ligand, Sequence
 from biopipelines.rfdiffusion import RFdiffusion
 from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.alphafold import AlphaFold

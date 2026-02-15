@@ -1,5 +1,4 @@
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.boltz2 import Boltz2
 from biopipelines.ligand_mpnn import LigandMPNN
 from biopipelines.distance_selector import DistanceSelector

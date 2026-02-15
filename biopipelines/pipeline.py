@@ -26,6 +26,7 @@ from .config_manager import ConfigManager
 try:
     from .base_config import BaseConfig, ToolOutput
     from .combinatorics import Bundle, Each
+    from .entities import *
 except ImportError:
     # Fallback for direct execution
     import sys
@@ -33,6 +34,7 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput
     from combinatorics import Bundle, Each
+    from entities import *
 
 # Module-level context variable to track active pipeline for auto-registration
 _active_pipeline: contextvars.ContextVar[Optional['Pipeline']] = contextvars.ContextVar('_active_pipeline', default=None)

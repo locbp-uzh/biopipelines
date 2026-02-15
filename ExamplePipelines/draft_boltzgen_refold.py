@@ -9,7 +9,6 @@ and obtain codon-optimized sequences for e coli
 """
 
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.boltz2 import Boltz2
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot

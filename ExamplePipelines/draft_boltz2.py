@@ -3,7 +3,6 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.boltz2 import Boltz2
 from biopipelines.combinatorics import Bundle, Each
 

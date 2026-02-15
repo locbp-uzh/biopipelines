@@ -12,7 +12,6 @@ A classic protein design pipeline: generate novel backbones with RFdiffusion, de
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.rfdiffusion import RFdiffusion
 from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.alphafold import AlphaFold
@@ -62,7 +61,6 @@ Enzyme redesign using RFdiffusion3 for backbone generation, split sequence desig
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.rfdiffusion3 import RFdiffusion3
 from biopipelines.distance_selector import DistanceSelector
 from biopipelines.protein_mpnn import ProteinMPNN
@@ -135,7 +133,6 @@ Comprehensive examples of Boltz2 with various input types and combinatorics (Bun
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.boltz2 import Boltz2
 from biopipelines.combinatorics import Bundle, Each
 
@@ -183,7 +180,6 @@ Multi-cycle iterative optimization: generate sequences with LigandMPNN, profile 
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.ligand_mpnn import LigandMPNN
 from biopipelines.mutation_profiler import MutationProfiler
 from biopipelines.mutation_composer import MutationComposer

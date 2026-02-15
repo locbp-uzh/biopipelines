@@ -10,7 +10,6 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.entities import *
 from biopipelines.rfdiffusion import RFdiffusion
 from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.alphafold import AlphaFold
