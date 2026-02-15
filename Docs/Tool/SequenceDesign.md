@@ -421,3 +421,61 @@ dna = DNAEncoder(
 **Note**: Uses thresholded weighted sampling (codons ≥10‰, fallback to ≥5‰). For multi-organism optimization, uses minimum frequency across organisms. Please cite CoCoPUTs (HIVE) when using.
 
 ---
+
+### RBSDesigner
+
+Designs synthetic ribosome binding sites (RBS) to control protein expression in bacteria. Uses the Salis thermodynamic model to predict translation initiation rates and a simulated annealing optimizer to design RBS sequences matching a target expression level. Requires ViennaRNA for RNA free energy calculations.
+
+**Reference**: Salis, Mirsky & Voigt, *Nat. Biotechnol.* **27**, 946–950 (2009). doi:10.1038/nbt.1568
+
+**Environment**: `rbs_designer` (ViennaRNA from bioconda, requires flexible channel priority)
+
+**Installation**:
+```python
+RBSDesigner.install()
+```
+
+**Parameters**:
+- `sequences`: Union[ToolOutput, StandardizedOutput] (required) — Input DNA sequences (typically from DNAEncoder)
+- `tir`: Union[str, int, float] = "medium" — Target translation initiation rate:
+  - "low" (100 au)
+  - "medium" (1000 au)
+  - "high" (10000 au)
+  - "maximum" (100000 au)
+  - Or any numeric value (au)
+- `pre_sequence`: str = "" — Optional fixed 5'UTR DNA to prepend before the designed RBS
+
+**Tables**:
+- `rbs`:
+
+  | id | dna_sequence | rbs_sequence | full_gene | dg_total | tir_predicted | target_tir | target_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby |
+  |----|-------------|--------------|-----------|----------|---------------|------------|-----------|---------|-------------|----------|------------|---------|------------|
+
+  - `full_gene` = `pre_sequence` + `rbs_sequence` + `dna_sequence` (complete DNA ready for synthesis)
+
+**Example**:
+```python
+from biopipelines.dna_encoder import DNAEncoder
+from biopipelines.rbs_designer import RBSDesigner
+
+# Codon-optimize then design RBS for high expression in E. coli
+dna = DNAEncoder(sequences=proteins, organism="EC")
+rbs = RBSDesigner(sequences=dna, tir="high")
+
+# Design RBS for specific TIR with 5'UTR prefix
+rbs = RBSDesigner(sequences=dna, tir=5000, pre_sequence="AATTAA")
+```
+
+**Thermodynamic model** (Equation 2):
+```
+dG_tot = dG_mRNA:rRNA + dG_start + dG_spacing - dG_standby - dG_mRNA
+```
+- `dG_mRNA:rRNA`: SD / anti-SD hybridization energy (ViennaRNA duplexfold)
+- `dG_start`: Start codon identity (AUG = −1.194, GUG = −0.075 kcal/mol)
+- `dG_spacing`: Penalty for non-optimal SD-to-start-codon distance
+- `dG_standby`: Energy to unfold the 4-nt standby site upstream of SD
+- `dG_mRNA`: Local mRNA folding energy (70 nt window around start codon)
+
+**Note**: RBS design uses simulated annealing with adaptive temperature control (5–20% acceptance rate). Each sequence typically requires thousands of energy evaluations. Computation time scales with the number of input sequences. Please cite Salis et al. 2009 when using.
+
+---

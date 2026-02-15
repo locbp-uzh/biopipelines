@@ -34,6 +34,7 @@ from .angle import Angle
 from .stitch_sequences import StitchSequences
 from .split_chains import SplitChains
 from .dna_encoder import DNAEncoder
+from .rbs_designer import RBSDesigner
 from .load import LoadOutput, LoadOutputs
 from .sequence_metric_correlation import SequenceMetricCorrelation
 from .pymol import PyMOL
@@ -94,6 +95,7 @@ __all__ = [
     'StitchSequences',
     'SplitChains',
     'DNAEncoder',
+    'RBSDesigner',
     'LoadOutput',
     'LoadOutputs',
     'SequenceMetricCorrelation',

@@ -47,6 +47,7 @@ Design and manipulate sequences.
 - [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Sequence combinations
 - [SplitChains](Tool/SequenceDesign.md#splitchains) - Split concatenated sequences
 - [DNAEncoder](Tool/SequenceDesign.md#dnaencoder) - Codon optimization
+- [RBSDesigner](Tool/SequenceDesign.md#rbsdesigner) - Ribosome binding site design
 
 ---
 
