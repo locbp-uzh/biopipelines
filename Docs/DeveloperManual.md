@@ -14,6 +14,7 @@
   - [Output Prediction](#output-prediction)
 - [HelpScript Development](#helpscript-development)
   - [pipe_biopipelines_io Module](#pipe_biopipelines_io-module)
+  - [pdb_parser Module](#pdb_parser-module)
   - [Table References](#table-references)
 - [Code Principles](#code-principles)
 - [Working with Git](#working-with-git)
@@ -337,6 +338,58 @@ for comp_id, values in iterate_values(ds, columns=['smiles', 'name']):
 
 # Get single value
 smiles = get_value(ds, "ligand_001", column="smiles")
+```
+
+### pdb_parser Module
+
+The `pdb_parser.py` module provides PDB parsing and selection utilities for HelpScripts:
+
+```python
+from pdb_parser import (
+    # Data
+    Atom,               # NamedTuple: x, y, z, atom_name, res_name, res_num, chain, element
+    STANDARD_RESIDUES,  # Set of 20 standard amino acid 3-letter codes
+
+    # Parsing
+    parse_pdb_file,     # PDB path → List[Atom]
+    get_protein_sequence, # List[Atom] → Dict[chain, sequence]
+
+    # Selection — single entry point
+    resolve_selection,  # Selection string + atoms → List[Atom]
+
+    # PyMOL range helpers (pure string operations, no atoms needed)
+    parse_pymol_ranges, # "3-45+58-60" → [(3, 45), (58, 60)]
+    format_pymol_ranges, # [3, 4, 5, 10, 11] → "3-5+10-11"
+
+    # Distance
+    calculate_distance,   # Atom, Atom → float
+    calculate_distances,  # List[Atom], List[Atom], metric → float
+)
+```
+
+#### resolve_selection
+
+`resolve_selection(selection, atoms)` is the single function for all atom/residue selection. It handles:
+
+| Syntax | Example | Meaning |
+|--------|---------|---------|
+| Residue number | `145`, `-1` | Select all atoms of residue 145; last residue |
+| Range | `10-20` | Residues 10 through 20 |
+| Multiple | `10+15+20` | Residues 10, 15, and 20 |
+| Residue.atom | `10.CA`, `-1.C` | Alpha-carbon of residue 10; C of last residue |
+| Ligand.atom | `LIG.Cl` | Chlorine atom of ligand LIG |
+| Sequence context | `D in IGDWG` | Aspartate within the IGDWG motif |
+
+#### parse_pymol_ranges / format_pymol_ranges
+
+Pure string ↔ tuple conversion for PyMOL-style range strings. No atoms or structures needed:
+
+```python
+# String → tuples
+parse_pymol_ranges("3-45+58-60")  # [(3, 45), (58, 60)]
+
+# Numbers → string
+format_pymol_ranges([3, 4, 5, 10, 11])  # "3-5+10-11"
 ```
 
 ### Table References

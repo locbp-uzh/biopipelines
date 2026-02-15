@@ -643,6 +643,24 @@ echo "=== Panda ready ==="
                     for old_id in old_ids:
                         self.id_remap[old_id] = new_id
 
+        # Auto-rename for multi-pool mode: when multiple pools are used with
+        # operations that reorder/filter rows (sort, filter, sample, etc.), the
+        # output IDs cannot be predicted at pipeline time because they depend on
+        # runtime data. Auto-renaming ensures deterministic output IDs.
+        if self.use_pool_mode and len(self.pool_outputs) > 1 and not self.rename:
+            has_reordering = any(
+                op.type in ("sort", "filter", "sample", "drop_duplicates")
+                for op in self.operations
+            )
+            if has_reordering:
+                # Derive rename prefix from step folder name (e.g., "010_Panda_Cycle1" -> "Panda_Cycle1")
+                folder_name = os.path.basename(self.output_folder)
+                parts = folder_name.split("_", 1)
+                if len(parts) > 1 and parts[0].isdigit():
+                    self.rename = parts[1]  # e.g., "Panda_Cycle1"
+                else:
+                    self.rename = folder_name
+
         # Configure pool mode - collect all pool folders and file mappings
         if self.use_pool_mode:
             self.pool_folders = []
