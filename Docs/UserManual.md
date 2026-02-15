@@ -4,6 +4,7 @@
 
 - [What is BioPipelines?](#what-is-biopipelines)
 - [Installation](#installation)
+- [Google Colab](#google-colab)
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
   - [Pipeline and SLURM Runtime](#pipeline-and-slurm-runtime)
@@ -66,6 +67,75 @@ ipython kernel install --user --name biopipelines
 ```
 
 Edit config.yaml to fit your cluster configuration.
+
+---
+
+## Google Colab
+
+BioPipelines runs on Google Colab with GPU support out of the box. No conda, no SLURM — tools are installed via `pip` into Colab's existing Python environment.
+
+### Setup
+
+Run these cells at the top of your Colab notebook:
+
+```python
+# Cell 1: Clone and install BioPipelines
+!git clone https://github.com/locbp-uzh/biopipelines
+%cd biopipelines
+!pip install -e .
+```
+
+BioPipelines automatically detects the Colab environment and loads `colab.yaml` instead of `config.yaml`. This sets `env_manager: "pip"`, which means:
+
+- Environment activation becomes a no-op (everything runs in Colab's single Python environment)
+- Tool installation uses `pip install` instead of creating conda environments
+- SLURM-related settings are disabled
+
+### Installing Tools
+
+Install the tools you need using `.install()`. This only needs to run once per Colab session (completed steps are skipped on re-run):
+
+```python
+from biopipelines.pipeline import *
+from biopipelines.rfdiffusion import RFdiffusion
+from biopipelines.protein_mpnn import ProteinMPNN
+from biopipelines.alphafold import AlphaFold
+
+with Pipeline("Setup", "install", description="Install tools"):
+    RFdiffusion.install()
+    ProteinMPNN.install()
+    AlphaFold.install()
+```
+
+### Running Pipelines
+
+After installation, pipelines work exactly as described in the rest of this manual. On-the-fly execution is enabled automatically in notebooks:
+
+```python
+Pipeline("Examples", "RFD-ProteinMPNN-AF2",
+         description="Redesign of N terminus domain of lysozyme")
+
+lysozyme = PDB("168L")
+rfd = RFdiffusion(pdb=lysozyme,
+                  contigs='50-70/A81-140',
+                  num_designs=3)
+pmpnn = ProteinMPNN(structures=rfd, num_sequences=2)
+af = AlphaFold(proteins=pmpnn)
+```
+
+### Key Differences from Cluster
+
+| | Cluster | Google Colab |
+|---|---|---|
+| **Environment manager** | mamba/conda | pip |
+| **Execution** | SLURM or on-the-fly | On-the-fly only |
+| **GPU** | Configured via `Resources()` | Colab's assigned GPU |
+| **Output location** | Configured in `config.yaml` | `./BioPipelines/` |
+| **Config file** | `config.yaml` | `colab.yaml` (auto-detected) |
+| **Tool install** | Creates conda environments | `pip install` into existing env |
+
+!!! note "Colab session limits"
+    Colab sessions are ephemeral. Installed tools and generated outputs are lost when the runtime disconnects. Mount Google Drive or download results before the session ends.
 
 ---
 

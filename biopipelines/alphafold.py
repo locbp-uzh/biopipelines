@@ -46,6 +46,18 @@ class AlphaFold(BaseConfig):
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         repo_dir = folders.get("AlphaFold", "")
         parent_dir = os.path.dirname(repo_dir)
+        if env_manager == "pip":
+            skip = "" if force_reinstall else """# Check if already installed
+if python -c "import colabfold" 2>/dev/null; then
+    echo "AlphaFold (ColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing AlphaFold (ColabFold via pip) ==="
+{skip}pip install "colabfold[alphafold]"
+
+echo "=== AlphaFold installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ]; then
     echo "AlphaFold (LocalColabFold) already installed, skipping. Use force_reinstall=True to reinstall."

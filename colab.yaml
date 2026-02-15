@@ -1,0 +1,53 @@
+# BioPipelines Configuration — Google Colab
+# This config is auto-detected when running inside Google Colab.
+# It uses pip for package management instead of conda/mamba.
+
+# Folder Configuration
+folders:
+  base:
+    home: "/root"
+    data: "/content/data"
+    scratch: "/content/scratch"
+    biopipelines: "<cwd>"
+    biopipelines_output: "/content/BioPipelines"
+
+  infrastructure:
+    HelpScripts: "<biopipelines>/HelpScripts"
+    PDBs: "<biopipelines>/PDBs"
+    Ligands: "<biopipelines>/Ligands"
+    cache: "/content/cache"
+    containers: "/content/containers"
+
+  repositories:
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RFdiffusion3: "<data>/rfdiffusion3"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    LigandMPNN: "<data>/LigandMPNN"
+    AlphaFold: "<data>/localcolabfold"
+
+    Boltz: "<data>/boltz"
+    BoltzGen: "<data>/boltzgen"
+    GhostFold: "<data>/ghostfold"
+    MMseqs2: "<data>/mmseqs"
+    ModelForge: "<data>/modelforge"
+
+  cache:
+    BoltzCache: "<cache>/Boltz"
+    BoltzGenCache: "<cache>/BoltzGen"
+    ColabFoldDatabases: "<cache>/colabfold_databases"
+    MMseqs2Databases: "<cache>/mmseqs2_databases"
+
+  server:
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
+
+# Cluster / Site Configuration
+cluster:
+  emails: {}
+
+  # pip mode: environments are managed via pip in the existing Python env
+  env_manager: "pip"
+
+  container_executor: "apptainer"
+
+  slurm_modules: []

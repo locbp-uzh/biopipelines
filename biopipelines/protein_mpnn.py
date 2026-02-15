@@ -38,9 +38,9 @@ if [ -d "{repo_dir}" ]; then
     exit 0
 fi
 """
+        # ProteinMPNN is git clone only — same for pip and conda
         return f"""echo "=== Installing ProteinMPNN ==="
-{skip}echo "Requires SE3nv (installed with RFdiffusion.install())"
-cd {parent_dir}
+{skip}cd {parent_dir}
 git clone https://github.com/dauparas/ProteinMPNN.git
 
 echo "=== ProteinMPNN installation complete ==="

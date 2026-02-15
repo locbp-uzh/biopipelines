@@ -44,37 +44,59 @@ with Pipeline(project="Examples",
 
 ## Quick Start
 
-### Installation
+=== "Cluster (conda/mamba)"
 
-```bash
-git clone https://github.com/locbp-uzh/biopipelines
-cd biopipelines
-mamba env create -f Environments/biopipelines.yaml
-mamba activate biopipelines
-pip install -e .
-ipython kernel install --user --name biopipelines
-```
+    ```bash
+    git clone https://github.com/locbp-uzh/biopipelines
+    cd biopipelines
+    mamba env create -f Environments/biopipelines.yaml
+    mamba activate biopipelines
+    pip install -e .
+    ipython kernel install --user --name biopipelines
+    ```
 
-Some clusters are configured to give low memory to the default bash shell, which might result in failure of the above procedure (std_alloc). You can avoid this by running the following prior to the installation:
+    Some clusters are configured to give low memory to the default bash shell, which might result in failure of the above procedure (std_alloc). You can avoid this by running the following prior to the installation:
 
-```bash
-srun --mem=16GB --time=1:00:00 --pty bash
-```
+    ```bash
+    srun --mem=16GB --time=1:00:00 --pty bash
+    ```
 
-Edit `config.yaml` to match your cluster configuration.
+    Edit `config.yaml` to match your cluster configuration.
 
-Individual models have to be installed separately. We provide a pipeline (ExamplePipelines/install_tools.py) to install all the tools used in the repository at once, but please refer to the respective official documentation in case your particular cluster configuration requires adjustments:
+    Individual models have to be installed separately. We provide a pipeline (ExamplePipelines/install_tools.py) to install all the tools used in the repository at once, but please refer to the respective official documentation in case your particular cluster configuration requires adjustments:
 
-```bash
-cd ExamplePipelines
-biopipelines-submit install_tools.py
-```
+    ```bash
+    cd ExamplePipelines
+    biopipelines-submit install_tools.py
+    ```
 
-### Run an Example
+    ### Run an Example
 
-```bash
-biopipelines-submit rfd_pmpnn_af2.py
-```
+    ```bash
+    biopipelines-submit rfd_pmpnn_af2.py
+    ```
+
+=== "Google Colab"
+
+    Run these two cells at the top of your Colab notebook:
+
+    ```python
+    # Cell 1: Install BioPipelines
+    !git clone https://github.com/locbp-uzh/biopipelines
+    %cd biopipelines
+    !pip install -e .
+    ```
+
+    ```python
+    # Cell 2: Install the tools you need (one-time per session)
+    from biopipelines.pipeline import *
+    from biopipelines.rfdiffusion import RFdiffusion
+
+    with Pipeline("Setup", "install", description="Install tools"):
+        RFdiffusion.install()
+    ```
+
+    The Colab configuration (`colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `pip` into Colab's existing Python environment. See [Google Colab](UserManual.md#google-colab) in the User Guide for details.
 
 ---
 

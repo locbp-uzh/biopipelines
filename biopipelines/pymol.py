@@ -65,6 +65,18 @@ class PyMOL(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
+        if env_manager == "pip":
+            skip = "" if force_reinstall else """# Check if already installed
+if python -c "import pymol" 2>/dev/null; then
+    echo "PyMOL already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing PyMOL (pip) ==="
+{skip}pip install pymol-open-source
+
+echo "=== PyMOL installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_manager} env list 2>/dev/null | grep -q "ProteinEnv"; then
     echo "PyMOL (ProteinEnv) already installed, skipping. Use force_reinstall=True to reinstall."

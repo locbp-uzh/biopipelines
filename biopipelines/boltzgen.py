@@ -47,6 +47,18 @@ class BoltzGen(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        if env_manager == "pip":
+            skip = "" if force_reinstall else """# Check if already installed
+if python -c "import boltzgen" 2>/dev/null; then
+    echo "BoltzGen already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing BoltzGen (pip) ==="
+{skip}pip install boltzgen
+
+echo "=== BoltzGen installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_manager} env list 2>/dev/null | grep -q "boltzgen"; then
     echo "BoltzGen already installed, skipping. Use force_reinstall=True to reinstall."

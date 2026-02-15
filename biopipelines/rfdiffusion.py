@@ -33,6 +33,42 @@ class RFdiffusion(BaseConfig):
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("RFdiffusion", "")
         parent_dir = os.path.dirname(repo_dir)
+        if env_manager == "pip":
+            skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
+    echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing RFdiffusion (pip) ==="
+{skip}cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/RosettaCommons/RFdiffusion.git
+fi
+cd {repo_dir}
+
+# Download model weights
+mkdir -p models && cd models
+wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt
+wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt
+wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/60f09a193fb5e5ccdc4980417708dbab/Complex_Fold_base_ckpt.pt
+wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/74f51cfb8b440f50d70878e05361d8f0/InpaintSeq_ckpt.pt
+wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/76d00716416567174cdb7ca96e208296/InpaintSeq_Fold_ckpt.pt
+wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/5532d2571571dcf28e1f96f5ea73f707/ActiveSite_ckpt.pt
+cd ..
+
+# Install dependencies via pip
+pip install -r {biopipelines}/Environments/SE3nv_pip_requirements.txt
+
+# Install SE3Transformer and RFdiffusion
+cd env/SE3Transformer
+pip install --no-cache-dir -r requirements.txt
+python setup.py install
+cd ../..
+pip install -e .
+
+echo "=== RFdiffusion installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] && {env_manager} env list 2>/dev/null | grep -q "SE3nv"; then
     echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."

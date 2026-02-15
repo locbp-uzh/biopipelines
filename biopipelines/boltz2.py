@@ -51,6 +51,18 @@ class Boltz2(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        if env_manager == "pip":
+            skip = "" if force_reinstall else """# Check if already installed
+if python -c "import boltz" 2>/dev/null; then
+    echo "Boltz2 already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing Boltz2 (pip) ==="
+{skip}pip install boltz -U
+
+echo "=== Boltz2 installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_manager} env list 2>/dev/null | grep -q "Boltz2Env"; then
     echo "Boltz2 already installed, skipping. Use force_reinstall=True to reinstall."

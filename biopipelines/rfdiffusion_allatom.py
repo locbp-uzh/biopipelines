@@ -46,6 +46,24 @@ if [ -d "{repo_dir}" ] && [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ]; th
     exit 0
 fi
 """
+        if env_manager == "pip":
+            return f"""echo "=== Installing RFdiffusion-AllAtom (pip) ==="
+{skip}cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git
+fi
+cd {repo_dir}
+
+# Download model weights
+wget -nc http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt
+
+# Initialize git submodules
+git submodule init
+git submodule update
+
+echo "=== RFdiffusion-AllAtom installation complete ==="
+echo "Requires RFdiffusion.install() for SE3nv dependencies (pip mode)"
+"""
         return f"""echo "=== Installing RFdiffusion-AllAtom ==="
 {skip}cd {parent_dir}
 git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git

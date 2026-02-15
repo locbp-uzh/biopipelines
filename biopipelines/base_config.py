@@ -200,9 +200,17 @@ class BaseConfig(ABC):
 
         Tools that need multiple environments (like DynamicBind) can access
         them via activate_environment(index=N).
+
+        In pip mode (e.g. Google Colab), no environments are needed since
+        everything runs in the pre-existing Python environment.
         """
         config_manager = ConfigManager()
         env_config = config_manager.get_environment(self.TOOL_NAME)
+
+        if env_config is None and config_manager.get_env_manager() == "pip":
+            # pip mode with no environments configured: nothing to activate
+            self.environments = []
+            return
 
         if env_config is None:
             # Default to biopipelines if not configured
@@ -216,7 +224,10 @@ class BaseConfig(ABC):
 
     def activate_environment(self, index: int = 0, name: Optional[str] = None) -> str:
         """
-        Generate bash script snippet to activate a conda environment.
+        Generate bash script snippet to activate an environment.
+
+        For pip mode (e.g. Google Colab), returns a no-op comment since
+        everything runs in the pre-existing Python environment.
 
         Args:
             index: Index of the environment to activate (default: 0, the first/primary environment)
@@ -228,6 +239,12 @@ class BaseConfig(ABC):
         Raises:
             IndexError: If index is out of range for configured environments
         """
+        config_manager = ConfigManager()
+
+        # pip mode: no environment activation needed
+        if config_manager.get_env_manager() == "pip":
+            return "# pip mode: no environment activation needed\n\n"
+
         if name is not None:
             env_name = name
         else:
@@ -238,7 +255,6 @@ class BaseConfig(ABC):
                 )
             env_name = self.environments[index]
 
-        config_manager = ConfigManager()
         shell_hook = config_manager.get_shell_hook_command()
         activate_cmd = config_manager.get_activate_command(env_name)
 

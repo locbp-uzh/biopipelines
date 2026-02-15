@@ -47,6 +47,18 @@ class MutationProfiler(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        if env_manager == "pip":
+            skip = "" if force_reinstall else """# Check if already installed
+if python -c "import seaborn; import logomaker" 2>/dev/null; then
+    echo "MutationEnv deps already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing MutationEnv deps (pip) ==="
+{skip}pip install seaborn matplotlib pandas logomaker scipy
+
+echo "=== MutationEnv installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_manager} env list 2>/dev/null | grep -q "MutationEnv"; then
     echo "MutationEnv already installed, skipping. Use force_reinstall=True to reinstall."

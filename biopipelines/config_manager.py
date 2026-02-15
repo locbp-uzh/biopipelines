@@ -41,14 +41,26 @@ class ConfigManager:
     @staticmethod
     def _get_config_path() -> str:
         """
-        Get the path to the config.yaml file.
+        Get the path to the config file.
+
+        On Google Colab, looks for colab.yaml first; falls back to config.yaml.
 
         Returns:
-            Absolute path to config.yaml in the repository root
+            Absolute path to the config file in the repository root
         """
         # Get repository root (assumes this file is in biopipelines/)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(script_dir)
+
+        # Auto-detect Google Colab
+        try:
+            import google.colab  # noqa: F401
+            colab_path = os.path.join(repo_root, "colab.yaml")
+            if os.path.exists(colab_path):
+                return colab_path
+        except ImportError:
+            pass
+
         return os.path.join(repo_root, "config.yaml")
 
     def _load_config(self) -> Dict[str, Any]:
@@ -75,7 +87,7 @@ class ConfigManager:
                 config = yaml.safe_load(f)
 
             # Validate required sections
-            required_sections = ['folders', 'environments']
+            required_sections = ['folders']
             for section in required_sections:
                 if section not in config:
                     raise ValueError(f"config.yaml missing required section: {section}")
@@ -178,13 +190,18 @@ class ConfigManager:
     def get_shell_hook_command(self) -> str:
         """Get the shell hook initialization command derived from env_manager."""
         mgr = self.get_env_manager()
+        if mgr == "pip":
+            return ""
         if mgr == "conda":
             return 'eval "$(conda shell.bash hook)"'
         return f'eval "$({mgr} shell hook --shell bash)"'
 
     def get_activate_command(self, env_name: str) -> str:
         """Get the activate command for a specific environment."""
-        return f'{self.get_env_manager()} activate {env_name}'
+        mgr = self.get_env_manager()
+        if mgr == "pip":
+            return ""
+        return f'{mgr} activate {env_name}'
 
     def get_module_load_line(self) -> str:
         """Get the full 'module load ...' line for SLURM scripts, or empty string if none."""

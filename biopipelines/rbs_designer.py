@@ -51,6 +51,18 @@ class RBSDesigner(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
+        if env_manager == "pip":
+            skip = "" if force_reinstall else """# Check if already installed
+if python -c "import RNA; import Bio" 2>/dev/null; then
+    echo "RBSDesigner deps already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing RBSDesigner (pip) ==="
+{skip}pip install ViennaRNA biopython
+
+echo "=== RBSDesigner installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_manager} env list 2>/dev/null | grep -q "rbs_designer"; then
     echo "RBSDesigner environment already installed, skipping. Use force_reinstall=True to reinstall."

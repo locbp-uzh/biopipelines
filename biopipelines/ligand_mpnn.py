@@ -32,6 +32,25 @@ class LigandMPNN(BaseConfig):
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         repo_dir = folders.get("LigandMPNN", "")
         parent_dir = os.path.dirname(repo_dir)
+        if env_manager == "pip":
+            skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ]; then
+    echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing LigandMPNN (pip) ==="
+{skip}cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/dauparas/LigandMPNN.git
+fi
+cd {repo_dir}
+bash get_model_params.sh "./model_params"
+
+pip install -r requirements.txt
+
+echo "=== LigandMPNN installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] && {env_manager} env list 2>/dev/null | grep -q "ligandmpnn_env"; then
     echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
