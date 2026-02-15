@@ -30,7 +30,7 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 | `drop_duplicates(subset)` | `Panda.drop_duplicates(subset="sequence")` |
 | `merge(on, prefixes)` | `Panda.merge(on="id", prefixes=["a_", "b_"])` |
 | `concat(fill, add_source)` | `Panda.concat(fill="")` |
-| `calculate(exprs)` | `Panda.calculate({"delta": "a - b"})` |
+| `calculate(exprs)` | `Panda.calculate({"delta": "a - b", "k2": "cos(angle) ** 2"})` |
 | `groupby(by, agg)` | `Panda.groupby("cat", {"score": "mean"})` |
 | `select_columns(cols)` | `Panda.select_columns(["id", "score"])` |
 | `drop_columns(cols)` | `Panda.drop_columns(["temp"])` |
@@ -80,6 +80,20 @@ merged = Panda(
     operations=[
         Panda.merge(on="id", prefixes=["apo_", "holo_"]),
         Panda.calculate({"delta": "holo_affinity - apo_affinity"})
+    ]
+)
+
+# Calculate with math functions (cos, sin, sqrt, log, exp, radians, degrees, pi, ...)
+# Expressions can reference columns defined earlier in the same calculate call
+fret = Panda(
+    tables=[distances.tables.result, angles.tables.angles],
+    operations=[
+        Panda.merge(on="id"),
+        Panda.calculate({
+            "kappa2": "cos(orientation) ** 2",
+            "R0_eff": "49.0 * (kappa2 / 0.6667) ** (1.0 / 6.0)",
+            "efficiency": "1 / (1 + (distance / R0_eff) ** 6)"
+        })
     ]
 )
 

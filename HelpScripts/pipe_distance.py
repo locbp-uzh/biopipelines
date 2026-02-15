@@ -116,9 +116,11 @@ def analyze_distances(config_data: Dict[str, Any]) -> None:
     residue_selection = config_data['residue_selection']
     distance_metric = config_data['distance_metric']
     metric_name = config_data['metric_name']
+    unit = config_data.get('unit', 'angstrom')
     output_csv = config_data['output_csv']
 
     print(f"Analyzing distances in {len(structures_ds.ids)} structures")
+    print(f"Output unit: {unit}")
 
     # Determine and display mode
     if isinstance(atom_selection, list):
@@ -150,14 +152,19 @@ def analyze_distances(config_data: Dict[str, Any]) -> None:
         print(f"\nProcessing structure {i+1}/{total}: {structure_path}")
         print(f"  - ID: {structure_id}")
 
-        # Calculate distance
+        # Calculate distance (always in angstrom internally)
         distance = calculate_distance(structure_path, atom_selection, residue_selection, distance_metric)
+
+        # Convert to nm if requested
+        if distance is not None and unit == 'nm':
+            distance = distance / 10.0
 
         # Store result using proper ID from DataStream
         result = {
             'id': structure_id,
             'source_structure': structure_path,
-            metric_name: distance
+            metric_name: distance,
+            'unit': unit
         }
         results.append(result)
 

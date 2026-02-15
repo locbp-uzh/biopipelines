@@ -257,12 +257,14 @@ def analyze_angles(config_data: Dict[str, Any]) -> None:
     atom_selections = config_data['atom_selections']
     is_torsion = config_data['is_torsion']
     metric_name = config_data['metric_name']
+    unit = config_data.get('unit', 'degrees')
     output_csv = config_data['output_csv']
 
     angle_type = "torsional" if is_torsion else "bond"
     print(f"Analyzing {angle_type} angles in {len(structures_ds.ids)} structures")
     print(f"Atom selections: {' -> '.join(atom_selections)}")
     print(f"Output column: {metric_name}")
+    print(f"Output unit: {unit}")
 
     # Process each structure
     results = []
@@ -277,14 +279,19 @@ def analyze_angles(config_data: Dict[str, Any]) -> None:
         print(f"\nProcessing structure {i+1}/{total}: {structure_path}")
         print(f"  - ID: {structure_id}")
 
-        # Calculate angle
+        # Calculate angle (always in degrees internally)
         angle = calculate_angle(structure_path, atom_selections, is_torsion)
+
+        # Convert to radians if requested
+        if angle is not None and unit == 'radians':
+            angle = math.radians(angle)
 
         # Store result
         result = {
             'id': structure_id,
             'source_structure': structure_path,
-            metric_name: angle
+            metric_name: angle,
+            'unit': unit
         }
         results.append(result)
 

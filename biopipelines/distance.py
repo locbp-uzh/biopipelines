@@ -60,6 +60,7 @@ echo "=== Distance ready ==="
                  residue: Union[str, List[str], None] = None,
                  method: str = "min",
                  metric_name: str = None,
+                 unit: str = "angstrom",
                  **kwargs):
         """
         Initialize atom-residue distance analysis tool.
@@ -70,6 +71,7 @@ echo "=== Distance ready ==="
             residue: Residue selection string, list of two selections, or None
             method: How to calculate distance ("min", "max", "mean", "closest")
             metric_name: Custom name for the distance column (default: "distance")
+            unit: Output unit, "angstrom" (default) or "nm"
 
         Selection Modes:
             1. Atom-Residue mode: atom=str, residue=str
@@ -103,6 +105,11 @@ echo "=== Distance ready ==="
         self.residue_selection = residue
         self.distance_metric = method
         self.custom_metric_name = metric_name
+        self.unit = unit
+
+        # Validate unit
+        if unit not in ("angstrom", "nm"):
+            raise ValueError(f"unit must be 'angstrom' or 'nm', got '{unit}'")
 
         # Validate selection mode
         if atom is None and residue is None:
@@ -168,7 +175,8 @@ echo "=== Distance ready ==="
 
         config_lines.extend([
             f"DISTANCE METRIC: {self.distance_metric}",
-            f"OUTPUT METRIC: {self.get_metric_name()}"
+            f"OUTPUT METRIC: {self.get_metric_name()}",
+            f"UNIT: {self.unit}"
         ])
 
         return config_lines
@@ -200,6 +208,7 @@ echo "=== Distance ready ==="
             "residue_selection": self.residue_selection,
             "distance_metric": self.distance_metric,
             "metric_name": self.get_metric_name(),
+            "unit": self.unit,
             "output_csv": self.analysis_csv
         }
 
@@ -232,8 +241,8 @@ fi
             "distances": TableInfo(
                 name="distances",
                 path=self.analysis_csv,
-                columns=["id", "source_structure", self.get_metric_name()],
-                description=f"Distance analysis: {self.atom_selection} to {self.residue_selection}",
+                columns=["id", "source_structure", self.get_metric_name(), "unit"],
+                description=f"Distance analysis ({self.unit}): {self.atom_selection} to {self.residue_selection}",
                 count=len(self.structures_stream)
             )
         }
@@ -264,7 +273,8 @@ fi
                 "atom_selection": self.atom_selection,
                 "residue_selection": self.residue_selection,
                 "distance_metric": self.distance_metric,
-                "metric_name": self.get_metric_name()
+                "metric_name": self.get_metric_name(),
+                "unit": self.unit
             }
         })
         return base_dict

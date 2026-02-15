@@ -182,11 +182,15 @@ echo "=== Plot ready ==="
     def Bar(data: Union[StandardizedOutput, TableInfo],
             x: str,
             y: str,
+            y_right: str = None,
             title: str = None,
             xlabel: str = None,
             ylabel: str = None,
+            ylabel_right: str = None,
             x_name: str = None,
             y_name: str = None,
+            color_left: str = None,
+            color_right: str = None,
             figsize: Tuple[float, float] = (8, 6),
             x_tick_rotation: float = 0,
             y_tick_rotation: float = 0,
@@ -194,15 +198,22 @@ echo "=== Plot ready ==="
         """
         Create bar chart for categorical X axis.
 
+        Supports an optional second y column plotted on a secondary (right) y-axis,
+        producing side-by-side bars at each x position with independent scales.
+
         Args:
             data: Data source (tool output or table)
             x: Column name for categories (X axis)
-            y: Column name for values (Y axis)
+            y: Column name for values (left Y axis)
+            y_right: Column name for values on secondary right Y axis (optional)
             title: Plot title (optional)
             xlabel: X axis label (defaults to x_name or column name)
-            ylabel: Y axis label (defaults to y_name or column name)
+            ylabel: Left Y axis label (defaults to y_name or column name)
+            ylabel_right: Right Y axis label (defaults to y_right column name)
             x_name: Display name for X variable (alternative to xlabel)
             y_name: Display name for Y variable (alternative to ylabel)
+            color_left: Color for left-axis bars (default: steelblue)
+            color_right: Color for right-axis bars (default: coral)
             figsize: Figure size as (width, height) in inches
             x_tick_rotation: Rotation angle for x-axis tick labels in degrees
             y_tick_rotation: Rotation angle for y-axis tick labels in degrees
@@ -211,9 +222,12 @@ echo "=== Plot ready ==="
         Returns:
             PlotOperation for bar chart
         """
-        return PlotOperation("bar", data=data, x=x, y=y,
+        return PlotOperation("bar", data=data, x=x, y=y, y_right=y_right,
                             title=title, xlabel=xlabel, ylabel=ylabel,
-                            x_name=x_name, y_name=y_name, figsize=figsize,
+                            ylabel_right=ylabel_right,
+                            x_name=x_name, y_name=y_name,
+                            color_left=color_left, color_right=color_right,
+                            figsize=figsize,
                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
                             grid=grid)
 

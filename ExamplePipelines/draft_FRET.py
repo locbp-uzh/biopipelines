@@ -6,12 +6,13 @@ from biopipelines.distance import Distance
 from biopipelines.angle import Angle
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
+from biopipelines.pymol import PyMOL
 
 with Pipeline(project="Biosensor", job="CaFRET"):
     Resources(gpu="A100", time="8:00:00", memory="16GB")
-    donor = Sequence("MVSKGEELFTGV...")     # ECFP
-    cam = PDB("1CFD")                       # Calmodulin
-    acceptor = Sequence("MVSKGEELFTG...")   # EYFP
+    donor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTWGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYISHNVYITADKQKNGIKANFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITLGMDELYK")     # ECFP
+    cam = PDB("1CFD") # Calmodulin
+    acceptor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFGYGLQCFARYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSYQSALSKDPNEKRDHMVLLEFVTAAGITLGMDELYK")   # EYFP
     fusions = Fuse(proteins=[donor, cam, acceptor],
                    name="CaFRET",
                    linker="GSGAG",
@@ -27,24 +28,38 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     dist_holo = Distance(structures=holo,
                          residue=["66", "-173"], 
                          metric_name="FRET_distance_holo")
-    dihedral_apo = Angle(structures=apo,
-                         atoms=["64.NE1", "66.CA", "-173.OH", "-173.CA"],
-                         metric_name="domain_orientation_apo")
-    dihedral_holo = Angle(structures=holo,
-                          atoms=["64.NE1", "66.CA", "-173.OH", "-173.CA"],
-                          metric_name="domain_orientation_holo")
-    derived_metrics = {"delta_distance": "FRET_distance_holo - FRET_distance_apo",
-                       "delta_orientation": "domain_orientation_holo - domain_orientation_apo"}
-    analysis = Panda(tables=[dist_apo.tables.distances, 
-                             dist_holo.tables.distances,
-                             dihedral_apo.tables.angles, 
-                             dihedral_holo.tables.angles],
+    R0 = 49.0  # Forster radius for CFP-YFP pair (Angstrom), assumes kappa2 = 2/3
+    derived_metrics = {"FRET_E_apo": f"1 / (1 + (FRET_distance_apo / {R0}) ** 6)",
+                       "FRET_E_holo": f"1 / (1 + (FRET_distance_holo / {R0}) ** 6)",
+                       "delta_FRET": "FRET_E_holo - FRET_E_apo"}
+    analysis = Panda(tables=[fusions.tables.sequences,
+                             dist_apo.tables.distances,
+                             dist_holo.tables.distances],
                      operations=[Panda.merge(on="id"),
-                                 Panda.calculate(derived_metrics)])
-    Plot(Plot.Scatter(data=analysis.tables.result,
-                      x="delta_distance", 
-                      y="delta_orientation",
-                      title="Calcium-Induced FRET Geometry Change",
-                      xlabel="Distance Change, Apo to Holo (A)",
-                      ylabel="Orientation Change (deg)", 
-                      grid=True))
+                                 Panda.calculate(derived_metrics),
+                                 Panda.sort(by="delta_FRET", ascending=False)])
+    Plot(Plot.Bar(data=analysis.tables.result,
+                  x="lengths",
+                  y="FRET_E_apo",
+                  y_right="FRET_E_holo",
+                  title="Calcium-Induced FRET Change by Linker Length",
+                  xlabel="Linker Lengths",
+                  ylabel="FRET apo",
+                  ylabel_right="FRET holo"))
+    best_apo = Panda(tables=[analysis.tables.result],
+                 operations=[Panda.head(1)],
+                 pool=apo)
+    best_holo = Panda(tables=[analysis.tables.result],
+                 operations=[Panda.head(1)],
+                 pool=holo)
+    PyMOL(
+        PyMOL.Load(best_apo),
+        PyMOL.Load(best_holo),
+        PyMOL.Color("white"),
+        PyMOL.Color("cyan", selection=analysis.tables.result.D1),
+        PyMOL.Color("pink", selection=analysis.tables.result.D2),
+        PyMOL.Color("yellow", selection=analysis.tables.result.D3),
+        PyMOL.Align(selection=analysis.tables.result.D2),
+        session="CaFRET_best"
+    )
+    

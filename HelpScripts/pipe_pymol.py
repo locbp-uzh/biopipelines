@@ -294,30 +294,35 @@ class PyMOLSessionBuilder:
 
     def execute_color(self, op: Dict[str, Any]):
         """
-        Execute Color operation - color structures by selection.
+        Execute Color operation - color structures or selections.
+
+        When structures is None, applies to all loaded objects.
+        When selection is None, colors the entire object(s).
 
         Args:
-            op: Operation dict with structures, selection, color
+            op: Operation dict with color, optional structures and selection
         """
         structures_ref = op.get("structures")
         selection_ref = op.get("selection")
         color = op.get("color", "white")
 
-        if not structures_ref:
-            raise ValueError("Color operation requires structures")
+        # If no structures specified, use all loaded objects
+        if structures_ref:
+            structures = self._resolve_structures(structures_ref)
+        else:
+            structures = [{"id": sid} for sid in self.loaded_objects]
 
-        structures = self._resolve_structures(structures_ref)
-
-        # Resolve selection - can be a fixed string or table column reference
+        # Resolve selection - can be a fixed string, table column reference, or None
         if isinstance(selection_ref, dict) and selection_ref.get("type") == "table_column":
             id_to_selection = self._resolve_table_column(selection_ref)
             print(f"Color: Applying color '{color}' with per-structure selections")
         elif isinstance(selection_ref, str):
-            # Fixed selection for all structures
             id_to_selection = {s["id"]: selection_ref for s in structures}
             print(f"Color: Applying color '{color}' with fixed selection '{selection_ref}'")
         else:
-            raise ValueError(f"Invalid selection format: {selection_ref}")
+            # No selection - color entire objects
+            id_to_selection = None
+            print(f"Color: Applying color '{color}' to all")
 
         for struct in structures:
             struct_id = struct["id"]
@@ -328,19 +333,22 @@ class PyMOLSessionBuilder:
 
             pymol_name = self.loaded_objects[struct_id]
 
-            if struct_id not in id_to_selection:
+            if id_to_selection is None:
+                # Color entire object
+                pymol_selection = pymol_name
+            elif struct_id not in id_to_selection:
                 print(f"  Skipping {struct_id} - no selection value")
                 continue
-
-            selection_value = id_to_selection[struct_id]
-
-            # Build PyMOL selection: object and resi selection
-            # Selection value is in PyMOL format like "1-40" or "41" or "42-78"
-            pymol_selection = f"{pymol_name} and resi {selection_value}"
+            else:
+                selection_value = id_to_selection[struct_id]
+                pymol_selection = f"{pymol_name} and resi {selection_value}"
 
             try:
                 cmd.color(color, pymol_selection)
-                print(f"  Colored {pymol_name} resi {selection_value} -> {color}")
+                if id_to_selection and struct_id in id_to_selection:
+                    print(f"  Colored {pymol_name} resi {id_to_selection[struct_id]} -> {color}")
+                else:
+                    print(f"  Colored {pymol_name} -> {color}")
             except Exception as e:
                 print(f"  Error coloring {pymol_name}: {e}")
 
@@ -587,14 +595,22 @@ class PyMOLSessionBuilder:
         Execute Align operation - align all loaded objects.
 
         Args:
-            op: Operation dict with method and optional target
+            op: Operation dict with method, optional target, and optional selection
         """
         method = op.get("method", "align")
         target = op.get("target")
+        selection_ref = op.get("selection")
 
         if len(self.loaded_objects) <= 1:
             print("Align: Only one structure loaded, skipping alignment")
             return
+
+        # Resolve selection to per-ID mapping if provided
+        id_to_selection = None
+        if isinstance(selection_ref, dict) and selection_ref.get("type") == "table_column":
+            id_to_selection = self._resolve_table_column(selection_ref)
+        elif isinstance(selection_ref, str):
+            id_to_selection = {sid: selection_ref for sid in self.loaded_objects}
 
         # Determine target for alignment
         if target:
@@ -604,23 +620,41 @@ class PyMOLSessionBuilder:
         else:
             target_name = list(self.loaded_objects.values())[0]
 
-        print(f"Align: Aligning to {target_name} using method '{method}'")
+        # Build target selection string
+        target_id = None
+        for sid, name in self.loaded_objects.items():
+            if name == target_name:
+                target_id = sid
+                break
+        if id_to_selection and target_id and target_id in id_to_selection:
+            target_sel = f"{target_name} and resi {id_to_selection[target_id]}"
+        else:
+            target_sel = target_name
+
+        sel_desc = f" on selection" if id_to_selection else ""
+        print(f"Align: Aligning to {target_name} using method '{method}'{sel_desc}")
 
         for struct_id, pymol_name in self.loaded_objects.items():
             if pymol_name == target_name:
                 continue
 
+            # Build mobile selection string
+            if id_to_selection and struct_id in id_to_selection:
+                mobile_sel = f"{pymol_name} and resi {id_to_selection[struct_id]}"
+            else:
+                mobile_sel = pymol_name
+
             try:
                 if method == "align":
-                    result = cmd.align(pymol_name, target_name)
+                    result = cmd.align(mobile_sel, target_sel)
                     rmsd = result[0] if isinstance(result, tuple) else 0
                     print(f"  Aligned {pymol_name}: RMSD = {rmsd:.2f}")
                 elif method == "super":
-                    result = cmd.super(pymol_name, target_name)
+                    result = cmd.super(mobile_sel, target_sel)
                     rmsd = result[0] if isinstance(result, tuple) else 0
                     print(f"  Super-aligned {pymol_name}: RMSD = {rmsd:.2f}")
                 elif method == "cealign":
-                    result = cmd.cealign(target_name, pymol_name)
+                    result = cmd.cealign(target_sel, mobile_sel)
                     rmsd = result.get("RMSD", 0) if isinstance(result, dict) else 0
                     print(f"  CE-aligned {pymol_name}: RMSD = {rmsd:.2f}")
                 else:

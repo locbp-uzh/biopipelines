@@ -77,6 +77,19 @@ class Panda(BaseConfig):
             ]
         )
 
+        # Calculate with math functions (cos, sin, sqrt, log, exp, radians, degrees, pi, ...)
+        fret = Panda(
+            tables=[distances.tables.result, angles.tables.angles],
+            operations=[
+                Panda.merge(on="id"),
+                Panda.calculate({
+                    "kappa2": "cos(orientation) ** 2",
+                    "R0_eff": "49.0 * (kappa2 / 0.6667) ** (1.0 / 6.0)",
+                    "efficiency": "1 / (1 + (distance / R0_eff) ** 6)"
+                })
+            ]
+        )
+
         # Multi-table concat (replaces ConcatenateTables)
         combined = Panda(
             tables=[cycle0.tables.sequences, cycle1.tables.sequences],
@@ -277,6 +290,12 @@ echo "=== Panda ready ==="
         """
         Add calculated columns using pandas eval expressions.
 
+        Supports standard arithmetic (+, -, *, /, **, %) and math functions:
+        cos, sin, tan, arccos, arcsin, arctan, arctan2, sqrt, abs, log, exp,
+        radians, degrees, pi.
+
+        Expressions can reference columns defined earlier in the same calculate call.
+
         Args:
             exprs: Dictionary mapping new column names to expressions
 
@@ -286,7 +305,10 @@ echo "=== Panda ready ==="
         Example:
             Panda.calculate({
                 "delta": "holo_affinity - apo_affinity",
-                "normalized": "score / max_score"
+                "normalized": "score / max_score",
+                "angle_rad": "radians(angle_deg)",
+                "kappa2": "cos(angle_rad) ** 2",
+                "efficiency": "1 / (1 + (distance / R0_eff) ** 6)"
             })
         """
         return Operation(type="calculate", params={"exprs": exprs})

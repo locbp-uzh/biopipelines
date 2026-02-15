@@ -262,16 +262,23 @@ class PlotBuilder:
         """
         Execute Bar operation - create bar chart.
 
+        Supports an optional second y column on a secondary (right) y-axis,
+        rendering side-by-side bars at each x position with independent scales.
+
         Args:
-            op: Operation dict with data, x, y, title, etc.
+            op: Operation dict with data, x, y, y_right, title, etc.
             output_path: Path to save the plot
         """
         data_ref = op.get("data")
         x_col = op.get("x")
         y_col = op.get("y")
+        y_right_col = op.get("y_right")
         title = op.get("title")
         xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
+        ylabel_right = op.get("ylabel_right") or (y_right_col if y_right_col else None)
+        color_left = op.get("color_left", "steelblue")
+        color_right = op.get("color_right", "coral")
         figsize = tuple(op.get("figsize", [8, 6]))
         x_tick_rotation = op.get("x_tick_rotation", 0)
         y_tick_rotation = op.get("y_tick_rotation", 0)
@@ -284,24 +291,55 @@ class PlotBuilder:
             raise ValueError(f"Column '{x_col}' not found in data. Available: {list(df.columns)}")
         if y_col not in df.columns:
             raise ValueError(f"Column '{y_col}' not found in data. Available: {list(df.columns)}")
+        if y_right_col and y_right_col not in df.columns:
+            raise ValueError(f"Column '{y_right_col}' not found in data. Available: {list(df.columns)}")
 
         fig, ax = plt.subplots(figsize=figsize)
 
         # Aggregate by category if multiple values per category
+        agg_cols = [y_col] + ([y_right_col] if y_right_col else [])
         if df[x_col].duplicated().any():
-            agg_df = df.groupby(x_col)[y_col].mean().reset_index()
+            agg_df = df.groupby(x_col)[agg_cols].mean().reset_index()
         else:
-            agg_df = df[[x_col, y_col]]
+            agg_df = df[[x_col] + agg_cols].copy()
 
-        x_positions = range(len(agg_df))
-        ax.bar(x_positions, agg_df[y_col], color='#1f77b4', edgecolor='white', alpha=0.8)
+        x_positions = np.arange(len(agg_df))
 
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(agg_df[x_col])
+        if y_right_col:
+            # Dual-axis mode: side-by-side bars
+            bar_width = 0.35
+            ax.bar(x_positions - bar_width / 2, agg_df[y_col],
+                   bar_width, color=color_left, edgecolor='white', alpha=0.8, label=ylabel)
+            ax.set_ylabel(ylabel, fontsize=10, color=color_left)
+            ax.tick_params(axis='y', labelcolor=color_left)
 
-        self._apply_style(ax, title, xlabel, ylabel,
-                         x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
-                         grid=grid)
+            ax2 = ax.twinx()
+            ax2.bar(x_positions + bar_width / 2, agg_df[y_right_col],
+                    bar_width, color=color_right, edgecolor='white', alpha=0.8, label=ylabel_right)
+            ax2.set_ylabel(ylabel_right, fontsize=10, color=color_right)
+            ax2.tick_params(axis='y', labelcolor=color_right)
+            ax2.spines['top'].set_visible(False)
+
+            ax.set_xticks(x_positions)
+            ax.set_xticklabels(agg_df[x_col])
+
+            # Combined legend
+            lines_left, labels_left = ax.get_legend_handles_labels()
+            lines_right, labels_right = ax2.get_legend_handles_labels()
+            ax.legend(lines_left + lines_right, labels_left + labels_right, loc='upper right')
+
+            self._apply_style(ax, title, xlabel, None,
+                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                             grid=grid)
+        else:
+            # Single-axis mode (original behavior)
+            ax.bar(x_positions, agg_df[y_col], color=color_left, edgecolor='white', alpha=0.8)
+            ax.set_xticks(x_positions)
+            ax.set_xticklabels(agg_df[x_col])
+
+            self._apply_style(ax, title, xlabel, ylabel,
+                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                             grid=grid)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -315,12 +353,13 @@ class PlotBuilder:
         print(f"  Exported data: {csv_path}")
 
         # Record metadata
+        y_columns = y_col + (f", {y_right_col}" if y_right_col else "")
         self.metadata.append({
             "filename": os.path.basename(output_path),
-            "type": "bar",
+            "type": "bar" + (" (dual-axis)" if y_right_col else ""),
             "title": title or "",
             "x_column": x_col,
-            "y_column": y_col,
+            "y_column": y_columns,
             "data_sources": self._get_data_source_name(data_ref)
         })
 

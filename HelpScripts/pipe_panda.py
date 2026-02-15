@@ -147,14 +147,27 @@ def execute_rename(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
 
 def execute_calculate(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    """Add calculated columns."""
+    """Add calculated columns.
+
+    Supports math functions (cos, sin, tan, sqrt, abs, log, exp, radians, degrees,
+    arccos, arcsin, arctan, arctan2) via numpy, available directly in expressions.
+    """
     exprs = params.get("exprs", {})
     df = df.copy()
+
+    # Expose numpy math functions for use in eval expressions
+    math_funcs = {
+        'cos': np.cos, 'sin': np.sin, 'tan': np.tan,
+        'arccos': np.arccos, 'arcsin': np.arcsin, 'arctan': np.arctan, 'arctan2': np.arctan2,
+        'sqrt': np.sqrt, 'abs': np.abs, 'log': np.log, 'exp': np.exp,
+        'radians': np.radians, 'degrees': np.degrees,
+        'pi': np.pi,
+    }
 
     for col_name, expr in exprs.items():
         validate_expression(expr)
         try:
-            df[col_name] = df.eval(expr)
+            df[col_name] = df.eval(expr, engine='python', local_dict=math_funcs)
             print(f"  Calculate: {col_name} = {expr}")
         except Exception as e:
             print(f"  Warning: Failed to calculate '{col_name}': {e}")

@@ -47,12 +47,16 @@ class PyMOL(BaseConfig):
     columns for per-structure selections and naming.
 
     Example:
+        # Color by domain and align on calmodulin (D2)
         PyMOL(
             PyMOL.Names(prefix="sensor", basename=fuse.tables.sequences.lengths, suffix="parts"),
-            PyMOL.Load(folded),
-            PyMOL.Color(folded, selection=fuse.tables.sequences.D1, color="white"),
-            PyMOL.Color(folded, selection=fuse.tables.sequences.L1, color="orange"),
-            PyMOL.Align("align")
+            PyMOL.Load(apo),
+            PyMOL.Load(holo),
+            PyMOL.Color("marine", selection=fuse.tables.sequences.D1),
+            PyMOL.Color("gray50", selection=fuse.tables.sequences.L1),
+            PyMOL.Color("white", selection=fuse.tables.sequences.D2),
+            PyMOL.Color("orange"),  # color everything else
+            PyMOL.Align(selection=fuse.tables.sequences.D2),
         )
     """
 
@@ -146,22 +150,23 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
         return PyMOLOperation("load", structures=structures)
 
     @staticmethod
-    def Color(structures: Union[StandardizedOutput, DataStream],
-              selection: Union[Tuple[TableInfo, str], str],
-              color: str) -> PyMOLOperation:
+    def Color(color: str,
+              structures: Union[StandardizedOutput, DataStream, None] = None,
+              selection: Union[Tuple[TableInfo, str], str, None] = None) -> PyMOLOperation:
         """
-        Color a selection on structures.
+        Color structures or selections.
 
-        For each structure, uses its ID to:
-        1. Look up the PyMOL name from the current naming map
-        2. Look up the selection value from the table column
-        Then applies: color {color}, {pymol_name} and resi {selection}
+        Can be used in several ways:
+        - Color(color="marine") - color all loaded objects
+        - Color(color="marine", selection="resi 1-40") - color a fixed selection on all objects
+        - Color(color="marine", selection=fuse.tables.sequences.D1) - per-structure selection on all objects
+        - Color(color="marine", structures=apo, selection=...) - restrict to specific structures
 
         Args:
-            structures: Tool output containing structures to color
-            selection: Table column reference for per-structure selection
-                       (e.g., fuse.tables.sequences.D1) or fixed selection string
             color: PyMOL color name (e.g., "white", "marine", "orange")
+            structures: Tool output containing structures to color (optional, defaults to all loaded)
+            selection: Table column reference for per-structure selection
+                       (e.g., fuse.tables.sequences.D1) or fixed selection string (optional)
 
         Returns:
             PyMOLOperation for coloring
@@ -228,20 +233,26 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                               show_mutations=show_mutations)
 
     @staticmethod
-    def Align(method: str = "align", target: Optional[str] = None) -> PyMOLOperation:
+    def Align(method: str = "align", target: Optional[str] = None,
+              selection: Optional[Union[Tuple[TableInfo, str], str]] = None) -> PyMOLOperation:
         """
         Align all loaded objects.
 
         If target is not specified, aligns all objects to the first loaded object.
+        If selection is provided, alignment is restricted to matching residues
+        (e.g., align only on a specific domain).
 
         Args:
             method: Alignment method - "align", "super", or "cealign"
             target: Target object name for alignment (default: first loaded)
+            selection: Optional residue selection to restrict alignment to.
+                       Table column reference (e.g., fuse.tables.sequences.D2)
+                       or fixed selection string (e.g., "resi 100-250")
 
         Returns:
             PyMOLOperation for alignment
         """
-        return PyMOLOperation("align", method=method, target=target)
+        return PyMOLOperation("align", method=method, target=target, selection=selection)
 
     @staticmethod
     def Show(structures: Union[StandardizedOutput, DataStream, None] = None,
@@ -513,6 +524,11 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                 structures = op.params.get("structures")
                 if structures is not None and structures not in self._structure_sources:
                     self._structure_sources.append(structures)
+
+            elif op.op_type == "align":
+                selection = op.params.get("selection")
+                if isinstance(selection, tuple):
+                    self._table_references.append(selection)
 
             elif op.op_type == "coloralign":
                 reference = op.params.get("reference")

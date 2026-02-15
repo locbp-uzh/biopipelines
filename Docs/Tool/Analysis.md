@@ -16,12 +16,13 @@ Measures distances between specific atoms and residues in structures. Useful for
 - `residue`: str (required) - Residue selection (e.g., 'D in IGDWG', '145', 'resn ALA')
 - `method`: str = "min" - Distance calculation method (min, max, mean, closest)
 - `metric_name`: str = None - Custom name for distance column in output (default: "distance")
+- `unit`: str = "angstrom" - Output unit: "angstrom" (default) or "nm"
 
 **Tables**:
 - `distances`:
 
-  | id | source_structure | {metric_name} |
-  |----|------------------|---------------|
+  | id | source_structure | {metric_name} | unit |
+  |----|------------------|---------------|------|
 
 **Example**:
 ```python
@@ -49,6 +50,7 @@ Calculates bond angles (3 atoms) or torsional/dihedral angles (4 atoms) between 
 - `structures`: Union[ToolOutput, StandardizedOutput] (required) - Input structures
 - `atoms`: List[str] (required) - List of 3 or 4 atom selections
 - `metric_name`: str = None - Custom name for angle column (default: "angle" or "torsion")
+- `unit`: str = "degrees" - Output unit: "degrees" or "radians"
 
 **Selection Syntax**:
 Same as Distance, with additional support for `residue.atom` format:
@@ -60,12 +62,12 @@ Same as Distance, with additional support for `residue.atom` format:
 **Tables**:
 - `angles`:
 
-  | id | source_structure | {metric_name} |
-  |----|------------------|---------------|
+  | id | source_structure | {metric_name} | unit |
+  |----|------------------|---------------|------|
 
 **Angle Types**:
-- **3 atoms (A-B-C)**: Bond angle at B in degrees (0-180°)
-- **4 atoms (A-B-C-D)**: Torsional angle in degrees (-180° to 180°)
+- **3 atoms (A-B-C)**: Bond angle at B (0-180° or 0-π rad)
+- **4 atoms (A-B-C-D)**: Torsional angle (-180° to 180° or -π to π rad)
 
 **Example**:
 ```python
@@ -103,6 +105,14 @@ chi1 = Angle(
 ligand_angle = Angle(
     structures=boltz,
     atoms=['LIG.C1', 'LIG.C2', 'LIG.C3']
+)
+
+# Output in radians (for use with cos/sin in Panda.calculate)
+orientation = Angle(
+    structures=boltz,
+    atoms=['64.NE1', '66.CA', '-173.OH', '-173.CA'],
+    metric_name="orientation",
+    unit="radians"
 )
 ```
 

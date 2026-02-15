@@ -33,8 +33,10 @@ class Angle(BaseConfig):
     Takes structures and atom selections as input, outputs CSV with angle metrics.
 
     Supports two modes:
-    - 3 atoms (A-B-C): Calculate bond angle at B (in degrees)
-    - 4 atoms (A-B-C-D): Calculate torsional/dihedral angle (in degrees, -180 to 180)
+    - 3 atoms (A-B-C): Calculate bond angle at B
+    - 4 atoms (A-B-C-D): Calculate torsional/dihedral angle
+
+    Output unit is configurable: "degrees" (default) or "radians".
 
     Commonly used for:
     - Backbone phi/psi angle analysis
@@ -62,6 +64,7 @@ echo "=== Angle ready ==="
                  structures: Union[DataStream, StandardizedOutput],
                  atoms: List[str],
                  metric_name: str = None,
+                 unit: str = "degrees",
                  **kwargs):
         """
         Initialize angle analysis tool.
@@ -70,6 +73,7 @@ echo "=== Angle ready ==="
             structures: Input structures as DataStream or StandardizedOutput
             atoms: List of 3 or 4 atom selection strings
             metric_name: Custom name for the angle column (default: "angle" or "torsion")
+            unit: Output unit, "degrees" (default) or "radians"
 
         Selection Syntax (same as Distance):
             Atom selections:
@@ -110,12 +114,17 @@ echo "=== Angle ready ==="
 
         self.atom_selections = atoms
         self.custom_metric_name = metric_name
+        self.unit = unit
 
         # Validate atom count
         if not isinstance(atoms, list):
             raise ValueError("atoms must be a list of selection strings")
         if len(atoms) not in [3, 4]:
             raise ValueError(f"atoms must contain exactly 3 or 4 selections, got {len(atoms)}")
+
+        # Validate unit
+        if unit not in ("degrees", "radians"):
+            raise ValueError(f"unit must be 'degrees' or 'radians', got '{unit}'")
 
         # Determine angle type
         self.is_torsion = len(atoms) == 4
@@ -151,6 +160,7 @@ echo "=== Angle ready ==="
             config_lines.append(f"ATOM {i+1}: {selection}")
 
         config_lines.append(f"OUTPUT METRIC: {self.get_metric_name()}")
+        config_lines.append(f"UNIT: {self.unit}")
 
         return config_lines
 
@@ -180,6 +190,7 @@ echo "=== Angle ready ==="
             "atom_selections": self.atom_selections,
             "is_torsion": self.is_torsion,
             "metric_name": self.get_metric_name(),
+            "unit": self.unit,
             "output_csv": self.analysis_csv
         }
 
@@ -216,8 +227,8 @@ fi
             "angles": TableInfo(
                 name="angles",
                 path=self.analysis_csv,
-                columns=["id", "source_structure", self.get_metric_name()],
-                description=f"{angle_type}: {atoms_desc}",
+                columns=["id", "source_structure", self.get_metric_name(), "unit"],
+                description=f"{angle_type} ({self.unit}): {atoms_desc}",
                 count=len(self.structures_stream)
             )
         }
@@ -238,7 +249,8 @@ fi
             "angle_params": {
                 "is_torsion": self.is_torsion,
                 "atom_selections": self.atom_selections,
-                "metric_name": self.get_metric_name()
+                "metric_name": self.get_metric_name(),
+                "unit": self.unit
             }
         })
         return base_dict

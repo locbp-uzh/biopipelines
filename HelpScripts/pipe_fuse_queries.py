@@ -142,7 +142,7 @@ def generate_fusion_sequences(
 
         # Build result dict
         # Format lengths string
-        lengths_str = "_".join(str(l) for l in length_combo)
+        lengths_str = "-".join(str(l) for l in length_combo)
 
         # Build sequence ID
         seq_id = f"{name_base}_{lengths_str}" if name_base else f"fused_{lengths_str}"
