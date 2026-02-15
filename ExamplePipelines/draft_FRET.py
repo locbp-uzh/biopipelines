@@ -58,9 +58,9 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                       pool=holo)
     PyMOL(PyMOL.Load(best_apo),
           PyMOL.Load(best_holo),
+          PyMOL.Align(selection=fusions.tables.sequences.S2),
           PyMOL.Color("white"),
           PyMOL.Color("cyan", selection=fusions.tables.sequences.S1),
           PyMOL.Color("pink", selection=fusions.tables.sequences.S2),
-          PyMOL.Color("yellow", selection=fusions.tables.sequences.S3),
-          PyMOL.Align(selection=fusions.tables.sequences.S2))
+          PyMOL.Color("yellow", selection=fusions.tables.sequences.S3))
     
