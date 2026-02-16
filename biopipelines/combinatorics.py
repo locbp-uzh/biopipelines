@@ -511,19 +511,17 @@ def predict_output_ids_with_provenance(
 
     # If no iterated axes, return single bundled name
     if not iterated_axes:
-        provenance = {name: ids for name, ids in pure_bundle_axes}
+        provenance = {name: ["+".join(ids)] for name, ids in pure_bundle_axes}
         return [bundled_name], provenance
 
     # If single iterated axis, return its IDs directly (no join needed)
     if len(iterated_axes) == 1:
         iter_name, iter_ids = iterated_axes[0]
         provenance = {iter_name: list(iter_ids)}
-        # Add pure bundle axes: repeat their IDs for every output
+        # Add pure bundle axes: repeat a joined representation for every output
         for bundle_name, bundle_ids in pure_bundle_axes:
-            if len(bundle_ids) == 1:
-                provenance[bundle_name] = list(bundle_ids) * len(iter_ids)
-            else:
-                provenance[bundle_name] = list(bundle_ids)
+            bundled_value = "+".join(bundle_ids)
+            provenance[bundle_name] = [bundled_value] * len(iter_ids)
         return list(iter_ids), provenance
 
     # Multiple iterated axes: always full cartesian product, no shortcuts
@@ -544,12 +542,10 @@ def predict_output_ids_with_provenance(
         output_ids = new_ids
         provenance = new_provenance
 
-    # Add pure bundle axes: repeat their IDs for every output
+    # Add pure bundle axes: repeat a joined representation for every output
     for bundle_name, bundle_ids in pure_bundle_axes:
-        if len(bundle_ids) == 1:
-            provenance[bundle_name] = list(bundle_ids) * len(output_ids)
-        else:
-            provenance[bundle_name] = list(bundle_ids)
+        bundled_value = "+".join(bundle_ids)
+        provenance[bundle_name] = [bundled_value] * len(output_ids)
 
     return output_ids, provenance
 
