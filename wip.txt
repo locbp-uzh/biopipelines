@@ -2,4 +2,9 @@
 - installation of biopipelines without conda/mamba, pip package
 - Panda.filter("RMSD < 1.5 and plddt > 80") 1 vs 2, different reasons?
 - Mutagenesis mutations vs mutation<N>
-- ids
+- ids general utils. merge(on=["id","compounds.ids"]). boltz default = "auto" possibly "proteins.ids|ligands.ids". 
+? boltz affinity = ligand vs DNA/RNA?? check for multiple copies of same ligand!!
+- ReMap ids function
+- LoadOutput should change the base directory of every filter. It should accept the folder (it anyway contains .expected output)
+- Log file in each folder too
+

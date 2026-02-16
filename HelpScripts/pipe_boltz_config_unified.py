@@ -335,6 +335,42 @@ def add_contacts_to_config(config: Dict, contacts: List[Dict]) -> Dict:
     return config
 
 
+def get_ligand_identity(ligand_entry: Dict) -> Optional[str]:
+    """Get the identity string (smiles or ccd) of a ligand entry for duplicate detection."""
+    lig = ligand_entry.get('ligand', {})
+    if lig.get('smiles'):
+        return f"smiles:{lig['smiles']}"
+    if lig.get('ccd'):
+        return f"ccd:{lig['ccd']}"
+    return None
+
+
+def has_duplicate_ligand(config: Dict, binder_chain_id: str) -> bool:
+    """
+    Check if the affinity binder ligand has duplicate copies in the config.
+
+    Boltz does not allow affinity calculation for a ligand that appears
+    multiple times in the same config. Returns True if duplicates are found.
+    """
+    # Find the binder ligand entry and its identity
+    binder_identity = None
+    for entry in config.get('sequences', []):
+        if 'ligand' in entry and entry['ligand'].get('id') == binder_chain_id:
+            binder_identity = get_ligand_identity(entry)
+            break
+
+    if binder_identity is None:
+        return False
+
+    # Count how many ligands share the same identity
+    count = 0
+    for entry in config.get('sequences', []):
+        if 'ligand' in entry and get_ligand_identity(entry) == binder_identity:
+            count += 1
+
+    return count > 1
+
+
 def build_protein_entry(protein: Dict, chain_id: str, msa_file: Optional[str]) -> Dict:
     """Build a protein entry for Boltz2 config."""
     entry = {
@@ -505,7 +541,10 @@ def generate_configs(
                         config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
 
                 if args.affinity:
-                    config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+                    if has_duplicate_ligand(config, first_ligand_chain):
+                        print(f"Warning: Affinity binder ligand (chain {first_ligand_chain}) has multiple copies in config '{ligand['id']}' - skipping affinity")
+                    else:
+                        config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
 
                 config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain)
                 config = add_pocket_to_config(config, args, first_ligand_chain)
@@ -532,7 +571,10 @@ def generate_configs(
                 config['sequences'].append(build_ligand_entry(ligand, chain_id))
 
             if args.affinity and first_ligand_chain:
-                config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+                if has_duplicate_ligand(config, first_ligand_chain):
+                    print(f"Warning: Affinity binder ligand (chain {first_ligand_chain}) has multiple copies in config 'bundled_complex' - skipping affinity")
+                else:
+                    config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
 
             config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'C')
             if first_ligand_chain:
@@ -558,7 +600,10 @@ def generate_configs(
             config['sequences'].append(build_ligand_entry(ligand, ligand_chain_id))
 
             if args.affinity:
-                config['properties'] = [{'affinity': {'binder': ligand_chain_id}}]
+                if has_duplicate_ligand(config, ligand_chain_id):
+                    print(f"Warning: Affinity binder ligand (chain {ligand_chain_id}) has multiple copies in config '{ligand['id']}' - skipping affinity")
+                else:
+                    config['properties'] = [{'affinity': {'binder': ligand_chain_id}}]
 
             config = add_covalent_linkage_to_config(config, covalent_linkage, ligand_chain_id)
             config = add_pocket_to_config(config, args, ligand_chain_id)
@@ -611,7 +656,10 @@ def generate_configs(
                             config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
 
                     if args.affinity:
-                        config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+                        if has_duplicate_ligand(config, first_ligand_chain):
+                            print(f"Warning: Affinity binder ligand (chain {first_ligand_chain}) has multiple copies in config '{protein['id']}_{ligand['id']}' - skipping affinity")
+                        else:
+                            config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
 
                     config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain)
                     config = add_pocket_to_config(config, args, first_ligand_chain)
@@ -652,7 +700,10 @@ def generate_configs(
                     config['sequences'].append(build_ligand_entry(ligand, chain_id))
 
                 if args.affinity and first_ligand_chain:
-                    config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
+                    if has_duplicate_ligand(config, first_ligand_chain):
+                        print(f"Warning: Affinity binder ligand (chain {first_ligand_chain}) has multiple copies in config '{protein['id']}' - skipping affinity")
+                    else:
+                        config['properties'] = [{'affinity': {'binder': first_ligand_chain}}]
 
                 config = add_covalent_linkage_to_config(config, covalent_linkage, first_ligand_chain or 'B')
                 if first_ligand_chain:
@@ -696,7 +747,10 @@ def generate_configs(
                         config['sequences'].append(build_ligand_entry(static_ligand, chain_id))
 
                     if args.affinity:
-                        config['properties'] = [{'affinity': {'binder': ligand_chain_id}}]
+                        if has_duplicate_ligand(config, ligand_chain_id):
+                            print(f"Warning: Affinity binder ligand (chain {ligand_chain_id}) has multiple copies in config '{protein['id']}' - skipping affinity")
+                        else:
+                            config['properties'] = [{'affinity': {'binder': ligand_chain_id}}]
 
                     config = add_covalent_linkage_to_config(config, covalent_linkage, ligand_chain_id)
                     config = add_pocket_to_config(config, args, ligand_chain_id)
