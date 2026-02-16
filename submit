@@ -59,15 +59,19 @@ echo ""
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 <pipeline_script>"
+    echo "Usage: $0 [-v|--verbose] <pipeline_script>"
     echo ""
     echo "Run a BioPipelines script and submit the generated job to SLURM"
+    echo ""
+    echo "Options:"
+    echo "  -v, --verbose    Show full pipeline generation output"
     echo ""
     echo "Arguments:"
     echo "  pipeline_script  Path to pipeline script (.py or .ipynb)"
     echo ""
     echo "Examples:"
     echo "  $0 pipeline.py                               # Run pipeline.py"
+    echo "  $0 -v pipeline.py                            # Run with full output"
     echo "  $0 pipeline.ipynb                             # Run from notebook"
     echo "  $0 ExamplePipelines/ligandmpnn_boltz2.py    # Run specific pipeline"
     echo ""
@@ -76,22 +80,34 @@ usage() {
 # Function to run pipeline and execute sbatch commands
 run_pipeline_and_submit() {
     local pipeline_script="$1"
+    local verbose="$2"
 
-    echo "Running pipeline: $pipeline_script"
-    echo ""
+    echo "Generating pipeline: $pipeline_script"
 
     # Run the pipeline and capture output
     local pipeline_output=$(python "$pipeline_script" 2>&1)
     local exit_code=$?
 
-    # Show pipeline output
-    echo "$pipeline_output"
+    if [ "$verbose" = "1" ]; then
+        echo ""
+        echo "$pipeline_output"
+    else
+        # Even in non-verbose mode, show errors/exceptions from the output
+        local error_lines=$(echo "$pipeline_output" | grep -i -E "error|exception|traceback|raise |failed" | head -20)
+        if [ -n "$error_lines" ]; then
+            echo ""
+            echo "$error_lines"
+        fi
+    fi
     echo ""
 
     if [ $exit_code -ne 0 ]; then
-        echo "Pipeline execution completed with exit code $exit_code"
-        echo "Note: This is expected for dummy/test pipelines"
+        echo "Pipeline generation failed with exit code $exit_code"
+        if [ "$verbose" != "1" ]; then
+            echo "Re-run with -v to see full output"
+        fi
         echo ""
+        return 1
     fi
 
     # Extract ALL runtime directories from pipeline output
@@ -244,17 +260,30 @@ run_pipeline_and_submit() {
 
 # Main execution
 main() {
-    local pipeline_script="$1"
+    local verbose=0
+    local pipeline_script=""
 
     echo "BioPipelines SLURM Submission Script"
     echo "===================================="
     echo ""
 
-    # Handle help request
-    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-        usage
-        return 0
-    fi
+    # Parse arguments
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                usage
+                return 0
+                ;;
+            -v|--verbose)
+                verbose=1
+                shift
+                ;;
+            *)
+                pipeline_script="$1"
+                shift
+                ;;
+        esac
+    done
 
     # Require a pipeline script argument
     if [ -z "$pipeline_script" ]; then
@@ -271,7 +300,7 @@ main() {
     fi
 
     # Run the pipeline and submit jobs
-    run_pipeline_and_submit "$pipeline_script"
+    run_pipeline_and_submit "$pipeline_script" "$verbose"
 }
 
 # Run main function with all arguments
