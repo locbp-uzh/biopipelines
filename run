@@ -93,11 +93,15 @@ run_pipeline_locally() {
         echo ""
         echo "$pipeline_output"
     else
-        # Even in non-verbose mode, show errors/exceptions from the output
-        local error_lines=$(echo "$pipeline_output" | grep -i -E "error|exception|traceback|raise |failed" | head -20)
-        if [ -n "$error_lines" ]; then
+        # Even in non-verbose mode, show full tracebacks and error context
+        local error_output=$(echo "$pipeline_output" | awk '
+            /^Traceback \(most recent call last\)/ { capture=1 }
+            capture { print }
+            !capture && /^[A-Za-z]*[Ee]rror:|^[A-Za-z]*[Ee]xception:/ { print }
+        ')
+        if [ -n "$error_output" ]; then
             echo ""
-            echo "$error_lines"
+            echo "$error_output"
         fi
     fi
     echo ""
