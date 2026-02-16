@@ -115,13 +115,15 @@ pip install boltz[cuda] -U
 **Tables**:
 - `confidence`:
 
-  | id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt |
-  |----|------------|------------------|-----|------|---------------|----------------|
+  | id | sequences.id | compounds.id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt |
+  |----|--------------|--------------|------------|------------------|-----|------|---------------|----------------|
 
 - `affinity`:
 
-  | id | input_file | affinity_pred_value | affinity_probability_binary |
-  |----|------------|---------------------|----------------------------|
+  | id | sequences.id | compounds.id | input_file | affinity_pred_value | affinity_probability_binary |
+  |----|--------------|--------------|------------|---------------------|----------------------------|
+
+  Provenance columns (`sequences.id`, `compounds.id`) track which protein and ligand produced each row, enabling filtering and joins without parsing the ID string.
 
 **Example**:
 ```python

@@ -346,7 +346,8 @@ def create_map_table(
     ids: List[str],
     files: Optional[List[str]] = None,
     values: Optional[List[str]] = None,
-    additional_columns: Optional[Dict[str, List[Any]]] = None
+    additional_columns: Optional[Dict[str, List[Any]]] = None,
+    provenance: Optional[Dict[str, List[str]]] = None
 ) -> str:
     """
     Create a map_table CSV file for a DataStream.
@@ -357,6 +358,9 @@ def create_map_table(
         files: List of file paths (optional, for file-based formats)
         values: List of inline values (optional, for value-based formats like SMILES)
         additional_columns: Dict of column_name -> values to include
+        provenance: Dict of {stream_name: [input_id_per_output, ...]} from
+                   predict_output_ids_with_provenance() or generate_multiplied_ids().
+                   Keys become columns named "{stream_name}.id".
 
     Returns:
         Path to created CSV file
@@ -376,6 +380,18 @@ def create_map_table(
             values=["CCO", "CC(=O)O"],
             additional_columns={"name": ["ethanol", "acetic acid"]}
         )
+
+        # With provenance tracking
+        create_map_table(
+            "/path/to/structures_map.csv",
+            ids=["lig1", "lig2", "lig3"],
+            files=[...],
+            provenance={
+                "sequences": ["prot1", "prot1", "prot1"],
+                "compounds": ["lig1", "lig2", "lig3"]
+            }
+        )
+        # Creates CSV with columns: id, file, value, sequences.id, compounds.id
     """
     data = {'id': ids}
 
@@ -397,6 +413,16 @@ def create_map_table(
                     f"but expected {len(ids)}"
                 )
             data[col_name] = col_values
+
+    if provenance:
+        for stream_name, prov_ids in provenance.items():
+            col_name = f"{stream_name}.id"
+            if len(prov_ids) != len(ids):
+                raise ValueError(
+                    f"Provenance column '{col_name}' has {len(prov_ids)} values "
+                    f"but expected {len(ids)}"
+                )
+            data[col_name] = prov_ids
 
     df = pd.DataFrame(data)
 

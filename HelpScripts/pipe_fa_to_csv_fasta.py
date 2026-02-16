@@ -65,6 +65,7 @@ for fa in fa_files:
                 pdb_base = fa[:-3]
                 mapped_base = id_map.get(pdb_base, pdb_base) if id_map else pdb_base
                 seq_data["id"] = mapped_base + "_" + seq_data["sample"]
+                seq_data["structures.id"] = mapped_base
                 if seq_data["sequence"] in seen_sequences:
                     if args.duplicates:
                         data.append(seq_data)

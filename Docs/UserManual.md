@@ -336,6 +336,19 @@ boltz = Boltz2(
 )
 ```
 
+**Output ID naming**: Output IDs are always the full cartesian product of all iterated axis IDs joined with `_`. For example, 1 protein (`prot1`) × 3 ligands (`lig1`, `lig2`, `lig3`) produces IDs `prot1_lig1`, `prot1_lig2`, `prot1_lig3`. There are no shortcuts — even with a single protein, the protein ID is always included.
+
+**Provenance columns**: All output tables include `{stream_name}.id` columns (e.g., `sequences.id`, `compounds.id`) that track which input from each axis produced each output row. This enables easy filtering and joining:
+
+```python
+# Filter Boltz2 results for a specific protein
+df = pd.read_csv(boltz.tables.confidence.info.path)
+prot1_results = df[df['sequences.id'] == 'prot1']
+
+# Filter for a specific ligand
+lig2_results = df[df['compounds.id'] == 'lig2']
+```
+
 
 ### Table Column References
 

@@ -50,9 +50,23 @@ def flatten_confidence(conf, parent_key=""):
             items[new_key] = value
     return items
 
-PREDICTION_FOLDER = args.PREDICTION_FOLDER  
+PREDICTION_FOLDER = args.PREDICTION_FOLDER
 OUTPUT_FOLDER = args.OUTPUT_FOLDER
 SEQUENCE_IDS_FILE = args.SEQUENCE_IDS_FILE
+
+# Load provenance from combinatorics config if available
+stored_provenance = {}
+combinatorics_config_path = os.path.join(OUTPUT_FOLDER, "combinatorics_config.json")
+if os.path.exists(combinatorics_config_path):
+    try:
+        with open(combinatorics_config_path, 'r') as f:
+            comb_data = json.load(f)
+        stored_provenance = comb_data.get('provenance', {})
+        stored_predicted_ids = comb_data.get('predicted_ids', [])
+        if stored_provenance:
+            print(f"Loaded provenance from combinatorics config: {list(stored_provenance.keys())}")
+    except Exception as e:
+        print(f"Warning: Could not load provenance from combinatorics config: {e}")
 
 # Load sequence IDs for proper renaming
 sequence_ids = []
@@ -230,6 +244,17 @@ for seq_id, conf_data in confidence_data.items():
 
 if confidence_rows:
     confidence_df = pd.DataFrame(confidence_rows)
+    # Add provenance columns if available
+    if stored_provenance and stored_predicted_ids:
+        prov_lookup = {sid: i for i, sid in enumerate(stored_predicted_ids)}
+        for stream_name, prov_ids in stored_provenance.items():
+            col_name = f"{stream_name}.id"
+            col_values = []
+            for _, row_data in enumerate(confidence_rows):
+                seq_id = row_data['id']
+                idx = prov_lookup.get(seq_id)
+                col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
+            confidence_df[col_name] = col_values
     confidence_csv = os.path.join(OUTPUT_FOLDER, "confidence_scores.csv")
     confidence_df.to_csv(confidence_csv, index=False)
     print(f"Created confidence scores CSV: {confidence_csv}")
@@ -248,6 +273,17 @@ for seq_id, aff_data in affinity_data.items():
 
 if affinity_rows:
     affinity_df = pd.DataFrame(affinity_rows)
+    # Add provenance columns if available
+    if stored_provenance and stored_predicted_ids:
+        prov_lookup = {sid: i for i, sid in enumerate(stored_predicted_ids)}
+        for stream_name, prov_ids in stored_provenance.items():
+            col_name = f"{stream_name}.id"
+            col_values = []
+            for row_data in affinity_rows:
+                seq_id = row_data['id']
+                idx = prov_lookup.get(seq_id)
+                col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
+            affinity_df[col_name] = col_values
     affinity_csv = os.path.join(OUTPUT_FOLDER, "affinity_scores.csv")
     affinity_df.to_csv(affinity_csv, index=False)
     print(f"Created affinity scores CSV: {affinity_csv}")

@@ -33,8 +33,8 @@ git clone https://github.com/dauparas/ProteinMPN
 **Tables**:
 - `sequences`:
 
-  | id | source_id | source_pdb | sequence | score | seq_recovery | rmsd | gaps |
-  |----|-----------|------------|----------|-------|--------------|------|------|
+  | id | structures.id | source_pdb | sequence | score | seq_recovery | rmsd | gaps |
+  |----|---------------|------------|----------|-------|--------------|------|------|
 
 **Note**: Sample 0 is the original/template sequence, samples 1+ are designs.
 
@@ -178,13 +178,15 @@ Performs mutagenesis at specified positions. Generates systematic amino acid sub
 **Tables**:
 - `sequences`:
 
-  | id | sequence | mutation | position | original_aa | new_aa |
-  |----|----------|----------|----------|-------------|--------|
+  | id | sequences.id | sequence | mutations | mutation_positions | original_aa | new_aa |
+  |----|--------------|----------|-----------|--------------------|-------------|--------|
 
-- `missing_sequences`:
+  When chaining multiple Mutagenesis steps, `mutations` accumulates (e.g., `A42V,G50L`) and `mutation_positions` uses PyMOL selection format (e.g., `42+50`).
 
-  | id | sequence | reason |
-  |----|----------|--------|
+- `missing`:
+
+  | id | removed_by | cause |
+  |----|------------|-------|
 
 **Example**:
 ```python

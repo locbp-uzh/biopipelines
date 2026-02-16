@@ -13,12 +13,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .combinatorics import generate_multiplied_ids
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from combinatorics import generate_multiplied_ids
 
 
 class ProteinMPNN(BaseConfig):
@@ -261,10 +263,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             fasta_ids.append(struct_id)
 
         # Predict sequence IDs (stream_id + sequence number)
-        sequence_ids = []
-        for struct_id in self.structures_stream.ids:
-            for seq_num in range(1, self.num_sequences + 1):
-                sequence_ids.append(f"{struct_id}_{seq_num}")
+        suffixes = [str(i) for i in range(1, self.num_sequences + 1)]
+        sequence_ids, provenance = generate_multiplied_ids(
+            self.structures_stream.ids, suffixes,
+            input_stream_name="structures"
+        )
 
         # Sequences stream - CSV-based with individual sequence IDs
         sequences = DataStream(
@@ -287,7 +290,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "sequences": TableInfo(
                 name="sequences",
                 path=self.queries_csv,
-                columns=["id", "source_id", "source_pdb", "sequence", "score", "seq_recovery", "gaps"],
+                columns=["id", "structures.id", "source_pdb", "sequence", "score", "seq_recovery", "gaps"],
                 description="ProteinMPNN sequence results",
                 count=len(sequence_ids)
             ),

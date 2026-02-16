@@ -16,12 +16,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .combinatorics import generate_multiplied_ids
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from combinatorics import generate_multiplied_ids
 
 
 class Mutagenesis(BaseConfig):
@@ -62,21 +64,19 @@ echo "=== Mutagenesis ready ==="
     mutagenesis_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutagenesis.py"))
 
     def __init__(self,
-                 original: Union[str, DataStream, StandardizedOutput],
+                 original: Union[DataStream, StandardizedOutput],
                  position: int,
                  mutate_to: str = "",
                  mode: str = "specific",
                  include_original: bool = False,
                  exclude: str = "",
-                 prefix: str = "",
                  **kwargs):
         """
         Initialize Mutagenesis tool.
 
         Args:
-            original: Input sequence - can be:
-                - DataStream or StandardizedOutput containing sequences
-                - Direct protein sequence string
+            original: Input sequence as DataStream or StandardizedOutput
+                      (e.g., from Sequence() entity or upstream tool)
             position: Target position for mutagenesis (1-indexed)
             mutate_to: Target amino acid(s) for "specific" mode, as single letter
                 codes (e.g., "A" for alanine, "AV" for alanine and valine).
@@ -95,21 +95,18 @@ echo "=== Mutagenesis ready ==="
                 - "negative": D, E
             include_original: Whether to include original amino acid (default: False)
             exclude: Amino acids to exclude as single string (e.g., "CEFGL")
-            prefix: Prefix for sequence IDs (used only for string sequence input)
             **kwargs: Additional parameters
 
         Examples:
             # Convert position 50 to alanine
-            sdm = Mutagenesis(original=structure, position=50, mutate_to="A")
-
-            # Try alanine and valine at position 50
-            sdm = Mutagenesis(original=structure, position=50, mutate_to="AV")
+            seq = Sequence("MKTVRQ...", ids="my_protein")
+            sdm = Mutagenesis(original=seq, position=50, mutate_to="A")
 
             # Saturation mutagenesis
-            sdm = Mutagenesis(original=boltz_output, position=167, mode="saturation")
+            sdm = Mutagenesis(original=seq, position=167, mode="saturation")
 
             # Charged amino acids excluding histidine
-            sdm = Mutagenesis(original=structure, position=175,
+            sdm = Mutagenesis(original=seq, position=175,
                               mode="charged", exclude="H")
         """
         # Store Mutagenesis-specific parameters
@@ -118,30 +115,21 @@ echo "=== Mutagenesis ready ==="
         self.mode = mode
         self.include_original = include_original
         self.exclude = exclude.upper()
-        self.prefix = prefix
 
-        # Handle different input types
-        self.input_sequence = None
-        self.input_sequence_id = None
+        # Handle input types
         self.sequences_stream = None
 
         if isinstance(original, StandardizedOutput):
             if original.streams.sequences and len(original.streams.sequences) > 0:
                 self.sequences_stream = original.streams.sequences
-                self.input_sequence_id = original.streams.sequences.ids[0] if original.streams.sequences.ids else "sequence"
             else:
                 raise ValueError("StandardizedOutput has no sequences")
         elif isinstance(original, DataStream):
             if len(original) == 0:
                 raise ValueError("DataStream is empty")
             self.sequences_stream = original
-            self.input_sequence_id = original.ids[0] if original.ids else "sequence"
-        elif isinstance(original, str):
-            # Direct sequence string
-            self.input_sequence = original.upper()
-            self.input_sequence_id = prefix if prefix else "sequence"
         else:
-            raise ValueError(f"original must be DataStream, StandardizedOutput, or string, got {type(original)}")
+            raise ValueError(f"original must be DataStream or StandardizedOutput, got {type(original)}")
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -175,10 +163,6 @@ echo "=== Mutagenesis ready ==="
             if invalid_aas:
                 raise ValueError(f"Invalid amino acids in exclude: {invalid_aas}")
 
-        # Validate sequence length if we have the sequence
-        if self.input_sequence and self.position > len(self.input_sequence):
-            raise ValueError(f"Position {self.position} exceeds sequence length {len(self.input_sequence)}")
-
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files and dependencies."""
         self.folders = pipeline_folders
@@ -190,25 +174,13 @@ echo "=== Mutagenesis ready ==="
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
 
-        # Determine sequence source
-        if self.input_sequence:
-            # Direct sequence provided
-            sequence_param = f'"{self.input_sequence}"'
-            sequence_id_param = f'"{self.input_sequence_id}"'
-            sequence_source = "direct"
-        else:
-            # Sequence from DataStream file
-            sequence_param = f'"{self.sequences_stream.files[0]}"'
-            sequence_id_param = f'"{self.input_sequence_id}"'
-            sequence_source = "file"
-
-        script_content += self._generate_script_run_sdm(sequence_source, sequence_param, sequence_id_param)
+        script_content += self._generate_script_run_sdm()
         script_content += self._generate_script_missing_sequences()
         script_content += self.generate_completion_check_footer()
 
         return script_content
 
-    def _generate_script_run_sdm(self, sequence_source: str, sequence_param: str, sequence_id_param: str) -> str:
+    def _generate_script_run_sdm(self) -> str:
         """Generate the Mutagenesis execution part of the script."""
         mutate_to_line = f'    --mutate-to "{self.mutate_to}" \\\n' if self.mutate_to else ""
         return f"""echo "Running Mutagenesis"
@@ -220,9 +192,7 @@ echo "Exclude: {self.exclude}"
 
 # Run Mutagenesis generation
 python {self.mutagenesis_helper_py} \\
-    --sequence-source {sequence_source} \\
-    --sequence {sequence_param} \\
-    --sequence-id {sequence_id_param} \\
+    --sequences "{self.sequences_stream.map_table}" \\
     --position {self.position} \\
     --mode {self.mode} \\
 {mutate_to_line}    --include-original {str(self.include_original).lower()} \\
@@ -242,22 +212,19 @@ if [ "{str(self.include_original).lower()}" = "false" ]; then
     echo "Creating missing table..."
     python -c "
 import pandas as pd
-import sys
 
-# Get original sequence and ID from sequences CSV
 try:
     sequences_df = pd.read_csv('{self.sequences_csv}')
     if len(sequences_df) > 0:
         first_row = sequences_df.iloc[0]
-        base_id = first_row['id'].rsplit('_', 1)[0]  # Remove _position_aa suffix
+        base_id = first_row['id'].rsplit('_', 1)[0]
         original_aa = first_row['original_aa']
 
-        # Create missing entry with standard columns
         original_id = f'{{base_id}}_{self.position}{{original_aa}}'
         missing_data = [{{
             'id': original_id,
             'removed_by': '{step_tool_name}',
-            'cause': f'Original amino acid ({{original_aa}}) excluded from mutagenesis'
+            'cause': f'Original amino acid ({{original_aa}}) excluded from mutagenesis at position {self.position}'
         }}]
 
         missing_df = pd.DataFrame(missing_data)
@@ -277,7 +244,7 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after Mutagenesis execution."""
-        # Calculate expected number of mutants
+        # Calculate expected number of mutants (approximate — original_aa unknown at pipeline time)
         if self.mode == "specific":
             amino_acids = self.mutate_to
         else:
@@ -287,32 +254,24 @@ fi
         if self.exclude:
             amino_acids = ''.join(aa for aa in amino_acids if aa not in self.exclude)
 
-        # Determine original amino acid and remove it unless include_original=True
-        if self.input_sequence:
-            original_aa = self.input_sequence[self.position - 1]
-            if not self.include_original and original_aa in amino_acids:
-                amino_acids = amino_acids.replace(original_aa, '')
+        # Multiply by number of input sequences
+        num_input = len(self.sequences_stream.ids)
+        num_mutants_per_input = len(amino_acids)
+        num_mutants = num_mutants_per_input * num_input
 
-        num_mutants = len(amino_acids)
-
-        # Generate sequence IDs
-        base_id = self.input_sequence_id
-        if self.input_sequence:
-            original_aa = self.input_sequence[self.position - 1]
-        else:
-            original_aa = "X"  # Will be determined at runtime
-
-        sequence_ids = []
-        for aa in amino_acids:
-            mutant_id = f"{base_id}_{self.position}{aa}"
-            sequence_ids.append(mutant_id)
+        # Generate sequence IDs (approximate — original_aa resolved at runtime)
+        suffixes = [f"{self.position}{aa}" for aa in amino_acids]
+        sequence_ids, provenance = generate_multiplied_ids(
+            self.sequences_stream.ids, suffixes,
+            input_stream_name="original"
+        )
 
         # Prepare tables
         tables = {
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
-                columns=["id", "sequence", "mutation", "position", "original_aa", "new_aa"],
+                columns=["id", "original.id", "sequence", "mutations", "mutation_positions", "original_aa", "new_aa"],
                 description=f"mutants at position {self.position} using {self.mode} mode",
                 count=num_mutants
             )
@@ -328,11 +287,11 @@ fi
                 count=1
             )
 
-        # Create sequences DataStream
+        # Create sequences DataStream (id-value stream, files empty)
         sequences = DataStream(
             name="sequences",
             ids=sequence_ids,
-            files=[self.sequences_csv],
+            files=[],
             map_table=self.sequences_csv,
             format="csv"
         )
@@ -348,11 +307,7 @@ fi
     def get_config_display(self) -> List[str]:
         """Get configuration display lines for pipeline output."""
         config_lines = super().get_config_display()
-
-        if self.input_sequence:
-            config_lines.append(f"INPUT: Direct sequence ({len(self.input_sequence)} aa)")
-        else:
-            config_lines.append(f"INPUT: {len(self.sequences_stream)} sequences from DataStream")
+        config_lines.append(f"INPUT: {len(self.sequences_stream)} sequences from DataStream")
 
         config_lines.append(f"POSITION: {self.position}")
         config_lines.append(f"MODE: {self.mode}")
@@ -372,10 +327,7 @@ fi
                 "mutate_to": self.mutate_to,
                 "mode": self.mode,
                 "include_original": self.include_original,
-                "exclude": self.exclude,
-                "prefix": self.prefix,
-                "input_sequence": self.input_sequence,
-                "input_sequence_id": self.input_sequence_id
+                "exclude": self.exclude
             }
         })
         return base_dict

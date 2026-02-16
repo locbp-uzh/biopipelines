@@ -26,6 +26,11 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 import yaml
 
+# Import shared ID prediction from biopipelines
+_biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines')
+sys.path.insert(0, _biopipelines_dir)
+from combinatorics import predict_single_output_id, CombinatoricsConfig
+
 
 # Custom YAML representer for inline list formatting in constraints
 class FlowList(list):
@@ -405,28 +410,14 @@ def generate_config_id(
     """
     Generate config ID based on combinatorics modes and indices.
 
-    Rules:
-    - bundle + bundle: "bundled_complex"
-    - bundle + each: ligand_id
-    - each + bundle: protein_id
-    - each + each:
-      - 1 protein: ligand_id
-      - 1 ligand: protein_id
-      - multiple both: protein_id_ligand_id
+    Delegates to the shared predict_single_output_id() in combinatorics.py
+    to ensure pipeline-time and SLURM-time ID generation always agree.
     """
-    if proteins_mode == 'bundle' and ligands_mode == 'bundle':
-        return 'bundled_complex'
-    elif proteins_mode == 'bundle' and ligands_mode == 'each':
-        return ligand_ids[ligand_idx]
-    elif proteins_mode == 'each' and ligands_mode == 'bundle':
-        return protein_ids[protein_idx]
-    else:  # each x each
-        if len(protein_ids) == 1:
-            return ligand_ids[ligand_idx]
-        elif len(ligand_ids) == 1:
-            return protein_ids[protein_idx]
-        else:
-            return f"{protein_ids[protein_idx]}_{ligand_ids[ligand_idx]}"
+    return predict_single_output_id(
+        bundled_name="bundled_complex",
+        sequences=(proteins_mode, protein_ids, protein_idx),
+        compounds=(ligands_mode, ligand_ids, ligand_idx)
+    )
 
 
 def generate_configs(
@@ -550,7 +541,8 @@ def generate_configs(
                 config = add_pocket_to_config(config, args, first_ligand_chain)
                 config = add_contacts_to_config(config, contacts)
 
-                configs.append((ligand['id'], config))
+                config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, None, lig_idx)
+                configs.append((config_id, config))
         else:
             # Pure bundle: single config with all proteins and all ligands
             config = {'sequences': []}
@@ -609,7 +601,7 @@ def generate_configs(
             config = add_pocket_to_config(config, args, ligand_chain_id)
             config = add_contacts_to_config(config, contacts)
 
-            config_id = ligand['id']
+            config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, None, lig_idx)
             configs.append((config_id, config))
 
     elif proteins_mode == 'each' and ligands_mode == 'bundle':
@@ -665,14 +657,7 @@ def generate_configs(
                     config = add_pocket_to_config(config, args, first_ligand_chain)
                     config = add_contacts_to_config(config, contacts)
 
-                    # Generate config ID
-                    if len(proteins_to_iterate) == 1:
-                        config_id = ligand['id']
-                    elif len(ligands_iterated) == 1:
-                        config_id = protein['id']
-                    else:
-                        config_id = f"{protein['id']}_{ligand['id']}"
-
+                    config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, prot_idx, lig_idx)
                     configs.append((config_id, config))
         else:
             # Pure bundle: one config per protein, all ligands bundled together
@@ -710,7 +695,7 @@ def generate_configs(
                     config = add_pocket_to_config(config, args, first_ligand_chain)
                 config = add_contacts_to_config(config, contacts)
 
-                config_id = protein['id']
+                config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, prot_idx, None)
                 configs.append((config_id, config))
 
     else:  # each x each (cartesian product)
@@ -757,12 +742,7 @@ def generate_configs(
                     config = add_contacts_to_config(config, contacts)
 
                 if ligand:
-                    if len(proteins_to_iterate) == 1:
-                        config_id = ligand['id']
-                    elif len(ligands_to_iterate) == 1:
-                        config_id = protein['id']
-                    else:
-                        config_id = f"{protein['id']}_{ligand['id']}"
+                    config_id = generate_config_id(proteins_mode, ligands_mode, protein_ids, ligand_ids, prot_idx, lig_idx)
                 else:
                     config_id = protein['id']
 
@@ -823,8 +803,10 @@ def write_protein_sequences(configs: List[tuple], output_path: str):
 def main():
     args = parse_arguments()
 
-    # Load combinatorics config
+    # Load combinatorics config (includes pre-computed predictions and provenance)
     comb_config = load_combinatorics_config(args.combinatorics_config)
+    stored_predicted_ids = comb_config.get('predicted_ids', [])
+    stored_provenance = comb_config.get('provenance', {})
     axes = comb_config.get('axes', {})
 
     # Extract sequences and compounds axes

@@ -17,14 +17,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
-    from .combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, Bundle, Each
+    from .combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
-    from combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, Bundle, Each
+    from combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
 
 
 def _unwrap_combinatorics(value):
@@ -294,8 +294,8 @@ echo "=== Boltz2 installation complete ==="
         config_path = os.path.join(self.output_folder, "combinatorics_config.json")
         generate_combinatorics_config(
             config_path,
-            sequences=self.proteins,
-            compounds=self.ligands
+            proteins=(self.proteins, "sequences"),
+            ligands=(self.ligands, "compounds")
         )
         return config_path
 
@@ -546,13 +546,21 @@ fi
         """Predict sequence IDs from input sources using combinatorics module."""
         return predict_output_ids(
             bundled_name="bundled_complex",
-            sequences=self.proteins,
-            compounds=self.ligands
+            proteins=(self.proteins, "sequences"),
+            ligands=(self.ligands, "compounds")
+        )
+
+    def _predict_sequence_ids_with_provenance(self):
+        """Predict sequence IDs and provenance from input sources."""
+        return predict_output_ids_with_provenance(
+            bundled_name="bundled_complex",
+            proteins=(self.proteins, "sequences"),
+            ligands=(self.ligands, "compounds")
         )
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after Boltz2 execution."""
-        predicted_ids = self._predict_sequence_ids()
+        predicted_ids, provenance = self._predict_sequence_ids_with_provenance()
 
         # Structure files
         structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
@@ -560,7 +568,7 @@ fi
 
         # Create structures DataStream
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, predicted_ids, files=structure_files)
+        create_map_table(structures_map, predicted_ids, files=structure_files, provenance=provenance)
 
         structures = DataStream(
             name="structures",

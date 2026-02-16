@@ -16,6 +16,11 @@
   - [pipe_biopipelines_io Module](#pipe_biopipelines_io-module)
   - [pdb_parser Module](#pdb_parser-module)
   - [Table References](#table-references)
+- [ID Generation and Provenance](#id-generation-and-provenance)
+  - [Output ID Rules](#output-id-rules)
+  - [Provenance Columns](#provenance-columns)
+  - [Shared Utilities](#shared-utilities)
+  - [Pipeline vs SLURM Agreement](#pipeline-vs-slurm-agreement)
 - [Code Principles](#code-principles)
 - [Working with Git](#working-with-git)
 - [Working with Claude Code](#working-with-claude-code)
@@ -461,6 +466,144 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
+---
+
+## ID Generation and Provenance
+
+All output ID generation and provenance tracking is centralized in `combinatorics.py`. Tool configs and pipe scripts must never implement their own ID logic.
+
+### Output ID Rules
+
+When a tool combines multiple input axes (e.g., proteins × ligands), the output ID is always the full cartesian product of all iterated axes joined with `_`:
+
+| Inputs | Output IDs |
+|--------|-----------|
+| 1 protein × 3 ligands | `prot1_lig1`, `prot1_lig2`, `prot1_lig3` |
+| 2 proteins × 3 ligands | `prot1_lig1`, `prot1_lig2`, ..., `prot2_lig3` |
+| 2 proteins × 1 ligand | `prot1_lig1`, `prot2_lig1` |
+| All bundled | `bundled_complex` |
+| Single iterated axis | IDs from that axis directly |
+
+There are no shortcuts (e.g., dropping single-element axes from the ID). This keeps the ID format predictable and eliminates case-specific logic.
+
+When a tool multiplies inputs by a suffix (e.g., ProteinMPNN generates N sequences per structure), the output ID is `{parent_id}_{suffix}`:
+
+| Tool | Suffix pattern | Example |
+|------|---------------|---------|
+| ProteinMPNN | `_{seq_num}` | `prot1_1`, `prot1_2` |
+| LigandMPNN | `_{seq_num}` | `prot1_1`, `prot1_2` |
+| Mutagenesis | `_{position}{aa}` | `prot1_50A`, `prot1_50V` |
+
+### Provenance Columns
+
+Every map_table CSV includes provenance columns named `{alias}.id` that track which input from each axis produced each output row. The alias matches the **tool parameter name** (e.g., `proteins` not `sequences` for Boltz2), making provenance columns unambiguous when a tool accepts multiple inputs of the same stream type.
+
+Example `structures_map.csv` from Boltz2 with 1 protein × 3 ligands:
+
+```csv
+id,file,value,proteins.id,ligands.id
+prot1_lig1,/path/prot1_lig1.pdb,,prot1,lig1
+prot1_lig2,/path/prot1_lig2.pdb,,prot1,lig2
+prot1_lig3,/path/prot1_lig3.pdb,,prot1,lig3
+```
+
+For multiplier tools, the provenance column tracks the parent:
+
+```csv
+id,structures.id,sequence,score,...
+struct1_1,struct1,MKTVRQ...,0.95,...
+struct1_2,struct1,AETGFT...,0.91,...
+struct2_1,struct2,MKTVRQ...,0.88,...
+```
+
+Downstream tools can join on any provenance column:
+```python
+# Find all outputs for a specific protein
+df[df['proteins.id'] == 'prot1']
+
+# Join two tables sharing a ligand provenance
+pd.merge(confidence, affinity, on=['id', 'ligands.id'])
+```
+
+### Shared Utilities
+
+All ID generation uses functions from `combinatorics.py`:
+
+| Function | Use case |
+|----------|----------|
+| `predict_output_ids_with_provenance()` | Multi-axis tools (Boltz2) at pipeline time |
+| `predict_output_ids()` | Same, without provenance (backward compat) |
+| `predict_single_output_id()` | Single-row ID at SLURM time (pipe scripts) |
+| `generate_multiplied_ids()` | Multiplier tools (ProteinMPNN, Mutagenesis) |
+
+#### Using `predict_output_ids_with_provenance` (multi-axis tools)
+
+Each kwarg is a `(value, stream_name)` tuple — the key becomes the provenance column name, `stream_name` tells which stream to extract IDs from. Bare values (no tuple) use the key as both alias and stream name.
+
+```python
+from .combinatorics import predict_output_ids_with_provenance
+
+predicted_ids, provenance = predict_output_ids_with_provenance(
+    bundled_name="bundled_complex",
+    proteins=(self.proteins, "sequences"),
+    ligands=(self.ligands, "compounds")
+)
+# provenance = {"proteins": ["prot1", "prot1", ...], "ligands": ["lig1", "lig2", ...]}
+
+create_map_table(map_path, predicted_ids, files=structure_files, provenance=provenance)
+```
+
+#### Using `generate_multiplied_ids` (multiplier tools)
+
+```python
+from .combinatorics import generate_multiplied_ids
+
+suffixes = [str(i) for i in range(1, self.num_sequences + 1)]
+sequence_ids, provenance = generate_multiplied_ids(
+    self.structures_stream.ids, suffixes,
+    input_stream_name="structures"
+)
+# provenance = {"structures": ["struct1", "struct1", ..., "struct2", ...]}
+```
+
+#### Passing provenance to `create_map_table`
+
+```python
+from .datastream import create_map_table
+
+create_map_table(
+    output_path, ids=predicted_ids, files=structure_files,
+    provenance=provenance  # Dict keys become {key}.id columns
+)
+```
+
+### Pipeline vs SLURM Agreement
+
+The `CombinatoricsConfig` JSON file stores pre-computed `predicted_ids` and `provenance` at pipeline time. Pipe scripts read these stored values instead of re-computing:
+
+```json
+{
+  "axes": { ... },
+  "predicted_ids": ["prot1_lig1", "prot1_lig2", "prot1_lig3"],
+  "provenance": {
+    "sequences": ["prot1", "prot1", "prot1"],
+    "compounds": ["lig1", "lig2", "lig3"]
+  }
+}
+```
+
+For pipe scripts that iterate and need single-row IDs, use `predict_single_output_id()` which mirrors the pipeline-time logic exactly:
+
+```python
+from combinatorics import predict_single_output_id
+
+config_id = predict_single_output_id(
+    bundled_name="bundled_complex",
+    sequences=("each", protein_ids, prot_idx),
+    compounds=("each", ligand_ids, lig_idx)
+)
 ```
 
 ---

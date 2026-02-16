@@ -7,14 +7,16 @@
 Runtime helper script for Fuse tool.
 
 Generates fusion sequences by combining multiple sequences with linkers of variable lengths.
-Outputs CSV with sequence information including sequence/linker position selections in PyMOL format.
+Reads a JSON config file specifying per-slot DataStream info and linker parameters.
+Outputs CSV with sequence information including provenance and position selections in PyMOL format.
 """
 
 import os
 import sys
+import json
 import argparse
 import pandas as pd
-from typing import List, Tuple, Dict, Any
+from typing import List, Dict, Any
 from itertools import product
 
 # Import pdb_parser for extracting sequences from PDB files
@@ -51,125 +53,165 @@ def parse_length_spec(spec: str) -> List[int]:
     return lengths
 
 
-def extract_sequence(protein_input: str) -> str:
+def load_sequences_from_slot(slot: Dict[str, Any]) -> Dict[str, str]:
     """
-    Extract sequence from protein input.
+    Load sequences from a slot definition.
 
-    Supported inputs:
-    - Raw amino acid sequence string
-    - Path to a PDB/CIF file
-    - Path to a CSV file with a 'sequence' column (e.g. Sequence map_table)
+    A slot has: ids, map_table, files.
+    - If map_table is available, load id→sequence from CSV
+    - If files are available, extract sequences from PDB/CIF files
 
     Args:
-        protein_input: Sequence string, PDB path, or CSV path
+        slot: Slot dict with keys: ids, map_table, files
 
     Returns:
-        Amino acid sequence string
+        Dict mapping ID → sequence string
     """
-    # PDB / CIF file
-    if protein_input.endswith('.pdb') or protein_input.endswith('.cif'):
-        if not os.path.exists(protein_input):
-            raise FileNotFoundError(f"PDB file not found: {protein_input}")
+    ids = slot["ids"]
+    map_table = slot.get("map_table", "")
+    files = slot.get("files", [])
 
-        atoms = parse_pdb_file(protein_input)
-        sequences = get_protein_sequence(atoms)
+    # Try map_table first (CSV with id, sequence columns)
+    if map_table and os.path.exists(map_table):
+        df = pd.read_csv(map_table)
+        if 'id' in df.columns and 'sequence' in df.columns:
+            id_to_seq = {}
+            for _, row in df.iterrows():
+                row_id = str(row['id'])
+                if row_id in ids:
+                    id_to_seq[row_id] = str(row['sequence']).upper()
+            if id_to_seq:
+                return id_to_seq
 
-        if not sequences:
-            raise ValueError(f"No protein sequence found in: {protein_input}")
+    # Try files (PDB/CIF)
+    if files:
+        id_to_seq = {}
+        for i, file_path in enumerate(files):
+            if i >= len(ids):
+                break
+            seq_id = ids[i]
+            if file_path.endswith('.pdb') or file_path.endswith('.cif'):
+                if os.path.exists(file_path):
+                    atoms = parse_pdb_file(file_path)
+                    sequences = get_protein_sequence(atoms)
+                    if sequences:
+                        full_sequence = ''.join(sequences[chain] for chain in sorted(sequences.keys()))
+                        id_to_seq[seq_id] = full_sequence
+            elif file_path.endswith('.csv') and os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                if 'sequence' in df.columns:
+                    id_to_seq[seq_id] = str(df['sequence'].iloc[0]).upper()
+        if id_to_seq:
+            return id_to_seq
 
-        # Concatenate all chains
-        full_sequence = ''.join(sequences[chain] for chain in sorted(sequences.keys()))
-        return full_sequence
-
-    # CSV file (e.g. Sequence tool map_table)
-    if protein_input.endswith('.csv'):
-        if not os.path.exists(protein_input):
-            raise FileNotFoundError(f"CSV file not found: {protein_input}")
-
-        df = pd.read_csv(protein_input)
-        if 'sequence' in df.columns:
-            return ''.join(df['sequence'].tolist())
-        raise ValueError(f"CSV file has no 'sequence' column: {protein_input}")
-
-    # Otherwise treat as sequence string
-    return protein_input
+    raise ValueError(f"Could not load sequences for slot with ids: {ids}")
 
 
 def generate_fusion_sequences(
-    sequences: List[str],
+    slots: List[Dict[str, Any]],
     linker: str,
     linker_lengths: List[str],
     name_base: str
 ) -> List[Dict[str, Any]]:
     """
-    Generate all fusion sequence combinations with sequence/linker position information.
+    Generate all fusion sequence combinations from multi-ID slots.
+
+    The output is the cartesian product of all slot options × linker length options.
 
     Args:
-        sequences: List of sequences (or PDB file paths)
+        slots: List of slot dicts with ids, map_table, files
         linker: Linker sequence template
         linker_lengths: List of length range specifications for each junction
-        name_base: Base name for output sequence IDs
+        name_base: Base name (unused in ID, IDs come from slot IDs)
 
     Returns:
-        List of dicts with sequence info including S1, L1, S2, L2, S3, etc.
+        List of dicts with sequence info including provenance and position columns
     """
-    # Extract sequences (handles both raw sequences and PDB files)
-    input_sequences = []
+    # Load sequences for each slot
+    slot_sequences = []
+    for i, slot in enumerate(slots):
+        print(f"Loading sequences for slot {i+1}...")
+        id_to_seq = load_sequences_from_slot(slot)
+        print(f"  Loaded {len(id_to_seq)} sequences")
+        slot_sequences.append(id_to_seq)
 
-    for i, seq_input in enumerate(sequences):
-        seq = extract_sequence(seq_input)
-        input_sequences.append(seq)
+    # Get per-slot ID lists
+    slot_id_lists = [slot["ids"] for slot in slots]
 
     # Parse linker length ranges
-    length_ranges = [parse_length_spec(spec) for spec in linker_lengths]
+    junction_length_lists = []
+    for spec in linker_lengths:
+        lengths = parse_length_spec(spec)
+        junction_length_lists.append(lengths)
+
+    # Build cartesian product axes: [slot0_ids, junction0_lengths, slot1_ids, ...]
+    axes = []
+    for i, slot_ids in enumerate(slot_id_lists):
+        axes.append(slot_ids)
+        if i < len(junction_length_lists):
+            axes.append(junction_length_lists[i])
 
     # Generate all combinations
     results = []
+    num_slots = len(slots)
 
-    for length_combo in product(*length_ranges):
+    for combo in product(*axes):
+        # combo alternates: (slot0_id, junc0_len, slot1_id, junc1_len, slot2_id, ...)
+        # Extract slot IDs and junction lengths
+        slot_ids_in_combo = [combo[i * 2] for i in range(num_slots)]
+        junction_lengths_in_combo = [combo[i * 2 + 1] for i in range(num_slots - 1)]
+
         # Build the fused sequence and track positions
         fused_sequence = ""
-        positions = []  # List of (type, idx, start, end) where type is 'S' or 'L'
+        positions = []  # List of (type, idx, start, end)
 
-        for i, seq in enumerate(input_sequences):
+        for i, seq_id in enumerate(slot_ids_in_combo):
+            seq = slot_sequences[i].get(seq_id, "")
+            if not seq:
+                print(f"Warning: No sequence found for {seq_id} in slot {i+1}, skipping combo")
+                break
+
             # Add sequence
             start = len(fused_sequence) + 1  # 1-indexed
             fused_sequence += seq
             end = len(fused_sequence)
             positions.append(('S', i + 1, start, end))
 
-            # Add linker if not last sequence
-            if i < len(input_sequences) - 1:
-                linker_len = length_combo[i]
+            # Add linker if not last slot
+            if i < num_slots - 1:
+                linker_len = junction_lengths_in_combo[i]
                 linker_seq = linker[:linker_len]
 
                 start = len(fused_sequence) + 1
                 fused_sequence += linker_seq
                 end = len(fused_sequence)
                 positions.append(('L', i + 1, start, end))
+        else:
+            # Build result dict
+            seq_id = "_".join(str(part) for part in combo)
 
-        # Build result dict
-        # Format lengths string
-        lengths_str = "-".join(str(l) for l in length_combo)
+            # Lengths string from junction lengths
+            lengths_str = "-".join(str(l) for l in junction_lengths_in_combo)
 
-        # Build sequence ID
-        seq_id = f"{name_base}_{lengths_str}" if name_base else f"fused_{lengths_str}"
+            result = {
+                'id': seq_id,
+                'sequence': fused_sequence,
+                'lengths': lengths_str
+            }
 
-        result = {
-            'id': seq_id,
-            'sequence': fused_sequence,
-            'lengths': lengths_str
-        }
+            # Add provenance columns
+            for slot_idx in range(num_slots):
+                result[f'sequences_{slot_idx+1}.id'] = slot_ids_in_combo[slot_idx]
 
-        # Add S1, L1, S2, L2, S3, etc. columns in PyMOL selection format
-        for pos_type, idx, start, end in positions:
-            col_name = f"{pos_type}{idx}"
-            if start == end:
-                result[col_name] = str(start)
-            else:
-                result[col_name] = f"{start}-{end}"
+            # Add S1, L1, S2, L2, S3, etc. columns in PyMOL selection format
+            for pos_type, idx, start, end in positions:
+                col_name = f"{pos_type}{idx}"
+                if start == end:
+                    result[col_name] = str(start)
+                else:
+                    result[col_name] = f"{start}-{end}"
 
-        results.append(result)
+            results.append(result)
 
     return results
 
@@ -195,79 +237,73 @@ def main():
     parser = argparse.ArgumentParser(
         description='Generate fusion sequences with linker combinations'
     )
-    parser.add_argument('name', help='Base name for output sequence IDs')
-    parser.add_argument('sequences', help='Semicolon-separated list of sequences or PDB file paths')
-    parser.add_argument('linker', help='Linker sequence template')
-    parser.add_argument('linker_lengths', help='Linker length specifications (e.g., "L2-4;2-4L")')
-    parser.add_argument('output_csv', help='Output CSV file path')
-    parser.add_argument('output_fasta', help='Output FASTA file path')
+    parser.add_argument('--config', required=True,
+                       help='Path to JSON config file')
 
     args = parser.parse_args()
 
-    # Parse sequences
-    sequences = args.sequences.split(';')
-    print(f"Processing {len(sequences)} sequences")
-    for i, s in enumerate(sequences):
-        if s.endswith('.pdb') or s.endswith('.cif'):
-            print(f"  Sequence {i+1}: {os.path.basename(s)} (PDB file)")
-        else:
-            print(f"  Sequence {i+1}: {len(s)} residues")
+    # Load config
+    with open(args.config, 'r') as f:
+        config = json.load(f)
 
-    # Parse linker lengths - strip leading/trailing L markers
-    linker_lengths_str = args.linker_lengths
-    if linker_lengths_str.startswith('L'):
-        linker_lengths_str = linker_lengths_str[1:]
-    if linker_lengths_str.endswith('L'):
-        linker_lengths_str = linker_lengths_str[:-1]
+    name = config["name"]
+    linker = config["linker"]
+    linker_lengths = config["linker_lengths"]
+    slots = config["slots"]
+    output_csv = config["output_csv"]
+    output_fasta = config["output_fasta"]
 
-    linker_lengths = linker_lengths_str.split(';')
-    print(f"Linker: {args.linker}")
+    num_slots = len(slots)
+    print(f"Processing {num_slots} slots")
+    for i, slot in enumerate(slots):
+        print(f"  Slot {i+1}: {len(slot['ids'])} sequences")
+
+    print(f"Linker: {linker}")
     print(f"Linker length ranges: {linker_lengths}")
 
     # Validate
-    expected_junctions = len(sequences) - 1
+    expected_junctions = num_slots - 1
     if len(linker_lengths) != expected_junctions:
         raise ValueError(
-            f"Expected {expected_junctions} linker length specs for {len(sequences)} sequences, "
+            f"Expected {expected_junctions} linker length specs for {num_slots} slots, "
             f"got {len(linker_lengths)}"
         )
 
     # Generate fusion sequences
     results = generate_fusion_sequences(
-        sequences=sequences,
-        linker=args.linker,
+        slots=slots,
+        linker=linker,
         linker_lengths=linker_lengths,
-        name_base=args.name
+        name_base=name
     )
 
     print(f"\nGenerated {len(results)} fusion sequences")
 
     # Create output directory if needed
-    output_dir = os.path.dirname(args.output_csv)
+    output_dir = os.path.dirname(output_csv)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    # Determine column order dynamically based on number of sequences
-    num_sequences = len(sequences)
+    # Determine column order dynamically
+    provenance_columns = [f'sequences_{i+1}.id' for i in range(num_slots)]
     position_columns = []
-    for i in range(1, num_sequences + 1):
+    for i in range(1, num_slots + 1):
         position_columns.append(f"S{i}")
-        if i < num_sequences:
+        if i < num_slots:
             position_columns.append(f"L{i}")
 
-    # Write CSV with ordered columns
     base_columns = ['id', 'sequence', 'lengths']
-    all_columns = base_columns + position_columns
+    all_columns = base_columns + provenance_columns + position_columns
 
+    # Write CSV with ordered columns
     df = pd.DataFrame(results)
-    # Reorder columns
     df = df[all_columns]
-    df.to_csv(args.output_csv, index=False)
-    print(f"Saved CSV: {args.output_csv}")
+    df.to_csv(output_csv, index=False)
+    print(f"Saved CSV: {output_csv}")
 
     # Write FASTA
-    write_fasta(results, args.output_fasta)
-    print(f"Saved FASTA: {args.output_fasta}")
+    write_fasta(results, output_fasta)
+    print(f"Saved FASTA: {output_fasta}")
 
     # Show sample output
     if results:
@@ -275,7 +311,7 @@ def main():
         print(f"\nSample output (first sequence):")
         print(f"  ID: {sample['id']}")
         print(f"  Length: {len(sample['sequence'])} residues")
-        for col in position_columns:
+        for col in provenance_columns + position_columns:
             if col in sample:
                 print(f"  {col}: {sample[col]}")
 

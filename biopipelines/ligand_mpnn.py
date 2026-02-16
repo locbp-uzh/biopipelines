@@ -13,12 +13,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .combinatorics import generate_multiplied_ids
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from combinatorics import generate_multiplied_ids
 
 
 class LigandMPNN(BaseConfig):
@@ -305,10 +307,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         # Predict sequence IDs (stream_id + sequence number)
         # Total sequences per structure = num_sequences (batch_size) * num_batches
         total_seqs = self.num_sequences * self.num_batches
-        sequence_ids = []
-        for struct_id in self.structures_stream.ids:
-            for seq_num in range(1, total_seqs + 1):
-                sequence_ids.append(f"{struct_id}_{seq_num}")
+        suffixes = [str(i) for i in range(1, total_seqs + 1)]
+        sequence_ids, provenance = generate_multiplied_ids(
+            self.structures_stream.ids, suffixes,
+            input_stream_name="structures"
+        )
 
         # Sequences stream - CSV-based with individual sequence IDs
         sequences = DataStream(
