@@ -1,5 +1,4 @@
 - colab
-- installation of biopipelines without conda/mamba, pip package
 - Panda.filter("RMSD < 1.5 and plddt > 80") 1 vs 2, different reasons?
 - Mutagenesis mutations vs mutation<N>
 - ids general utils. merge(on=["id","compounds.ids"]). boltz default = "auto" possibly "proteins.ids|ligands.ids". 

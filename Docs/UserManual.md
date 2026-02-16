@@ -567,9 +567,9 @@ Note: `local_output` defaults to `True` automatically when `on_the_fly` is enabl
 ```python
 from biopipelines.load import LoadOutput, LoadOutputs
 
-# Single output
-prev = LoadOutput("/path/to/ToolOutputs/001_Boltz2.json")
+# Single output (pass the tool's output folder)
+prev = LoadOutput("/path/to/job/001_Boltz2")
 
-# Multiple outputs by tool name
+# Multiple outputs by tool name (pass the job folder)
 all_boltz = LoadOutputs("/path/to/job/", tool="Boltz2")
 ```

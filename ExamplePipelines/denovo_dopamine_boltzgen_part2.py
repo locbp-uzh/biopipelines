@@ -18,8 +18,8 @@ with Pipeline(project="Examples",
     # Load results from 10 parallel batches
     boltzgens=[]
     for i in range(1,11):
-        jsonpath=f"/path/to/Dopamine_BoltzGen_1000designs_{i:03d}/ToolOutputs/002_BoltzGen.json"
-        boltzgens.append(LoadOutput(jsonpath,validate_files=False))
+        folderpath=f"/path/to/Dopamine_BoltzGen_1000designs_{i:03d}/002_BoltzGen"
+        boltzgens.append(LoadOutput(folderpath,validate_files=False))
     # Run analysis
     analyzed = [BoltzGen(reuse=bg1000,
             steps=["analysis"],

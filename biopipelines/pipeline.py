@@ -375,7 +375,8 @@ class Pipeline:
         print(f"{'='*60}")
 
         # Execute the script, streaming output in real-time
-        with open(log_path, 'w') as log_file:
+        tool_folder_log_path = os.path.join(tool_config.output_folder, ".log")
+        with open(log_path, 'w') as log_file, open(tool_folder_log_path, 'w') as tool_folder_log:
             process = subprocess.Popen(
                 ['bash', '-e', tool_script_path],
                 stdout=subprocess.PIPE,
@@ -388,6 +389,8 @@ class Pipeline:
                 sys.stdout.flush()
                 log_file.write(line)
                 log_file.flush()
+                tool_folder_log.write(line)
+                tool_folder_log.flush()
             process.wait()
 
         if process.returncode != 0:
@@ -581,9 +584,10 @@ class Pipeline:
                 log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.log")
             else:
                 log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}.log")
+            tool_folder_log = os.path.join(tool.output_folder, ".log")
             script_lines.extend([
                 f"echo {tool.TOOL_NAME}",
-                f"{tool_script_path} 2>&1 | tee {log_file}",
+                f"{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}",
                 "echo"
             ])
         

@@ -435,6 +435,10 @@ def main():
     except (json.JSONDecodeError, FileNotFoundError) as e:
         print(f"Error parsing expected outputs: {e}", file=sys.stderr)
         sys.exit(2)
+
+    # Unwrap envelope format if present (tool_name, tool_class, output_structure wrapper)
+    if 'output_structure' in expected_outputs and 'tool_name' in expected_outputs:
+        expected_outputs = expected_outputs['output_structure']
     
     # Use filter-aware validation
     success, missing_by_category, filter_info = check_expected_outputs_filter_aware(

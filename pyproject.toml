@@ -18,6 +18,9 @@ dependencies = [
 ]
 
 [project.scripts]
+bp-submit = "biopipelines.cli:submit"
+bp-run = "biopipelines.cli:run"
+bp-config = "biopipelines.cli:config"
 biopipelines-submit = "biopipelines.cli:submit"
 biopipelines-run = "biopipelines.cli:run"
 biopipelines-config = "biopipelines.cli:config"

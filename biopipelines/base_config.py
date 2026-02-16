@@ -657,10 +657,16 @@ fi
         )
 
         # Write expected outputs to JSON file at pipeline time (not SLURM time)
+        # Wrap in metadata envelope so LoadOutput can load directly from the tool folder
+        expected_outputs_wrapped = {
+            "tool_name": self.TOOL_NAME,
+            "tool_class": self.__class__.__name__,
+            "output_structure": json_safe_outputs,
+        }
         expected_outputs_file = os.path.join(self.output_folder, ".expected_outputs.json")
         os.makedirs(self.output_folder, exist_ok=True)
         with open(expected_outputs_file, 'w') as f:
-            json.dump(json_safe_outputs, f, indent=2)
+            json.dump(expected_outputs_wrapped, f, indent=2)
 
         return f"""
 # Check completion and create status files
