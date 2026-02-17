@@ -362,10 +362,11 @@ class PyMOLSessionBuilder:
         structures_ref = op.get("structures")
         upper = op.get("upper", 100)
 
-        if not structures_ref:
-            raise ValueError("ColorAF operation requires structures")
-
-        structures = self._resolve_structures(structures_ref)
+        if structures_ref:
+            structures = self._resolve_structures(structures_ref)
+        else:
+            # No structures specified - apply to all loaded objects
+            structures = [{"id": sid} for sid in self.loaded_objects]
         print(f"ColorAF: Applying pLDDT coloring to {len(structures)} structures (upper={upper})")
 
         # Calculate thresholds based on upper value

@@ -10,6 +10,7 @@ from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.alphafold import AlphaFold
 from biopipelines.conformational_change import ConformationalChange
 from biopipelines.panda import Panda
+from biopipelines.pymol import PyMOL
 
 with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
@@ -22,7 +23,8 @@ with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
                             redesigned=backbones.tables.structures.designed)
     refolded = AlphaFold(proteins=sequences)    
     conf_change = ConformationalChange(reference_structures = kinase,
-                                       target_structures = refolded)
+                                       target_structures = refolded,
+                                       selection = backbones.tables.structures.fixed)
     top3 = Panda(tables=[refolded.tables.confidence,
                          conf_change.tables.changes],
                  operations=[Panda.merge(),
@@ -30,6 +32,11 @@ with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
                              Panda.sort("plddt"),
                              Panda.head(3)],
                  pool=refolded)
+    PyMOL(PyMOL.Load(top3),
+          PyMOL.ColorAF(top3),
+          PyMOL.Color("white",selection=backbones.tables.structures.fixed))
+    
+
     
     
 

@@ -10,7 +10,7 @@ by PyMOL's align, super, or cealign methods.
 """
 
 import os
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Tuple, Union
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
@@ -61,7 +61,7 @@ echo "=== ConformationalChange ready ==="
     def __init__(self,
                  reference_structures: Union[DataStream, StandardizedOutput],
                  target_structures: Union[DataStream, StandardizedOutput],
-                 selection: Optional[str] = None,
+                 selection: Optional[Union[str, Tuple['TableInfo', str]]] = None,
                  alignment: str = "align",
                  **kwargs):
         """
@@ -70,17 +70,17 @@ echo "=== ConformationalChange ready ==="
         Args:
             reference_structures: Reference structures as DataStream or StandardizedOutput
             target_structures: Target structures as DataStream or StandardizedOutput
-            selection: Region specification - string or None for all residues
-                      String format: '10-20+30-40' (residue ranges)
-                      None: Compare all CA atoms (whole structure RMSD)
+            selection: Region specification. Accepts:
+                      - None: Compare all atoms (whole structure RMSD)
+                      - String: '10-20+30-40' (fixed residue ranges for all structures)
+                      - Table column reference: (table, "column_name") for per-structure selections
             alignment: Alignment method - "align", "super", or "cealign" (default: "align")
             **kwargs: Additional parameters
 
-        Selection Syntax:
+        Selection Syntax (string):
             - '10-20' → residues 10 to 20
             - '10-20+30-40' → residues 10-20 and 30-40
             - '145+147+150' → specific residues 145, 147, and 150
-            - None → all CA atoms
 
         Alignment Methods:
             - "align": PyMOL align (sequence-dependent, fast)
@@ -95,12 +95,19 @@ echo "=== ConformationalChange ready ==="
                 alignment='cealign'
             )
 
-            # Analyze conformational change with fixed selection
+            # Analyze conformational change with fixed selection string
             conf_analysis = ConformationalChange(
                 reference_structures=rfdaa,
                 target_structures=boltz_results,
                 selection='10-20+30-40',
                 alignment='super'
+            )
+
+            # Per-structure selection from table column reference
+            conf_analysis = ConformationalChange(
+                reference_structures=kinase,
+                target_structures=refolded,
+                selection=backbones.tables.structures.fixed
             )
         """
         # Resolve reference structures to DataStream
@@ -143,14 +150,21 @@ echo "=== ConformationalChange ready ==="
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
-        selection_display = self.selection_spec if self.selection_spec else "All CA atoms (whole structure)"
+        if self.selection_spec is None:
+            selection_display = "All atoms (whole structure)"
+        elif isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
+            table_obj, col_name = self.selection_spec
+            table_name = table_obj.info.name if hasattr(table_obj, 'info') else str(table_obj)
+            selection_display = f"Column reference: {table_name}.{col_name}"
+        else:
+            selection_display = self.selection_spec
 
         config_lines.extend([
             f"REFERENCE STRUCTURES: {len(self.reference_stream)} files",
             f"TARGET STRUCTURES: {len(self.target_stream)} files",
             f"SELECTION: {selection_display}",
             f"ALIGNMENT METHOD: {self.alignment_method}",
-            f"METRICS: RMSD (from PyMOL {self.alignment_method})"
+            f"METRICS: RMSD (PyMOL {self.alignment_method}, all atoms)"
         ])
 
         return config_lines
@@ -182,6 +196,14 @@ echo "=== ConformationalChange ready ==="
         # Handle selection input
         if self.selection_spec is None:
             selection_config = {"type": "all"}
+        elif isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
+            # Table column reference: (TableInfo, "column_name")
+            table_object, column_name = self.selection_spec
+            if hasattr(table_object, 'info'):
+                table_path = table_object.info.path
+            else:
+                raise ValueError(f"Invalid table object in selection reference: {table_object}")
+            selection_config = {"type": "table_column", "table_path": table_path, "column_name": column_name}
         else:
             selection_config = {"type": "fixed", "value": self.selection_spec}
 
@@ -231,9 +253,14 @@ python "{self.analysis_py}" --config "{self.config_file}"
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
+        if isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
+            table_obj, col_name = self.selection_spec
+            selection_str = f"table_column:{table_obj.info.name}.{col_name}" if hasattr(table_obj, 'info') else str(self.selection_spec)
+        else:
+            selection_str = str(self.selection_spec)
         base_dict.update({
             "tool_params": {
-                "selection": str(self.selection_spec),
+                "selection": selection_str,
                 "alignment_method": self.alignment_method
             }
         })

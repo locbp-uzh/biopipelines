@@ -40,13 +40,13 @@ def align_and_compute_rmsd(ref_obj: str, target_obj: str, selection: str,
     Returns:
         Dictionary with RMSD and num_aligned_atoms from PyMOL's alignment
     """
-    # Create selection strings for CA atoms
+    # Create selection strings
     if selection is None or selection == "all":
-        ref_sel = f"{ref_obj} and name CA"
-        target_sel = f"{target_obj} and name CA"
+        ref_sel = f"{ref_obj}"
+        target_sel = f"{target_obj}"
     else:
-        ref_sel = f"{ref_obj} and resi {selection} and name CA"
-        target_sel = f"{target_obj} and resi {selection} and name CA"
+        ref_sel = f"{ref_obj} and resi {selection}"
+        target_sel = f"{target_obj} and resi {selection}"
 
     if alignment_method == "align":
         # Returns: [RMSD_after, atoms_after, cycles, RMSD_before, atoms_before, score, residues_aligned]
@@ -225,7 +225,7 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
     selection_map = {}
     if selection_config['type'] == 'all':
         # Use all CA atoms (whole structure RMSD)
-        print("Using all CA atoms (whole structure RMSD)")
+        print("Using all atoms (whole structure RMSD)")
         for target_id in target_ds.ids:
             selection_map[target_id] = "all"
     elif selection_config['type'] == 'fixed':

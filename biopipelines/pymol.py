@@ -186,7 +186,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
         return PyMOLOperation("color", structures=structures, selection=selection, color=color)
 
     @staticmethod
-    def ColorAF(structures: Union[StandardizedOutput, DataStream],
+    def ColorAF(structures: Union[StandardizedOutput, DataStream, None] = None,
                 upper: float = 100) -> PyMOLOperation:
         """
         Color structures by AlphaFold pLDDT (B-factor spectrum).
@@ -195,7 +195,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
         pLDDT scores in AlphaFold-generated structures.
 
         Args:
-            structures: Tool output containing AlphaFold structures
+            structures: Tool output containing structures (optional, defaults to all loaded)
             upper: Maximum B-factor value for scaling (default: 100 for pLDDT)
 
         Returns:
