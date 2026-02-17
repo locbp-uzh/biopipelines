@@ -1230,20 +1230,26 @@ class StandardizedOutput:
                 return f"<output_folder>/{relative_path}"
             return file_path
 
-        def format_datastream(name: str, ds: DataStream) -> List[str]:
+        def format_datastream(stream_key: str, ds: DataStream) -> List[str]:
             """Format a DataStream for display."""
             import pandas as pd
 
             if not ds or len(ds) == 0:
                 return []
 
-            result = [f"{name}: ({ds.format}, {len(ds)} items)"]
+            result = [f"{stream_key}:"]
 
-            # Show metadata
-            if ds.map_table:
-                result.append(f"    map_table: '{make_relative_path(ds.map_table)}'")
+            # Metadata fields
+            result.append(f"    name: {ds.name}")
+            result.append(f"    format: {ds.format}")
+            result.append(f"    items: {len(ds)}")
+            result.append(f"    map_table: '{make_relative_path(ds.map_table) if ds.map_table else ''}'")
+            result.append(f"    files_contain_wildcards: {ds.files_contain_wildcards}")
+            if ds.metadata:
+                meta_str = ", ".join(f"{k}={v}" for k, v in ds.metadata.items())
+                result.append(f"    metadata: {meta_str}")
 
-            # Try to render from map_table (full columns) if available
+            # Data: try map_table first, then id/file fallback
             map_data = ds._get_map_data()
             if map_data is not None and len(map_data) > 0:
                 columns = list(map_data.columns)
@@ -1267,7 +1273,6 @@ class StandardizedOutput:
                         parts.append(f"{col}={val}")
                     result.append(f"    – {', '.join(parts)}")
             else:
-                # Fallback: render id/file pairs from iterator
                 items = list(ds)
                 n_items = len(items)
                 if n_items <= 4:
@@ -1398,22 +1403,33 @@ class StandardizedOutput:
             if stream.format.lower() in self._IMAGE_FORMATS:
                 continue
 
-            # Stream header with metadata
+            # Stream header
             html_parts.append(
                 f'<div class="bp-section">'
-                f'<div class="bp-section-title">{stream_name} '
-                f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
+                f'<div class="bp-section-title">{stream_name}</div>'
             )
 
-            # Stream metadata line
-            meta_parts = []
-            if stream.map_table:
-                meta_parts.append(f"map_table: {html_module.escape(rel(stream.map_table))}")
-            if meta_parts:
-                html_parts.append(
-                    f'<div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">'
-                    f'{" | ".join(meta_parts)}</div>'
-                )
+            # Stream metadata table (horizontal)
+            meta_headers = ['name', 'format', 'items', 'map_table', 'files_contain_wildcards']
+            meta_values = [
+                html_module.escape(stream.name),
+                html_module.escape(stream.format),
+                str(len(stream)),
+                html_module.escape(rel(stream.map_table) if stream.map_table else ''),
+                str(stream.files_contain_wildcards),
+            ]
+            if stream.metadata:
+                meta_headers.append('metadata')
+                meta_values.append(html_module.escape(
+                    ", ".join(f"{k}={v}" for k, v in stream.metadata.items())
+                ))
+            html_parts.append('<table class="bp-table"><tr>')
+            for h in meta_headers:
+                html_parts.append(f'<th>{h}</th>')
+            html_parts.append('</tr><tr>')
+            for v in meta_values:
+                html_parts.append(f'<td>{v}</td>')
+            html_parts.append('</tr></table>')
 
             # Try to render from map_table (full columns) if available
             map_data = stream._get_map_data()
