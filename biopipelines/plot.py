@@ -199,7 +199,9 @@ echo "=== Plot ready ==="
             dpi: int = 100,
             x_tick_rotation: float = 0,
             y_tick_rotation: float = 0,
-            grid: bool = True) -> PlotOperation:
+            grid: bool = True,
+            legend_loc: str = "upper right",
+            legend_outside: bool = False) -> PlotOperation:
         """
         Create bar chart for categorical X axis.
 
@@ -224,6 +226,8 @@ echo "=== Plot ready ==="
             x_tick_rotation: Rotation angle for x-axis tick labels in degrees
             y_tick_rotation: Rotation angle for y-axis tick labels in degrees
             grid: Show grid lines (default True)
+            legend_loc: Legend location ("upper right", "upper left", etc.)
+            legend_outside: Place legend outside plot area to the right (default False)
 
         Returns:
             PlotOperation for bar chart
@@ -235,7 +239,8 @@ echo "=== Plot ready ==="
                             color_left=color_left, color_right=color_right,
                             figsize=figsize, dpi=dpi,
                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
-                            grid=grid)
+                            grid=grid,
+                            legend_loc=legend_loc, legend_outside=legend_outside)
 
     @staticmethod
     def Column(data: List[Union[StandardizedOutput, TableInfo]],

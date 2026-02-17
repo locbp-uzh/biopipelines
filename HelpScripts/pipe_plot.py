@@ -289,6 +289,8 @@ class PlotBuilder:
         x_tick_rotation = op.get("x_tick_rotation", 0)
         y_tick_rotation = op.get("y_tick_rotation", 0)
         grid = op.get("grid", True)
+        legend_loc = op.get("legend_loc", "upper right")
+        legend_outside = op.get("legend_outside", False)
 
         df = self._resolve_data_source(data_ref)
 
@@ -332,7 +334,11 @@ class PlotBuilder:
             # Combined legend
             lines_left, labels_left = ax.get_legend_handles_labels()
             lines_right, labels_right = ax2.get_legend_handles_labels()
-            ax.legend(lines_left + lines_right, labels_left + labels_right, loc='upper right')
+            if legend_outside:
+                ax.legend(lines_left + lines_right, labels_left + labels_right,
+                         loc='center left', bbox_to_anchor=(1.12, 0.5), frameon=True)
+            else:
+                ax.legend(lines_left + lines_right, labels_left + labels_right, loc=legend_loc)
 
             self._apply_style(ax, title, xlabel, None,
                              x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
