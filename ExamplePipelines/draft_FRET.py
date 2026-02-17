@@ -19,8 +19,8 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     acceptor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFGYGLQCFARYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSYQSALSKDPNEKRDHMVLLEFVTAAGITLGMDELYK")   # EYFP
     fusions = Fuse(sequences=[donor, cam, acceptor],
                    name="CaFRET",
-                   linker="GSGAG",
-                   linker_lengths=["3-5", "3-5"])
+                   linker="GS",
+                   linker_lengths=["0-2", "0-2"])
     apo = Boltz2(proteins=fusions)
     calcium = Ligand("CA")
     holo = Boltz2(proteins=fusions,

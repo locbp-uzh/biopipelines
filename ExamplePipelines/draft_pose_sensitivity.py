@@ -29,19 +29,13 @@ with Pipeline(project="Imatinib", job="PoseSensitivity"):
                              mutants.tables.affinity,
                              mutants_sequences.tables.sequences],
                      operations=[Panda.merge()])
-    Plot(Plot.Scatter(data=analysis.tables.result,
-                      x="ligand_rmsd", 
-                      y="affinity_pred_value",
-                      title="Pose Deviation vs Predicted Affinity",
-                      xlabel="Ligand RMSD (A)",
-                      ylabel="Predicted Affinity", 
-                      grid=True),
-        Plot.Bar(data=analysis.tables.result,
-                 x="mutation", 
-                 y="ligand_rmsd",
-                 title="Ligand RMSD per Mutant",
-                 xlabel="Mutation", 
-                 ylabel="Ligand RMSD (A)",
-                 x_tick_rotation=45, 
-                 grid=True))
+    Plot(Plot.Bar(data=analysis.tables.result,
+                  x="mutation", 
+                  y="ligand_rmsd",
+                  title="Ligand RMSD per Mutant",
+                  xlabel="Mutation", 
+                  ylabel="Ligand RMSD (A)",
+                  x_tick_rotation=45, 
+                  grid=True))
+
 
