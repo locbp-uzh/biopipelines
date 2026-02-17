@@ -462,7 +462,7 @@ class Pipeline:
         self.pipeline_script = script_path
         self.scripts_generated = True
         
-        # Export tool outputs for potential reuse with LoadOutput
+        # Export tool outputs for potential reuse with Load
         self._export_tool_outputs()
 
         # Save the original pipeline Python script to runtime folder
@@ -1010,7 +1010,7 @@ umask 002
     
     def _export_tool_outputs(self):
         """
-        Export tool output metadata to JSON files for potential reuse with LoadOutput.
+        Export tool output metadata to JSON files for potential reuse with Load.
         
         Creates a tool_outputs/ directory with JSON files for each tool containing
         complete output structure, configuration, and execution metadata.

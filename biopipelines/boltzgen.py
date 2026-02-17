@@ -685,20 +685,20 @@ fi
 '''
 
         elif self.spec_mode == "manual":
-            # Manual mode: write YAML at pipeline time (user-provided spec)
+            # Manual mode: write YAML at configuration time (user-provided spec)
             if self.design_spec_is_dict:
-                # Convert dictionary to YAML and write to file at pipeline time
+                # Convert dictionary to YAML and write to file at configuration time
                 import yaml
                 with open(self.design_spec_yaml_file, 'w') as f:
                     yaml.dump(self.design_spec, f, default_flow_style=False)
                 return f'# Using pre-generated design specification: {self.design_spec_yaml_file}\n'
             elif self.design_spec_is_yaml_str:
-                # Write YAML string to file at pipeline time
+                # Write YAML string to file at configuration time
                 with open(self.design_spec_yaml_file, 'w') as f:
                     f.write(self.design_spec)
                 return f'# Using pre-generated design specification: {self.design_spec_yaml_file}\n'
             elif self.design_spec_is_file:
-                # Copy existing file to output folder at pipeline time
+                # Copy existing file to output folder at configuration time
                 import shutil
                 shutil.copy(self.design_spec, self.design_spec_yaml_file)
                 return f'# Using copied design specification: {self.design_spec_yaml_file}\n'
@@ -861,7 +861,7 @@ fi
 
             # Generate structure IDs and paths
             # BoltzGen filtering outputs files named rank0001_<original_design_id>.cif
-            # The exact design ID suffix is only known at SLURM time, so we use wildcard patterns
+            # The exact design ID suffix is only known at execution time, so we use wildcard patterns
             structure_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
             structure_files = [os.path.join(final_designs_folder, f"rank{i:04d}_*.cif") for i in range(1, self.budget + 1)]
 

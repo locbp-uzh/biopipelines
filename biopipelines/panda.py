@@ -632,30 +632,23 @@ echo "=== Panda ready ==="
         # Extract id_map from merge operation if present (maps new_id -> [old_ids])
         # We store both directions for different use cases:
         # - id_remap: old_id -> new_id (for remapping pool IDs to merged IDs)
-        # - id_map_forward: new_id -> [old_ids] (for reverse lookup at SLURM time)
+        # - id_map_forward: new_id -> [old_ids] (for reverse lookup at execution time)
         self.id_remap = {}  # old_id -> new_id
         self.id_map_forward = {}  # new_id -> [old_ids] (original id_map)
         for op in self.operations:
             if op.type == "merge" and op.params.get("id_map"):
                 id_map = op.params["id_map"]
-                self.id_map_forward = id_map  # Store original for SLURM time
+                self.id_map_forward = id_map  # Store original for execution time
                 for new_id, old_ids in id_map.items():
                     for old_id in old_ids:
                         self.id_remap[old_id] = new_id
 
         # Auto-rename for pool mode:
-        # - Multiple pools: always rename (IDs from different sources need unification)
-        # - Single pool + sort: rename (output order is unpredictable at pipeline time)
-        # - Single pool without sort: no rename (predict all input IDs, missing ones
-        #   from filter/head/sample/etc. are tracked in missing.csv)
+        # - sort/head/tail/sample present: rename (output IDs are unpredictable at configuration time)
+        # - Otherwise: no rename, predict all input IDs (deduplicated across pools),
+        #   missing ones from filter/etc. are tracked in missing.csv
         if self.use_pool_mode and not self.rename:
-            needs_rename = False
-            if len(self.pool_outputs) > 1:
-                needs_rename = True
-            else:
-                has_sort = any(op.type == "sort" for op in self.operations)
-                if has_sort:
-                    needs_rename = True
+            needs_rename = any(op.type in ("sort", "head", "tail", "sample") for op in self.operations)
 
             if needs_rename:
                 # Derive rename prefix from step folder name (e.g., "010_Panda_Cycle1" -> "Panda_Cycle1")
@@ -691,7 +684,7 @@ echo "=== Panda ready ==="
                                     file_map[stream_name][mapped_id] = stream.files[i]
                 self.pool_file_maps.append(file_map)
 
-                # Build table map from pool tables (for filtering/copying at SLURM time)
+                # Build table map from pool tables (for filtering/copying at execution time)
                 table_map = {}
                 if hasattr(pool, 'tables') and hasattr(pool.tables, '_tables'):
                     for table_name, table_info in pool.tables._tables.items():
@@ -926,6 +919,19 @@ fi
                             remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids]
                             stream_data[stream_name]["ids"].extend(remapped_ids)
                             stream_data[stream_name]["files"].extend(stream.files)
+
+            # Deduplicate IDs across pools (first occurrence wins)
+            for sdata in stream_data.values():
+                seen = set()
+                deduped_ids = []
+                deduped_files = []
+                for sid, sf in zip(sdata["ids"], sdata["files"]):
+                    if sid not in seen:
+                        seen.add(sid)
+                        deduped_ids.append(sid)
+                        deduped_files.append(sf)
+                sdata["ids"] = deduped_ids
+                sdata["files"] = deduped_files
 
             # Check if head/tail/sample limits the output count
             predicted_count = self._get_predicted_output_count()

@@ -696,8 +696,8 @@ fi
             "pipe_check_completion.py"
         )
 
-        # Write expected outputs to JSON file at pipeline time (not SLURM time)
-        # Wrap in metadata envelope so LoadOutput can load directly from the tool folder
+        # Write expected outputs to JSON file at configuration time (not execution time)
+        # Wrap in metadata envelope so Load can load directly from the tool folder
         expected_outputs_wrapped = {
             "tool_name": self.TOOL_NAME,
             "tool_class": self.__class__.__name__,

@@ -177,7 +177,7 @@ echo "=== Angle ready ==="
 
     def _generate_script_run_angle_analysis(self) -> str:
         """Generate the angle analysis execution part of the script."""
-        # Write config file at pipeline time
+        # Write config file at configuration time
         os.makedirs(self.output_folder, exist_ok=True)
 
         # Serialize structures DataStream to JSON for HelpScript to load

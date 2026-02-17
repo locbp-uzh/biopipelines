@@ -3,7 +3,7 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-LoadOutput tool for loading previously saved pipeline tool outputs.
+Load tool for loading previously saved pipeline tool outputs.
 
 Allows reusing results from previous pipeline runs without re-execution,
 enabling incremental pipeline development and efficient result reuse.
@@ -27,36 +27,36 @@ except ImportError:
     from datastream import DataStream
 
 
-class LoadOutput(BaseConfig):
+class Load(BaseConfig):
     """
     Load results from a previously executed pipeline tool, with optional filtering.
 
     This tool allows reusing outputs from previous pipeline runs without
     re-execution, enabling incremental pipeline development and result reuse.
 
-    The LoadOutput tool:
+    The Load tool:
     - Loads .expected_outputs.json from a tool's output folder
     - Rebases file paths when the folder has been moved
     - Optionally applies filters to loaded data (expression string or Filter tool output)
     - Provides filtered results through the standard pipeline interface
     - Enables subsequent tools to work with the filtered subset
 
-    This is the ONLY tool that checks file existence at pipeline runtime (not SLURM runtime).
+    This is the ONLY tool that checks file existence at configuration time (not execution time).
     """
 
     # Tool identification
-    TOOL_NAME = "LoadOutput"
+    TOOL_NAME = "Load"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        return """echo "=== LoadOutput ==="
+        return """echo "=== Load ==="
 echo "Uses biopipelines environment (no additional installation needed)."
-echo "=== LoadOutput ready ==="
+echo "=== Load ready ==="
 """
 
     def __init__(self, path: str, filter = None, validate_files: bool = True, **kwargs):
         """
-        Initialize LoadOutput tool.
+        Initialize Load tool.
 
         Args:
             path: Path to the tool's output folder (containing .expected_outputs.json)
@@ -131,7 +131,7 @@ echo "=== LoadOutput ready ==="
             # The folder was moved — rebase all paths
             old_prefix = os.path.dirname(old_output_folder)  # parent of old tool folder
             new_prefix = os.path.dirname(self.tool_folder)    # parent of new tool folder
-            print(f"LoadOutput: Rebasing paths from {old_prefix} -> {new_prefix}")
+            print(f"Load: Rebasing paths from {old_prefix} -> {new_prefix}")
             self._rebase_paths(output_structure, old_prefix, new_prefix)
 
         # Validate file existence if requested
@@ -201,7 +201,7 @@ echo "=== LoadOutput ready ==="
         """
         Resolve glob patterns and match IDs to actual file paths.
 
-        Called at pipeline runtime when validate_files=True.
+        Called at configuration time when validate_files=True.
 
         Args:
             output_structure: The output structure to resolve
@@ -231,7 +231,7 @@ echo "=== LoadOutput ready ==="
                     continue
 
             # Need to resolve
-            print(f"LoadOutput: Resolving {file_type} paths ({len(files)} patterns -> {len(ids)} IDs)")
+            print(f"Load: Resolving {file_type} paths ({len(files)} patterns -> {len(ids)} IDs)")
 
             # Collect all potential files
             all_files = []
@@ -329,7 +329,7 @@ echo "=== LoadOutput ready ==="
         if not main_table_path or not os.path.exists(main_table_path):
             raise ValueError(f"Cannot find main table to filter in loaded output: {main_table_path}")
 
-        print(f"LoadOutput: Applying filter to table: {main_table_path}")
+        print(f"Load: Applying filter to table: {main_table_path}")
 
         try:
             df = pd.read_csv(main_table_path)
@@ -389,7 +389,7 @@ echo "=== LoadOutput ready ==="
     def _apply_filter_to_output_structure(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
         """Apply filtering to the output structure based on filtered IDs."""
 
-        print(f"LoadOutput: Filtering output structure to {len(self.filtered_ids)} items")
+        print(f"Load: Filtering output structure to {len(self.filtered_ids)} items")
 
         filtered_structure = output_structure.copy()
 
@@ -413,7 +413,7 @@ echo "=== LoadOutput ready ==="
             elif len(files) <= 1:
                 # Single file or no files — just filter IDs
                 filtered_ids = [i for i in ids if i in self.filtered_ids]
-                # For single CSV files, update path to LoadOutput's output folder
+                # For single CSV files, update path to Load's output folder
                 filtered_files = []
                 for file_path in files:
                     if isinstance(file_path, str) and file_path.endswith('.csv'):
@@ -426,7 +426,7 @@ echo "=== LoadOutput ready ==="
             filtered_structure[stream_name]['files'] = filtered_files
             print(f"  - Filtered {stream_name}: {len(filtered_ids)}/{len(ids)}")
 
-        # Update tables paths to point to LoadOutput's output folder and update counts
+        # Update tables paths to point to Load's output folder and update counts
         if 'tables' in filtered_structure:
             for ds_name, ds_info in filtered_structure['tables'].items():
                 if isinstance(ds_info, dict):
@@ -466,11 +466,11 @@ echo "=== LoadOutput ready ==="
             raise ValueError(f"missing.csv does not have required 'id' column: {missing_path}")
 
         missing_ids = set(missing_df['id'].tolist())
-        print(f"LoadOutput: Excluding {len(missing_ids)} IDs from missing.csv")
+        print(f"Load: Excluding {len(missing_ids)} IDs from missing.csv")
         return missing_ids
 
     def validate_params(self):
-        """Validate LoadOutput parameters."""
+        """Validate Load parameters."""
         if not self.loaded_result:
             raise ValueError("No result loaded - initialization failed")
 
@@ -479,7 +479,7 @@ echo "=== LoadOutput ready ==="
             print("Consider setting validate_files=False if files have been moved")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
-        """Configure LoadOutput - no inputs needed since we're loading existing results."""
+        """Configure Load - no inputs needed since we're loading existing results."""
         self.folders = pipeline_folders
 
     def get_output_files(self) -> Dict[str, Any]:
@@ -597,7 +597,7 @@ echo "=== LoadOutput ready ==="
             original_job = 'unknown'
 
         script_content = "#!/bin/bash\n"
-        script_content += f"# LoadOutput script - loading results from {original_tool}\n"
+        script_content += f"# Load script - loading results from {original_tool}\n"
         script_content += f"# Original job: {original_job}\n"
         script_content += f"# Tool folder: {self.tool_folder}\n"
         script_content += self.generate_completion_check_header()
@@ -664,7 +664,7 @@ echo "Filtered tables created successfully"
 
         script_content += f"""
 
-echo "LoadOutput complete"
+echo "Load complete"
 echo "Files loaded from {original_tool} are ready for use"
 
 """
@@ -673,7 +673,7 @@ echo "Files loaded from {original_tool} are ready for use"
         return script_content
 
     def get_config_display(self) -> List[str]:
-        """Get LoadOutput configuration display."""
+        """Get Load configuration display."""
         config_lines = super().get_config_display()
 
         if self.loaded_result:
@@ -741,7 +741,7 @@ echo "Files loaded from {original_tool} are ready for use"
         return metadata
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize LoadOutput configuration."""
+        """Serialize Load configuration."""
         base_dict = super().to_dict()
         base_dict.update({
             "load_params": {
@@ -756,16 +756,16 @@ echo "Files loaded from {original_tool} are ready for use"
     def __str__(self) -> str:
         """String representation."""
         original_tool = self.original_tool_name or 'Unknown'
-        return f"LoadOutput(from {original_tool}: {os.path.basename(self.tool_folder)})"
+        return f"Load(from {original_tool}: {os.path.basename(self.tool_folder)})"
 
 
-def LoadOutputs(path: str,
+def LoadMultiple(path: str,
                 tool: Optional[str] = None,
                 suffix: Optional[str] = None,
                 in_suffix: Optional[Union[str, List[str]]] = None,
                 not_in_suffix: Optional[Union[str, List[str]]] = None,
                 ascending: bool = True,
-                **load_output_kwargs) -> Dict[str, LoadOutput]:
+                **load_output_kwargs) -> Dict[str, Load]:
     """
     Load multiple tool outputs from a job folder by scanning tool subfolders.
 
@@ -779,20 +779,20 @@ def LoadOutputs(path: str,
         in_suffix: Filter requiring suffix to contain string(s)
         not_in_suffix: Filter excluding suffix containing string(s)
         ascending: Sort order (True = ascending by name, False = descending)
-        **load_output_kwargs: Additional parameters passed to LoadOutput constructor
+        **load_output_kwargs: Additional parameters passed to Load constructor
 
     Returns:
-        Dictionary mapping folder names to LoadOutput objects
+        Dictionary mapping folder names to Load objects
 
     Examples:
         # Load all tool outputs from a job
-        >>> data = LoadOutputs("/path/to/Job_001")
+        >>> data = LoadMultiple("/path/to/Job_001")
 
         # Load only Boltz2 outputs
-        >>> boltz = LoadOutputs("/path/to/Job_001", tool="Boltz2")
+        >>> boltz = LoadMultiple("/path/to/Job_001", tool="Boltz2")
 
         # Load outputs with a specific suffix
-        >>> cycle10 = LoadOutputs("/path/to/Job_001", suffix="Cycle10")
+        >>> cycle10 = LoadMultiple("/path/to/Job_001", suffix="Cycle10")
     """
     job_folder = os.path.abspath(path)
 
@@ -853,13 +853,13 @@ def LoadOutputs(path: str,
                 if any(c in folder_suffix for c in checks):
                     continue
 
-        # Passed all filters — create LoadOutput
+        # Passed all filters — create Load
         folder_path = os.path.join(job_folder, folder_name)
         try:
-            load_output = LoadOutput(folder_path, **load_output_kwargs)
+            load_output = Load(folder_path, **load_output_kwargs)
             loaded_outputs[folder_name] = load_output
         except Exception as e:
-            print(f"Warning: Could not create LoadOutput for {folder_name}: {e}")
+            print(f"Warning: Could not create Load for {folder_name}: {e}")
             continue
 
     if not loaded_outputs:
@@ -874,7 +874,7 @@ def LoadOutputs(path: str,
     # Sort outputs by name
     sorted_outputs = dict(sorted(loaded_outputs.items(), reverse=not ascending))
 
-    print(f"LoadOutputs: Loaded {len(sorted_outputs)} outputs from {job_folder}")
+    print(f"LoadMultiple: Loaded {len(sorted_outputs)} outputs from {job_folder}")
     if tool:
         print(f"  - Tool filter: {tool}")
     if suffix:

@@ -552,7 +552,7 @@ echo "=== Plot ready ==="
             "plot_filenames": [self._generate_plot_filename(op, i) for i, op in enumerate(self.operations)]
         }
 
-        # Write config file at pipeline time (not SLURM time)
+        # Write config file at configuration time (not execution time)
         with open(self.config_file, 'w') as f:
             json.dump(config, f, indent=2)
 

@@ -194,7 +194,7 @@ echo "=== Distance ready ==="
 
     def _generate_script_run_distance_analysis(self) -> str:
         """Generate the distance analysis execution part of the script."""
-        # Write config file at pipeline time
+        # Write config file at configuration time
         os.makedirs(self.output_folder, exist_ok=True)
 
         # Serialize structures DataStream to JSON for HelpScript to load

@@ -7,7 +7,7 @@ De novo antibiotic binding protein design using BoltzGen.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.load import LoadOutput
+from biopipelines.load import Load
 from biopipelines.boltzgen import BoltzGenMerge, BoltzGen
 
 with Pipeline(project="Examples",
@@ -19,7 +19,7 @@ with Pipeline(project="Examples",
     boltzgens=[]
     for i in range(1,11):
         folderpath=f"/path/to/Dopamine_BoltzGen_1000designs_{i:03d}/002_BoltzGen"
-        boltzgens.append(LoadOutput(folderpath,validate_files=False))
+        boltzgens.append(Load(folderpath,validate_files=False))
     # Run analysis
     analyzed = [BoltzGen(reuse=bg1000,
             steps=["analysis"],

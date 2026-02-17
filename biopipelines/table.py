@@ -26,7 +26,7 @@ class Table(BaseConfig):
     """
     Entity for loading existing CSV files into the pipeline.
 
-    Reads the CSV at pipeline time to extract column headers, then provides
+    Reads the CSV at configuration time to extract column headers, then provides
     a TableInfo that downstream tools can reference.
 
     Example:

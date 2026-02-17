@@ -289,7 +289,7 @@ echo "=== Boltz2 installation complete ==="
         return kwargs
 
     def _write_combinatorics_config(self) -> str:
-        """Write combinatorics config file at pipeline time."""
+        """Write combinatorics config file at configuration time."""
         config_path = os.path.join(self.output_folder, "combinatorics_config.json")
         generate_combinatorics_config(config_path, **self._build_combinatorics_kwargs())
         return config_path
@@ -370,7 +370,7 @@ mkdir -p {self.msa_cache_folder}
         config_file_path = os.path.join(self.output_folder, f"{effective_job_name}.yaml")
 
         if self.config:
-            # Direct YAML configuration - write at pipeline time
+            # Direct YAML configuration - write at configuration time
             os.makedirs(self.output_folder, exist_ok=True)
             with open(config_file_path, 'w') as f:
                 f.write(self.config)
@@ -433,7 +433,7 @@ echo "Generating Boltz2 configurations using unified config generator"
 mkdir -p {self.config_files_dir}
 
 """
-        # Generate ligands CSV if using direct SMILES string - write at pipeline time
+        # Generate ligands CSV if using direct SMILES string - write at configuration time
         if self.ligands_smiles:
             ligand_id = config_name if config_name != "prediction" else "ligand"
             os.makedirs(os.path.dirname(self.ligands_csv), exist_ok=True)

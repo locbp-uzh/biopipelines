@@ -4,7 +4,7 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Helper script for PoseChange - executed during SLURM runtime.
+Helper script for PoseChange - executed during execution time.
 
 Calculates ligand pose RMSD and distance metrics between reference
 and target structures using PyMOL.

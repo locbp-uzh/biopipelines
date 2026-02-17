@@ -4,9 +4,9 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Runtime helper script for LoadOutput filtering.
+Runtime helper script for Load filtering.
 
-Filters CSV tables based on filtered IDs and saves them to LoadOutput's output folder.
+Filters CSV tables based on filtered IDs and saves them to Load's output folder.
 """
 
 import os
@@ -109,7 +109,7 @@ def filter_tables(config_data: Dict[str, Any]) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Filter LoadOutput tables')
+    parser = argparse.ArgumentParser(description='Filter Load tables')
     parser.add_argument('--config', required=True, help='JSON config file with filter parameters')
 
     args = parser.parse_args()

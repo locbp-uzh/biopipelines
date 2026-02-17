@@ -33,8 +33,8 @@
 
 | Phase | Location | What Happens |
 |-------|----------|--------------|
-| **Pipeline time** | biopipelines/ | Python generates bash scripts, predicts outputs |
-| **SLURM time** | HelpScripts/ | Bash scripts execute, `pipe_*.py` scripts run |
+| **configuration time** | biopipelines/ | Python generates bash scripts, predicts outputs |
+| **execution time** | HelpScripts/ | Bash scripts execute, `pipe_*.py` scripts run |
 
 Tools never execute computations directly. They:
 1. Validate parameters
@@ -294,11 +294,11 @@ def get_output_files(self) -> Dict[str, Any]:
 
 ## HelpScript Development
 
-HelpScripts (`HelpScripts/pipe_*.py`) execute at SLURM runtime. They process data, generate outputs, and communicate results back to the pipeline.
+HelpScripts (`HelpScripts/pipe_*.py`) execute at execution time. They process data, generate outputs, and communicate results back to the pipeline.
 
 ### pipe_biopipelines_io Module
 
-The `pipe_biopipelines_io.py` module provides utilities for reading DataStreams and tables at SLURM runtime:
+The `pipe_biopipelines_io.py` module provides utilities for reading DataStreams and tables at execution time:
 
 ```python
 from pipe_biopipelines_io import (
@@ -533,9 +533,9 @@ All ID generation uses functions from `combinatorics.py`:
 
 | Function | Use case |
 |----------|----------|
-| `predict_output_ids_with_provenance()` | Multi-axis tools (Boltz2) at pipeline time |
+| `predict_output_ids_with_provenance()` | Multi-axis tools (Boltz2) at configuration time |
 | `predict_output_ids()` | Same, without provenance (backward compat) |
-| `predict_single_output_id()` | Single-row ID at SLURM time (pipe scripts) |
+| `predict_single_output_id()` | Single-row ID at execution time (pipe scripts) |
 | `generate_multiplied_ids()` | Multiplier tools (ProteinMPNN, Mutagenesis) |
 
 #### Using `predict_output_ids_with_provenance` (multi-axis tools)
@@ -581,7 +581,7 @@ create_map_table(
 
 ### Pipeline vs SLURM Agreement
 
-The `CombinatoricsConfig` JSON file stores pre-computed `predicted_ids` and `provenance` at pipeline time. Pipe scripts read these stored values instead of re-computing:
+The `CombinatoricsConfig` JSON file stores pre-computed `predicted_ids` and `provenance` at configuration time. Pipe scripts read these stored values instead of re-computing:
 
 ```json
 {
@@ -676,7 +676,7 @@ def configure_inputs(self):
 def configure_inputs(self):
     # Predict path without checking existence
     self.input_file = os.path.join(self.folders["data"], "file.txt")
-    # File will exist at SLURM runtime
+    # File will exist at execution time
 ```
 
 ---

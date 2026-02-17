@@ -4,10 +4,10 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-BioPipelines I/O Utilities for SLURM Runtime.
+BioPipelines I/O Utilities for Execution Time.
 
 This module provides functions for pipe_*.py scripts to read DataStreams and tables
-at SLURM runtime. It handles wildcard resolution, ID mapping, and table lookups.
+at execution time. It handles wildcard resolution, ID mapping, and table lookups.
 
 Functions:
     # DataStream utilities
@@ -66,7 +66,7 @@ class DataStreamRuntime:
     Runtime representation of a DataStream for SLURM job execution.
 
     This is a lightweight version of DataStream designed for use in pipe scripts
-    at SLURM runtime. It supports lazy loading of map_table data.
+    at execution time. It supports lazy loading of map_table data.
 
     Attributes:
         name: Name of this data stream

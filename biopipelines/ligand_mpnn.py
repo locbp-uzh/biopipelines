@@ -242,7 +242,7 @@ echo "=== LigandMPNN installation complete ==="
             commands.append(f'python run.py {base_options} --pdb_path "{pdb_path}" {struct_id}_FIXED_OPTION_PLACEHOLDER {struct_id}_REDESIGNED_OPTION_PLACEHOLDER')
             commands.append("")
 
-        # Write commands file at pipeline time (not SLURM time)
+        # Write commands file at configuration time (not execution time)
         os.makedirs(os.path.dirname(self.commands_file), exist_ok=True)
         with open(self.commands_file, 'w') as f:
             f.write("#!/bin/bash\n")

@@ -244,7 +244,7 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after Mutagenesis execution."""
-        # Calculate expected number of mutants (approximate — original_aa unknown at pipeline time)
+        # Calculate expected number of mutants (approximate — original_aa unknown at configuration time)
         if self.mode == "specific":
             amino_acids = self.mutate_to
         else:

@@ -15,7 +15,7 @@ Input entities and utility tools.
 - [CompoundLibrary](Tool/Utilities.md#compoundlibrary) - Create compound collections
 
 **Loading & MSA**:
-- [LoadOutput / LoadOutputs](Tool/Utilities.md#loadoutput) - Load previous outputs
+- [Load / LoadMultiple](Tool/Utilities.md#Load) - Load previous outputs
 - [MMseqs2](Tool/Utilities.md#mmseqs2) - MSA generation
 
 **Visualization**:

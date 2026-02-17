@@ -91,8 +91,8 @@ class PyMOLSessionBuilder:
         """
         Resolve structure reference to list of {id, path} dicts.
 
-        Note: When LoadOutput is used with validate_files=True (default), glob patterns
-        are already resolved at pipeline runtime. This method handles:
+        Note: When Load is used with validate_files=True (default), glob patterns
+        are already resolved at configuration time. This method handles:
         1. Standard: len(structures) == len(structure_ids), one file per ID
         2. Legacy glob: structures contains glob pattern(s) - fallback for validate_files=False
         3. Single file: one structure path with multiple IDs (expand by searching directory)

@@ -191,7 +191,7 @@ library = CompoundLibrary(
 
 ## Loading Outputs
 
-### LoadOutput
+### Load
 
 Loads a single tool output JSON file.
 
@@ -203,15 +203,15 @@ Loads a single tool output JSON file.
 **Example**:
 
 ```python
-from biopipelines.load import LoadOutput
+from biopipelines.load import Load
 
-prev = LoadOutput(
+prev = Load(
     output_json="/path/to/ToolOutputs/003_Boltz2.json",
     filter="confidence_score > 0.8"
 )
 ```
 
-### LoadOutputs
+### LoadMultiple
 
 Loads multiple outputs from a ToolOutputs folder.
 
@@ -221,20 +221,20 @@ Loads multiple outputs from a ToolOutputs folder.
 - `suffix`: str = None - Filter by filename suffix
 - `ascending`: bool = True - Sort order
 
-**Returns**: Dictionary mapping identifiers to LoadOutput objects
+**Returns**: Dictionary mapping identifiers to Load objects
 
 **Example**:
 
 ```python
-from biopipelines.load import LoadOutputs
+from biopipelines.load import LoadMultiple
 
 # All Boltz2 outputs
-all_boltz = LoadOutputs("/path/to/job/", tool="Boltz2")
+all_boltz = LoadMultiple("/path/to/job/", tool="Boltz2")
 
 # Access: all_boltz["003_Boltz2"], all_boltz["007_Boltz2"], etc.
 
 # Filter by suffix
-cycle10 = LoadOutputs("/path/to/job/", suffix="Cycle10")
+cycle10 = LoadMultiple("/path/to/job/", suffix="Cycle10")
 ```
 
 ---
@@ -398,7 +398,7 @@ PyMOL(session="alignment_view",
 
 Creates plots from CSV data.
 
-**Environment**: None (uses matplotlib at SLURM time)
+**Environment**: None (uses matplotlib at execution time)
 
 **Operations**:
 - `Scatter(data, x, y, color)` - Scatter plot

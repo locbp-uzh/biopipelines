@@ -35,7 +35,7 @@ from .stitch_sequences import StitchSequences
 from .split_chains import SplitChains
 from .dna_encoder import DNAEncoder
 from .rbs_designer import RBSDesigner
-from .load import LoadOutput, LoadOutputs
+from .load import Load, LoadMultiple
 from .sequence_metric_correlation import SequenceMetricCorrelation
 from .pymol import PyMOL
 from .fuse import Fuse
@@ -97,8 +97,8 @@ __all__ = [
     'SplitChains',
     'DNAEncoder',
     'RBSDesigner',
-    'LoadOutput',
-    'LoadOutputs',
+    'Load',
+    'LoadMultiple',
     'SequenceMetricCorrelation',
     'PyMOL',
     'Fuse',

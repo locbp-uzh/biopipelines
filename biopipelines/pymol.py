@@ -675,7 +675,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
             "output_folder": self.output_folder
         }
 
-        # Write config file at pipeline time (not SLURM time)
+        # Write config file at configuration time (not execution time)
         os.makedirs(self.output_folder, exist_ok=True)
         with open(self.config_file, 'w') as f:
             json.dump(config, f, indent=2)

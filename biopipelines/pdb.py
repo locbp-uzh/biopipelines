@@ -123,7 +123,7 @@ echo "=== PDB ready ==="
                   or a StandardizedOutput/DataStream from an upstream tool.
                   Can be single string, list of strings (e.g. "4ufc" or ["4ufc","1abc"]),
                   a folder path (absolute or relative to PDBs folder),
-                  or a tool output whose structures will be used at SLURM runtime.
+                  or a tool output whose structures will be used at execution time.
             *args: Operations to apply after loading (e.g., PDB.Rename("LIG", ":L:"))
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
             format: File format ("pdb" or "cif", default: "pdb")
@@ -182,7 +182,7 @@ echo "=== PDB ready ==="
                 PDB.Rename("LIG", ":L:")
             ))
 
-            # Pass upstream tool output (files resolved at SLURM runtime)
+            # Pass upstream tool output (files resolved at execution time)
             pdb = PDB(boltz_output, PDB.Rename("LIG", ":L:"))
         """
         # Extract operations from args
@@ -337,11 +337,11 @@ echo "=== PDB ready ==="
         """Configure input parameters and check for local files."""
         self.folders = pipeline_folders
 
-        # When input comes from an upstream tool, files will exist at SLURM runtime only
+        # When input comes from an upstream tool, files will exist at execution time only
         if self.from_upstream:
             self.found_locally = []
             self.needs_download = []
-            print(f"  PDB: using {len(self.pdb_ids)} structures from upstream tool (validated at SLURM runtime)")
+            print(f"  PDB: using {len(self.pdb_ids)} structures from upstream tool (validated at execution time)")
             return
 
         # Check if folder needs resolution relative to PDBs
@@ -541,7 +541,7 @@ echo "=== PDB ready ==="
             raise ValueError(f"Error checking RCSB for '{rcsb_id}': {e}")
 
     def _fetch_ligand_info_from_rcsb(self):
-        """Fetch ligand information from RCSB API at pipeline runtime (silently for local files)."""
+        """Fetch ligand information from RCSB API at configuration time (silently for local files)."""
         self.predicted_compound_ids = []
 
         # Skip - ligand info already handled in _check_rcsb_exists for downloads

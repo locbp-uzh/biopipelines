@@ -31,8 +31,8 @@ class DataStream:
         format: Data format ("pdb", "cif", "fasta", "csv", "sdf", "smiles", "ccd", etc.)
         metadata: Additional tool-specific metadata
         files_contain_wildcards: If True, file paths contain wildcard patterns (e.g.,
-            "/path/to/rank0001_*.cif") that will be resolved at SLURM runtime.
-            This is used when the exact filename cannot be predicted at pipeline time,
+            "/path/to/rank0001_*.cif") that will be resolved at execution time.
+            This is used when the exact filename cannot be predicted at configuration time,
             such as BoltzGen's filtered outputs where the design ID suffix is only
             known after filtering.
 
@@ -60,7 +60,7 @@ class DataStream:
             format="smiles"
         )
 
-        # Wildcard patterns (resolved at SLURM time)
+        # Wildcard patterns (resolved at execution time)
         filtered_structures = DataStream(
             name="structures",
             ids=["rank0001", "rank0002"],

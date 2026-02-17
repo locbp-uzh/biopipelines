@@ -7,7 +7,7 @@
 - [Google Colab](#google-colab)
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
-  - [Pipeline and SLURM Runtime](#pipeline-and-slurm-runtime)
+  - [Configuration and Execution Time](#configuration-and-execution-time)
   - [Entity Types](#entity-types)
   - [DataStream vs Tables](#datastream-vs-tables)
   - [Combinatorics: Bundle and Each](#combinatorics-bundle-and-each)
@@ -154,7 +154,7 @@ Note: you must have installed the relevant environments and configured them in c
 
 ## Core Concepts
 
-### Pipeline and SLURM Runtime
+### Configuration and Execution Time
 
 BioPipelines operates alternatively in one or two phases:
 
@@ -368,7 +368,7 @@ lmpnn = LigandMPNN(
 
 Hint: if you don't remember the table or column name, you can look it up in the ToolReference.
 
-At SLURM time, the column value is resolved per-structure by ID matching.
+At execution time, the column value is resolved per-structure by ID matching.
 
 ---
 
@@ -578,11 +578,11 @@ Note: `local_output` defaults to `True` automatically when `on_the_fly` is enabl
 **Load previous outputs**:
 
 ```python
-from biopipelines.load import LoadOutput, LoadOutputs
+from biopipelines.load import Load, LoadMultiple
 
 # Single output (pass the tool's output folder)
-prev = LoadOutput("/path/to/job/001_Boltz2")
+prev = Load("/path/to/job/001_Boltz2")
 
 # Multiple outputs by tool name (pass the job folder)
-all_boltz = LoadOutputs("/path/to/job/", tool="Boltz2")
+all_boltz = LoadMultiple("/path/to/job/", tool="Boltz2")
 ```

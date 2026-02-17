@@ -32,7 +32,7 @@ class MMseqs2(BaseConfig):
     Submits sequences to a running MMseqs2 server for MSA generation.
 
     ARCHITECTURE NOTE: MMseqs2 is an exception to the standard BioPipelines pattern.
-    Unlike other tools that generate bash scripts and call pipe_<tool>.py at SLURM runtime,
+    Unlike other tools that generate bash scripts and call pipe_<tool>.py at execution time,
     MMseqs2 calls existing bash scripts from HelpScripts (mmseqs2_client.sh) and helper
     python scripts (pipe_mmseqs2_sequences.py) directly. This is necessary because MMseqs2
     requires interaction with pre-existing server infrastructure rather than generating
@@ -299,7 +299,7 @@ class MMseqs2Server(BaseConfig):
     Does not process sequences - only manages server infrastructure.
 
     ARCHITECTURE NOTE: MMseqs2Server is an exception to the standard BioPipelines pattern.
-    Unlike other tools that generate bash scripts and call pipe_<tool>.py at SLURM runtime,
+    Unlike other tools that generate bash scripts and call pipe_<tool>.py at execution time,
     MMseqs2Server calls existing bash scripts from HelpScripts (mmseqs2_server_cpu.sh,
     mmseqs2_server_gpu.sh) directly. This is necessary because MMseqs2Server manages
     pre-existing server infrastructure rather than generating new computational workflows.

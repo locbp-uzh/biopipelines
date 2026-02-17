@@ -265,7 +265,7 @@ cp "{self.library_csv}" "{self.compounds_csv}"
 """
         elif self.library_dict:
             # Generate from dictionary
-            # Write JSON files at pipeline time (not SLURM time)
+            # Write JSON files at configuration time (not execution time)
             os.makedirs(self.output_folder, exist_ok=True)
             with open(self.library_dict_json, 'w') as f:
                 json.dump(self.library_dict, f, indent=2)

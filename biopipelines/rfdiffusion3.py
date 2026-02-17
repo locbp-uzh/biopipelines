@@ -491,7 +491,7 @@ echo "=== RFdiffusion3 installation complete ==="
         """Generate bash section that creates JSON input file."""
         json_config = self._build_json_config()
 
-        # Write JSON config file at pipeline time (not SLURM time)
+        # Write JSON config file at configuration time (not execution time)
         os.makedirs(self.output_folder, exist_ok=True)
         with open(self.json_file, 'w') as f:
             json.dump(json_config, f, indent=2)
