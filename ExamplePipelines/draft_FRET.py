@@ -54,7 +54,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                   ylabel_right="FRET holo"))
     
 
-    best = Panda(tables=[analysis],
+    best = Panda(tables=[analysis.tables.result],
                  operations=[Panda.sort("delta_FRET",ascending=False)])
     best_apo = Panda(tables=[best.tables.result],
                      operations=[Panda.head(1)],

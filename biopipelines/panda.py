@@ -738,7 +738,7 @@ echo "=== Panda ready ==="
                     table_names = list(tables._tables.keys())
                     raise ValueError(
                         f"Ambiguous: StandardizedOutput has multiple tables {table_names}. "
-                        f"Use explicit specification like table=tool.tables.affinity"
+                        f"Did you mean <tool>.tables.{table_names[0]}?"
                     )
 
         # Try output folder prediction
