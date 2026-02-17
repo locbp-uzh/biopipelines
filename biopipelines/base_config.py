@@ -377,7 +377,6 @@ echo "=============================="
             HTML string for notebook display, or empty string if nothing to show
         """
         from .datastream import DataStream
-        import py3Dmol
 
         structures_ds = output.streams.get("structures")
         if not isinstance(structures_ds, DataStream) or len(structures_ds) == 0:
@@ -386,18 +385,20 @@ echo "=============================="
         return self._build_py3dmol_html(structures_ds)
 
     @staticmethod
-    def _build_py3dmol_html(structures_ds, max_structures: int = 20) -> str:
+    def _build_py3dmol_html(structures_ds, max_structures: int = 50) -> str:
         """
-        Build py3Dmol interactive 3D viewer HTML from a DataStream.
+        Build py3Dmol interactive 3D viewer HTML with prev/next navigation.
+
+        Displays one structure at a time with left/right buttons and an ID label.
 
         Args:
             structures_ds: DataStream containing structure files (pdb/cif)
-            max_structures: Maximum number of structures to display
+            max_structures: Maximum number of structures to load
 
         Returns:
-            HTML string with the 3D viewer
+            HTML string with the navigable 3D viewer
         """
-        import py3Dmol
+        import json as json_module
 
         if structures_ds.format not in ("pdb", "cif"):
             return ""
@@ -416,48 +417,87 @@ echo "=============================="
         if not pdb_data:
             return ""
 
+        fmt = "pdb" if structures_ds.format == "pdb" else "cif"
+
+        # Unique ID for this viewer instance to avoid conflicts with multiple viewers
+        import random
+        viewer_id = f"bp3d_{random.randint(100000, 999999)}"
+
+        # Serialize structure data for JavaScript
+        struct_ids_json = json_module.dumps([sid for sid, _ in pdb_data])
+        struct_data_json = json_module.dumps([content for _, content in pdb_data])
+
+        truncated = len(structures_ds) > max_structures
+        total_label = f"{len(pdb_data)} structure{'s' if len(pdb_data) != 1 else ''}"
+        if truncated:
+            total_label += f" (of {len(structures_ds)} total)"
+
         colors = [
             "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
             "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
         ]
-        fmt = "pdb" if structures_ds.format == "pdb" else "cif"
+        colors_json = json_module.dumps(colors)
 
-        viewer = py3Dmol.view(width=800, height=500)
-        for i, (struct_id, content) in enumerate(pdb_data):
-            viewer.addModel(content, fmt)
-            viewer.setStyle({"model": i}, {"cartoon": {"color": colors[i % len(colors)]}})
-        viewer.zoomTo()
+        html = f"""
+<script src="https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"></script>
+<div style="margin-top: 12px;">
+  <strong>3D Structure Viewer</strong> ({total_label})
+</div>
+<div id="{viewer_id}_container" style="position: relative; width: 800px;">
+  <div id="{viewer_id}_viewer" style="width: 800px; height: 500px; position: relative;"></div>
+  <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 6px; font-family: monospace;">
+    <button id="{viewer_id}_prev" onclick="{viewer_id}_navigate(-1)"
+            style="padding: 4px 14px; font-size: 1.1em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;">&#9664;</button>
+    <span id="{viewer_id}_label" style="min-width: 200px; text-align: center; font-size: 0.95em;"></span>
+    <button id="{viewer_id}_next" onclick="{viewer_id}_navigate(1)"
+            style="padding: 4px 14px; font-size: 1.1em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;">&#9654;</button>
+  </div>
+</div>
+<script>
+(function() {{
+  var ids = {struct_ids_json};
+  var data = {struct_data_json};
+  var fmt = "{fmt}";
+  var colors = {colors_json};
+  var idx = 0;
+  var viewer = null;
 
-        parts = []
-        truncated = len(structures_ds) > max_structures
+  function initViewer() {{
+    if (typeof $3Dmol === "undefined") {{
+      setTimeout(initViewer, 200);
+      return;
+    }}
+    var el = document.getElementById("{viewer_id}_viewer");
+    viewer = $3Dmol.createViewer(el, {{backgroundColor: "white"}});
+    showStructure(0);
+  }}
 
-        parts.append(
-            f'<div style="margin-top: 12px;">'
-            f'<strong>3D Structure Viewer</strong> '
-            f'({len(pdb_data)} structure{"s" if len(pdb_data) != 1 else ""})'
-        )
-        if truncated:
-            parts.append(
-                f' <span style="color: #888;">'
-                f"(showing first {max_structures} of {len(structures_ds)})</span>"
-            )
-        parts.append("</div>")
-        parts.append(viewer._repr_html_())
+  function showStructure(i) {{
+    if (!viewer) return;
+    idx = i;
+    if (idx < 0) idx = ids.length - 1;
+    if (idx >= ids.length) idx = 0;
+    viewer.removeAllModels();
+    viewer.addModel(data[idx], fmt);
+    var color = colors[idx % colors.length];
+    viewer.setStyle({{}}, {{"cartoon": {{"color": color}}}});
+    viewer.zoomTo();
+    viewer.render();
+    document.getElementById("{viewer_id}_label").innerHTML =
+      '<span style="display:inline-block;width:12px;height:12px;background:' + color +
+      ';border-radius:2px;vertical-align:middle;margin-right:6px;"></span>' +
+      ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
+  }}
 
-        # Color legend
-        parts.append('<div style="margin-top: 4px; font-size: 0.85em;">')
-        for i, (struct_id, _) in enumerate(pdb_data):
-            color = colors[i % len(colors)]
-            parts.append(
-                f'<span style="display: inline-block; margin-right: 12px;">'
-                f'<span style="display: inline-block; width: 12px; height: 12px; '
-                f"background: {color}; border-radius: 2px; vertical-align: middle;"
-                f' margin-right: 4px;"></span>'
-                f"{struct_id}</span>"
-            )
-        parts.append("</div>")
+  window.{viewer_id}_navigate = function(delta) {{
+    showStructure(idx + delta);
+  }};
 
-        return "\n".join(parts)
+  initViewer();
+}})();
+</script>
+"""
+        return html
 
     def get_expected_output_paths(self) -> Dict[str, List[str]]:
         """
@@ -1220,6 +1260,7 @@ class StandardizedOutput:
     def pretty(self) -> str:
         """Pretty formatted representation of the output."""
         from .datastream import DataStream
+        import pandas as pd
 
         lines = []
 
@@ -1293,19 +1334,64 @@ class StandardizedOutput:
 
             return result
 
-        # Main DataStream attributes
-        for attr_name, ds in self.streams.items():
-            if isinstance(ds, DataStream) and len(ds) > 0:
-                lines.extend(format_datastream(attr_name, ds))
+        # Streams summary
+        active_streams = [
+            (k, ds) for k, ds in self.streams.items()
+            if isinstance(ds, DataStream) and len(ds) > 0
+        ]
+        if active_streams:
+            lines.append("streams:")
+            for attr_name, ds in active_streams:
+                mt = make_relative_path(ds.map_table) if ds.map_table else ''
+                lines.append(f"    {attr_name}: format={ds.format}, items={len(ds)}, map_table='{mt}'")
 
-        # Tables
-        if 'tables' in self._data and hasattr(self.tables, '_tables'):
+        # Per-stream detail
+        for attr_name, ds in active_streams:
+            lines.extend(format_datastream(attr_name, ds))
+
+        # Tables summary
+        if 'tables' in self._data and hasattr(self.tables, '_tables') and self.tables._tables:
             lines.append("tables:")
             for name, info in self.tables._tables.items():
                 col_display = ', '.join(info.info.columns[:]) if info.info.columns else ''
-                lines.append(f"    ${name} ({col_display}):")
+                lines.append(f"    {name} ({col_display}):")
                 relative_path = make_relative_path(info.info.path)
                 lines.append(f"        – '{relative_path}'")
+
+            # Per-table detail
+            for name, info in self.tables._tables.items():
+                t_meta = info.info
+                lines.append(f"{name}:")
+                lines.append(f"    name: {t_meta.name}")
+                lines.append(f"    path: '{make_relative_path(t_meta.path) if t_meta.path else ''}'")
+                lines.append(f"    columns: {', '.join(t_meta.columns) if t_meta.columns else ''}")
+                lines.append(f"    description: {t_meta.description}")
+                lines.append(f"    count: {t_meta.count}")
+                if t_meta.path and os.path.exists(t_meta.path):
+                    try:
+                        table_df = pd.read_csv(t_meta.path)
+                        if len(table_df) > 0:
+                            columns = list(table_df.columns)
+                            n_rows = len(table_df)
+                            if n_rows <= 4:
+                                row_indices = list(range(n_rows))
+                                ellipsis_after = None
+                            else:
+                                row_indices = list(range(2)) + list(range(n_rows - 2, n_rows))
+                                ellipsis_after = 2
+                            for row_i, idx in enumerate(row_indices):
+                                if ellipsis_after is not None and row_i == ellipsis_after:
+                                    lines.append(f"    – ... ({n_rows - 4} more) ...")
+                                row = table_df.iloc[idx]
+                                parts = []
+                                for col in columns:
+                                    val = str(row[col]) if pd.notna(row[col]) else ''
+                                    if len(val) > 40:
+                                        val = val[:37] + '...'
+                                    parts.append(f"{col}={val}")
+                                lines.append(f"    – {', '.join(parts)}")
+                    except Exception:
+                        pass
 
         # Output folder
         if self.output_folder:
@@ -1394,109 +1480,133 @@ class StandardizedOutput:
                 return "<output_folder>/" + os.path.relpath(path, self.output_folder)
             return path
 
-        # --- Streams as HTML tables ---
-        for stream_name, stream in self.streams.items():
-            if not isinstance(stream, DataStream) or len(stream) == 0:
-                continue
+        # Helper: render a DataFrame as an HTML table with 2+...+2 truncation
+        def _render_dataframe(df, html_out):
+            columns = list(df.columns)
+            html_out.append('<table class="bp-table"><tr>')
+            for col in columns:
+                html_out.append(f'<th>{html_module.escape(str(col))}</th>')
+            html_out.append('</tr>')
 
-            # Skip image streams here; they'll be rendered as inline images below
-            if stream.format.lower() in self._IMAGE_FORMATS:
-                continue
-
-            # Stream header
-            html_parts.append(
-                f'<div class="bp-section">'
-                f'<div class="bp-section-title">{stream_name}</div>'
-            )
-
-            # Stream metadata table (horizontal)
-            meta_headers = ['name', 'format', 'items', 'map_table', 'files_contain_wildcards']
-            meta_values = [
-                html_module.escape(stream.name),
-                html_module.escape(stream.format),
-                str(len(stream)),
-                html_module.escape(rel(stream.map_table) if stream.map_table else ''),
-                str(stream.files_contain_wildcards),
-            ]
-            if stream.metadata:
-                meta_headers.append('metadata')
-                meta_values.append(html_module.escape(
-                    ", ".join(f"{k}={v}" for k, v in stream.metadata.items())
-                ))
-            html_parts.append('<table class="bp-table"><tr>')
-            for h in meta_headers:
-                html_parts.append(f'<th>{h}</th>')
-            html_parts.append('</tr><tr>')
-            for v in meta_values:
-                html_parts.append(f'<td>{v}</td>')
-            html_parts.append('</tr></table>')
-
-            # Try to render from map_table (full columns) if available
-            map_data = stream._get_map_data()
-            if map_data is not None and len(map_data) > 0:
-                columns = list(map_data.columns)
-                html_parts.append('<table class="bp-table"><tr>')
-                for col in columns:
-                    html_parts.append(f'<th>{html_module.escape(str(col))}</th>')
-                html_parts.append('</tr>')
-
-                n_rows = len(map_data)
-                if n_rows <= 4:
-                    display_rows = list(range(n_rows))
-                    ellipsis_after = None
-                else:
-                    display_rows = list(range(2)) + list(range(n_rows - 2, n_rows))
-                    ellipsis_after = 2
-
-                for row_i, idx in enumerate(display_rows):
-                    if ellipsis_after is not None and row_i == ellipsis_after:
-                        html_parts.append(
-                            f'<tr class="bp-ellipsis"><td colspan="{len(columns)}">'
-                            f'... {n_rows - 4} more ...</td></tr>'
-                        )
-                    row = map_data.iloc[idx]
-                    html_parts.append('<tr>')
-                    for col in columns:
-                        val = str(row[col]) if pd.notna(row[col]) else ''
-                        # Truncate long cell values
-                        display_val = val if len(val) <= 60 else val[:57] + '...'
-                        html_parts.append(f'<td>{html_module.escape(display_val)}</td>')
-                    html_parts.append('</tr>')
+            n_rows = len(df)
+            if n_rows <= 4:
+                display_rows = list(range(n_rows))
+                ellipsis_after = None
             else:
-                # Fallback: render id/file pairs from iterator
-                html_parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
+                display_rows = list(range(2)) + list(range(n_rows - 2, n_rows))
+                ellipsis_after = 2
 
-                items = list(stream)
-                n_items = len(items)
-                if n_items <= 4:
-                    display_items = items
-                    ellipsis_after = None
-                else:
-                    display_items = items[:2] + items[-2:]
-                    ellipsis_after = 2
-
-                for item_i, (item_id, item_file) in enumerate(display_items):
-                    if ellipsis_after is not None and item_i == ellipsis_after:
-                        html_parts.append(
-                            f'<tr class="bp-ellipsis"><td colspan="2">'
-                            f'... {n_items - 4} more ...</td></tr>'
-                        )
-                    html_parts.append(
-                        f"<tr><td>{html_module.escape(str(item_id))}</td>"
-                        f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
+            for row_i, idx in enumerate(display_rows):
+                if ellipsis_after is not None and row_i == ellipsis_after:
+                    html_out.append(
+                        f'<tr class="bp-ellipsis"><td colspan="{len(columns)}">'
+                        f'... {n_rows - 4} more ...</td></tr>'
                     )
+                row = df.iloc[idx]
+                html_out.append('<tr>')
+                for col in columns:
+                    val = str(row[col]) if pd.notna(row[col]) else ''
+                    display_val = val if len(val) <= 60 else val[:57] + '...'
+                    html_out.append(f'<td>{html_module.escape(display_val)}</td>')
+                html_out.append('</tr>')
+            html_out.append('</table>')
 
-            html_parts.append("</table></div>")
+        # --- Streams ---
+        # Collect non-empty, non-image streams
+        active_streams = [
+            (sn, s) for sn, s in self.streams.items()
+            if isinstance(s, DataStream) and len(s) > 0
+            and s.format.lower() not in self._IMAGE_FORMATS
+        ]
 
-        # --- Tables as HTML tables ---
+        if active_streams:
+            # Streams summary table
+            html_parts.append(
+                '<div class="bp-section">'
+                '<div class="bp-section-title">streams</div>'
+            )
+            html_parts.append(
+                '<table class="bp-table">'
+                '<tr><th>name</th><th>format</th><th>items</th><th>map_table</th></tr>'
+            )
+            for stream_name, stream in active_streams:
+                html_parts.append(
+                    f'<tr><td>{html_module.escape(stream_name)}</td>'
+                    f'<td>{html_module.escape(stream.format)}</td>'
+                    f'<td>{len(stream)}</td>'
+                    f'<td>{html_module.escape(rel(stream.map_table) if stream.map_table else "")}</td></tr>'
+                )
+            html_parts.append('</table></div>')
+
+            # Per-stream detail
+            for stream_name, stream in active_streams:
+                html_parts.append(
+                    f'<div class="bp-section">'
+                    f'<div class="bp-section-title">{stream_name}</div>'
+                )
+
+                # Metadata table (horizontal)
+                meta_headers = ['name', 'format', 'items', 'map_table', 'files_contain_wildcards']
+                meta_values = [
+                    html_module.escape(stream.name),
+                    html_module.escape(stream.format),
+                    str(len(stream)),
+                    html_module.escape(rel(stream.map_table) if stream.map_table else ''),
+                    str(stream.files_contain_wildcards),
+                ]
+                if stream.metadata:
+                    meta_headers.append('metadata')
+                    meta_values.append(html_module.escape(
+                        ", ".join(f"{k}={v}" for k, v in stream.metadata.items())
+                    ))
+                html_parts.append('<table class="bp-table"><tr>')
+                for h in meta_headers:
+                    html_parts.append(f'<th>{h}</th>')
+                html_parts.append('</tr><tr>')
+                for v in meta_values:
+                    html_parts.append(f'<td>{v}</td>')
+                html_parts.append('</tr></table>')
+
+                # Data: map_table or id/file fallback
+                map_data = stream._get_map_data()
+                if map_data is not None and len(map_data) > 0:
+                    _render_dataframe(map_data, html_parts)
+                else:
+                    # Fallback: render id/file pairs from iterator
+                    items = list(stream)
+                    n_items = len(items)
+                    html_parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
+                    if n_items <= 4:
+                        display_items = items
+                        ellipsis_after = None
+                    else:
+                        display_items = items[:2] + items[-2:]
+                        ellipsis_after = 2
+
+                    for item_i, (item_id, item_file) in enumerate(display_items):
+                        if ellipsis_after is not None and item_i == ellipsis_after:
+                            html_parts.append(
+                                f'<tr class="bp-ellipsis"><td colspan="2">'
+                                f'... {n_items - 4} more ...</td></tr>'
+                            )
+                        html_parts.append(
+                            f"<tr><td>{html_module.escape(str(item_id))}</td>"
+                            f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
+                        )
+                    html_parts.append('</table>')
+
+                html_parts.append('</div>')
+
+        # --- Tables ---
         if "tables" in self._data and hasattr(self.tables, "_tables") and self.tables._tables:
+            # Tables summary
             html_parts.append(
                 '<div class="bp-section">'
                 '<div class="bp-section-title">tables</div>'
             )
             html_parts.append(
                 '<table class="bp-table">'
-                "<tr><th>name</th><th>columns</th><th>path</th></tr>"
+                '<tr><th>name</th><th>columns</th><th>path</th></tr>'
             )
             for name, info in self.tables._tables.items():
                 cols = ", ".join(info.info.columns) if info.info.columns else ""
@@ -1506,7 +1616,43 @@ class StandardizedOutput:
                     f"<td>{html_module.escape(cols)}</td>"
                     f"<td>{html_module.escape(path)}</td></tr>"
                 )
-            html_parts.append("</table></div>")
+            html_parts.append('</table></div>')
+
+            # Per-table detail
+            for name, info in self.tables._tables.items():
+                html_parts.append(
+                    f'<div class="bp-section">'
+                    f'<div class="bp-section-title">{html_module.escape(name)}</div>'
+                )
+
+                # Table metadata (horizontal)
+                t_meta = info.info
+                t_headers = ['name', 'path', 'columns', 'description', 'count']
+                t_values = [
+                    html_module.escape(t_meta.name),
+                    html_module.escape(rel(t_meta.path) if t_meta.path else ''),
+                    html_module.escape(", ".join(t_meta.columns) if t_meta.columns else ''),
+                    html_module.escape(t_meta.description),
+                    str(t_meta.count),
+                ]
+                html_parts.append('<table class="bp-table"><tr>')
+                for h in t_headers:
+                    html_parts.append(f'<th>{h}</th>')
+                html_parts.append('</tr><tr>')
+                for v in t_values:
+                    html_parts.append(f'<td>{v}</td>')
+                html_parts.append('</tr></table>')
+
+                # Try to load and display CSV content
+                if t_meta.path and os.path.exists(t_meta.path):
+                    try:
+                        table_df = pd.read_csv(t_meta.path)
+                        if len(table_df) > 0:
+                            _render_dataframe(table_df, html_parts)
+                    except Exception:
+                        pass
+
+                html_parts.append('</div>')
 
         # --- Image streams: display inline ---
         for stream_name, stream in self.streams.items():
