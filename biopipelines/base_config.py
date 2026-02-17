@@ -1232,30 +1232,54 @@ class StandardizedOutput:
 
         def format_datastream(name: str, ds: DataStream) -> List[str]:
             """Format a DataStream for display."""
+            import pandas as pd
+
             if not ds or len(ds) == 0:
                 return []
 
             result = [f"{name}: ({ds.format}, {len(ds)} items)"]
 
-            # Show (id, file) pairs
-            items = list(ds)
-            if len(items) <= 6:
-                for item_id, item_file in items:
-                    if item_file:
-                        rel_path = make_relative_path(item_file)
-                        result.append(f"    – {item_id}: '{rel_path}'")
-                    else:
-                        result.append(f"    – {item_id}")
+            # Show metadata
+            if ds.map_table:
+                result.append(f"    map_table: '{make_relative_path(ds.map_table)}'")
+
+            # Try to render from map_table (full columns) if available
+            map_data = ds._get_map_data()
+            if map_data is not None and len(map_data) > 0:
+                columns = list(map_data.columns)
+                n_rows = len(map_data)
+                if n_rows <= 4:
+                    row_indices = list(range(n_rows))
+                    ellipsis_after = None
+                else:
+                    row_indices = list(range(2)) + list(range(n_rows - 2, n_rows))
+                    ellipsis_after = 2
+
+                for row_i, idx in enumerate(row_indices):
+                    if ellipsis_after is not None and row_i == ellipsis_after:
+                        result.append(f"    – ... ({n_rows - 4} more) ...")
+                    row = map_data.iloc[idx]
+                    parts = []
+                    for col in columns:
+                        val = str(row[col]) if pd.notna(row[col]) else ''
+                        if len(val) > 40:
+                            val = val[:37] + '...'
+                        parts.append(f"{col}={val}")
+                    result.append(f"    – {', '.join(parts)}")
             else:
-                # Truncated: first 3, ..., last 3
-                for item_id, item_file in items[:3]:
-                    if item_file:
-                        rel_path = make_relative_path(item_file)
-                        result.append(f"    – {item_id}: '{rel_path}'")
-                    else:
-                        result.append(f"    – {item_id}")
-                result.append(f"    – ... ({len(items) - 6} more) ...")
-                for item_id, item_file in items[-3:]:
+                # Fallback: render id/file pairs from iterator
+                items = list(ds)
+                n_items = len(items)
+                if n_items <= 4:
+                    display_items = items
+                    ellipsis_after = None
+                else:
+                    display_items = items[:2] + items[-2:]
+                    ellipsis_after = 2
+
+                for item_i, (item_id, item_file) in enumerate(display_items):
+                    if ellipsis_after is not None and item_i == ellipsis_after:
+                        result.append(f"    – ... ({n_items - 4} more) ...")
                     if item_file:
                         rel_path = make_relative_path(item_file)
                         result.append(f"    – {item_id}: '{rel_path}'")
@@ -1346,6 +1370,7 @@ class StandardizedOutput:
         from .datastream import DataStream
         import base64
         import html as html_module
+        import pandas as pd
 
         html_parts = []
         css = """<style>
@@ -1373,30 +1398,73 @@ class StandardizedOutput:
             if stream.format.lower() in self._IMAGE_FORMATS:
                 continue
 
+            # Stream header with metadata
             html_parts.append(
                 f'<div class="bp-section">'
                 f'<div class="bp-section-title">{stream_name} '
                 f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
             )
-            html_parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
 
-            items = list(stream)
-            if len(items) <= 6:
-                for item_id, item_file in items:
-                    html_parts.append(
-                        f"<tr><td>{html_module.escape(str(item_id))}</td>"
-                        f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
-                    )
-            else:
-                for item_id, item_file in items[:3]:
-                    html_parts.append(
-                        f"<tr><td>{html_module.escape(str(item_id))}</td>"
-                        f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
-                    )
+            # Stream metadata line
+            meta_parts = []
+            if stream.map_table:
+                meta_parts.append(f"map_table: {html_module.escape(rel(stream.map_table))}")
+            if meta_parts:
                 html_parts.append(
-                    f'<tr class="bp-ellipsis"><td colspan="2">... {len(items) - 6} more ...</td></tr>'
+                    f'<div style="color: #888; font-size: 0.85em; margin-bottom: 4px;">'
+                    f'{" | ".join(meta_parts)}</div>'
                 )
-                for item_id, item_file in items[-3:]:
+
+            # Try to render from map_table (full columns) if available
+            map_data = stream._get_map_data()
+            if map_data is not None and len(map_data) > 0:
+                columns = list(map_data.columns)
+                html_parts.append('<table class="bp-table"><tr>')
+                for col in columns:
+                    html_parts.append(f'<th>{html_module.escape(str(col))}</th>')
+                html_parts.append('</tr>')
+
+                n_rows = len(map_data)
+                if n_rows <= 4:
+                    display_rows = list(range(n_rows))
+                    ellipsis_after = None
+                else:
+                    display_rows = list(range(2)) + list(range(n_rows - 2, n_rows))
+                    ellipsis_after = 2
+
+                for row_i, idx in enumerate(display_rows):
+                    if ellipsis_after is not None and row_i == ellipsis_after:
+                        html_parts.append(
+                            f'<tr class="bp-ellipsis"><td colspan="{len(columns)}">'
+                            f'... {n_rows - 4} more ...</td></tr>'
+                        )
+                    row = map_data.iloc[idx]
+                    html_parts.append('<tr>')
+                    for col in columns:
+                        val = str(row[col]) if pd.notna(row[col]) else ''
+                        # Truncate long cell values
+                        display_val = val if len(val) <= 60 else val[:57] + '...'
+                        html_parts.append(f'<td>{html_module.escape(display_val)}</td>')
+                    html_parts.append('</tr>')
+            else:
+                # Fallback: render id/file pairs from iterator
+                html_parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
+
+                items = list(stream)
+                n_items = len(items)
+                if n_items <= 4:
+                    display_items = items
+                    ellipsis_after = None
+                else:
+                    display_items = items[:2] + items[-2:]
+                    ellipsis_after = 2
+
+                for item_i, (item_id, item_file) in enumerate(display_items):
+                    if ellipsis_after is not None and item_i == ellipsis_after:
+                        html_parts.append(
+                            f'<tr class="bp-ellipsis"><td colspan="2">'
+                            f'... {n_items - 4} more ...</td></tr>'
+                        )
                     html_parts.append(
                         f"<tr><td>{html_module.escape(str(item_id))}</td>"
                         f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
