@@ -1654,60 +1654,64 @@ class StandardizedOutput:
 
                 html_parts.append('</div>')
 
-        # --- Image streams: display inline ---
-        for stream_name, stream in self.streams.items():
-            if not isinstance(stream, DataStream) or len(stream) == 0:
-                continue
-            if stream.format.lower() not in self._IMAGE_FORMATS:
-                continue
-
-            html_parts.append(
-                f'<div class="bp-section">'
-                f'<div class="bp-section-title">{stream_name} '
-                f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
-            )
-
-            for item_id, file_path in stream:
-                if not file_path or not os.path.isfile(file_path):
-                    continue
-
-                if stream.format.lower() == "svg":
-                    try:
-                        with open(file_path, "r") as f:
-                            svg_content = f.read()
-                        html_parts.append(
-                            f'<div style="margin: 4px 0;">'
-                            f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
-                            f"{svg_content}</div>"
-                        )
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        with open(file_path, "rb") as f:
-                            img_data = base64.b64encode(f.read()).decode("utf-8")
-                        mime = f"image/{stream.format.lower()}"
-                        if stream.format.lower() in ("jpg", "jpeg"):
-                            mime = "image/jpeg"
-                        html_parts.append(
-                            f'<div style="margin: 4px 0;">'
-                            f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
-                            f'<img src="data:{mime};base64,{img_data}" '
-                            f'style="max-width: 100%; height: auto;" /></div>'
-                        )
-                    except Exception:
-                        pass
-
-            html_parts.append("</div>")
-
-        # --- Tool-specific visualization (e.g. 3D viewer) ---
+        # --- Tool-specific visualization (e.g. 3D viewer, Plot) ---
+        # Run before generic image streams so tools can handle their own display.
+        tool_html = ""
         if hasattr(self, "tool") and hasattr(self.tool, "_repr_notebook_html"):
             try:
-                tool_html = self.tool._repr_notebook_html(self)
+                tool_html = self.tool._repr_notebook_html(self) or ""
                 if tool_html:
                     html_parts.append(tool_html)
             except Exception:
                 pass
+
+        # --- Image streams: display inline ---
+        # Skip if the tool already provided its own visualization.
+        if not tool_html:
+            for stream_name, stream in self.streams.items():
+                if not isinstance(stream, DataStream) or len(stream) == 0:
+                    continue
+                if stream.format.lower() not in self._IMAGE_FORMATS:
+                    continue
+
+                html_parts.append(
+                    f'<div class="bp-section">'
+                    f'<div class="bp-section-title">{stream_name} '
+                    f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
+                )
+
+                for item_id, file_path in stream:
+                    if not file_path or not os.path.isfile(file_path):
+                        continue
+
+                    if stream.format.lower() == "svg":
+                        try:
+                            with open(file_path, "r") as f:
+                                svg_content = f.read()
+                            html_parts.append(
+                                f'<div style="margin: 4px 0;">'
+                                f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
+                                f"{svg_content}</div>"
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            with open(file_path, "rb") as f:
+                                img_data = base64.b64encode(f.read()).decode("utf-8")
+                            mime = f"image/{stream.format.lower()}"
+                            if stream.format.lower() in ("jpg", "jpeg"):
+                                mime = "image/jpeg"
+                            html_parts.append(
+                                f'<div style="margin: 4px 0;">'
+                                f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
+                                f'<img src="data:{mime};base64,{img_data}" '
+                                f'style="max-width: 100%; height: auto;" /></div>'
+                            )
+                        except Exception:
+                            pass
+
+                html_parts.append("</div>")
 
         if not html_parts:
             return None
@@ -1892,8 +1896,12 @@ class ToolOutput:
         """
         return self
 
+    def _repr_html_(self):
+        """Delegate rich HTML display to StandardizedOutput."""
+        return self.output._repr_html_()
+
     def __str__(self) -> str:
         return f"ToolOutput({self.tool_type}, {len(self._output_files)} output types)"
-    
+
     def __repr__(self) -> str:
         return self.__str__()
