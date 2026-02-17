@@ -74,6 +74,7 @@ class AxisConfig:
     name: str                                    # Axis name (e.g., "proteins", "ligands")
     mode: str = "each"                           # "each" or "bundle"
     sources: List[Dict] = field(default_factory=list)  # [{"path": str, "iterate": bool}]
+    entity_type: Optional[str] = None            # e.g., "protein", "dna", "rna", "ligand"
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -143,27 +144,33 @@ class CombinatoricsConfig:
         return [s["path"] if isinstance(s, dict) else s for s in axis.sources]
 
 
-def _unpack_input(name: str, value: Any) -> Tuple[Any, str]:
+def _unpack_input(name: str, value: Any) -> Tuple[Any, str, Optional[str]]:
     """
-    Unpack the (value, stream_name) tuple convention.
+    Unpack the (value, stream_name) or (value, stream_name, entity_type) tuple convention.
 
     Each named input can be either:
     - A bare value: the key serves as both alias and stream name
     - A (value, stream_name) tuple: key is alias, stream_name tells which stream to extract
+    - A (value, stream_name, entity_type) triple: adds entity_type metadata for the axis
 
     Args:
         name: The kwarg key (alias for provenance columns)
-        value: The kwarg value — bare or (value, stream_name) tuple
+        value: The kwarg value — bare, (value, stream_name) tuple, or (value, stream_name, entity_type) triple
 
     Returns:
-        (actual_value, stream_name)
+        (actual_value, stream_name, entity_type)
     """
-    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[1], str):
-        # Check it's not a TableInfo tuple by verifying second element looks like a stream name
-        actual_value, stream_name = value
-        if not isinstance(actual_value, str):  # Not a (TableInfo, column_name) tuple
-            return actual_value, stream_name
-    return value, name
+    if isinstance(value, tuple):
+        if len(value) == 3 and isinstance(value[1], str) and isinstance(value[2], str):
+            actual_value, stream_name, entity_type = value
+            if not isinstance(actual_value, str):
+                return actual_value, stream_name, entity_type
+        elif len(value) == 2 and isinstance(value[1], str):
+            # Check it's not a TableInfo tuple by verifying second element looks like a stream name
+            actual_value, stream_name = value
+            if not isinstance(actual_value, str):  # Not a (TableInfo, column_name) tuple
+                return actual_value, stream_name, None
+    return value, name, None
 
 
 def _extract_source_paths(source: Any, stream_name: str) -> List[str]:
@@ -293,17 +300,17 @@ def generate_combinatorics_config(
     Example:
         generate_combinatorics_config(
             "config.json",
-            proteins=(lmpnn, "sequences"),
-            ligands=(Bundle(compounds), "compounds")
+            proteins=(lmpnn, "sequences", "protein"),
+            ligands=(Bundle(compounds), "compounds", "ligand")
         )
     """
     axes = {}
     for name, raw_value in named_inputs.items():
-        actual_value, stream_name = _unpack_input(name, raw_value)
+        actual_value, stream_name, entity_type = _unpack_input(name, raw_value)
         if actual_value is None:
             continue
         mode, sources = _unwrap_sources(actual_value, stream_name)
-        axes[name] = AxisConfig(name=name, mode=mode, sources=sources)
+        axes[name] = AxisConfig(name=name, mode=mode, sources=sources, entity_type=entity_type)
 
     config = CombinatoricsConfig(axes=axes)
 
@@ -452,7 +459,7 @@ def _collect_axes_info(
     """
     axes_info = []
     for name, raw_value in named_inputs.items():
-        actual_value, stream_name = _unpack_input(name, raw_value)
+        actual_value, stream_name, _entity_type = _unpack_input(name, raw_value)
         if actual_value is None:
             continue
         mode, sources = _unwrap_sources(actual_value, stream_name)

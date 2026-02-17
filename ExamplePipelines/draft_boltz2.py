@@ -208,3 +208,34 @@ with Pipeline(project="Examples",
             {"token1": ["A", 145], "token2": ["B", "C15"], "max_distance": 8.0, "force": False}
         ]
     )
+
+    # =========================================================================
+    # DNA examples
+    # =========================================================================
+
+    # 17: DNA only - predict structure of a DNA duplex
+    Suffix("17")
+    dna_strand = Sequence("ACGTACGTACGTACGT", type="dna", ids="DNA_strand")
+    boltz_dna = Boltz2(
+        dna=dna_strand
+    )
+
+    # 18: DNA + ligand - predict binding of a small molecule to DNA
+    Suffix("18")
+    dna_target = Sequence("AATTAATTAATTAATT", type="dna", ids="DNA_target")
+    daunorubicin = Ligand("daunorubicin")
+    boltz_dna_ligand = Boltz2(
+        dna=dna_target,
+        ligands=daunorubicin
+    )
+
+    # 19: Protein + DNA + ligand - three-axis combinatorics
+    Suffix("19")
+    # With 2 proteins, 1 DNA, and 2 ligands (all Each): generates 4 predictions
+    # ProteinA_DNA_target_aspirin, ProteinA_DNA_target_caffeine,
+    # ProteinB_DNA_target_aspirin, ProteinB_DNA_target_caffeine
+    boltz_three_axis = Boltz2(
+        proteins=Each(protein_a, protein_b),
+        dna=dna_target,
+        ligands=Each(Ligand("aspirin"), Ligand("caffeine"))
+    )

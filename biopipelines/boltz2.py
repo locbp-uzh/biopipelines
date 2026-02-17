@@ -18,6 +18,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
+    from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -25,18 +26,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
-
-
-def _unwrap_combinatorics(value):
-    """
-    Unwrap Bundle/Each wrappers to get the underlying source.
-
-    Returns the first source inside the wrapper, or the value itself if not wrapped.
-    """
-    if isinstance(value, (Bundle, Each)):
-        if value.sources:
-            return _unwrap_combinatorics(value.sources[0])
-    return value
+    from datastream_resolver import resolve_input_to_datastream
 
 
 class Boltz2(BaseConfig):
@@ -116,6 +106,8 @@ echo "=== Boltz2 installation complete ==="
                  # Primary input parameters
                  config: Optional[str] = None,
                  proteins: Optional[Union[DataStream, StandardizedOutput]] = None,
+                 dna: Optional[Union[DataStream, StandardizedOutput]] = None,
+                 rna: Optional[Union[DataStream, StandardizedOutput]] = None,
                  ligands: Optional[Union[str, DataStream, StandardizedOutput]] = None,
                  msas: Optional[StandardizedOutput] = None,
                  # Core prediction parameters
@@ -148,6 +140,8 @@ echo "=== Boltz2 installation complete ==="
         Args:
             config: Direct YAML configuration string
             proteins: Protein sequences as DataStream or StandardizedOutput
+            dna: DNA sequences as DataStream or StandardizedOutput
+            rna: RNA sequences as DataStream or StandardizedOutput
             ligands: Single SMILES string, DataStream, or StandardizedOutput with compounds
             msas: MSA files from previous Boltz2 run (StandardizedOutput with msas table)
             affinity: Whether to calculate binding affinity
@@ -174,41 +168,31 @@ echo "=== Boltz2 installation complete ==="
         self.config = config
         self.msas = msas
 
-        # Combinatorics modes
-        self._proteins_mode = get_mode(proteins)
-        self._ligands_mode = get_mode(ligands)
-
-        # Unwrap Bundle/Each to get the underlying source
-        unwrapped_proteins = _unwrap_combinatorics(proteins)
-        unwrapped_ligands = _unwrap_combinatorics(ligands)
-
         # Store raw inputs for combinatorics config generation
         self.proteins = proteins
+        self.dna = dna
+        self.rna = rna
         self.ligands = ligands
 
-        # Resolve protein input to DataStream
-        self.proteins_stream: Optional[DataStream] = None
-        if unwrapped_proteins is not None:
-            if isinstance(unwrapped_proteins, StandardizedOutput):
-                self.proteins_stream = unwrapped_proteins.streams.sequences
-            elif isinstance(unwrapped_proteins, DataStream):
-                self.proteins_stream = unwrapped_proteins
-            else:
-                raise ValueError(f"proteins must be DataStream or StandardizedOutput, got {type(unwrapped_proteins)}")
+        # Combinatorics modes
+        self._proteins_mode = get_mode(proteins)
+        self._dna_mode = get_mode(dna)
+        self._rna_mode = get_mode(rna)
+        self._ligands_mode = get_mode(ligands)
 
-        # Resolve ligand input
+        # Resolve sequence inputs to DataStreams using shared utility
+        self.proteins_stream: Optional[DataStream] = resolve_input_to_datastream(proteins, fallback_stream="sequences")
+        self.dna_stream: Optional[DataStream] = resolve_input_to_datastream(dna, fallback_stream="sequences")
+        self.rna_stream: Optional[DataStream] = resolve_input_to_datastream(rna, fallback_stream="sequences")
+
+        # Resolve ligand input (special handling for direct SMILES string)
         self.ligands_stream: Optional[DataStream] = None
         self.ligands_smiles: Optional[str] = None
-        if unwrapped_ligands is not None:
-            if isinstance(unwrapped_ligands, StandardizedOutput):
-                self.ligands_stream = unwrapped_ligands.streams.compounds
-            elif isinstance(unwrapped_ligands, DataStream):
-                self.ligands_stream = unwrapped_ligands
-            elif isinstance(unwrapped_ligands, str):
-                # Direct SMILES string
-                self.ligands_smiles = unwrapped_ligands
-            else:
-                raise ValueError(f"ligands must be str (SMILES), DataStream, or StandardizedOutput, got {type(unwrapped_ligands)}")
+        if isinstance(ligands, str):
+            # Direct SMILES string
+            self.ligands_smiles = ligands
+        elif ligands is not None:
+            self.ligands_stream = resolve_input_to_datastream(ligands, fallback_stream="compounds")
 
         # Override affinity to False if no ligands
         if self.ligands is None and self.ligands_smiles is None and affinity:
@@ -244,16 +228,18 @@ echo "=== Boltz2 installation complete ==="
     def validate_params(self):
         """Validate Boltz2-specific parameters."""
         # Must have some form of input
-        has_input = any([
-            self.config is not None,
-            self.proteins_stream is not None
+        has_sequence_input = any([
+            self.proteins_stream is not None,
+            self.dna_stream is not None,
+            self.rna_stream is not None,
         ])
+        has_input = self.config is not None or has_sequence_input
         if not has_input:
-            raise ValueError("Either config or proteins parameter is required")
+            raise ValueError("Either config or at least one sequence parameter (proteins/dna/rna) is required")
 
-        # Cannot specify both config and proteins
-        if self.config is not None and self.proteins_stream is not None:
-            raise ValueError("Cannot specify both config and proteins")
+        # Cannot specify both config and sequence parameters
+        if self.config is not None and has_sequence_input:
+            raise ValueError("Cannot specify both config and sequence parameters (proteins/dna/rna)")
 
         # Validate enum values
         if self.output_format not in ["pdb", "mmcif"]:
@@ -289,14 +275,23 @@ echo "=== Boltz2 installation complete ==="
         """Configure input files."""
         self.folders = pipeline_folders
 
+    def _build_combinatorics_kwargs(self) -> Dict:
+        """Build combinatorics kwargs for all active axes."""
+        kwargs = {}
+        if self.proteins is not None:
+            kwargs['proteins'] = (self.proteins, "sequences", "protein")
+        if self.dna is not None:
+            kwargs['dna'] = (self.dna, "sequences", "dna")
+        if self.rna is not None:
+            kwargs['rna'] = (self.rna, "sequences", "rna")
+        if self.ligands is not None:
+            kwargs['ligands'] = (self.ligands, "compounds", "ligand")
+        return kwargs
+
     def _write_combinatorics_config(self) -> str:
         """Write combinatorics config file at pipeline time."""
         config_path = os.path.join(self.output_folder, "combinatorics_config.json")
-        generate_combinatorics_config(
-            config_path,
-            proteins=(self.proteins, "sequences"),
-            ligands=(self.ligands, "compounds")
-        )
+        generate_combinatorics_config(config_path, **self._build_combinatorics_kwargs())
         return config_path
 
     def _generate_extra_config_params(self) -> str:
@@ -517,8 +512,9 @@ echo "Post-processing completed"
     def _generate_missing_table_propagation(self) -> str:
         """Generate script section to propagate missing.csv from upstream tools."""
         upstream_missing_path = self._get_upstream_missing_table_path(
-            self.proteins,
-            self.proteins_stream
+            self.proteins, self.proteins_stream,
+            self.dna, self.dna_stream,
+            self.rna, self.rna_stream
         )
 
         if not upstream_missing_path:
@@ -546,16 +542,14 @@ fi
         """Predict sequence IDs from input sources using combinatorics module."""
         return predict_output_ids(
             bundled_name="bundled_complex",
-            proteins=(self.proteins, "sequences"),
-            ligands=(self.ligands, "compounds")
+            **self._build_combinatorics_kwargs()
         )
 
     def _predict_sequence_ids_with_provenance(self):
         """Predict sequence IDs and provenance from input sources."""
         return predict_output_ids_with_provenance(
             bundled_name="bundled_complex",
-            proteins=(self.proteins, "sequences"),
-            ligands=(self.ligands, "compounds")
+            **self._build_combinatorics_kwargs()
         )
 
     def get_output_files(self) -> Dict[str, Any]:
@@ -668,8 +662,9 @@ fi
 
         # Check for upstream missing table
         upstream_missing_path = self._get_upstream_missing_table_path(
-            self.proteins,
-            self.proteins_stream
+            self.proteins, self.proteins_stream,
+            self.dna, self.dna_stream,
+            self.rna, self.rna_stream
         )
         if upstream_missing_path:
             tables["missing"] = TableInfo(
@@ -693,6 +688,10 @@ fi
         """Get configuration display lines for pipeline output."""
         config_lines = super().get_config_display()
 
+        if self.dna_stream:
+            config_lines.append(f"DNA: {len(self.dna_stream)} sequences")
+        if self.rna_stream:
+            config_lines.append(f"RNA: {len(self.rna_stream)} sequences")
         if self.ligands_smiles:
             config_lines.append(f"Ligands: {self.ligands_smiles}")
         elif self.ligands_stream:
@@ -739,6 +738,8 @@ fi
             "boltz2_params": {
                 "config": self.config,
                 "proteins": str(self.proteins) if self.proteins else None,
+                "dna": str(self.dna) if self.dna else None,
+                "rna": str(self.rna) if self.rna else None,
                 "ligands": str(self.ligands) if self.ligands else self.ligands_smiles,
                 "msas": str(self.msas) if self.msas else None,
                 "affinity": self.affinity,

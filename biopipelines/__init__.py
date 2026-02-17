@@ -57,6 +57,7 @@ __all__ = [
     'create_map_table',
     'DataStreamResolver',
     'resolve_to_datastream',
+    'resolve_input_to_datastream',
 
     # File path descriptor
     'Path',

@@ -181,3 +181,64 @@ def resolve_to_datastream(
     """
     resolver = DataStreamResolver(output_folder=output_folder)
     return resolver.resolve(input_param, format=format, name=name)
+
+
+def resolve_input_to_datastream(
+    value: Any,
+    fallback_stream: str = "sequences"
+) -> Optional[DataStream]:
+    """
+    Resolve any tool input to a DataStream, handling all input shapes.
+
+    Supports:
+    - None → returns None
+    - DataStream → returned directly
+    - StandardizedOutput → extracts stream by fallback_stream name
+    - Bundle/Each wrappers → unwraps recursively to get first leaf, then resolves
+
+    The fallback_stream parameter is only used when a leaf is a StandardizedOutput
+    and we need to know which stream to extract (e.g., "sequences", "compounds").
+    If the leaf is already a DataStream, fallback_stream is ignored.
+
+    Args:
+        value: Input value (DataStream, StandardizedOutput, Bundle/Each, or None)
+        fallback_stream: Stream name to extract from StandardizedOutput (default: "sequences")
+
+    Returns:
+        DataStream or None if value is None
+
+    Example:
+        # All of these work:
+        stream = resolve_input_to_datastream(tool_output, "sequences")
+        stream = resolve_input_to_datastream(tool_output.streams.sequences, "sequences")
+        stream = resolve_input_to_datastream(Each(tool_a, tool_b), "sequences")
+        stream = resolve_input_to_datastream(Each(tool_a.streams.custom), "sequences")
+    """
+    if value is None:
+        return None
+
+    # Already a DataStream - return directly
+    if isinstance(value, DataStream):
+        return value
+
+    # Bundle/Each wrapper - unwrap to get first leaf
+    # Use duck-typing (check for .sources attribute) to avoid circular imports
+    if hasattr(value, 'sources') and isinstance(value.sources, tuple):
+        if value.sources:
+            return resolve_input_to_datastream(value.sources[0], fallback_stream)
+        return None
+
+    # StandardizedOutput - extract stream by name
+    if hasattr(value, 'streams'):
+        stream = getattr(value.streams, fallback_stream, None)
+        if stream is not None and isinstance(stream, DataStream):
+            return stream
+        raise ValueError(
+            f"StandardizedOutput has no '{fallback_stream}' stream. "
+            f"Pass a DataStream directly (e.g., tool.streams.your_stream) instead."
+        )
+
+    raise ValueError(
+        f"Cannot resolve {type(value).__name__} to DataStream. "
+        f"Expected DataStream, StandardizedOutput, Bundle, or Each."
+    )
