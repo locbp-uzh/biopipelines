@@ -111,7 +111,8 @@ echo "=== Plot ready ==="
                 ylabel: str = None,
                 x_name: str = None,
                 y_name: str = None,
-                figsize: Tuple[float, float] = (8, 6),
+                figsize: Tuple[int, int] = (800, 600),
+                dpi: int = 100,
                 x_tick_rotation: float = 0,
                 y_tick_rotation: float = 0,
                 grid: bool = True,
@@ -130,7 +131,8 @@ echo "=== Plot ready ==="
             ylabel: Y axis label (defaults to y_name or column name)
             x_name: Display name for X variable (alternative to xlabel)
             y_name: Display name for Y variable (alternative to ylabel)
-            figsize: Figure size as (width, height) in inches
+            figsize: Figure size as (width, height) in pixels (default: (800, 600))
+            dpi: Resolution in dots per inch (default: 100)
             x_tick_rotation: Rotation angle for x-axis tick labels in degrees
             y_tick_rotation: Rotation angle for y-axis tick labels in degrees
             grid: Show grid lines (default True)
@@ -142,7 +144,7 @@ echo "=== Plot ready ==="
         """
         return PlotOperation("scatter", data=data, x=x, y=y, color=color,
                             title=title, xlabel=xlabel, ylabel=ylabel,
-                            x_name=x_name, y_name=y_name, figsize=figsize,
+                            x_name=x_name, y_name=y_name, figsize=figsize, dpi=dpi,
                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
                             grid=grid, color_legend_loc=color_legend_loc,
                             color_legend_outside=color_legend_outside)
@@ -156,7 +158,8 @@ echo "=== Plot ready ==="
                   ylabel: str = None,
                   x_name: str = None,
                   y_name: str = None,
-                  figsize: Tuple[float, float] = (8, 6)) -> PlotOperation:
+                  figsize: Tuple[int, int] = (800, 600),
+                  dpi: int = 100) -> PlotOperation:
         """
         Create distribution histogram of a single column.
 
@@ -169,14 +172,15 @@ echo "=== Plot ready ==="
             ylabel: Y axis label (defaults to y_name or "Count")
             x_name: Display name for X variable (alternative to xlabel)
             y_name: Display name for Y variable (alternative to ylabel)
-            figsize: Figure size as (width, height) in inches
+            figsize: Figure size as (width, height) in pixels (default: (800, 600))
+            dpi: Resolution in dots per inch (default: 100)
 
         Returns:
             PlotOperation for histogram
         """
         return PlotOperation("histogram", data=data, x=x, bins=bins,
                             title=title, xlabel=xlabel, ylabel=ylabel,
-                            x_name=x_name, y_name=y_name, figsize=figsize)
+                            x_name=x_name, y_name=y_name, figsize=figsize, dpi=dpi)
 
     @staticmethod
     def Bar(data: Union[StandardizedOutput, TableInfo],
@@ -191,7 +195,8 @@ echo "=== Plot ready ==="
             y_name: str = None,
             color_left: str = None,
             color_right: str = None,
-            figsize: Tuple[float, float] = (8, 6),
+            figsize: Tuple[int, int] = (800, 600),
+            dpi: int = 100,
             x_tick_rotation: float = 0,
             y_tick_rotation: float = 0,
             grid: bool = True) -> PlotOperation:
@@ -214,7 +219,8 @@ echo "=== Plot ready ==="
             y_name: Display name for Y variable (alternative to ylabel)
             color_left: Color for left-axis bars (default: steelblue)
             color_right: Color for right-axis bars (default: coral)
-            figsize: Figure size as (width, height) in inches
+            figsize: Figure size as (width, height) in pixels (default: (800, 600))
+            dpi: Resolution in dots per inch (default: 100)
             x_tick_rotation: Rotation angle for x-axis tick labels in degrees
             y_tick_rotation: Rotation angle for y-axis tick labels in degrees
             grid: Show grid lines (default True)
@@ -227,7 +233,7 @@ echo "=== Plot ready ==="
                             ylabel_right=ylabel_right,
                             x_name=x_name, y_name=y_name,
                             color_left=color_left, color_right=color_right,
-                            figsize=figsize,
+                            figsize=figsize, dpi=dpi,
                             x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
                             grid=grid)
 
@@ -242,7 +248,8 @@ echo "=== Plot ready ==="
                y_name: str = None,
                style: str = "column",
                show_error: str = "sd",
-               figsize: Tuple[float, float] = (8, 6),
+               figsize: Tuple[int, int] = (800, 600),
+               dpi: int = 100,
                color_groups: List[str] = None,
                colors: List[str] = None,
                color_legend_title: str = None,
@@ -269,7 +276,8 @@ echo "=== Plot ready ==="
             style: Plot style - "column" (bars+points), "simple_bar" (bars only),
                    "scatter" (points only), "box" (box and whiskers), "floating_bar" (mean±error bars)
             show_error: Error bar type: "sd" (std dev), "sem" (std error), "ci" (95% CI), or None
-            figsize: Figure size as (width, height) in inches
+            figsize: Figure size as (width, height) in pixels (default: (800, 600))
+            dpi: Resolution in dots per inch (default: 100)
             color_groups: List of group names for coloring (e.g., protein names). Same color for same group.
             colors: Explicit list of colors (hex or named). If not provided, uses a color palette.
             color_legend_title: Title for the color legend (e.g., "Protein")
@@ -285,7 +293,7 @@ echo "=== Plot ready ==="
         return PlotOperation("column", data=data, y=y, labels=labels,
                             title=title, xlabel=xlabel, ylabel=ylabel,
                             x_name=x_name, y_name=y_name,
-                            style=style, show_error=show_error, figsize=figsize,
+                            style=style, show_error=show_error, figsize=figsize, dpi=dpi,
                             color_groups=color_groups, colors=colors,
                             color_legend_title=color_legend_title, color_legend_loc=color_legend_loc,
                             color_legend_outside=color_legend_outside,
@@ -305,7 +313,8 @@ echo "=== Plot ready ==="
                 y_name: str = None,
                 cmap: str = "viridis",
                 annotate: bool = True,
-                figsize: Tuple[float, float] = (10, 8)) -> PlotOperation:
+                figsize: Tuple[int, int] = (1000, 800),
+                dpi: int = 100) -> PlotOperation:
         """
         Create a heatmap visualization.
 
@@ -326,7 +335,8 @@ echo "=== Plot ready ==="
             y_name: Display name for Y axis (alternative to ylabel)
             cmap: Colormap name (default: "viridis")
             annotate: Show values in cells (default: True)
-            figsize: Figure size as (width, height) in inches
+            figsize: Figure size as (width, height) in pixels (default: (1000, 800))
+            dpi: Resolution in dots per inch (default: 100)
 
         Returns:
             PlotOperation for heatmap
@@ -341,7 +351,7 @@ echo "=== Plot ready ==="
         return PlotOperation("heatmap", data=data, x=x, y=y, value=value,
                             columns=columns, title=title, xlabel=xlabel, ylabel=ylabel,
                             x_name=x_name, y_name=y_name, cmap=cmap,
-                            annotate=annotate, figsize=figsize)
+                            annotate=annotate, figsize=figsize, dpi=dpi)
 
     # --- Instance methods ---
 

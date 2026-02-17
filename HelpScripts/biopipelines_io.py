@@ -712,3 +712,74 @@ def clear_table_cache() -> None:
     global _table_cache
     _table_cache = {}
 
+
+# =============================================================================
+# Provenance-based ID Resolution
+# =============================================================================
+# When tools like Panda auto-rename IDs (e.g., Panda_1, Panda_2), the original
+# source IDs are preserved in map_table provenance columns (e.g., structures.id).
+# These functions trace back through provenance to match renamed IDs to their
+# source IDs in external tables.
+
+
+def resolve_id_by_provenance(
+    item_id: str,
+    target_ids: set,
+    map_table_paths: List[str]
+) -> Optional[str]:
+    """
+    Resolve an ID to a matching target ID using map_table provenance columns.
+
+    When structures pass through Panda with auto-rename (e.g., Panda_1 -> Panda_2),
+    their map_table contains provenance columns like 'structures.id' that track
+    the original source IDs. This function looks up item_id in those map_tables
+    and returns the provenance source ID that exists in target_ids.
+
+    Args:
+        item_id: The ID to resolve (e.g., 'Panda_1')
+        target_ids: Set of IDs we're trying to match against
+        map_table_paths: List of map_table CSV paths to search for provenance
+
+    Returns:
+        Matching target ID if found via provenance, None otherwise
+
+    Example:
+        # Panda_1's map_table has: id=Panda_1, structures.id=LID_Redesign_001_1
+        # Selection table has: id=LID_Redesign_001_1, fixed=10-20+30-40
+        matched = resolve_id_by_provenance("Panda_1", {"LID_Redesign_001_1"}, ["/path/to/map.csv"])
+        # Returns "LID_Redesign_001_1"
+    """
+    for map_table_path in map_table_paths:
+        if not map_table_path or not os.path.exists(map_table_path):
+            continue
+
+        # Use table cache
+        if map_table_path in _table_cache:
+            df = _table_cache[map_table_path]
+        else:
+            try:
+                df = pd.read_csv(map_table_path)
+                _table_cache[map_table_path] = df
+            except Exception:
+                continue
+
+        if "id" not in df.columns:
+            continue
+
+        # Find the row for this item_id
+        row = df[df["id"].astype(str) == item_id]
+        if row.empty:
+            continue
+
+        row = row.iloc[0]
+
+        # Check provenance columns (columns ending in '.id' like 'structures.id')
+        provenance_cols = [col for col in df.columns if col.endswith(".id") and col != "id"]
+
+        for prov_col in provenance_cols:
+            source_id = str(row[prov_col])
+            if source_id in target_ids:
+                return source_id
+
+    return None
+

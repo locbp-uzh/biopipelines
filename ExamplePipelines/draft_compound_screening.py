@@ -9,10 +9,11 @@ from biopipelines.compound_library import CompoundLibrary
 from biopipelines.boltz2 import Boltz2
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
+#    MarR = Sequence("LFNEIIPLGRLIHMVNQKKDRLLNEYLSPLDITAAQFKVLCSIRCAACITPVELKKVLSVDLGALTRMLDRLVCKGWVERLPNPNDKRGVLVKLTTGGAAICEQCHQLVGQDLHQELTKNLTADEVATLEYLLKKVLP")
 
 with Pipeline(project="MarR", job="FragmentScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")
-    MarR = Sequence("LFNEIIPLGRLIHMVNQKKDRLLNEYLSPLDITAAQFKVLCSIRCAACITPVELKKVLSVDLGALTRMLDRLVCKGWVERLPNPNDKRGVLVKLTTGGAAICEQCHQLVGQDLHQELTKNLTADEVATLEYLLKKVLP")
+    MarR = Sequence("LFNEIIPLG...")
     library = CompoundLibrary(library={"candidate": "<aryl><carboxylate>",
                                        "aryl": ["<o-hydroxyphenyl>", 
                                                 "<m-hydroxyphenyl>",
@@ -26,13 +27,24 @@ with Pipeline(project="MarR", job="FragmentScreen"):
                    ligands=Each(library))
     merged = Panda(tables=[boltz.tables.affinity, 
                            library.tables.compounds],
-                   operations=[Panda.merge(on="id")])
+                   operations=[Panda.merge(on="id"),
+                               Panda.calculate({"aff_uM":"10**affinity_pred_value"})])
     Plot(Plot.Scatter(data=merged.tables.result,
                       x="aryl", 
-                      y="affinity_pred_value",
+                      y="aff_uM",
                       title="Predicted Affinity by Aryl Substituent",
                       xlabel="Aryl Group", 
-                      ylabel="Predicted Affinity", 
+                      ylabel="Predicted Affinity [uM]", 
                       grid=True))
+    atp=Ligand("ATP")
+    boltz_ligand_affinity = Boltz2(proteins=Bundle(MarR, MarR),
+                                   ligands=Bundle(Each(library),atp))
+    boltz_atp_affinity = Boltz2(proteins=Bundle(MarR, MarR),
+                                   ligands=Bundle(Each(library),atp))
+    
+
+    
+
+
     
 

@@ -33,10 +33,12 @@ with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
                              Panda.head(3)],
                  pool=refolded)
     PyMOL(PyMOL.Load(top3),
-          PyMOL.ColorAF(top3),
+          PyMOL.ColorAF(),
           PyMOL.Color("white",selection=backbones.tables.structures.fixed))
     
 
     
+
+
     
 

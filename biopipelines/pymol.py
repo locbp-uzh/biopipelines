@@ -603,14 +603,16 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                         "type": "standardized_output",
                         "output_folder": value.output_folder,
                         "structures": structures_data.files,
-                        "structure_ids": structures_data.ids
+                        "structure_ids": structures_data.ids,
+                        "map_table": structures_data.map_table or ""
                     }
                 else:
                     result[key] = {
                         "type": "standardized_output",
                         "output_folder": value.output_folder,
                         "structures": structures_data if isinstance(structures_data, list) else [],
-                        "structure_ids": value.structure_ids if hasattr(value, 'structure_ids') else []
+                        "structure_ids": value.structure_ids if hasattr(value, 'structure_ids') else [],
+                        "map_table": ""
                     }
             elif isinstance(value, TableInfo):
                 # Direct TableInfo reference (for data_table in RenderEach)

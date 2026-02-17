@@ -131,7 +131,9 @@ class PlotBuilder:
         title = op.get("title")
         xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
-        figsize = tuple(op.get("figsize", [8, 6]))
+        dpi = op.get("dpi", 100)
+        figsize_px = op.get("figsize", [800, 600])
+        figsize = (figsize_px[0] / dpi, figsize_px[1] / dpi)
         x_tick_rotation = op.get("x_tick_rotation", 0)
         y_tick_rotation = op.get("y_tick_rotation", 0)
         grid = op.get("grid", True)
@@ -173,7 +175,7 @@ class PlotBuilder:
                          grid=grid)
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
         plt.close()
 
         print(f"  Created scatter plot: {output_path}")
@@ -210,7 +212,9 @@ class PlotBuilder:
         title = op.get("title")
         xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), "Count")
-        figsize = tuple(op.get("figsize", [8, 6]))
+        dpi = op.get("dpi", 100)
+        figsize_px = op.get("figsize", [800, 600])
+        figsize = (figsize_px[0] / dpi, figsize_px[1] / dpi)
 
         df = self._resolve_data_source(data_ref)
 
@@ -238,7 +242,7 @@ class PlotBuilder:
         self._apply_style(ax, title, xlabel, ylabel, grid=True)
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
         plt.close()
 
         print(f"  Created histogram: {output_path}")
@@ -279,7 +283,9 @@ class PlotBuilder:
         ylabel_right = op.get("ylabel_right") or (y_right_col if y_right_col else None)
         color_left = op.get("color_left", "steelblue")
         color_right = op.get("color_right", "coral")
-        figsize = tuple(op.get("figsize", [8, 6]))
+        dpi = op.get("dpi", 100)
+        figsize_px = op.get("figsize", [800, 600])
+        figsize = (figsize_px[0] / dpi, figsize_px[1] / dpi)
         x_tick_rotation = op.get("x_tick_rotation", 0)
         y_tick_rotation = op.get("y_tick_rotation", 0)
         grid = op.get("grid", True)
@@ -342,7 +348,7 @@ class PlotBuilder:
                              grid=grid)
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
         plt.close()
 
         print(f"  Created bar chart: {output_path}")
@@ -381,7 +387,9 @@ class PlotBuilder:
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
         style = op.get("style", "column")
         show_error = op.get("show_error", "sd")
-        figsize = tuple(op.get("figsize", [8, 6]))
+        dpi = op.get("dpi", 100)
+        figsize_px = op.get("figsize", [800, 600])
+        figsize = (figsize_px[0] / dpi, figsize_px[1] / dpi)
         color_groups = op.get("color_groups")
         explicit_colors = op.get("colors")
         color_legend_title = op.get("color_legend_title")
@@ -542,7 +550,7 @@ class PlotBuilder:
                        transform=ax.transAxes, fontsize=8, verticalalignment='top')
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
         plt.close()
 
         print(f"  Created column plot ({style}): {output_path}")
@@ -588,7 +596,9 @@ class PlotBuilder:
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col or "")
         cmap = op.get("cmap", "viridis")
         annotate = op.get("annotate", True)
-        figsize = tuple(op.get("figsize", [10, 8]))
+        dpi = op.get("dpi", 100)
+        figsize_px = op.get("figsize", [1000, 800])
+        figsize = (figsize_px[0] / dpi, figsize_px[1] / dpi)
 
         df = self._resolve_data_source(data_ref)
 
@@ -661,7 +671,7 @@ class PlotBuilder:
         self._apply_style(ax, title, xlabel, ylabel, grid=False)
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
         plt.close()
 
         print(f"  Created heatmap: {output_path}")

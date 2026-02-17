@@ -211,10 +211,11 @@ def get_mapped_ids(
     source_ids: List[str],
     target_ids: List[str],
     id_map: Dict[str, str] = None,
-    unique: bool = True
+    unique: bool = True,
+    map_table_paths: Optional[List[str]] = None
 ) -> Union[Dict[str, Optional[str]], Dict[str, List[str]]]:
     """
-    Match source IDs to target IDs using id_map patterns.
+    Match source IDs to target IDs using id_map patterns and provenance.
 
     For each source_id, finds target_ids that match according to the id_map.
     Matching uses a priority-based strategy:
@@ -222,6 +223,7 @@ def get_mapped_ids(
     2. Target is derived from source: target_id = source_id + suffix
     3. Source is derived from target: source_id = target_id + suffix
     4. Common ancestor: both source and target derive from same base
+    5. Provenance: source_id traces to target_id via map_table provenance columns
 
     Args:
         source_ids: List of source IDs to match from
@@ -230,6 +232,11 @@ def get_mapped_ids(
                 Supports recursive suffix matching
         unique: If True (default), return the single most specific match or None.
                 If False, return list of all matches.
+        map_table_paths: Optional list of map_table CSV paths for provenance-based
+                         matching. When suffix-based strategies fail (e.g., Panda
+                         auto-renamed IDs like Panda_1), provenance columns in
+                         map_tables (e.g., structures.id) are used to trace back
+                         to original source IDs.
 
     Returns:
         If unique=True: Dict mapping each source_id to best matching target_id (or None)
@@ -240,6 +247,7 @@ def get_mapped_ids(
         2. Child match (target derives from source, closest first)
         3. Parent match (source derives from target, closest first)
         4. Sibling match (common ancestor, closest combined distance first)
+        5. Provenance match (via map_table provenance columns)
 
     Examples:
         >>> # Exact match
@@ -261,6 +269,10 @@ def get_mapped_ids(
         >>> # unique=False - returns all matches
         >>> get_mapped_ids(["protein_1"], ["protein_1_1", "protein_1_2"], unique=False)
         {'protein_1': ['protein_1_1', 'protein_1_2']}
+
+        >>> # Provenance match (Panda auto-renamed IDs)
+        >>> get_mapped_ids(["Panda_1"], ["LID_001_1"], map_table_paths=["/path/to/map.csv"])
+        {'Panda_1': 'LID_001_1'}
     """
     if id_map is None:
         id_map = {"*": "*_<N>"}
@@ -352,6 +364,17 @@ def get_mapped_ids(
                         unique_matches.append(m[0])
                 result[source_id] = unique_matches
             continue
+
+        # Priority 5: Provenance match via map_table columns
+        if map_table_paths:
+            from biopipelines_io import resolve_id_by_provenance
+            matched = resolve_id_by_provenance(source_id, target_set, map_table_paths)
+            if matched is not None:
+                if unique:
+                    result[source_id] = matched
+                else:
+                    result[source_id] = [matched]
+                continue
 
         # No match found
         if unique:

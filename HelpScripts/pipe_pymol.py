@@ -58,6 +58,10 @@ class PyMOLSessionBuilder:
         # Track first loaded object for alignment
         self.first_loaded_object: Optional[str] = None
 
+        # Track map_table paths for provenance-based ID matching
+        # Populated during execute_load from serialized structures
+        self.loaded_map_tables: List[str] = []
+
     def setup_pymol(self):
         """Initialize PyMOL with standard settings (already launched at import time)."""
         # Standard visualization settings
@@ -217,6 +221,38 @@ class PyMOLSessionBuilder:
 
         return dict(zip(df["id"].astype(str), df[column_name].astype(str)))
 
+    def _resolve_id_to_value(self, struct_id: str, id_to_value: Dict[str, str]) -> Optional[str]:
+        """
+        Resolve a loaded structure ID to a value from an id->value mapping.
+
+        Uses get_mapped_ids which handles all matching strategies:
+        exact match, suffix stripping, sibling matching, and provenance via map_tables.
+
+        Args:
+            struct_id: The loaded structure's ID (e.g., 'Panda_1')
+            id_to_value: Mapping from table IDs to values (e.g., from selection column)
+
+        Returns:
+            Matched value if found, None otherwise
+        """
+        from id_map_utils import get_mapped_ids
+
+        # Exact match (fast path)
+        if struct_id in id_to_value:
+            return id_to_value[struct_id]
+
+        # Full matching: suffix stripping + provenance
+        matches = get_mapped_ids(
+            [struct_id], list(id_to_value.keys()),
+            map_table_paths=self.loaded_map_tables
+        )
+        matched_id = matches.get(struct_id)
+        if matched_id is not None:
+            print(f"  ID match: {struct_id} -> {matched_id}")
+            return id_to_value[matched_id]
+
+        return None
+
     def execute_names(self, op: Dict[str, Any]):
         """
         Execute Names operation - set up ID -> PyMOL name mapping.
@@ -269,6 +305,12 @@ class PyMOLSessionBuilder:
 
         structures = self._resolve_structures(structures_ref)
         print(f"Load: Loading {len(structures)} structures")
+
+        # Capture map_table path for provenance-based ID matching
+        map_table = structures_ref.get("map_table", "")
+        if map_table:
+            self.loaded_map_tables.append(map_table)
+            print(f"  Registered map_table for provenance: {map_table}")
 
         for struct in structures:
             struct_id = struct["id"]
@@ -336,17 +378,17 @@ class PyMOLSessionBuilder:
             if id_to_selection is None:
                 # Color entire object
                 pymol_selection = pymol_name
-            elif struct_id not in id_to_selection:
-                print(f"  Skipping {struct_id} - no selection value")
-                continue
             else:
-                selection_value = id_to_selection[struct_id]
+                selection_value = self._resolve_id_to_value(struct_id, id_to_selection)
+                if selection_value is None:
+                    print(f"  Skipping {struct_id} - no selection value")
+                    continue
                 pymol_selection = f"{pymol_name} and resi {selection_value}"
 
             try:
                 cmd.color(color, pymol_selection)
-                if id_to_selection and struct_id in id_to_selection:
-                    print(f"  Colored {pymol_name} resi {id_to_selection[struct_id]} -> {color}")
+                if id_to_selection:
+                    print(f"  Colored {pymol_name} resi {selection_value} -> {color}")
                 else:
                     print(f"  Colored {pymol_name} -> {color}")
             except Exception as e:
@@ -627,8 +669,12 @@ class PyMOLSessionBuilder:
             if name == target_name:
                 target_id = sid
                 break
-        if id_to_selection and target_id and target_id in id_to_selection:
-            target_sel = f"{target_name} and resi {id_to_selection[target_id]}"
+        if id_to_selection and target_id:
+            target_sel_value = self._resolve_id_to_value(target_id, id_to_selection)
+            if target_sel_value:
+                target_sel = f"{target_name} and resi {target_sel_value}"
+            else:
+                target_sel = target_name
         else:
             target_sel = target_name
 
@@ -640,8 +686,12 @@ class PyMOLSessionBuilder:
                 continue
 
             # Build mobile selection string
-            if id_to_selection and struct_id in id_to_selection:
-                mobile_sel = f"{pymol_name} and resi {id_to_selection[struct_id]}"
+            if id_to_selection:
+                sel_value = self._resolve_id_to_value(struct_id, id_to_selection)
+                if sel_value:
+                    mobile_sel = f"{pymol_name} and resi {sel_value}"
+                else:
+                    mobile_sel = pymol_name
             else:
                 mobile_sel = pymol_name
 
@@ -705,8 +755,12 @@ class PyMOLSessionBuilder:
 
             pymol_name = self.loaded_objects[struct_id]
 
-            if id_to_selection and struct_id in id_to_selection:
-                pymol_selection = f"{pymol_name} and resi {id_to_selection[struct_id]}"
+            if id_to_selection:
+                sel_value = self._resolve_id_to_value(struct_id, id_to_selection)
+                if sel_value:
+                    pymol_selection = f"{pymol_name} and resi {sel_value}"
+                else:
+                    pymol_selection = pymol_name
             else:
                 pymol_selection = pymol_name
 
@@ -758,8 +812,12 @@ class PyMOLSessionBuilder:
 
             pymol_name = self.loaded_objects[struct_id]
 
-            if id_to_selection and struct_id in id_to_selection:
-                pymol_selection = f"{pymol_name} and resi {id_to_selection[struct_id]}"
+            if id_to_selection:
+                sel_value = self._resolve_id_to_value(struct_id, id_to_selection)
+                if sel_value:
+                    pymol_selection = f"{pymol_name} and resi {sel_value}"
+                else:
+                    pymol_selection = pymol_name
             else:
                 pymol_selection = pymol_name
 
