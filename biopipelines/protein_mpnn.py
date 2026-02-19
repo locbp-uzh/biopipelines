@@ -31,20 +31,60 @@ class ProteinMPNN(BaseConfig):
     TOOL_NAME = "ProteinMPNN"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
+                        cudatoolkit="11.3", **kwargs):
+        try:
+            from .config_manager import ConfigManager
+        except ImportError:
+            from config_manager import ConfigManager
+
         repo_dir = folders.get("ProteinMPNN", "")
         parent_dir = os.path.dirname(repo_dir)
+
+        pmpnn_env = ConfigManager().get_environment("ProteinMPNN") or "mlfold"
+        rfd_env   = ConfigManager().get_environment("RFdiffusion")
+
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ]; then
     echo "ProteinMPNN already installed, skipping. Use force_reinstall=True to reinstall."
     exit 0
 fi
 """
-        # ProteinMPNN is git clone only — same for pip and conda
-        return f"""echo "=== Installing ProteinMPNN ==="
-{skip}mkdir -p {parent_dir}
+        clone_block = f"""mkdir -p {parent_dir}
 cd {parent_dir}
-git clone https://github.com/dauparas/ProteinMPNN.git
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/dauparas/ProteinMPNN.git
+fi"""
+
+        if env_manager == "pip":
+            # Notebook / Colab: just install PyTorch if not already present
+            return f"""echo "=== Installing ProteinMPNN (pip) ==="
+{skip}{clone_block}
+
+# Install PyTorch (skip if already importable)
+python -c "import torch" 2>/dev/null || pip install torch torchvision torchaudio || echo "WARNING: torch install failed, skipping"
+
+echo "=== ProteinMPNN installation complete ==="
+"""
+
+        if rfd_env and pmpnn_env == rfd_env:
+            # Same conda/mamba environment as RFdiffusion — nothing extra needed
+            return f"""echo "=== Installing ProteinMPNN ==="
+{skip}{clone_block}
+
+echo "ProteinMPNN shares the '{pmpnn_env}' environment with RFdiffusion — no separate environment needed."
+echo "If RFdiffusion.install() has not been run yet, run it first to create the '{pmpnn_env}' environment."
+
+echo "=== ProteinMPNN installation complete ==="
+"""
+
+        # Dedicated environment — create it and install PyTorch
+        return f"""echo "=== Installing ProteinMPNN ==="
+{skip}{clone_block}
+
+# Create dedicated ProteinMPNN environment
+{env_manager} create --name {pmpnn_env} -y || echo "WARNING: environment '{pmpnn_env}' may already exist, continuing"
+{env_manager} run -n {pmpnn_env} conda install pytorch torchvision torchaudio cudatoolkit={cudatoolkit} -c pytorch -y || echo "WARNING: PyTorch install failed, skipping"
 
 echo "=== ProteinMPNN installation complete ==="
 """

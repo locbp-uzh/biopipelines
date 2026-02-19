@@ -4,6 +4,10 @@
 
 """
 RFdiffusion configuration for protein backbone generation.
+
+RFdiffusion is a diffusion-based generative model for designing protein backbones.
+It supports unconditional generation, motif scaffolding, binder design, and partial
+diffusion. See https://github.com/RosettaCommons/RFdiffusion for full documentation.
 """
 
 import os
@@ -24,15 +28,101 @@ except ImportError:
 class RFdiffusion(BaseConfig):
     """
     Configuration for RFdiffusion protein backbone generation.
+
+    RFdiffusion generates novel protein backbones using a denoising diffusion
+    probabilistic model conditioned on structural motifs, partial structures,
+    or protein-protein interaction targets.
+
+    Main workflows:
+        - Unconditional generation: produce backbones of a given length range
+          without any input structure (contigs only, no pdb).
+        - Motif scaffolding: hold a fixed structural motif in place and design
+          the surrounding scaffold (pdb + contigs specifying the motif).
+        - Binder design: design a new protein that binds to a target (pdb of
+          the target + contigs describing the binder length).
+        - Partial diffusion: apply limited noise to an existing structure and
+          re-diffuse, producing near-neighbour variants (partial_steps).
+
+    Model checkpoints (see WEIGHTS / DEFAULT_WEIGHTS):
+        By default only Base and Complex_base are downloaded (~2 GB). Add others
+        via RFdiffusion.install(weights=[...]) when needed.
+
+    Installation:
+        with Pipeline(...):
+            RFdiffusion.install()                         # default weights
+            RFdiffusion.install(weights=["Base",
+                                         "InpaintSeq"])   # custom selection
+            rfd = RFdiffusion(contigs="50-100", ...)
+
+    Reference:
+        Watson et al. (2023) De novo design of protein structure and function
+        with RFdiffusion. Nature 620, 1089-1100.
+        https://github.com/RosettaCommons/RFdiffusion
     """
 
     TOOL_NAME = "RFdiffusion"
 
+    # Mapping of weight name -> (url_hash, filename)
+    WEIGHTS = {
+        "Base":              ("6f5902ac237024bdd0c176cb93063dc4", "Base_ckpt.pt"),
+        "Complex_base":      ("e29311f6f1bf1af907f9ef9f44b8328b", "Complex_base_ckpt.pt"),
+        "Complex_Fold_base": ("60f09a193fb5e5ccdc4980417708dbab", "Complex_Fold_base_ckpt.pt"),
+        "InpaintSeq":        ("74f51cfb8b440f50d70878e05361d8f0", "InpaintSeq_ckpt.pt"),
+        "InpaintSeq_Fold":   ("76d00716416567174cdb7ca96e208296", "InpaintSeq_Fold_ckpt.pt"),
+        "ActiveSite":        ("5532d2e1f3a4738decd58b19d633b3c3", "ActiveSite_ckpt.pt"),
+        "Base_epoch8":       ("12fc204edeae5b57713c5ad7dcb97d39", "Base_epoch8_ckpt.pt"),
+        "RF_structure_prediction": ("1befcb9b28e2f778f53d47f18b7597fa", "RF_structure_prediction_weights.pt"),
+    }
+    # Weights downloaded by default — covers the two main workflows:
+    #   Base          → unconditional generation, motif scaffolding
+    #   Complex_base  → binder design / protein-protein interaction
+    # Add more via RFdiffusion.install(weights=[...]):
+    #   Complex_Fold_base  → binder design with fold/topology conditioning
+    #   InpaintSeq         → auto-selected when contigmap.inpaint_seq is used
+    #   InpaintSeq_Fold    → inpaint + fold conditioning together
+    #   ActiveSite         → small active-site motifs (requires ckpt_override_path)
+    #   Base_epoch8        → alternative base checkpoint
+    #   RF_structure_prediction → legacy structure prediction (unrelated to diffusion)
+    DEFAULT_WEIGHTS = ["Base", "Complex_base"]
+
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
+                        weights=None, **kwargs):
+        """
+        Generate the bash installation script for RFdiffusion.
+
+        Clones the RFdiffusion repository, downloads the requested model
+        checkpoints, and creates (or reuses) the SE3nv conda/mamba environment.
+        In pip mode (e.g. Google Colab) the environment creation step is skipped
+        and dependencies are installed directly.
+
+        Args:
+            folders: Resolved pipeline folder paths (must contain "RFdiffusion"
+                     and "biopipelines" keys).
+            env_manager: "mamba", "conda", or "pip".
+            force_reinstall: If True, skip the already-installed early-exit check.
+            weights: List of checkpoint names to download. Defaults to
+                     DEFAULT_WEIGHTS (["Base", "Complex_base"]).
+                     Valid names are the keys of WEIGHTS.
+        """
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("RFdiffusion", "")
         parent_dir = os.path.dirname(repo_dir)
+
+        if weights is None:
+            weights = cls.DEFAULT_WEIGHTS
+        invalid = [w for w in weights if w not in cls.WEIGHTS]
+        if invalid:
+            raise ValueError(
+                f"Unknown weight(s): {invalid}. "
+                f"Valid options are: {list(cls.WEIGHTS.keys())}"
+            )
+        wget_lines = "\n".join(
+            f"wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/{cls.WEIGHTS[w][0]}/{cls.WEIGHTS[w][1]}"
+            f" || echo \"WARNING: failed to download {cls.WEIGHTS[w][1]}, skipping\""
+            for w in weights
+        )
+
         if env_manager == "pip":
             skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
@@ -50,12 +140,7 @@ cd {repo_dir}
 
 # Download model weights
 mkdir -p models && cd models
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/60f09a193fb5e5ccdc4980417708dbab/Complex_Fold_base_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/74f51cfb8b440f50d70878e05361d8f0/InpaintSeq_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/76d00716416567174cdb7ca96e208296/InpaintSeq_Fold_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/5532d2571571dcf28e1f96f5ea73f707/ActiveSite_ckpt.pt
+{wget_lines}
 cd ..
 
 # Install dependencies via pip
@@ -83,12 +168,7 @@ cd {repo_dir}
 
 # Download model weights
 mkdir -p models && cd models
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/60f09a193fb5e5ccdc4980417708dbab/Complex_Fold_base_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/74f51cfb8b440f50d70878e05361d8f0/InpaintSeq_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/76d00716416567174cdb7ca96e208296/InpaintSeq_Fold_ckpt.pt
-wget -nc http://files.ipd.uw.edu/pub/RFdiffusion/5532d2571571dcf28e1f96f5ea73f707/ActiveSite_ckpt.pt
+{wget_lines}
 cd ..
 
 # Create SE3nv environment
@@ -140,15 +220,36 @@ echo "=== RFdiffusion installation complete ==="
         Initialize RFdiffusion configuration.
 
         Args:
-            contigs: Contig specification (e.g., "A1-100,10-20")
-            pdb: Optional input structure as DataStream or StandardizedOutput
-            inpaint: Inpainting specification (same format as contigs)
-            num_designs: Number of designs to generate
-            active_site: Use active site model for small motifs
-            steps: Diffusion steps (default 50)
-            partial_steps: Partial diffusion steps
-            reproducible: Use deterministic sampling
-            design_startnum: Starting number for design numbering
+            contigs: Contig map describing which residues are fixed and which
+                     are to be generated. Residues from the input PDB are
+                     specified as chain+range (e.g. "A1-100"); new backbone
+                     segments are specified as length ranges (e.g. "50-100").
+                     Multiple segments are separated by "/" (e.g. "A1-50/30-50/A60-100").
+                     For unconditional generation (no pdb) use a length range alone
+                     (e.g. "100-200").
+            pdb: Optional input structure. Required for motif scaffolding,
+                 binder design, and partial diffusion. Accepts a DataStream
+                 (single file) or a StandardizedOutput (first structure is used).
+            inpaint: Residues whose sequence should be masked during diffusion
+                     (same chain+range format as contigs). When set, the
+                     InpaintSeq checkpoint is used automatically — ensure it
+                     was downloaded at install time.
+            num_designs: Number of independent backbone designs to generate.
+            active_site: If True, use the ActiveSite checkpoint instead of
+                         Base. Intended for scaffolding very small functional
+                         motifs (< ~10 residues). Requires the ActiveSite
+                         weight to have been downloaded at install time.
+            steps: Number of denoising diffusion steps (default 50). Fewer
+                   steps are faster but may reduce quality.
+            partial_steps: Number of partial diffusion steps. When > 0, the
+                           input structure is noised for this many steps and
+                           then re-diffused, producing near-neighbour variants.
+                           Must be less than steps.
+            reproducible: If True, use deterministic (fixed-seed) sampling so
+                          the same contigs always produce the same outputs.
+            design_startnum: Integer appended to the pipeline name to number
+                             output files (e.g. design_startnum=1 → name_1.pdb).
+                             Useful when continuing a previous run.
         """
         # Resolve optional pdb input
         self.pdb_file: Optional[str] = None

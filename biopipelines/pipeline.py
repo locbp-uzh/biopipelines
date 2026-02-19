@@ -378,7 +378,7 @@ class Pipeline:
         tool_folder_log_path = os.path.join(tool_config.output_folder, ".log")
         with open(log_path, 'w') as log_file, open(tool_folder_log_path, 'w') as tool_folder_log:
             process = subprocess.Popen(
-                ['bash', '-e', tool_script_path],
+                ['bash', tool_script_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -539,7 +539,6 @@ class Pipeline:
             f"# Generated pipeline: {self.project}",
             f"# Tools: {', '.join([t.TOOL_NAME for t in self.tools])}",
             "",
-            "set -e  # Exit on any error",
             "umask 002  # Make all files group-writable by default",
             "",
             "# Initialize environment manager",
@@ -860,7 +859,6 @@ umask 002
             f"# Generated pipeline batch {batch_idx + 1}: {self.project}",
             f"# Tools: {', '.join([t.TOOL_NAME for t in batch_tools])}",
             "",
-            "set -e  # Exit on any error",
             "umask 002  # Make all files group-writable by default",
             "",
             "# Initialize environment manager",

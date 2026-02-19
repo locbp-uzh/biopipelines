@@ -54,7 +54,10 @@ if python -c "import colabfold" 2>/dev/null; then
 fi
 """
             return f"""echo "=== Installing AlphaFold (ColabFold via pip) ==="
-{skip}pip install "colabfold[alphafold]"
+{skip}# Install from git main branch: the PyPI release pins pandas<2.0 which has no
+# pre-built wheel for Python 3.12 and fails to build from source on Colab.
+# alphafold-minus-jax skips reinstalling JAX, which Colab already provides.
+pip install -q --no-warn-conflicts "colabfold[alphafold-minus-jax] @ git+https://github.com/sokrypton/ColabFold"
 
 echo "=== AlphaFold installation complete ==="
 """
