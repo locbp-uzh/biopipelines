@@ -27,6 +27,8 @@ with Pipeline(project="Examples",
 
     Resources(gpu="A100", time="8:00:00", memory="16GB")
 
+    Gnina.install()
+
     # Shared protein — fetched once, reused across all three tests
     protein = PDB("9RTM", ids="rhotag")
 
