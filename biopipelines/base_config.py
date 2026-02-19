@@ -1523,7 +1523,7 @@ class StandardizedOutput:
             # Streams summary table
             html_parts.append(
                 '<div class="bp-section">'
-                '<div class="bp-section-title">streams</div>'
+                '<div class="bp-section-title">STREAMS</div>'
             )
             html_parts.append(
                 '<table class="bp-table">'
@@ -1602,7 +1602,7 @@ class StandardizedOutput:
             # Tables summary
             html_parts.append(
                 '<div class="bp-section">'
-                '<div class="bp-section-title">tables</div>'
+                '<div class="bp-section-title">TABLES</div>'
             )
             html_parts.append(
                 '<table class="bp-table">'
