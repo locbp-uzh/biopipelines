@@ -36,11 +36,12 @@ with Pipeline(project="MarR", job="FragmentScreen"):
                       xlabel="Aryl Group", 
                       ylabel="Predicted Affinity [uM]", 
                       grid=True))
+    
     atp=Ligand("ATP")
     boltz_ligand_affinity = Boltz2(proteins=Bundle(MarR, MarR),
                                    ligands=Bundle(Each(library),atp))
     boltz_atp_affinity = Boltz2(proteins=Bundle(MarR, MarR),
-                                   ligands=Bundle(Each(library),atp))
+                                   ligands=Bundle(atp,Each(library)))
     
 
     
