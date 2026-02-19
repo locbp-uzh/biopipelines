@@ -242,9 +242,6 @@ python "{self.profiler_py}" --config "{self.config_file}"
         }
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "visualizations": [
                 self.sequence_logo_relative_svg, self.sequence_logo_relative_png,

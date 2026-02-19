@@ -461,8 +461,6 @@ python {self.helper_py} {self.config_json}
 
         return {
             "structures": structures,
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

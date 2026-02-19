@@ -210,9 +210,6 @@ python "{self.contacts_py}" --config "{self.config_file}"
         }
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

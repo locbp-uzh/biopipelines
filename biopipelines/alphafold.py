@@ -404,8 +404,6 @@ fi
 
         return {
             "structures": structures,
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "msas": msas,
             "tables": tables,
             "output_folder": self.output_folder

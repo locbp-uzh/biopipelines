@@ -741,12 +741,9 @@ python "{self.pymol_py}" --config "{self.config_file}"
                 format="png"
             )
         else:
-            renders = DataStream.empty("renders", "png")
+            renders = None
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "renders": renders,
             "tables": {},
             "output_folder": self.output_folder,

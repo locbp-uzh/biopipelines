@@ -348,9 +348,7 @@ python "{self.sequence_py}" --config "{self.config_file}"
         )
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
             "sequences": sequences,
-            "compounds": DataStream.empty("compounds", "csv"),
             "tables": tables,
             "output_folder": self.output_folder,
             "fasta": self.sequences_fasta

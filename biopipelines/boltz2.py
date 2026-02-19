@@ -608,7 +608,7 @@ fi
                 format="smiles"
             )
         else:
-            compounds = DataStream.empty("compounds", "smiles")
+            compounds = None
 
         # Tables
         tables = {

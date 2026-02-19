@@ -275,9 +275,7 @@ python "{self.composer_py}" --config "{self.config_file}"
         }
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
             "sequences": sequences,
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

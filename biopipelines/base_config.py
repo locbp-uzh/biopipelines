@@ -927,11 +927,7 @@ class _Installer(BaseConfig):
         return script
 
     def get_output_files(self):
-        from .datastream import DataStream
         return {
-            "structures": DataStream.empty("structures", "pdb"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": {},
             "output_folder": self.output_folder
         }
@@ -1081,10 +1077,10 @@ class StreamContainer:
         raise KeyError(f"No stream named '{key}' in streams")
 
     def __getattr__(self, name: str):
-        """Get DataStream by name via dot notation."""
+        """Get DataStream by name via dot notation. Returns None if not present."""
         if '_streams' in self.__dict__ and name in self._streams:
             return self._streams[name]
-        raise AttributeError(f"No stream named '{name}'")
+        return None
 
     def keys(self):
         """Get all stream names."""

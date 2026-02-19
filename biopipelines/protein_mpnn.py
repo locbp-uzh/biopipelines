@@ -344,10 +344,8 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         }
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
             "sequences": sequences,
             "fasta": fasta,
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

@@ -907,17 +907,20 @@ fi
                 if hasattr(pool, 'streams'):
                     for stream_name in pool.streams.keys():
                         stream = pool.streams.get(stream_name)
-                        if stream and len(stream) > 0 and len(stream.files) > 0:
-                            if stream_name not in stream_data:
-                                stream_data[stream_name] = {
-                                    "ids": [],
-                                    "files": [],
-                                    "format": stream.format,
-                                    "map_table": stream.map_table or ""
-                                }
-                            # Apply id_remap to IDs if present
-                            remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids]
-                            stream_data[stream_name]["ids"].extend(remapped_ids)
+                        if not stream or len(stream) == 0:
+                            continue
+                        if stream_name not in stream_data:
+                            stream_data[stream_name] = {
+                                "ids": [],
+                                "files": [],
+                                "format": stream.format,
+                                "map_table": stream.map_table or ""
+                            }
+                        # Apply id_remap to IDs if present
+                        remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids]
+                        stream_data[stream_name]["ids"].extend(remapped_ids)
+                        # Only collect files for file-based streams
+                        if stream.is_file_based():
                             stream_data[stream_name]["files"].extend(stream.files)
 
             # Deduplicate IDs across pools (first occurrence wins)
@@ -925,11 +928,13 @@ fi
                 seen = set()
                 deduped_ids = []
                 deduped_files = []
-                for sid, sf in zip(sdata["ids"], sdata["files"]):
+                pairs = zip(sdata["ids"], sdata["files"]) if sdata["files"] else ((sid, None) for sid in sdata["ids"])
+                for sid, sf in pairs:
                     if sid not in seen:
                         seen.add(sid)
                         deduped_ids.append(sid)
-                        deduped_files.append(sf)
+                        if sf is not None:
+                            deduped_files.append(sf)
                 sdata["ids"] = deduped_ids
                 sdata["files"] = deduped_files
 
@@ -942,6 +947,17 @@ fi
                 pool_count = len(data["ids"])
                 # Use predicted count if available, otherwise use pool count
                 num_items = min(predicted_count, pool_count) if predicted_count is not None else pool_count
+
+                # Value-based streams (no files): propagate as-is with original map_table
+                if not data["files"]:
+                    output_streams[stream_name] = DataStream(
+                        name=stream_name,
+                        ids=data["ids"][:num_items],
+                        files=[],
+                        map_table=data.get("map_table") or "",
+                        format=data["format"]
+                    )
+                    continue
 
                 if self.rename:
                     # Predict renamed IDs and file paths based on predicted output count
@@ -973,10 +989,6 @@ fi
                     format=data["format"]
                 )
 
-            # Ensure standard streams exist (empty if not in pools)
-            for std_stream in ["structures", "sequences", "compounds"]:
-                if std_stream not in output_streams:
-                    output_streams[std_stream] = DataStream.empty(std_stream, "pdb" if std_stream == "structures" else "fasta" if std_stream == "sequences" else "sdf")
 
             # Include tables from first pool (they typically have same schema)
             first_pool = self.pool_outputs[0]
@@ -997,9 +1009,6 @@ fi
             return output_streams
         else:
             return {
-                "structures": DataStream.empty("structures", "pdb"),
-                "sequences": DataStream.empty("sequences", "fasta"),
-                "compounds": DataStream.empty("compounds", "sdf"),
                 "tables": tables,
                 "output_folder": self.output_folder
             }

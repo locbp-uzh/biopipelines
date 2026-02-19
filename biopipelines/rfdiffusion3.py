@@ -696,7 +696,6 @@ python "{self.table_py_file}" \\
         return {
             "structures": structures,
             "sequences": sequences,
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

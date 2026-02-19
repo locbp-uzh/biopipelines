@@ -406,8 +406,6 @@ python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_ch
 
         return {
             "structures": structures,
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }
@@ -551,8 +549,6 @@ fi
 
         return {
             "structures": structures,
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "tables": tables,
             "output_folder": self.output_folder
         }

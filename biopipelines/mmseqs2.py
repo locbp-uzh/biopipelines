@@ -268,9 +268,6 @@ echo "MMseqs2 processing completed"
         }
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
             "msas": msas,
             "tables": tables,
             "output_folder": self.output_folder
@@ -518,10 +515,6 @@ bash {self.gpu_server_script}
         """Get expected output files after MMseqs2Server execution."""
         # Server doesn't produce output files - it just runs
         return {
-            "structures": DataStream.empty("structures", "pdb"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
-            "msas": DataStream.empty("msas", "a3m"),
             "tables": {},
             "output_folder": self.output_folder
         }

@@ -550,7 +550,7 @@ echo "=== Load ready ==="
             if isinstance(raw_data, dict) and 'ids' in raw_data and 'files' in raw_data:
                 return DataStream.from_dict(raw_data)
 
-            return DataStream.empty(data_key, default_format)
+            return None
 
         structures = convert_data_type('structures', 'pdb')
         sequences = convert_data_type('sequences', 'fasta')

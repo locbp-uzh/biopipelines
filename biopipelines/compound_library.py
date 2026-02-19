@@ -438,8 +438,6 @@ print(f'Output: {self.compounds_csv}')
         )
 
         return {
-            "structures": DataStream.empty("structures", "pdb"),
-            "sequences": DataStream.empty("sequences", "fasta"),
             "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder

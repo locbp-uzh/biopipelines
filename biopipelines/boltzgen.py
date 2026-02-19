@@ -806,10 +806,6 @@ fi
         # If no relevant steps, return empty prediction
         if not has_analysis and not has_filtering and not has_folding:
             return {
-                "structures": DataStream.empty("structures", "cif"),
-                "sequences": DataStream.empty("sequences", "fasta"),
-                "compounds": DataStream.empty("compounds", "sdf"),
-                "msas": DataStream.empty("msas", "a3m"),
                 "tables": tables,
                 "output_folder": self.output_folder
             }
@@ -930,7 +926,7 @@ fi
                 format="cif"
             )
         else:
-            structures = DataStream.empty("structures", "cif")
+            structures = None
 
         # Sequences stream: extracted from designed structures by postprocessing.
         # sequences.csv (id, sequence) is written by pipe_boltzgen.py and serves
@@ -945,13 +941,11 @@ fi
                 format="csv",
             )
         else:
-            sequences = DataStream.empty("sequences", "fasta")
+            sequences = None
 
         return {
             "structures": structures,
             "sequences": sequences,
-            "compounds": DataStream.empty("compounds", "sdf"),
-            "msas": DataStream.empty("msas", "a3m"),
             "tables": tables,
             "output_folder": self.output_folder
         }
@@ -1161,10 +1155,6 @@ fi
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after merge."""
         return {
-            "structures": DataStream.empty("structures", "cif"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
-            "msas": DataStream.empty("msas", "a3m"),
             "tables": {},
             "output_folder": self.output_folder
         }
@@ -1552,10 +1542,6 @@ fi
         structure for subsequent BoltzGen steps.
         """
         return {
-            "structures": DataStream.empty("structures", "cif"),
-            "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
-            "msas": DataStream.empty("msas", "a3m"),
             "tables": {},
             "output_folder": self.output_folder
         }

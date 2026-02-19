@@ -419,7 +419,6 @@ python "{self.ligand_py}" --config "{self.config_file}"
 
         return {
             "structures": structures,
-            "sequences": DataStream.empty("sequences", "fasta"),
             "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder
