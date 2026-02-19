@@ -675,7 +675,7 @@ echo "=== Panda ready ==="
                 if hasattr(pool, 'streams'):
                     for stream_name in pool.streams.keys():
                         stream = pool.streams.get(stream_name)
-                        if stream and len(stream) > 0:
+                        if stream and len(stream) > 0 and len(stream.files) > 0:
                             file_map[stream_name] = {}
                             for i, sid in enumerate(stream.ids):
                                 if i < len(stream.files):
@@ -907,7 +907,7 @@ fi
                 if hasattr(pool, 'streams'):
                     for stream_name in pool.streams.keys():
                         stream = pool.streams.get(stream_name)
-                        if stream and len(stream) > 0:
+                        if stream and len(stream) > 0 and len(stream.files) > 0:
                             if stream_name not in stream_data:
                                 stream_data[stream_name] = {
                                     "ids": [],
@@ -947,11 +947,7 @@ fi
                     # Predict renamed IDs and file paths based on predicted output count
                     new_ids = [f"{self.rename}_{i+1}" for i in range(num_items)]
                     new_files = []
-                    # Get extension from first file
-                    if data["files"]:
-                        ext = os.path.splitext(data["files"][0])[1]
-                    else:
-                        ext = ".pdb" if stream_name == "structures" else ".fasta" if stream_name == "sequences" else ".sdf"
+                    ext = os.path.splitext(data["files"][0])[1]
                     for new_id in new_ids:
                         new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
                 else:
