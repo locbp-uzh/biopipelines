@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+# Authors (2026): G. Quargnali & P. Rivera-Fuentes @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
 #
 # This software is freely available for use, modification, and redistribution.
 

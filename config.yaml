@@ -43,6 +43,7 @@ folders:
     GhostFold: "<data>/ghostfold"
     MMseqs2: "<data>/mmseqs"
     ModelForge: "<data>/modelforge"
+    Gnina: "<data>/gnina"
 
   # Cache paths (shared on group storage)
   cache:
@@ -86,6 +87,7 @@ environments:
   RF3: "modelforge"
 
   # Analysis
+  Gnina: "biopipelines"
   Distance: "biopipelines"
   DistanceSelector: "biopipelines"
   ConformationalChange: "ProteinEnv"
@@ -144,3 +146,12 @@ cluster:
   slurm_modules:
     - "miniforge3"
     - "apptainer"
+
+# GNINA-specific runtime configuration
+# CUDA modules and library paths needed for GNINA's CNN scoring.
+# Adjust these to match your HPC environment.
+gnina:
+  modules:
+    - "cuda/12.6.3"
+    - "cudnn/9.8.0.87-12"
+  ld_library_path: "/apps/u24/opt/x86_64_v3/cuda-12.6.3-ok2c7hqa5kefkh3iyolgxrajfpepvh6h/targets/x86_64-linux/lib"

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+# Authors (2026): G. Quargnali & P. Rivera-Fuentes @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
@@ -43,6 +43,7 @@ from .plot import Plot
 from .panda import Panda
 from .mmseqs2 import MMseqs2, MMseqs2Server
 from .remap import ReMap
+from .gnina import Gnina
 from .converters import *
 from .entities import *
 
@@ -108,6 +109,7 @@ __all__ = [
     'MMseqs2',
     'MMseqs2Server',
     'ReMap',
+    'Gnina',
 
     # Utility functions
     'pdb_to_jsonl',

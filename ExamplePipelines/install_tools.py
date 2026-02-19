@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+# Authors (2026): G. Quargnali & P. Rivera-Fuentes @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
@@ -23,6 +23,7 @@ from biopipelines.boltz2 import Boltz2
 from biopipelines.boltzgen import BoltzGen
 from biopipelines.mutation_profiler import MutationProfiler
 from biopipelines.pymol import PyMOL
+from biopipelines.gnina import Gnina
 
 with Pipeline(project="Setup",
               job="InstallTools",
@@ -48,4 +49,5 @@ with Pipeline(project="Setup",
     # Visualization & Analysis
     PyMOL.install()               # Creates ProteinEnv (PyMOL, pandas, biopython, rdkit)
     MutationProfiler.install()    # Creates MutationEnv
+    Gnina.install()               # Downloads weights
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Gianluca Quargnali @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+# Authors (2026): G. Quargnali & P. Rivera-Fuentes @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
@@ -85,6 +85,7 @@ echo "=== BoltzGen installation complete ==="
     per_target_metrics_csv = Path(lambda self: os.path.join(self.intermediate_inverse_folded_folder, "per_target_metrics_analyze.csv"))
     results_overview_pdf = Path(lambda self: os.path.join(self.final_ranked_folder, "results_overview.pdf"))
     structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
+    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
 
     # Helper script paths
     boltzgen_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen.py"))
@@ -931,9 +932,24 @@ fi
         else:
             structures = DataStream.empty("structures", "cif")
 
+        # Sequences stream: extracted from designed structures by postprocessing.
+        # sequences.csv (id, sequence) is written by pipe_boltzgen.py and serves
+        # directly as the map_table. Only available when filtering runs.
+        if has_filtering:
+            sequence_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
+            sequences = DataStream(
+                name="sequences",
+                ids=sequence_ids,
+                files=[],
+                map_table=self.sequences_csv,
+                format="csv",
+            )
+        else:
+            sequences = DataStream.empty("sequences", "fasta")
+
         return {
             "structures": structures,
-            "sequences": DataStream.empty("sequences", "fasta"),
+            "sequences": sequences,
             "compounds": DataStream.empty("compounds", "sdf"),
             "msas": DataStream.empty("msas", "a3m"),
             "tables": tables,
