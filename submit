@@ -55,7 +55,7 @@ else
     echo "  pip install -e ."
     exit 1
 fi
-echo ""
+#echo ""
 
 # Function to print usage
 usage() {
@@ -103,7 +103,7 @@ run_pipeline_and_submit() {
             echo "$error_output"
         fi
     fi
-    echo ""
+    #echo ""
 
     if [ $exit_code -ne 0 ]; then
         echo "Pipeline generation failed with exit code $exit_code"
@@ -146,10 +146,10 @@ run_pipeline_and_submit() {
         fi
     fi
 
-    echo ""
+    #echo ""
     echo "Found $(echo "$runtime_dirs" | wc -l) pipeline(s) to submit"
     echo "=========================================="
-    echo ""
+    #echo ""
 
     local total_jobs_submitted=0
 
@@ -163,7 +163,7 @@ run_pipeline_and_submit() {
         local pipeline_name=$(basename "$(dirname "$runtime_dir")")
         echo "Processing pipeline: $pipeline_name"
         echo "Runtime directory: $runtime_dir"
-        echo ""
+        #echo ""
 
         # Check for batch files (multi-batch pipeline)
         local batch_files=$(ls "$runtime_dir"/slurm_batch*.sh 2>/dev/null | sort -V)
@@ -173,7 +173,7 @@ run_pipeline_and_submit() {
             echo "Detected multi-batch pipeline"
             echo "Submitting jobs with dependencies..."
             echo "------------------------------------------"
-            echo ""
+            #echo ""
 
             local job_count=0
             local last_job_id=""
@@ -217,11 +217,11 @@ run_pipeline_and_submit() {
                     echo "   Error: $submit_output"
                     return 1
                 fi
-                echo ""
+                #echo ""
             done
 
             echo "Pipeline $pipeline_name: $job_count batch(es) submitted"
-            echo ""
+            #echo ""
         else
             # Single batch pipeline - look for slurm.sh
             local slurm_script="$runtime_dir/slurm.sh"
@@ -229,7 +229,7 @@ run_pipeline_and_submit() {
                 echo "Detected single-batch pipeline"
                 echo "Submitting job..."
                 echo "------------------------------------------"
-                echo ""
+                #echo ""
 
                 # Extract job name from pipeline output
                 local job_name=$(echo "$pipeline_output" | grep -A1 "$runtime_dir" | grep -o "Job: .*" | sed 's/Job: //' | head -1)
@@ -250,10 +250,10 @@ run_pipeline_and_submit() {
                     echo "   Error: $submit_output"
                     return 1
                 fi
-                echo ""
+                #echo ""
             else
                 echo "Warning: No slurm script found in $runtime_dir"
-                echo ""
+                #echo ""
             fi
         fi
     done <<< "$runtime_dirs"
@@ -267,9 +267,9 @@ main() {
     local verbose=0
     local pipeline_script=""
 
-    echo "BioPipelines SLURM Submission Script"
-    echo "===================================="
-    echo ""
+    #echo "BioPipelines SLURM Submission Script"
+    #echo "===================================="
+    #echo ""
 
     # Parse arguments
     while [ $# -gt 0 ]; do
