@@ -21,6 +21,8 @@ with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
     sequences = ProteinMPNN(structures=backbones,
                             num_sequences=2,
                             redesigned=backbones.tables.structures.designed)
+sequences
+
     refolded = AlphaFold(proteins=sequences)    
     conf_change = ConformationalChange(reference_structures = kinase,
                                        target_structures = refolded,
