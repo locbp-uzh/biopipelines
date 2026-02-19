@@ -42,6 +42,7 @@ from .fuse import Fuse
 from .plot import Plot
 from .panda import Panda
 from .mmseqs2 import MMseqs2, MMseqs2Server
+from .remap import ReMap
 from .converters import *
 from .entities import *
 
@@ -106,6 +107,7 @@ __all__ = [
     'Panda',
     'MMseqs2',
     'MMseqs2Server',
+    'ReMap',
 
     # Utility functions
     'pdb_to_jsonl',

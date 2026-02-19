@@ -71,14 +71,14 @@ echo "=== MMseqs2 ready ==="
                   - String format: "10-20+30-40" (PyMOL selection style)
                   - Tuple format: (TableInfo, "column_name") for per-sequence masking
                   - Empty string: no masking (default)
-            id_map: ID mapping pattern for matching sequence IDs to table IDs (default: {"*": "*_<N>"})
+            id_map: ID mapping pattern for matching sequence IDs to table IDs (default: {"*": "*_<S>"})
                   - Used when mask table IDs don't match sequence IDs
                   - Example: sequence ID "rifampicin_1_2" maps to table ID "rifampicin_1"
-                  - Pattern {"*": "*_<N>"} strips last "_<number>" from sequence ID
+                  - Pattern {"*": "*_<S>"} strips last "_segment" from sequence ID
             **kwargs: Additional parameters
         """
         if id_map is None:
-            id_map = {"*": "*_<N>"}
+            id_map = {"*": "*_<S>"}
 
         # Resolve sequences input
         self.sequences_source_file: Optional[str] = None

@@ -65,7 +65,7 @@ echo "=== Contacts ready ==="
                  ligand: str = None,
                  contact_threshold: float = 5.0,
                  contact_metric_name: str = None,
-                 id_map: Dict[str, str] = {"*": "*_<N>"},
+                 id_map: Dict[str, str] = {"*": "*_<S>"},
                  **kwargs):
         """
         Initialize protein-ligand contact analysis tool.

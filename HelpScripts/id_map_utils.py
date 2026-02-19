@@ -13,18 +13,29 @@ describes how to map structure IDs to table IDs.
 Pattern syntax:
 - "*" in both key and value represents the base ID
 - "<N>" represents a numeric suffix (one or more digits)
+- "<S>" represents any non-underscore segment (alphanumeric suffixes like "19A")
 - Everything else is treated as literal text
 - Patterns are applied RECURSIVELY until no more matches
 
 Examples:
-- {"*": "*"}           → no mapping (identity)
-- {"*": "*_<N>"}       → strip ALL trailing "_123" suffixes recursively
-                        → "rifampicin_1_2_3" → "rifampicin"
-- {"*": "*-<N>"}       → strip ALL trailing "-123" suffixes recursively
-- {"*": "*_seq_<N>"}   → strip ALL trailing "_seq_123" patterns recursively
+- {"*": "*"}           -> no mapping (identity)
+- {"*": "*_<S>"}       -> strip ALL trailing "_segment" suffixes recursively (DEFAULT)
+                        -> "protein_1_19A" -> "protein_1" -> "protein"
+                        -> "rifampicin_1_2_3" -> "rifampicin"
+- {"*": "*_<N>"}       -> strip only trailing "_123" numeric suffixes recursively
+                        -> "protein_1_19A" -> NO MATCH (19A is not purely numeric)
+- {"*": "*-<N>"}       -> strip ALL trailing "-123" suffixes recursively
+- {"*": "*_seq_<N>"}   -> strip ALL trailing "_seq_123" patterns recursively
 
-Note: The default pattern {"*": "*_<N>"} works for any number of numeric suffixes,
-so you don't need to specify {"*": "*_<N>_<N>"} or similar patterns.
+Note: The default pattern {"*": "*_<S>"} works for any kind of suffix (numeric
+or alphanumeric). Use {"*": "*_<N>"} if you need to restrict to numeric-only suffixes.
+
+Matching priority order (when using get_mapped_ids with unique=True):
+    1. Exact match (source_id == target_id)
+    2. Provenance match (via map_table provenance columns)
+    3. Child match (target derives from source, closest first)
+    4. Parent match (source derives from target, closest first)
+    5. Sibling match (common ancestor, closest combined distance first)
 """
 
 import re
@@ -47,10 +58,10 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
         >>> match.group(1)
         'rifampicin'
 
-        >>> pattern = parse_id_map_pattern({"*": "*_<N>_<N>"})
-        >>> match = pattern.match("rifampicin_1_2")
+        >>> pattern = parse_id_map_pattern({"*": "*_<S>"})
+        >>> match = pattern.match("protein_19A")
         >>> match.group(1)
-        'rifampicin'
+        'protein'
 
         >>> pattern = parse_id_map_pattern({"*": "*-seq-<N>"})
         >>> match = pattern.match("protein-seq-42")
@@ -78,22 +89,25 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
         return None
 
     # Build regex pattern by:
-    # 1. Replace "<N>" placeholder with a temporary marker
+    # 1. Replace "<N>" and "<S>" placeholders with temporary markers
     # 2. Escape special regex characters in the literal parts
-    # 3. Replace marker back with "\d+" pattern
+    # 3. Replace markers back with regex patterns
     # 4. Anchor to end of string
 
-    # Use a placeholder that won't appear in normal text
-    PLACEHOLDER = '\x00DIGIT_PATTERN\x00'
+    # Use placeholders that won't appear in normal text
+    DIGIT_PLACEHOLDER = '\x00DIGIT_PATTERN\x00'
+    SEGMENT_PLACEHOLDER = '\x00SEGMENT_PATTERN\x00'
 
-    # Replace <N> with placeholder before escaping
-    temp_pattern = suffix_pattern.replace('<N>', PLACEHOLDER)
+    # Replace <N> and <S> with placeholders before escaping
+    temp_pattern = suffix_pattern.replace('<N>', DIGIT_PLACEHOLDER)
+    temp_pattern = temp_pattern.replace('<S>', SEGMENT_PLACEHOLDER)
 
     # Escape regex special characters
     regex_suffix = re.escape(temp_pattern)
 
-    # Replace placeholder with digit pattern
-    regex_suffix = regex_suffix.replace(re.escape(PLACEHOLDER), r'\d+')
+    # Replace placeholders with regex patterns
+    regex_suffix = regex_suffix.replace(re.escape(DIGIT_PLACEHOLDER), r'\d+')
+    regex_suffix = regex_suffix.replace(re.escape(SEGMENT_PLACEHOLDER), r'[^_]+')
 
     # Build full pattern: capture everything before the suffix
     full_pattern = f'^(.+){regex_suffix}$'
@@ -115,7 +129,7 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
 
     Args:
         structure_id: Structure ID (e.g., "RFDAA_Hit_Screen_007_1_1")
-        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"})
+        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"} or {"*": "*_<S>"})
 
     Returns:
         List of candidate IDs to try, from most specific to least specific
@@ -124,6 +138,9 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     Examples:
         >>> map_table_ids_to_ids("rifampicin_1_2", {"*": "*_<N>"})
         ['rifampicin_1_2', 'rifampicin_1', 'rifampicin']
+
+        >>> map_table_ids_to_ids("protein_1_19A", {"*": "*_<S>"})
+        ['protein_1_19A', 'protein_1', 'protein']
 
         >>> map_table_ids_to_ids("protein-seq-42", {"*": "*-seq-<N>"})
         ['protein-seq-42', 'protein']
@@ -150,17 +167,23 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     if not suffix_pattern:
         return [structure_id]
 
-    # Find the first occurrence of <N>
-    n_pos = suffix_pattern.find('<N>')
-    if n_pos == -1:
+    # Determine placeholder type: <S> (any segment) or <N> (digits only)
+    has_s = '<S>' in suffix_pattern
+    has_n = '<N>' in suffix_pattern
+
+    if not has_s and not has_n:
         return [structure_id]
 
+    # Find the position of the placeholder
+    placeholder = '<S>' if has_s else '<N>'
+    p_pos = suffix_pattern.find(placeholder)
+
     # Extract delimiter
-    if n_pos == 0:
+    if p_pos == 0:
         return [structure_id]  # Pattern like "*<N>" doesn't make sense
 
-    delimiter = suffix_pattern[n_pos - 1]
-    literal_with_delim = suffix_pattern[:n_pos - 1] if n_pos > 1 else ""
+    delimiter = suffix_pattern[p_pos - 1]
+    literal_with_delim = suffix_pattern[:p_pos - 1] if p_pos > 1 else ""
     if literal_with_delim.startswith(delimiter):
         literal_part = literal_with_delim[1:]
     else:
@@ -180,21 +203,33 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
         stripped = False
 
         if literal_part:
-            # Pattern like "*-seq-<N>"
-            # Check if we can strip literal + number at the end
+            # Pattern like "*-seq-<N>" or "*-seq-<S>"
+            # Check if we can strip literal + segment at the end
             if len(parts) >= 2:
                 last_part = parts[-1]
                 second_last = parts[-2] if len(parts) >= 2 else ""
 
-                if last_part.isdigit() and second_last == literal_part:
-                    # Remove both literal and number parts
-                    parts = parts[:-2]
-                    stripped = True
+                if has_s:
+                    # <S>: strip any non-empty segment after literal
+                    if last_part and second_last == literal_part:
+                        parts = parts[:-2]
+                        stripped = True
+                else:
+                    # <N>: strip only numeric segment after literal
+                    if last_part.isdigit() and second_last == literal_part:
+                        parts = parts[:-2]
+                        stripped = True
         else:
-            # Pattern like "*_<N>": strip trailing numeric part
-            if parts[-1].isdigit():
+            # Pattern like "*_<N>" or "*_<S>"
+            if has_s:
+                # <S>: strip any trailing segment unconditionally
                 parts = parts[:-1]
                 stripped = True
+            else:
+                # <N>: strip only trailing numeric part
+                if parts[-1].isdigit():
+                    parts = parts[:-1]
+                    stripped = True
 
         if not stripped or not parts:
             break
@@ -220,15 +255,15 @@ def get_mapped_ids(
     For each source_id, finds target_ids that match according to the id_map.
     Matching uses a priority-based strategy:
     1. Exact match: source_id == target_id (highest priority)
-    2. Target is derived from source: target_id = source_id + suffix
-    3. Source is derived from target: source_id = target_id + suffix
-    4. Common ancestor: both source and target derive from same base
-    5. Provenance: source_id traces to target_id via map_table provenance columns
+    2. Provenance match (via map_table provenance columns — most reliable signal)
+    3. Child match: target derives from source (target = source + suffix)
+    4. Parent match: source derives from target (source = target + suffix)
+    5. Sibling match: common ancestor
 
     Args:
         source_ids: List of source IDs to match from
         target_ids: List of target IDs to match against
-        id_map: ID mapping pattern (default: {"*": "*_<N>"})
+        id_map: ID mapping pattern (default: {"*": "*_<S>"})
                 Supports recursive suffix matching
         unique: If True (default), return the single most specific match or None.
                 If False, return list of all matches.
@@ -244,10 +279,10 @@ def get_mapped_ids(
 
     Priority order (when unique=True):
         1. Exact match (source_id == target_id)
-        2. Child match (target derives from source, closest first)
-        3. Parent match (source derives from target, closest first)
-        4. Sibling match (common ancestor, closest combined distance first)
-        5. Provenance match (via map_table provenance columns)
+        2. Provenance match (via map_table provenance columns)
+        3. Child match (target derives from source, closest first)
+        4. Parent match (source derives from target, closest first)
+        5. Sibling match (common ancestor, closest combined distance first)
 
     Examples:
         >>> # Exact match
@@ -275,7 +310,7 @@ def get_mapped_ids(
         {'Panda_1': 'LID_001_1'}
     """
     if id_map is None:
-        id_map = {"*": "*_<N>"}
+        id_map = {"*": "*_<S>"}
 
     target_set = set(target_ids)
     result = {}
@@ -301,7 +336,18 @@ def get_mapped_ids(
                 result[source_id] = matches
             continue
 
-        # Priority 2: Target is a "child" of source (target = source + suffix)
+        # Priority 2: Provenance match via map_table columns
+        if map_table_paths:
+            from biopipelines_io import resolve_id_by_provenance
+            matched = resolve_id_by_provenance(source_id, target_set, map_table_paths)
+            if matched is not None:
+                if unique:
+                    result[source_id] = matched
+                else:
+                    result[source_id] = [matched]
+                continue
+
+        # Priority 3: Target is a "child" of source (target = source + suffix)
         child_matches = []
         for target_id in target_ids:
             target_bases = target_bases_cache[target_id]
@@ -317,7 +363,7 @@ def get_mapped_ids(
                 result[source_id] = [m[0] for m in child_matches]
             continue
 
-        # Priority 3: Source is a "child" of target (source = target + suffix)
+        # Priority 4: Source is a "child" of target (source = target + suffix)
         source_bases = map_table_ids_to_ids(source_id, id_map)
         parent_matches = []
         for i, base in enumerate(source_bases[1:], start=1):
@@ -332,7 +378,7 @@ def get_mapped_ids(
                 result[source_id] = [m[0] for m in parent_matches]
             continue
 
-        # Priority 4: Sibling match (source and target share common ancestor)
+        # Priority 5: Sibling match (source and target share common ancestor)
         # Find targets that share any base with source
         source_bases_set = set(source_bases)
         sibling_matches = []
@@ -365,17 +411,6 @@ def get_mapped_ids(
                 result[source_id] = unique_matches
             continue
 
-        # Priority 5: Provenance match via map_table columns
-        if map_table_paths:
-            from biopipelines_io import resolve_id_by_provenance
-            matched = resolve_id_by_provenance(source_id, target_set, map_table_paths)
-            if matched is not None:
-                if unique:
-                    result[source_id] = matched
-                else:
-                    result[source_id] = [matched]
-                continue
-
         # No match found
         if unique:
             result[source_id] = None
@@ -400,7 +435,7 @@ def get_mapped_ids_grouped(
     Args:
         source_ids: List of source IDs to match from
         target_ids: List of target IDs to match against
-        id_map: ID mapping pattern (default: {"*": "*_<N>"})
+        id_map: ID mapping pattern (default: {"*": "*_<S>"})
 
     Returns:
         Dict with structure: {base_id: {"sources": [...], "targets": [...]}}
@@ -409,7 +444,7 @@ def get_mapped_ids_grouped(
         >>> get_mapped_ids_grouped(
         ...     ["protein_1", "protein_2"],
         ...     ["protein_1_1", "protein_1_2", "protein_2_1"],
-        ...     {"*": "*_<N>"}
+        ...     {"*": "*_<S>"}
         ... )
         {
             'protein_1': {'sources': ['protein_1'], 'targets': ['protein_1_1', 'protein_1_2']},
@@ -417,7 +452,7 @@ def get_mapped_ids_grouped(
         }
     """
     if id_map is None:
-        id_map = {"*": "*_<N>"}
+        id_map = {"*": "*_<S>"}
 
     # Build base-to-ids mapping for both source and target
     source_by_base = {}
@@ -446,4 +481,3 @@ def get_mapped_ids_grouped(
         }
 
     return result
-

@@ -518,7 +518,13 @@ def predict_output_ids_with_provenance(
 
     # If no iterated axes, return single bundled name
     if not iterated_axes:
-        provenance = {name: ["+".join(ids)] for name, ids in pure_bundle_axes}
+        provenance = {}
+        for name, ids in pure_bundle_axes:
+            bundled_value = "+".join(ids)
+            provenance[name] = [bundled_value]
+            if len(ids) > 1:
+                for i, bid in enumerate(ids, start=1):
+                    provenance[f"{name}.{i}"] = [bid]
         return [bundled_name], provenance
 
     # If single iterated axis, return its IDs directly (no join needed)
@@ -529,6 +535,9 @@ def predict_output_ids_with_provenance(
         for bundle_name, bundle_ids in pure_bundle_axes:
             bundled_value = "+".join(bundle_ids)
             provenance[bundle_name] = [bundled_value] * len(iter_ids)
+            if len(bundle_ids) > 1:
+                for i, bid in enumerate(bundle_ids, start=1):
+                    provenance[f"{bundle_name}.{i}"] = [bid] * len(iter_ids)
         return list(iter_ids), provenance
 
     # Multiple iterated axes: always full cartesian product, no shortcuts
@@ -553,6 +562,9 @@ def predict_output_ids_with_provenance(
     for bundle_name, bundle_ids in pure_bundle_axes:
         bundled_value = "+".join(bundle_ids)
         provenance[bundle_name] = [bundled_value] * len(output_ids)
+        if len(bundle_ids) > 1:
+            for i, bid in enumerate(bundle_ids, start=1):
+                provenance[f"{bundle_name}.{i}"] = [bid] * len(output_ids)
 
     return output_ids, provenance
 

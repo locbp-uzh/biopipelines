@@ -552,12 +552,12 @@ def apply_id_map(structure_id: str, id_map: dict) -> list:
     """
     Apply id_map pattern to generate possible sequence ID patterns.
 
-    The id_map pattern {"*": "*_<N>"} means structure ID can have
-    recursive numeric suffixes added to match sequence IDs.
+    The id_map pattern {"*": "*_<S>"} means structure ID can have
+    recursive suffixes added to match sequence IDs.
 
     Args:
         structure_id: ID of the structure
-        id_map: Mapping pattern, e.g., {"*": "*_<N>"}
+        id_map: Mapping pattern, e.g., {"*": "*_<S>"}
 
     Returns:
         List of matching patterns (regex patterns or exact strings)
@@ -595,14 +595,14 @@ def find_sequence_for_structure(structure_id: str, sequences: dict, id_map: dict
     Args:
         structure_id: ID of the structure
         sequences: Dictionary mapping IDs to sequences
-        id_map: ID mapping pattern, e.g., {"*": "*_<N>"} for recursive suffixes.
-               Default: {"*": "*_<N>"}
+        id_map: ID mapping pattern, e.g., {"*": "*_<S>"} for recursive suffixes.
+               Default: {"*": "*_<S>"}
 
     Returns:
         Sequence string or None if not found
     """
     if id_map is None:
-        id_map = {"*": "*_<N>"}
+        id_map = {"*": "*_<S>"}
 
     # Get matching patterns from id_map
     patterns = apply_id_map(structure_id, id_map)
@@ -811,14 +811,14 @@ def import_structures(
         sequences_csv: Path to sequences CSV (for inverse_folding mode)
         ligand_csv: Path to ligand compounds CSV
         id_map: ID mapping pattern for matching structure IDs to sequence IDs.
-               Default {"*": "*_<N>"} handles recursive numeric suffixes.
+               Default {"*": "*_<S>"} handles recursive suffix stripping.
         ligand_name: Residue name for ligand in output (default: "LIG")
 
     Returns:
         Dictionary with import statistics
     """
     if id_map is None:
-        id_map = {"*": "*_<N>"}
+        id_map = {"*": "*_<S>"}
     stats = {
         'processed': 0,
         'success': 0,
@@ -999,9 +999,9 @@ def main():
     )
     parser.add_argument(
         '--id-map',
-        default='{"*": "*_<N>"}',
-        help='JSON string for ID mapping pattern (default: {"*": "*_<N>"}). '
-             'Maps structure IDs to sequence IDs with recursive numeric suffixes.'
+        default='{"*": "*_<S>"}',
+        help='JSON string for ID mapping pattern (default: {"*": "*_<S>"}). '
+             'Maps structure IDs to sequence IDs with recursive suffix stripping.'
     )
     parser.add_argument(
         '--ligand-name',

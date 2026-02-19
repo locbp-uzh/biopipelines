@@ -432,8 +432,8 @@ def main():
                        help='Column name in mask_table containing selection strings')
     parser.add_argument('--mask_selection', default=None,
                        help='Direct selection string to apply to all sequences (e.g., "10-20+30-40")')
-    parser.add_argument('--id_map', default='{"*": "*_<N>"}',
-                       help='JSON string for ID mapping pattern (default: {"*": "*_<N>"})')
+    parser.add_argument('--id_map', default='{"*": "*_<S>"}',
+                       help='JSON string for ID mapping pattern (default: {"*": "*_<S>"})')
 
     args = parser.parse_args()
 

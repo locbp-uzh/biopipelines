@@ -370,7 +370,7 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
     ligand_name = config_data['ligand_name']
     contact_threshold = config_data['contact_threshold']
     contact_metric_name = config_data['contact_metric_name']
-    id_map = config_data.get('id_map', {"*": "*_<N>"})  # Default to standard pattern
+    id_map = config_data.get('id_map', {"*": "*_<S>"})  # Default to standard pattern
     output_csv = config_data['output_csv']
 
     print(f"Analyzing protein-ligand contacts")

@@ -1240,7 +1240,7 @@ echo "=== BoltzGenImport ready ==="
             ligand_chain: Chain ID for ligand in output (default: "B")
             protein_chain: Chain ID for protein in output (default: "A")
             id_map: ID mapping pattern for matching structure IDs to sequence IDs.
-                   Default {"*": "*_<N>"} handles recursive numeric suffixes:
+                   Default {"*": "*_<S>"} handles recursive suffix stripping:
                    - Structure "design_1" matches sequence "design_1_1", "design_1_1_1", etc.
                    - Set to {"*": "*"} for exact ID matching.
             ligand_name: Residue name for ligand in output (default: "LIG1").
@@ -1251,7 +1251,7 @@ echo "=== BoltzGenImport ready ==="
         """
         # Set default for id_map
         if id_map is None:
-            id_map = {"*": "*_<N>"}
+            id_map = {"*": "*_<S>"}
 
         self.binder_spec = binder_spec
         self.protocol = protocol

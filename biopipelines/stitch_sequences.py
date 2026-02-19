@@ -76,7 +76,7 @@ echo "=== StitchSequences ready ==="
                  template: Union[str, DataStream, StandardizedOutput],
                  substitutions: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
                  indels: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
-                 id_map: Dict[str, str] = {"*": "*_<N>"},
+                 id_map: Dict[str, str] = {"*": "*_<S>"},
                  remove_duplicates: bool = True,
                  **kwargs):
         """

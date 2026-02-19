@@ -331,13 +331,13 @@ def extract_base_id(seq_id: str, id_map: Dict[str, str] = None) -> str:
 
     Args:
         seq_id: The sequence ID to strip
-        id_map: ID mapping pattern (default: {"*": "*_<N>"})
+        id_map: ID mapping pattern (default: {"*": "*_<S>"})
 
     Returns:
         The base ID after recursively stripping suffixes
     """
     if id_map is None:
-        id_map = {"*": "*_<N>"}
+        id_map = {"*": "*_<S>"}
     bases = map_table_ids_to_ids(seq_id, id_map)
     return bases[-1] if bases else seq_id
 
@@ -387,7 +387,7 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
     template_info = config_data['template']
     substitutions_info = config_data.get('substitutions', {})
     indels_info = config_data.get('indels', {})
-    id_map = config_data.get('id_map', {"*": "*_<N>"})
+    id_map = config_data.get('id_map', {"*": "*_<S>"})
     output_csv = config_data['output_csv']
 
     print("Loading template sequences...")

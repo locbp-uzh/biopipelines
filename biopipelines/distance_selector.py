@@ -53,7 +53,7 @@ echo "=== DistanceSelector ready ==="
                  reference: str = "ligand",
                  residues: str = "",
                  restrict_to: Union[str, tuple, None] = None,
-                 id_map: Dict[str, str] = {"*": "*_<N>"},
+                 id_map: Dict[str, str] = {"*": "*_<S>"},
                  include_reference: bool = True,
                  **kwargs):
         """
@@ -72,10 +72,10 @@ echo "=== DistanceSelector ready ==="
                         - Table reference tuple: (table, "column")
                         - Direct selection string: "10-20+30-40"
                         - None: Consider all protein residues (default)
-            id_map: ID mapping pattern for matching structure IDs to table IDs (default: {"*": "*_<N>"})
+            id_map: ID mapping pattern for matching structure IDs to table IDs (default: {"*": "*_<S>"})
                    - Used when table IDs don't match structure IDs
                    - Example: structure ID "rifampicin_1_2" maps to table ID "rifampicin_1"
-                   - Pattern {"*": "*_<N>"} strips last "_<number>" from structure ID
+                   - Pattern {"*": "*_<S>"} strips last "_segment" from structure ID
                    - Set to {"*": "*"} for no mapping (1:1 ID match)
             include_reference: Whether to include reference residues in "within" selection (default: True)
                              - True: "within" includes reference + nearby residues
