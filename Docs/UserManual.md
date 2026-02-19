@@ -166,8 +166,8 @@ One phase (Jupyter/Colab notebooks):
 Two phases (biopipelines-submit):
 | Phase | What Happens | Executer | Where |
 |-------|--------------|-------|-------|
-| **Pipeline** | Generation of bash scripts, prediction of output paths and files | Python | Cluster |
-| **SLURM** | Bash scripts execute, files are created | Slurm | Cluster |
+| **Configuration** | Generation of bash scripts, prediction of output paths and files | Python | Cluster |
+| **Execution** | Bash scripts execute, files are created | Bash + Python | Cluster |
 
 ### DataStream vs Tables
 
@@ -534,7 +534,7 @@ Available operations: `filter`, `sort`, `head`, `tail`, `sample`, `rank`, `drop_
 ## Filesystem Structure
 
 ```
-/shares/<user>/BioPipelines/<project>/<job>_<NNN>/
+<biopipelines_output>/<project>/<job>_<NNN>/
 ├── RunTime/                    # Execution scripts
 │   ├── pipeline.sh
 │   ├── 001_<tool>.sh
@@ -542,15 +542,17 @@ Available operations: `filter`, `sort`, `head`, `tail`, `sample`, `rank`, `drop_
 ├── Logs/                       # Execution logs
 │   ├── 001_<tool>.log
 │   └── 002_<tool>.log
-├── ToolOutputs/                # Tool output predictions (JSON)
+├── ToolOutputs/                # Tool output predictions 
 │   ├── 001_<tool>.json
 │   └── 002_<tool>.json
 ├── 001_<Tool>/                 # Tool outputs
-│   ├── structures/
-│   └── results.csv
+│   ├── .expected_outputs.json
+│   ├── .log
+│   └── various output (PDBs, CSVs, ...)
 └── 002_<Tool>/
-    └── ...
+... └── ...
 ```
+
 
 Configure paths and environments in `config.yaml` at repository root.
 
