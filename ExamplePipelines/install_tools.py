@@ -24,6 +24,7 @@ from biopipelines.boltzgen import BoltzGen
 from biopipelines.mutation_profiler import MutationProfiler
 from biopipelines.pymol import PyMOL
 from biopipelines.gnina import Gnina
+from biopipelines.posebusters import PoseBusters
 
 with Pipeline(project="Setup",
               job="InstallTools",
@@ -50,4 +51,4 @@ with Pipeline(project="Setup",
     PyMOL.install()               # Creates ProteinEnv (PyMOL, pandas, biopython, rdkit)
     MutationProfiler.install()    # Creates MutationEnv
     Gnina.install()               # Downloads weights
-
+    PoseBusters.install()
