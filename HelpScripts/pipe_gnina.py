@@ -249,6 +249,9 @@ def prepare_proteins(structures_ds, output_folder, protonate, pH):
 
     prepared = {}
     for protein_id, protein_file in iterate_files(structures_ds):
+        if not os.path.exists(protein_file):
+            print(f"  Warning: protein file not found, skipping: {protein_file}")
+            continue
         print(f"Preparing {protein_id}: {protein_file}")
 
         cleaned_pdb = os.path.join(prep_dir, f"{protein_id}_clean.pdb")
@@ -1067,6 +1070,19 @@ def main():
 
     structures_ds = load_datastream(config["structures_json"])
     compounds_ds = load_datastream(config["compounds_json"])
+
+    missing_csv = config.get("missing_csv")
+    if missing_csv and os.path.exists(missing_csv):
+        missing_df = pd.read_csv(missing_csv)
+        missing_ids = set(missing_df["id"].astype(str))
+        if missing_ids:
+            pairs = [(id_, f) for id_, f in zip(structures_ds.ids, structures_ds.files)
+                     if id_ not in missing_ids]
+            skipped = len(structures_ds.ids) - len(pairs)
+            if skipped:
+                print(f"  Skipping {skipped} IDs from upstream missing table")
+            structures_ds.ids = [p[0] for p in pairs]
+            structures_ds.files = [p[1] for p in pairs]
 
     print("\n--- Step 1: Protein Preparation ---")
     prepared_proteins = prepare_proteins(

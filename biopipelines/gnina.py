@@ -116,6 +116,8 @@ echo "=== GNINA installation complete ==="
     structures_json = Path(lambda self: os.path.join(self.output_folder, "structures_ds.json"))
     compounds_json = Path(lambda self: os.path.join(self.output_folder, "compounds_ds.json"))
     structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
+    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+    propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -192,6 +194,9 @@ echo "=== GNINA installation complete ==="
                 in PATH.
             pH: Protonation pH for OpenBabel (default 7.4).
         """
+        # Keep original input for upstream missing table detection
+        self.structures_input = structures
+
         # Resolve structures input to DataStream
         if isinstance(structures, StandardizedOutput):
             self.structures_stream: DataStream = structures.streams.structures
@@ -335,6 +340,8 @@ echo "=== GNINA installation complete ==="
         if self.autobox_ligand_path is not None:
             box_config["autobox_ligand"] = self.autobox_ligand_path
 
+        upstream_missing = self._get_upstream_missing_table_path(self.structures_input)
+
         config = {
             "output_folder": self.output_folder,
             "gnina_binary": self.gnina_binary,
@@ -342,6 +349,7 @@ echo "=== GNINA installation complete ==="
             "compounds_json": self.compounds_json,
             "docking_results_csv": self.docking_results_csv,
             "conformer_ranking_csv": self.conformer_ranking_csv,
+            "missing_csv": upstream_missing,
             "box": box_config,
             "exhaustiveness": self.exhaustiveness,
             "num_modes": self.num_modes,
@@ -394,8 +402,33 @@ echo "=== GNINA installation complete ==="
 
         script_content += "\n"
         script_content += self._generate_script_run_gnina()
+        script_content += self._generate_missing_table_propagation()
         script_content += self.generate_completion_check_footer()
         return script_content
+
+    def _generate_missing_table_propagation(self) -> str:
+        """Generate script section to propagate missing.csv from upstream tools."""
+        upstream_missing_path = self._get_upstream_missing_table_path(self.structures_input)
+
+        if not upstream_missing_path:
+            return ""
+
+        upstream_folder = os.path.dirname(upstream_missing_path)
+
+        return f"""
+# Propagate missing table from upstream tools
+echo "Checking for upstream missing structures..."
+if [ -f "{upstream_missing_path}" ]; then
+    echo "Found upstream missing.csv - propagating to current tool"
+    python {self.propagate_missing_py} \\
+        --upstream-folders "{upstream_folder}" \\
+        --output-folder "{self.output_folder}"
+else
+    echo "No upstream missing.csv found - creating empty missing.csv"
+    echo "id,removed_by,cause" > "{self.missing_csv}"
+fi
+
+"""
 
     def _generate_script_run_gnina(self) -> str:
         """Generate the GNINA execution part of the script."""
@@ -412,6 +445,8 @@ python {self.helper_py} {self.config_json}
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after GNINA execution."""
+        upstream_missing_path = self._get_upstream_missing_table_path(self.structures_input)
+
         tables = {
             "docking_results": TableInfo(
                 name="docking_results",
@@ -432,6 +467,15 @@ python {self.helper_py} {self.config_json}
                 count=0
             ),
         }
+
+        if upstream_missing_path:
+            tables["missing"] = TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "cause"],
+                description="IDs removed by upstream tools with removal reason",
+                count="variable"
+            )
 
         best_poses_dir = os.path.join(self.output_folder, "best_poses")
         protein_ids = self.structures_stream.ids
