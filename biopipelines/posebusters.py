@@ -78,7 +78,7 @@ fi
         return f"""echo "=== Installing PoseBusters ==="
 {skip}{env_manager} create -n posebusters python=3.10 -y
 {env_manager} activate posebusters
-pip install posebusters
+pip install posebusters gemmi
 
 echo "=== PoseBusters installation complete ==="
 """

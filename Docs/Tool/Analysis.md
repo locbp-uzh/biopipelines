@@ -240,6 +240,56 @@ contacts = Contacts(
 
 ---
 
+### PoseBusters
+
+Validates computationally generated molecule poses by checking bond lengths, bond angles, internal steric clashes, volume overlap with protein, and more. Supports `dock` mode (ligand + protein) and `redock` mode (+ reference ligand for RMSD comparison).
+
+**Environment**: `posebusters`
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Protein-ligand complexes (PDB/CIF)
+- `ligand`: str (required) - 3-letter residue code for the ligand (e.g., 'LIG', 'ATP')
+- `reference_ligand`: Union[DataStream, StandardizedOutput, None] = None - Reference ligand structure for redock mode
+- `reference_ligand_code`: Optional[str] = None - Residue code in reference structure (defaults to `ligand`)
+- `mode`: str = "dock" - Validation mode: 'dock' or 'redock' (auto-set to 'redock' if reference_ligand provided)
+
+**Tables**:
+- `posebusters`:
+
+  | id | source_structure | mol_pred_loaded | mol_cond_loaded | sanitization | all_atoms_connected | bond_lengths | bond_angles | internal_steric_clash | aromatic_ring_flatness | double_bond_flatness | internal_energy | volume_overlap_with_protein | minimum_distance_to_protein | all_pass |
+  |----|------------------|-----------------|-----------------|--------------|---------------------|--------------|-------------|-----------------------|------------------------|----------------------|-----------------|-----------------------------|-----------------------------|---------|
+
+  In redock mode, additional columns `mol_true_loaded` and `rmsd` are included.
+
+**Output Columns**:
+- `id`: Structure identifier (suffixed with `_lig1`, `_lig2` etc. when multiple ligand copies exist)
+- `source_structure`: Path to input structure file
+- Boolean check columns: Each PoseBusters test (True = pass, False = fail)
+- `all_pass`: True only if all boolean checks pass
+
+**Example**:
+```python
+from biopipelines.posebusters import PoseBusters
+
+# Dock mode — validate predicted poses
+validation = PoseBusters(
+    structures=boltz_holo,
+    ligand="LIG"
+)
+
+# Redock mode — validate against crystal reference
+xrc = PDB("1ABC")
+validation = PoseBusters(
+    structures=boltz_holo,
+    ligand="ATP",
+    reference_ligand=xrc,
+    reference_ligand_code="ATP",
+    mode="redock"
+)
+```
+
+---
+
 ### PoseChange
 
 Measures ligand pose distance between reference holo structure and sample structures. Calculates RMSD and geometric metrics to quantify how well designed structures reproduce known binding poses.

@@ -69,6 +69,7 @@ Analyze structures and interactions.
 - [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
 - [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
 - [Contacts](Tool/Analysis.md#contacts) - Contact analysis
+- [PoseBusters](Tool/Analysis.md#posebusters) - Pose validation (bond lengths, clashes, etc.)
 - [PoseChange](Tool/Analysis.md#posechange) - Ligand pose comparison (to be unified with ConformationalChange)
 
 ---
