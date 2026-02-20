@@ -66,7 +66,9 @@ RRNA_16S = "ACCUCCUUA"
 # Model parameters (from paper main text and SI)
 OPTIMAL_SPACING = 5       # optimal aligned spacing (nt) between SD and start codon
 BETA = 0.45               # apparent Boltzmann factor (mol/kcal), Fig 2b
-K = 2500.0                # proportionality constant for TIR, SI Fig S1
+K = 2500.0                # proportionality constant for TIR; explicitly used in SI Section 3
+                          # to calibrate the spacing model (K varies by promoter in Fig S1,
+                          # but 2500 au is the value the authors use for forward engineering)
 
 # Subsequence cutoff (nt before and after start codon), SI Section 4, Fig S3
 CUTOFF = 35
@@ -401,7 +403,7 @@ def check_long_range_pairs(s1_rna):
     "According to a growth model for random RNA sequences, the equilibrium
     probability P of nucleotides i and j forming a base pair in solution is
     proportional to P = |i-j|^(-1.44). For each base pair in sequence S1,
-    we calculate P. If the minimum P is < 6 x 10^-5, then the sequence
+    we calculate P. If the minimum P is < 6 x 10^-3, then the sequence
     is rejected."
 
     Args:
@@ -483,6 +485,41 @@ def mutate_rbs(rbs_dna):
 
 
 # =============================================================================
+# Minimum achievable dG estimator
+# =============================================================================
+
+def estimate_min_dg(cds_dna, pre_sequence=""):
+    """
+    Estimate the minimum achievable dG_tot for a given CDS.
+
+    Uses a long, strong synthetic SD sequence to get the best possible
+    dG_mRNA:rRNA, at optimal spacing, with no standby penalty, so the
+    result is a lower bound on what the SA can achieve for this CDS.
+    The dG_mRNA term is fixed by the CDS and cannot be changed by the
+    RBS optimizer, so if this lower bound already exceeds the target,
+    convergence is thermodynamically impossible.
+
+    Returns:
+        Estimated minimum dG_tot (kcal/mol).
+    """
+    # Canonical strong SD: perfect complement to anti-SD ACCUCCUUA → TAAGGAGGT
+    # Place it at optimal spacing (5 nt) before the start codon
+    strong_sd_dna = "TAAGGAGGT"
+    spacer_dna = "AAAAA"   # 5 nt spacer = optimal spacing
+    probe_rbs_dna = strong_sd_dna + spacer_dna
+
+    cds_rna = dna_to_rna(cds_dna)
+    pre_rna = dna_to_rna(pre_sequence) if pre_sequence else ""
+    probe_rna = dna_to_rna(probe_rbs_dna)
+
+    full_mrna = pre_rna + probe_rna + cds_rna
+    start_pos = len(pre_rna) + len(probe_rna)
+
+    result = calc_dg_total(full_mrna, start_pos)
+    return result["dg_total"], result["dg_mrna"]
+
+
+# =============================================================================
 # Simulated annealing RBS designer — Online Methods
 # =============================================================================
 
@@ -518,6 +555,18 @@ def design_rbs(cds_dna, target_dg, pre_sequence=""):
 
     cds_rna = dna_to_rna(cds_dna)
     pre_rna = dna_to_rna(pre_sequence) if pre_sequence else ""
+
+    # Pre-check: estimate minimum achievable dG_tot for this CDS.
+    # If even a perfect SD at optimal spacing cannot reach the target,
+    # the CDS secondary structure (dG_mRNA term) is too stable and the
+    # SA will never converge — warn the user immediately.
+    min_dg, dg_mrna_cds = estimate_min_dg(cds_dna, pre_sequence)
+    if min_dg > target_dg + SA_CONVERGENCE_THRESHOLD:
+        print(f"        WARNING: target dG={target_dg:.3f} is UNREACHABLE for this CDS.", flush=True)
+        print(f"          Estimated minimum achievable dG={min_dg:.3f} kcal/mol", flush=True)
+        print(f"          The CDS folds strongly (dG_mRNA={dg_mrna_cds:.3f} kcal/mol); "
+              f"this raises dG_tot by {-dg_mrna_cds:.1f} kcal/mol.", flush=True)
+        print(f"          Optimization will proceed but convergence is not expected.", flush=True)
 
     # Initialize with random RBS
     best_rbs_dna = random_rbs(15)
@@ -578,18 +627,19 @@ def design_rbs(cds_dna, target_dg, pre_sequence=""):
         # "The first constraint calculates the energy required to unfold
         # the 16S rRNA binding site on the mRNA sequence and rejects the
         # ones that require >6 kcal/mol to unfold."
-        fold_start = max(0, candidate_start - CUTOFF)
-        fold_end = min(len(candidate_mrna), candidate_start + CUTOFF)
-        fold_region = candidate_mrna[fold_start:fold_end]
-        if len(fold_region) >= 4:
-            if abs(rna_mfe(fold_region)) > SA_MAX_UNFOLD_ENERGY:
+        # This applies to the upstream region only (S1: up to 35 nt before
+        # the start codon). Using the full S2 window (which includes the CDS)
+        # would cause every candidate to be rejected whenever the CDS itself
+        # is highly structured — which is independent of the RBS being designed.
+        upstream_fold = candidate_mrna[max(0, candidate_start - CUTOFF):candidate_start]
+        if len(upstream_fold) >= 4:
+            if abs(rna_mfe(upstream_fold)) > SA_MAX_UNFOLD_ENERGY:
                 total_rejected_constraint += 1
                 continue
 
         # Constraint 2: long-range base pair interactions
-        upstream_s1 = candidate_mrna[max(0, candidate_start - CUTOFF):candidate_start]
-        if len(upstream_s1) >= 10:
-            if not check_long_range_pairs(upstream_s1):
+        if len(upstream_fold) >= 10:
+            if not check_long_range_pairs(upstream_fold):
                 total_rejected_constraint += 1
                 continue
 
@@ -660,6 +710,7 @@ def design_rbs(cds_dna, target_dg, pre_sequence=""):
         "dg_standby": final_result["dg_standby"],
         "iterations": iteration + 1,
         "elapsed_s": elapsed,
+        "min_achievable_dg": min_dg,
     }
 
 
@@ -730,15 +781,18 @@ def main():
 
         full_gene = pre_sequence + result["rbs_dna"] + cds_dna
 
+        converged = abs(result["dg_total"] - target_dg) < SA_CONVERGENCE_THRESHOLD
         results.append({
             "id": seq_id,
             "dna_sequence": cds_dna,
             "rbs_sequence": result["rbs_dna"],
             "full_gene": full_gene,
+            "converged": converged,
             "dg_total": round(result["dg_total"], 4),
             "tir_predicted": round(result["tir_predicted"], 2),
             "target_tir": target_tir,
             "target_dg": round(target_dg, 4),
+            "min_achievable_dg": round(result["min_achievable_dg"], 4),
             "spacing": result["spacing"],
             "dg_mrna_rrna": round(result["dg_mrna_rrna"], 4),
             "dg_start": round(result["dg_start"], 4),
@@ -747,7 +801,6 @@ def main():
             "dg_standby": round(result["dg_standby"], 4),
         })
 
-        converged = abs(result["dg_total"] - target_dg) < SA_CONVERGENCE_THRESHOLD
         status = "CONVERGED" if converged else "best found"
         print(f"        Result ({status}): RBS={result['rbs_dna']} "
               f"({len(result['rbs_dna'])} nt)", flush=True)

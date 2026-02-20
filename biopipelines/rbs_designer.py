@@ -247,8 +247,8 @@ python "{self.designer_py}" --config "{self.config_file}"
                 path=self.rbs_csv,
                 columns=[
                     "id", "dna_sequence", "rbs_sequence", "full_gene",
-                    "dg_total", "tir_predicted", "target_tir", "target_dg",
-                    "spacing", "dg_mrna_rrna", "dg_start", "dg_spacing",
+                    "converged", "dg_total", "tir_predicted", "target_tir", "target_dg",
+                    "min_achievable_dg", "spacing", "dg_mrna_rrna", "dg_start", "dg_spacing",
                     "dg_mrna", "dg_standby",
                 ],
                 description="RBS design results with thermodynamic parameters",
