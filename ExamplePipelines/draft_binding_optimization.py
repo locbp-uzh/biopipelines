@@ -24,6 +24,7 @@ for example, comp in examples.items():
             ligand = Ligand(comp[1])
             original = Boltz2(proteins=protein, 
                             ligands=ligand)
+            current_best_sequence = protein
             if with_gnina:
                 docked_original = Gnina(structures=original,
                                         compounds=ligand)
@@ -44,7 +45,7 @@ for example, comp in examples.items():
                                     ligand="LIG",
                                     num_sequences=1000,
                                     redesigned=pocket.tables.selections.within)
-                profile = MutationProfiler(original=current_best, 
+                profile = MutationProfiler(original=current_best_sequence, 
                                         mutants=variants)
                 candidates = MutationComposer(frequencies=profile.tables.absolute_frequencies,
                                             num_sequences=10, 
@@ -60,13 +61,23 @@ for example, comp in examples.items():
                                         operations=[Panda.concat(add_source=True),
                                                     Panda.sort("cnn_affinity", ascending=True),
                                                     Panda.head(1)],
-                                        pool=[current_best, docked_predicted])
+                                        pool=[current_best, 
+                                              docked_predicted])
+                    current_best_sequence = Panda(tables=[current_best.tables.result,
+                                                          docked_predicted.tables.docking_results],
+                                                  operations=[Panda.concat(add_source=True),
+                                                              Panda.sort("cnn_affinity", ascending=True),
+                                                              Panda.head(1)],
+                                                  pool=[current_best_sequence, 
+                                                        candidates])
                 else:
                     current_best = Panda(tables=[current_best.tables.result, 
                                                 predicted.tables.affinity],
                                         operations=[Panda.concat(add_source=True),
                                                     Panda.sort("affinity_pred_value", ascending=True),
                                                     Panda.head(1)],
-                                        pool=[current_best, predicted])
+                                        pool=[current_best, 
+                                              predicted])
+                    current_best_sequence = current_best_sequence
 
 
