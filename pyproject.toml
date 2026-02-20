@@ -14,7 +14,8 @@ dependencies = [
     "requests",
     "biopython",
     "ipykernel",
-    "py3Dmol"
+    "py3Dmol",
+    "openpyxl"
 ]
 
 [project.scripts]

@@ -1,6 +1,7 @@
 # BioPipelines base environment
-# Version: 1.2
+# Version: 1.3
 # Changes:
+#   1.3 - Added openpyxl for Excel support
 #   1.2 - Added ipykernel for Jupyter usage
 #   1.1 - Added rdkit and openbabel for molecule handling
 #   1.0 - Initial version with pandas, numpy, pyyaml, requests, biopython
@@ -18,6 +19,7 @@ dependencies:
   - requests
   - biopython
   - rdkit
-  - openbabel  
+  - openbabel
   - ipykernel
+  - openpyxl
 
