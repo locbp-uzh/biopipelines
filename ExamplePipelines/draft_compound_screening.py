@@ -9,11 +9,12 @@ from biopipelines.compound_library import CompoundLibrary
 from biopipelines.boltz2 import Boltz2
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
+#    MarR = Sequence("LFNEIIPLG...")
 #    MarR = Sequence("LFNEIIPLGRLIHMVNQKKDRLLNEYLSPLDITAAQFKVLCSIRCAACITPVELKKVLSVDLGALTRMLDRLVCKGWVERLPNPNDKRGVLVKLTTGGAAICEQCHQLVGQDLHQELTKNLTADEVATLEYLLKKVLP")
 
 with Pipeline(project="MarR", job="FragmentScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")
-    MarR = Sequence("LFNEIIPLG...")
+    MarR = Sequence("LFNEIIPLGRLIHMVNQKKDRLLNEYLSPLDITAAQFKVLCSIRCAACITPVELKKVLSVDLGALTRMLDRLVCKGWVERLPNPNDKRGVLVKLTTGGAAICEQCHQLVGQDLHQELTKNLTADEVATLEYLLKKVLP")
     library = CompoundLibrary(library={"candidate": "<aryl><carboxylate>",
                                        "aryl": ["<o-hydroxyphenyl>", 
                                                 "<m-hydroxyphenyl>",
