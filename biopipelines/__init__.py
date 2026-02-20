@@ -44,6 +44,7 @@ from .panda import Panda
 from .mmseqs2 import MMseqs2, MMseqs2Server
 from .remap import ReMap
 from .gnina import Gnina
+from .posebusters_tool import PoseBusters as PoseBustersTool
 from .converters import *
 from .entities import *
 
@@ -110,6 +111,7 @@ __all__ = [
     'MMseqs2Server',
     'ReMap',
     'Gnina',
+    'PoseBustersTool',
 
     # Utility functions
     'pdb_to_jsonl',

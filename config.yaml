@@ -96,6 +96,7 @@ environments:
   MutationProfiler: "MutationEnv"
   SequenceMetricCorrelation: "MutationEnv"
   BayesianAdjuster: "MutationEnv"
+  PoseBusters: "posebusters"
   Contacts: "ProteinEnv"
   PoseChange: "ProteinEnv"
   SASA: "ProteinEnv"
