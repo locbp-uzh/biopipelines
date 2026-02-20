@@ -112,21 +112,22 @@ echo "=== Sequence ready ==="
             # --- RCSB PDB code ---
             if self._is_pdb_code(seq):
                 self._load_from_pdb_code(seq, ids)
-            # --- Existing CSV/FASTA file (absolute or relative) ---
-            elif self._is_sequence_file(seq):
-                if ids is not None:
-                    print(f"  Warning: 'ids' parameter ignored when loading from file (using ids from file)")
-                if seq.lower().endswith('.csv'):
-                    self._load_from_csv(seq)
+            # --- CSV/FASTA path or filename (may need Sequences/ resolution) ---
+            elif self._has_sequence_extension(seq):
+                if os.path.isfile(seq):
+                    # Exists as given — load immediately
+                    if ids is not None:
+                        print(f"  Warning: 'ids' parameter ignored when loading from file (using ids from file)")
+                    if seq.lower().endswith('.csv'):
+                        self._load_from_csv(seq)
+                    else:
+                        self._load_from_fasta(seq)
                 else:
-                    self._load_from_fasta(seq)
-            # --- Bare filename that may live in Sequences/ folder ---
-            elif self._looks_like_sequence_filename(seq):
-                self._pending_filename = seq
-                # Defer actual loading to configure_inputs; set placeholders for now
-                self.sequences = []
-                self.custom_ids = []
-                self._pending_ids_param = ids
+                    # Defer to configure_inputs to try joining with Sequences/ folder
+                    self._pending_filename = seq
+                    self.sequences = []
+                    self.custom_ids = []
+                    self._pending_ids_param = ids
             # --- Raw sequence string ---
             else:
                 self.sequences = [seq]
@@ -164,17 +165,8 @@ echo "=== Sequence ready ==="
         """Return True if s looks like a 4-character alphanumeric RCSB PDB code."""
         return len(s) == 4 and s.isalnum() and not os.path.exists(s)
 
-    def _is_sequence_file(self, path: str) -> bool:
-        """Return True if path points to an existing CSV or FASTA file."""
-        lower = path.lower()
-        return (lower.endswith('.csv') or lower.endswith('.fasta') or lower.endswith('.fa')) \
-               and os.path.isfile(path)
-
-    def _looks_like_sequence_filename(self, s: str) -> bool:
-        """
-        Return True if the string looks like a bare CSV/FASTA filename (with extension)
-        but does not yet exist on disk — it may reside in the Sequences/ folder.
-        """
+    def _has_sequence_extension(self, s: str) -> bool:
+        """Return True if s has a CSV or FASTA file extension."""
         lower = s.lower()
         return lower.endswith('.csv') or lower.endswith('.fasta') or lower.endswith('.fa')
 
@@ -373,19 +365,18 @@ echo "=== Sequence ready ==="
         """Configure input parameters."""
         self.folders = pipeline_folders
 
-        # Resolve a pending filename against the Sequences/ folder
+        # Resolve a pending path against the Sequences/ folder
         if self._pending_filename:
             sequences_folder = pipeline_folders.get("Sequences", "")
             candidate = os.path.join(sequences_folder, self._pending_filename)
             if not os.path.isfile(candidate):
                 raise FileNotFoundError(
-                    f"Sequence file '{self._pending_filename}' not found. "
-                    f"Looked in: {sequences_folder}"
+                    f"Sequence file not found: '{self._pending_filename}'. "
+                    f"Tried as-is and as '{candidate}'."
                 )
-            lower = self._pending_filename.lower()
-            ids_param = self._pending_ids_param
-            if ids_param is not None:
+            if self._pending_ids_param is not None:
                 print(f"  Warning: 'ids' parameter ignored when loading from file (using ids from file)")
+            lower = self._pending_filename.lower()
             if lower.endswith('.csv'):
                 self._load_from_csv(candidate)
             else:
