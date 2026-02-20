@@ -590,7 +590,7 @@ fi
             ids=predicted_ids,
             files=[],  # Sequences are value-based, stored in map_table
             map_table=self.sequences_csv,
-            format="sequence"
+            format="csv"
         )
 
         # Compounds DataStream

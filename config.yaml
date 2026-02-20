@@ -26,6 +26,8 @@ folders:
     HelpScripts: "<biopipelines>/HelpScripts"
     PDBs: "<biopipelines>/PDBs"
     Ligands: "<biopipelines>/Ligands"
+    Sequences: "<biopipelines>/Sequences"
+    Tables: "<biopipelines>/Tables"
     cache: "<group>/cache"
     containers: "<group>/containers"
 

@@ -3,7 +3,8 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Sequence tool for creating sequence DataStreams from raw sequence strings or CSV files.
+Sequence tool for creating sequence DataStreams from raw sequence strings, CSV/FASTA
+files, or RCSB PDB codes.
 
 Provides a standardized way to pass sequences to other tools like Boltz2, AlphaFold, etc.
 Supports automatic type detection (protein/DNA/RNA) or explicit type specification.
@@ -28,10 +29,12 @@ except ImportError:
 
 class Sequence(BaseConfig):
     """
-    Pipeline tool for creating sequence DataStreams from raw sequence strings or CSV files.
+    Pipeline tool for creating sequence DataStreams from raw sequence strings, CSV/FASTA
+    files, or RCSB PDB codes.
 
-    Converts raw sequence strings or CSV files into a standardized format that can be passed
-    to other tools like Boltz2, AlphaFold, ProteinMPNN, etc.
+    Converts raw sequence strings, CSV/FASTA files, or sequences fetched from RCSB
+    into a standardized format that can be passed to other tools like Boltz2,
+    AlphaFold, ProteinMPNN, etc.
     """
 
     TOOL_NAME = "Sequence"
@@ -61,76 +64,82 @@ echo "=== Sequence ready ==="
             seq: Sequence input. Can be:
                  - Single sequence string: "MKTVRQERLKSIVRILERSKEPVSGAQ"
                  - Multiple sequences: ["MKTVRQ...", "AETGFT..."]
-                 - Path to CSV file with 'id' and 'sequence' columns: "/path/to/sequences.csv"
+                 - Path to CSV file with 'id' and 'sequence' columns
+                   (absolute, relative, or filename inside the Sequences/ folder)
+                 - Path to a FASTA file (.fasta or .fa)
+                   (absolute, relative, or filename inside the Sequences/ folder)
+                 - 4-character RCSB PDB code: "4EQ7"
+                   Fetches all protein chains from the RCSB FASTA API.
             type: Sequence type - "auto", "protein", "dna", or "rna".
                   "auto" will detect based on sequence content:
                   - Contains only ACGT -> DNA
                   - Contains only ACGU -> RNA
                   - Otherwise -> protein
-            ids: Output identifier(s) for the sequences (e.g., "my_protein" -> my_protein in FASTA).
-                 If not provided, defaults to "seq_1", "seq_2", etc.
-                 Ignored when loading from CSV (uses 'id' column from file).
+            ids: Output identifier(s). Ignored when loading from a file or PDB code.
+                 If not provided for raw sequences, defaults to "seq_1", "seq_2", etc.
             **kwargs: Additional parameters
 
         Examples:
             # Single protein sequence
             seq = Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ")
 
-            # Multiple sequences
-            seq = Sequence(["MKTVRQ...", "AETGFT..."])
-
-            # With custom ids
+            # With custom id
             seq = Sequence("MKTVRQ...", ids="my_protein")
 
-            # Multiple with custom ids
-            seq = Sequence(["MKTVRQ...", "AETGFT..."], ids=["prot1", "prot2"])
+            # From RCSB PDB code (fetches longest chain per entity)
+            seq = Sequence("4EQ7")
+
+            # Load from CSV (absolute path, or filename inside Sequences/)
+            seq = Sequence("my_proteins.csv")
+            seq = Sequence("/absolute/path/to/sequences.csv")
+
+            # Load from FASTA (absolute path, or filename inside Sequences/)
+            seq = Sequence("my_proteins.fasta")
 
             # Explicit type
             seq = Sequence("ACGTACGT", type="dna")
-
-            # Load from CSV file (must have 'id' and 'sequence' columns)
-            seq = Sequence("/path/to/sequences.csv")
-
-            # Use in pipeline
-            with Pipeline("MyProject", "Test", "Description"):
-                proteins = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
-                boltz = Boltz2(proteins=proteins)
         """
-        # Track if loaded from CSV
+        # Track source
         self.from_csv = False
+        self.from_fasta = False
+        self.from_pdb_code = False
         self.source_csv_path = None
+        # Pending filename: set when a bare filename is given that needs resolution
+        # against the Sequences/ folder in configure_inputs
+        self._pending_filename = None
 
-        # Check if seq is a path to a CSV file
-        if isinstance(seq, str) and self._is_csv_path(seq):
-            self._load_from_csv(seq)
-            if ids is not None:
-                print(f"  Warning: 'ids' parameter ignored when loading from CSV file (using 'id' column from file)")
-        else:
-            # Handle sequence input as before
-            if isinstance(seq, str):
-                self.sequences = [seq]
+        if isinstance(seq, str):
+            # --- RCSB PDB code ---
+            if self._is_pdb_code(seq):
+                self._load_from_pdb_code(seq, ids)
+            # --- Existing CSV/FASTA file (absolute or relative) ---
+            elif self._is_sequence_file(seq):
+                if ids is not None:
+                    print(f"  Warning: 'ids' parameter ignored when loading from file (using ids from file)")
+                if seq.lower().endswith('.csv'):
+                    self._load_from_csv(seq)
+                else:
+                    self._load_from_fasta(seq)
+            # --- Bare filename that may live in Sequences/ folder ---
+            elif self._looks_like_sequence_filename(seq):
+                self._pending_filename = seq
+                # Defer actual loading to configure_inputs; set placeholders for now
+                self.sequences = []
+                self.custom_ids = []
+                self._pending_ids_param = ids
+            # --- Raw sequence string ---
             else:
-                self.sequences = list(seq)
-
-            # Validate sequences are not empty
+                self.sequences = [seq]
+                self._apply_ids(ids, 1)
+        else:
+            # List of raw sequence strings
+            self.sequences = list(seq)
             if not self.sequences:
                 raise ValueError("Must provide at least one sequence")
             for i, s in enumerate(self.sequences):
                 if not s or not s.strip():
                     raise ValueError(f"Sequence at index {i} is empty")
-
-            # Handle ids - default to "seq_N"
-            if ids is not None:
-                if isinstance(ids, str):
-                    self.custom_ids = [ids]
-                else:
-                    self.custom_ids = list(ids)
-            else:
-                self.custom_ids = [f"seq_{i + 1}" for i in range(len(self.sequences))]
-
-            # Validate lengths
-            if len(self.custom_ids) != len(self.sequences):
-                raise ValueError(f"Length mismatch: ids has {len(self.custom_ids)} items but sequences has {len(self.sequences)} items")
+            self._apply_ids(ids, len(self.sequences))
 
         # Validate and store type
         valid_types = ["auto", "protein", "dna", "rna"]
@@ -138,65 +147,171 @@ echo "=== Sequence ready ==="
             raise ValueError(f"Invalid type: {type}. Must be one of: {valid_types}")
         self.seq_type = type
 
-        # Detect types if auto
-        self.detected_types = []
-        for seq in self.sequences:
-            self.detected_types.append(self._detect_type(seq) if self.seq_type == "auto" else self.seq_type)
+        # Detect types (may be empty if pending; re-detected in configure_inputs)
+        self.detected_types = [
+            self._detect_type(s) if self.seq_type == "auto" else self.seq_type
+            for s in self.sequences
+        ]
 
         # Initialize base class
         super().__init__(**kwargs)
 
-    def _is_csv_path(self, path: str) -> bool:
-        """
-        Check if a string is a path to an existing CSV file.
+    # ------------------------------------------------------------------
+    # Helpers: source detection
+    # ------------------------------------------------------------------
 
-        Args:
-            path: String to check
+    def _is_pdb_code(self, s: str) -> bool:
+        """Return True if s looks like a 4-character alphanumeric RCSB PDB code."""
+        return len(s) == 4 and s.isalnum() and not os.path.exists(s)
 
-        Returns:
-            True if path points to an existing CSV file, False otherwise
+    def _is_sequence_file(self, path: str) -> bool:
+        """Return True if path points to an existing CSV or FASTA file."""
+        lower = path.lower()
+        return (lower.endswith('.csv') or lower.endswith('.fasta') or lower.endswith('.fa')) \
+               and os.path.isfile(path)
+
+    def _looks_like_sequence_filename(self, s: str) -> bool:
         """
-        # Check if it ends with .csv and exists as a file
-        if path.lower().endswith('.csv') and os.path.isfile(path):
-            return True
-        return False
+        Return True if the string looks like a bare CSV/FASTA filename (with extension)
+        but does not yet exist on disk — it may reside in the Sequences/ folder.
+        """
+        lower = s.lower()
+        return lower.endswith('.csv') or lower.endswith('.fasta') or lower.endswith('.fa')
+
+    def _apply_ids(self, ids, count: int):
+        """Set self.custom_ids from the ids parameter or generate defaults."""
+        if ids is not None:
+            if isinstance(ids, str):
+                self.custom_ids = [ids]
+            else:
+                self.custom_ids = list(ids)
+            if len(self.custom_ids) != count:
+                raise ValueError(
+                    f"Length mismatch: ids has {len(self.custom_ids)} items "
+                    f"but sequences has {count} items"
+                )
+        else:
+            self.custom_ids = [f"seq_{i + 1}" for i in range(count)]
+
+    # ------------------------------------------------------------------
+    # Loaders
+    # ------------------------------------------------------------------
+
+    def _load_from_pdb_code(self, pdb_code: str, ids):
+        """Fetch protein chain sequences from the RCSB FASTA API."""
+        try:
+            import requests
+        except ImportError:
+            raise ImportError("'requests' module is required to fetch sequences from RCSB")
+
+        pdb_id = pdb_code.upper()
+        url = f"https://www.rcsb.org/fasta/entry/{pdb_id}/display"
+        print(f"  Fetching sequences for {pdb_id} from RCSB FASTA: {url}")
+
+        response = requests.get(url, timeout=15,
+                                headers={"User-Agent": "BioPipelines/1.0"})
+        response.raise_for_status()
+
+        fasta_text = response.text
+        chains = self._parse_fasta_text(fasta_text)
+
+        if not chains:
+            raise ValueError(f"No protein sequences found in RCSB FASTA for {pdb_id}")
+
+        self.sequences = [seq for _, seq in chains]
+        if ids is not None:
+            if isinstance(ids, str):
+                self.custom_ids = [ids]
+            else:
+                self.custom_ids = list(ids)
+            if len(self.custom_ids) != len(self.sequences):
+                raise ValueError(
+                    f"ids has {len(self.custom_ids)} items but RCSB returned "
+                    f"{len(self.sequences)} chain(s) for {pdb_id}"
+                )
+        else:
+            self.custom_ids = [header for header, _ in chains]
+
+        self.from_pdb_code = True
+        print(f"  Loaded {len(self.sequences)} chain(s) from RCSB {pdb_id}: "
+              f"{', '.join(self.custom_ids)}")
+
+    def _parse_fasta_text(self, fasta_text: str) -> List[tuple]:
+        """
+        Parse FASTA text into (id, sequence) pairs.
+        Uses the first token of each header line as the id.
+        """
+        chains = []
+        current_id = None
+        current_seq_parts = []
+
+        for line in fasta_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                if current_id is not None:
+                    seq = "".join(current_seq_parts)
+                    if seq:
+                        chains.append((current_id, seq))
+                # Use first token (e.g. "4EQ7_1|Chain A" -> "4EQ7_1")
+                header = line[1:].split("|")[0].strip()
+                current_id = header
+                current_seq_parts = []
+            else:
+                current_seq_parts.append(line)
+
+        if current_id is not None:
+            seq = "".join(current_seq_parts)
+            if seq:
+                chains.append((current_id, seq))
+
+        return chains
 
     def _load_from_csv(self, csv_path: str):
-        """
-        Load sequences from a CSV file.
-
-        Args:
-            csv_path: Path to CSV file with 'id' and 'sequence' columns
-
-        Raises:
-            FileNotFoundError: If CSV file doesn't exist
-            ValueError: If required columns are missing
-        """
+        """Load sequences from a CSV file with 'id' and 'sequence' columns."""
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
         self.source_csv_path = os.path.abspath(csv_path)
         self.from_csv = True
 
-        # Read CSV
         df = pd.read_csv(csv_path)
 
-        # Validate required columns
         if 'id' not in df.columns:
-            raise ValueError(f"CSV file must have 'id' column. Found columns: {list(df.columns)}")
+            raise ValueError(f"CSV file must have 'id' column. Found: {list(df.columns)}")
         if 'sequence' not in df.columns:
-            raise ValueError(f"CSV file must have 'sequence' column. Found columns: {list(df.columns)}")
+            raise ValueError(f"CSV file must have 'sequence' column. Found: {list(df.columns)}")
 
-        # Extract data
         self.custom_ids = df['id'].astype(str).tolist()
         self.sequences = df['sequence'].astype(str).tolist()
 
-        # Validate no empty sequences
         for i, (seq_id, seq) in enumerate(zip(self.custom_ids, self.sequences)):
-            if not seq or not seq.strip() or pd.isna(seq):
+            if not seq or not seq.strip():
                 raise ValueError(f"Empty sequence for id '{seq_id}' at row {i}")
 
         print(f"  Loaded {len(self.sequences)} sequences from CSV: {csv_path}")
+
+    def _load_from_fasta(self, fasta_path: str):
+        """Load sequences from a FASTA file."""
+        if not os.path.exists(fasta_path):
+            raise FileNotFoundError(f"FASTA file not found: {fasta_path}")
+
+        with open(fasta_path, "r") as f:
+            chains = self._parse_fasta_text(f.read())
+
+        if not chains:
+            raise ValueError(f"No sequences found in FASTA file: {fasta_path}")
+
+        self.custom_ids = [h for h, _ in chains]
+        self.sequences = [s for _, s in chains]
+        self.from_fasta = True
+        self.source_csv_path = os.path.abspath(fasta_path)
+        print(f"  Loaded {len(self.sequences)} sequences from FASTA: {fasta_path}")
+
+    # ------------------------------------------------------------------
+    # Type detection
+    # ------------------------------------------------------------------
 
     def _detect_type(self, seq: str) -> str:
         """
@@ -224,6 +339,10 @@ echo "=== Sequence ready ==="
 
     def validate_params(self):
         """Validate Sequence parameters."""
+        # Pending-filename sequences are validated after configure_inputs resolves them
+        if self._pending_filename:
+            return
+
         if not self.sequences:
             raise ValueError("sequences cannot be empty")
 
@@ -254,8 +373,32 @@ echo "=== Sequence ready ==="
         """Configure input parameters."""
         self.folders = pipeline_folders
 
+        # Resolve a pending filename against the Sequences/ folder
+        if self._pending_filename:
+            sequences_folder = pipeline_folders.get("Sequences", "")
+            candidate = os.path.join(sequences_folder, self._pending_filename)
+            if not os.path.isfile(candidate):
+                raise FileNotFoundError(
+                    f"Sequence file '{self._pending_filename}' not found. "
+                    f"Looked in: {sequences_folder}"
+                )
+            lower = self._pending_filename.lower()
+            ids_param = self._pending_ids_param
+            if ids_param is not None:
+                print(f"  Warning: 'ids' parameter ignored when loading from file (using ids from file)")
+            if lower.endswith('.csv'):
+                self._load_from_csv(candidate)
+            else:
+                self._load_from_fasta(candidate)
+            self._pending_filename = None
+            # Re-detect types now that sequences are loaded
+            self.detected_types = [
+                self._detect_type(s) if self.seq_type == "auto" else self.seq_type
+                for s in self.sequences
+            ]
+
         # Display sequence info
-        for i, (seq_id, seq, seq_type) in enumerate(zip(self.custom_ids, self.sequences, self.detected_types)):
+        for seq_id, seq, seq_type in zip(self.custom_ids, self.sequences, self.detected_types):
             seq_preview = seq[:30] + "..." if len(seq) > 30 else seq
             print(f"  Sequence {seq_id}: {seq_preview} (type: {seq_type}, length: {len(seq)})")
 
@@ -263,9 +406,13 @@ echo "=== Sequence ready ==="
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
-        # Show source if loaded from CSV
-        if self.from_csv and self.source_csv_path:
+        # Show source
+        if self.from_pdb_code:
+            config_lines.append(f"SOURCE: RCSB PDB")
+        elif (self.from_csv or self.from_fasta) and self.source_csv_path:
             config_lines.append(f"SOURCE: {self.source_csv_path}")
+        elif self._pending_filename:
+            config_lines.append(f"SOURCE: {self._pending_filename} (Sequences/ folder)")
 
         config_lines.extend([
             f"IDS: {', '.join(self.custom_ids[:5])}{'...' if len(self.custom_ids) > 5 else ''} ({len(self.custom_ids)} sequences)",
@@ -338,20 +485,28 @@ python "{self.sequence_py}" --config "{self.config_file}"
             )
         }
 
-        # Create DataStream for sequences (value-based — sequence data lives in CSV)
+        # sequences stream: value-based, sequence data lives in CSV map_table
         sequences = DataStream(
             name="sequences",
             ids=self.custom_ids.copy(),
             files=[],
             map_table=self.sequences_csv,
-            format="sequence"
+            format="csv"
+        )
+
+        # fasta stream: file-based, single .fasta file shared across all IDs
+        fasta = DataStream(
+            name="fasta",
+            ids=self.custom_ids.copy(),
+            files=[self.sequences_fasta],
+            format="fasta"
         )
 
         return {
             "sequences": sequences,
+            "fasta": fasta,
             "tables": tables,
-            "output_folder": self.output_folder,
-            "fasta": self.sequences_fasta
+            "output_folder": self.output_folder
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -364,6 +519,8 @@ python "{self.sequence_py}" --config "{self.config_file}"
                 "seq_type": self.seq_type,
                 "detected_types": self.detected_types,
                 "from_csv": self.from_csv,
+                "from_fasta": self.from_fasta,
+                "from_pdb_code": self.from_pdb_code,
                 "source_csv_path": self.source_csv_path
             }
         })

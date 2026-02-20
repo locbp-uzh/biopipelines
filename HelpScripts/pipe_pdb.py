@@ -206,12 +206,17 @@ def extract_sequence_from_structure(content: str, format: str) -> str:
     """
     Extract protein sequence from structure content.
 
+    Returns the sequence of the longest chain. Structures often contain multiple
+    identical or non-identical chains (e.g. dimers, complexes); concatenating them
+    would produce an artificially long sequence that inflates memory usage in
+    downstream tools such as LigandMPNN.
+
     Args:
         content: Structure file content
         format: File format ("pdb" or "cif")
 
     Returns:
-        Concatenated protein sequence from all chains
+        Sequence of the longest protein chain
     """
     import tempfile
 
@@ -232,8 +237,15 @@ def extract_sequence_from_structure(content: str, format: str) -> str:
             # Clean up temporary file
             os.unlink(tmp.name)
 
-            # Concatenate all chain sequences
-            return "".join(sequences_dict.values())
+            if not sequences_dict:
+                return ""
+
+            # Return the longest chain sequence (sequences_dict already contains only
+            # standard amino-acid chains; water/ions are excluded by get_protein_sequence)
+            candidates = [seq for seq in sequences_dict.values() if len(seq) >= 10]
+            if not candidates:
+                return max(sequences_dict.values(), key=len)
+            return max(candidates, key=len)
 
     except Exception as e:
         print(f"Warning: Could not extract sequence from PDB - {str(e)}")
@@ -244,11 +256,16 @@ def extract_sequence_from_cif(content: str) -> str:
     """
     Extract protein sequence from CIF content using BioPython.
 
+    Returns the sequence of the longest chain. Structures often contain multiple
+    identical or non-identical chains (e.g. dimers, complexes); concatenating them
+    would produce an artificially long sequence that inflates memory usage in
+    downstream tools such as LigandMPNN.
+
     Args:
         content: CIF file content
 
     Returns:
-        Concatenated protein sequence from all chains
+        Sequence of the longest protein chain
     """
     import tempfile
 
@@ -294,11 +311,18 @@ def extract_sequence_from_cif(content: str) -> str:
             # Clean up
             os.unlink(cif_path)
 
-            # Concatenate all chain sequences
-            full_sequence = "".join(sequences.values())
-            if full_sequence:
-                print(f"  Extracted sequence from CIF: {len(full_sequence)} residues from {len(sequences)} chain(s)")
-            return full_sequence
+            if not sequences:
+                return ""
+
+            # Return the longest chain sequence (sequences already contains only
+            # standard amino-acid chains; water/ions are excluded by the aa_map filter above)
+            candidates = [seq for seq in sequences.values() if len(seq) >= 10]
+            if not candidates:
+                longest = max(sequences.values(), key=len)
+            else:
+                longest = max(candidates, key=len)
+            print(f"  Extracted sequence from CIF: {len(longest)} residues (longest of {len(sequences)} chain(s))")
+            return longest
 
         except Exception as e:
             # Clean up on error

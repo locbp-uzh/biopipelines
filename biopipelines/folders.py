@@ -152,7 +152,7 @@ class FolderManager:
         self._folders["project"] = os.path.join(self._folders["biopipelines_output"], project)
 
         # Create necessary directories
-        folders_to_create = ["biopipelines_output", "PDBs", "Ligands"]
+        folders_to_create = ["biopipelines_output", "PDBs", "Ligands", "Sequences", "Tables"]
         if not self._local_output:
             folders_to_create.append("user")
         for folder_key in folders_to_create:
