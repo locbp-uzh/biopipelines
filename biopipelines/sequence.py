@@ -103,6 +103,8 @@ echo "=== Sequence ready ==="
         self.from_csv = False
         self.from_fasta = False
         self.from_pdb_code = False
+        self.from_excel = False
+        self._excel_source_path = None
         self.source_csv_path = None
         # Pending filename: set when a bare filename is given that needs resolution
         # against the Sequences/ folder in configure_inputs
@@ -118,7 +120,10 @@ echo "=== Sequence ready ==="
                     # Exists as given — load immediately
                     if ids is not None:
                         print(f"  Warning: 'ids' parameter ignored when loading from file (using ids from file)")
-                    if seq.lower().endswith('.csv'):
+                    lower = seq.lower()
+                    if lower.endswith('.xlsx') or lower.endswith('.xls'):
+                        self._load_from_excel(seq)
+                    elif lower.endswith('.csv'):
                         self._load_from_csv(seq)
                     else:
                         self._load_from_fasta(seq)
@@ -166,9 +171,10 @@ echo "=== Sequence ready ==="
         return len(s) == 4 and s.isalnum() and not os.path.exists(s)
 
     def _has_sequence_extension(self, s: str) -> bool:
-        """Return True if s has a CSV or FASTA file extension."""
+        """Return True if s has a CSV, Excel, or FASTA file extension."""
         lower = s.lower()
-        return lower.endswith('.csv') or lower.endswith('.fasta') or lower.endswith('.fa')
+        return (lower.endswith('.csv') or lower.endswith('.xlsx') or lower.endswith('.xls')
+                or lower.endswith('.fasta') or lower.endswith('.fa'))
 
     def _apply_ids(self, ids, count: int):
         """Set self.custom_ids from the ids parameter or generate defaults."""
@@ -284,6 +290,30 @@ echo "=== Sequence ready ==="
 
         print(f"  Loaded {len(self.sequences)} sequences from CSV: {csv_path}")
 
+    def _load_from_excel(self, excel_path: str):
+        """Load sequences from an Excel file with 'id' and 'sequence' columns."""
+        if not os.path.exists(excel_path):
+            raise FileNotFoundError(f"Excel file not found: {excel_path}")
+
+        df = pd.read_excel(excel_path)
+
+        if 'id' not in df.columns:
+            raise ValueError(f"Excel file must have 'id' column. Found: {list(df.columns)}")
+        if 'sequence' not in df.columns:
+            raise ValueError(f"Excel file must have 'sequence' column. Found: {list(df.columns)}")
+
+        self.custom_ids = df['id'].astype(str).tolist()
+        self.sequences = df['sequence'].astype(str).tolist()
+
+        for i, (seq_id, seq) in enumerate(zip(self.custom_ids, self.sequences)):
+            if not seq or not seq.strip():
+                raise ValueError(f"Empty sequence for id '{seq_id}' at row {i}")
+
+        self.from_excel = True
+        self._excel_source_path = os.path.abspath(excel_path)
+        # source_csv_path is set in configure_inputs once output_folder is available
+        print(f"  Loaded {len(self.sequences)} sequences from Excel: {excel_path}")
+
     def _load_from_fasta(self, fasta_path: str):
         """Load sequences from a FASTA file."""
         if not os.path.exists(fasta_path):
@@ -377,7 +407,9 @@ echo "=== Sequence ready ==="
             if self._pending_ids_param is not None:
                 print(f"  Warning: 'ids' parameter ignored when loading from file (using ids from file)")
             lower = self._pending_filename.lower()
-            if lower.endswith('.csv'):
+            if lower.endswith('.xlsx') or lower.endswith('.xls'):
+                self._load_from_excel(candidate)
+            elif lower.endswith('.csv'):
                 self._load_from_csv(candidate)
             else:
                 self._load_from_fasta(candidate)
@@ -387,6 +419,15 @@ echo "=== Sequence ready ==="
                 self._detect_type(s) if self.seq_type == "auto" else self.seq_type
                 for s in self.sequences
             ]
+
+        # For Excel inputs: write the converted CSV to sequences_csv (the lazy path)
+        # so that source_csv_path and map_table both point to a real CSV file.
+        if self.from_excel:
+            os.makedirs(self.output_folder, exist_ok=True)
+            df = pd.DataFrame({"id": self.custom_ids, "sequence": self.sequences})
+            df.to_csv(self.sequences_csv, index=False)
+            self.source_csv_path = self.sequences_csv
+            print(f"  Converted Excel to CSV: {self.sequences_csv}")
 
         # Display sequence info
         for seq_id, seq, seq_type in zip(self.custom_ids, self.sequences, self.detected_types):
@@ -400,6 +441,8 @@ echo "=== Sequence ready ==="
         # Show source
         if self.from_pdb_code:
             config_lines.append(f"SOURCE: RCSB PDB")
+        elif self.from_excel and self._excel_source_path:
+            config_lines.append(f"SOURCE (Excel): {self._excel_source_path}")
         elif (self.from_csv or self.from_fasta) and self.source_csv_path:
             config_lines.append(f"SOURCE: {self.source_csv_path}")
         elif self._pending_filename:
@@ -512,6 +555,8 @@ python "{self.sequence_py}" --config "{self.config_file}"
                 "from_csv": self.from_csv,
                 "from_fasta": self.from_fasta,
                 "from_pdb_code": self.from_pdb_code,
+                "from_excel": self.from_excel,
+                "excel_source_path": self._excel_source_path,
                 "source_csv_path": self.source_csv_path
             }
         })

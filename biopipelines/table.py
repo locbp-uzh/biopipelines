@@ -3,9 +3,10 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Table entity for loading existing CSV files into the pipeline.
+Table entity for loading existing CSV or Excel files into the pipeline.
 
-Reads column headers from the CSV and provides a TableInfo for downstream tools.
+Reads column headers from the file and provides a TableInfo for downstream tools.
+Excel files (.xlsx/.xls) are converted to CSV internally before use.
 """
 
 import os
@@ -64,7 +65,8 @@ echo "=== Table ready ==="
         Initialize Table entity.
 
         Args:
-            path: Path to existing CSV file
+            path: Path to existing CSV or Excel (.xlsx/.xls) file.
+                  Excel files are converted to CSV internally.
             name: Name for the table (default: "data")
             description: Description of the table contents
             **kwargs: Additional parameters
@@ -72,12 +74,25 @@ echo "=== Table ready ==="
         if not os.path.exists(path):
             raise FileNotFoundError(f"Table file not found: {path}")
 
-        self.table_path = os.path.abspath(path)
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in ('.csv', '.xlsx', '.xls'):
+            raise ValueError(f"Table only accepts CSV or Excel files (.csv, .xlsx, .xls). Got: '{path}'")
+
+        abs_path = os.path.abspath(path)
         self.table_name = name
         self.table_description = description
 
-        # Read CSV to get columns and count
-        df = pd.read_csv(self.table_path)
+        # Read the file; convert Excel to CSV when needed
+        if ext in ('.xlsx', '.xls'):
+            df = pd.read_excel(abs_path)
+            csv_path = os.path.splitext(abs_path)[0] + '.csv'
+            df.to_csv(csv_path, index=False)
+            self.table_path = csv_path
+            print(f"  Converted Excel to CSV: {csv_path}")
+        else:
+            df = pd.read_csv(abs_path)
+            self.table_path = abs_path
+
         self.table_columns = list(df.columns)
         self.table_count = len(df)
 
