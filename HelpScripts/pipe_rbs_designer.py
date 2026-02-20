@@ -79,9 +79,9 @@ START_CODON_ENERGIES = {
 }
 
 # Spacing penalty coefficients — SI Equations 7 and 8
-# Quadratic (s > 5): dG_spacing = c1*(s-s_opt)^2 + c2*(s-s_opt)
-SPACING_C1_QUAD = 0.048     # kcal/mol/nt^2
-SPACING_C2_QUAD = 0.24      # kcal/mol/nt
+# Quadratic (s > 5): dG_spacing = c1*(s-s_opt) + c2*(s-s_opt)^2
+SPACING_C1_QUAD = 0.048     # kcal/mol/nt  (linear term)
+SPACING_C2_QUAD = 0.24      # kcal/mol/nt^2 (quadratic term)
 # Sigmoidal (s < 5): dG_spacing = c1 / [1 + exp(c2*(s - s_opt + 2))]^3
 SPACING_C1_SIG = 12.2       # kcal/mol
 SPACING_C2_SIG = 2.5        # nt^-1
@@ -103,7 +103,7 @@ SA_CONVERGENCE_THRESHOLD = 0.25   # kcal/mol, paper main text p.948
 SA_RBS_MIN_LEN = 5
 SA_RBS_MAX_LEN = 35
 SA_MAX_UNFOLD_ENERGY = 6.0        # kcal/mol, Online Methods constraint 1
-SA_MIN_BASE_PAIR_PROB = 6e-5      # Online Methods constraint 2
+SA_MIN_BASE_PAIR_PROB = 6e-3      # Online Methods constraint 2
 SA_BP_EXPONENT = -1.44            # growth model exponent, ref 34
 
 # Adaptive temperature: paper says "T_SA is continually adjusted to maintain
@@ -204,7 +204,7 @@ def calc_spacing_penalty(spacing):
     Calculate the spacing penalty dG_spacing.
 
     From SI Section 3 (Eqs. 7-8):
-      s > s_opt (stretched): dG = c1*(s - s_opt)^2 + c2*(s - s_opt)
+      s > s_opt (stretched): dG = c1*(s - s_opt) + c2*(s - s_opt)^2
       s < s_opt (compressed): dG = c1 / [1 + exp(c2*(s - s_opt + 2))]^3
 
     where s_opt = 5, c1/c2 differ between the two regimes.
@@ -219,7 +219,7 @@ def calc_spacing_penalty(spacing):
     s = spacing
     if s >= OPTIMAL_SPACING:
         ds = s - OPTIMAL_SPACING
-        return SPACING_C1_QUAD * ds * ds + SPACING_C2_QUAD * ds
+        return SPACING_C1_QUAD * ds + SPACING_C2_QUAD * ds * ds
     else:
         return SPACING_C1_SIG / (
             (1.0 + math.exp(SPACING_C2_SIG * (s - OPTIMAL_SPACING + 2))) ** 3
@@ -286,7 +286,8 @@ def calc_dg_total(mrna_rna, start_pos):
     best_combined = 0.0  # dG_mRNA:rRNA + dG_spacing (want to minimize)
     best_duplex_energy = 0.0
     best_spacing = OPTIMAL_SPACING
-    best_sd_end = start_pos  # position after last nt of SD site in mRNA
+    best_sd_end = start_pos    # 3' end of SD binding site in mRNA
+    best_sd_start = start_pos  # 5' start of SD binding site in mRNA
 
     if len(upstream_seq) >= 4:
         # Try all sub-windows of the upstream region against the anti-SD
@@ -300,6 +301,8 @@ def calc_dg_total(mrna_rna, start_pos):
 
                 # The 3' end of this SD binding site in the mRNA
                 sd_end_pos = s1_start + offset + win_len
+                # The 5' start of this SD binding site in the mRNA
+                sd_start_pos = s1_start + offset
                 # Aligned spacing: distance from SD 3' end to start codon
                 spacing = start_pos - sd_end_pos
 
@@ -311,6 +314,7 @@ def calc_dg_total(mrna_rna, start_pos):
                     best_duplex_energy = energy
                     best_spacing = spacing
                     best_sd_end = sd_end_pos
+                    best_sd_start = sd_start_pos
 
     dg_mrna_rrna = best_duplex_energy
     spacing = best_spacing
@@ -336,7 +340,7 @@ def calc_dg_total(mrna_rna, start_pos):
     # upstream of the 16S binding site) must be unpaired. We split S2 into
     # sub-sequences around the standby site and sum their mfes.
     dg_standby = 0.0
-    standby_end = best_sd_end               # standby ends where SD starts
+    standby_end = best_sd_start             # standby ends where SD 5' end begins
     standby_start = standby_end - STANDBY_SITE_LEN
 
     if standby_start >= s2_start and standby_end <= s2_end:
@@ -674,6 +678,7 @@ def main():
     sequences_csv = config["sequences_csv"]
     target_tir = float(config["tir"])
     pre_sequence = config.get("pre_sequence", "")
+    add_start_codon = config.get("add_start_codon", False)
     rbs_output = config["rbs_output"]
     info_output = config["info_output"]
 
@@ -690,6 +695,7 @@ def main():
     print(f"  Target TIR:     {target_tir:.0f} au")
     print(f"  Target dG_tot:  {target_dg:.3f} kcal/mol")
     print(f"  Pre-sequence:   {pre_sequence if pre_sequence else '(none)'}")
+    print(f"  Add start codon: {'Yes (ATG prepended)' if add_start_codon else 'No'}")
     print(f"  Convergence:    |dG_tot - target| < {SA_CONVERGENCE_THRESHOLD} kcal/mol")
     print(f"  Max iterations: {SA_MAX_ITERATIONS} per sequence")
     print()
@@ -714,6 +720,9 @@ def main():
     for idx, row in sequences_df.iterrows():
         seq_id = row["id"]
         cds_dna = row[seq_col].upper()
+
+        if add_start_codon:
+            cds_dna = "ATG" + cds_dna
 
         print(f"\n  [{idx + 1}/{n_seqs}] {seq_id} ({len(cds_dna)} bp)", flush=True)
 
@@ -797,7 +806,7 @@ Start codon energies:
   GUG = {START_CODON_ENERGIES['GUG']} kcal/mol
 
 Spacing penalty (SI Eqs. 7-8):
-  s > 5 nt: dG = {SPACING_C1_QUAD}*(s-5)^2 + {SPACING_C2_QUAD}*(s-5)
+  s > 5 nt: dG = {SPACING_C1_QUAD}*(s-5) + {SPACING_C2_QUAD}*(s-5)^2
   s < 5 nt: dG = {SPACING_C1_SIG} / [1 + exp({SPACING_C2_SIG}*(s-3))]^3
 
 Target TIR: {target_tir:.0f}

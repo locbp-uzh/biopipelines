@@ -92,6 +92,7 @@ echo "=== RBSDesigner installation complete ==="
                  sequences: Union[DataStream, StandardizedOutput],
                  tir: Union[str, int, float] = "medium",
                  pre_sequence: str = "",
+                 add_start_codon: bool = False,
                  **kwargs):
         """
         Initialize RBS designer tool.
@@ -104,6 +105,9 @@ echo "=== RBSDesigner installation complete ==="
                  "maximum" (100000).
             pre_sequence: Optional fixed 5'UTR DNA sequence to prepend before
                           the designed RBS in the full gene output.
+            add_start_codon: If True, prepend ATG to each input sequence before
+                             RBS design. Use when sequences do not already begin
+                             with a start codon.
             **kwargs: Additional parameters.
 
         Examples:
@@ -112,6 +116,9 @@ echo "=== RBSDesigner installation complete ==="
 
             # Design RBS for specific TIR with 5'UTR prefix
             rbs = RBSDesigner(sequences=dna, tir=5000, pre_sequence="AATTAA")
+
+            # Sequences lack a start codon
+            rbs = RBSDesigner(sequences=dna, tir="medium", add_start_codon=True)
         """
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):
@@ -137,6 +144,7 @@ echo "=== RBSDesigner installation complete ==="
             self.tir_preset = None
 
         self.pre_sequence = pre_sequence.upper()
+        self.add_start_codon = add_start_codon
 
         super().__init__(**kwargs)
 
@@ -178,6 +186,9 @@ echo "=== RBSDesigner installation complete ==="
         if self.pre_sequence:
             config_lines.append(f"PRE_SEQUENCE: {self.pre_sequence}")
 
+        if self.add_start_codon:
+            config_lines.append("ADD_START_CODON: True (ATG prepended to each sequence)")
+
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
@@ -201,6 +212,7 @@ echo "=== RBSDesigner installation complete ==="
             "sequences_csv": self.sequences_stream.map_table,
             "tir": self.tir,
             "pre_sequence": self.pre_sequence,
+            "add_start_codon": self.add_start_codon,
             "rbs_output": self.rbs_csv,
             "info_output": self.info_txt,
         }
