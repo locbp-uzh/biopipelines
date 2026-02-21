@@ -18,6 +18,7 @@ examples = {
 }
 for example, comp in examples.items():
     for with_gnina in [True, False]:
+        if not with_gnina and example != "TeaA-hydroxyectoine": continue
         with Pipeline(project="Optimization", job=f"IterativeBinding_{example}_Gnina{with_gnina}"):
             Resources(gpu="A100", time="24:00:00", memory="16GB")
             protein = PDB(comp[0])
