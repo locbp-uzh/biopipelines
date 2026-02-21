@@ -10,10 +10,10 @@ from biopipelines.panda import Panda
 from biopipelines.gnina import Gnina
 
 examples = {
-    "Atu4243-GABA": ("4EQ7","GABA"),
-    "Atu4243-TACA": ("4EQ7","TACA"),
-    "NocT-Histopine": ("5OT9","Histopine"),
-    "Atu4661-Galactinol": ("6EQ8","galactinol"),
+    "Atu4243-GABA": ("4EQ7","GABA"), # no gnina: (0.86,0.88)->(0.60,0.86)
+    "Atu4243-TACA": ("4EQ7","TACA"), # no gnina: (1.26,0.79)->(1.08,0.77)
+    "NocT-Histopine": ("5OT9","Histopine"), #no gnina: (-0.22,0.88)->(-0.48,0.93)
+    "Atu4661-Galactinol": ("6EQ8","galactinol"), #no gnina: (1.33,0.56)->
     "TeaA-hydroxyectoine": ("2VPO","hydroxyectoine"),
 }
 for example, comp in examples.items():

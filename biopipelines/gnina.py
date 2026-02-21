@@ -451,15 +451,15 @@ python {self.helper_py} {self.config_json}
             "docking_results": TableInfo(
                 name="docking_results",
                 path=self.docking_results_csv,
-                columns=["id", "protein_id", "ligand_id", "conformer_id", "run",
-                         "pose", "vina_score", "cnn_score", "cnn_affinity"],
+                columns=["id", "structures.id", "compounds.id", "conformer_id",
+                         "run", "pose", "vina_score", "cnn_score", "cnn_affinity"],
                 description="All accepted docked poses with Vina and CNN scores",
                 count=0
             ),
             "conformer_ranking": TableInfo(
                 name="conformer_ranking",
                 path=self.conformer_ranking_csv,
-                columns=["id", "protein_id", "ligand_id", "conformer_id",
+                columns=["id", "structures.id", "compounds.id", "conformer_id",
                          "best_vina", "mean_vina", "std_vina", "best_cnn_score",
                          "pose_consistency", "conformer_energy",
                          "pseudo_binding_energy", "best_pose_file"],
@@ -481,12 +481,8 @@ python {self.helper_py} {self.config_json}
         protein_ids = self.structures_stream.ids
         ligand_ids = self.compounds_stream.ids
 
-        # Always predict conformer 0 as the representative best pose per
-        # (protein, ligand) pair. When generate_conformers=True the actual
-        # number of clustered conformers is only known at execution time, so
-        # we do not attempt to enumerate them here.
         structure_ids = [
-            f"{prot}_{lig}_conf0"
+            f"{prot}_{lig}"
             for prot in protein_ids
             for lig in ligand_ids
         ]
@@ -494,7 +490,12 @@ python {self.helper_py} {self.config_json}
             os.path.join(best_poses_dir, f"{sid}_best.pdb")
             for sid in structure_ids
         ]
-        create_map_table(self.structures_map, structure_ids, files=structure_files)
+        provenance = {
+            "structures": [prot for prot in protein_ids for _ in ligand_ids],
+            "compounds": [lig for _ in protein_ids for lig in ligand_ids],
+        }
+        create_map_table(self.structures_map, structure_ids, files=structure_files,
+                         provenance=provenance)
         structures = DataStream(
             name="structures",
             ids=structure_ids,

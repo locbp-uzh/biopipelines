@@ -728,11 +728,10 @@ def _parse_gnina_output(sdf_path, protein_id, ligand_id, conformer_id,
         if cnn_score is not None and cnn_score < cnn_score_threshold:
             continue
 
-        pose_id = f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}_pose{pose_idx}"
         poses.append({
-            "id": pose_id,
-            "protein_id": protein_id,
-            "ligand_id": ligand_id,
+            "id": f"{protein_id}_{ligand_id}",
+            "structures.id": protein_id,
+            "compounds.id": ligand_id,
             "conformer_id": conformer_id,
             "run": run_idx,
             "pose": pose_idx,
@@ -776,7 +775,7 @@ def analyze_pose_consistency(all_poses, config):
 
     groups = defaultdict(list)
     for pose in all_poses:
-        key = (pose["protein_id"], pose["ligand_id"], pose["conformer_id"])
+        key = (pose["structures.id"], pose["compounds.id"], pose["conformer_id"])
         groups[key].append(pose)
 
     consistency = {}
@@ -878,7 +877,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
         print(f"Wrote {len(results_df)} poses to {docking_results_csv}")
     else:
         pd.DataFrame(columns=[
-            "id", "protein_id", "ligand_id", "conformer_id",
+            "id", "structures.id", "compounds.id", "conformer_id",
             "run", "pose", "vina_score", "cnn_score", "cnn_affinity"
         ]).to_csv(docking_results_csv, index=False)
         print("Warning: No poses passed filtering")
@@ -894,7 +893,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
 
     groups = defaultdict(list)
     for pose in all_poses:
-        key = (pose["protein_id"], pose["ligand_id"], pose["conformer_id"])
+        key = (pose["structures.id"], pose["compounds.id"], pose["conformer_id"])
         groups[key].append(pose)
 
     ranking_rows = []
@@ -941,7 +940,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
             )
             dst_pdb = os.path.join(
                 best_poses_dir,
-                f"{protein_id}_{ligand_id}_conf{conformer_id}_best.pdb"
+                f"{protein_id}_{ligand_id}_best.pdb"
             )
             prot_info = prepared_proteins.get(protein_id, {})
             protein_pdb = prot_info.get("protein") if isinstance(prot_info, dict) else prot_info
@@ -950,9 +949,9 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
                 best_pose_file = dst_pdb
 
         ranking_rows.append({
-            "id": f"{protein_id}_{ligand_id}_conf{conformer_id}",
-            "protein_id": protein_id,
-            "ligand_id": ligand_id,
+            "id": f"{protein_id}_{ligand_id}",
+            "structures.id": protein_id,
+            "compounds.id": ligand_id,
             "conformer_id": conformer_id,
             "best_vina": best_vina,
             "mean_vina": mean_vina,
