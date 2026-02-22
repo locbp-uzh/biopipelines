@@ -729,7 +729,7 @@ def _parse_gnina_output(sdf_path, protein_id, ligand_id, conformer_id,
             continue
 
         poses.append({
-            "id": f"{protein_id}_{ligand_id}",
+            "id": f"{protein_id}_{ligand_id}_r{run_idx}_p{pose_idx}",
             "structures.id": protein_id,
             "compounds.id": ligand_id,
             "conformer_id": conformer_id,
