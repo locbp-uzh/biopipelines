@@ -18,7 +18,7 @@ examples = {
 }
 for example, comp in examples.items():
     if example.startswith("Atu"): continue
-    with Pipeline(project="Optimization", job=f"IterativeBinding_{example}_Gnina{with_gnina}"):
+    with Pipeline(project="Optimization", job=f"IterativeBinding_{example}_Gnina"):
         Resources(gpu="A100", time="24:00:00", memory="16GB")
         protein = PDB(comp[0])
         ligand = Ligand(comp[1])
