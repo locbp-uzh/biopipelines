@@ -15,9 +15,10 @@ from biopipelines.panda import Panda
 from biopipelines.dna_encoder import DNAEncoder
 
 
-with Pipeline(project="CAII", job="InverseFolding"):
+with Pipeline(project="Ubiquitin", job="InverseFolding"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
-    ubiquitin = PDB("4LCD")
+    ubiquitin = PDB("4LCD",
+                    chain="E")
     sequences = ProteinMPNN(structures=ubiquitin,
                             num_sequences=50,
                             soluble_model=True)
