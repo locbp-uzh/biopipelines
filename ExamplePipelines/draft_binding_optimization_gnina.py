@@ -8,6 +8,9 @@ from biopipelines.mutation_profiler import MutationProfiler
 from biopipelines.mutation_composer import MutationComposer
 from biopipelines.panda import Panda
 from biopipelines.gnina import Gnina
+from biopipelines.remap import ReMap
+
+# provenence propagation
 
 examples = {
     "Atu4243-GABA": ("4EQ7","GABA"), # no gnina: (0.86,0.88)->(0.60,0.86)
@@ -18,7 +21,7 @@ examples = {
 }
 for example, comp in examples.items():
     if example.startswith("Atu"): continue
-    with Pipeline(project="Optimization", job=f"IterativeBinding_{example}_Gnina"):
+    with Pipeline(project="Optimization", job=f"IterativeBinding_{example}_Gnina_ReMap"):
         Resources(gpu="A100", time="24:00:00", memory="16GB")
         protein = PDB(comp[0])
         ligand = Ligand(comp[1])
@@ -58,14 +61,14 @@ for example, comp in examples.items():
                                             Panda.head(1)],
                                 pool=[current_best,
                                       docked])
+            # Select best structure for next cycle (pool from docked for structures)
+            docked_sequences = ReMap(candidates,docked.streams.structures.ids)
             current_best_sequence = Panda(
                                 tables=[current_best.tables.result,
                                         docked.tables.docking_summary],
                                 operations=[Panda.concat(add_source=True),
                                             Panda.sort("mean_cnn_affinity", ascending=True),
-                                            Panda.head(1),
-                                            Panda.drop_columns(["id"]),
-                                            Panda.rename({"structures.id": "id"})],
+                                            Panda.head(1)],
                                 pool=[current_best_sequence,
-                                      predicted])
+                                      docked_sequences])
             
