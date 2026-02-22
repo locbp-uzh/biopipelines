@@ -5,24 +5,32 @@
 """
 ReMap tool for renaming IDs across all streams and tables from a source tool output.
 
-Provides a lightweight way to rename auto-generated IDs to user-friendly names
-without re-running any computation. At execution time, files are symlinked
-(or copied on Windows) and CSV tables are rewritten with the new IDs.
+Provides a lightweight way to rename IDs without re-running any computation.
+At execution time, files are symlinked (or copied on Windows) and CSV tables
+are rewritten with the new IDs.
 
 Usage:
     # String basename: appends _1, _2, ...
-    remapped = ReMap(source=boltz, ids="design")
+    remapped = ReMap(source=tool_a, onto="design")
 
-    # List of new IDs (must match length)
-    remapped = ReMap(source=boltz, ids=["kinase_apo", "kinase_holo"])
+    # List of new IDs (matched per-stream where lengths agree)
+    remapped = ReMap(source=tool_a, onto=["kinase_apo", "kinase_holo"])
 
     # Dict mapping old->new (for selective remapping)
-    remapped = ReMap(source=boltz, ids={"prot1_lig1": "complex_A", "prot1_lig2": "complex_B"})
+    remapped = ReMap(source=tool_a, onto={"prot1_lig1": "complex_A"})
+
+    # Align onto another tool's IDs (per-stream zip where lengths match,
+    # or provenance-based matching when they don't)
+    remapped = ReMap(source=tool_a, onto=tool_b)
+    remapped = ReMap(source=tool_a, onto=tool_b.streams.structures)
+
+    # Use an intermediate tool as bridge for provenance-based mapping
+    remapped = ReMap(source=tool_a, onto=tool_c, map=tool_b)
 """
 
 import os
 import json
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Optional, Union
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
@@ -60,79 +68,78 @@ echo "=== ReMap ready ==="
 
     def __init__(self,
                  source: StandardizedOutput,
-                 ids: Union[str, List[str], Dict[str, str]],
+                 onto: Union[str, List[str], Dict[str, str], StandardizedOutput, DataStream],
+                 map: Optional[Union[StandardizedOutput, DataStream]] = None,
                  **kwargs):
         """
         Initialize ReMap configuration.
 
         Args:
-            source: StandardizedOutput from a previous tool
-            ids: Remapping specification:
+            source: StandardizedOutput from a previous tool whose IDs will be renamed.
+            onto: Target ID specification:
                 - str: basename for auto-numbered IDs (e.g., "design" -> design_1, design_2, ...)
-                - list: explicit new IDs (must match count of source IDs)
-                - dict: old_id -> new_id mapping (all keys must exist in source)
+                - list: explicit new IDs (matched per-stream where lengths agree)
+                - dict: old_id -> new_id mapping (selective remapping)
+                - StandardizedOutput: align source IDs onto this tool's IDs (per-stream zip)
+                - DataStream: align source IDs onto this stream's IDs
+            map: Optional intermediate tool whose provenance bridges source and onto IDs.
+                For example, if source=tool_a and onto=tool_c, passing map=tool_b
+                uses tool_b's provenance columns to build the mapping from tool_a
+                IDs to tool_c IDs.
             **kwargs: Additional parameters passed to BaseConfig
         """
         self.source = source
-        self.ids_spec = ids
+        self.onto_spec = onto
+        self.map_source = map
 
-        # Resolve source IDs from the first non-empty stream
-        self.source_ids = self._get_source_ids()
-        if not self.source_ids:
-            raise ValueError("ReMap source has no IDs in any stream")
+        # Resolve onto IDs
+        self.onto_ids = self._resolve_onto_ids()
 
-        # Compute the old->new mapping
-        self.id_mapping = self._compute_id_mapping()
-
-        # Collect source stream info for config generation
+        # Collect source stream info
         self.source_streams = self._collect_source_streams()
+
+        # Compute the per-stream old->new mappings
+        self.id_mapping = self._compute_id_mapping()
 
         # Collect source table info
         self.source_tables = self._collect_source_tables()
 
-        # Collect source map_table paths
-        self.source_map_tables = self._collect_source_map_tables()
-
         super().__init__(**kwargs)
 
-    def _get_source_ids(self) -> List[str]:
-        """Get IDs from the first non-empty stream in source."""
-        for stream_name, stream in self.source.streams.items():
-            if isinstance(stream, DataStream) and len(stream) > 0:
-                return list(stream.ids)
-        return []
+    def _resolve_onto_ids(self) -> Union[str, List[str], Dict[str, str], Dict[str, List[str]]]:
+        """
+        Resolve the onto specification into a usable form.
 
-    def _compute_id_mapping(self) -> Dict[str, str]:
-        """Compute old->new ID mapping from the ids specification."""
-        if isinstance(self.ids_spec, str):
-            # String basename: generate numbered IDs
-            mapping = {}
-            for i, old_id in enumerate(self.source_ids, start=1):
-                mapping[old_id] = f"{self.ids_spec}_{i}"
-            return mapping
+        Returns:
+            - str: basename for auto-numbering
+            - list: explicit ID list
+            - dict (str->str): explicit old->new mapping
+            - dict (str->list): per-stream-name -> IDs (from StandardizedOutput/DataStream)
+        """
+        onto = self.onto_spec
 
-        elif isinstance(self.ids_spec, list):
-            # List of new IDs: must match length
-            if len(self.ids_spec) != len(self.source_ids):
-                raise ValueError(
-                    f"ids list length ({len(self.ids_spec)}) does not match "
-                    f"source ID count ({len(self.source_ids)})"
-                )
-            return dict(zip(self.source_ids, self.ids_spec))
+        if isinstance(onto, str):
+            return onto
 
-        elif isinstance(self.ids_spec, dict):
-            # Dict mapping: validate all keys exist
-            missing = set(self.ids_spec.keys()) - set(self.source_ids)
-            if missing:
-                raise ValueError(f"ids dict contains unknown source IDs: {missing}")
-            # For IDs not in the dict, keep the original name
-            mapping = {}
-            for old_id in self.source_ids:
-                mapping[old_id] = self.ids_spec.get(old_id, old_id)
-            return mapping
+        if isinstance(onto, dict):
+            return onto
 
-        else:
-            raise ValueError(f"ids must be str, list, or dict, got {type(self.ids_spec)}")
+        if isinstance(onto, list):
+            return onto
+
+        if isinstance(onto, DataStream):
+            # Single stream: return its IDs keyed by stream name
+            return {onto.name: list(onto.ids)}
+
+        if isinstance(onto, StandardizedOutput):
+            # Collect IDs from all non-empty streams
+            stream_ids = {}
+            for stream_name, stream in onto.streams.items():
+                if isinstance(stream, DataStream) and len(stream) > 0:
+                    stream_ids[stream_name] = list(stream.ids)
+            return stream_ids
+
+        raise ValueError(f"onto must be str, list, dict, DataStream, or StandardizedOutput, got {type(onto)}")
 
     def _collect_source_streams(self) -> List[Dict[str, Any]]:
         """Collect info about source streams for config generation."""
@@ -151,6 +158,242 @@ echo "=== ReMap ready ==="
                 streams_info.append(info)
         return streams_info
 
+    def _compute_id_mapping(self) -> Dict[str, str]:
+        """
+        Compute a single old->new ID mapping that covers all streams.
+
+        Strategy depends on the resolved onto_ids type:
+        - str: auto-number based on each stream's IDs
+        - list: match against streams with the same length
+        - dict (str->str): direct mapping
+        - dict (str->list): per-stream matching by name or length
+        """
+        onto = self.onto_ids
+        mapping = {}
+
+        if isinstance(onto, str):
+            # String basename: generate numbered IDs from all source streams
+            all_source_ids = []
+            seen = set()
+            for stream_info in self.source_streams:
+                for sid in stream_info["ids"]:
+                    if sid not in seen:
+                        all_source_ids.append(sid)
+                        seen.add(sid)
+            for i, old_id in enumerate(all_source_ids, start=1):
+                mapping[old_id] = f"{onto}_{i}"
+            return mapping
+
+        if isinstance(onto, list):
+            # List: find streams where length matches, zip them
+            for stream_info in self.source_streams:
+                source_ids = stream_info["ids"]
+                if len(source_ids) == len(onto):
+                    for old_id, new_id in zip(source_ids, onto):
+                        mapping[old_id] = new_id
+            if not mapping:
+                raise ValueError(
+                    f"onto list has {len(onto)} IDs but no source stream has "
+                    f"matching length. Stream lengths: "
+                    f"{[(s['stream_key'], len(s['ids'])) for s in self.source_streams]}"
+                )
+            return mapping
+
+        if isinstance(onto, dict):
+            # Could be str->str (direct mapping) or str->list (per-stream)
+            if not onto:
+                return mapping
+
+            first_val = next(iter(onto.values()))
+
+            if isinstance(first_val, str):
+                # Direct old->new mapping
+                for stream_info in self.source_streams:
+                    for old_id in stream_info["ids"]:
+                        if old_id in onto:
+                            mapping[old_id] = onto[old_id]
+                return mapping
+
+            if isinstance(first_val, list):
+                # Per-stream mapping from StandardizedOutput/DataStream
+                if self.map_source is not None:
+                    return self._compute_mapping_via_bridge(onto)
+                return self._compute_mapping_via_zip(onto)
+
+        raise ValueError(f"Unexpected onto_ids type: {type(onto)}")
+
+    def _resolve_via_provenance(self, source_ids: List[str], onto_stream: DataStream) -> Dict[str, str]:
+        """
+        Build mapping using provenance columns from the onto stream's map_table.
+
+        Map_tables include provenance columns ({stream_name}.id) that track which
+        input ID produced each output. This method reads those columns to find
+        which source IDs map to which onto IDs.
+
+        Args:
+            source_ids: IDs from the source tool to map from
+            onto_stream: DataStream whose map_table contains provenance columns
+
+        Returns:
+            Dict mapping source_id -> onto_id for matched IDs
+        """
+        mapping = {}
+        if not onto_stream.map_table:
+            return mapping
+
+        map_data = onto_stream._get_map_data()
+        if map_data is None or 'id' not in map_data.columns:
+            return mapping
+
+        source_id_set = set(str(s) for s in source_ids)
+        provenance_cols = [c for c in map_data.columns if c.endswith('.id') and c != 'id']
+
+        for prov_col in provenance_cols:
+            prov_values = set(map_data[prov_col].astype(str))
+            if not prov_values.intersection(source_id_set):
+                continue
+
+            # This provenance column links source IDs to onto IDs
+            for _, row in map_data.iterrows():
+                src_id = str(row[prov_col])
+                onto_id = str(row['id'])
+                if src_id in source_id_set and src_id not in mapping:
+                    mapping[src_id] = onto_id
+
+            if mapping:
+                return mapping
+
+        return mapping
+
+    def _get_onto_streams(self) -> List[DataStream]:
+        """Get the original DataStream objects from the onto specification."""
+        onto = self.onto_spec
+        if isinstance(onto, DataStream):
+            return [onto]
+        if isinstance(onto, StandardizedOutput):
+            streams = []
+            for stream_name, stream in onto.streams.items():
+                if isinstance(stream, DataStream) and len(stream) > 0:
+                    streams.append(stream)
+            return streams
+        return []
+
+    def _compute_mapping_via_zip(self, onto_stream_ids: Dict[str, List[str]]) -> Dict[str, str]:
+        """
+        Build mapping by zipping source and onto IDs where stream lengths match.
+
+        For each source stream, looks for an onto stream with matching length
+        (first by name, then by length). When neither matches, falls back to
+        provenance-based resolution using map_table provenance columns.
+        """
+        mapping = {}
+        onto_by_length = {}
+        for name, ids in onto_stream_ids.items():
+            onto_by_length.setdefault(len(ids), []).append((name, ids))
+
+        unmapped_source_streams = []
+
+        for stream_info in self.source_streams:
+            source_ids = stream_info["ids"]
+            stream_key = stream_info["stream_key"]
+            n = len(source_ids)
+
+            # Try matching by stream name first
+            if stream_key in onto_stream_ids and len(onto_stream_ids[stream_key]) == n:
+                for old_id, new_id in zip(source_ids, onto_stream_ids[stream_key]):
+                    mapping[old_id] = new_id
+                continue
+
+            # Fall back to matching by length
+            if n in onto_by_length and onto_by_length[n]:
+                _, onto_ids = onto_by_length[n][0]
+                for old_id, new_id in zip(source_ids, onto_ids):
+                    mapping[old_id] = new_id
+                continue
+
+            unmapped_source_streams.append(stream_info)
+
+        # Provenance-based fallback for streams that couldn't be matched by name/length
+        if unmapped_source_streams:
+            onto_streams = self._get_onto_streams()
+            for stream_info in unmapped_source_streams:
+                source_ids = stream_info["ids"]
+                for onto_stream in onto_streams:
+                    prov_mapping = self._resolve_via_provenance(source_ids, onto_stream)
+                    if prov_mapping:
+                        mapping.update(prov_mapping)
+                        break
+
+        return mapping
+
+    def _compute_mapping_via_bridge(self, onto_stream_ids: Dict[str, List[str]]) -> Dict[str, str]:
+        """
+        Build mapping using an intermediate tool's provenance to bridge source and onto IDs.
+
+        The bridge tool (self.map_source) connects source IDs to onto IDs through its
+        provenance columns. For example, if source=tool_a and onto=tool_c,
+        bridge=tool_b:
+        - tool_b's map_table has provenance columns (e.g., sequences.id) linking
+          tool_a input IDs to tool_b output IDs
+        - tool_b output IDs match tool_c's IDs
+        - So: tool_a_id -> tool_b_id -> tool_c_id
+
+        The bridge's map_tables contain provenance columns ({stream}.id) that link
+        input IDs to output IDs.
+        """
+        mapping = {}
+        bridge = self.map_source
+
+        # Collect all onto IDs into a flat set for matching
+        all_onto_ids = set()
+        for ids in onto_stream_ids.values():
+            all_onto_ids.update(ids)
+
+        # Collect all source IDs for provenance matching
+        all_source_ids = set()
+        for stream_info in self.source_streams:
+            all_source_ids.update(stream_info["ids"])
+
+        # Look through bridge's streams for provenance that connects source to onto
+        for stream_name, stream in bridge.streams.items():
+            if not isinstance(stream, DataStream) or not stream.map_table:
+                continue
+
+            bridge_ids = list(stream.ids)
+
+            # Check if bridge output IDs overlap with onto IDs
+            if not all_onto_ids.intersection(bridge_ids):
+                continue
+
+            # This bridge stream's IDs match onto IDs.
+            # Read its map_table to find provenance columns linking back to source IDs.
+            map_data = stream._get_map_data()
+            if map_data is None or 'id' not in map_data.columns:
+                continue
+
+            provenance_cols = [c for c in map_data.columns if c.endswith('.id') and c != 'id']
+
+            for prov_col in provenance_cols:
+                prov_values = set(map_data[prov_col].astype(str))
+                if not prov_values.intersection(all_source_ids):
+                    continue
+
+                # This provenance column links source IDs to bridge IDs
+                for _, row in map_data.iterrows():
+                    src_id = str(row[prov_col])
+                    bridge_id = str(row['id'])
+                    if src_id in all_source_ids and bridge_id in all_onto_ids:
+                        mapping[src_id] = bridge_id
+
+                if mapping:
+                    return mapping
+
+        # Fallback: try zip approach if bridge mapping didn't work
+        if not mapping:
+            return self._compute_mapping_via_zip(onto_stream_ids)
+
+        return mapping
+
     def _collect_source_tables(self) -> List[Dict[str, str]]:
         """Collect info about source tables."""
         tables_info = []
@@ -163,14 +406,6 @@ echo "=== ReMap ready ==="
                 })
         return tables_info
 
-    def _collect_source_map_tables(self) -> List[str]:
-        """Collect all map_table paths from source streams."""
-        paths = []
-        for stream_info in self.source_streams:
-            if stream_info["map_table"]:
-                paths.append(stream_info["map_table"])
-        return paths
-
     def validate_params(self):
         """Validate ReMap parameters."""
         pass
@@ -179,15 +414,23 @@ echo "=== ReMap ready ==="
         """Configure inputs from pipeline context."""
         self.folders = pipeline_folders
 
+    def get_config_display(self) -> List[str]:
+        """Get configuration display lines."""
+        config_lines = super().get_config_display()
+        config_lines.append(f"MAPPINGS: {len(self.id_mapping)} IDs")
+        for old_id, new_id in list(self.id_mapping.items())[:5]:
+            config_lines.append(f"  {old_id} -> {new_id}")
+        if len(self.id_mapping) > 5:
+            config_lines.append(f"  ... and {len(self.id_mapping) - 5} more")
+        return config_lines
+
     def generate_script(self, script_path: str) -> str:
         """Generate bash script for ReMap execution."""
-        # Write the remap config JSON at configuration time
         config = {
             "id_mapping": self.id_mapping,
             "output_folder": self.output_folder,
             "streams": self.source_streams,
             "tables": self.source_tables,
-            "map_tables": self.source_map_tables,
         }
 
         os.makedirs(self.output_folder, exist_ok=True)
@@ -210,7 +453,6 @@ echo "=== ReMap ready ==="
         """Get expected output files with remapped IDs."""
         output = {}
 
-        # Build remapped streams
         for stream_info in self.source_streams:
             stream_key = stream_info["stream_key"]
             fmt = stream_info["format"]
@@ -219,18 +461,25 @@ echo "=== ReMap ready ==="
 
             new_ids = [self.id_mapping.get(oid, oid) for oid in old_ids]
 
-            # Build new file paths (symlinks will be created at execution time)
+            # Build new file paths
             new_files = []
-            if old_files:
-                for old_id, new_id, old_file in zip(old_ids, new_ids, old_files):
+            if old_files and len(old_files) == len(old_ids):
+                # One file per ID: create new paths
+                for new_id, old_file in zip(new_ids, old_files):
                     ext = os.path.splitext(old_file)[1]
                     new_file = os.path.join(self.output_folder, f"{new_id}{ext}")
                     new_files.append(new_file)
+            elif old_files and len(old_files) == 1:
+                # Single shared file (e.g., sequences CSV): will be rewritten
+                new_files = [os.path.join(self.output_folder,
+                             os.path.basename(old_files[0]))]
+            else:
+                new_files = []
 
             # Create map_table for this stream
             map_table_path = os.path.join(self.output_folder, f"{stream_info['name']}_map.csv")
 
-            # Build provenance: trace new IDs back to old IDs via stream_key
+            # Build provenance: trace new IDs back to old IDs
             provenance = {stream_key: old_ids}
 
             create_map_table(

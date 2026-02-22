@@ -32,10 +32,12 @@ or alphanumeric). Use {"*": "*_<N>"} if you need to restrict to numeric-only suf
 
 Matching priority order (when using get_mapped_ids with unique=True):
     1. Exact match (source_id == target_id)
-    2. Provenance match (via map_table provenance columns)
-    3. Child match (target derives from source, closest first)
-    4. Parent match (source derives from target, closest first)
-    5. Sibling match (common ancestor, closest combined distance first)
+    2. Exact provenance match (via map_table provenance columns)
+    3. For each candidate id in [source_id, *provenance_ids]:
+       a. Child match (target derives from candidate, closest first)
+       b. Parent match (candidate derives from target, closest first)
+    4. For each candidate id in [source_id, *provenance_ids]:
+       Sibling match (common ancestor, closest combined distance first)
 """
 
 import re
@@ -242,6 +244,52 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     return candidates
 
 
+def _get_provenance_ids(source_id, map_table_paths):
+    """
+    Get all provenance identity values for a source_id from map_tables.
+
+    Reads provenance columns ({stream}.id) from map_table CSVs and returns
+    all alternate identities for the given source_id, without filtering
+    against any target set.
+
+    Args:
+        source_id: The ID to look up
+        map_table_paths: List of map_table CSV paths to search
+
+    Returns:
+        List of provenance identity strings (may be empty)
+    """
+    if not map_table_paths:
+        return []
+    from biopipelines_io import _table_cache
+    import pandas as pd
+    import os
+    provenance_ids = []
+    for path in map_table_paths:
+        if not path or not os.path.exists(path):
+            continue
+        if path in _table_cache:
+            df = _table_cache[path]
+        else:
+            try:
+                df = pd.read_csv(path)
+                _table_cache[path] = df
+            except Exception:
+                continue
+        if "id" not in df.columns:
+            continue
+        row = df[df["id"].astype(str) == source_id]
+        if row.empty:
+            continue
+        row = row.iloc[0]
+        for col in df.columns:
+            if col.endswith(".id") and col != "id":
+                val = str(row[col])
+                if val and val != source_id and val != "nan":
+                    provenance_ids.append(val)
+    return provenance_ids
+
+
 def get_mapped_ids(
     source_ids: List[str],
     target_ids: List[str],
@@ -279,10 +327,12 @@ def get_mapped_ids(
 
     Priority order (when unique=True):
         1. Exact match (source_id == target_id)
-        2. Provenance match (via map_table provenance columns)
-        3. Child match (target derives from source, closest first)
-        4. Parent match (source derives from target, closest first)
-        5. Sibling match (common ancestor, closest combined distance first)
+        2. Exact provenance match (via map_table provenance columns)
+        3. For each candidate in [source_id, *provenance_ids]:
+           a. Child match (target derives from candidate, closest first)
+           b. Parent match (candidate derives from target, closest first)
+        4. For each candidate in [source_id, *provenance_ids]:
+           Sibling match (common ancestor, closest combined distance first)
 
     Examples:
         >>> # Exact match
@@ -347,53 +397,70 @@ def get_mapped_ids(
                     result[source_id] = [matched]
                 continue
 
-        # Priority 3: Target is a "child" of source (target = source + suffix)
-        child_matches = []
-        for target_id in target_ids:
-            target_bases = target_bases_cache[target_id]
-            if source_id in target_bases:
-                distance = target_bases.index(source_id)
-                child_matches.append((target_id, distance))
+        # Build candidate IDs: source_id + provenance identities
+        candidate_ids = [source_id]
+        if map_table_paths:
+            for prov_id in _get_provenance_ids(source_id, map_table_paths):
+                if prov_id not in candidate_ids:
+                    candidate_ids.append(prov_id)
 
-        if child_matches:
-            child_matches.sort(key=lambda x: x[1])
-            if unique:
-                result[source_id] = child_matches[0][0]
-            else:
-                result[source_id] = [m[0] for m in child_matches]
+        # Priority 3: Child/Parent match for each candidate id
+        # For each candidate, try child then parent before moving to next candidate
+        found = False
+        for cand_id in candidate_ids:
+            # 3a: Target is a "child" of candidate (target = cand_id + suffix)
+            child_matches = []
+            for target_id in target_ids:
+                target_bases = target_bases_cache[target_id]
+                if cand_id in target_bases:
+                    distance = target_bases.index(cand_id)
+                    child_matches.append((target_id, distance))
+
+            if child_matches:
+                child_matches.sort(key=lambda x: x[1])
+                if unique:
+                    result[source_id] = child_matches[0][0]
+                else:
+                    result[source_id] = [m[0] for m in child_matches]
+                found = True
+                break
+
+            # 3b: Candidate is a "child" of target (cand_id = target + suffix)
+            cand_bases = map_table_ids_to_ids(cand_id, id_map)
+            parent_matches = []
+            for i, base in enumerate(cand_bases[1:], start=1):
+                if base in target_set:
+                    parent_matches.append((base, i))
+
+            if parent_matches:
+                parent_matches.sort(key=lambda x: x[1])
+                if unique:
+                    result[source_id] = parent_matches[0][0]
+                else:
+                    result[source_id] = [m[0] for m in parent_matches]
+                found = True
+                break
+
+        if found:
             continue
 
-        # Priority 4: Source is a "child" of target (source = target + suffix)
-        source_bases = map_table_ids_to_ids(source_id, id_map)
-        parent_matches = []
-        for i, base in enumerate(source_bases[1:], start=1):
-            if base in target_set:
-                parent_matches.append((base, i))
-
-        if parent_matches:
-            parent_matches.sort(key=lambda x: x[1])
-            if unique:
-                result[source_id] = parent_matches[0][0]
-            else:
-                result[source_id] = [m[0] for m in parent_matches]
-            continue
-
-        # Priority 5: Sibling match (source and target share common ancestor)
-        # Find targets that share any base with source
-        source_bases_set = set(source_bases)
+        # Priority 4: Sibling match for each candidate id
         sibling_matches = []
-        for target_id in target_ids:
-            target_bases = target_bases_cache[target_id]
-            # Find common ancestors
-            common = source_bases_set & set(target_bases)
-            if common:
-                # Find the most specific common ancestor (closest to both)
-                for common_base in common:
-                    source_dist = source_bases.index(common_base)
-                    target_dist = target_bases.index(common_base)
-                    # Combined distance: prefer matches where both are close to ancestor
-                    combined_dist = source_dist + target_dist
-                    sibling_matches.append((target_id, combined_dist, source_dist))
+        for cand_id in candidate_ids:
+            cand_bases = map_table_ids_to_ids(cand_id, id_map)
+            cand_bases_set = set(cand_bases)
+            for target_id in target_ids:
+                target_bases = target_bases_cache[target_id]
+                # Find common ancestors
+                common = cand_bases_set & set(target_bases)
+                if common:
+                    # Find the most specific common ancestor (closest to both)
+                    for common_base in common:
+                        source_dist = cand_bases.index(common_base)
+                        target_dist = target_bases.index(common_base)
+                        # Combined distance: prefer matches where both are close to ancestor
+                        combined_dist = source_dist + target_dist
+                        sibling_matches.append((target_id, combined_dist, source_dist))
 
         if sibling_matches:
             # Sort by combined distance, then by source distance
