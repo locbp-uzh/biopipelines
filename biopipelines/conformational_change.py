@@ -63,6 +63,7 @@ echo "=== ConformationalChange ready ==="
                  target_structures: Union[DataStream, StandardizedOutput],
                  selection: Optional[Union[str, Tuple['TableInfo', str]]] = None,
                  alignment: str = "align",
+                 atoms: str = "all",
                  **kwargs):
         """
         Initialize conformational change analysis tool.
@@ -75,6 +76,11 @@ echo "=== ConformationalChange ready ==="
                       - String: '10-20+30-40' (fixed residue ranges for all structures)
                       - Table column reference: (table, "column_name") for per-structure selections
             alignment: Alignment method - "align", "super", or "cealign" (default: "align")
+            atoms: Which atoms to use for alignment. Options:
+                  - "all" (default): all atoms
+                  - "CA": alpha-carbon only
+                  - "backbone": backbone atoms (CA+C+N+O)
+                  - Any '+'-separated atom names, e.g. "CA+CB"
             **kwargs: Additional parameters
 
         Selection Syntax (string):
@@ -109,6 +115,21 @@ echo "=== ConformationalChange ready ==="
                 target_structures=refolded,
                 selection=backbones.tables.structures.fixed
             )
+
+            # CA-only RMSD
+            conf_analysis = ConformationalChange(
+                reference_structures=design,
+                target_structures=refolded,
+                atoms='CA'
+            )
+
+            # Backbone RMSD on specific region
+            conf_analysis = ConformationalChange(
+                reference_structures=design,
+                target_structures=refolded,
+                selection='10-50',
+                atoms='backbone'
+            )
         """
         # Resolve reference structures to DataStream
         if isinstance(reference_structures, StandardizedOutput):
@@ -128,6 +149,7 @@ echo "=== ConformationalChange ready ==="
 
         self.selection_spec = selection
         self.alignment_method = alignment
+        self.atoms = atoms
 
         super().__init__(**kwargs)
 
@@ -164,7 +186,8 @@ echo "=== ConformationalChange ready ==="
             f"TARGET STRUCTURES: {len(self.target_stream)} files",
             f"SELECTION: {selection_display}",
             f"ALIGNMENT METHOD: {self.alignment_method}",
-            f"METRICS: RMSD (PyMOL {self.alignment_method}, all atoms)"
+            f"ATOMS: {self.atoms}",
+            f"METRICS: RMSD (PyMOL {self.alignment_method}, {self.atoms} atoms)"
         ])
 
         return config_lines
@@ -212,6 +235,7 @@ echo "=== ConformationalChange ready ==="
             "target_structures_json": self.target_ds_json,
             "selection": selection_config,
             "alignment_method": self.alignment_method,
+            "atoms": self.atoms,
             "output_csv": self.analysis_csv
         }
 
@@ -258,7 +282,8 @@ python "{self.analysis_py}" --config "{self.config_file}"
         base_dict.update({
             "tool_params": {
                 "selection": selection_str,
-                "alignment_method": self.alignment_method
+                "alignment_method": self.alignment_method,
+                "atoms": self.atoms
             }
         })
         return base_dict

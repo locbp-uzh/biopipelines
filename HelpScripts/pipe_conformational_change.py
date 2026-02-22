@@ -26,8 +26,28 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from biopipelines_io import load_datastream, iterate_files
 
 
+def resolve_atoms(atoms: str) -> Optional[str]:
+    """
+    Resolve an atoms specification to a PyMOL atom name selection string.
+
+    Args:
+        atoms: Atom specification. "all" returns None (no filter).
+            "backbone" expands to "CA+C+N+O". Any '+'-separated names
+            are joined with '+' for PyMOL's ``name`` selector.
+
+    Returns:
+        PyMOL name selection string (e.g. "CA+C+N+O"), or None for all atoms
+    """
+    if atoms == "all":
+        return None
+    if atoms == "backbone":
+        return "CA+C+N+O"
+    return atoms
+
+
 def align_and_compute_rmsd(ref_obj: str, target_obj: str, selection: str,
-                           alignment_method: str) -> Dict[str, Any]:
+                           alignment_method: str,
+                           atoms: str = "all") -> Dict[str, Any]:
     """
     Align target structure to reference and return RMSD from PyMOL.
 
@@ -36,6 +56,7 @@ def align_and_compute_rmsd(ref_obj: str, target_obj: str, selection: str,
         target_obj: Target PyMOL object name (will be aligned to reference)
         selection: Selection specification, or None/"all" for whole structure
         alignment_method: "align", "super", or "cealign"
+        atoms: Atom specification ("all", "CA", "backbone", or "CA+CB" etc.)
 
     Returns:
         Dictionary with RMSD and num_aligned_atoms from PyMOL's alignment
@@ -47,6 +68,12 @@ def align_and_compute_rmsd(ref_obj: str, target_obj: str, selection: str,
     else:
         ref_sel = f"{ref_obj} and resi {selection}"
         target_sel = f"{target_obj} and resi {selection}"
+
+    # Apply atom name filter
+    atom_names = resolve_atoms(atoms)
+    if atom_names:
+        ref_sel = f"({ref_sel}) and name {atom_names}"
+        target_sel = f"({target_sel}) and name {atom_names}"
 
     if alignment_method == "align":
         # Returns: [RMSD_after, atoms_after, cycles, RMSD_before, atoms_before, score, residues_aligned]
@@ -145,7 +172,8 @@ def lookup_selection_with_base_id(structure_id: str, selection_map: Dict[str, st
 
 
 def analyze_conformational_change(ref_path: str, target_path: str, selection: str,
-                                  alignment_method: str) -> Optional[Dict[str, Any]]:
+                                  alignment_method: str,
+                                  atoms: str = "all") -> Optional[Dict[str, Any]]:
     """
     Analyze conformational change between reference and target structures.
 
@@ -154,6 +182,7 @@ def analyze_conformational_change(ref_path: str, target_path: str, selection: st
         target_path: Path to target structure file
         selection: Selection specification (e.g., '10-20+30-40')
         alignment_method: Alignment method ("align", "super", or "cealign")
+        atoms: Atom specification ("all", "CA", "backbone", or "CA+CB" etc.)
 
     Returns:
         Dictionary with RMSD and num_aligned_atoms, or None if failed
@@ -175,7 +204,7 @@ def analyze_conformational_change(ref_path: str, target_path: str, selection: st
         print(f"  - Selection: {selection}")
 
         # Align and get RMSD from PyMOL
-        metrics = align_and_compute_rmsd(ref_obj, target_obj, selection, alignment_method)
+        metrics = align_and_compute_rmsd(ref_obj, target_obj, selection, alignment_method, atoms)
 
         # Clean up PyMOL objects
         cmd.delete(ref_obj)
@@ -203,6 +232,7 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
 
     selection_config = config_data['selection']
     alignment_method = config_data['alignment_method']
+    atoms = config_data.get('atoms', 'all')
     output_csv = config_data['output_csv']
 
     print(f"Analyzing conformational changes")
@@ -210,6 +240,7 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
     print(f"Target structures: {len(target_ds.ids)}")
     print(f"Selection: {selection_config}")
     print(f"Alignment method: {alignment_method}")
+    print(f"Atoms: {atoms}")
 
     # Initialize PyMOL in headless mode
     pymol.pymol_argv = ['pymol', '-c']
@@ -289,7 +320,7 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
             continue
 
         # Analyze conformational change
-        metrics = analyze_conformational_change(ref_path, target_path, selection, alignment_method)
+        metrics = analyze_conformational_change(ref_path, target_path, selection, alignment_method, atoms)
 
         if metrics is None:
             continue

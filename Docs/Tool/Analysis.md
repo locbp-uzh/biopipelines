@@ -159,8 +159,13 @@ Quantifies structural changes between reference and target structures using PyMO
 **Parameters**:
 - `reference_structures`: Union[DataStream, StandardizedOutput] (required) - Reference structures. Can be one or the same number as targets.
 - `target_structures`: Union[DataStream, StandardizedOutput] (required) - Target structures to compare
-- `selection`: Optional[str] = None - Residue range (e.g., '10-20+30-40'). None = all CA atoms.
+- `selection`: Optional[str] = None - Residue range (e.g., '10-20+30-40'). None = whole structure.
 - `alignment`: str = "align" - Alignment method (align, super, cealign). Rule of thumb: sequence similarity > 50% -> align; otherwise cealign.
+- `atoms`: str = "all" - Which atoms to use for alignment:
+  - `"all"` (default): all atoms
+  - `"CA"`: alpha-carbon only
+  - `"backbone"`: backbone atoms (CA+C+N+O)
+  - Any `+`-separated atom names, e.g. `"CA+CB"`
 
 **Tables**:
 - `changes`:
@@ -172,11 +177,27 @@ Quantifies structural changes between reference and target structures using PyMO
 ```python
 from biopipelines.conformational_change import ConformationalChange
 
+# All-atom RMSD on a specific region
 conf_change = ConformationalChange(
     reference_structures=apo_structures,
     target_structures=holo_structures,
     selection="10-50",
     alignment="super"
+)
+
+# CA-only RMSD
+conf_change = ConformationalChange(
+    reference_structures=design,
+    target_structures=refolded,
+    atoms="CA"
+)
+
+# Backbone RMSD on redesigned region
+conf_change = ConformationalChange(
+    reference_structures=kinase,
+    target_structures=refolded,
+    selection=backbones.tables.structures.fixed,
+    atoms="backbone"
 )
 ```
 

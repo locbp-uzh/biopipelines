@@ -27,6 +27,7 @@ Fetches protein structures with priority: `local_folder` → `PDBs/` → RCSB do
 - `local_folder`: str = None - Check first before PDBs/
 - `biological_assembly`: bool = False - Download biological assembly
 - `remove_waters`: bool = True - Remove water molecules
+- `chain`: str = "longest" - Which chain to extract sequence from. "longest" (default) picks the longest chain. Specify a chain letter (e.g. "A", "B") to select that chain.
 
 **Operations** (optional positional args):
 - `PDB.Rename(old, new)` - Rename residues (e.g., for RFdiffusion3 compatibility)
