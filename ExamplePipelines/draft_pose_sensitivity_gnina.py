@@ -60,7 +60,7 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                                   mutants.tables.confidence],
                           operations=[Panda.merge()])
 
-    gnina_best = Panda(tables=docking.tables.conformer_ranking,
+    gnina_best = Panda(tables=docking.tables.docking_summary,
                        operations=[Panda.sort("best_vina", ascending=True),
                                    Panda.drop_duplicates(subset="protein_id", keep="first"),
                                    Panda.select_columns(["protein_id", "best_vina",

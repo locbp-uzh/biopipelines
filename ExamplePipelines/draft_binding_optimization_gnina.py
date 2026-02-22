@@ -1,4 +1,4 @@
-# 10.1111/mmi.12043 Atu4243 9 ± 2 μM
+# 10.1111/mmi.12043 Atu4243 9 ± 2 μM
 
 from biopipelines.pipeline import *
 from biopipelines.boltz2 import Boltz2
@@ -21,47 +21,53 @@ for example, comp in examples.items():
         Resources(gpu="A100", time="24:00:00", memory="16GB")
         protein = PDB(comp[0])
         ligand = Ligand(comp[1])
-        original = Boltz2(proteins=protein, 
+        original = Boltz2(proteins=protein,
                         ligands=ligand)
         current_best_sequence = protein
         docked_original = Gnina(structures=original,
                                 compounds=ligand)
-        current_best = Panda(tables=docked_original.tables.docking_results,
-                            operations=[Panda.sort("cnn_affinity", ascending=True),
+        current_best = Panda(tables=docked_original.tables.docking_summary,
+                            operations=[Panda.sort("mean_cnn_affinity", ascending=True),
                                         Panda.head(1)],
                             pool=docked_original)
         for cycle in range(5):
             Suffix(f"Cycle{cycle+1}")
             pocket = DistanceSelector(structures=current_best,
-                                    ligand="LIG", 
+                                    ligand="LIG",
                                     distance=5)
             variants = LigandMPNN(structures=current_best,
                                 ligand="LIG",
                                 num_sequences=1000,
                                 redesigned=pocket.tables.selections.within)
-            profile = MutationProfiler(original=current_best_sequence, 
+            profile = MutationProfiler(original=current_best_sequence,
                                        mutants=variants)
             candidates = MutationComposer(frequencies=profile.tables.absolute_frequencies,
-                                        num_sequences=10, 
-                                        mode="weighted_random", 
+                                        num_sequences=10,
+                                        mode="weighted_random",
                                         max_mutations=3)
-            predicted = Boltz2(proteins=candidates, 
+            predicted = Boltz2(proteins=candidates,
                             ligands=ligand)
             docked = Gnina(structures=predicted,
                            compounds=ligand)
+            # Select best structure for next cycle (pool from docked for structures)
             current_best = Panda(tables=[current_best.tables.result,
-                                        docked.tables.docking_results],
+                                        docked.tables.docking_summary],
                                 operations=[Panda.concat(add_source=True),
-                                            Panda.sort("cnn_affinity", ascending=True),
+                                            Panda.sort("mean_cnn_affinity", ascending=True),
                                             Panda.head(1)],
-                                pool=[current_best, 
+                                pool=[current_best,
                                       docked])
-            current_best_sequence = Panda(tables=[current_best.tables.result,
-                                                  docked.tables.docking_results],
-                                            operations=[Panda.concat(add_source=True),
-                                                        Panda.sort("cnn_affinity", ascending=True),
-                                                        Panda.head(1)],
-                                            pool=[current_best_sequence, 
-                                                  candidates])
-
-
+            # Select best sequence for MutationProfiler: use docking_summary
+            # but remap id to structures.id so pool matching finds the right
+            # sequence in predicted (Boltz2), which propagates sequences
+            # from candidates
+            current_best_sequence = Panda(
+                                tables=[current_best_sequence.tables.result,
+                                        docked.tables.docking_summary],
+                                operations=[Panda.concat(add_source=True),
+                                            Panda.sort("mean_cnn_affinity", ascending=True),
+                                            Panda.head(1),
+                                            Panda.drop_columns(["id"]),
+                                            Panda.rename({"structures.id": "id"})],
+                                pool=[current_best_sequence,
+                                      predicted])

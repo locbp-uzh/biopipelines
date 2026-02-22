@@ -99,4 +99,4 @@ with Pipeline(project="Examples",
     )
     # Results:
     #   docking_conformers.tables.docking_results   — all poses with Vina & CNN scores
-    #   docking_conformers.tables.conformer_ranking — per-conformer stats + pseudo_binding_energy
+    #   docking_conformers.tables.docking_summary   — per-conformer aggregated stats across runs

@@ -11,7 +11,7 @@ Orchestrates the full docking workflow:
 2. Ligand/conformer preparation (RDKit conformer generation or loading)
 3. Docking execution (GNINA binary calls)
 4. Pose consistency analysis (RMSD clustering across runs)
-5. Results aggregation (docking_results.csv + conformer_ranking.csv)
+5. Results aggregation (docking_results.csv + docking_summary.csv)
 
 Usage:
     python pipe_gnina.py <config_json>
@@ -862,14 +862,14 @@ def _single_linkage_cluster(rmsd_matrix, threshold):
 
 def aggregate_results(all_poses, conformers, consistency, config, prepared_proteins):
     """
-    Aggregate results into docking_results.csv and conformer_ranking.csv.
+    Aggregate results into docking_results.csv and docking_summary.csv.
 
     Also writes best poses as combined protein+ligand PDB files under
     best_poses/ within the output folder.
     """
     output_folder = config["output_folder"]
     docking_results_csv = config["docking_results_csv"]
-    conformer_ranking_csv = config["conformer_ranking_csv"]
+    docking_summary_csv = config["docking_summary_csv"]
 
     if all_poses:
         results_df = pd.DataFrame(all_poses)
@@ -896,13 +896,15 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
         key = (pose["structures.id"], pose["compounds.id"], pose["conformer_id"])
         groups[key].append(pose)
 
-    ranking_rows = []
+    summary_rows = []
     for key, poses in groups.items():
         protein_id, ligand_id, conformer_id = key
 
         vina_scores = [p["vina_score"] for p in poses if p["vina_score"] != ""]
         cnn_scores = [p["cnn_score"] for p in poses if p["cnn_score"] != ""]
+        cnn_affinities = [p["cnn_affinity"] for p in poses if p["cnn_affinity"] != ""]
 
+        # Best pose per run (by Vina score)
         best_per_run = {}
         for pose in poses:
             run = pose["run"]
@@ -913,11 +915,15 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
                 best_per_run[run] = pose
 
         run_vinas = [best_per_run[r]["vina_score"] for r in best_per_run]
+        run_cnn_affinities = [best_per_run[r]["cnn_affinity"] for r in best_per_run
+                              if best_per_run[r]["cnn_affinity"] != ""]
 
         best_vina = min(vina_scores) if vina_scores else ""
         mean_vina = float(np.mean(run_vinas)) if run_vinas else ""
         std_vina = float(np.std(run_vinas)) if len(run_vinas) > 1 else ""
         best_cnn = max(cnn_scores) if cnn_scores else ""
+        mean_cnn_affinity = float(np.mean(run_cnn_affinities)) if run_cnn_affinities else ""
+        std_cnn_affinity = float(np.std(run_cnn_affinities)) if len(run_cnn_affinities) > 1 else ""
         pose_cons = consistency.get(key, "")
         conf_energy = energy_lookup.get((ligand_id, conformer_id), "")
 
@@ -948,7 +954,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
                 _write_complex_pdb(protein_pdb, src_sdf, best_pose["pose"], dst_pdb)
                 best_pose_file = dst_pdb
 
-        ranking_rows.append({
+        summary_rows.append({
             "id": f"{protein_id}_{ligand_id}",
             "structures.id": protein_id,
             "compounds.id": ligand_id,
@@ -957,21 +963,23 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
             "mean_vina": mean_vina,
             "std_vina": std_vina,
             "best_cnn_score": best_cnn,
+            "mean_cnn_affinity": mean_cnn_affinity,
+            "std_cnn_affinity": std_cnn_affinity,
             "pose_consistency": pose_cons,
             "conformer_energy": conf_energy,
             "pseudo_binding_energy": pseudo_be,
             "best_pose_file": best_pose_file,
         })
 
-    ranking_df = pd.DataFrame(ranking_rows)
-    if not ranking_df.empty and "best_vina" in ranking_df.columns:
-        ranking_df["_sort_key"] = pd.to_numeric(ranking_df["best_vina"], errors="coerce")
-        ranking_df = (ranking_df.sort_values("_sort_key")
+    summary_df = pd.DataFrame(summary_rows)
+    if not summary_df.empty and "mean_vina" in summary_df.columns:
+        summary_df["_sort_key"] = pd.to_numeric(summary_df["mean_vina"], errors="coerce")
+        summary_df = (summary_df.sort_values("_sort_key")
                                 .drop(columns=["_sort_key"])
                                 .reset_index(drop=True))
 
-    ranking_df.to_csv(conformer_ranking_csv, index=False)
-    print(f"Wrote {len(ranking_df)} conformer rankings to {conformer_ranking_csv}")
+    summary_df.to_csv(docking_summary_csv, index=False)
+    print(f"Wrote {len(summary_df)} docking summaries to {docking_summary_csv}")
 
 
 def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):

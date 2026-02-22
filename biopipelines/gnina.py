@@ -54,9 +54,10 @@ class Gnina(BaseConfig):
 
     Outputs:
         - docking_results: all accepted poses with Vina and CNN scores.
-        - conformer_ranking: per-conformer aggregated statistics including
-          pose consistency (fraction of runs that converge to the same pose)
-          and pseudo_binding_energy (best Vina + conformer strain energy).
+        - docking_summary: per-conformer aggregated statistics including
+          mean scores across runs, pose consistency (fraction of runs that
+          converge to the same pose), and pseudo_binding_energy (best Vina +
+          conformer strain energy).
         - best_poses/: combined protein+ligand PDB files for each best pose.
 
     Usage:
@@ -111,7 +112,7 @@ echo "=== GNINA installation complete ==="
     gnina_binary = Path(lambda self: os.path.join(self.folders["Gnina"], "gnina"))
     helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_gnina.py"))
     docking_results_csv = Path(lambda self: os.path.join(self.output_folder, "docking_results.csv"))
-    conformer_ranking_csv = Path(lambda self: os.path.join(self.output_folder, "conformer_ranking.csv"))
+    docking_summary_csv = Path(lambda self: os.path.join(self.output_folder, "docking_summary.csv"))
     config_json = Path(lambda self: os.path.join(self.output_folder, "gnina_config.json"))
     structures_json = Path(lambda self: os.path.join(self.output_folder, "structures_ds.json"))
     compounds_json = Path(lambda self: os.path.join(self.output_folder, "compounds_ds.json"))
@@ -348,7 +349,7 @@ echo "=== GNINA installation complete ==="
             "structures_json": self.structures_json,
             "compounds_json": self.compounds_json,
             "docking_results_csv": self.docking_results_csv,
-            "conformer_ranking_csv": self.conformer_ranking_csv,
+            "docking_summary_csv": self.docking_summary_csv,
             "missing_csv": upstream_missing,
             "box": box_config,
             "exhaustiveness": self.exhaustiveness,
@@ -456,14 +457,15 @@ python {self.helper_py} {self.config_json}
                 description="All accepted docked poses with Vina and CNN scores",
                 count=0
             ),
-            "conformer_ranking": TableInfo(
-                name="conformer_ranking",
-                path=self.conformer_ranking_csv,
+            "docking_summary": TableInfo(
+                name="docking_summary",
+                path=self.docking_summary_csv,
                 columns=["id", "structures.id", "compounds.id", "conformer_id",
                          "best_vina", "mean_vina", "std_vina", "best_cnn_score",
+                         "mean_cnn_affinity", "std_cnn_affinity",
                          "pose_consistency", "conformer_energy",
                          "pseudo_binding_energy", "best_pose_file"],
-                description="Aggregated conformer ranking with statistical analysis",
+                description="Per-conformer aggregated docking statistics across runs",
                 count=0
             ),
         }
