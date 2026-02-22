@@ -61,8 +61,7 @@ for example, comp in examples.items():
                                             Panda.head(1)],
                                 pool=[current_best,
                                       docked])
-            # Select best structure for next cycle (pool from docked for structures)
-            docked_sequences = ReMap(candidates,docked.streams.structures.ids)
+            docked_sequences = ReMap(candidates, docked)
             current_best_sequence = Panda(
                                 tables=[current_best.tables.result,
                                         docked.tables.docking_summary],

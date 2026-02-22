@@ -202,6 +202,33 @@ def remove_waters_from_content(content: str, format: str) -> str:
     return '\n'.join(filtered_lines)
 
 
+def filter_chain_from_content(content: str, format: str, chain: str) -> str:
+    """
+    Filter structure content to keep only the specified chain.
+
+    Args:
+        content: Structure file content
+        format: File format ("pdb" or "cif")
+        chain: Chain identifier to keep (e.g., "A", "E")
+
+    Returns:
+        Structure content with only the specified chain
+    """
+    if format != "pdb":
+        return content
+
+    lines = content.split('\n')
+    filtered_lines = []
+
+    for line in lines:
+        if line.startswith(('ATOM', 'HETATM')):
+            if len(line) > 21 and line[21] != chain:
+                continue
+        filtered_lines.append(line)
+
+    return '\n'.join(filtered_lines)
+
+
 def extract_sequence_from_structure(content: str, format: str, chain: str = "longest") -> str:
     """
     Extract protein sequence from structure content.
@@ -544,6 +571,10 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         if remove_waters:
             content = remove_waters_from_content(content, target_format)
 
+        # Filter to specific chain if requested
+        if chain != "longest":
+            content = filter_chain_from_content(content, target_format, chain)
+
         # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
         original_ligand_codes = extract_ligands_from_structure(content, target_format)
         rename_mapping = build_rename_mapping(operations) if operations else {}
@@ -719,6 +750,10 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         if remove_waters:
             content = remove_waters_from_content(content, format)
 
+        # Filter to specific chain if requested
+        if chain != "longest":
+            content = filter_chain_from_content(content, format, chain)
+
         # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
         original_ligand_codes = extract_ligands_from_structure(content, format)
         rename_mapping = build_rename_mapping(operations) if operations else {}
@@ -807,6 +842,10 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 # Remove waters if requested
                 if remove_waters:
                     content = remove_waters_from_content(content, "pdb")
+
+                # Filter to specific chain if requested
+                if chain != "longest":
+                    content = filter_chain_from_content(content, "pdb", chain)
 
                 # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
                 original_ligand_codes = extract_ligands_from_structure(content, "pdb")
