@@ -335,7 +335,7 @@ if os.path.exists(msas_folder):
             
             msa_entry = {
                 'id': seq_id,  # Remove msa_ prefix - use same ID as other tables
-                'sequence_id': seq_id,
+                'sequences.id': seq_id,
                 'sequence': sequences_data.get(seq_id, ''),  # Add actual protein sequence
                 'msa_file': os.path.join(msas_folder, msa_file)
             }
@@ -352,7 +352,7 @@ if msa_files_in_dir:
 else:
     print("[Warning] No MSA files found, creating empty MSAs CSV")
     # Create empty MSAs CSV so completion check doesn't fail
-    msa_df = pd.DataFrame(columns=['id', 'sequence_id', 'sequence', 'msa_file'])
+    msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'msa_file'])
     msa_df.to_csv(msa_csv, index=False)
     print(f"Created empty MSAs CSV: {msa_csv}")
 

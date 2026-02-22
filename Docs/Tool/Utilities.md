@@ -255,7 +255,7 @@ Generates multiple sequence alignments for structure prediction.
 **Streams**: `msas`
 
 **Tables**:
-- `msas`: | id | sequence_id | sequence | msa_file |
+- `msas`: | id | sequences.id | sequence | msa_file |
 
 **Example**:
 

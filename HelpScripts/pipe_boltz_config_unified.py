@@ -60,7 +60,7 @@ def parse_arguments():
     )
     parser.add_argument(
         '--msa-table',
-        help='Path to MSA table CSV file (columns: id, sequence_id, sequence, msa_file)'
+        help='Path to MSA table CSV file (columns: id, sequences.id, sequence, msa_file)'
     )
     parser.add_argument(
         '--affinity', action='store_true',
@@ -163,7 +163,7 @@ def load_msa_mappings(msa_table: Optional[str]) -> Dict:
         msa_map_by_seq = {}
 
         for _, row in df.iterrows():
-            seq_id = row.get('sequence_id', row.get('id', ''))
+            seq_id = row.get('sequences.id', row.get('id', ''))
             msa_file = row.get('msa_file', '')
             sequence = row.get('sequence', '')
 

@@ -261,7 +261,7 @@ echo "MMseqs2 processing completed"
             "msas": TableInfo(
                 name="msas",
                 path=self.output_msa_csv,
-                columns=["id", "sequence_id", "sequence", "msa_file"],
+                columns=["id", "sequences.id", "sequence", "msa_file"],
                 description="MSA files for sequence alignment",
                 count=len(sequence_ids)
             )

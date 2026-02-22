@@ -364,7 +364,7 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_posit
         # Return single summary row pointing to the converted CSV file
         return [{
             'id': f"{sequence_id}_msa",
-            'sequence_id': sequence_id,
+            'sequences.id': sequence_id,
             'sequence': query_sequence,
             'msa_file': output_csv_file  # Reference to converted CSV file
         }]
@@ -408,7 +408,7 @@ def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=No
         # Return single summary row pointing to the MSA CSV file
         return [{
             'id': f"{sequence_id}_msa",
-            'sequence_id': sequence_id,
+            'sequences.id': sequence_id,
             'sequence': query_sequence,
             'msa_file': output_csv_file  # Reference to output CSV file
         }]
@@ -554,7 +554,7 @@ def main():
                     query_sequence = existing_df['sequence'].iloc[0]
                     msa_rows = [{
                         'id': f"{sequence_id}_msa",
-                        'sequence_id': sequence_id,
+                        'sequences.id': sequence_id,
                         'sequence': query_sequence,
                         'msa_file': individual_msa_file
                     }]
@@ -634,7 +634,7 @@ def main():
     else:
         log("WARNING: No MSA entries generated")
         # Create empty file with correct columns
-        empty_df = pd.DataFrame(columns=['id', 'sequence_id', 'sequence', 'msa_file'])
+        empty_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'msa_file'])
         empty_df.to_csv(args.output_msa_csv, index=False)
         log(f"Created empty MSA CSV: {args.output_msa_csv}")
 

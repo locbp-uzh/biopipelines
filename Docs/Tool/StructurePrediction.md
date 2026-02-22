@@ -47,8 +47,8 @@ rm install_colabbatch_linux.sh
 
 - `msas` (only when MSAs are generated):
 
-  | id | sequence_id | sequence | msa_file |
-  |----|-------------|----------|----------|
+  | id | sequences.id | sequence | msa_file |
+  |----|--------------|----------|----------|
 
 **Example**:
 ```python

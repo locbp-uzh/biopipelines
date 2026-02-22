@@ -23,7 +23,7 @@ def parse_arguments():
     )
     parser.add_argument(
         '--msa-table', required=True,
-        help='Path to MSA table CSV file (columns: id, sequence_id, msa_file)'
+        help='Path to MSA table CSV file (columns: id, sequences.id, msa_file)'
     )
     parser.add_argument(
         '--output-folder', required=True,
@@ -62,7 +62,7 @@ def copy_msa_files(msa_table_path: str, output_folder: str) -> int:
     copied_count = 0
     for _, row in df.iterrows():
         msa_file = row.get('msa_file', '')
-        seq_id = row.get('sequence_id', row.get('id', ''))
+        seq_id = row.get('sequences.id', row.get('id', ''))
 
         if not msa_file or not os.path.exists(msa_file):
             print(f"Warning: MSA file not found: {msa_file}")
