@@ -702,13 +702,17 @@ def filter_and_copy_pool_tables(
                             break
 
                 if not matching.empty:
-                    # Copy matching row(s) and update ID
+                    # Copy matching row(s) and update ID, adding provenance
                     for _, match_row in matching.iterrows():
                         new_row = match_row.copy()
+                        original_pool_id = str(match_row['id'])
                         new_row['id'] = output_id
+                        # Add provenance column if ID was remapped
+                        if output_id != original_pool_id:
+                            new_row['pool.id'] = original_pool_id
                         filtered_rows.append(new_row)
 
-        # Determine output filename from the pool table path (use basename to match get_output_files)
+        # Use the upstream table's basename as output filename
         output_filename = None
         for tm in pool_table_maps:
             if table_name in tm:
