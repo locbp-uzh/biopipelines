@@ -17,6 +17,7 @@ examples = {
     "TeaA-hydroxyectoine": ("2VPO","hydroxyectoine"),
 }
 for example, comp in examples.items():
+    if example.startswith("Atu"): continue
     with Pipeline(project="Optimization", job=f"IterativeBinding_{example}_Gnina{with_gnina}"):
         Resources(gpu="A100", time="24:00:00", memory="16GB")
         protein = PDB(comp[0])
@@ -57,12 +58,8 @@ for example, comp in examples.items():
                                             Panda.head(1)],
                                 pool=[current_best,
                                       docked])
-            # Select best sequence for MutationProfiler: use docking_summary
-            # but remap id to structures.id so pool matching finds the right
-            # sequence in predicted (Boltz2), which propagates sequences
-            # from candidates
             current_best_sequence = Panda(
-                                tables=[current_best_sequence.tables.result,
+                                tables=[current_best.tables.result,
                                         docked.tables.docking_summary],
                                 operations=[Panda.concat(add_source=True),
                                             Panda.sort("mean_cnn_affinity", ascending=True),
@@ -71,3 +68,4 @@ for example, comp in examples.items():
                                             Panda.rename({"structures.id": "id"})],
                                 pool=[current_best_sequence,
                                       predicted])
+            
