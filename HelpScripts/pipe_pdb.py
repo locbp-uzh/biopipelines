@@ -202,26 +202,28 @@ def remove_waters_from_content(content: str, format: str) -> str:
     return '\n'.join(filtered_lines)
 
 
-def extract_sequence_from_structure(content: str, format: str) -> str:
+def extract_sequence_from_structure(content: str, format: str, chain: str = "longest") -> str:
     """
     Extract protein sequence from structure content.
 
-    Returns the sequence of the longest chain. Structures often contain multiple
-    identical or non-identical chains (e.g. dimers, complexes); concatenating them
-    would produce an artificially long sequence that inflates memory usage in
+    By default returns the sequence of the longest chain. Structures often contain
+    multiple identical or non-identical chains (e.g. dimers, complexes); concatenating
+    them would produce an artificially long sequence that inflates memory usage in
     downstream tools such as LigandMPNN.
 
     Args:
         content: Structure file content
         format: File format ("pdb" or "cif")
+        chain: Which chain to extract. "longest" (default) picks the longest chain.
+            Specify a chain letter (e.g. "A", "B") to select that chain.
 
     Returns:
-        Sequence of the longest protein chain
+        Protein sequence from the selected chain
     """
     import tempfile
 
     if format == "cif":
-        return extract_sequence_from_cif(content)
+        return extract_sequence_from_cif(content, chain=chain)
 
     # PDB format
     try:
@@ -240,6 +242,14 @@ def extract_sequence_from_structure(content: str, format: str) -> str:
             if not sequences_dict:
                 return ""
 
+            # If a specific chain is requested, return it
+            if chain != "longest":
+                if chain in sequences_dict:
+                    return sequences_dict[chain]
+                else:
+                    available = ', '.join(sorted(sequences_dict.keys()))
+                    print(f"Warning: Chain '{chain}' not found in structure. Available chains: {available}. Falling back to longest chain.")
+
             # Return the longest chain sequence (sequences_dict already contains only
             # standard amino-acid chains; water/ions are excluded by get_protein_sequence)
             candidates = [seq for seq in sequences_dict.values() if len(seq) >= 10]
@@ -252,20 +262,22 @@ def extract_sequence_from_structure(content: str, format: str) -> str:
         return ""
 
 
-def extract_sequence_from_cif(content: str) -> str:
+def extract_sequence_from_cif(content: str, chain: str = "longest") -> str:
     """
     Extract protein sequence from CIF content using BioPython.
 
-    Returns the sequence of the longest chain. Structures often contain multiple
-    identical or non-identical chains (e.g. dimers, complexes); concatenating them
-    would produce an artificially long sequence that inflates memory usage in
+    By default returns the sequence of the longest chain. Structures often contain
+    multiple identical or non-identical chains (e.g. dimers, complexes); concatenating
+    them would produce an artificially long sequence that inflates memory usage in
     downstream tools such as LigandMPNN.
 
     Args:
         content: CIF file content
+        chain: Which chain to extract. "longest" (default) picks the longest chain.
+            Specify a chain letter (e.g. "A", "B") to select that chain.
 
     Returns:
-        Sequence of the longest protein chain
+        Protein sequence from the selected chain
     """
     import tempfile
 
@@ -313,6 +325,15 @@ def extract_sequence_from_cif(content: str) -> str:
 
             if not sequences:
                 return ""
+
+            # If a specific chain is requested, return it
+            if chain != "longest":
+                if chain in sequences:
+                    print(f"  Extracted sequence from CIF: {len(sequences[chain])} residues (chain {chain})")
+                    return sequences[chain]
+                else:
+                    available = ', '.join(sorted(sequences.keys()))
+                    print(f"Warning: Chain '{chain}' not found in CIF. Available chains: {available}. Falling back to longest chain.")
 
             # Return the longest chain sequence (sequences already contains only
             # standard amino-acid chains; water/ions are excluded by the aa_map filter above)
@@ -486,7 +507,8 @@ def find_local_structure(pdb_id: str, format: str, local_folder: str,
 
 def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
                         source_format: str, target_format: str, remove_waters: bool,
-                        output_folder: str, operations: List[Dict[str, Any]] = None) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
+                        output_folder: str, operations: List[Dict[str, Any]] = None,
+                        chain: str = "longest") -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Copy local structure file to output folder with optional format conversion.
 
@@ -538,7 +560,7 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
             f.write(content)
 
         file_size = os.path.getsize(output_path)
-        sequence = extract_sequence_from_structure(content, target_format)
+        sequence = extract_sequence_from_structure(content, target_format, chain=chain)
 
         # Build ligands list using original codes for SMILES lookup, renamed codes for output
         ligands = []
@@ -583,7 +605,8 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
 
 def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_assembly: bool,
                    remove_waters: bool, output_folder: str, repo_pdbs_folder: str,
-                   operations: List[Dict[str, Any]] = None) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
+                   operations: List[Dict[str, Any]] = None,
+                   chain: str = "longest") -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Download a single structure from RCSB PDB and save to both PDBs/ and output folder.
 
@@ -723,7 +746,7 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         file_size = os.path.getsize(output_path)
 
         # Extract sequence from structure
-        sequence = extract_sequence_from_structure(content, format)
+        sequence = extract_sequence_from_structure(content, format, chain=chain)
 
         # Build ligands list using original codes for SMILES lookup, renamed codes for output
         ligands = []
@@ -806,7 +829,7 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                     f.write(content)
 
                 file_size = os.path.getsize(output_path)
-                sequence = extract_sequence_from_structure(content, "pdb")
+                sequence = extract_sequence_from_structure(content, "pdb", chain=chain)
 
                 # Build ligands list using original codes for SMILES lookup, renamed codes for output
                 ligands = []
@@ -938,6 +961,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     failed_table = config_data['failed_table']
     compounds_table = config_data.get('compounds_table', os.path.join(output_folder, 'compounds.csv'))
     operations = config_data.get('operations', [])
+    chain = config_data.get('chain', 'longest')
     from_upstream = config_data.get('from_upstream', False)
     upstream_files = config_data.get('upstream_files', [])
     upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)
@@ -984,7 +1008,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 # Detect source format from extension
                 source_format = "cif" if source_path.endswith(".cif") else "pdb"
                 success, file_path, sequence, ligands, metadata = copy_local_structure(
-                    pdb_id, custom_id, source_path, source_format, format, remove_waters, output_folder, operations
+                    pdb_id, custom_id, source_path, source_format, format, remove_waters, output_folder, operations, chain=chain
                 )
             else:
                 error_msg = f"Upstream file not found for '{pdb_id}': {source_path}"
@@ -1006,14 +1030,14 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 # Copy from local (may need conversion)
                 local_path, source_format = local_result
                 success, file_path, sequence, ligands, metadata = copy_local_structure(
-                    pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations
+                    pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations, chain=chain
                 )
             else:
                 # Download from RCSB (with automatic CIF fallback if PDB fails)
                 print(f"{pdb_id} not found locally, downloading from RCSB")
                 success, file_path, sequence, ligands, metadata = download_from_rcsb(
                     pdb_id, custom_id, format, biological_assembly, remove_waters,
-                    output_folder, repo_pdbs_folder, operations
+                    output_folder, repo_pdbs_folder, operations, chain=chain
                 )
 
         if success:

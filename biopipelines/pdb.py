@@ -114,6 +114,7 @@ echo "=== PDB ready ==="
                  local_folder: Optional[str] = None,
                  biological_assembly: bool = False,
                  remove_waters: bool = True,
+                 chain: str = "longest",
                  **kwargs):
         """
         Initialize PDB tool.
@@ -130,6 +131,8 @@ echo "=== PDB ready ==="
             local_folder: Custom local folder to check first (before PDBs/). Default: None
             biological_assembly: Whether to download biological assembly from RCSB (default: False)
             remove_waters: Whether to remove water molecules from structures (default: True)
+            chain: Which chain to extract the sequence from. "longest" (default) picks
+                the longest chain. Specify a chain letter (e.g. "A", "B") to select that chain.
             **kwargs: Additional parameters
 
         Fetch Priority:
@@ -237,6 +240,7 @@ echo "=== PDB ready ==="
             self.local_folder = None
         self.biological_assembly = biological_assembly
         self.remove_waters = remove_waters
+        self.chain = chain
 
         # Validate format
         if self.format not in ["pdb", "cif"]:
@@ -558,7 +562,8 @@ echo "=== PDB ready ==="
             f"FORMAT: {self.format.upper()}",
             f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses PDBs/)'}",
             f"BIOLOGICAL_ASSEMBLY: {self.biological_assembly}",
-            f"REMOVE_WATERS: {self.remove_waters}"
+            f"REMOVE_WATERS: {self.remove_waters}",
+            f"CHAIN: {self.chain}"
         ])
 
         # Add operations if any
@@ -610,6 +615,7 @@ echo "=== PDB ready ==="
             "repo_pdbs_folder": repo_pdbs_folder,
             "biological_assembly": self.biological_assembly,
             "remove_waters": self.remove_waters,
+            "chain": self.chain,
             "output_folder": self.output_folder,
             "structures_table": self.structures_csv,
             "sequences_table": self.sequences_csv,
@@ -723,6 +729,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 "local_folder": self.local_folder,
                 "biological_assembly": self.biological_assembly,
                 "remove_waters": self.remove_waters,
+                "chain": self.chain,
                 "operations": [op.to_dict() for op in self.operations]
             }
         })
