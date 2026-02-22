@@ -116,7 +116,7 @@ echo "=== ProteinMPNN installation complete ==="
                  num_sequences: int = 1,
                  fixed: Union[str, Tuple['TableInfo', str]] = "",
                  redesigned: Union[str, Tuple['TableInfo', str]] = "",
-                 fixed_chain: str = "A",
+                 chain: str = "auto",
                  plddt_threshold: float = 100.0,
                  sampling_temp: float = 0.1,
                  model_name: str = "v_48_020",
@@ -136,7 +136,7 @@ echo "=== ProteinMPNN installation complete ==="
             redesigned: Designed positions. Accepts:
                    - PyMOL-style selection string: "10-20+30-40"
                    - Table column reference: (table, "column_name")
-            fixed_chain: Chain to apply fixed positions to
+            chain: Chain to apply fixed positions to ("auto" detects from input structure)
             plddt_threshold: pLDDT threshold for automatic fixing (100 = no fixing)
             sampling_temp: Sampling temperature for sequence generation
             model_name: ProteinMPNN model variant
@@ -157,7 +157,7 @@ echo "=== ProteinMPNN installation complete ==="
         self.num_sequences = num_sequences
         self.fixed = fixed
         self.redesigned = redesigned
-        self.fixed_chain = fixed_chain
+        self.chain = chain
         self.plddt_threshold = plddt_threshold
         self.sampling_temp = sampling_temp
         self.model_name = model_name
@@ -193,7 +193,7 @@ echo "=== ProteinMPNN installation complete ==="
             f"NUM SEQUENCES PER TARGET: {self.num_sequences}",
             f"FIXED: {self.fixed or 'None'}",
             f"REDESIGNED: {self.redesigned or 'None'}",
-            f"FIXED CHAIN: {self.fixed_chain}",
+            f"CHAIN: {self.chain}",
             f"pLDDT THR: {self.plddt_threshold}",
             f"SAMPLING T: {self.sampling_temp}",
             f"MODEL: {self.model_name}",
@@ -246,7 +246,7 @@ echo "=== ProteinMPNN installation complete ==="
         designed_param = resolved_redesigned if resolved_redesigned else "-"
 
         return f"""echo "Determining fixed positions"
-python {self.fixed_py} "{self.structures_json}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.fixed_chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
+python {self.fixed_py} "{self.structures_json}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
 
 echo "Parsing multiple PDBs"
 python {self.parse_py} --input_path {input_directory} --output_path {self.parsed_pdbs_jsonl}
@@ -358,7 +358,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "num_sequences": self.num_sequences,
                 "fixed": self.fixed,
                 "redesigned": self.redesigned,
-                "fixed_chain": self.fixed_chain,
+                "chain": self.chain,
                 "plddt_threshold": self.plddt_threshold,
                 "sampling_temp": self.sampling_temp,
                 "model_name": self.model_name,

@@ -95,6 +95,31 @@ def list_to_sele(a):
         i += 1
     return s
 
+def get_protein_chains_from_pdb(pdb_path):
+    """
+    Get all protein chain identifiers from a PDB file.
+
+    Args:
+        pdb_path: Path to PDB file
+
+    Returns:
+        Sorted list of unique chain identifiers that contain protein residues
+    """
+    standard_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+    }
+
+    atoms = parse_pdb_file(pdb_path)
+    chains = set()
+
+    for atom in atoms:
+        if atom.res_name in standard_residues:
+            chains.add(atom.chain)
+
+    return sorted(list(chains))
+
+
 def get_protein_residues_from_pdb(pdb_path, chain):
     """
     Get all protein residue numbers for a specific chain from PDB file.
@@ -178,6 +203,21 @@ structures_ds = load_datastream(structures_json)
 design_entries = list(iterate_files(structures_ds))  # List of (design_id, pdb_file) tuples
 design_ids = [entry[0] for entry in design_entries]
 design_files = {entry[0]: entry[1] for entry in design_entries}  # Map id -> file path
+
+# Auto-detect chain if requested
+if FIXED_CHAIN == "auto":
+    # Use the first structure to detect chains
+    first_pdb = design_files[design_ids[0]]
+    all_chains = get_protein_chains_from_pdb(first_pdb)
+    if len(all_chains) == 1:
+        FIXED_CHAIN = all_chains[0]
+        print(f"Auto-detected single protein chain: {FIXED_CHAIN}")
+    elif len(all_chains) > 1:
+        FIXED_CHAIN = all_chains[0]
+        print(f"Multiple protein chains found: {', '.join(all_chains)}. Using first chain: {FIXED_CHAIN}")
+    else:
+        FIXED_CHAIN = "A"
+        print(f"Warning: No protein chains detected, defaulting to chain A")
 
 fixed_dict = dict()
 mobile_dict = dict()
@@ -313,6 +353,16 @@ elif input_source == "plddt" or input_source == "table":  # table fallback
                 fixed_dict[design_id][FIXED_CHAIN] = sele_to_list(FIXED)
                 mobile_dict[design_id][FIXED_CHAIN] = sele_to_list(DESIGNED)
                 print(f"Design: {design_id}, Selection-based - Fixed: {FIXED}, Redesigned: {DESIGNED}")
+
+# Ensure all protein chains in each structure have entries in fixed_dict
+# ProteinMPNN expects a key for every chain present in the structure
+for design_id in design_ids:
+    if design_id in fixed_dict:
+        pdb_path = design_files[design_id]
+        all_chains = get_protein_chains_from_pdb(pdb_path)
+        for ch in all_chains:
+            if ch not in fixed_dict[design_id]:
+                fixed_dict[design_id][ch] = []
 
 with open(fixed_jsonl_file,"w") as jsonl_file:
     #Python converts dictionaries to string having keys inside '', json only recognises ""
