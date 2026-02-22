@@ -53,10 +53,11 @@ Design and manipulate sequences.
 
 ## [Structure Prediction](Tool/StructurePrediction.md)
 
-Predict protein and complex structures.
+Predict protein and complex structures, and dock ligands.
 
 - [AlphaFold](Tool/StructurePrediction.md#alphafold) - AlphaFold2 prediction
 - [Boltz2](Tool/StructurePrediction.md#boltz2) - Biomolecular complex prediction
+- [Gnina](Tool/StructurePrediction.md#gnina) - Molecular docking with CNN scoring
 
 ---
 

@@ -179,3 +179,87 @@ boltz_complex = Boltz2(proteins=split, ligands=compounds)
 ```
 
 ---
+
+### Gnina
+
+Molecular docking with CNN-based pose scoring. Combines AutoDock Vina search with a convolutional neural network for more accurate binding pose prediction. Supports multi-run docking with statistical analysis across independent runs, optional conformer generation, and pose consistency analysis.
+
+The binding box is determined in order: explicit `center`+`size` > `autobox_ligand` > crystal ligand HETATM records in the input PDB.
+
+**Resources**: GPU recommended (CPU fallback available but slow).
+
+**Environment**: `biopipelines` (plus CUDA modules configured in `config.yaml` under `gnina:`)
+
+**Installation**: Downloads pre-built `gnina.1.3.2` binary from GitHub.
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Protein structures
+- `compounds`: Union[DataStream, StandardizedOutput] (required) - Ligands (from `Ligand()`, `CompoundLibrary()`, etc.)
+- `autobox_ligand`: Union[DataStream, StandardizedOutput, str, None] = None - Reference ligand for automatic box
+- `center`: Optional[str] = None - Explicit box center as `"x,y,z"`
+- `size`: Union[float, str, None] = None - Box dimensions in Angstroms (single float = cubic, `"x,y,z"` = asymmetric)
+- `autobox_add`: float = 4.0 - Padding around autobox ligand (Angstroms)
+- `exhaustiveness`: int = 32 - Search exhaustiveness
+- `num_modes`: int = 9 - Docked poses per run
+- `num_runs`: int = 5 - Independent docking runs per conformer
+- `seed`: int = 42 - Base random seed (each run uses `seed + run_index`)
+- `cnn_scoring`: str = "rescore" - CNN scoring mode (`"rescore"`, `"refinement"`, `"none"`, `"rescore_only"`)
+- `generate_conformers`: bool = False - Generate RDKit ETKDGv3 conformers per ligand
+- `num_conformers`: int = 50 - Conformers to generate before filtering
+- `energy_window`: float = 2.0 - Max relative MMFF94 energy (kcal/mol) for conformer filtering
+- `conformer_rmsd`: float = 1.0 - Heavy-atom RMSD cutoff (Angstroms) for Butina clustering
+- `conformer_energies`: Optional[tuple] = None - Pre-computed energies as `(TableInfo, "column_name")`
+- `cnn_score_threshold`: float = 0.5 - Min CNNscore to accept a pose (0-1)
+- `rmsd_threshold`: float = 2.0 - RMSD cutoff (Angstroms) for pose consistency clustering
+- `protonate`: bool = True - Add hydrogens with OpenBabel before docking
+- `pH`: float = 7.4 - Protonation pH
+
+**Streams**: `structures` (combined protein+ligand PDB files of best poses)
+
+**Tables**:
+- `docking_results` - One row per accepted pose across all runs:
+
+  | id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity |
+  |----|---------------|--------------|--------------|-----|------|------------|-----------|--------------|
+
+  IDs are unique per pose: `{protein}_{ligand}_r{run}_p{pose}`.
+
+- `docking_summary` - One row per (protein, ligand, conformer) group, aggregated across runs:
+
+  | id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file |
+  |----|---------------|--------------|--------------|-----------|-----------|---------|----------------|-------------------|------------------|-----------------|------------------|-----------------------|----------------|
+
+  - `mean_vina` / `std_vina`: mean and std of the best Vina score per run (not all poses — just the top pose from each independent run). Robust metric for ranking.
+  - `mean_cnn_affinity` / `std_cnn_affinity`: same logic for CNN affinity.
+  - `pose_consistency`: fraction of runs whose best pose clusters together by RMSD. Measures reproducibility (1.0 = all runs converge).
+  - `conformer_energy`: MMFF94 relative strain energy (only with `generate_conformers=True`).
+  - `pseudo_binding_energy`: `best_vina + conformer_energy`. Penalizes Vina score by conformer strain. Only populated when conformer generation is enabled.
+
+**Example**:
+```python
+from biopipelines.gnina import Gnina
+
+# Basic docking (autobox from crystal ligand in PDB)
+docked = Gnina(structures=boltz, compounds=ligand)
+
+# Explicit box
+docked = Gnina(
+    structures=boltz,
+    compounds=ligand,
+    center="10.5,20.3,15.0",
+    size=25.0
+)
+
+# With conformer generation for flexible ligand docking
+docked = Gnina(
+    structures=boltz,
+    compounds=compound_library,
+    generate_conformers=True,
+    num_conformers=100,
+    energy_window=3.0,
+    num_runs=10,
+    exhaustiveness=64
+)
+```
+
+---
