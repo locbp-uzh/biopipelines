@@ -259,9 +259,9 @@ python "{self.composer_py}" --config "{self.config_file}"
         sequences = DataStream(
             name="sequences",
             ids=sequence_ids,
-            files=[self.sequences_fasta],
+            files=[],
             map_table=self.sequences_csv,
-            format="fasta"
+            format="csv"
         )
 
         tables = {
