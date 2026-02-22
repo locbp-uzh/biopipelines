@@ -214,19 +214,65 @@ def filter_chain_from_content(content: str, format: str, chain: str) -> str:
     Returns:
         Structure content with only the specified chain
     """
-    if format != "pdb":
-        return content
+    if format == "pdb":
+        lines = content.split('\n')
+        filtered_lines = []
 
-    lines = content.split('\n')
-    filtered_lines = []
+        for line in lines:
+            if line.startswith(('ATOM', 'HETATM')):
+                if len(line) > 21 and line[21] != chain:
+                    continue
+            filtered_lines.append(line)
 
-    for line in lines:
-        if line.startswith(('ATOM', 'HETATM')):
-            if len(line) > 21 and line[21] != chain:
+        return '\n'.join(filtered_lines)
+
+    elif format == "cif":
+        # CIF _atom_site lines are whitespace-delimited.
+        # auth_asym_id (chain ID) column index is determined from the header.
+        lines = content.split('\n')
+        filtered_lines = []
+        in_atom_site = False
+        column_names = []
+        chain_col_idx = None
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Detect start of _atom_site loop
+            if stripped == 'loop_' and not in_atom_site:
+                filtered_lines.append(line)
+                in_atom_site = True
+                column_names = []
+                chain_col_idx = None
                 continue
-        filtered_lines.append(line)
 
-    return '\n'.join(filtered_lines)
+            if in_atom_site:
+                if stripped.startswith('_atom_site.'):
+                    column_names.append(stripped)
+                    if stripped == '_atom_site.auth_asym_id':
+                        chain_col_idx = len(column_names) - 1
+                    filtered_lines.append(line)
+                    continue
+
+                # Data line within _atom_site block
+                if column_names and (stripped.startswith('ATOM') or stripped.startswith('HETATM')):
+                    if chain_col_idx is not None:
+                        fields = stripped.split()
+                        if len(fields) > chain_col_idx and fields[chain_col_idx] != chain:
+                            continue
+                    filtered_lines.append(line)
+                    continue
+
+                # End of _atom_site block
+                in_atom_site = False
+                column_names = []
+                chain_col_idx = None
+
+            filtered_lines.append(line)
+
+        return '\n'.join(filtered_lines)
+
+    return content
 
 
 def extract_sequence_from_structure(content: str, format: str, chain: str = "longest") -> str:
