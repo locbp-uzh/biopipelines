@@ -44,7 +44,7 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                                                  "proteins.id"]),
                                  Panda.calculate({"mean_cnn_aff_uM":"10**(6-mean_cnn_affinity)",
                                                   "boltz_aff_uM":"10**affinity_pred_value"})])
-    # 1. Boltz2 predicted affinity per mutation
+
     Plot(Plot.Bar(data=analysis.tables.result,
                   x="mutations",
                   y="boltz_aff_uM",
@@ -52,30 +52,32 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                   xlabel="Mutation",
                   ylabel="Boltz2 Affinity [uM]",
                   x_tick_rotation=45,
-                  grid=True))
-    
-    # 2. GNINA predicted affinity per mutation
-    Plot(Plot.Bar(data=analysis.tables.result,
+                  grid=True),
+        Plot.Bar(data=analysis.tables.result,
                   x="mutations",
                   y="mean_cnn_aff_uM",
                   title="Gnina Average Predicted Affinity per Gatekeeper Mutant",
                   xlabel="Mutation",
                   ylabel="GNINA Affinity [uM]",
                   x_tick_rotation=45,
-                  grid=True))
-
-    # 3. GNINA predicted affinity vs Boltz2
-    Plot(Plot.Bar(data=analysis.tables.result,
+                  grid=True),
+        Plot.Bar(data=analysis.tables.result,
+                  x="mutations",
+                  y="mean_vina",
+                  title="Gnina score per Gatekeeper Mutant",
+                  xlabel="Mutation",
+                  ylabel="GNINA mean Vina sore",
+                  x_tick_rotation=45,
+                  grid=True),
+        Plot.Scatter(data=analysis.tables.result,
                   x="boltz_aff_uM",
                   y="mean_cnn_aff_uM",
                   title="Gnina vs Boltz predicted affinity",
                   xlabel="Boltz2 Affinity [uM]",
                   ylabel="GNINA Affinity [uM]",
                   x_tick_rotation=45,
-                  grid=True))
-
-    # 4. GNINA Vina score and CNN score side-by-side per mutation
-    Plot(Plot.Bar(data=analysis.tables.result,
+                  grid=True),
+        Plot.Bar(data=analysis.tables.result,
                   x="mutations",
                   y="best_vina",
                   y_right="best_cnn_score",

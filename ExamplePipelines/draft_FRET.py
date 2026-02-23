@@ -23,7 +23,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     fusions = Fuse(sequences=[donor, cam, acceptor],
                    name="CaFRET",
                    linker="GS",
-                   linker_lengths=["0-3", "0-3"])
+                   linker_lengths=["0-2", "0-2"])
     apo = Boltz2(proteins=fusions)
     calcium = Ligand("CA")
     holo = Boltz2(proteins=fusions,
@@ -42,7 +42,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     analysis = Panda(tables=[fusions.tables.sequences,
                              dist_apo.tables.distances,
                              dist_holo.tables.distances],
-                     operations=[Panda.merge(on="id"),
+                     operations=[Panda.merge(),
                                  Panda.calculate(derived_metrics)])
     Plot(Plot.Bar(data=analysis.tables.result,
                   title="Calcium-Induced FRET Change by Linker Length",
@@ -54,7 +54,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                   ylabel_right="FRET holo"))
     
 
-
+"""
 with Pipeline(project="Biosensor", job="CaFRET"):
     Resources(gpu="A100", time="8:00:00", memory="16GB")
     donor = Sequence("VSKGEELFTG...", ids="EBFP")     
@@ -63,7 +63,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     fusions = Fuse(sequences=[donor, cam, acceptor],
                    name="CaFRET",
                    linker="GS",
-                   linker_lengths=["0-3", "0-3"])
+                   linker_lengths=["0-2", "0-2"])
     apo = Boltz2(proteins=fusions)
     calcium = Ligand("CA")
     holo = Boltz2(proteins=fusions,
@@ -109,4 +109,4 @@ with Pipeline(project="Biosensor", job="CaFRET"):
           PyMOL.Color("blue", selection=fusions.tables.sequences.S1),
           PyMOL.Color("pink", selection=fusions.tables.sequences.S2),
           PyMOL.Color("yellow", selection=fusions.tables.sequences.S3))
-    
+"""

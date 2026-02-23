@@ -14,7 +14,7 @@ from biopipelines.plot import Plot
 
 with Pipeline(project="MarR", job="FragmentScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")
-    MarR = Sequence("LFNEIIPLGRLIHMVNQKKDRLLNEYLSPLDITAAQFKVLCSIRCAACITPVELKKVLSVDLGALTRMLDRLVCKGWVERLPNPNDKRGVLVKLTTGGAAICEQCHQLVGQDLHQELTKNLTADEVATLEYLLKKVLP")
+    MarR = Sequence("LFNEIIPLG...")
     library = CompoundLibrary(library={"candidate": "<aryl><carboxylate>",
                                        "aryl": ["<o-hydroxyphenyl>", 
                                                 "<m-hydroxyphenyl>",
