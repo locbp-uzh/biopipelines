@@ -332,7 +332,7 @@ echo "=== Panda ready ==="
         return Operation(type="fillna", params={"value": value, "column": column})
 
     @staticmethod
-    def merge(on: str = "id", how: str = "outer",
+    def merge(on: Union[str, List[str]] = "id", how: str = "outer",
               prefixes: Optional[List[str]] = None,
               id_map: Optional[Dict[str, List[str]]] = None) -> Operation:
         """
@@ -342,7 +342,11 @@ echo "=== Panda ready ==="
         Requires multi-table input (tables parameter instead of table).
 
         Args:
-            on: Column name to merge on (must exist in all tables)
+            on: Column name(s) to merge on. Can be:
+                - A single string: same column name used in all tables (e.g., "id")
+                - A list of strings (one per table): each table is joined on its
+                  own column, which is renamed to the first entry before merging
+                  (e.g., ["id", "id", "structures.id"])
             how: Join type ("inner", "outer", "left", "right")
             prefixes: List of prefixes for each table's columns (prevents name collisions)
             id_map: Dictionary mapping new_id -> [old_id1, old_id2, ...] to consolidate IDs
@@ -352,6 +356,7 @@ echo "=== Panda ready ==="
 
         Example:
             Panda.merge(on="id", prefixes=["apo_", "holo_"])
+            Panda.merge(on=["id", "id", "structures.id"])
             Panda.merge(on="structure_id", how="inner", id_map={"common": ["id_a", "id_b"]})
         """
         return Operation(type="merge", params={

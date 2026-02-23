@@ -200,12 +200,29 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
     prefixes = params.get("prefixes", [])
     id_map = params.get("id_map", {})
 
-    print(f"  Merge: on={on}, how={how}")
+    # Normalise `on` to a per-table list of column names.
+    # When a list is provided, each entry names the merge key for the
+    # corresponding table; the common key used for the join is the first entry.
+    if isinstance(on, list):
+        on_per_table = on
+        merge_key = on_per_table[0]  # canonical column name after renaming
+    else:
+        on_per_table = [on] * len(dataframes)
+        merge_key = on
 
-    # Apply prefixes to each dataframe
+    print(f"  Merge: on={on}, how={how}, merge_key={merge_key}")
+
+    # Apply per-table key renaming, id mapping, and prefixes
     renamed_dfs = []
     for i, df in enumerate(dataframes):
         df = df.copy()
+
+        # Rename per-table key to the canonical merge key
+        table_key = on_per_table[i] if i < len(on_per_table) else merge_key
+        if table_key != merge_key:
+            if table_key in df.columns:
+                df = df.rename(columns={table_key: merge_key})
+                print(f"    Renamed '{table_key}' -> '{merge_key}' in dataframe {i}")
 
         # Apply ID mapping
         if id_map:
@@ -214,14 +231,14 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
                 for old_id in old_id_list:
                     reverse_map[old_id] = new_id
 
-            if on in df.columns:
-                df[on] = df[on].replace(reverse_map)
+            if merge_key in df.columns:
+                df[merge_key] = df[merge_key].replace(reverse_map)
                 print(f"    Applied ID mapping to dataframe {i}")
 
         # Apply prefix
         if prefixes and i < len(prefixes) and prefixes[i]:
             prefix = prefixes[i]
-            rename_dict = {col: f"{prefix}{col}" for col in df.columns if col != on}
+            rename_dict = {col: f"{prefix}{col}" for col in df.columns if col != merge_key}
             df = df.rename(columns=rename_dict)
             print(f"    Applied prefix '{prefix}' to dataframe {i}")
 
@@ -231,13 +248,13 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
     result = renamed_dfs[0]
     for i, df in enumerate(renamed_dfs[1:], 1):
         # Check for overlapping columns (excluding merge key)
-        overlap = set(result.columns) & set(df.columns) - {on}
+        overlap = set(result.columns) & set(df.columns) - {merge_key}
         if overlap:
             print(f"    Warning: Overlapping columns: {overlap}")
             df = df.drop(columns=list(overlap))
 
         before_rows = len(result)
-        result = pd.merge(result, df, on=on, how=how)
+        result = pd.merge(result, df, on=merge_key, how=how)
         print(f"    Merged dataframe {i+1}: {before_rows} -> {len(result)} rows")
 
     return result

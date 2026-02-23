@@ -9,15 +9,13 @@
 #   1. Mutagenesis at gatekeeper position (AUTH 315, internal 93)
 #   2. Boltz2 predicts each mutant complex with affinity
 #   3. GNINA re-docks imatinib into each Boltz2-predicted structure
-#   4. PoseChange compares ligand poses between mutants and wild-type
-#   5. Panda merges all metrics into a single table
-#   6. Plots: Boltz2 affinity, GNINA scores, cross-method scatter, pose RMSD
+#   4. Panda merges all metrics into a single table
+#   5. Plots: Boltz2 affinity, GNINA scores, cross-method scatter
 
 from biopipelines.pipeline import *
 from biopipelines.mutagenesis import Mutagenesis
 from biopipelines.boltz2 import Boltz2
 from biopipelines.gnina import Gnina
-from biopipelines.pose_change import PoseChange
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
 
@@ -34,23 +32,23 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                      ligands=imatinib)
     docking = Gnina(structures=mutants,
                     compounds=imatinib)
-    
+
     mutants_docking = Panda(tables=[mutants.tables.affinity,
                                     mutants.tables.confidence,
                                     docking.tables.docking_summary],
                             operations=[Panda.merge(on=["id",
                                                         "id",
                                                         "structures.id"])])
-    
-    final_analysis = Panda(tables=[mutant_sequences.tables.sequences,
-                                   mutants_docking.tables.result],
+
+    analysis = Panda(tables=[mutant_sequences.tables.sequences,
+                             mutants_docking.tables.result],
                      operations=[Panda.merge(on=["id",
                                                  "proteins.id"])])
 
     # --- Plots ---
 
     # 1. Boltz2 predicted affinity per mutation
-    Plot(Plot.Bar(data=final_analysis.tables.result,
+    Plot(Plot.Bar(data=analysis.tables.result,
                   x="mutations",
                   y="affinity_pred_value",
                   title="Boltz2 Predicted Affinity per Gatekeeper Mutant",
@@ -60,8 +58,8 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                   grid=True))
 
     # 2. GNINA Vina score and CNN score side-by-side per mutation
-    Plot(Plot.Bar(data=final_analysis.tables.result,
-                  x="mutation",
+    Plot(Plot.Bar(data=analysis.tables.result,
+                  x="mutations",
                   y="best_vina",
                   y_right="best_cnn_score",
                   title="GNINA Docking Scores per Gatekeeper Mutant",
@@ -72,34 +70,12 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                   grid=True))
 
     # 3. Cross-method scatter: Boltz2 affinity vs GNINA Vina score
-    Plot(Plot.Scatter(data=final_analysis.tables.result,
+    Plot(Plot.Scatter(data=analysis.tables.result,
                       x="affinity_pred_value",
                       y="best_vina",
-                      color="mutation",
+                      color="mutations",
                       title="Boltz2 Affinity vs GNINA Vina Score",
                       xlabel="Boltz2 Affinity (pred)",
                       ylabel="GNINA Best Vina (kcal/mol)",
                       grid=True,
                       color_legend_outside=True))
-
-    # 4. Ligand RMSD per mutation (pose displacement from wild-type)
-    Plot(Plot.Bar(data=final_analysis.tables.result,
-                  x="mutation",
-                  y="ligand_rmsd",
-                  y_right="pose_consistency",
-                  title="Ligand Pose Change per Gatekeeper Mutant",
-                  xlabel="Mutation",
-                  ylabel="Ligand RMSD vs WT (Å)",
-                  ylabel_right="GNINA Pose Consistency",
-                  x_tick_rotation=45,
-                  grid=True))
-
-    # 5. Boltz2 confidence score per mutation
-    Plot(Plot.Bar(data=analysis.tables.result,
-                  x="mutation",
-                  y="confidence_score",
-                  title="Boltz2 Confidence Score per Gatekeeper Mutant",
-                  xlabel="Mutation",
-                  ylabel="Confidence Score",
-                  x_tick_rotation=45,
-                  grid=True))
