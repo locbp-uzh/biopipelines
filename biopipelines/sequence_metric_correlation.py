@@ -86,14 +86,11 @@ echo "=== SequenceMetricCorrelation ready ==="
             positions: PyMOL-style selection string for positions to display in plots
             **kwargs: Additional parameters
 
-        Examples:
-            # Single cycle analysis
-            correlation = SequenceMetricCorrelation(
-                mutants=filtered.tables.sequences,
-                data=filtered.tables.merged,
-                original=original_holo,
-                metric="affinity_pred_value"
-            )
+        Output:
+            Streams: (none)
+            Tables:
+                correlation_1d: position | wt_aa | correlation | mean_mutated | mean_wt | var_mutated | var_wt | n_mutated | n_wt
+                correlation_2d: position | wt_aa | A | C | D | ... | Y
         """
         # Handle list inputs
         self.mutants_input = mutants if isinstance(mutants, list) else [mutants]

@@ -81,14 +81,10 @@ echo "=== Contacts ready ==="
             id_map: ID mapping pattern for matching structure IDs to table IDs
             **kwargs: Additional parameters
 
-        Examples:
-            # Analyze protein-ligand contacts with specific protein regions
-            contact_analysis = Contacts(
-                structures=boltz_holo,
-                selections='10-20+30-40',
-                ligand='LIG',
-                contact_threshold=4.0
-            )
+        Output:
+            Streams: (none)
+            Tables:
+                contacts: id | source_structure | selections | ligand | <contact_metric> | min_distance | max_distance | mean_distance | sum_distances_sqrt_normalized
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):

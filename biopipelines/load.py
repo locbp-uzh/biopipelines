@@ -63,6 +63,10 @@ echo "=== Load ready ==="
             filter: Optional filter result (ToolOutput from Filter tool) to only load specific IDs
             validate_files: Whether to validate that all referenced files exist
             **kwargs: Additional parameters for BaseConfig
+
+        Output:
+            Streams: inherits from the loaded tool (structures, sequences, compounds, etc.)
+            Tables: inherits all tables from the loaded tool
         """
         self.tool_folder = os.path.abspath(path)
         self.result_file = os.path.join(self.tool_folder, ".expected_outputs.json")

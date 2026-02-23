@@ -250,6 +250,11 @@ echo "=== RFdiffusion installation complete ==="
             design_startnum: Integer appended to the pipeline name to number
                              output files (e.g. design_startnum=1 → name_1.pdb).
                              Useful when continuing a previous run.
+
+        Output:
+            Streams: structures (.pdb)
+            Tables:
+                structures: id | source_id | pdb | fixed | designed | contigs | time | status
         """
         # Resolve optional pdb input
         self.pdb_file: Optional[str] = None

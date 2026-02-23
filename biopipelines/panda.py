@@ -498,45 +498,11 @@ echo "=== Panda ready ==="
             table: Deprecated alias for tables (single table). Use tables instead.
             **kwargs: Additional parameters
 
-        Examples:
-            # Single table with operations
-            result = Panda(
-                tables=boltz.tables.confidence,
-                operations=[Panda.filter("pLDDT > 80"), Panda.sort("score")]
-            )
-
-            # Multi-table merge
-            merged = Panda(
-                tables=[apo.tables.affinity, holo.tables.affinity],
-                operations=[Panda.merge(on="id", prefixes=["apo_", "holo_"])]
-            )
-
-            # With pool mode - copy structures matching filtered IDs
-            filtered = Panda(
-                tables=combined.tables.merged,
-                operations=[Panda.filter("delta > 0")],
-                pool=boltz_output
-            )
-
-            # Sort and rename to get ranked output
-            ranked = Panda(
-                tables=boltz.tables.confidence,
-                operations=[Panda.sort("confidence_score", ascending=False)],
-                rename="best",  # Output will have IDs: best_1, best_2, ...
-                pool=boltz
-            )
-
-            # Multi-pool selection (replaces SelectBest) - select best from multiple cycles
-            best = Panda(
-                tables=[cycle1.tables.result, cycle2.tables.result, cycle3.tables.result],
-                operations=[
-                    Panda.concat(add_source=True),
-                    Panda.sort("metric", ascending=True),
-                    Panda.head(1)
-                ],
-                pool=[cycle1_output, cycle2_output, cycle3_output],  # Pools match tables
-                rename="best"
-            )
+        Output:
+            Streams: inherits all streams from pool input (if pool mode)
+            Tables:
+                result: columns derived from input + applied operations (dynamic)
+                missing: id | removed_by | cause
         """
         # Handle deprecated 'table' parameter
         if table is not None:

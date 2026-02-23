@@ -92,22 +92,10 @@ echo "=== MutationComposer ready ==="
                 - "round_robin": Alternate tables for single mutations
             **kwargs: Additional parameters
 
-        Examples:
-            # Generate single-point mutations from single table
-            composer = MutationComposer(
-                frequencies=profiler.tables.absolute_frequencies,
-                num_sequences=20,
-                mode="single_point"
-            )
-
-            # Generate sequences with one mutation from each enantiomer
-            composer = MutationComposer(
-                frequencies=[profiler_R.tables.absolute_frequencies,
-                           profiler_S.tables.absolute_frequencies],
-                num_sequences=50,
-                mode="single_point",
-                combination_strategy="stack"
-            )
+        Output:
+            Streams: sequences (.csv)
+            Tables:
+                sequences: id | sequence | mutations | mutation_positions
         """
         # Normalize frequencies to list for consistent handling
         if isinstance(frequencies, list):

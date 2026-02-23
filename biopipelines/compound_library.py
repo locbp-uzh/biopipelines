@@ -72,6 +72,12 @@ echo "=== CompoundLibrary ready ==="
             validate_smiles: Validate SMILES strings during expansion
             conformer_method: Method for conformer generation ("UFF", "OpenFF", "DFT")
             **kwargs: Additional parameters
+
+        Output:
+            Streams: compounds (.csv)
+            Tables:
+                compounds: id | format | smiles | ccd | ...branching_keys
+                covalent_compounds: id | format | smiles | ccd (if covalent=True)
         """
         # Store CompoundLibrary-specific parameters
         self.library = library

@@ -180,6 +180,13 @@ echo "=== BoltzGen installation complete ==="
             steps: Run only specific pipeline steps (default: all steps)
             cache_dir: Model/cache location (default: /home/$USER/data/boltzgen, auto-downloaded on first run)
             **kwargs: Additional parameters passed to BaseConfig
+
+        Output:
+            Streams: filtered_ranked_structures (.cif), sequences (.csv), refolded_structures (.cif)
+            Tables:
+                aggregate_metrics: id | file_name | designed_sequence | num_prot_tokens | native_rmsd | design_ptm | design_iptm | affinity_pred_value | ...
+                all_designs_metrics: id | final_rank | designed_sequence | affinity_probability_binary1 | design_to_target_iptm | filter_rmsd | ...
+                final_designs_metrics: id | final_rank | designed_sequence | ... (same as all_designs_metrics, filtered)
         """
         # Store design specification parameters
         self.design_spec = design_spec
@@ -1045,6 +1052,10 @@ echo "=== BoltzGenMerge ready ==="
                         - "{name}_" -> BoltzGen_Run1_design_spec_001
                         Default: None (uses standard boltzgen merge)
             **kwargs: Additional parameters passed to BaseConfig
+
+        Output:
+            Streams: (none)
+            Tables: (none) — merges BoltzGen output directories
         """
         self.sources = sources or []
         self.source_paths = []
@@ -1254,6 +1265,10 @@ echo "=== BoltzGenImport ready ==="
             num_designs: Number of designs being imported (auto-detected if None).
                         Used for consistent naming with BoltzGen conventions.
             **kwargs: Additional parameters passed to BaseConfig
+
+        Output:
+            Streams: (none)
+            Tables: (none) — imports external designs into BoltzGen format
         """
         # Set default for id_map
         if id_map is None:

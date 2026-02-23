@@ -112,32 +112,13 @@ echo "=== BayesianAdjuster ready ==="
                       If None, shows all positions with adjustments. This ensures consistent x-axis across tools.
             **kwargs: Additional parameters
 
-        Examples:
-            # Adjust frequencies based on correlation signals
-            adjuster = BayesianAdjuster(
-                frequencies=profiler.tables.absolute_frequencies,
-                correlations=correlation_analysis.tables.correlation_2d,
-                mode="min",  # Minimize affinity
-                gamma=3.0,
-                pseudocount=0.01
-            )
-
-            # With position filter for plot consistency
-            adjuster = BayesianAdjuster(
-                frequencies=profiler.tables.absolute_frequencies,
-                correlations=correlation_analysis.tables.correlation_2d,
-                mode="min",
-                gamma=3.0,
-                pseudocount=0.01,
-                positions="141+143+145+147-149+151-152"
-            )
-
-            # Use adjusted probabilities in MutationComposer
-            composer = MutationComposer(
-                frequencies=adjuster.tables.absolute_probabilities,
-                num_sequences=50,
-                mode="weighted_random"
-            )
+        Output:
+            Streams: (none)
+            Tables:
+                adjusted_probabilities: position | original | A | C | D | ... | Y
+                absolute_probabilities: position | original | A | C | D | ... | Y
+                relative_probabilities: position | original | A | C | D | ... | Y
+                adjustment_log: position | wt_aa | aa | prior_freq | correlation | adjusted_prob | change
         """
         self.frequencies_input = frequencies
         self.correlations_input = correlations

@@ -113,6 +113,14 @@ echo "=== AlphaFold installation complete ==="
             num_relax: Number of best models to relax with AMBER
             num_recycle: Number of recycling iterations (default 3)
             rand_seed: Random seed for reproducible results (0 = random)
+
+        Output:
+            Streams: structures (.pdb), msas (.a3m)
+            Tables:
+                structures: id | file
+                confidence: id | structure | plddt | max_pae | ptm
+                msas: id | sequences.id | sequence | msa_file
+                missing: id | removed_by | cause
         """
         # Store original input for upstream missing table lookup
         self.proteins = proteins

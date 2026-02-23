@@ -164,6 +164,17 @@ echo "=== Boltz2 installation complete ==="
                       Tokens are [chain_id, residue_index] for proteins or
                       [chain_id, atom_name] for ligands (e.g. ["B", "C1"]).
             **kwargs: Additional parameters
+
+        Output:
+            Streams: structures (.pdb/.mmcif), sequences (.csv), compounds (.csv), msas (.csv/.a3m)
+            Tables:
+                structures: id | file
+                confidence: id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt
+                sequences: id | sequence
+                msas: id | sequences.id | sequence | msa_file
+                affinity: id | input_file | affinity_pred_value | affinity_probability_binary
+                compounds: id | format | smiles | ccd
+                missing: id | removed_by | cause
         """
         self.config = config
         self.msas = msas

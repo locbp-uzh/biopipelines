@@ -102,16 +102,13 @@ echo "=== MutationEnv installation complete ==="
                       If None, shows all positions with mutations.
             **kwargs: Additional parameters
 
-        Examples:
-            # Analyze LigandMPNN mutations against original
-            profiler = MutationProfiler(original=original_structure, mutants=lmpnn)
-
-            # Profile mutations with specific positions for plot consistency
-            profiler = MutationProfiler(
-                original=original_structure,
-                mutants=lmpnn,
-                positions="141+143+145+147-149+151-152"
-            )
+        Output:
+            Streams: (none)
+            Tables:
+                profile: position | original | count | frequency
+                mutations: position | original | A | C | D | ... | Y
+                absolute_frequencies: position | original | A | C | D | ... | Y
+                relative_frequencies: position | original | A | C | D | ... | Y
         """
         # Resolve original to DataStream
         if isinstance(original, StandardizedOutput):

@@ -82,6 +82,11 @@ echo "=== Fuse ready ==="
             linker: Linker sequence to use (will be truncated to specified lengths)
             linker_lengths: List of length ranges for each junction (e.g., ["1-6", "1-6"])
             **kwargs: Additional parameters
+
+        Output:
+            Streams: sequences (.fasta)
+            Tables:
+                sequences: id | sequence | lengths | sequences_1.id | sequences_2.id | ... | S1 | L1 | S2 | L2 | ... | Sn
         """
         # Resolve input slots
         self.input_slots = self._resolve_slots(sequences)

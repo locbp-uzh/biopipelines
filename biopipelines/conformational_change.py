@@ -93,43 +93,10 @@ echo "=== ConformationalChange ready ==="
             - "super": PyMOL super (structure-based superposition)
             - "cealign": PyMOL cealign (combinatorial extension alignment)
 
-        Examples:
-            # Whole structure RMSD (no selection)
-            conf_analysis = ConformationalChange(
-                reference_structures=design,
-                target_structures=refolded,
-                alignment='cealign'
-            )
-
-            # Analyze conformational change with fixed selection string
-            conf_analysis = ConformationalChange(
-                reference_structures=rfdaa,
-                target_structures=boltz_results,
-                selection='10-20+30-40',
-                alignment='super'
-            )
-
-            # Per-structure selection from table column reference
-            conf_analysis = ConformationalChange(
-                reference_structures=kinase,
-                target_structures=refolded,
-                selection=backbones.tables.structures.fixed
-            )
-
-            # CA-only RMSD
-            conf_analysis = ConformationalChange(
-                reference_structures=design,
-                target_structures=refolded,
-                atoms='CA'
-            )
-
-            # Backbone RMSD on specific region
-            conf_analysis = ConformationalChange(
-                reference_structures=design,
-                target_structures=refolded,
-                selection='10-50',
-                atoms='backbone'
-            )
+        Output:
+            Streams: (none)
+            Tables:
+                changes: id | reference_structure | target_structure | selection | num_aligned_atoms | RMSD
         """
         # Resolve reference structures to DataStream
         if isinstance(reference_structures, StandardizedOutput):

@@ -78,12 +78,10 @@ echo "=== DNAEncoder ready ==="
                      With more than one organism it is more likely if not inevitable to have rare codons.
             **kwargs: Additional parameters
 
-        Examples:
-            # Encode for E. coli
-            dna = DNAEncoder(sequences=lmpnn, organism="EC")
-
-            # Encode for both E. coli and human (conservative approach)
-            dna = DNAEncoder(sequences=designed_sequences, organism="EC&HS")
+        Output:
+            Streams: sequences (.dna)
+            Tables:
+                dna: id | protein_sequence | dna_sequence | organism | method
         """
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):

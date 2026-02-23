@@ -79,25 +79,10 @@ echo "=== Sequence ready ==="
                  If not provided for raw sequences, defaults to "seq_1", "seq_2", etc.
             **kwargs: Additional parameters
 
-        Examples:
-            # Single protein sequence
-            seq = Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ")
-
-            # With custom id
-            seq = Sequence("MKTVRQ...", ids="my_protein")
-
-            # From RCSB PDB code (fetches longest chain per entity)
-            seq = Sequence("4EQ7")
-
-            # Load from CSV (absolute path, or filename inside Sequences/)
-            seq = Sequence("my_proteins.csv")
-            seq = Sequence("/absolute/path/to/sequences.csv")
-
-            # Load from FASTA (absolute path, or filename inside Sequences/)
-            seq = Sequence("my_proteins.fasta")
-
-            # Explicit type
-            seq = Sequence("ACGTACGT", type="dna")
+        Output:
+            Streams: sequences (.csv), fasta (.fasta)
+            Tables:
+                sequences: id | sequence | type | length
         """
         # Track source
         self.from_csv = False

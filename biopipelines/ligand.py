@@ -94,43 +94,11 @@ echo "=== Ligand ready ==="
             2. ./Ligands/ folder in repository
             3. Download from RCSB or PubChem (saved to both Ligands/ and output folder)
 
-        Examples:
-            # Simplest: just lookup (ids and codes derived automatically)
-            lig = Ligand("ATP")  # ids=["ATP"], codes=["ATP"]
-
-            # Multiple ligands with just lookup
-            lig = Ligand(["ATP", "GDP"])  # ids=["ATP", "GDP"], codes=["ATP", "GDP"]
-
-            # With custom id
-            lig = Ligand("ATP", ids="atp_ligand")
-
-            # PubChem ligand by compound name
-            lig = Ligand("aspirin", ids="aspirin_lig", codes="ASP")
-
-            # PubChem by CID
-            lig = Ligand("2157", ids="caffeine", codes="CAF")
-
-            # PubChem by CAS number
-            lig = Ligand("15687-27-1", ids="ibuprofen", codes="IBU")
-
-            # Multiple ligands with explicit ids and codes
-            lig = Ligand(
-                ["ATP", "aspirin"],
-                ids=["lig1", "lig2"],
-                codes=["ATP", "LIG"]
-            )
-
-            # Force source
-            lig = Ligand("ATP", source="pubchem")
-
-            # Direct SMILES input (single)
-            lig = Ligand(smiles="CCO")  # ids=["smiles_1"], codes=["LIG"]
-
-            # Direct SMILES input (multiple)
-            lig = Ligand(smiles=["CCO", "CC(=O)O"])  # ids=["smiles_1", "smiles_2"], codes=["LIG", "LIG"]
-
-            # SMILES with custom ids and codes
-            lig = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
+        Output:
+            Streams: structures (.pdb/.cif), compounds (.csv)
+            Tables:
+                compounds: id | format | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path
+                failed: lookup | error_message | source | attempted_path
         """
         # Handle smiles input
         if smiles is not None:

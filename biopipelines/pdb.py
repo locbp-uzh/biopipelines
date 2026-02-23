@@ -141,52 +141,13 @@ echo "=== PDB ready ==="
             2. ./PDBs/ folder in repository
             3. Download from RCSB PDB (saved to both PDBs/ and output folder)
 
-        Examples:
-            # Fetch with automatic fallback (checks PDBs/, then downloads)
-            pdb = pipeline.add(PDB(
-                pdbs="4ufc"
-            ))
-
-            # Fetch multiple structures with custom IDs
-            pdb = pipeline.add(PDB(
-                pdbs=["4ufc", "1abc"],
-                ids=["POI1", "POI2"],
-                format="pdb"
-            ))
-
-            # Load all PDB files from a folder (absolute path)
-            pdb = pipeline.add(PDB(
-                pdbs="/path/to/my/structures"
-            ))
-
-            # Load all PDB files from a folder (relative to PDBs folder)
-            pdb = pipeline.add(PDB(
-                pdbs="my_structures_subfolder"
-            ))
-
-            # Check custom folder first, then PDBs/, then download
-            pdb = pipeline.add(PDB(
-                pdbs="my_structure",
-                local_folder="/path/to/my/pdbs"
-            ))
-
-            # Download with biological assembly and custom naming, keep waters
-            pdb = pipeline.add(PDB(
-                pdbs="4ufc",
-                ids="MyProtein",
-                format="pdb",
-                biological_assembly=True,
-                remove_waters=False
-            ))
-
-            # Rename ligand for RFdiffusion3 compatibility
-            pdb = pipeline.add(PDB(
-                pdbs="structure.pdb",
-                PDB.Rename("LIG", ":L:")
-            ))
-
-            # Pass upstream tool output (files resolved at execution time)
-            pdb = PDB(boltz_output, PDB.Rename("LIG", ":L:"))
+        Output:
+            Streams: structures (.pdb/.cif), sequences (.csv), compounds (.csv)
+            Tables:
+                structures: id | pdb_id | file_path | format | file_size | source
+                sequences: id | sequence
+                compounds: id | code | format | smiles | ccd
+                failed: pdb_id | error_message | source | attempted_path
         """
         # Extract operations from args
         self.operations = []

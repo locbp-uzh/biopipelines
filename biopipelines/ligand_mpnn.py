@@ -120,6 +120,12 @@ echo "=== LigandMPNN installation complete ==="
             remove_duplicates: Remove duplicate sequences from output (default True)
             fill_gaps: Amino acid to replace X (unknown/gap residues) with (default "G" for glycine).
                        Empty string means no filling (X is kept as-is).
+
+        Output:
+            Streams: sequences (.csv), fasta (.fasta)
+            Tables:
+                sequences: id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps
+                missing: id | removed_by | cause
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):

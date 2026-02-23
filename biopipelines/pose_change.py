@@ -76,6 +76,11 @@ echo "=== PoseChange ready ==="
             target_alignment: PyMOL selection for target structure alignment
                              (default: "not resn {sample_ligand}" — everything except the ligand)
             **kwargs: Additional parameters passed to BaseConfig
+
+        Output:
+            Streams: (none)
+            Tables:
+                changes: id | target_structure | reference_structure | ligand_rmsd | centroid_distance | orientation_angle | orientation_axis | alignment_rmsd | num_ligand_atoms
         """
         # Resolve reference structure to DataStream
         if isinstance(reference_structure, StandardizedOutput):

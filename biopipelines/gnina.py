@@ -194,6 +194,13 @@ echo "=== GNINA installation complete ==="
                 the specified pH before docking (default True). Requires obabel
                 in PATH.
             pH: Protonation pH for OpenBabel (default 7.4).
+
+        Output:
+            Streams: structures (.pdb)
+            Tables:
+                docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity
+                docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
+                missing: id | removed_by | cause
         """
         # Keep original input for upstream missing table detection
         self.structures_input = structures

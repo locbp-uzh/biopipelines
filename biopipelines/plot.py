@@ -368,11 +368,10 @@ echo "=== Plot ready ==="
             *args: Sequence of plot operations (Scatter, Histogram, Bar, Column)
             **kwargs: Additional configuration parameters
 
-        Example:
-            Plot(
-                Plot.Histogram(data=results, x="pLDDT"),
-                Plot.Scatter(data=results, x="pLDDT", y="affinity")
-            )
+        Output:
+            Streams: plots (.png)
+            Tables:
+                metadata: filename | type | title | x_column | y_column | data_sources
         """
         self.operations = list(args)
 

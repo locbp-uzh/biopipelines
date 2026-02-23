@@ -110,15 +110,10 @@ echo "=== RBSDesigner installation complete ==="
                              with a start codon.
             **kwargs: Additional parameters.
 
-        Examples:
-            # Design RBS for medium expression
-            rbs = RBSDesigner(sequences=dna, tir="medium")
-
-            # Design RBS for specific TIR with 5'UTR prefix
-            rbs = RBSDesigner(sequences=dna, tir=5000, pre_sequence="AATTAA")
-
-            # Sequences lack a start codon
-            rbs = RBSDesigner(sequences=dna, tir="medium", add_start_codon=True)
+        Output:
+            Streams: sequences (.dna)
+            Tables:
+                rbs: id | dna_sequence | rbs_sequence | full_gene | converged | dg_total | tir_predicted | target_tir | target_dg | min_achievable_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby
         """
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):

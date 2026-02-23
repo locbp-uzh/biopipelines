@@ -64,6 +64,11 @@ echo "=== SplitChains ready ==="
             chain_names: Optional names for the chains (e.g., ["ChainA", "ChainB"])
                         If not provided, uses numeric suffixes (_1, _2, etc.)
             **kwargs: Additional parameters
+
+        Output:
+            Streams: sequences (.csv)
+            Tables:
+                sequences: id | sequence | source_id | complex_id | chain_index | chain_name | chain_length
         """
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):

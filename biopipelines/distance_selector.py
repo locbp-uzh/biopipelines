@@ -81,6 +81,11 @@ echo "=== DistanceSelector ready ==="
                              - True: "within" includes reference + nearby residues
                              - False: "within" includes only nearby residues (excludes reference itself)
             **kwargs: Additional parameters
+
+        Output:
+            Streams: (none)
+            Tables:
+                selections: id | pdb | within | beyond | distance_cutoff | reference_ligand
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):

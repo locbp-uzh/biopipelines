@@ -92,6 +92,11 @@ echo "=== Distance ready ==="
             - '-1' -> last residue (C-terminus)
             - '-2' -> second-to-last residue
             - '1' -> first residue (N-terminus)
+
+        Output:
+            Streams: (none)
+            Tables:
+                distances: id | source_structure | <metric_name> | unit
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):

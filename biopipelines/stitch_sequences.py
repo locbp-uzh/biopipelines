@@ -107,6 +107,12 @@ echo "=== StitchSequences ready ==="
         Processing Order:
             1. Substitutions are applied first (same-length, position-to-position)
             2. Indels are applied second (can change sequence length)
+
+        Output:
+            Streams: sequences (.csv)
+            Tables:
+                sequences: id | sequence
+                missing: id | removed_by | cause
         """
         # Handle concatenation mode: no template, integer keys in indels
         if template is None and indels:

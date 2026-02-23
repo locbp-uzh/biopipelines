@@ -97,17 +97,11 @@ echo "=== Mutagenesis ready ==="
             exclude: Amino acids to exclude as single string (e.g., "CEFGL")
             **kwargs: Additional parameters
 
-        Examples:
-            # Convert position 50 to alanine
-            seq = Sequence("MKTVRQ...", ids="my_protein")
-            sdm = Mutagenesis(original=seq, position=50, mutate_to="A")
-
-            # Saturation mutagenesis
-            sdm = Mutagenesis(original=seq, position=167, mode="saturation")
-
-            # Charged amino acids excluding histidine
-            sdm = Mutagenesis(original=seq, position=175,
-                              mode="charged", exclude="H")
+        Output:
+            Streams: sequences (.csv)
+            Tables:
+                sequences: id | original.id | sequence | mutations | mutation_positions | original_aa | new_aa
+                missing: id | removed_by | cause
         """
         # Store Mutagenesis-specific parameters
         self.position = position

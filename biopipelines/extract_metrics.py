@@ -67,15 +67,10 @@ echo "=== ExtractMetrics ready ==="
             table_names: Optional custom names for columns (defaults to table indices)
             **kwargs: Additional parameters
 
-        Examples:
-            # Extract multiple metrics across cycles
-            metrics_extract = pipeline.add(ExtractMetrics(
-                tables=[cycle0.tables.merged,
-                           cycle1.tables.merged,
-                           cycle2.tables.merged],
-                metrics=["affinity_delta", "affinity_delta_R", "affinity_delta_S"],
-                table_names=["Cycle0", "Cycle1", "Cycle2"]
-            ))
+        Output:
+            Streams: (none)
+            Tables:
+                <metric_name>: columns = table_names list (one table per metric)
         """
         self.tables_input = tables
         self.metrics = metrics

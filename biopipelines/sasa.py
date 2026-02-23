@@ -68,6 +68,11 @@ echo "=== SASA ready ==="
             ligand: Ligand identifier/code (e.g., ":X:", "LIG", "AMX")
             dot_density: Dot density for SASA calculation (1-4, higher = more accurate)
             **kwargs: Additional parameters
+
+        Output:
+            Streams: (none)
+            Tables:
+                sasa: id | structure | sasa_ligand_alone | sasa_ligand_complex | delta_sasa
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):

@@ -76,6 +76,11 @@ echo "=== MMseqs2 ready ==="
                   - Example: sequence ID "rifampicin_1_2" maps to table ID "rifampicin_1"
                   - Pattern {"*": "*_<S>"} strips last "_segment" from sequence ID
             **kwargs: Additional parameters
+
+        Output:
+            Streams: msas (.csv/.a3m)
+            Tables:
+                msas: id | sequences.id | sequence | msa_file
         """
         if id_map is None:
             id_map = {"*": "*_<S>"}

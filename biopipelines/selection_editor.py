@@ -69,6 +69,11 @@ echo "=== SelectionEditor ready ==="
             shift: Number of residues to shift all intervals (+/-) (default: 0)
             invert: Whether to invert the selection (select complement) (default: False)
             **kwargs: Additional parameters
+
+        Output:
+            Streams: (none)
+            Tables:
+                selections: id | pdb | <modified_column> | original_<modified_column>
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):

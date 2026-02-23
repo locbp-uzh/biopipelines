@@ -213,6 +213,14 @@ echo "=== RFdiffusion3 installation complete ==="
             json_config: Full JSON config override for advanced use
             design_startnum: Starting number for design IDs
             **kwargs: Additional parameters passed to BaseConfig
+
+        Output:
+            Streams: structures (.pdb), sequences (.csv)
+            Tables:
+                structures: id | design | model | pdb | fixed | designed | contig | length | time | status
+                metrics: id | design | model | max_ca_deviation | n_chainbreaks | ligand_clashes | ligand_min_distance | loop_fraction | helix_fraction | sheet_fraction | radius_of_gyration | ...
+                specifications: id | design | model | sampled_contig | num_tokens_in | num_residues_in | num_chains | num_atoms | num_residues
+                sequences: id | source_id | source_pdb | chain | sequence | length
         """
         # Resolve PDB input
         self.input_pdb_file: Optional[str] = None

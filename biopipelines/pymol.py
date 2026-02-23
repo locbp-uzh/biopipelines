@@ -500,10 +500,9 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
             *args: Sequence of PyMOL operations (Names, Load, Color, etc.)
             **kwargs: Additional configuration parameters
 
-        Example:
-            PyMOL(session="my_session",
-                  PyMOL.Load(structures),
-                  PyMOL.ColorAF(structures))
+        Output:
+            Streams: renders (.png) if Render operations present
+            Files: session (.pse)
         """
         self.operations = list(args)
         self.session_name = session

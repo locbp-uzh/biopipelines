@@ -88,21 +88,10 @@ echo "=== Angle ready ==="
             - '-1' -> last residue (C-terminus)
             - '-1.C' -> carbonyl carbon of last residue
 
-        Examples:
-            # Bond angle at CA of residue 10 (N-CA-C angle)
-            Angle(structures=boltz, atoms=['10.N', '10.CA', '10.C'])
-
-            # Phi angle (C-N-CA-C)
-            Angle(structures=boltz, atoms=['9.C', '10.N', '10.CA', '10.C'])
-
-            # Psi angle (N-CA-C-N)
-            Angle(structures=boltz, atoms=['10.N', '10.CA', '10.C', '11.N'])
-
-            # Chi1 angle for residue 50
-            Angle(structures=boltz, atoms=['50.N', '50.CA', '50.CB', '50.CG'])
-
-            # Ligand geometry
-            Angle(structures=boltz, atoms=['LIG.C1', 'LIG.C2', 'LIG.C3'])
+        Output:
+            Streams: (none)
+            Tables:
+                angles: id | source_structure | <metric_name> | unit
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):

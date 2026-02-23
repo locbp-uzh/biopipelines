@@ -23,60 +23,35 @@ from biopipelines.plot import Plot
 
 with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
     Resources(gpu="A100", time="12:00:00", memory="32GB")
-
     abl1 = PDB("3QRK")
     imatinib = Ligand("STI")
-
-    # Predict wild-type complex as pose reference
     original = Boltz2(proteins=abl1,
-                      ligands=imatinib,
-                      affinity=True)
-
-    # Saturation mutagenesis at gatekeeper position (internal 93, AUTH 315)
+                      ligands=imatinib)
     mutant_sequences = Mutagenesis(original=abl1,
-                                   position=93,
+                                   position=93, #AUTH 315
                                    mode="saturation")
-
-    # Boltz2: predict all mutant complexes with affinity
     mutants = Boltz2(proteins=mutant_sequences,
-                     ligands=imatinib,
-                     affinity=True)
-
-    # GNINA: re-dock imatinib into each Boltz2-predicted mutant structure.
-    # Autobox is derived from the co-predicted ligand coordinates in the PDB.
+                     ligands=imatinib)
     docking = Gnina(structures=mutants,
-                    compounds=imatinib,
-                    exhaustiveness=32,
-                    num_runs=5,
-                    cnn_scoring="rescore")
-
-    # PoseChange: measure ligand RMSD between each mutant and wild-type pose
-    pose = PoseChange(reference_structure=original,
-                      sample_structures=mutants,
-                      reference_ligand="LIG")
-
-    # Merge Boltz2 affinity + confidence + GNINA best scores + pose RMSD + mutation labels
-    boltz_metrics = Panda(tables=[mutants.tables.affinity,
-                                  mutants.tables.confidence],
-                          operations=[Panda.merge()])
-
-    gnina_best = Panda(tables=docking.tables.docking_summary,
-                       operations=[Panda.sort("best_vina", ascending=True),
-                                   Panda.drop_duplicates(subset="protein_id", keep="first"),
-                                   Panda.select_columns(["protein_id", "best_vina",
-                                                         "best_cnn_score", "pose_consistency"])])
-
-    analysis = Panda(tables=[boltz_metrics.tables.result,
-                              gnina_best.tables.result,
-                              pose.tables.changes,
-                              mutant_sequences.tables.sequences],
-                     operations=[Panda.merge()])
+                    compounds=imatinib)
+    
+    mutants_docking = Panda(tables=[mutants.tables.affinity,
+                                    mutants.tables.confidence,
+                                    docking.tables.docking_summary],
+                            operations=[Panda.merge(on=["id",
+                                                        "id",
+                                                        "structures.id"])])
+    
+    final_analysis = Panda(tables=[mutant_sequences.tables.sequences,
+                                   mutants_docking.tables.result],
+                     operations=[Panda.merge(on=["id",
+                                                 "proteins.id"])])
 
     # --- Plots ---
 
     # 1. Boltz2 predicted affinity per mutation
-    Plot(Plot.Bar(data=analysis.tables.result,
-                  x="mutation",
+    Plot(Plot.Bar(data=final_analysis.tables.result,
+                  x="mutations",
                   y="affinity_pred_value",
                   title="Boltz2 Predicted Affinity per Gatekeeper Mutant",
                   xlabel="Mutation",
@@ -85,7 +60,7 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                   grid=True))
 
     # 2. GNINA Vina score and CNN score side-by-side per mutation
-    Plot(Plot.Bar(data=analysis.tables.result,
+    Plot(Plot.Bar(data=final_analysis.tables.result,
                   x="mutation",
                   y="best_vina",
                   y_right="best_cnn_score",
@@ -97,7 +72,7 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                   grid=True))
 
     # 3. Cross-method scatter: Boltz2 affinity vs GNINA Vina score
-    Plot(Plot.Scatter(data=analysis.tables.result,
+    Plot(Plot.Scatter(data=final_analysis.tables.result,
                       x="affinity_pred_value",
                       y="best_vina",
                       color="mutation",
@@ -108,7 +83,7 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                       color_legend_outside=True))
 
     # 4. Ligand RMSD per mutation (pose displacement from wild-type)
-    Plot(Plot.Bar(data=analysis.tables.result,
+    Plot(Plot.Bar(data=final_analysis.tables.result,
                   x="mutation",
                   y="ligand_rmsd",
                   y_right="pose_consistency",

@@ -147,6 +147,11 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
             inpaint_length: Target length for each inpainted region
             guiding_potentials: JSON or filepath specifying custom external potentials
             **kwargs: Additional parameters
+
+        Output:
+            Streams: structures (.pdb)
+            Tables:
+                structures: id | source_id | pdb | fixed | designed | contigs | time | status
         """
         # Resolve optional pdb input
         self.pdb_file: Optional[str] = None
@@ -464,6 +469,11 @@ class RFDAA_PrepareLigand(BaseConfig):
         Args:
             ligand: Ligand structure as DataStream or StandardizedOutput
             **kwargs: Additional parameters
+
+        Output:
+            Streams: structures (.pdb)
+            Tables:
+                structures: id | file_path
         """
         # Resolve ligand input
         if isinstance(ligand, StandardizedOutput):

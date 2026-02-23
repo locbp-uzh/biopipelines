@@ -109,18 +109,11 @@ echo "=== PoseBusters installation complete ==="
             id_map: ID mapping pattern for matching structure IDs to table IDs
             **kwargs: Additional parameters
 
-        Examples:
-            # Dock mode
-            validation = PoseBusters(structures=boltz_holo, ligand='LIG')
-
-            # Redock mode with reference
-            validation = PoseBusters(
-                structures=boltz_holo,
-                ligand='ATP',
-                reference_ligand=crystal_structure,
-                reference_ligand_code='ATP',
-                mode='redock'
-            )
+        Output:
+            Streams: (none)
+            Tables:
+                posebusters (dock): id | source_structure | mol_pred_loaded | mol_cond_loaded | sanitization | all_atoms_connected | bond_lengths | bond_angles | internal_steric_clash | aromatic_ring_flatness | double_bond_flatness | internal_energy | volume_overlap_with_protein | minimum_distance_to_protein | all_pass
+                posebusters (redock): adds mol_true_loaded | rmsd before all_pass
         """
         # Resolve structures input to DataStream
         if isinstance(structures, StandardizedOutput):
