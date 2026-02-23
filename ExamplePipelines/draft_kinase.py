@@ -28,8 +28,9 @@ with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
     top3 = Panda(tables=[refolded.tables.confidence,
                          conf_change.tables.changes],
                  operations=[Panda.merge(),
-                             Panda.filter("RMSD < 1.5 and plddt > 80"),
-                             Panda.sort("plddt"),
+                             Panda.filter("RMSD < 1.5"),
+                             Panda.sort("plddt",
+                                        ascending=False),
                              Panda.head(3)],
                  pool=refolded)
     PyMOL(PyMOL.Load(top3),

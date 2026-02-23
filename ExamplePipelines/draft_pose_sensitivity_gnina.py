@@ -32,32 +32,49 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                      ligands=imatinib)
     docking = Gnina(structures=mutants,
                     compounds=imatinib)
-
     mutants_docking = Panda(tables=[mutants.tables.affinity,
                                     mutants.tables.confidence,
                                     docking.tables.docking_summary],
                             operations=[Panda.merge(on=["id",
                                                         "id",
                                                         "structures.id"])])
-
     analysis = Panda(tables=[mutant_sequences.tables.sequences,
                              mutants_docking.tables.result],
                      operations=[Panda.merge(on=["id",
-                                                 "proteins.id"])])
-
-    # --- Plots ---
-
+                                                 "proteins.id"]),
+                                 Panda.calculate({"mean_cnn_aff_uM":"10**(6-mean_cnn_affinity)",
+                                                  "boltz_aff_uM":"10**affinity_pred_value"})])
     # 1. Boltz2 predicted affinity per mutation
     Plot(Plot.Bar(data=analysis.tables.result,
                   x="mutations",
-                  y="affinity_pred_value",
+                  y="boltz_aff_uM",
                   title="Boltz2 Predicted Affinity per Gatekeeper Mutant",
                   xlabel="Mutation",
-                  ylabel="Boltz2 Affinity (pred)",
+                  ylabel="Boltz2 Affinity [uM]",
+                  x_tick_rotation=45,
+                  grid=True))
+    
+    # 2. GNINA predicted affinity per mutation
+    Plot(Plot.Bar(data=analysis.tables.result,
+                  x="mutations",
+                  y="mean_cnn_aff_uM",
+                  title="Gnina Average Predicted Affinity per Gatekeeper Mutant",
+                  xlabel="Mutation",
+                  ylabel="GNINA Affinity [uM]",
                   x_tick_rotation=45,
                   grid=True))
 
-    # 2. GNINA Vina score and CNN score side-by-side per mutation
+    # 3. GNINA predicted affinity vs Boltz2
+    Plot(Plot.Bar(data=analysis.tables.result,
+                  x="boltz_aff_uM",
+                  y="mean_cnn_aff_uM",
+                  title="Gnina vs Boltz predicted affinity",
+                  xlabel="Boltz2 Affinity [uM]",
+                  ylabel="GNINA Affinity [uM]",
+                  x_tick_rotation=45,
+                  grid=True))
+
+    # 4. GNINA Vina score and CNN score side-by-side per mutation
     Plot(Plot.Bar(data=analysis.tables.result,
                   x="mutations",
                   y="best_vina",
@@ -68,14 +85,4 @@ with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
                   ylabel_right="CNN Score",
                   x_tick_rotation=45,
                   grid=True))
-
-    # 3. Cross-method scatter: Boltz2 affinity vs GNINA Vina score
-    Plot(Plot.Scatter(data=analysis.tables.result,
-                      x="affinity_pred_value",
-                      y="best_vina",
-                      color="mutations",
-                      title="Boltz2 Affinity vs GNINA Vina Score",
-                      xlabel="Boltz2 Affinity (pred)",
-                      ylabel="GNINA Best Vina (kcal/mol)",
-                      grid=True,
-                      color_legend_outside=True))
+    

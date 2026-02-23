@@ -20,7 +20,7 @@ with Pipeline(project="Ubiquitin", job="InverseFolding"):
     ubiquitin = PDB("4LCD",
                     chain="E")
     sequences = ProteinMPNN(structures=ubiquitin,
-                            num_sequences=50,
+                            num_sequences=10,
                             soluble_model=True)
     folded = AlphaFold(proteins=sequences)
     dna = DNAEncoder(sequences=sequences, 
@@ -34,6 +34,7 @@ with Pipeline(project="Ubiquitin", job="InverseFolding"):
                                pool=sequences)
     dna = DNAEncoder(sequences=filtered_sequences, 
                      organism="EC") 
+
 
 
 
