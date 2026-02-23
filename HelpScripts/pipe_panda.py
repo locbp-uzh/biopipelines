@@ -221,6 +221,10 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
         table_key = on_per_table[i] if i < len(on_per_table) else merge_key
         if table_key != merge_key:
             if table_key in df.columns:
+                # Drop the existing merge_key column to avoid duplicates after rename
+                if merge_key in df.columns:
+                    df = df.drop(columns=[merge_key])
+                    print(f"    Dropped original '{merge_key}' column in dataframe {i} (replaced by '{table_key}')")
                 df = df.rename(columns={table_key: merge_key})
                 print(f"    Renamed '{table_key}' -> '{merge_key}' in dataframe {i}")
 
