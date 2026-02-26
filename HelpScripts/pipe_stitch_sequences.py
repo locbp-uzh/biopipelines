@@ -26,12 +26,9 @@ import pandas as pd
 from typing import Dict, List, Any, Tuple
 from itertools import product
 
-# Import ID mapping utilities
-# Handle both direct execution and import from other directories
-try:
-    from id_map_utils import get_mapped_ids, map_table_ids_to_ids
-except ImportError:
-    from HelpScripts.id_map_utils import get_mapped_ids, map_table_ids_to_ids
+# Add repo root to path so biopipelines package is importable
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.id_map_utils import get_mapped_ids, map_table_ids_to_ids
 
 
 def sele_to_list(s: str) -> List[int]:

@@ -19,8 +19,9 @@ import tempfile
 import time
 import random
 
-# Import unified ID mapping utilities
-from id_map_utils import map_table_ids_to_ids
+# Add repo root to path so biopipelines package is importable
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.id_map_utils import map_table_ids_to_ids
 
 def log(message):
     """Log with timestamp."""

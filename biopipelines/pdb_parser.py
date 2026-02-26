@@ -275,17 +275,46 @@ def select_atoms_by_sequence_context(atoms: List[Atom], target_residue: str, seq
     
     return select_atoms_by_residue_number(atoms, target_positions)
 
+def _resolve_keyword_residue(keyword: str, atoms: List[Atom], chain: str = None) -> int:
+    """
+    Resolve 'first' or 'last' keyword to actual PDB residue number.
+
+    Args:
+        keyword: 'first' or 'last'
+        atoms: List of all atoms
+        chain: Optional chain filter
+
+    Returns:
+        Actual PDB residue number
+    """
+    protein_residues = sorted(
+        {(a.chain, a.res_num) for a in atoms if a.res_name in STANDARD_RESIDUES}
+    )
+    if chain:
+        protein_residues = [(c, r) for c, r in protein_residues if c == chain]
+    if not protein_residues:
+        raise ValueError(f"No protein residues found to resolve '{keyword}'")
+    if keyword == "first":
+        res_num = protein_residues[0][1]
+    else:
+        res_num = protein_residues[-1][1]
+    print(f"  - Keyword '{keyword}' -> residue {res_num}")
+    return res_num
+
+
 def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
     """
     Parse selection string and return matching atoms.
 
     Supports:
     - Residue.atom: ``10.CA``, ``-1.C`` (numeric before dot)
+    - Keyword.atom: ``first.CA``, ``last.C``
     - Ligand.atom:  ``LIG.Cl`` (non-numeric before dot)
     - Sequence context: ``D in IGDWG``
+    - Keywords: ``first``, ``last``
     - Residue numbers: ``145``, ``-1``
     - Ranges: ``145-150``
-    - Multiple: ``145+147+150``, ``1+-1``
+    - Multiple: ``145+147+150``, ``1+-1``, ``first+last``
     - Atom name fallback
 
     Args:
@@ -300,7 +329,19 @@ def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
         prefix = parts[0]
         atom_name = parts[1] if len(parts) > 1 else None
 
-        if prefix.lstrip('-').isdigit():
+        if prefix.lower() in ('first', 'last'):
+            # Keyword.atom: 'first.CA', 'last.C'
+            res_num = _resolve_keyword_residue(prefix.lower(), atoms)
+            residue_atoms = select_atoms_by_residue_number(atoms, [res_num])
+            if atom_name is None:
+                return residue_atoms
+            selected = []
+            for atom in residue_atoms:
+                atom_clean = atom.atom_name.strip()
+                if atom_clean == atom_name or atom_clean.upper() == atom_name.upper():
+                    selected.append(atom)
+            return selected
+        elif prefix.lstrip('-').isdigit():
             # Residue.atom: '10.CA', '-1.C'
             residue_atoms = select_atoms_by_residue_number(atoms, [int(prefix)])
             if atom_name is None:
@@ -322,6 +363,11 @@ def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
         sequence_context = parts[1].strip()
         return select_atoms_by_sequence_context(atoms, target_residue, sequence_context)
 
+    elif selection.lower() in ('first', 'last'):
+        # Keyword: 'first' or 'last'
+        res_num = _resolve_keyword_residue(selection.lower(), atoms)
+        return select_atoms_by_residue_number(atoms, [res_num])
+
     elif selection.lstrip('-').isdigit():
         # Simple residue number: '145' or '-1' (negative indexing)
         res_num = int(selection)
@@ -342,12 +388,14 @@ def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
             return select_atoms_by_residue_number(atoms, [res_num])
 
     elif '+' in selection:
-        # Multiple residues: '145+147+150' or '1+-1' (supports negative)
+        # Multiple residues: '145+147+150', '1+-1', 'first+last' (supports negative & keywords)
         parts = selection.split('+')
         res_nums = []
         for part in parts:
             part = part.strip()
-            if part.lstrip('-').isdigit():
+            if part.lower() in ('first', 'last'):
+                res_nums.append(_resolve_keyword_residue(part.lower(), atoms))
+            elif part.lstrip('-').isdigit():
                 res_nums.append(int(part))
         return select_atoms_by_residue_number(atoms, res_nums)
 

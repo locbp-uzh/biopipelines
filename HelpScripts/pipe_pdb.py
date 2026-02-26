@@ -19,9 +19,9 @@ from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
 
-# Import the local PDB parser
-sys.path.append(os.path.dirname(__file__))
-from pdb_parser import get_protein_sequence, parse_pdb_file
+# Add repo root to path so biopipelines package is importable
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.pdb_parser import get_protein_sequence, parse_pdb_file
 
 
 def convert_cif_to_pdb(cif_content: str) -> str:

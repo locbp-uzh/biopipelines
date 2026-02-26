@@ -36,12 +36,12 @@ import math
 from pathlib import Path
 
 # Import our native PDB parser
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
 from typing import List, Dict, Tuple
 
 # Import unified I/O utilities
-from biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
+from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
 
 def parse_reference_spec(reference_spec):

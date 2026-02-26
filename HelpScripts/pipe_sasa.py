@@ -21,8 +21,8 @@ import pandas as pd
 from typing import List, Tuple
 
 # Import unified I/O utilities
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from biopipelines_io import load_datastream, iterate_files
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
 
 # Import PyMOL
 import pymol

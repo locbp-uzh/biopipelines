@@ -1117,13 +1117,10 @@ umask 002
         from .datastream import DataStream
 
         try:
-            from HelpScripts.id_map_utils import get_mapped_ids
+            from biopipelines.id_map_utils import get_mapped_ids
         except ImportError:
-            try:
-                from id_map_utils import get_mapped_ids
-            except ImportError:
-                print("Warning: Could not import id_map_utils, skipping lineage CSV")
-                return
+            print("Warning: Could not import id_map_utils, skipping lineage CSV")
+            return
 
         # 1. Collect tool info: (label, all_ids, provenance)
         #    all_ids is the union of IDs across all non-empty streams

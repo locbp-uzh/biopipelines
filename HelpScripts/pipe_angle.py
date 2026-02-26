@@ -23,9 +23,9 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 
 # Import unified I/O utilities
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from biopipelines_io import load_datastream, iterate_files
-from pdb_parser import parse_pdb_file, Atom, resolve_selection
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.pdb_parser import parse_pdb_file, Atom, resolve_selection
 
 
 def get_atom_centroid(atoms: List[Atom]) -> Tuple[float, float, float]:

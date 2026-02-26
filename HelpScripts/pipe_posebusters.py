@@ -19,8 +19,8 @@ import pandas as pd
 from typing import Dict, List, Any, Optional, Tuple
 
 # Import unified I/O utilities
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from biopipelines_io import load_datastream, iterate_files
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
 
 
 def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structure_id):

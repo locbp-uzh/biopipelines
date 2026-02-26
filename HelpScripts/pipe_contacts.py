@@ -21,14 +21,14 @@ import math
 from typing import Dict, List, Any, Optional, Tuple, NamedTuple
 
 # Import unified I/O utilities
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from biopipelines_io import load_datastream, iterate_files
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
 
 # Import unified ID mapping utilities
-from id_map_utils import map_table_ids_to_ids
+from biopipelines.id_map_utils import map_table_ids_to_ids
 
 # Import PDB parser and selection utilities
-from pdb_parser import Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file, STANDARD_RESIDUES, parse_pymol_ranges
+from biopipelines.pdb_parser import Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file, STANDARD_RESIDUES, parse_pymol_ranges
 
 
 def parse_pdb_file(pdb_path: str) -> List[_PdbAtom]:

@@ -19,13 +19,9 @@ import pandas as pd
 from typing import List, Dict, Any
 from itertools import product
 
-# Import pdb_parser for extracting sequences from PDB files
-try:
-    from pdb_parser import parse_pdb_file, get_protein_sequence
-except ImportError:
-    # Direct path for testing
-    sys.path.insert(0, os.path.dirname(__file__))
-    from pdb_parser import parse_pdb_file, get_protein_sequence
+# Add repo root to path so biopipelines package is importable
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
 
 
 def parse_length_spec(spec: str) -> List[int]:

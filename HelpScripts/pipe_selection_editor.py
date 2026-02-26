@@ -30,9 +30,9 @@ import pandas as pd
 from typing import List, Tuple, Set
 
 # Import unified I/O utilities and PDB parser
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from biopipelines_io import load_datastream, iterate_files
-from pdb_parser import parse_pdb_file, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.pdb_parser import parse_pdb_file, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
 
 
 def parse_pymol_selection(selection: str) -> List[Tuple[int, int]]:

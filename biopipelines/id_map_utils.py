@@ -261,7 +261,7 @@ def _get_provenance_ids(source_id, map_table_paths):
     """
     if not map_table_paths:
         return []
-    from biopipelines_io import _table_cache
+    from biopipelines.biopipelines_io import _table_cache
     import pandas as pd
     import os
     provenance_ids = []
@@ -388,7 +388,7 @@ def get_mapped_ids(
 
         # Priority 2: Provenance match via map_table columns
         if map_table_paths:
-            from biopipelines_io import resolve_id_by_provenance
+            from biopipelines.biopipelines_io import resolve_id_by_provenance
             matched = resolve_id_by_provenance(source_id, target_set, map_table_paths)
             if matched is not None:
                 if unique:

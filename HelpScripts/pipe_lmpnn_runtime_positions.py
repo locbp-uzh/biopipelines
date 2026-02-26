@@ -33,9 +33,9 @@ import glob
 from pathlib import Path
 
 # Import unified I/O utilities
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
-from pdb_parser import parse_pdb_file
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
+from biopipelines.pdb_parser import parse_pdb_file
 
 
 def sele_to_list(sele_str):

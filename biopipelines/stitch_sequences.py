@@ -26,15 +26,8 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
 
-# Import ID mapping utilities from HelpScripts
-try:
-    from HelpScripts.id_map_utils import get_mapped_ids
-except ImportError:
-    import sys
-    help_scripts_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'HelpScripts')
-    if help_scripts_path not in sys.path:
-        sys.path.insert(0, help_scripts_path)
-    from id_map_utils import get_mapped_ids
+# Import ID mapping utilities
+from biopipelines.id_map_utils import get_mapped_ids
 
 
 class StitchSequences(BaseConfig):

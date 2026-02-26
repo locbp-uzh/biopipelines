@@ -17,8 +17,8 @@ import sys
 import pandas as pd
 
 # Import unified I/O utilities
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from biopipelines_io import load_datastream, iterate_files
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
 
 
 def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, target_id,

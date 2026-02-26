@@ -18,6 +18,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+# Add repo root to path so biopipelines package is importable
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # CRITICAL: Set environment variables for headless PyMOL BEFORE any import
 # This prevents libGL.so.1 errors on headless cluster nodes
 os.environ['PYMOL_SYMMETRY_VIEWER'] = '0'
@@ -235,7 +238,7 @@ class PyMOLSessionBuilder:
         Returns:
             Matched value if found, None otherwise
         """
-        from id_map_utils import get_mapped_ids
+        from biopipelines.id_map_utils import get_mapped_ids
 
         # Exact match (fast path)
         if struct_id in id_to_value:
