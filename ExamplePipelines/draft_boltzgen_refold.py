@@ -15,14 +15,14 @@ from biopipelines.plot import Plot
 from biopipelines.dna_encoder import DNAEncoder
 from biopipelines.conformational_change import ConformationalChange
 
-with Pipeline(project="DopamineBinder", job="BoltzGen-Refold-DNA"):
+with Pipeline(project="GentamicinBinder", job="BoltzGen-Refold-DNA"):
     Resources(gpu="any", time="24:00:00", memory="16GB")
     final_metrics_csv = "/path/to/final_designs_metrics_100.csv"
     final_sequences = Sequence(final_metrics_csv)
     DNAEncoder(final_sequences, 
                organism="EC")
     boltzgen_data = Table(final_metrics_csv) 
-    ligand = Ligand("dopamine")
+    ligand = Ligand("gentamicin")
     boltz_apo  = Boltz2(proteins=final_sequences)
     boltz_holo = Boltz2(proteins=final_sequences,
                         ligands=ligand,

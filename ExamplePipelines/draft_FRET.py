@@ -12,14 +12,17 @@ from biopipelines.panda import Panda
 from biopipelines.plot import Plot
 from biopipelines.pymol import PyMOL
 
+donor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTHGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAA",
+                     ids="EBFP")  
+acceptor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFGYGLQCFARYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSYQSALSKDPNEKRDHMVLLEFVTAA",
+                        ids="EYFP") 
+
+
 with Pipeline(project="Biosensor", job="CaFRET"):
     Resources(gpu="A100", time="8:00:00", memory="16GB")
-    donor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTHGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAA",
-                     ids="EBFP")     
-    cam = PDB("1CFD",
-              ids="CaM") # Calmodulin
-    acceptor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFGYGLQCFARYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSYQSALSKDPNEKRDHMVLLEFVTAA",
-                        ids="EYFP")   
+    donor = Sequence("VSKGEELFTG...", ids="EBFP")     
+    cam = PDB("1CFD", ids="CaM")
+    acceptor = Sequence("VSKGEELFTG...", ids="EYFP")   
     fusions = Fuse(sequences=[donor, cam, acceptor],
                    name="CaFRET",
                    linker="GSG",
@@ -44,16 +47,25 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                              dist_holo.tables.distances],
                      operations=[Panda.merge(),
                                  Panda.calculate(derived_metrics)])
+    Plot(...)
     Plot(Plot.Bar(data=analysis.tables.result,
-                  title="Calcium-Induced FRET Change by Linker Length",
+                  title="FRET efficiency by Linker Length",
                   x="lengths",
                   y="FRET_E_apo",
                   y_right="FRET_E_holo",
                   xlabel="Linker Lengths",
                   ylabel="FRET apo",
-                  ylabel_right="FRET holo"))
+                  ylabel_right="FRET holo"),
+         Plot.Bar(data=analysis.tables.result,
+                  title="Calcium-Induced FRET Change by Linker Length",
+                  x="lengths",
+                  y="delta_FRET",
+                  xlabel="Linker Lengths",
+                  ylabel="FRET difference"))
+    
     best = Panda(tables=[analysis.tables.result],
                  operations=[Panda.sort("delta_FRET",ascending=False)])
+    
     best_apo = Panda(tables=[best.tables.result],
                      operations=[Panda.head(1)],
                      pool=apo)

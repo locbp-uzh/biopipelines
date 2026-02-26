@@ -9,76 +9,39 @@ from biopipelines.mutation_composer import MutationComposer
 from biopipelines.panda import Panda
 from biopipelines.gnina import Gnina
 
-examples = {
-    "Atu4243-GABA": ("4EQ7","GABA"), # no gnina: (0.86,0.88)->(0.60,0.86)
-    "Atu4243-TACA": ("4EQ7","TACA"), # no gnina: (1.26,0.79)->(1.08,0.77)
-    "NocT-Histopine": ("5OT9","Histopine"), #no gnina: (-0.22,0.88)->(-0.48,0.93)
-    "Atu4661-Galactinol": ("6EQ8","galactinol"), #no gnina: (1.33,0.56)->
-    "TeaA-hydroxyectoine": ("2VPO","hydroxyectoine"),
-}
-for example, comp in examples.items():
-    for with_gnina in [True, False]:
-        if not with_gnina and example != "TeaA-hydroxyectoine": continue
-        with Pipeline(project="Optimization", job=f"IterativeBinding_{example}_Gnina{with_gnina}"):
-            Resources(gpu="A100", time="24:00:00", memory="16GB")
-            protein = PDB(comp[0])
-            ligand = Ligand(comp[1])
-            original = Boltz2(proteins=protein, 
-                            ligands=ligand)
-            current_best_sequence = protein
-            if with_gnina:
-                docked_original = Gnina(structures=original,
-                                        compounds=ligand)
-                current_best = Panda(tables=docked_original.tables.docking_results,
-                                    operations=[Panda.sort("cnn_affinity", ascending=True),
-                                                Panda.head(1)],
-                                    pool=docked_original)
-            else:
-                current_best = Panda(tables=original.tables.affinity,
-                                    operations=[],
-                                    pool=original)
-            for cycle in range(5):
-                Suffix(f"Cycle{cycle+1}")
-                pocket = DistanceSelector(structures=current_best,
-                                        ligand="LIG", 
-                                        distance=5)
-                variants = LigandMPNN(structures=current_best,
-                                    ligand="LIG",
-                                    num_sequences=1000,
-                                    redesigned=pocket.tables.selections.within)
-                profile = MutationProfiler(original=current_best_sequence, 
-                                        mutants=variants)
-                candidates = MutationComposer(frequencies=profile.tables.absolute_frequencies,
-                                            num_sequences=10, 
-                                            mode="weighted_random", 
-                                            max_mutations=3)
-                predicted = Boltz2(proteins=candidates, 
-                                ligands=ligand)
-                if with_gnina:
-                    docked_predicted = Gnina(structures=predicted,
-                                            compounds=ligand)
-                    current_best = Panda(tables=[current_best.tables.result,
-                                                docked_predicted.tables.docking_results],
-                                        operations=[Panda.concat(add_source=True),
-                                                    Panda.sort("cnn_affinity", ascending=True),
-                                                    Panda.head(1)],
-                                        pool=[current_best, 
-                                              docked_predicted])
-                    current_best_sequence = Panda(tables=[current_best.tables.result,
-                                                          docked_predicted.tables.docking_results],
-                                                  operations=[Panda.concat(add_source=True),
-                                                              Panda.sort("cnn_affinity", ascending=True),
-                                                              Panda.head(1)],
-                                                  pool=[current_best_sequence, 
-                                                        candidates])
-                else:
-                    current_best = Panda(tables=[current_best.tables.result, 
-                                                predicted.tables.affinity],
-                                        operations=[Panda.concat(add_source=True),
-                                                    Panda.sort("affinity_pred_value", ascending=True),
-                                                    Panda.head(1)],
-                                        pool=[current_best, 
-                                              predicted])
-                    current_best_sequence = current_best_sequence
+
+with Pipeline(project="NocT", job=f"IterativeBindingOptimization"):
+    Resources(gpu="A100", time="24:00:00", memory="16GB")
+    protein = PDB("5OT9")
+    ligand = Ligand("Histopine")
+    original = Boltz2(proteins=protein, 
+                    ligands=ligand)
+    
+    current_best = Panda(tables=original.tables.affinity,
+                        pool=original)
+    for cycle in range(5):
+        Suffix(f"Cycle{cycle+1}")
+        pocket = DistanceSelector(structures=current_best,
+                                ligand="LIG", 
+                                distance=5)
+        variants = LigandMPNN(structures=current_best,
+                            ligand="LIG",
+                            num_sequences=1000,
+                            redesigned=pocket.tables.selections.within)
+        profile = MutationProfiler(original=current_best, 
+                                mutants=variants)
+        candidates = MutationComposer(frequencies=profile.tables.absolute_frequencies,
+                                    num_sequences=10, 
+                                    mode="weighted_random", 
+                                    max_mutations=3)
+        predicted = Boltz2(proteins=candidates, 
+                        ligands=ligand)
+        current_best = Panda(tables=[current_best.tables.result, 
+                                    predicted.tables.affinity],
+                            operations=[Panda.concat(add_source=True),
+                                        Panda.sort("affinity_pred_value"),
+                                        Panda.head(1)],
+                            pool=[current_best, 
+                                    predicted])
 
 

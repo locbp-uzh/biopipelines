@@ -24,9 +24,9 @@ with Pipeline(project="MarR", job="FragmentScreen"):
                                        "p-hydroxyphenyl": r"c1c(O)ccc(c1)",
                                        "carboxylate": r"C(=O)[O-]"},
                               primary_key="candidate")
-    boltz = Boltz2(proteins=Bundle(MarR, MarR),
+    cofolded = Boltz2(proteins=Bundle(MarR, MarR),
                    ligands=Each(library))
-    merged = Panda(tables=[boltz.tables.affinity, 
+    merged = Panda(tables=[cofolded.tables.affinity, 
                            library.tables.compounds],
                    operations=[Panda.merge(on="id"),
                                Panda.calculate({"aff_uM":"10**affinity_pred_value"})])

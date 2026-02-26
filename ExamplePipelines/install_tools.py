@@ -26,29 +26,23 @@ from biopipelines.pymol import PyMOL
 from biopipelines.gnina import Gnina
 from biopipelines.posebusters import PoseBusters
 
-with Pipeline(project="Setup",
-              job="InstallTools",
-              description="Install external tools and environments"):
-
-    Resources(time="8:00:00",
-              memory="32GB")
-
+with Pipeline(project="Setup", job="InstallTools"):
+    Resources(time="8:00:00", memory="32GB")
     # Structure generation
     RFdiffusion.install()         # Creates SE3nv, clones repo, downloads weights
     RFdiffusionAllAtom.install()  # Clones repo (uses SE3nv from RFdiffusion)
     RFdiffusion3.install()        # Creates foundry env, downloads checkpoints
     BoltzGen.install()            # Creates boltzgen env
-
     # Sequence design
     ProteinMPNN.install()         # Clones repo (uses SE3nv from RFdiffusion)
     LigandMPNN.install()          # Creates ligandmpnn_env, clones repo
-
     # Structure prediction
     AlphaFold.install()           # LocalColabFold installation
     Boltz2.install()              # Creates Boltz2Env
-
     # Visualization & Analysis
     PyMOL.install()               # Creates ProteinEnv (PyMOL, pandas, biopython, rdkit)
     MutationProfiler.install()    # Creates MutationEnv
     Gnina.install()               # Downloads weights
-    PoseBusters.install()
+    PoseBusters.install()         # CLones repository, creates environment
+
+    
