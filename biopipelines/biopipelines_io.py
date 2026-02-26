@@ -575,6 +575,85 @@ def load_table(
     return df, column_name
 
 
+def _find_lineage_file() -> Optional[str]:
+    """
+    Search for .lineage.csv by walking up from cached table paths or cwd.
+
+    Returns:
+        Path to .lineage.csv if found, None otherwise.
+    """
+    # Collect candidate directories: parents of cached table paths + cwd
+    candidates = set()
+    for path in _table_cache:
+        candidates.add(os.path.dirname(os.path.abspath(path)))
+    candidates.add(os.getcwd())
+
+    checked = set()
+    for start in candidates:
+        d = start
+        while d not in checked:
+            checked.add(d)
+            lineage = os.path.join(d, ".lineage.csv")
+            if os.path.isfile(lineage):
+                return lineage
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    return None
+
+
+def _resolve_id_via_lineage(item_id: str, target_ids: set) -> Optional[str]:
+    """
+    Resolve *item_id* to one of *target_ids* using the pipeline lineage CSV.
+
+    The lineage CSV has one column per tool. We find any column containing
+    *item_id* and any column containing target IDs, then look up the
+    corresponding target value in the same row.
+
+    Args:
+        item_id: ID to resolve
+        target_ids: Set of acceptable target IDs
+
+    Returns:
+        Matching target ID or None
+    """
+    lineage_path = _find_lineage_file()
+    if lineage_path is None:
+        return None
+
+    if lineage_path in _table_cache:
+        df = _table_cache[lineage_path]
+    else:
+        try:
+            df = pd.read_csv(lineage_path)
+            _table_cache[lineage_path] = df
+        except Exception:
+            return None
+
+    # Find column containing item_id and column(s) containing target_ids
+    item_col = None
+    target_col = None
+    for col in df.columns:
+        col_values = set(df[col].dropna().astype(str))
+        if item_col is None and item_id in col_values:
+            item_col = col
+        if target_col is None and col_values & target_ids:
+            target_col = col
+
+    if not item_col or not target_col or item_col == target_col:
+        return None
+
+    # Look up matching target in rows where item_col == item_id
+    for _, row in df.iterrows():
+        if str(row.get(item_col, "")) == item_id:
+            tgt = str(row.get(target_col, ""))
+            if tgt in target_ids:
+                return tgt
+
+    return None
+
+
 def lookup_table_value(
     table: pd.DataFrame,
     item_id: str,
@@ -590,6 +669,7 @@ def lookup_table_value(
     1. Match by pdb column (if exists): item_id or item_id.pdb
     2. Match by id column: exact match
     3. Match by id column with ID mapping: strip suffixes according to id_map
+    4. Match via pipeline .lineage.csv: trace ID relationships across tools
 
     Args:
         table: DataFrame to search
@@ -660,6 +740,16 @@ def lookup_table_value(
             except ImportError:
                 # id_map_utils not available, skip this strategy
                 pass
+
+    # Strategy 4: Try lineage-based resolution
+    if id_column in table.columns:
+        target_ids = set(table[id_column].astype(str))
+        lineage_id = _resolve_id_via_lineage(item_id, target_ids)
+        if lineage_id is not None:
+            attempted_ids.append(f"{lineage_id} (via lineage)")
+            matching_rows = table[table[id_column] == lineage_id]
+            if not matching_rows.empty:
+                return matching_rows.iloc[0][column]
 
     raise KeyError(
         f"ID '{item_id}' not found in table. Tried: {attempted_ids}"

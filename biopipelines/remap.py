@@ -247,7 +247,7 @@ echo "=== ReMap ready ==="
 
     def _resolve_via_lineage(self, source_ids: List[str], onto_ids: List[str]) -> Dict[str, str]:
         """
-        Try to build mapping using the pipeline's id_lineage.csv.
+        Try to build mapping using the pipeline's .lineage.csv.
 
         The lineage CSV has one column per tool. Both source and onto tools
         appear as columns. By reading rows where the onto tool column matches
@@ -260,7 +260,7 @@ echo "=== ReMap ready ==="
         Returns:
             Dict mapping source_id -> onto_id for matched IDs, or empty dict
         """
-        lineage_path = os.path.join(os.path.dirname(self.output_folder), "id_lineage.csv")
+        lineage_path = os.path.join(os.path.dirname(self.output_folder), ".lineage.csv")
         if not os.path.exists(lineage_path):
             return {}
 

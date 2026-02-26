@@ -1287,7 +1287,7 @@ umask 002
                 unique_rows.append(row)
 
         # 6. Write CSV
-        csv_path = os.path.join(self.folders["output"], "id_lineage.csv")
+        csv_path = os.path.join(self.folders["output"], ".lineage.csv")
         with open(csv_path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=headers)
             writer.writeheader()
