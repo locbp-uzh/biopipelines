@@ -118,6 +118,60 @@ best = Panda(
 
 ---
 
+## ReMap
+
+Renames IDs across all streams and tables from a source tool output. At execution time, files are symlinked and CSV tables are rewritten with new IDs.
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `source`: StandardizedOutput - Tool output whose IDs will be renamed
+- `onto`: str | list | dict | list[tuple] | DataStream | StandardizedOutput - Target ID specification
+- `map`: StandardizedOutput = None - Intermediate tool for provenance bridging
+
+**`onto` specification**:
+| Type | Behavior |
+|------|----------|
+| `str` | Auto-number: `"design"` → `design_1`, `design_2`, ... |
+| `list[str]` | Explicit new IDs (matched to streams with same length) |
+| `dict` | Selective: `{"old_id": "new_id"}` |
+| `list[tuple]` | Same as dict: `[("old_id", "new_id")]` |
+| `DataStream` | Align onto stream's IDs |
+| `StandardizedOutput` | Align onto tool's IDs (all streams must have same IDs) |
+
+**Streams**: All source streams whose IDs can be fully remapped (others are discarded with a message)
+
+**Tables**: Remapped copies of all source tables
+
+**Examples**:
+
+```python
+from biopipelines.remap import ReMap
+
+# Auto-numbered
+remapped = ReMap(source=tool_a, onto="design")
+
+# Explicit list
+remapped = ReMap(source=tool_a, onto=["kinase_apo", "kinase_holo"])
+
+# Dict mapping
+remapped = ReMap(source=tool_a, onto={"prot1": "complex_A", "prot2": "complex_B"})
+
+# List of tuples
+remapped = ReMap(source=tool_a, onto=[("prot1", "complex_A"), ("prot2", "complex_B")])
+
+# Align onto another tool's IDs
+remapped = ReMap(source=tool_a, onto=tool_b)
+
+# Align onto a specific stream
+remapped = ReMap(source=tool_a, onto=tool_b.streams.structures)
+
+# Use intermediate tool as provenance bridge
+remapped = ReMap(source=tool_a, onto=tool_c, map=tool_b)
+```
+
+---
+
 ## ExtractMetrics
 
 Creates separate CSV files per metric for statistical software (GraphPad Prism).

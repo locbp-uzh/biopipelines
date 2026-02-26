@@ -258,11 +258,14 @@ echo "=== RFdiffusion installation complete ==="
         """
         # Resolve optional pdb input
         self.pdb_file: Optional[str] = None
+        self.pdb_input_id: Optional[str] = None
         if pdb is not None:
             if isinstance(pdb, StandardizedOutput):
                 self.pdb_file = pdb.streams.structures.files[0]
+                self.pdb_input_id = pdb.streams.structures.ids[0]
             elif isinstance(pdb, DataStream):
                 self.pdb_file = pdb.files[0]
+                self.pdb_input_id = pdb.ids[0]
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
 
@@ -337,7 +340,8 @@ echo "=== RFdiffusion installation complete ==="
         if self.pdb_file:
             rfd_options += f" inference.input_pdb={self.pdb_file}"
 
-        prefix = os.path.join(self.output_folder, self.pipeline_name)
+        output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
+        prefix = os.path.join(self.output_folder, output_name)
         rfd_options += f" inference.output_prefix={prefix}"
         rfd_options += f" inference.num_designs={self.num_designs}"
         rfd_options += f" inference.deterministic={self.reproducible}"
@@ -365,25 +369,34 @@ python {self.inference_py_file} {rfd_options}
         """Generate the table creation part of the script."""
         design_character = "-"
 
+        output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
         return f"""echo "Creating results table"
-python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_character}" "{self.pipeline_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_character}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
 
 """
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after RFdiffusion execution."""
+        # Use PDB input ID as base when available, otherwise pipeline name
+        output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
+
         # Generate expected PDB file paths and IDs
         design_pdbs = []
         structure_ids = []
         for i in range(self.num_designs):
-            design_id = f"{self.pipeline_name}_{self.design_startnum + i}"
+            design_id = f"{output_name}_{self.design_startnum + i}"
             design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
             design_pdbs.append(design_path)
             structure_ids.append(design_id)
 
+        # Build provenance if PDB input is available
+        provenance = None
+        if self.pdb_input_id:
+            provenance = {"structures": [self.pdb_input_id] * len(structure_ids)}
+
         # Create map_table for structures
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, structure_ids, files=design_pdbs)
+        create_map_table(structures_map, structure_ids, files=design_pdbs, provenance=provenance)
 
         structures = DataStream(
             name="structures",

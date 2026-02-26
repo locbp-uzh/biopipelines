@@ -224,26 +224,31 @@ echo "=== RFdiffusion3 installation complete ==="
         """
         # Resolve PDB input
         self.input_pdb_file: Optional[str] = None
+        self.pdb_input_id: Optional[str] = None
 
         # Handle ligand structure (takes precedence over pdb)
         if ligand_structure is not None:
             if isinstance(ligand_structure, StandardizedOutput):
                 self.input_pdb_file = ligand_structure.streams.structures.files[0]
+                self.pdb_input_id = ligand_structure.streams.structures.ids[0]
                 # Auto-extract ligand code from compound_ids if not provided
                 if not ligand_code and ligand_structure.streams.compounds:
                     ligand_code = ligand_structure.streams.compounds.ids[0] if ligand_structure.streams.compounds.ids else ""
             elif isinstance(ligand_structure, DataStream):
                 self.input_pdb_file = ligand_structure.files[0]
+                self.pdb_input_id = ligand_structure.ids[0]
             else:
                 raise ValueError(f"ligand_structure must be DataStream or StandardizedOutput, got {type(ligand_structure)}")
         # Handle PDB input (only if ligand_structure not provided)
         elif pdb is not None:
             if isinstance(pdb, StandardizedOutput):
                 self.input_pdb_file = pdb.streams.structures.files[0]
+                self.pdb_input_id = pdb.streams.structures.ids[0]
                 if len(pdb.streams.structures.files) > 1:
                     print(f"Warning: Multiple structures provided ({len(pdb.streams.structures.files)}), using first: {pdb.streams.structures.files[0]}")
             elif isinstance(pdb, DataStream):
                 self.input_pdb_file = pdb.files[0]
+                self.pdb_input_id = pdb.ids[0]
                 if len(pdb.files) > 1:
                     print(f"Warning: Multiple structures provided ({len(pdb.files)}), using first: {pdb.files[0]}")
             else:
@@ -270,7 +275,11 @@ echo "=== RFdiffusion3 installation complete ==="
 
     def _get_prefix(self) -> str:
         """Get the prefix to use for output files."""
-        return self.prefix if self.prefix else self.pipeline_name
+        if self.prefix:
+            return self.prefix
+        if self.pdb_input_id:
+            return self.pdb_input_id
+        return self.pipeline_name
 
     def validate_params(self):
         """Validate RFdiffusion3-specific parameters."""
@@ -639,9 +648,14 @@ python "{self.table_py_file}" \\
                 design_pdbs.append(structure_path)
                 structure_ids.append(structure_id)
 
+        # Build provenance if PDB input is available
+        provenance = None
+        if self.pdb_input_id:
+            provenance = {"structures": [self.pdb_input_id] * len(structure_ids)}
+
         # Create map_table for structures
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, structure_ids, files=design_pdbs)
+        create_map_table(structures_map, structure_ids, files=design_pdbs, provenance=provenance)
 
         structures = DataStream(
             name="structures",

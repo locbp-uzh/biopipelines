@@ -337,6 +337,7 @@ class Pipeline:
         # On-the-fly execution: generate and run the tool's script immediately
         if self.on_the_fly:
             self._execute_tool_on_the_fly(tool_config)
+            self._generate_id_lineage_csv()
 
         return tool_output
 
@@ -464,6 +465,9 @@ class Pipeline:
         
         # Export tool outputs for potential reuse with Load
         self._export_tool_outputs()
+
+        # Generate ID lineage CSV
+        self._generate_id_lineage_csv()
 
         # Save the original pipeline Python script to runtime folder
         self._save_original_pipeline_script()
@@ -1098,6 +1102,200 @@ umask 002
         else:
             print("Warning: No tool output metadata could be exported")
     
+    def _generate_id_lineage_csv(self):
+        """
+        Generate CSV tracking ID lineage across all pipeline tools.
+
+        Each final output ID is traced backward through the pipeline using
+        tool-provided provenance (map_table .id columns) and fallback
+        ID matching via get_mapped_ids().
+
+        Multi-input tools produce duplicate rows per output ID, one per input
+        axis, with blanks for tools not on that lineage path.
+        """
+        import csv
+        from .datastream import DataStream
+
+        try:
+            from HelpScripts.id_map_utils import get_mapped_ids
+        except ImportError:
+            try:
+                from id_map_utils import get_mapped_ids
+            except ImportError:
+                print("Warning: Could not import id_map_utils, skipping lineage CSV")
+                return
+
+        # 1. Collect tool info: (label, all_ids, provenance)
+        #    all_ids is the union of IDs across all non-empty streams
+        tool_info = []
+        for tool_output in self.tool_outputs:
+            label = f"{tool_output.execution_order:03d}_{tool_output.tool_type}"
+            std_output = tool_output.output
+
+            # Collect IDs from all non-empty streams (deduplicated, order-preserving)
+            seen = set()
+            ids = []
+            for name, stream in std_output.streams.items():
+                if hasattr(stream, 'ids'):
+                    for sid in stream.ids:
+                        if sid not in seen:
+                            seen.add(sid)
+                            ids.append(sid)
+            if not ids:
+                continue
+
+            # Get provenance from tool's map_tables
+            try:
+                provenance = tool_output.config.get_id_provenance()
+            except Exception:
+                provenance = {}
+
+            tool_info.append((label, ids, provenance))
+
+        if not tool_info:
+            return
+
+        headers = [ti[0] for ti in tool_info]
+        last_label, last_ids, _ = tool_info[-1]
+
+        # 2. Identify all distinct lineage axes
+        # An axis is a chain of tools connected by provenance.
+        # For tools with no provenance (root tools or pass-through), there's one
+        # implicit axis. For multi-input tools, each provenance key is a separate axis.
+
+        # Find which tools have multi-axis provenance
+        # For each provenance axis of each tool, determine which earlier tool provides
+        # the parent IDs for that axis
+        axis_source = {}  # (tool_idx, axis_name) -> source_tool_idx
+        for tool_idx, (label, ids, provenance) in enumerate(tool_info):
+            for axis_name, prov_map in provenance.items():
+                parent_ids_for_axis = set(prov_map.values())
+                for j in range(tool_idx - 1, -1, -1):
+                    _, earlier_ids, _ = tool_info[j]
+                    if parent_ids_for_axis & set(earlier_ids):
+                        axis_source[(tool_idx, axis_name)] = j
+                        break
+
+        # 3. Determine the set of lineage paths to trace
+        # Default: single path tracing all tools. Multi-input tools split into
+        # multiple paths.
+
+        # Find tools with >1 provenance axis (branch points)
+        multi_axis_tools = {}
+        for tool_idx, (label, ids, provenance) in enumerate(tool_info):
+            if len(provenance) > 1:
+                multi_axis_tools[tool_idx] = provenance
+
+        # Build lineage paths. Each path is defined by which provenance axis to
+        # follow at each branch point. For simple pipelines (no multi-axis), there's
+        # just one path covering all tools.
+        if not multi_axis_tools:
+            # Simple case: one path, all tools
+            paths = [None]  # None = default path (use any available provenance)
+        else:
+            # One path per provenance axis per multi-axis tool
+            paths = []
+            for tool_idx, provenance in multi_axis_tools.items():
+                for axis_name in provenance:
+                    paths.append((tool_idx, axis_name))
+
+        # 4. Build rows
+        all_rows = []
+
+        for path_spec in paths:
+            for output_id in last_ids:
+                row = {h: "" for h in headers}
+                row[last_label] = output_id
+
+                # Walk backward from second-to-last tool
+                current_id = output_id
+                for i in range(len(tool_info) - 2, -1, -1):
+                    label_i, parent_ids_i, _ = tool_info[i]
+                    next_idx = i + 1
+                    next_provenance = tool_info[next_idx][2]
+                    child_id = current_id
+
+                    # Determine if we're on this path
+                    if path_spec is not None:
+                        branch_tool_idx, branch_axis = path_spec
+
+                        if next_idx == branch_tool_idx:
+                            # At the branch point: use the specific axis
+                            prov_map = next_provenance.get(branch_axis, {})
+                            if child_id in prov_map:
+                                candidate = prov_map[child_id]
+                                if candidate in parent_ids_i:
+                                    row[label_i] = candidate
+                                    current_id = candidate
+                                    continue
+                            # This axis doesn't connect to this tool — skip
+                            row[label_i] = ""
+                            continue
+                        elif next_idx > branch_tool_idx:
+                            # After the branch: same as default, trace normally
+                            pass
+                        else:
+                            # Before the branch: check if this tool is on the
+                            # branch's source chain
+                            source_idx = axis_source.get(
+                                (branch_tool_idx, branch_axis)
+                            )
+                            if source_idx is not None and i > source_idx:
+                                # We're between the branch source and the branch
+                                # tool, but not on this axis's lineage
+                                # Check if provenance maps through here
+                                pass
+                            elif source_idx is not None and i < source_idx:
+                                # Before the source tool of this axis — trace normally
+                                pass
+
+                    # Default matching: try provenance first, then get_mapped_ids
+                    matched = None
+
+                    # Try provenance from the next tool
+                    for axis_name, prov_map in next_provenance.items():
+                        if path_spec is not None:
+                            branch_tool_idx, branch_axis = path_spec
+                            if next_idx == branch_tool_idx and axis_name != branch_axis:
+                                continue
+                        if child_id in prov_map:
+                            candidate = prov_map[child_id]
+                            if candidate in parent_ids_i:
+                                matched = candidate
+                                break
+
+                    if matched is None:
+                        # Fallback: use get_mapped_ids
+                        mapping = get_mapped_ids([child_id], parent_ids_i)
+                        matched = mapping.get(child_id)
+
+                    if matched:
+                        row[label_i] = matched
+                        current_id = matched
+                    else:
+                        # Can't trace further back on this path — leave blank
+                        row[label_i] = ""
+
+                all_rows.append(row)
+
+        # 5. Remove duplicate rows and rows that are strict subsets
+        # (a row is a subset if every non-blank cell matches another row that
+        # has additional non-blank cells)
+        unique_rows = []
+        seen = set()
+        for row in all_rows:
+            key = tuple(row[h] for h in headers)
+            if key not in seen:
+                seen.add(key)
+                unique_rows.append(row)
+
+        # 6. Write CSV
+        csv_path = os.path.join(self.folders["output"], "id_lineage.csv")
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(unique_rows)
+
     def _json_serializer(self, obj):
         """Custom JSON serializer for ToolOutput and other non-serializable objects."""
         if hasattr(obj, 'to_dict'):

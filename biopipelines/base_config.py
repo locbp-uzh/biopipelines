@@ -362,6 +362,57 @@ echo "=============================="
         """
         pass
 
+    def get_id_provenance(self) -> Dict[str, Dict[str, str]]:
+        """
+        Get provenance mapping for this tool's output IDs.
+
+        Reads the map_table CSV of every output stream and extracts
+        provenance columns ({stream_name}.id) to build child->parent
+        mappings. Skips axes already found in an earlier stream.
+
+        Returns:
+            Dict mapping axis_name -> {output_id: parent_id}.
+            Empty dict if no provenance data is available.
+        """
+        from .datastream import DataStream
+
+        output_files = self.get_output_files()
+
+        result = {}
+        seen_tables = set()
+
+        for key, val in output_files.items():
+            if not isinstance(val, DataStream):
+                continue
+            if not val.map_table or not os.path.exists(val.map_table):
+                continue
+            if val.map_table in seen_tables:
+                continue
+            seen_tables.add(val.map_table)
+
+            try:
+                df = pd.read_csv(val.map_table)
+            except Exception:
+                continue
+            if "id" not in df.columns:
+                continue
+
+            for col in df.columns:
+                if col.endswith(".id") and col != "id":
+                    axis_name = col[:-3]  # "structures.id" -> "structures"
+                    if axis_name in result:
+                        continue  # already found from another stream
+                    mapping = {}
+                    for _, row in df.iterrows():
+                        output_id = str(row["id"])
+                        parent_id = str(row[col])
+                        if parent_id and parent_id != "nan":
+                            mapping[output_id] = parent_id
+                    if mapping:
+                        result[axis_name] = mapping
+
+        return result
+
     def _repr_notebook_html(self, output: 'StandardizedOutput') -> str:
         """
         Generate custom HTML visualization for notebook display.

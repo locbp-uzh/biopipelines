@@ -90,6 +90,7 @@ Mutation analysis and frequency optimization.
 Filter, transform, and manipulate tables.
 
 - [Panda](Tool/DataManagement.md#panda) - Unified table transformations (filter, sort, merge, concat, rank, ...)
+- [ReMap](Tool/DataManagement.md#remap) - Rename IDs across streams and tables
 - [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric extraction for Prism
 - [SelectionEditor](Tool/DataManagement.md#selectioneditor) - Selection string manipulation
 

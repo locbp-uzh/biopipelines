@@ -68,7 +68,7 @@ echo "=== ReMap ready ==="
 
     def __init__(self,
                  source: StandardizedOutput,
-                 onto: Union[str, List[str], Dict[str, str], StandardizedOutput, DataStream],
+                 onto: Union[str, List[str], List[tuple], Dict[str, str], StandardizedOutput, DataStream, "ToolOutput"],
                  map: Optional[Union[StandardizedOutput, DataStream]] = None,
                  **kwargs):
         """
@@ -118,8 +118,18 @@ echo "=== ReMap ready ==="
         """
         onto = self.onto_spec
 
+        # Unwrap ToolOutput to StandardizedOutput
+        from .base_config import ToolOutput
+        if isinstance(onto, ToolOutput):
+            onto = onto.output
+            self.onto_spec = onto  # update reference for _get_onto_streams
+
         if isinstance(onto, str):
             return onto
+
+        # List of tuples: syntactic sugar for dict
+        if isinstance(onto, list) and onto and isinstance(onto[0], tuple):
+            return {old: new for old, new in onto}
 
         if isinstance(onto, dict):
             return onto
@@ -137,6 +147,19 @@ echo "=== ReMap ready ==="
             for stream_name, stream in onto.streams.items():
                 if isinstance(stream, DataStream) and len(stream) > 0:
                     stream_ids[stream_name] = list(stream.ids)
+            if not stream_ids:
+                raise ValueError("onto tool has no non-empty streams")
+            # Check all streams have the same IDs
+            id_lists = list(stream_ids.values())
+            if len(id_lists) > 1:
+                for other in id_lists[1:]:
+                    if other != id_lists[0]:
+                        names = list(stream_ids.keys())
+                        raise ValueError(
+                            f"Ambiguous onto: streams have different IDs "
+                            f"({names}). Pass a specific stream, "
+                            f"e.g., onto=tool.streams.{names[0]}"
+                        )
             return stream_ids
 
         raise ValueError(f"onto must be str, list, dict, DataStream, or StandardizedOutput, got {type(onto)}")
@@ -221,6 +244,54 @@ echo "=== ReMap ready ==="
                 return self._compute_mapping_via_zip(onto)
 
         raise ValueError(f"Unexpected onto_ids type: {type(onto)}")
+
+    def _resolve_via_lineage(self, source_ids: List[str], onto_ids: List[str]) -> Dict[str, str]:
+        """
+        Try to build mapping using the pipeline's id_lineage.csv.
+
+        The lineage CSV has one column per tool. Both source and onto tools
+        appear as columns. By reading rows where the onto tool column matches
+        an onto ID, we can look up the corresponding source tool column value.
+
+        Args:
+            source_ids: IDs from the source tool
+            onto_ids: IDs from the onto tool
+
+        Returns:
+            Dict mapping source_id -> onto_id for matched IDs, or empty dict
+        """
+        lineage_path = os.path.join(os.path.dirname(self.output_folder), "id_lineage.csv")
+        if not os.path.exists(lineage_path):
+            return {}
+
+        import pandas as pd
+        df = pd.read_csv(lineage_path)
+
+        source_set = set(str(s) for s in source_ids)
+        onto_set = set(str(s) for s in onto_ids)
+
+        # Find columns that contain source and onto IDs
+        source_col = None
+        onto_col = None
+        for col in df.columns:
+            col_values = set(df[col].dropna().astype(str))
+            if not source_col and col_values & source_set:
+                source_col = col
+            if not onto_col and col_values & onto_set:
+                onto_col = col
+
+        if not source_col or not onto_col or source_col == onto_col:
+            return {}
+
+        # Build mapping from lineage rows
+        mapping = {}
+        for _, row in df.iterrows():
+            src = str(row[source_col]) if pd.notna(row[source_col]) else ""
+            tgt = str(row[onto_col]) if pd.notna(row[onto_col]) else ""
+            if src in source_set and tgt in onto_set and src not in mapping:
+                mapping[src] = tgt
+
+        return mapping
 
     def _resolve_via_provenance(self, source_ids: List[str], onto_stream: DataStream) -> Dict[str, str]:
         """
@@ -313,11 +384,20 @@ echo "=== ReMap ready ==="
 
             unmapped_source_streams.append(stream_info)
 
-        # Provenance-based fallback for streams that couldn't be matched by name/length
+        # For streams that couldn't be matched by name/length:
+        # 1. Try lineage CSV first
+        # 2. Fall back to provenance-based resolution
         if unmapped_source_streams:
-            onto_streams = self._get_onto_streams()
+            all_onto_ids = [oid for ids in onto_stream_ids.values() for oid in ids]
             for stream_info in unmapped_source_streams:
                 source_ids = stream_info["ids"]
+                # Try lineage first
+                lineage_mapping = self._resolve_via_lineage(source_ids, all_onto_ids)
+                if lineage_mapping:
+                    mapping.update(lineage_mapping)
+                    continue
+                # Fall back to provenance
+                onto_streams = self._get_onto_streams()
                 for onto_stream in onto_streams:
                     prov_mapping = self._resolve_via_provenance(source_ids, onto_stream)
                     if prov_mapping:
@@ -353,6 +433,11 @@ echo "=== ReMap ready ==="
         all_source_ids = set()
         for stream_info in self.source_streams:
             all_source_ids.update(stream_info["ids"])
+
+        # Try lineage CSV first
+        lineage_mapping = self._resolve_via_lineage(list(all_source_ids), list(all_onto_ids))
+        if lineage_mapping:
+            return lineage_mapping
 
         # Look through bridge's streams for provenance that connects source to onto
         for stream_name, stream in bridge.streams.items():
@@ -459,7 +544,15 @@ echo "=== ReMap ready ==="
             old_ids = stream_info["ids"]
             old_files = stream_info["files"]
 
-            new_ids = [self.id_mapping.get(oid, oid) for oid in old_ids]
+            # For non-string onto, check if all IDs in this stream have a mapping
+            if not isinstance(self.onto_ids, str):
+                new_ids = [self.id_mapping.get(oid) for oid in old_ids]
+                if None in new_ids:
+                    print(f"  ReMap: discarding stream '{stream_key}' "
+                          f"(not all IDs have a mapping)")
+                    continue
+            else:
+                new_ids = [self.id_mapping.get(oid, oid) for oid in old_ids]
 
             # Build new file paths
             new_files = []
