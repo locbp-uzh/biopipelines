@@ -235,7 +235,7 @@ class StructureAttribute:
 
     # --- Nonpolymer (Ligand) Molecular Features ---
     class NonpolymerFeatures:
-        ComponentIdentifier         = _Attr("rcsb_nonpolymer_entity_container_identifiers.comp_id")
+        ComponentIdentifier         = _Attr("rcsb_nonpolymer_entity_container_identifiers.nonpolymer_comp_id")
         FormulaWeight               = _Attr("rcsb_nonpolymer_entity.formula_weight")
         LigandQscore                = _Attr("rcsb_nonpolymer_entity_instance_container_identifiers.ligand_qscore")
 
