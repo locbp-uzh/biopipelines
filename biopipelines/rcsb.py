@@ -12,6 +12,7 @@ with the same output format as the PDB tool.
 
 import os
 import json
+from enum import Enum
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -31,6 +32,223 @@ class RCSBQuery:
 
     def __init__(self, query_dict: Dict[str, Any]):
         self.query_dict = query_dict
+
+
+# ---------------------------------------------------------------------------
+# Value enumerations (used as arguments to StructureAttribute methods)
+# ---------------------------------------------------------------------------
+
+class PolymerEntityType(Enum):
+    """Polymer Entity Type — mirrors RCSB 'Polymer Entity Type' attribute values."""
+    PROTEIN           = "Protein"
+    DNA               = "DNA"
+    RNA               = "RNA"
+    NA_HYBRID         = "NA-hybrid"
+    OTHER             = "Other"
+
+
+class SymmetryType(Enum):
+    """Symmetry Type — mirrors RCSB 'Symmetry Type' attribute values (Assembly Features)."""
+    ASYMMETRIC        = "Asymmetric"
+    HOMO_2_MER        = "Homo 2-mer"
+    HOMO_3_MER        = "Homo 3-mer"
+    HOMO_4_MER        = "Homo 4-mer"
+    HOMO_5_MER        = "Homo 5-mer"
+    HOMO_6_MER        = "Homo 6-mer"
+    HOMO_7_MER        = "Homo 7-mer"
+    PSEUDO_SYMMETRIC  = "Pseudo-Symmetric"
+    HETEROMERIC       = "Heteromeric"
+
+
+class ExperimentalMethod(Enum):
+    """Experimental Method — mirrors RCSB 'Experimental Method' attribute values."""
+    X_RAY_DIFFRACTION      = "X-RAY DIFFRACTION"
+    ELECTRON_MICROSCOPY    = "ELECTRON MICROSCOPY"
+    SOLUTION_NMR           = "SOLUTION NMR"
+    SOLID_STATE_NMR        = "SOLID-STATE NMR"
+    NEUTRON_DIFFRACTION    = "NEUTRON DIFFRACTION"
+    ELECTRON_CRYSTALLOGRAPHY = "ELECTRON CRYSTALLOGRAPHY"
+    FIBER_DIFFRACTION      = "FIBER DIFFRACTION"
+    EPR                    = "EPR"
+    FLUORESCENCE_TRANSFER  = "FLUORESCENCE TRANSFER"
+    INFRARED_SPECTROSCOPY  = "INFRARED SPECTROSCOPY"
+
+
+# ---------------------------------------------------------------------------
+# Attribute descriptor — holds the API path, produces RCSBQuery via methods
+# ---------------------------------------------------------------------------
+
+class _Attr:
+    """
+    Represents a single searchable RCSB attribute.
+
+    Methods produce RCSBQuery objects that can be passed directly to RCSB().
+    Each method name mirrors the kind of comparison being performed, making
+    intent explicit at the call site.
+
+    Example:
+        RCSB(
+            StructureAttribute.NonpolymerFeatures.ComponentIdentifier.is_any("FMN", "FAD"),
+            StructureAttribute.PolymerMolecularFeatures.PolymerEntityType.equals(PolymerEntityType.PROTEIN),
+            StructureAttribute.AssemblyFeatures.SymmetryType.equals(SymmetryType.ASYMMETRIC),
+            StructureAttribute.PolymerMolecularFeatures.PolymerEntitySequenceLength.between(80, 300),
+        )
+    """
+
+    def __init__(self, path: str):
+        self._path = path
+
+    def _make(self, operator: str, value: Any, negation: bool = False) -> RCSBQuery:
+        params: Dict[str, Any] = {
+            "attribute": self._path,
+            "operator": operator,
+            "value": value,
+        }
+        if negation:
+            params["negation"] = True
+        return RCSBQuery({
+            "type": "terminal",
+            "service": "text",
+            "parameters": params,
+        })
+
+    # --- comparison methods ---
+
+    def equals(self, value: Any) -> RCSBQuery:
+        """Exact equality. Pass an Enum member or a plain value."""
+        v = value.value if isinstance(value, Enum) else value
+        return self._make("exact_match", v)
+
+    def is_any(self, *values) -> RCSBQuery:
+        """Value is one of the supplied options (OR). Pass Enum members or plain strings."""
+        vs = [v.value if isinstance(v, Enum) else v for v in values]
+        return self._make("in", vs)
+
+    def contains(self, text: str) -> RCSBQuery:
+        """Value contains the given words (case-insensitive substring search)."""
+        return self._make("contains_words", text)
+
+    def contains_phrase(self, text: str) -> RCSBQuery:
+        """Value contains the given exact phrase."""
+        return self._make("contains_phrase", text)
+
+    def between(self, low: Any, high: Any, inclusive: bool = True) -> RCSBQuery:
+        """Numeric or date range. Both bounds included by default."""
+        return self._make("range", {
+            "from": low,
+            "to": high,
+            "include_lower": inclusive,
+            "include_upper": inclusive,
+        })
+
+    def greater_than(self, value: Any, or_equal: bool = False) -> RCSBQuery:
+        """Greater than (or equal) comparison."""
+        op = "greater_or_equal" if or_equal else "greater"
+        return self._make(op, value)
+
+    def less_than(self, value: Any, or_equal: bool = False) -> RCSBQuery:
+        """Less than (or equal) comparison."""
+        op = "less_or_equal" if or_equal else "less"
+        return self._make(op, value)
+
+    def exists(self) -> RCSBQuery:
+        """Match entries where this attribute exists (is not null)."""
+        return self._make("exists", None)
+
+    def not_equals(self, value: Any) -> RCSBQuery:
+        """Negated exact equality."""
+        v = value.value if isinstance(value, Enum) else value
+        return self._make("exact_match", v, negation=True)
+
+    def not_any(self, *values) -> RCSBQuery:
+        """Value is none of the supplied options."""
+        vs = [v.value if isinstance(v, Enum) else v for v in values]
+        return self._make("in", vs, negation=True)
+
+
+# ---------------------------------------------------------------------------
+# StructureAttribute — namespace mirroring RCSB advanced search categories
+# ---------------------------------------------------------------------------
+
+class StructureAttribute:
+    """
+    Typed attribute descriptors for RCSB advanced search, organised by the
+    same categories shown at rcsb.org/search/advanced.
+
+    Each attribute exposes comparison methods that return an RCSBQuery:
+        .equals(value)
+        .is_any(*values)
+        .contains(text)
+        .contains_phrase(text)
+        .between(low, high)
+        .greater_than(value, or_equal=False)
+        .less_than(value, or_equal=False)
+        .exists()
+        .not_equals(value)
+        .not_any(*values)
+
+    Usage:
+        from biopipelines.rcsb import StructureAttribute, PolymerEntityType, SymmetryType
+
+        RCSB(
+            StructureAttribute.NonpolymerFeatures.ComponentIdentifier.is_any("FMN"),
+            StructureAttribute.PolymerMolecularFeatures.PolymerEntityType.equals(PolymerEntityType.PROTEIN),
+            StructureAttribute.AssemblyFeatures.SymmetryType.equals(SymmetryType.ASYMMETRIC),
+            StructureAttribute.PolymerMolecularFeatures.PolymerEntitySequenceLength.between(80, 300),
+            max_results=100,
+        )
+    """
+
+    # --- ID(s) and Keywords ---
+    class IDsAndKeywords:
+        EntryId                     = _Attr("rcsb_entry_container_identifiers.entry_id")
+        StructureKeywords           = _Attr("struct_keywords.pdbx_keywords")
+        AdditionalKeywords          = _Attr("struct_keywords.text")
+
+    # --- Structure Details ---
+    class StructureDetails:
+        StructureTitle              = _Attr("struct.title")
+        DepositDate                 = _Attr("rcsb_accession_info.deposit_date")
+        ReleaseDate                 = _Attr("rcsb_accession_info.initial_release_date")
+        RevisionDate                = _Attr("rcsb_accession_info.major_revision")
+
+    # --- Entry Features ---
+    class EntryFeatures:
+        MolecularWeight             = _Attr("rcsb_entry_info.molecular_weight")
+        NumberOfProteinEntities     = _Attr("rcsb_entry_info.polymer_entity_count_protein")
+        NumberOfRnaEntities         = _Attr("rcsb_entry_info.polymer_entity_count_RNA")
+        NumberOfDnaEntities         = _Attr("rcsb_entry_info.polymer_entity_count_DNA")
+        TotalPolymerResidues        = _Attr("rcsb_entry_info.deposited_polymer_monomer_count")
+        EntryPolymerComposition     = _Attr("rcsb_entry_info.polymer_composition")
+        EntryPolymerTypes           = _Attr("rcsb_entry_info.selected_polymer_entity_types")
+
+    # --- Polymer Molecular Features ---
+    class PolymerMolecularFeatures:
+        PolymerEntityDescription    = _Attr("rcsb_polymer_entity.pdbx_description")
+        PolymerEntityType           = _Attr("entity_poly.rcsb_entity_polymer_type")
+        PolymerEntitySequenceLength = _Attr("entity_poly.rcsb_sample_sequence_length")
+        MonomerComponentId          = _Attr("entity_poly.pdbx_seq_one_letter_code_can")
+        ScientificName              = _Attr("rcsb_entity_source_organism.scientific_name")
+        TaxonomyId                  = _Attr("rcsb_entity_source_organism.ncbi_taxonomy_id")
+        GeneName                    = _Attr("rcsb_gene_name.value")
+        EnzymeClassification        = _Attr("rcsb_polymer_entity.rcsb_ec_lineage.id")
+
+    # --- Nonpolymer (Ligand) Molecular Features ---
+    class NonpolymerFeatures:
+        ComponentIdentifier         = _Attr("rcsb_nonpolymer_entity_container_identifiers.comp_id")
+        FormulaWeight               = _Attr("rcsb_nonpolymer_entity.formula_weight")
+        LigandQscore                = _Attr("rcsb_nonpolymer_entity_instance_container_identifiers.ligand_qscore")
+
+    # --- Assembly Features ---
+    class AssemblyFeatures:
+        SymmetryType                = _Attr("rcsb_struct_symmetry.type")
+        SymmetrySymbol              = _Attr("rcsb_struct_symmetry.symbol")
+        OligomericState             = _Attr("pdbx_struct_assembly.oligomeric_details")
+
+    # --- Methods ---
+    class Methods:
+        ExperimentalMethod          = _Attr("rcsb_entry_info.experimental_method")
+        Resolution                  = _Attr("rcsb_entry_info.resolution_combined")
 
 
 class RCSB(BaseConfig):

@@ -81,14 +81,57 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 
 **Query Types**:
 - `RCSB.Text(value)` - Full-text search (supports +, |, -, quoted phrases)
-- `RCSB.Attribute(attribute, operator, value)` - Structured attribute search
 - `RCSB.Sequence(sequence, identity_cutoff, evalue_cutoff, sequence_type)` - BLAST-like similarity
 - `RCSB.SeqMotif(pattern, pattern_type, sequence_type)` - Motif search (prosite/simple/regex)
 - `RCSB.Structure(entry_id, assembly_id)` - 3D structure similarity
 - `RCSB.StrucMotif(residues, pdb_id, assembly_id)` - Structure motif search
-- `RCSB.Chemical(value, match_type, descriptor_type)` - Chemical similarity
+- `RCSB.Chemical(value, match_type, descriptor_type)` - Chemical similarity (by SMILES/InChI)
+- `StructureAttribute.*` - Typed attribute search (see below)
 
-**Attribute Operators**: `exact_match`, `contains_words`, `contains_phrase`, `greater`, `less`, `greater_or_equal`, `less_or_equal`, `equals`, `range`, `exists`, `in`
+**StructureAttribute** — typed descriptors organised by RCSB category. Each attribute exposes comparison methods that return a query object:
+
+| Method | Description |
+|--------|-------------|
+| `.equals(value)` | Exact match. Accepts an enum member or plain value. |
+| `.is_any(*values)` | Value is one of the options (OR). |
+| `.contains(text)` | Contains words (case-insensitive). |
+| `.contains_phrase(text)` | Contains exact phrase. |
+| `.between(low, high)` | Numeric or date range (inclusive by default). |
+| `.greater_than(value, or_equal=False)` | Greater than (or equal). |
+| `.less_than(value, or_equal=False)` | Less than (or equal). |
+| `.exists()` | Attribute is not null. |
+| `.not_equals(value)` | Negated exact match. |
+| `.not_any(*values)` | Negated "in" operator. |
+
+**StructureAttribute categories and attributes**:
+
+`StructureAttribute.IDsAndKeywords`
+- `EntryId`, `StructureKeywords`, `AdditionalKeywords`
+
+`StructureAttribute.StructureDetails`
+- `StructureTitle`, `DepositDate`, `ReleaseDate`, `RevisionDate`
+
+`StructureAttribute.EntryFeatures`
+- `MolecularWeight`, `NumberOfProteinEntities`, `NumberOfRnaEntities`, `NumberOfDnaEntities`
+- `TotalPolymerResidues`, `EntryPolymerComposition`, `EntryPolymerTypes`
+
+`StructureAttribute.PolymerMolecularFeatures`
+- `PolymerEntityDescription`, `PolymerEntityType`, `PolymerEntitySequenceLength`
+- `ScientificName`, `TaxonomyId`, `GeneName`, `EnzymeClassification`
+
+`StructureAttribute.NonpolymerFeatures`
+- `ComponentIdentifier`, `FormulaWeight`, `LigandQscore`
+
+`StructureAttribute.AssemblyFeatures`
+- `SymmetryType`, `SymmetrySymbol`, `OligomericState`
+
+`StructureAttribute.Methods`
+- `ExperimentalMethod`, `Resolution`
+
+**Value enums** (for use with `.equals()` / `.is_any()`):
+- `PolymerEntityType` — `PROTEIN`, `DNA`, `RNA`, `NA_HYBRID`, `OTHER`
+- `SymmetryType` — `ASYMMETRIC`, `HOMO_2_MER`, `HOMO_3_MER`, `HOMO_4_MER`, `HOMO_5_MER`, `HOMO_6_MER`, `HOMO_7_MER`, `PSEUDO_SYMMETRIC`, `HETEROMERIC`
+- `ExperimentalMethod` — `X_RAY_DIFFRACTION`, `ELECTRON_MICROSCOPY`, `SOLUTION_NMR`, `SOLID_STATE_NMR`, `NEUTRON_DIFFRACTION`, `ELECTRON_CRYSTALLOGRAPHY`, `FIBER_DIFFRACTION`, `EPR`, `FLUORESCENCE_TRANSFER`, `INFRARED_SPECTROSCOPY`
 
 **Streams**: `structures`, `sequences`, `compounds`
 
@@ -103,6 +146,16 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 
 ```python
 from biopipelines.entities import RCSB
+from biopipelines.rcsb import StructureAttribute, PolymerEntityType, SymmetryType, ExperimentalMethod
+
+# Typed attribute search (recommended)
+results = RCSB(
+    StructureAttribute.NonpolymerFeatures.ComponentIdentifier.is_any("FMN"),
+    StructureAttribute.PolymerMolecularFeatures.PolymerEntityType.equals(PolymerEntityType.PROTEIN),
+    StructureAttribute.AssemblyFeatures.SymmetryType.equals(SymmetryType.ASYMMETRIC),
+    StructureAttribute.PolymerMolecularFeatures.PolymerEntitySequenceLength.between(80, 300),
+    max_results=100,
+)
 
 # Text search
 results = RCSB(
@@ -110,10 +163,10 @@ results = RCSB(
     max_results=10
 )
 
-# Attribute search with resolution filter
+# Resolution + organism filter
 results = RCSB(
-    RCSB.Attribute("rcsb_entity_source_organism.scientific_name", "exact_match", "Homo sapiens"),
-    RCSB.Attribute("rcsb_entry_info.resolution_combined", "less", 2.0),
+    StructureAttribute.PolymerMolecularFeatures.ScientificName.equals("Homo sapiens"),
+    StructureAttribute.Methods.Resolution.less_than(2.0),
     max_results=20
 )
 
@@ -141,11 +194,11 @@ results = RCSB(
     max_results=10
 )
 
-# Combined queries (AND by default)
+# Mixed: text + typed attributes
 results = RCSB(
     RCSB.Text("kinase"),
-    RCSB.Attribute("rcsb_entry_info.resolution_combined", "less", 2.5),
-    RCSB.Attribute("rcsb_entity_source_organism.scientific_name", "exact_match", "Homo sapiens"),
+    StructureAttribute.Methods.Resolution.less_than(2.5),
+    StructureAttribute.PolymerMolecularFeatures.ScientificName.equals("Homo sapiens"),
     max_results=50,
     sort="resolution"
 )
