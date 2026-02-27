@@ -13,21 +13,21 @@ from biopipelines.gnina import Gnina
 
 def drop_duplicates_history(new_sequences, all_sequences_seen):
     if all_sequences_seen is None: # First cycle
-        unique_new_sequences = Panda(table=new_sequences.tables.sequences,
+        unique_new_sequences = Panda(tables=new_sequences.tables.sequences,
                                      operations=[Panda.drop_duplicates(subset="sequence", 
                                                                        keep="first")],
                                      pool=new_sequences)
-        all_sequences_updated = Panda(table=unique_new_sequences.tables.result)
+        all_sequences_updated = Panda(tables=unique_new_sequences.tables.result)
     else: # Subsequent cycles - concatenate with history and remove duplicates
         combined = Panda(tables=[new_sequences.tables.sequences, 
                                  all_sequences_seen.tables.result],
                          operations=[Panda.concat(add_source=True)])
-        unique_new_sequences = Panda(table=combined.tables.result,
+        unique_new_sequences = Panda(tables=combined.tables.result,
                                      operations=[Panda.drop_duplicates(subset="sequence", 
                                                                        keep="first"),
                                                  Panda.filter("source_table == 0")], # keep only new
                                      pool=new_sequences)
-        all_sequences_updated = Panda(table=combined.tables.result,
+        all_sequences_updated = Panda(tables=combined.tables.result,
                                       operations=[Panda.drop_duplicates(subset="sequence", 
                                                                         keep="first")])
     return unique_new_sequences,all_sequences_updated
