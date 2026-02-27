@@ -16,7 +16,7 @@ with Pipeline(project="Examples",
     # MMseqs2 has to wait for the server to initialize and provide the msas.
     # This is often not immediate. It is better to switch to non-GPU mode when waiting.
     Resources(gpu=None,
-              time="4:00:00",
+              time="24:00:00",
               memory="16GB")
     
     sequences = Sequence(["GNSKKHNLILIGAPGSGKGTQCEFIKKEYGLAHLSTGDMLREAIKNGTKIGLEAKSIIESGNFVGDEIVLGLVKEK",

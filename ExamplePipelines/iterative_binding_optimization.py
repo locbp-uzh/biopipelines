@@ -1,4 +1,6 @@
-# 10.1111/mmi.12043 Atu4243 9 ± 2 μM
+# Authors (2026): G. Quargnali & P. Rivera-Fuentes @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+#
+# Licensed under the MIT License. See LICENSE file in the project root for details.
 
 from biopipelines.pipeline import *
 from biopipelines.boltz2 import Boltz2
@@ -7,7 +9,6 @@ from biopipelines.distance_selector import DistanceSelector
 from biopipelines.mutation_profiler import MutationProfiler
 from biopipelines.mutation_composer import MutationComposer
 from biopipelines.panda import Panda
-from biopipelines.gnina import Gnina
 
 
 with Pipeline(project="NocT", job=f"IterativeBindingOptimization"):
@@ -31,7 +32,7 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization"):
         profile = MutationProfiler(original=current_best, 
                                 mutants=variants)
         candidates = MutationComposer(frequencies=profile.tables.absolute_frequencies,
-                                    num_sequences=10, 
+                                    num_sequences=3, 
                                     mode="weighted_random", 
                                     max_mutations=3)
         predicted = Boltz2(proteins=candidates, 

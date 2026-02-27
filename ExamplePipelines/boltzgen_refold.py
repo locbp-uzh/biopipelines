@@ -21,7 +21,7 @@ with Pipeline(project="GentamicinBinder", job="BoltzGen-Refold-DNA"):
     final_sequences = Sequence(final_metrics_csv)
     DNAEncoder(final_sequences, 
                organism="EC")
-    boltzgen_data = Table(final_metrics_csv) 
+    
     ligand = Ligand("gentamicin")
     boltz_apo  = Boltz2(proteins=final_sequences)
     boltz_holo = Boltz2(proteins=final_sequences,
@@ -29,6 +29,7 @@ with Pipeline(project="GentamicinBinder", job="BoltzGen-Refold-DNA"):
                         msas=boltz_apo)
     conf_change = ConformationalChange(reference_structures=boltz_apo,
                                        target_structures=boltz_holo)
+    boltzgen_data = Table(final_metrics_csv) 
     merged = Panda(tables=[boltzgen_data.tables.data,
                            boltz_apo.tables.confidence,
                            boltz_holo.tables.confidence,
