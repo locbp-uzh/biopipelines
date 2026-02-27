@@ -484,7 +484,6 @@ echo "=== Panda ready ==="
                  operations: Optional[List[Operation]] = None,
                  pool: Optional[Union[StandardizedOutput, List[StandardizedOutput]]] = None,
                  rename: Optional[str] = None,
-                 table: Union[TableInfo, StandardizedOutput, str, None] = None,
                  **kwargs):
         """
         Initialize Panda tool.
@@ -500,7 +499,6 @@ echo "=== Panda ready ==="
                   the pool corresponding to each row's source_table index.
             rename: If provided, output IDs will be renamed to {rename}_1, {rename}_2, etc.
                     Useful after sorting to get ranked IDs (e.g., rename="best" -> best_1, best_2, ...)
-            table: Deprecated alias for tables (single table). Use tables instead.
             **kwargs: Additional parameters
 
         Output:
@@ -509,12 +507,6 @@ echo "=== Panda ready ==="
                 result: columns derived from input + applied operations (dynamic)
                 missing: id | removed_by | cause
         """
-        # Handle deprecated 'table' parameter
-        if table is not None:
-            if tables is not None:
-                raise ValueError("Cannot specify both 'table' and 'tables'. Use 'tables' for both single and multiple inputs.")
-            tables = table
-
         if tables is None:
             raise ValueError("Must specify 'tables' (single table or list of tables)")
 
