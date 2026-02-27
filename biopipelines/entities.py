@@ -3,6 +3,7 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 from biopipelines.pdb import PDB
+from biopipelines.rcsb import RCSB
 from biopipelines.ligand import Ligand
 from biopipelines.sequence import Sequence
 from biopipelines.compound_library import CompoundLibrary

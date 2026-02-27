@@ -9,7 +9,7 @@
 Basic input types exported from `biopipelines.entities`:
 
 ```python
-from biopipelines.entities import PDB, Sequence, Ligand, CompoundLibrary
+from biopipelines.entities import PDB, RCSB, Sequence, Ligand, CompoundLibrary
 ```
 
 ---
@@ -58,6 +58,100 @@ pdb = PDB("structure.pdb", PDB.Rename("LIG", ":L:"))
 
 # Biological assembly
 pdb = PDB("4ufc", biological_assembly=True, remove_waters=False)
+```
+
+---
+
+### RCSB
+
+Searches the RCSB PDB Search API v2 and downloads matching structures.
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `*queries`: One or more query objects (combined with logical_operator)
+- `max_results`: int = 10 - Maximum PDB entries to return
+- `return_type`: str = "entry" - Result granularity ("entry", "assembly", "polymer_entity", "polymer_instance")
+- `sort`: str = "score" - Sort field ("score", "resolution", "release_date", or RCSB attribute)
+- `format`: str = "pdb" - Output format ("pdb" or "cif")
+- `ids`: str | List[str] = None - Custom IDs (defaults to PDB IDs)
+- `remove_waters`: bool = True - Remove water molecules
+- `chain`: str = "longest" - Which chain to extract sequence from
+- `logical_operator`: str = "and" - How to combine queries ("and" or "or")
+
+**Query Types**:
+- `RCSB.Text(value)` - Full-text search (supports +, |, -, quoted phrases)
+- `RCSB.Attribute(attribute, operator, value)` - Structured attribute search
+- `RCSB.Sequence(sequence, identity_cutoff, evalue_cutoff, sequence_type)` - BLAST-like similarity
+- `RCSB.SeqMotif(pattern, pattern_type, sequence_type)` - Motif search (prosite/simple/regex)
+- `RCSB.Structure(entry_id, assembly_id)` - 3D structure similarity
+- `RCSB.StrucMotif(residues, pdb_id, assembly_id)` - Structure motif search
+- `RCSB.Chemical(value, match_type, descriptor_type)` - Chemical similarity
+
+**Attribute Operators**: `exact_match`, `contains_words`, `contains_phrase`, `greater`, `less`, `greater_or_equal`, `less_or_equal`, `equals`, `range`, `exists`, `in`
+
+**Streams**: `structures`, `sequences`, `compounds`
+
+**Tables**:
+- `structures`: | id | pdb_id | file_path | format | source |
+- `sequences`: | id | sequence |
+- `compounds`: | id | code | smiles | ccd |
+- `search_results`: | id | pdb_id | result_id | score |
+- `entry_info`: | id | pdb_id | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date |
+
+**Examples**:
+
+```python
+from biopipelines.entities import RCSB
+
+# Text search
+results = RCSB(
+    RCSB.Text("insulin receptor"),
+    max_results=10
+)
+
+# Attribute search with resolution filter
+results = RCSB(
+    RCSB.Attribute("rcsb_entity_source_organism.scientific_name", "exact_match", "Homo sapiens"),
+    RCSB.Attribute("rcsb_entry_info.resolution_combined", "less", 2.0),
+    max_results=20
+)
+
+# Sequence similarity search
+results = RCSB(
+    RCSB.Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ", identity_cutoff=0.9),
+    max_results=50
+)
+
+# Structure similarity
+results = RCSB(
+    RCSB.Structure("4HHB", assembly_id=1),
+    max_results=10
+)
+
+# Sequence motif (PROSITE format)
+results = RCSB(
+    RCSB.SeqMotif("C-x(2,4)-C-x(3)-[LIVMFYWC]-x(8)-H-x(3,5)-H", pattern_type="prosite"),
+    max_results=100
+)
+
+# Chemical similarity (by SMILES)
+results = RCSB(
+    RCSB.Chemical("c1ccc(cc1)C(=O)O", match_type="fingerprint-similarity"),
+    max_results=10
+)
+
+# Combined queries (AND by default)
+results = RCSB(
+    RCSB.Text("kinase"),
+    RCSB.Attribute("rcsb_entry_info.resolution_combined", "less", 2.5),
+    RCSB.Attribute("rcsb_entity_source_organism.scientific_name", "exact_match", "Homo sapiens"),
+    max_results=50,
+    sort="resolution"
+)
+
+# Use downstream
+af = AlphaFold(proteins=results)
 ```
 
 ---

@@ -10,6 +10,7 @@ Input entities and utility tools.
 
 **Basic Input Types**:
 - [PDB](Tool/Utilities.md#pdb) - Fetch protein structures
+- [RCSB](Tool/Utilities.md#rcsb) - Search RCSB PDB and download structures
 - [Sequence](Tool/Utilities.md#sequence) - Create sequences from strings
 - [Ligand](Tool/Utilities.md#ligand) - Fetch small molecules
 - [CompoundLibrary](Tool/Utilities.md#compoundlibrary) - Create compound collections
