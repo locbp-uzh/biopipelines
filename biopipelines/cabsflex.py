@@ -92,12 +92,13 @@ echo "=== CABS-Flex installation complete ==="
                  temperature: Optional[str] = None,
                  flexibility: Optional[str] = None,
                  filtering_count: int = 1000,
-                 aa_rebuild: bool = True,
+                 aa_rebuild: bool = False,
                  restraints: str = "ss2",
                  restraints_gap: int = 3,
                  restraints_min: float = 3.8,
                  restraints_max: float = 8.0,
                  weighted_fit: Optional[str] = None,
+                 pdb_output: str = "M",
                  **kwargs):
         """
         Initialize CABS-Flex configuration.
@@ -105,18 +106,20 @@ echo "=== CABS-Flex installation complete ==="
         Args:
             structures: Input protein structures as DataStream or StandardizedOutput
             num_models: Number of cluster medoids / final models (default: 10)
-            mc_cycles: Monte Carlo cycles between trajectory frames (default: 50)
-            mc_steps: Monte Carlo steps (default: 50)
+            mc_cycles: Monte Carlo cycles; total snapshots = mc_annealing × mc_cycles (default: 50)
+            mc_steps: Monte Carlo cycles between trajectory frames (default: 50)
             mc_annealing: Temperature annealing cycles (default: 20)
             temperature: Temperature range as "TINIT TFINAL" (default: "1.4 1.4")
-            flexibility: Residue flexibility: float, 'bf', 'bfi', 'bfg', or filename (default: None = 1.0)
+            flexibility: Residue flexibility: float (0=flexible, 1=stiff), 'bf', 'bfi', 'bfg', or filename
             filtering_count: Number of low-energy models for clustering (default: 1000)
-            aa_rebuild: Rebuild to all-atom with MODELLER (default: True)
+            aa_rebuild: Rebuild to all-atom with MODELLER (default: False). Requires MODELLER license.
             restraints: Restraint mode: 'all', 'ss1', 'ss2' (default: 'ss2')
             restraints_gap: Min gap along chain for restraints (default: 3)
             restraints_min: Min distance in Angstroms for restraints (default: 3.8)
             restraints_max: Max distance in Angstroms for restraints (default: 8.0)
-            weighted_fit: Fit method: 'gauss', 'flex', 'ss', 'off', or filename (default: 'gauss')
+            weighted_fit: Fit method: 'gauss', 'flex', 'ss', 'off', or filename. None = CABSflex default.
+            pdb_output: Which structures to save: 'A' (all), 'R' (replicas), 'F' (filtered),
+                        'C' (clusters), 'M' (models), 'S' (starting), 'N' (none). Combinable, e.g. 'RM'. (default: 'M')
             **kwargs: Additional parameters
 
         Output:
@@ -149,6 +152,7 @@ echo "=== CABS-Flex installation complete ==="
         self.restraints_min = restraints_min
         self.restraints_max = restraints_max
         self.weighted_fit = weighted_fit
+        self.pdb_output = pdb_output
 
         super().__init__(**kwargs)
 
@@ -203,7 +207,12 @@ echo "=== CABS-Flex installation complete ==="
         return script_content
 
     def _generate_script_run_cabsflex(self) -> str:
-        """Generate the CABS-Flex execution part of the script."""
+        """Generate the CABS-Flex execution part of the script.
+
+        CABSflex runs under Python 2.7, so execution is done in pure bash.
+        Post-processing (file copying, RMSF parsing) runs under biopipelines
+        (Python 3) via the helper script.
+        """
         # Only pass flags that differ from CABSflex defaults
         flags = []
         if self.mc_cycles != 50:
@@ -226,27 +235,54 @@ echo "=== CABS-Flex installation complete ==="
             flags.append(f"--weighted-fit {self.weighted_fit}")
         if self.aa_rebuild:
             flags.append("-A")
-        # Output only models (M) to save disk space
-        flags.append("-o M")
+        if self.pdb_output != "A":
+            flags.append(f"-o {self.pdb_output}")
 
         flags_str = " ".join(flags)
+
+        # Generate bash loop over each structure (runs under Py2.7 CABSflex env)
+        cabsflex_cmds = ""
+        for sid, sfile in zip(self.structures_stream.ids, self.structures_stream.files):
+            work_dir = os.path.join(self.output_folder, sid)
+            cmd = f'CABSflex -i "{sfile}" -w "{work_dir}"'
+            if flags_str:
+                cmd += f" {flags_str}"
+            cabsflex_cmds += f"""
+echo "=== Processing {sid} ==="
+mkdir -p "{work_dir}"
+{cmd}
+if [ $? -ne 0 ]; then
+    echo "Error: CABS-Flex failed for {sid}"
+    exit 1
+fi
+"""
+
+        # Post-processing runs under biopipelines (Python 3)
+        postproc_env = self.activate_environment(name="biopipelines")
 
         return f"""echo "Running CABS-Flex flexibility simulation"
 echo "Input structures: {len(self.structures_stream)} files"
 echo "Models per structure: {self.num_models}"
+
+# --- Run CABSflex for each structure (Python 2.7 env) ---
+{cabsflex_cmds}
+
+echo "=== CABSflex runs complete, starting post-processing ==="
+
+# --- Switch to Python 3 for post-processing ---
+{postproc_env}
 
 python "{self.helper_script}" \\
     --structures "{self.structures_ds_json}" \\
     --output_dir "{self.output_folder}" \\
     --rmsf_all_csv "{self.rmsf_all_csv}" \\
     --structures_map "{self.structures_map}" \\
-    --num_models {self.num_models} \\
-    --cabsflex_flags {flags_str}
+    --num_models {self.num_models}
 
 if [ $? -eq 0 ]; then
     echo "CABS-Flex completed successfully"
 else
-    echo "Error: CABS-Flex failed"
+    echo "Error: CABS-Flex post-processing failed"
     exit 1
 fi
 
@@ -348,7 +384,8 @@ fi
                 "filtering_count": self.filtering_count,
                 "aa_rebuild": self.aa_rebuild,
                 "restraints": self.restraints,
-                "weighted_fit": self.weighted_fit
+                "weighted_fit": self.weighted_fit,
+                "pdb_output": self.pdb_output
             }
         })
         return base_dict

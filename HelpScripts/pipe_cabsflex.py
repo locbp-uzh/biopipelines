@@ -4,10 +4,12 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Runtime helper script for CABS-Flex.
+Post-processing helper for CABS-Flex.
 
-Runs CABSflex for each input structure, collects output models, parses RMSF,
-copies SVG plots, and builds the final structures map and merged RMSF table.
+Collects output models, parses RMSF, copies SVG plots, and builds the
+final structures map and merged RMSF table. CABSflex itself runs from
+the bash script under Python 2.7; this script runs under biopipelines
+(Python 3) for post-processing only.
 """
 
 import os
@@ -15,13 +17,12 @@ import re
 import sys
 import shutil
 import argparse
-import subprocess
 
 import pandas as pd
 
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.biopipelines_io import load_datastream
 
 
 def parse_rmsf(rmsf_path, struct_id):
@@ -57,23 +58,13 @@ def parse_rmsf(rmsf_path, struct_id):
     return rows
 
 
-def run_cabsflex(struct_id, struct_file, output_dir, cabsflex_flags):
+def postprocess(struct_id, output_dir, num_models):
     """
-    Run CABSflex for a single structure.
+    Post-process CABSflex output for a single structure.
 
-    Returns True on success, False on failure.
+    Copies model PDBs and SVG plots to output_dir, parses RMSF.
     """
     work_dir = os.path.join(output_dir, struct_id)
-    os.makedirs(work_dir, exist_ok=True)
-
-    cmd = ["CABSflex", "-i", struct_file, "-w", work_dir] + cabsflex_flags
-    print(f"=== Processing {struct_id} ===")
-    print(f"Command: {' '.join(cmd)}")
-
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        print(f"Error: CABS-Flex failed for {struct_id}")
-        return False
 
     # Copy model PDBs to output folder with proper naming
     pdbs_dir = os.path.join(work_dir, "output_pdbs")
@@ -107,8 +98,6 @@ def run_cabsflex(struct_id, struct_file, output_dir, cabsflex_flags):
         print(f"RMSF saved to {rmsf_out} ({len(rmsf_rows)} residues)")
     else:
         print(f"Warning: No RMSF.csv found for {struct_id}")
-
-    return True
 
 
 def build_outputs(structures_ds, output_dir, num_models, rmsf_all_csv, structures_map):
@@ -154,13 +143,12 @@ def build_outputs(structures_ds, output_dir, num_models, rmsf_all_csv, structure
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CABS-Flex runner and post-processor")
+    parser = argparse.ArgumentParser(description="CABS-Flex post-processor")
     parser.add_argument("--structures", required=True, help="JSON file containing input DataStream")
     parser.add_argument("--output_dir", required=True, help="Output directory")
     parser.add_argument("--rmsf_all_csv", required=True, help="Output merged RMSF CSV path")
     parser.add_argument("--structures_map", required=True, help="Output structures map CSV path")
     parser.add_argument("--num_models", type=int, default=10, help="Number of models per structure")
-    parser.add_argument("--cabsflex_flags", nargs="*", default=[], help="Flags to pass to CABSflex")
 
     args = parser.parse_args()
 
@@ -170,17 +158,14 @@ def main():
         print("Error: No structures found in input DataStream")
         sys.exit(1)
 
-    print(f"Running CABS-Flex on {len(structures_ds.ids)} structures")
+    print(f"Post-processing CABS-Flex output for {len(structures_ds.ids)} structures")
 
-    # Run CABSflex for each structure
-    for struct_id, struct_file in iterate_files(structures_ds):
-        if not os.path.exists(struct_file):
-            print(f"Warning: Structure file not found: {struct_file}")
-            continue
-        run_cabsflex(struct_id, struct_file, args.output_dir, args.cabsflex_flags)
+    # Post-process each structure's output
+    for struct_id in structures_ds.ids:
+        postprocess(struct_id, args.output_dir, args.num_models)
 
     # Build merged outputs
-    print("\n=== Post-processing ===")
+    print("\n=== Building final outputs ===")
     build_outputs(structures_ds, args.output_dir, args.num_models,
                   args.rmsf_all_csv, args.structures_map)
 
