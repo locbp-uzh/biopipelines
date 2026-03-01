@@ -88,6 +88,9 @@ environments:
   Boltz2: "Boltz2Env"
   RF3: "modelforge"
 
+  # Flexibility
+  CABSflex: "CABSflex"
+
   # Analysis
   Gnina: "biopipelines"
   Distance: "biopipelines"

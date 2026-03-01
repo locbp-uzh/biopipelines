@@ -368,3 +368,77 @@ good_poses = Filter(
     expression="ligand_rmsd < 2.0"
 )
 ```
+
+---
+
+### CABSflex
+
+Fast coarse-grained Monte Carlo simulation of protein structure flexibility. Produces conformational ensembles and per-residue RMSF profiles. Optionally rebuilds models to all-atom representation using MODELLER.
+
+**WARNING**: MODELLER requires a license key (free for academics). Get one at https://salilab.org/modeller/registration.html and set `KEY_MODELLER` before running.
+
+**Environment**: `CABSflex` (Python 2.7 with `modeller` and `cabs`)
+
+**Installation**: `conda create -n CABSflex python=2.7 && conda install -c salilab modeller -c lcbio cabs`. On Colab: `pip install modeller cabs`.
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Input protein structures
+- `num_models`: int = 10 - Number of cluster medoids / final models per input structure
+- `mc_cycles`: int = 50 - Monte Carlo cycles between trajectory frames
+- `mc_steps`: int = 50 - Monte Carlo steps
+- `mc_annealing`: int = 20 - Temperature annealing cycles
+- `temperature`: Optional[str] = None - Temperature range as "TINIT TFINAL" (default: "1.4 1.4")
+- `flexibility`: Optional[str] = None - Residue flexibility: float (0=flexible, 1=stiff), 'bf', 'bfi', 'bfg', or filename
+- `filtering_count`: int = 1000 - Number of low-energy models for clustering
+- `aa_rebuild`: bool = True - Rebuild to all-atom with MODELLER
+- `restraints`: str = "ss2" - Restraint mode: 'all', 'ss1', 'ss2'
+- `restraints_gap`: int = 3 - Min gap along chain for restraints
+- `restraints_min`: float = 3.8 - Min distance in Å for restraints
+- `restraints_max`: float = 8.0 - Max distance in Å for restraints
+- `weighted_fit`: str = "gauss" - Fit method: 'gauss', 'flex', 'ss', 'off', or filename
+
+**Streams**:
+- `structures`: PDB ensemble models (`num_models` per input structure)
+- `images`: SVG plots (RMSF, RMSD, energy) per input structure
+
+**Tables**:
+- `structures`:
+
+  | id | file | structures.id |
+  |----|------|---------------|
+
+- `rmsf_all` (merged across all input structures):
+
+  | id | chain | resi | rmsf |
+  |----|-------|------|------|
+
+- `rmsf_<input_id>` (one per input structure, same columns as `rmsf_all`)
+
+**Example**:
+```python
+from biopipelines.cabsflex import CABSflex
+
+# Basic flexibility simulation
+protein = PDB("1AHN")
+flex = CABSflex(structures=protein, num_models=10)
+
+# Access merged RMSF
+flex.tables.rmsf_all  # all structures combined
+
+# Access per-structure RMSF (e.g., for input ID "1AHN")
+flex.tables.rmsf_1AHN
+
+# Access ensemble models
+flex.streams.structures  # 10 PDB models
+
+# Custom simulation parameters
+flex = CABSflex(
+    structures=protein,
+    num_models=5,
+    mc_cycles=100,
+    mc_annealing=30,
+    temperature="1.4 2.0",
+    flexibility=0.5,
+    aa_rebuild=True
+)
+```
