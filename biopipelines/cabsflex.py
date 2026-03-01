@@ -56,7 +56,7 @@ fi
 {skip}echo "WARNING: MODELLER requires a license key."
 echo "Get one at https://salilab.org/modeller/registration.html"
 echo "Then set: export KEY_MODELLER=your_key"
-pip install -q modeller cabs
+pip install -q modeller cabs dssp
 
 echo "=== CABS-Flex installation complete ==="
 """
@@ -71,7 +71,7 @@ fi
 echo "Get one at https://salilab.org/modeller/registration.html"
 echo "Then set: export KEY_MODELLER=your_key"
 {env_manager} create -y -n CABSflex python=2.7
-{env_manager} install -y -n CABSflex -c salilab modeller
+{env_manager} install -y -n CABSflex -c salilab modeller dssp
 {env_manager} install -y -n CABSflex -c lcbio cabs
 
 echo "=== CABS-Flex installation complete ==="
@@ -97,7 +97,7 @@ echo "=== CABS-Flex installation complete ==="
                  restraints_gap: int = 3,
                  restraints_min: float = 3.8,
                  restraints_max: float = 8.0,
-                 weighted_fit: str = "gauss",
+                 weighted_fit: Optional[str] = None,
                  **kwargs):
         """
         Initialize CABS-Flex configuration.
@@ -204,112 +204,49 @@ echo "=== CABS-Flex installation complete ==="
 
     def _generate_script_run_cabsflex(self) -> str:
         """Generate the CABS-Flex execution part of the script."""
-        # Build CABSflex flags
+        # Only pass flags that differ from CABSflex defaults
         flags = []
-        flags.append(f"-y {self.mc_cycles}")
-        flags.append(f"-s {self.mc_steps}")
-        flags.append(f"-a {self.mc_annealing}")
-        flags.append(f"-k {self.num_models}")
-        flags.append(f"-n {self.filtering_count}")
-        flags.append(f"-g {self.restraints} {self.restraints_gap} {self.restraints_min} {self.restraints_max}")
-        flags.append(f"--weighted-fit {self.weighted_fit}")
-
+        if self.mc_cycles != 50:
+            flags.append(f"-y {self.mc_cycles}")
+        if self.mc_steps != 50:
+            flags.append(f"-s {self.mc_steps}")
+        if self.mc_annealing != 20:
+            flags.append(f"-a {self.mc_annealing}")
+        if self.num_models != 10:
+            flags.append(f"-k {self.num_models}")
+        if self.filtering_count != 1000:
+            flags.append(f"-n {self.filtering_count}")
+        if self.restraints != "ss2" or self.restraints_gap != 3 or self.restraints_min != 3.8 or self.restraints_max != 8.0:
+            flags.append(f"-g {self.restraints} {self.restraints_gap} {self.restraints_min} {self.restraints_max}")
         if self.temperature:
             flags.append(f"-t {self.temperature}")
         if self.flexibility is not None:
             flags.append(f"-f {self.flexibility}")
+        if self.weighted_fit is not None:
+            flags.append(f"--weighted-fit {self.weighted_fit}")
         if self.aa_rebuild:
             flags.append("-A")
-
         # Output only models (M) to save disk space
         flags.append("-o M")
 
         flags_str = " ".join(flags)
 
-        ds_json = self.structures_ds_json
-
         return f"""echo "Running CABS-Flex flexibility simulation"
 echo "Input structures: {len(self.structures_stream)} files"
 echo "Models per structure: {self.num_models}"
-echo "Output: {self.output_folder}"
 
-# Read structures JSON and iterate
-STRUCTURES_JSON="{ds_json}"
-OUTPUT_DIR="{self.output_folder}"
-
-# Process each structure
-python -c "
-import json, sys
-with open('$STRUCTURES_JSON') as f:
-    ds = json.load(f)
-ids = ds['ids']
-files = ds['files']
-if len(files) == 1 and len(ids) > 1:
-    files = files * len(ids)
-for i, sid in enumerate(ids):
-    print(sid + '\\t' + files[i])
-" | while IFS=$'\\t' read -r STRUCT_ID STRUCT_FILE; do
-
-    echo "=== Processing $STRUCT_ID ==="
-
-    WORK_DIR="$OUTPUT_DIR/${{STRUCT_ID}}"
-    mkdir -p "$WORK_DIR"
-
-    CABSflex -i "$STRUCT_FILE" -w "$WORK_DIR" {flags_str}
-
-    if [ $? -ne 0 ]; then
-        echo "Error: CABS-Flex failed for $STRUCT_ID"
-        continue
-    fi
-
-    # Copy model PDBs to output folder with proper naming
-    MODEL_IDX=0
-    for MODEL_PDB in "$WORK_DIR/output_pdbs"/model_*.pdb; do
-        if [ -f "$MODEL_PDB" ]; then
-            MODEL_IDX=$((MODEL_IDX + 1))
-            cp "$MODEL_PDB" "$OUTPUT_DIR/${{STRUCT_ID}}_${{MODEL_IDX}}.pdb"
-        fi
-    done
-    echo "Copied $MODEL_IDX models for $STRUCT_ID"
-
-    # Copy SVG plots to output folder
-    for SVG_FILE in "$WORK_DIR/plots"/*.svg; do
-        if [ -f "$SVG_FILE" ]; then
-            SVG_NAME=$(basename "$SVG_FILE")
-            cp "$SVG_FILE" "$OUTPUT_DIR/${{STRUCT_ID}}_${{SVG_NAME}}"
-        fi
-    done
-
-    # Copy and reformat RMSF.csv with proper headers
-    # Format: tab-separated, no header, columns like "A2\\t3.516"
-    # where A2 = chain(A) + residue_index(2)
-    if [ -f "$WORK_DIR/plots/RMSF.csv" ]; then
-        echo "id,chain,resi,rmsf" > "$OUTPUT_DIR/${{STRUCT_ID}}_RMSF.csv"
-        while IFS=$'\\t' read -r RESID RMSF_VAL; do
-            # Parse chain letter and residue number from e.g. "A2"
-            CHAIN=$(echo "$RESID" | head -c 1)
-            RESI=$(echo "$RESID" | tail -c +2)
-            echo "$STRUCT_ID,$CHAIN,$RESI,$RMSF_VAL" >> "$OUTPUT_DIR/${{STRUCT_ID}}_RMSF.csv"
-        done < "$WORK_DIR/plots/RMSF.csv"
-        echo "RMSF saved to $OUTPUT_DIR/${{STRUCT_ID}}_RMSF.csv"
-    fi
-
-done
-
-echo "CABS-Flex simulation complete"
-
-# Build merged RMSF and structures map
 python "{self.helper_script}" \\
     --structures "{self.structures_ds_json}" \\
     --output_dir "{self.output_folder}" \\
     --rmsf_all_csv "{self.rmsf_all_csv}" \\
     --structures_map "{self.structures_map}" \\
-    --num_models {self.num_models}
+    --num_models {self.num_models} \\
+    --cabsflex_flags {flags_str}
 
 if [ $? -eq 0 ]; then
-    echo "CABS-Flex analysis completed successfully"
+    echo "CABS-Flex completed successfully"
 else
-    echo "Error: CABS-Flex post-processing failed"
+    echo "Error: CABS-Flex failed"
     exit 1
 fi
 
