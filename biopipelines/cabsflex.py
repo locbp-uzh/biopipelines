@@ -17,13 +17,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, IndexedTableContainer
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, IndexedTableContainer
     from file_paths import Path
     from datastream import DataStream, create_map_table
 
@@ -397,6 +397,16 @@ fi
         # --- Output tables ---
         rmsf_columns = ["id", "chain", "resi", "rmsf"]
 
+        # Per-ID RMSF tables: res.tables.rmsf["<id>"]
+        rmsf_per_id = IndexedTableContainer(
+            name="rmsf",
+            columns=rmsf_columns,
+            description="Per-residue RMSF"
+        )
+        for input_id in input_ids:
+            rmsf_path = os.path.join(self.output_folder, f"{input_id}_RMSF.csv")
+            rmsf_per_id.add(input_id, path=rmsf_path)
+
         tables = {
             "structures": TableInfo(
                 name="structures",
@@ -411,19 +421,9 @@ fi
                 columns=rmsf_columns,
                 description="Per-residue RMSF from all input structures (merged)",
                 count="variable"
-            )
+            ),
+            "rmsf": rmsf_per_id
         }
-
-        # Per-ID RMSF tables: res.tables.rmsf_<id>
-        for input_id in input_ids:
-            rmsf_path = os.path.join(self.output_folder, f"{input_id}_RMSF.csv")
-            tables[f"rmsf_{input_id}"] = TableInfo(
-                name=f"rmsf_{input_id}",
-                path=rmsf_path,
-                columns=rmsf_columns,
-                description=f"Per-residue RMSF for {input_id}",
-                count="variable"
-            )
 
         return {
             "structures": structures,

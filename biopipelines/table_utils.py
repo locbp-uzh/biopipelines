@@ -51,6 +51,13 @@ def get_table_path(source: Any, name: str) -> str:
     """
     table = get_table(source, name)
 
+    # IndexedTableContainer - no single path
+    if hasattr(table, '_entries'):
+        raise TypeError(
+            f"Table '{name}' is an IndexedTableContainer with {len(table)} entries. "
+            f"Use get_table() and index by ID to get individual paths."
+        )
+
     # TableInfo object
     if hasattr(table, 'info'):
         return table.info.path
@@ -83,6 +90,28 @@ def list_tables(source: Any) -> List[str]:
         return list_tables(source.tables)
 
     raise TypeError(f"Cannot list tables from type: {type(source).__name__}")
+
+
+def get_indexed_table(source: Any, name: str, entry_id: str) -> Any:
+    """
+    Get a specific entry from an IndexedTableContainer.
+
+    Args:
+        source: Dict, ToolOutput, or StandardizedOutput
+        name: Name of the indexed table collection
+        entry_id: ID of the specific entry
+
+    Returns:
+        TableInfo for the given ID
+
+    Raises:
+        TypeError: If the table is not an IndexedTableContainer
+        KeyError: If the entry_id is not found
+    """
+    table = get_table(source, name)
+    if hasattr(table, '_entries'):
+        return table[entry_id]
+    raise TypeError(f"Table '{name}' is not an IndexedTableContainer")
 
 
 def table_exists(source: Any, name: str) -> bool:

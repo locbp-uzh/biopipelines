@@ -670,6 +670,8 @@ fi
             if obj_id in seen:
                 return f"<circular reference to {type(obj).__name__}>"
 
+            if isinstance(obj, IndexedTableContainer):
+                return obj.to_dict()
             if isinstance(obj, TableInfo):
                 return obj.to_dict()
             elif isinstance(obj, dict):
@@ -1049,6 +1051,126 @@ class TableInfo:
         }
 
 
+class IndexedTableContainer:
+    """A collection of TableInfo objects indexed by ID, all sharing the same schema.
+
+    Used when a tool produces one table per input ID (e.g., per-structure RMSF).
+    Integrates into TableContainer as a single named entry.
+
+    Usage:
+        rmsf = IndexedTableContainer(
+            name="rmsf",
+            columns=["id", "chain", "resi", "rmsf"],
+            description="Per-residue RMSF"
+        )
+        rmsf.add("1a2j", path="/output/1a2j_RMSF.csv")
+        rmsf.add("1gfl", path="/output/1gfl_RMSF.csv")
+
+        rmsf["1a2j"]              # -> TableInfo
+        rmsf["1a2j"].info.path    # -> path string
+
+        for struct_id, table_info in rmsf:
+            print(struct_id, table_info.info.path)
+    """
+
+    def __init__(self, name: str, columns: List[str] = None,
+                 description: str = ""):
+        self.name = name
+        self.columns = columns or []
+        self.description = description
+        self._entries: Dict[str, TableInfo] = {}
+
+    def add(self, entry_id: str, path: str, count: int = 0) -> 'IndexedTableContainer':
+        """Add a per-ID table entry. Returns self for chaining."""
+        self._entries[entry_id] = TableInfo(
+            name=f"{self.name}_{entry_id}",
+            path=path,
+            columns=self.columns.copy(),
+            description=f"{self.description} ({entry_id})",
+            count=count
+        )
+        return self
+
+    def __getitem__(self, entry_id: str) -> TableInfo:
+        """Get TableInfo by ID."""
+        if entry_id in self._entries:
+            return self._entries[entry_id]
+        raise KeyError(f"No entry for ID '{entry_id}' in indexed table '{self.name}'. "
+                       f"Available IDs: {list(self._entries.keys())}")
+
+    def get(self, entry_id: str, default=None) -> Optional[TableInfo]:
+        """Get TableInfo by ID with default."""
+        return self._entries.get(entry_id, default)
+
+    def __contains__(self, entry_id: str) -> bool:
+        return entry_id in self._entries
+
+    def __iter__(self):
+        """Iterate over (id, TableInfo) pairs."""
+        return iter(self._entries.items())
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    @property
+    def ids(self) -> List[str]:
+        """All entry IDs."""
+        return list(self._entries.keys())
+
+    def keys(self):
+        """All entry IDs."""
+        return self._entries.keys()
+
+    def values(self):
+        """All TableInfo objects."""
+        return self._entries.values()
+
+    def items(self):
+        """All (id, TableInfo) pairs."""
+        return self._entries.items()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize for JSON persistence."""
+        return {
+            "_type": "IndexedTableContainer",
+            "name": self.name,
+            "columns": self.columns.copy(),
+            "description": self.description,
+            "entries": {
+                entry_id: table_info.to_dict()
+                for entry_id, table_info in self._entries.items()
+            }
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'IndexedTableContainer':
+        """Deserialize from JSON dict."""
+        container = cls(
+            name=data["name"],
+            columns=data.get("columns", []),
+            description=data.get("description", "")
+        )
+        for entry_id, info_dict in data.get("entries", {}).items():
+            container._entries[entry_id] = TableInfo(
+                name=info_dict.get("name", f"{data['name']}_{entry_id}"),
+                path=info_dict.get("path", ""),
+                columns=info_dict.get("columns", []),
+                description=info_dict.get("description", ""),
+                count=info_dict.get("count", 0)
+            )
+        return container
+
+    def __str__(self) -> str:
+        ids_display = ', '.join(self.ids[:5])
+        if len(self.ids) > 5:
+            ids_display += f', ... ({len(self.ids)} total)'
+        col_display = ', '.join(self.columns) if self.columns else 'unknown'
+        return f"${self.name}[{ids_display}] ({col_display})"
+
+    def __repr__(self) -> str:
+        return f"IndexedTableContainer(name='{self.name}', ids={self.ids}, columns={self.columns})"
+
+
 class TableContainer:
     """Container for named tables with dot-notation access."""
     
@@ -1060,10 +1182,13 @@ class TableContainer:
         for name, info in tables.items():
             setattr(self, name, info)
     
-    def __getitem__(self, key: str) -> str:
-        """Get table path by name with legacy 'main' support."""
+    def __getitem__(self, key: str):
+        """Get table path by name, or IndexedTableContainer directly."""
         if key in self._tables:
-            return self._tables[key].info.path
+            entry = self._tables[key]
+            if isinstance(entry, IndexedTableContainer):
+                return entry
+            return entry.info.path
 
         raise KeyError(f"No table named '{key}' in tables")
     
@@ -1078,8 +1203,14 @@ class TableContainer:
         return self._tables.keys()
 
     def items(self):
-        """Get all name, path pairs."""
-        return [(name, info.info.path) for name, info in self._tables.items()]
+        """Get all name, path/container pairs."""
+        result = []
+        for name, entry in self._tables.items():
+            if isinstance(entry, IndexedTableContainer):
+                result.append((name, entry))
+            else:
+                result.append((name, entry.info.path))
+        return result
     
     def __contains__(self, key: str) -> bool:
         """Support 'in' operator: 'table_name' in tables"""
@@ -1095,15 +1226,21 @@ class TableContainer:
     def __str__(self) -> str:
         if not self._tables:
             return "{}"
-        
+
         lines = []
-        for name, info in self._tables.items():
-            # Format: table name with columns, then indented file path
-            # Extract just the filename from the full path
-            filename = info.info.path.split('/')[-1]
-            path_display = f"<output_folder>/{filename}"
-            lines.append(f"    {str(info)}:")
-            lines.append(f"        – '{path_display}'")
+        for name, entry in self._tables.items():
+            if isinstance(entry, IndexedTableContainer):
+                lines.append(f"    {str(entry)}:")
+                for eid, tinfo in entry:
+                    filename = tinfo.info.path.split('/')[-1]
+                    lines.append(f"        [{eid}] '<output_folder>/{filename}'")
+            else:
+                # Format: table name with columns, then indented file path
+                # Extract just the filename from the full path
+                filename = entry.info.path.split('/')[-1]
+                path_display = f"<output_folder>/{filename}"
+                lines.append(f"    {str(entry)}:")
+                lines.append(f"        – '{path_display}'")
         
         return "\n".join(lines)
     
@@ -1208,27 +1345,31 @@ class StandardizedOutput:
             # Already in named format
             table_infos = {}
             for name, info in tables_raw.items():
-                if isinstance(info, dict):
-                    # Handle columns - ensure it's always a list
-                    columns = info.get('columns', [])
-                    if isinstance(columns, str):
-                        # No placeholders - if it's a string, it should be an actual column name
-                        columns = [columns]  # Single string becomes list
-                    
-                    table_infos[name] = TableInfo(
-                        name=name,
-                        path=info.get('path', ''),
-                        columns=columns,
-                        description=info.get('description', ''),
-                        count=info.get('count', 0)
-                    )
-                else:
-                    # Could be a TableInfo object or just a path
-                    if isinstance(info, TableInfo):
-                        table_infos[name] = info
+                if isinstance(info, IndexedTableContainer):
+                    table_infos[name] = info
+                elif isinstance(info, dict):
+                    # Check for serialized IndexedTableContainer
+                    if info.get('_type') == 'IndexedTableContainer':
+                        table_infos[name] = IndexedTableContainer.from_dict(info)
                     else:
-                        # Legacy format - just a path
-                        table_infos[name] = TableInfo(name=name, path=str(info))
+                        # Handle columns - ensure it's always a list
+                        columns = info.get('columns', [])
+                        if isinstance(columns, str):
+                            # No placeholders - if it's a string, it should be an actual column name
+                            columns = [columns]  # Single string becomes list
+
+                        table_infos[name] = TableInfo(
+                            name=name,
+                            path=info.get('path', ''),
+                            columns=columns,
+                            description=info.get('description', ''),
+                            count=info.get('count', 0)
+                        )
+                elif isinstance(info, TableInfo):
+                    table_infos[name] = info
+                else:
+                    # Legacy format - just a path
+                    table_infos[name] = TableInfo(name=name, path=str(info))
             return TableContainer(table_infos)
         elif isinstance(tables_raw, list):
             # Legacy format - convert first item to "main"

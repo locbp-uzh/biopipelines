@@ -10,11 +10,11 @@ Provides tool configurations, pipeline orchestration, and seamless integration.
 """
 
 from .pipeline import Pipeline, Bundle, Each
-from .base_config import BaseConfig, ToolOutput
+from .base_config import BaseConfig, ToolOutput, IndexedTableContainer
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .datastream import DataStream, create_map_table
 from .file_paths import Path
-from .table_utils import get_table, get_table_path, list_tables, table_exists
+from .table_utils import get_table, get_table_path, list_tables, table_exists, get_indexed_table
 from .rfdiffusion import RFdiffusion
 from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .protein_mpnn import ProteinMPNN
@@ -66,8 +66,10 @@ __all__ = [
     'Path',
 
     # Table utilities
+    'IndexedTableContainer',
     'get_table',
     'get_table_path',
+    'get_indexed_table',
     'list_tables',
     'table_exists',
 
