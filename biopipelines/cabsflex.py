@@ -97,8 +97,10 @@ echo "=== CABS-Flex installation complete ==="
                  restraints_gap: int = 3,
                  restraints_min: float = 3.8,
                  restraints_max: float = 8.0,
+                 restraints_reduce: Optional[float] = None,
                  weighted_fit: Optional[str] = None,
                  pdb_output: str = "M",
+                 max_parallel: int = 1,
                  **kwargs):
         """
         Initialize CABS-Flex configuration.
@@ -117,9 +119,11 @@ echo "=== CABS-Flex installation complete ==="
             restraints_gap: Min gap along chain for restraints (default: 3)
             restraints_min: Min distance in Angstroms for restraints (default: 3.8)
             restraints_max: Max distance in Angstroms for restraints (default: 8.0)
+            restraints_reduce: Reduce restraints by factor in [0,1] to speed up computation. None = no reduction.
             weighted_fit: Fit method: 'gauss', 'flex', 'ss', 'off', or filename. None = CABSflex default.
             pdb_output: Which structures to save: 'A' (all), 'R' (replicas), 'F' (filtered),
                         'C' (clusters), 'M' (models), 'S' (starting), 'N' (none). Combinable, e.g. 'RM'. (default: 'M')
+            max_parallel: Max structures to run concurrently (default: 1 = sequential)
             **kwargs: Additional parameters
 
         Output:
@@ -151,8 +155,10 @@ echo "=== CABS-Flex installation complete ==="
         self.restraints_gap = restraints_gap
         self.restraints_min = restraints_min
         self.restraints_max = restraints_max
+        self.restraints_reduce = restraints_reduce
         self.weighted_fit = weighted_fit
         self.pdb_output = pdb_output
+        self.max_parallel = max_parallel
 
         super().__init__(**kwargs)
 
@@ -170,6 +176,10 @@ echo "=== CABS-Flex installation complete ==="
             raise ValueError("mc_annealing must be >= 1")
         if self.restraints not in ("all", "ss1", "ss2"):
             raise ValueError(f"restraints must be 'all', 'ss1', or 'ss2', got: {self.restraints}")
+        if self.restraints_reduce is not None and not (0 <= self.restraints_reduce <= 1):
+            raise ValueError(f"restraints_reduce must be in [0, 1], got: {self.restraints_reduce}")
+        if self.max_parallel < 1:
+            raise ValueError(f"max_parallel must be >= 1, got: {self.max_parallel}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -185,7 +195,9 @@ echo "=== CABS-Flex installation complete ==="
             f"MC ANNEALING: {self.mc_annealing}",
             f"AA REBUILD: {self.aa_rebuild}",
             f"RESTRAINTS: {self.restraints}",
-            f"WEIGHTED FIT: {self.weighted_fit}"
+            f"RESTRAINTS REDUCE: {self.restraints_reduce}",
+            f"WEIGHTED FIT: {self.weighted_fit}",
+            f"MAX PARALLEL: {self.max_parallel}"
         ])
         return config_lines
 
@@ -233,6 +245,8 @@ echo "=== CABS-Flex installation complete ==="
             flags.append(f"-f {self.flexibility}")
         if self.weighted_fit is not None:
             flags.append(f"--weighted-fit {self.weighted_fit}")
+        if self.restraints_reduce is not None:
+            flags.append(f"--protein-restraints-reduce {self.restraints_reduce}")
         if self.aa_rebuild:
             flags.append("-A")
         if self.pdb_output != "A":
@@ -240,19 +254,67 @@ echo "=== CABS-Flex installation complete ==="
 
         flags_str = " ".join(flags)
 
-        # Generate bash loop over each structure (runs under Py2.7 CABSflex env)
+        # Generate commands for each structure (runs under Py2.7 CABSflex env)
+        n_structures = len(self.structures_stream.ids)
+        run_parallel = self.max_parallel > 1 and n_structures > 1
+
         cabsflex_cmds = ""
+        if run_parallel:
+            cabsflex_cmds += f'\necho "Running {n_structures} structures in parallel (max {self.max_parallel} concurrent)"\n'
+            cabsflex_cmds += "PIDS=()\nFAILED=0\n"
+
         for sid, sfile in zip(self.structures_stream.ids, self.structures_stream.files):
             work_dir = os.path.join(self.output_folder, sid)
             cmd = f'CABSflex -i "{sfile}" -w "{work_dir}"'
             if flags_str:
                 cmd += f" {flags_str}"
-            cabsflex_cmds += f"""
+
+            if run_parallel:
+                log_file = os.path.join(self.output_folder, f"{sid}.log")
+                cabsflex_cmds += f"""
+# Wait if we've reached the concurrency limit
+while [ "${{#PIDS[@]}}" -ge {self.max_parallel} ]; do
+    # Wait for any one job to finish, then remove completed PIDs
+    NEW_PIDS=()
+    for PID in "${{PIDS[@]}}"; do
+        if kill -0 "$PID" 2>/dev/null; then
+            NEW_PIDS+=("$PID")
+        else
+            wait "$PID" || FAILED=$((FAILED + 1))
+        fi
+    done
+    PIDS=("${{NEW_PIDS[@]}}")
+    if [ "${{#PIDS[@]}}" -ge {self.max_parallel} ]; then
+        sleep 1
+    fi
+done
+mkdir -p "{work_dir}"
+(
+    echo "=== Processing {sid} ==="
+    {cmd}
+) > "{log_file}" 2>&1 &
+PIDS+=($!)
+"""
+            else:
+                cabsflex_cmds += f"""
 echo "=== Processing {sid} ==="
 mkdir -p "{work_dir}"
 {cmd}
 if [ $? -ne 0 ]; then
     echo "Error: CABS-Flex failed for {sid}"
+    exit 1
+fi
+"""
+
+        if run_parallel:
+            cabsflex_cmds += """
+# Wait for remaining jobs
+for PID in "${PIDS[@]}"; do
+    wait "$PID" || FAILED=$((FAILED + 1))
+done
+
+if [ "$FAILED" -ne 0 ]; then
+    echo "Error: $FAILED CABS-Flex job(s) failed"
     exit 1
 fi
 """
@@ -384,8 +446,10 @@ fi
                 "filtering_count": self.filtering_count,
                 "aa_rebuild": self.aa_rebuild,
                 "restraints": self.restraints,
+                "restraints_reduce": self.restraints_reduce,
                 "weighted_fit": self.weighted_fit,
-                "pdb_output": self.pdb_output
+                "pdb_output": self.pdb_output,
+                "max_parallel": self.max_parallel
             }
         })
         return base_dict
