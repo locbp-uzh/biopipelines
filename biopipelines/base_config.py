@@ -1308,6 +1308,12 @@ class StandardizedOutput:
             print(f"Processing {structure.ids[0]}: {structure.files[0]}")
 
         print(f"Generated {len(output.streams.structures)} structures")
+
+    If all streams share the same IDs, the output itself is iterable,
+    yielding single-item StandardizedOutput objects:
+
+        for item in output:
+            tool = SomeTool(structures=item)  # item.streams has one id per stream
     """
 
     def __init__(self, output_files: Dict[str, Any]):
@@ -1389,8 +1395,55 @@ class StandardizedOutput:
         return self._data.get(key, [])
     
     def __iter__(self):
-        """Allow iteration over keys."""
-        return iter(self._data)
+        """
+        Iterate over single-item StandardizedOutput objects.
+
+        Requires at least one stream and that all streams share the same IDs.
+        Each yielded item is a StandardizedOutput with single-item DataStreams
+        (one ID/file per stream), preserving the same stream names.
+
+        Raises:
+            ValueError: If there are no streams or streams have mismatched IDs.
+        """
+        from .datastream import DataStream
+
+        # Collect all streams
+        streams = [
+            (name, ds) for name, ds in self.streams.items()
+            if isinstance(ds, DataStream) and len(ds) > 0
+        ]
+
+        if not streams:
+            raise ValueError(
+                "Cannot iterate over StandardizedOutput: no non-empty streams. "
+                "Iterate over a specific stream instead (e.g., output.streams.structures)."
+            )
+
+        # Verify all streams share the same IDs
+        reference_name, reference_ds = streams[0]
+        reference_ids = reference_ds.ids
+        for name, ds in streams[1:]:
+            if ds.ids != reference_ids:
+                raise ValueError(
+                    f"Cannot iterate over StandardizedOutput: streams have mismatched IDs. "
+                    f"'{reference_name}' has {len(reference_ids)} IDs, "
+                    f"'{name}' has {len(ds.ids)} IDs. "
+                    f"Iterate over a specific stream instead (e.g., output.streams.{reference_name})."
+                )
+
+        # Yield one StandardizedOutput per ID
+        for idx in range(len(reference_ids)):
+            single_streams = {}
+            for name, ds in streams:
+                single_streams[name] = DataStream(
+                    name=ds.name,
+                    ids=[ds.ids[idx]],
+                    files=[ds.files[idx]] if ds.files else [],
+                    format=ds.format,
+                    files_contain_wildcards=ds.files_contain_wildcards
+                )
+            single_streams["output_folder"] = self.output_folder
+            yield StandardizedOutput(single_streams)
     
     def keys(self):
         """Get all available keys."""

@@ -184,6 +184,12 @@ for structure in boltz.streams.structures:
 for structure in proteins.streams.structures:
     result = SomeTool(structures=structure)
 
+# Iterate over the tool output itself (requires all streams to share the same IDs)
+# Each item is a single-item StandardizedOutput with all streams sliced to one ID
+for item in boltz:
+    print(item.streams.structures.ids[0])  # same ID across all streams
+    result = SomeTool(structures=item)     # passable directly to tools
+
 # Count items
 print(f"Generated {len(boltz.streams.structures)} structures")
 print(f"Expected ids: {boltz.streams.structures.ids}")
