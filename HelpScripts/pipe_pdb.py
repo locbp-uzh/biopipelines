@@ -883,25 +883,35 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 else:
                     cif_content = response.text
 
-                # Convert CIF to PDB
+                # Try to convert CIF to PDB; keep CIF if conversion fails (e.g. chain IDs > 1 char)
                 print(f"  Converting CIF to PDB format...")
-                content = convert_cif_to_pdb(cif_content)
+                try:
+                    content = convert_cif_to_pdb(cif_content)
+                    actual_format = "pdb"
+                    output_path = os.path.join(output_folder, f"{custom_id}.pdb")
+                    source_label = "rcsb_download (CIF) -> converted to PDB"
+                except Exception as conv_e:
+                    print(f"  CIF to PDB conversion failed ({conv_e}), keeping CIF format")
+                    content = cif_content
+                    actual_format = "cif"
+                    output_path = os.path.join(output_folder, f"{custom_id}.cif")
+                    source_label = "rcsb_download (CIF, PDB conversion not possible)"
 
                 # Remove waters if requested
                 if remove_waters:
-                    content = remove_waters_from_content(content, "pdb")
+                    content = remove_waters_from_content(content, actual_format)
 
                 # Filter to specific chain if requested
                 if chain != "longest":
-                    content = filter_chain_from_content(content, "pdb", chain)
+                    content = filter_chain_from_content(content, actual_format, chain)
 
                 # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
-                original_ligand_codes = extract_ligands_from_structure(content, "pdb")
+                original_ligand_codes = extract_ligands_from_structure(content, actual_format)
                 rename_mapping = build_rename_mapping(operations) if operations else {}
 
                 # Apply operations (e.g., rename)
                 if operations:
-                    content = apply_operations(content, "pdb", operations)
+                    content = apply_operations(content, actual_format, operations)
 
                 # Cache the CIF file
                 os.makedirs(repo_pdbs_folder, exist_ok=True)
@@ -910,13 +920,12 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                     f.write(cif_content)
                 print(f"  Cached CIF to PDBs/ folder: {cache_path}")
 
-                # Save PDB to output folder
-                output_path = os.path.join(output_folder, f"{custom_id}.pdb")
+                # Save to output folder
                 with open(output_path, 'w') as f:
                     f.write(content)
 
                 file_size = os.path.getsize(output_path)
-                sequence = extract_sequence_from_structure(content, "pdb", chain=chain)
+                sequence = extract_sequence_from_structure(content, actual_format, chain=chain)
 
                 # Build ligands list using original codes for SMILES lookup, renamed codes for output
                 ligands = []
@@ -924,7 +933,7 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                     print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
                     for original_code in original_ligand_codes:
                         # Use original code for SMILES fetch from RCSB
-                        smiles = fetch_ligand_smiles_from_rcsb(original_code)
+                        smiles = fetch_ligand_smiles_from_rcsb(original_code) if fetch_compounds else None
                         # Use renamed code (if any) for output
                         output_code = rename_mapping.get(original_code, original_code)
                         ligands.append({
@@ -937,11 +946,11 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
 
                 metadata = {
                     "file_size": file_size,
-                    "source": "rcsb_download (CIF) -> converted to PDB",
+                    "source": source_label,
                     "url": url
                 }
 
-                print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes (CIF fallback -> PDB)")
+                print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes ({source_label})")
                 return True, output_path, sequence, ligands, metadata
 
             except Exception as fallback_e:
