@@ -6,9 +6,12 @@
 """
 Runtime helper script for Angle analysis.
 
-This script analyzes protein structures to calculate angles between atoms:
-- 3 atoms: Bond angle at middle atom (in degrees, 0-180)
-- 4 atoms: Torsional/dihedral angle (in degrees, -180 to 180)
+This script analyzes protein structures to calculate angles between atoms.
+Three modes are supported (determined by `mode` in the config):
+
+- "bond"   : (a, o, b)           Bond angle at o (0-180 degrees)
+- "torsion": (a, x1, x2, b)      Torsional/dihedral angle (-180 to 180 degrees)
+- "vector" : [[a1, a2], [b1, b2]] Angle between vectors a1->a2 and b1->b2 (0-180 degrees)
 
 Parses PDB files directly as text, using the same selection syntax as Distance.
 """
@@ -146,15 +149,44 @@ def calculate_torsion_angle(p1: Tuple[float, float, float],
     return math.degrees(math.atan2(y, x))
 
 
-def calculate_angle(structure_path: str, atom_selections: List[str],
-                    is_torsion: bool) -> Optional[float]:
+def calculate_vector_angle(p1: Tuple[float, float, float],
+                           p2: Tuple[float, float, float],
+                           p3: Tuple[float, float, float],
+                           p4: Tuple[float, float, float]) -> float:
+    """
+    Calculate the angle between vectors p1->p2 and p3->p4.
+
+    Args:
+        p1, p2: Start and end of the first vector (direction p1 to p2)
+        p3, p4: Start and end of the second vector (direction p3 to p4)
+
+    Returns:
+        Angle in degrees (0-180)
+    """
+    v1 = (p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2])
+    v2 = (p4[0] - p3[0], p4[1] - p3[1], p4[2] - p3[2])
+
+    dot = v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2]
+    mag1 = math.sqrt(v1[0]**2 + v1[1]**2 + v1[2]**2)
+    mag2 = math.sqrt(v2[0]**2 + v2[1]**2 + v2[2]**2)
+
+    if mag1 == 0 or mag2 == 0:
+        raise ValueError("Cannot calculate vector angle: zero-length vector")
+
+    cos_angle = max(-1.0, min(1.0, dot / (mag1 * mag2)))
+    return math.degrees(math.acos(cos_angle))
+
+
+def calculate_angle(structure_path: str, atom_selections,
+                    mode: str) -> Optional[float]:
     """
     Calculate angle between selected atoms by parsing PDB file.
 
     Args:
         structure_path: Path to structure file
-        atom_selections: List of 3 or 4 atom selection strings
-        is_torsion: True for torsional angle (4 atoms), False for bond angle (3 atoms)
+        atom_selections: For "bond"/"torsion": list of 3 or 4 selection strings.
+                         For "vector": list of two 2-element lists [[a1, a2], [b1, b2]].
+        mode: "bond", "torsion", or "vector"
 
     Returns:
         Calculated angle in degrees, or None if failed
@@ -169,30 +201,32 @@ def calculate_angle(structure_path: str, atom_selections: List[str],
 
         print(f"  - Total atoms in structure: {len(atoms)}")
 
-        # Parse each selection and get centroids
-        points = []
-        for i, selection in enumerate(atom_selections):
-            selected_atoms = resolve_selection(selection, atoms)
-            print(f"  - Selection '{selection}': {len(selected_atoms)} atoms")
-
-            if not selected_atoms:
-                print(f"  - Warning: No atoms found for selection '{selection}'")
-                return None
-
-            # Get centroid (or single atom coordinates)
-            centroid = get_atom_centroid(selected_atoms)
-            points.append(centroid)
-
-            if len(selected_atoms) == 1:
-                print(f"    Atom: {selected_atoms[0].atom_name} at ({centroid[0]:.2f}, {centroid[1]:.2f}, {centroid[2]:.2f})")
+        def resolve_point(selection):
+            selected = resolve_selection(selection, atoms)
+            print(f"  - Selection '{selection}': {len(selected)} atoms")
+            if not selected:
+                raise ValueError(f"No atoms found for selection '{selection}'")
+            centroid = get_atom_centroid(selected)
+            if len(selected) == 1:
+                print(f"    Atom: {selected[0].atom_name} at ({centroid[0]:.2f}, {centroid[1]:.2f}, {centroid[2]:.2f})")
             else:
-                print(f"    Centroid of {len(selected_atoms)} atoms: ({centroid[0]:.2f}, {centroid[1]:.2f}, {centroid[2]:.2f})")
+                print(f"    Centroid of {len(selected)} atoms: ({centroid[0]:.2f}, {centroid[1]:.2f}, {centroid[2]:.2f})")
+            return centroid
 
-        # Calculate angle
-        if is_torsion:
+        if mode == "vector":
+            (sel_a1, sel_a2), (sel_b1, sel_b2) = atom_selections
+            p_a1 = resolve_point(sel_a1)
+            p_a2 = resolve_point(sel_a2)
+            p_b1 = resolve_point(sel_b1)
+            p_b2 = resolve_point(sel_b2)
+            angle = calculate_vector_angle(p_a1, p_a2, p_b1, p_b2)
+            print(f"  - Vector-vector angle: {angle:.2f}°")
+        elif mode == "torsion":
+            points = [resolve_point(s) for s in atom_selections]
             angle = calculate_torsion_angle(points[0], points[1], points[2], points[3])
             print(f"  - Torsional angle: {angle:.2f}°")
-        else:
+        else:  # bond
+            points = [resolve_point(s) for s in atom_selections]
             angle = calculate_bond_angle(points[0], points[1], points[2])
             print(f"  - Bond angle: {angle:.2f}°")
 
@@ -216,14 +250,18 @@ def analyze_angles(config_data: Dict[str, Any]) -> None:
     structures_ds = load_datastream(config_data['structures_json'])
 
     atom_selections = config_data['atom_selections']
-    is_torsion = config_data['is_torsion']
+    mode = config_data['mode']
     metric_name = config_data['metric_name']
     unit = config_data.get('unit', 'degrees')
     output_csv = config_data['output_csv']
 
-    angle_type = "torsional" if is_torsion else "bond"
+    angle_type = {"bond": "bond", "torsion": "torsional", "vector": "vector-vector"}[mode]
     print(f"Analyzing {angle_type} angles in {len(structures_ds.ids)} structures")
-    print(f"Atom selections: {' -> '.join(atom_selections)}")
+    if mode == "vector":
+        (a1, a2), (b1, b2) = atom_selections
+        print(f"Vector 1: {a1} -> {a2}  |  Vector 2: {b1} -> {b2}")
+    else:
+        print(f"Atom selections: {' -> '.join(atom_selections)}")
     print(f"Output column: {metric_name}")
     print(f"Output unit: {unit}")
 
@@ -241,7 +279,7 @@ def analyze_angles(config_data: Dict[str, Any]) -> None:
         print(f"  - ID: {structure_id}")
 
         # Calculate angle (always in degrees internally)
-        angle = calculate_angle(structure_path, atom_selections, is_torsion)
+        angle = calculate_angle(structure_path, atom_selections, mode)
 
         # Convert to radians if requested
         if angle is not None and unit == 'radians':
@@ -323,7 +361,7 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['structures_json', 'atom_selections', 'is_torsion',
+    required_params = ['structures_json', 'atom_selections', 'mode',
                        'metric_name', 'output_csv']
     for param in required_params:
         if param not in config_data:

@@ -5,9 +5,14 @@
 """
 Angle analysis for calculating angles and torsional angles between atoms.
 
-Analyzes protein structures to calculate angles between 3 atoms (bond angle on middle atom)
-or torsional angles between 4 atoms (dihedral angle). Outputs CSV with angle metrics
-for all structures.
+Analyzes protein structures to calculate angles between atoms. Three modes are supported,
+selected by the shape of the `atoms` argument:
+
+- (a, o, b)           : bond angle at o (a-o-b)
+- (a, x1, x2, b)      : dihedral angle along axis x1-x2
+- ((a1, a2), (b1, b2)): angle between vectors a1->a2 and b1->b2
+
+Outputs CSV with angle metrics for all structures.
 """
 
 import os
@@ -47,6 +52,11 @@ class Angle(BaseConfig):
 
     TOOL_NAME = "Angle"
 
+    # Angle modes
+    MODE_BOND = "bond"
+    MODE_TORSION = "torsion"
+    MODE_VECTOR = "vector"
+
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Angle ==="
@@ -62,7 +72,7 @@ echo "=== Angle ready ==="
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
-                 atoms: List[str],
+                 atoms: tuple,
                  metric_name: str = None,
                  unit: str = "degrees",
                  **kwargs):
@@ -71,8 +81,21 @@ echo "=== Angle ready ==="
 
         Args:
             structures: Input structures as DataStream or StandardizedOutput
-            atoms: List of 3 or 4 atom selection strings
-            metric_name: Custom name for the angle column (default: "angle" or "torsion")
+            atoms: Tuple specifying which angle to compute. Three forms are accepted:
+
+                (a, o, b)
+                    Bond angle at o: the angle formed by selections a, o, b with
+                    vertex at o.
+
+                (a, x1, x2, b)
+                    Dihedral angle along axis x1-x2 (standard IUPAC torsion).
+
+                ((a1, a2), (b1, b2))
+                    Angle between vectors a1->a2 and b1->b2 (each selection may
+                    resolve to multiple atoms; centroids are used).
+
+            metric_name: Custom name for the angle column (default: "angle",
+                         "torsion", or "vector_angle" depending on mode)
             unit: Output unit, "degrees" (default) or "radians"
 
         Selection Syntax (same as Distance):
@@ -101,30 +124,60 @@ echo "=== Angle ready ==="
         else:
             raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
 
-        self.atom_selections = atoms
         self.custom_metric_name = metric_name
         self.unit = unit
-
-        # Validate atom count
-        if not isinstance(atoms, list):
-            raise ValueError("atoms must be a list of selection strings")
-        if len(atoms) not in [3, 4]:
-            raise ValueError(f"atoms must contain exactly 3 or 4 selections, got {len(atoms)}")
 
         # Validate unit
         if unit not in ("degrees", "radians"):
             raise ValueError(f"unit must be 'degrees' or 'radians', got '{unit}'")
 
-        # Determine angle type
-        self.is_torsion = len(atoms) == 4
+        # Detect mode from atoms shape
+        self.mode, self.atom_selections = self._parse_atoms(atoms)
 
         super().__init__(**kwargs)
+
+    @staticmethod
+    def _parse_atoms(atoms):
+        """
+        Parse the atoms argument and return (mode, flat_selections).
+
+        flat_selections is always a plain list of strings (or nested list for
+        vector mode) that can be serialized to JSON and understood by the
+        HelpScript.
+        """
+        if not isinstance(atoms, tuple):
+            raise ValueError(
+                "atoms must be a tuple: (a, o, b), (a, x1, x2, b), "
+                "or ((a1, a2), (b1, b2))"
+            )
+
+        # Vector mode: tuple of two 2-tuples
+        if (len(atoms) == 2
+                and isinstance(atoms[0], tuple) and len(atoms[0]) == 2
+                and isinstance(atoms[1], tuple) and len(atoms[1]) == 2):
+            (a1, a2), (b1, b2) = atoms
+            return Angle.MODE_VECTOR, [[a1, a2], [b1, b2]]
+
+        # Bond angle: 3-tuple of strings
+        if len(atoms) == 3:
+            a, o, b = atoms
+            return Angle.MODE_BOND, [a, o, b]
+
+        # Dihedral: 4-tuple of strings
+        if len(atoms) == 4:
+            a, x1, x2, b = atoms
+            return Angle.MODE_TORSION, [a, x1, x2, b]
+
+        raise ValueError(
+            "atoms must be a 3-tuple (a, o, b), a 4-tuple (a, x1, x2, b), "
+            "or a pair of 2-tuples ((a1, a2), (b1, b2))"
+        )
 
     def get_metric_name(self) -> str:
         """Get the default metric name."""
         if self.custom_metric_name:
             return self.custom_metric_name
-        return "torsion" if self.is_torsion else "angle"
+        return {"bond": "angle", "torsion": "torsion", "vector": "vector_angle"}[self.mode]
 
     def validate_params(self):
         """Validate Angle parameters."""
@@ -142,11 +195,20 @@ echo "=== Angle ready ==="
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
-        angle_type = "Torsional (4 atoms)" if self.is_torsion else "Bond (3 atoms)"
+        angle_type = {
+            self.MODE_BOND: "Bond (3 atoms)",
+            self.MODE_TORSION: "Torsional (4 atoms)",
+            self.MODE_VECTOR: "Vector-vector",
+        }[self.mode]
         config_lines.append(f"ANGLE TYPE: {angle_type}")
 
-        for i, selection in enumerate(self.atom_selections):
-            config_lines.append(f"ATOM {i+1}: {selection}")
+        if self.mode == self.MODE_VECTOR:
+            (a1, a2), (b1, b2) = self.atom_selections
+            config_lines.append(f"VECTOR 1: {a1} -> {a2}")
+            config_lines.append(f"VECTOR 2: {b1} -> {b2}")
+        else:
+            for i, selection in enumerate(self.atom_selections):
+                config_lines.append(f"ATOM {i+1}: {selection}")
 
         config_lines.append(f"OUTPUT METRIC: {self.get_metric_name()}")
         config_lines.append(f"UNIT: {self.unit}")
@@ -177,7 +239,7 @@ echo "=== Angle ready ==="
         config_data = {
             "structures_json": self.structures_ds_json,
             "atom_selections": self.atom_selections,
-            "is_torsion": self.is_torsion,
+            "mode": self.mode,
             "metric_name": self.get_metric_name(),
             "unit": self.unit,
             "output_csv": self.analysis_csv
@@ -186,8 +248,12 @@ echo "=== Angle ready ==="
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        angle_type = "torsional" if self.is_torsion else "bond"
-        atoms_str = " -> ".join(self.atom_selections)
+        angle_type = {"bond": "bond", "torsion": "torsional", "vector": "vector-vector"}[self.mode]
+        if self.mode == self.MODE_VECTOR:
+            (a1, a2), (b1, b2) = self.atom_selections
+            atoms_str = f"({a1}->{a2}) ^ ({b1}->{b2})"
+        else:
+            atoms_str = " -> ".join(self.atom_selections)
 
         return f"""echo "Running {angle_type} angle analysis"
 echo "Atoms: {atoms_str}"
@@ -209,8 +275,13 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after angle analysis."""
-        angle_type = "Torsional angle" if self.is_torsion else "Bond angle"
-        atoms_desc = " -> ".join(self.atom_selections)
+        angle_type = {"bond": "Bond angle", "torsion": "Torsional angle",
+                      "vector": "Vector-vector angle"}[self.mode]
+        if self.mode == self.MODE_VECTOR:
+            (a1, a2), (b1, b2) = self.atom_selections
+            atoms_desc = f"({a1}->{a2}) ^ ({b1}->{b2})"
+        else:
+            atoms_desc = " -> ".join(self.atom_selections)
 
         tables = {
             "angles": TableInfo(
@@ -233,7 +304,7 @@ fi
 
         base_dict.update({
             "angle_params": {
-                "is_torsion": self.is_torsion,
+                "mode": self.mode,
                 "atom_selections": self.atom_selections,
                 "metric_name": self.get_metric_name(),
                 "unit": self.unit

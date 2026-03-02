@@ -67,7 +67,7 @@ Predict protein and complex structures, and dock ligands.
 Analyze structures and interactions.
 
 - [Distance](Tool/Analysis.md#distance) - Distance measurements
-- [Angle](Tool/Analysis.md#angle) - Bond and torsional angles
+- [Angle](Tool/Analysis.md#angle) - Bond, torsional, and vector-vector angles
 - [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
 - [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
 - [Contacts](Tool/Analysis.md#contacts) - Contact analysis

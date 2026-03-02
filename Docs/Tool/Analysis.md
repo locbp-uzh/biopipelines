@@ -42,15 +42,15 @@ distances = Distance(
 
 ### Angle
 
-Calculates bond angles (3 atoms) or torsional/dihedral angles (4 atoms) between specified atoms in structures. Useful for backbone phi/psi analysis, side chain rotamers, and ligand geometry verification.
+Calculates angles between atoms in structures. Three modes are supported, selected by the shape of the `atoms` tuple. Useful for backbone phi/psi analysis, side chain rotamers, ligand geometry verification, and measuring relative orientations between structural elements.
 
 **Environment**: `biopipelines`
 
 **Parameters**:
 - `structures`: Union[ToolOutput, StandardizedOutput] (required) - Input structures
-- `atoms`: List[str] (required) - List of 3 or 4 atom selections
-- `metric_name`: str = None - Custom name for angle column (default: "angle" or "torsion")
-- `unit`: str = "degrees" - Output unit: "degrees" or "radians"
+- `atoms`: tuple (required) - Atom selections; form determines the angle mode (see below)
+- `metric_name`: str = None - Custom name for angle column (default: `"angle"`, `"torsion"`, or `"vector_angle"` depending on mode)
+- `unit`: str = "degrees" - Output unit: `"degrees"` or `"radians"`
 
 **Selection Syntax**:
 Same as Distance, with additional support for `residue.atom` format:
@@ -65,52 +65,65 @@ Same as Distance, with additional support for `residue.atom` format:
   | id | source_structure | {metric_name} | unit |
   |----|------------------|---------------|------|
 
-**Angle Types**:
-- **3 atoms (A-B-C)**: Bond angle at B (0-180° or 0-π rad)
-- **4 atoms (A-B-C-D)**: Torsional angle (-180° to 180° or -π to π rad)
+**Angle Modes**:
+
+| Form | Mode | Description | Range |
+|------|------|-------------|-------|
+| `(a, o, b)` | Bond | Angle at vertex o (a–o–b) | 0–180° |
+| `(a, x1, x2, b)` | Torsional | Dihedral along axis x1–x2 | −180° to 180° |
+| `((a1, a2), (b1, b2))` | Vector | Angle between vectors a1→a2 and b1→b2 | 0–180° |
+
+Each selection may resolve to multiple atoms; centroids are used in that case.
 
 **Example**:
 ```python
 from biopipelines.angle import Angle
 
-# Bond angle at CA (N-CA-C angle)
+# Bond angle at CA (N-CA-C)
 bond_angle = Angle(
     structures=boltz,
-    atoms=['10.N', '10.CA', '10.C'],
+    atoms=('10.N', '10.CA', '10.C'),
     metric_name="nca_angle"
 )
 
 # Phi angle (C-N-CA-C)
 phi = Angle(
     structures=boltz,
-    atoms=['9.C', '10.N', '10.CA', '10.C'],
+    atoms=('9.C', '10.N', '10.CA', '10.C'),
     metric_name="phi"
 )
 
 # Psi angle (N-CA-C-N)
 psi = Angle(
     structures=boltz,
-    atoms=['10.N', '10.CA', '10.C', '11.N'],
+    atoms=('10.N', '10.CA', '10.C', '11.N'),
     metric_name="psi"
 )
 
-# Chi1 angle for a residue
+# Chi1 angle
 chi1 = Angle(
     structures=boltz,
-    atoms=['50.N', '50.CA', '50.CB', '50.CG'],
+    atoms=('50.N', '50.CA', '50.CB', '50.CG'),
     metric_name="chi1"
 )
 
 # Ligand geometry
 ligand_angle = Angle(
     structures=boltz,
-    atoms=['LIG.C1', 'LIG.C2', 'LIG.C3']
+    atoms=('LIG.C1', 'LIG.C2', 'LIG.C3')
+)
+
+# Angle between two structural vectors (e.g. helix axis proxies)
+orientation = Angle(
+    structures=boltz,
+    atoms=(('66.NE1', '66.CA'), ('-173.OH', '-173.CA')),
+    metric_name="orientation"
 )
 
 # Output in radians (for use with cos/sin in Panda.calculate)
-orientation = Angle(
+orientation_rad = Angle(
     structures=boltz,
-    atoms=['64.NE1', '66.CA', '-173.OH', '-173.CA'],
+    atoms=(('66.NE1', '66.CA'), ('-173.OH', '-173.CA')),
     metric_name="orientation",
     unit="radians"
 )
