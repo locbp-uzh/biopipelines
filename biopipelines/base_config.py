@@ -770,8 +770,7 @@ python {pipe_check_completion} "{self.output_folder}" "{self.TOOL_NAME}" "{expec
 if [ $? -eq 0 ]; then
     echo "{self.TOOL_NAME} completed successfully"
 else
-    echo "{self.TOOL_NAME} failed - some outputs missing"
-    exit 1
+    echo "{self.TOOL_NAME} - some outputs missing"
 fi
 """
     

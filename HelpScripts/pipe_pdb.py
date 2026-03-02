@@ -709,7 +709,8 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         metadata = {
             "file_size": file_size,
             "source": source_info,
-            "source_path": source_path
+            "source_path": source_path,
+            "actual_format": actual_format
         }
 
         print(f"Successfully processed {pdb_id} as {custom_id}: {file_size} bytes ({source_info})")
@@ -900,7 +901,8 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         metadata = {
             "file_size": file_size,
             "source": source_info,
-            "url": url
+            "url": url,
+            "actual_format": format
         }
 
         print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes ({source_info})")
@@ -992,7 +994,8 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 metadata = {
                     "file_size": file_size,
                     "source": source_label,
-                    "url": url
+                    "url": url,
+                    "actual_format": actual_format
                 }
 
                 print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes ({source_label})")
@@ -1187,7 +1190,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 'id': custom_id,
                 'pdb_id': pdb_id,
                 'file_path': file_path,
-                'format': format,
+                'format': metadata.get('actual_format', format),
                 'file_size': metadata['file_size'],
                 'source': metadata['source']
             })
