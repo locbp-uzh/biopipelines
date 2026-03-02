@@ -12,6 +12,7 @@ This allows bash scripts to skip already completed steps and provides clear stat
 
 import os
 import sys
+import glob
 import argparse
 import json
 from pathlib import Path
@@ -20,13 +21,17 @@ from typing import Dict, List, Any, Optional
 def check_file_exists(file_path: str) -> bool:
     """
     Check if a file or directory exists.
-    
+
+    Supports glob wildcard patterns (e.g. rank0001_*.cif).
+
     Args:
-        file_path: Path to check
-        
+        file_path: Path to check (may contain * or ? wildcards)
+
     Returns:
         True if exists, False otherwise
     """
+    if '*' in file_path or '?' in file_path:
+        return len(glob.glob(file_path)) > 0
     return os.path.exists(file_path) and (os.path.isfile(file_path) or os.path.isdir(file_path))
 
 def load_expected_missing_ids(missing_csv_path: str) -> List[str]:
