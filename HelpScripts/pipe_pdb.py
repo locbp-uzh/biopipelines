@@ -645,17 +645,13 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         with open(source_path, 'r') as f:
             content = f.read()
 
-        # Convert format if needed; fall back to keeping CIF if conversion fails
+        # Convert format if needed
         actual_format = source_format
         if source_format != target_format:
             if source_format == "cif" and target_format == "pdb":
                 print(f"  Converting CIF to PDB format...")
-                try:
-                    content = convert_cif_to_pdb(content)
-                    actual_format = "pdb"
-                except Exception as conv_e:
-                    print(f"  CIF to PDB conversion failed ({conv_e}), keeping CIF format")
-                    actual_format = "cif"
+                content = convert_cif_to_pdb(content)
+                actual_format = "pdb"
             elif source_format == "pdb" and target_format == "cif":
                 raise NotImplementedError("PDB to CIF conversion not implemented")
 
@@ -703,8 +699,6 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         source_info = f"local ({source_format.upper()})"
         if source_format != actual_format:
             source_info += f" -> converted to {actual_format.upper()}"
-        elif source_format != target_format:
-            source_info += f" (PDB conversion not possible, kept as {actual_format.upper()})"
 
         metadata = {
             "file_size": file_size,
@@ -930,19 +924,12 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 else:
                     cif_content = response.text
 
-                # Try to convert CIF to PDB; keep CIF if conversion fails (e.g. chain IDs > 1 char)
+                # Convert CIF to PDB
                 print(f"  Converting CIF to PDB format...")
-                try:
-                    content = convert_cif_to_pdb(cif_content)
-                    actual_format = "pdb"
-                    output_path = os.path.join(output_folder, f"{custom_id}.pdb")
-                    source_label = "rcsb_download (CIF) -> converted to PDB"
-                except Exception as conv_e:
-                    print(f"  CIF to PDB conversion failed ({conv_e}), keeping CIF format")
-                    content = cif_content
-                    actual_format = "cif"
-                    output_path = os.path.join(output_folder, f"{custom_id}.cif")
-                    source_label = "rcsb_download (CIF, PDB conversion not possible)"
+                content = convert_cif_to_pdb(cif_content)
+                actual_format = "pdb"
+                output_path = os.path.join(output_folder, f"{custom_id}.pdb")
+                source_label = "rcsb_download (CIF) -> converted to PDB"
 
                 # Remove waters if requested
                 if remove_waters:

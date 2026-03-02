@@ -484,6 +484,7 @@ echo "=== Panda ready ==="
                  operations: Optional[List[Operation]] = None,
                  pool: Optional[Union[StandardizedOutput, List[StandardizedOutput]]] = None,
                  rename: Optional[str] = None,
+                 ignore_missing: bool = False,
                  **kwargs):
         """
         Initialize Panda tool.
@@ -499,6 +500,8 @@ echo "=== Panda ready ==="
                   the pool corresponding to each row's source_table index.
             rename: If provided, output IDs will be renamed to {rename}_1, {rename}_2, etc.
                     Useful after sorting to get ranked IDs (e.g., rename="best" -> best_1, best_2, ...)
+            ignore_missing: If True, skip missing pool files with a warning instead of failing.
+                    Useful when some upstream downloads/conversions may have failed.
             **kwargs: Additional parameters
 
         Output:
@@ -521,6 +524,7 @@ echo "=== Panda ready ==="
 
         self.operations = operations or []
         self.rename = rename
+        self.ignore_missing = ignore_missing
 
         # Handle pool - can be single or list
         if pool is None:
@@ -781,6 +785,7 @@ echo "=== Panda ready ==="
             "pool_table_maps": getattr(self, 'pool_table_maps', []),
             "id_map_forward": getattr(self, 'id_map_forward', {}),
             "rename": self.rename,
+            "ignore_missing": self.ignore_missing,
             "step_tool_name": step_tool_name
         }
 

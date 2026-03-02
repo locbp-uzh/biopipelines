@@ -457,7 +457,8 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
 def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str,
                                         output_folder: str,
                                         rename_map: Optional[Dict[str, str]] = None,
-                                        file_map: Optional[Dict[str, Dict[str, str]]] = None) -> Dict[str, List[str]]:
+                                        file_map: Optional[Dict[str, Dict[str, str]]] = None,
+                                        ignore_missing: bool = False) -> Dict[str, List[str]]:
     """
     Extract data from a single pool for filtered IDs.
 
@@ -467,6 +468,7 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
         output_folder: Where to copy the filtered data
         rename_map: Optional mapping from original ID to new ID for renaming output files
         file_map: Optional mapping {stream_name: {id: file_path}} for direct file lookup
+        ignore_missing: If True, skip missing files with a warning instead of failing
 
     Returns:
         Dictionary mapping stream name to list of extracted file paths
@@ -491,6 +493,17 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                     continue
 
                 source = id_to_file[selected_id]
+
+                if not os.path.exists(source):
+                    if ignore_missing:
+                        print(f"  Warning: Missing file for {stream_name} ID '{selected_id}': {source} (skipped)")
+                        continue
+                    else:
+                        raise FileNotFoundError(
+                            f"Pool file not found for {stream_name} ID '{selected_id}': {source}. "
+                            f"Use ignore_missing=True to skip missing files."
+                        )
+
                 output_id = rename_map.get(str(selected_id), selected_id) if rename_map else selected_id
                 ext = os.path.splitext(source)[1]
                 dest = os.path.join(output_folder, f"{output_id}{ext}")
@@ -507,7 +520,8 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
 def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str],
                                  output_folder: str,
                                  rename_map: Optional[Dict[str, str]] = None,
-                                 file_maps: Optional[List[Dict[str, Dict[str, str]]]] = None) -> Dict[str, List[str]]:
+                                 file_maps: Optional[List[Dict[str, Dict[str, str]]]] = None,
+                                 ignore_missing: bool = False) -> Dict[str, List[str]]:
     """
     Extract data from multiple pools based on source_table column.
 
@@ -521,6 +535,7 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
         output_folder: Where to copy the extracted data
         rename_map: Optional mapping from original ID to new ID
         file_maps: List of file maps, one per pool: [{stream_name: {id: file_path}}]
+        ignore_missing: If True, skip missing files with a warning instead of failing
 
     Returns:
         Dictionary mapping stream name to list of extracted file paths
@@ -566,6 +581,17 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
                 continue
 
             source = id_to_file[lookup_id]
+
+            if not os.path.exists(source):
+                if ignore_missing:
+                    print(f"  Warning: Missing file for {stream_name} ID '{lookup_id}' from pool {source_idx}: {source} (skipped)")
+                    continue
+                else:
+                    raise FileNotFoundError(
+                        f"Pool file not found for {stream_name} ID '{lookup_id}' from pool {source_idx}: {source}. "
+                        f"Use ignore_missing=True to skip missing files."
+                    )
+
             ext = os.path.splitext(source)[1]
             dest = os.path.join(output_folder, f"{output_id}{ext}")
 
@@ -782,6 +808,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     pool_table_maps = config_data.get('pool_table_maps', [])
     id_map_forward = config_data.get('id_map_forward', {})
     rename = config_data.get('rename')
+    ignore_missing = config_data.get('ignore_missing', False)
 
     print(f"Panda: Processing {len(input_csvs)} input files")
     print(f"Operations: {len(operations)}")
@@ -890,14 +917,16 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                 extracted = extract_from_multiple_pools(
                     result_df, pool_folders, output_dir,
                     rename_map=original_to_new_id if rename else None,
-                    file_maps=pool_file_maps
+                    file_maps=pool_file_maps,
+                    ignore_missing=ignore_missing
                 )
             else:
                 # Single pool mode - use first pool
                 extracted = extract_pool_data_for_filtered_ids(
                     filtered_ids_for_lookup, pool_folders[0], output_dir,
                     rename_map=original_to_new_id if rename else None,
-                    file_map=pool_file_maps[0] if pool_file_maps else None
+                    file_map=pool_file_maps[0] if pool_file_maps else None,
+                    ignore_missing=ignore_missing
                 )
 
         print(f"\nPool mode summary:")
