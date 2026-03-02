@@ -645,39 +645,43 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         with open(source_path, 'r') as f:
             content = f.read()
 
-        # Convert format if needed
-        needs_conversion = (source_format != target_format)
-        if needs_conversion:
+        # Convert format if needed; fall back to keeping CIF if conversion fails
+        actual_format = source_format
+        if source_format != target_format:
             if source_format == "cif" and target_format == "pdb":
                 print(f"  Converting CIF to PDB format...")
-                content = convert_cif_to_pdb(content)
+                try:
+                    content = convert_cif_to_pdb(content)
+                    actual_format = "pdb"
+                except Exception as conv_e:
+                    print(f"  CIF to PDB conversion failed ({conv_e}), keeping CIF format")
+                    actual_format = "cif"
             elif source_format == "pdb" and target_format == "cif":
                 raise NotImplementedError("PDB to CIF conversion not implemented")
 
         if remove_waters:
-            content = remove_waters_from_content(content, target_format)
+            content = remove_waters_from_content(content, actual_format)
 
         # Filter to specific chain if requested
         if chain != "longest":
-            content = filter_chain_from_content(content, target_format, chain)
+            content = filter_chain_from_content(content, actual_format, chain)
 
         # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
-        original_ligand_codes = extract_ligands_from_structure(content, target_format)
+        original_ligand_codes = extract_ligands_from_structure(content, actual_format)
         rename_mapping = build_rename_mapping(operations) if operations else {}
 
         # Apply operations (e.g., rename)
         if operations:
-            content = apply_operations(content, target_format, operations)
+            content = apply_operations(content, actual_format, operations)
 
-        extension = ".pdb" if target_format == "pdb" else ".cif"
-        filename = f"{custom_id}{extension}"
-        output_path = os.path.join(output_folder, filename)
+        extension = ".pdb" if actual_format == "pdb" else ".cif"
+        output_path = os.path.join(output_folder, f"{custom_id}{extension}")
 
         with open(output_path, 'w') as f:
             f.write(content)
 
         file_size = os.path.getsize(output_path)
-        sequence = extract_sequence_from_structure(content, target_format, chain=chain)
+        sequence = extract_sequence_from_structure(content, actual_format, chain=chain)
 
         # Build ligands list using original codes for SMILES lookup, renamed codes for output
         ligands = []
@@ -697,8 +701,10 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
                 })
 
         source_info = f"local ({source_format.upper()})"
-        if needs_conversion:
-            source_info += f" -> converted to {target_format.upper()}"
+        if source_format != actual_format:
+            source_info += f" -> converted to {actual_format.upper()}"
+        elif source_format != target_format:
+            source_info += f" (PDB conversion not possible, kept as {actual_format.upper()})"
 
         metadata = {
             "file_size": file_size,
