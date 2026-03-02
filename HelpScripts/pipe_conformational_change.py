@@ -202,6 +202,7 @@ def analyze_conformational_change(ref_path: str, target_path: str, selection: st
         print(f"  - Loaded reference: {ref_obj}")
         print(f"  - Loaded target: {target_obj}")
         print(f"  - Selection: {selection}")
+        print(f"  - Atoms: {atoms}")
 
         # Align and get RMSD from PyMOL
         metrics = align_and_compute_rmsd(ref_obj, target_obj, selection, alignment_method, atoms)
