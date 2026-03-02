@@ -660,7 +660,7 @@ python "{self.plot_py}" --config "{self.config_file}"
             f'({plots_stream.format}, {len(plots_stream)} items)</span></div>'
         )
 
-        for item_id, file_path in plots_stream:
+        for item_id, file_path in zip(plots_stream.ids, plots_stream.files):
             if not file_path or not os.path.isfile(file_path):
                 continue
 

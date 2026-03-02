@@ -290,8 +290,7 @@ echo "=== BoltzGen installation complete ==="
         if isinstance(target_structure, StandardizedOutput):
             if target_structure.streams.structures and len(target_structure.streams.structures) > 0:
                 # Get first structure file
-                first_id, first_file = target_structure.streams.structures[0]
-                self.target_structure_path = first_file
+                self.target_structure_path = target_structure.streams.structures.files[0]
             else:
                 raise ValueError("target_structure StandardizedOutput has no structures")
         elif isinstance(target_structure, DataStream):
@@ -1305,7 +1304,8 @@ echo "=== BoltzGenImport ready ==="
 
         if isinstance(designs, StandardizedOutput):
             if designs.streams.structures and len(designs.streams.structures) > 0:
-                for struct_id, struct_file in designs.streams.structures:
+                for struct_id, struct_file in zip(designs.streams.structures.ids,
+                                                    designs.streams.structures.files):
                     self.design_ids.append(struct_id)
                     self.design_structures.append(struct_file)
             else:

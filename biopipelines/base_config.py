@@ -455,7 +455,7 @@ echo "=============================="
             return ""
 
         pdb_data = []
-        for struct_id, file_path in structures_ds:
+        for struct_id, file_path in zip(structures_ds.ids, structures_ds.files):
             if file_path and os.path.isfile(file_path):
                 try:
                     with open(file_path, "r") as f:
@@ -1304,8 +1304,8 @@ class StandardizedOutput:
 
     DataStreams are accessed via the streams container:
 
-        for struct_id, pdb_path in output.streams.structures:
-            print(f"Processing {struct_id}: {pdb_path}")
+        for structure in output.streams.structures:
+            print(f"Processing {structure.ids[0]}: {structure.files[0]}")
 
         print(f"Generated {len(output.streams.structures)} structures")
     """
@@ -1501,7 +1501,7 @@ class StandardizedOutput:
                         parts.append(f"{col}={val}")
                     result.append(f"    – {', '.join(parts)}")
             else:
-                items = list(ds)
+                items = list(zip(ds.ids, ds.files)) if ds.files else [(iid, "") for iid in ds.ids]
                 n_items = len(items)
                 if n_items <= 4:
                     display_items = items
@@ -1759,8 +1759,8 @@ class StandardizedOutput:
                 if map_data is not None and len(map_data) > 0:
                     _render_dataframe(map_data, html_parts)
                 else:
-                    # Fallback: render id/file pairs from iterator
-                    items = list(stream)
+                    # Fallback: render id/file pairs
+                    items = list(zip(stream.ids, stream.files)) if stream.files else [(iid, "") for iid in stream.ids]
                     n_items = len(items)
                     html_parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
                     if n_items <= 4:
@@ -1867,7 +1867,7 @@ class StandardizedOutput:
                     f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
                 )
 
-                for item_id, file_path in stream:
+                for item_id, file_path in zip(stream.ids, stream.files):
                     if not file_path or not os.path.isfile(file_path):
                         continue
 

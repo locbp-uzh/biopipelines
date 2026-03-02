@@ -103,7 +103,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
             if hasattr(source, "streams"):
                 structures_ds = source.streams.get("structures")
                 if isinstance(structures_ds, DataStream) and len(structures_ds) > 0:
-                    for struct_id, file_path in structures_ds:
+                    for struct_id, file_path in zip(structures_ds.ids, structures_ds.files):
                         all_ids.append(struct_id)
                         all_files.append(file_path)
 

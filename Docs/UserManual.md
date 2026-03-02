@@ -176,9 +176,13 @@ Tools output two types of data containers:
 **DataStream** - Unified container supporting ID tracking, and association of IDs to files (e.g. .pdb, .cif, .sdf) or values (e.g. protein/dna sequences):
 
 ```python
-# Access structures from a tool via the streams container
-for struct_id, pdb_path in boltz.streams.structures:
-    print(f"{struct_id}: {pdb_path}")
+# Iterate over structures - each item is a single-item DataStream
+for structure in boltz.streams.structures:
+    print(f"{structure.ids[0]}: {structure.files[0]}")
+
+# Each item can be passed directly to downstream tools
+for structure in proteins.streams.structures:
+    result = SomeTool(structures=structure)
 
 # Count items
 print(f"Generated {len(boltz.streams.structures)} structures")

@@ -413,6 +413,7 @@ Fast coarse-grained Monte Carlo simulation of protein structure flexibility. Pro
 **Streams**:
 - `structures`: PDB ensemble models (`num_models` per input structure)
 - `images`: SVG plots (RMSF, RMSD, energy) per input structure
+- `rmsf`: Per-residue RMSF CSVs (`per-residue-values-csv` format, columns: id, chain, resi, rmsf), one file per input structure
 
 **Tables**:
 - `structures`:
@@ -425,8 +426,6 @@ Fast coarse-grained Monte Carlo simulation of protein structure flexibility. Pro
   | id | chain | resi | rmsf |
   |----|-------|------|------|
 
-- `rmsf_<input_id>` (one per input structure, same columns as `rmsf_all`)
-
 **Example**:
 ```python
 from biopipelines.cabsflex import CABSflex
@@ -435,14 +434,15 @@ from biopipelines.cabsflex import CABSflex
 protein = PDB("1AHN")
 flex = CABSflex(structures=protein, num_models=10)
 
-# Access merged RMSF
+# Access merged RMSF table
 flex.tables.rmsf_all  # all structures combined
 
-# Access per-structure RMSF (e.g., for input ID "1AHN")
-flex.tables.rmsf_1AHN
+# Access per-structure RMSF stream
+for rmsf in flex.streams.rmsf:
+    print(f"{rmsf.ids[0]}: {rmsf.files[0]}")
 
 # Access ensemble models
-flex.streams.structures  # 10 PDB models
+flex.streams.structures  # 10 PDB models per input
 
 # Custom simulation parameters
 flex = CABSflex(

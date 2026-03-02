@@ -17,13 +17,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo, IndexedTableContainer
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo, IndexedTableContainer
+    from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
 
@@ -81,6 +81,7 @@ echo "=== CABS-Flex installation complete ==="
     structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
     structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
     rmsf_all_csv = Path(lambda self: os.path.join(self.output_folder, "rmsf_all.csv"))
+    rmsf_map = Path(lambda self: os.path.join(self.output_folder, "rmsf_map.csv"))
     helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_cabsflex.py"))
 
     def __init__(self,
@@ -130,9 +131,10 @@ echo "=== CABS-Flex installation complete ==="
             Streams:
                 structures: PDB ensemble models (num_models per input structure)
                 images: SVG plots (RMSF, RMSD, energy) per input structure
+                rmsf: Per-residue RMSF CSVs (per-residue-values-csv format),
+                    one per input structure; columns: id, chain, resi, rmsf
             Tables:
                 rmsf_all: id | chain | resi | rmsf  (merged, all structures)
-                rmsf.<input_id>: id | chain | resi | rmsf  (per input structure)
                 structures: id | file | structures.id
         """
         # Resolve input to DataStream
@@ -394,19 +396,22 @@ fi
             format="svg"
         )
 
-        # --- Output tables ---
+        # --- Output RMSF stream: one CSV per input structure ---
         rmsf_columns = ["id", "chain", "resi", "rmsf"]
-
-        # Per-ID RMSF tables: res.tables.rmsf["<id>"]
-        rmsf_per_id = IndexedTableContainer(
+        rmsf_files = [
+            os.path.join(self.output_folder, f"{input_id}_RMSF.csv")
+            for input_id in input_ids
+        ]
+        create_map_table(self.rmsf_map, list(input_ids), files=rmsf_files)
+        rmsf_stream = DataStream(
             name="rmsf",
-            columns=rmsf_columns,
-            description="Per-residue RMSF"
+            ids=list(input_ids),
+            files=rmsf_files,
+            map_table=self.rmsf_map,
+            format="per-residue-values-csv"
         )
-        for input_id in input_ids:
-            rmsf_path = os.path.join(self.output_folder, f"{input_id}_RMSF.csv")
-            rmsf_per_id.add(input_id, path=rmsf_path)
 
+        # --- Output tables ---
         tables = {
             "structures": TableInfo(
                 name="structures",
@@ -421,13 +426,13 @@ fi
                 columns=rmsf_columns,
                 description="Per-residue RMSF from all input structures (merged)",
                 count="variable"
-            ),
-            "rmsf": rmsf_per_id
+            )
         }
 
         return {
             "structures": structures,
             "images": images,
+            "rmsf": rmsf_stream,
             "tables": tables,
             "output_folder": self.output_folder
         }

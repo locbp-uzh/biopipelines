@@ -70,9 +70,10 @@ class DataStream:
             files_contain_wildcards=True
         )
 
-        # Iteration works uniformly
-        for item_id, item_path in structures:
-            print(f"Processing {item_id}: {item_path}")
+        # Iteration yields single-item DataStreams that can be passed to tools
+        for structure in structures:
+            print(f"Processing {structure.ids[0]}: {structure.files[0]}")
+            tool = SomeTool(structures=structure)
     """
 
     name: str = ""
@@ -109,38 +110,43 @@ class DataStream:
         """
         return len(self.ids)
 
-    def __iter__(self) -> Iterator[Tuple[str, str]]:
+    def __iter__(self) -> Iterator['DataStream']:
         """
-        Iterate over (id, file_or_value) pairs.
+        Iterate over single-item DataStream objects.
 
-        For file-based formats, yields (id, file_path).
-        For value-based formats (like SMILES), yields (id, value_from_map_table).
+        Each yielded DataStream has the same name and format as the parent,
+        with ids containing a single ID and files containing the corresponding
+        file (for file-based streams) or empty (for value-based streams).
+
+        This enables passing individual items directly to tools:
+            for structure in proteins.streams.structures:
+                tool = SomeTool(structures=structure)
 
         Yields:
-            Tuple of (item_id, item_path_or_value)
+            Single-item DataStream for each item
         """
         if self.files:
-            # File-based format
-            yield from zip(self.ids, self.files)
+            for item_id, item_file in zip(self.ids, self.files):
+                yield DataStream(
+                    name=self.name,
+                    ids=[item_id],
+                    files=[item_file],
+                    format=self.format,
+                    files_contain_wildcards=self.files_contain_wildcards
+                )
         else:
-            # Value-based format - get values from map_table
-            map_data = self._get_map_data()
-            if map_data is not None and 'value' in map_data.columns:
-                for item_id in self.ids:
-                    row = map_data[map_data['id'] == item_id]
-                    if not row.empty:
-                        yield (item_id, row.iloc[0]['value'])
-                    else:
-                        yield (item_id, "")
-            else:
-                # Fallback: yield empty values
-                for item_id in self.ids:
-                    yield (item_id, "")
+            for item_id in self.ids:
+                yield DataStream(
+                    name=self.name,
+                    ids=[item_id],
+                    files=[],
+                    format=self.format
+                )
 
     def __getitem__(self, index):
         """Get item by index or slice.
 
-        For integer index: returns (id, file_or_value) tuple.
+        For integer index: returns single-item DataStream.
         For slice: returns new DataStream with sliced items.
         """
         if isinstance(index, slice):
@@ -156,21 +162,26 @@ class DataStream:
                 files_contain_wildcards=self.files_contain_wildcards
             )
 
-        # Integer indexing
+        # Integer indexing - return single-item DataStream
         if index < 0 or index >= len(self.ids):
             raise IndexError(f"Index {index} out of range for DataStream with {len(self.ids)} items")
 
         item_id = self.ids[index]
         if self.files:
-            return (item_id, self.files[index])
+            return DataStream(
+                name=self.name,
+                ids=[item_id],
+                files=[self.files[index]],
+                format=self.format,
+                files_contain_wildcards=self.files_contain_wildcards
+            )
         else:
-            # Value-based format
-            map_data = self._get_map_data()
-            if map_data is not None and 'value' in map_data.columns:
-                row = map_data[map_data['id'] == item_id]
-                if not row.empty:
-                    return (item_id, row.iloc[0]['value'])
-            return (item_id, "")
+            return DataStream(
+                name=self.name,
+                ids=[item_id],
+                files=[],
+                format=self.format
+            )
 
     def __bool__(self) -> bool:
         """DataStream is truthy if it has any items."""
