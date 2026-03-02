@@ -343,7 +343,6 @@ echo "=== RCSB ready ==="
     compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
     failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
     search_results_csv = Path(lambda self: os.path.join(self.output_folder, "search_results.csv"))
-    entry_info_csv = Path(lambda self: os.path.join(self.output_folder, "entry_info.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
     pdb_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pdb.py"))
 
@@ -583,6 +582,7 @@ echo "=== RCSB ready ==="
                  ids: Optional[Union[str, List[str]]] = None,
                  remove_waters: bool = True,
                  chain: str = "longest",
+                 fetch_compounds: bool = True,
                  logical_operator: str = "and",
                  **kwargs):
         """
@@ -609,7 +609,7 @@ echo "=== RCSB ready ==="
                 structures: id | pdb_id | file_path | format | file_size | source
                 sequences: id | sequence
                 compounds: id | code | format | smiles | ccd
-                search_results: id | pdb_id | score
+                search_results: id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date
                 failed: pdb_id | error_message | source | attempted_path
         """
         # Validate queries
@@ -629,6 +629,7 @@ echo "=== RCSB ready ==="
         self.format = format.lower()
         self.remove_waters = remove_waters
         self.chain = chain
+        self.fetch_compounds = fetch_compounds
         self.logical_operator = logical_operator.lower()
         self.custom_ids = None
 
@@ -1022,6 +1023,7 @@ echo "=== RCSB ready ==="
             "sequences_table": self.sequences_csv,
             "failed_table": self.failed_csv,
             "compounds_table": self.compounds_csv,
+            "fetch_compounds": self.fetch_compounds,
             "operations": []
         }
 
@@ -1042,36 +1044,29 @@ python "{self.pdb_py}" --config "{self.config_file}"
 """
 
     def _write_search_results_csv(self):
-        """Write search results CSV with scores and entry info CSV with metadata."""
+        """Write search_results.csv combining search scores and entry metadata."""
         import csv
         os.makedirs(self.output_folder, exist_ok=True)
 
-        # Write search_results.csv (scores)
-        with open(self.search_results_csv, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["id", "pdb_id", "result_id", "score"])
-            for output_id, pdb_id, result_id, score in zip(
-                self.output_ids, self.pdb_ids, self.result_ids, self.search_scores
-            ):
-                writer.writerow([output_id, pdb_id, result_id, score])
-
-        # Write entry_info.csv (metadata from RCSB Data API)
-        info_columns = [
-            "id", "pdb_id", "title", "resolution", "method",
+        columns = [
+            "id", "pdb_id", "result_id", "score",
+            "title", "resolution", "method",
             "molecular_weight_kda", "organism", "entity_description",
             "protein_entity_count", "residue_count",
             "citation_title", "citation_journal", "citation_year", "citation_authors",
-            "release_date", "deposit_date"
+            "release_date", "deposit_date",
         ]
-        with open(self.entry_info_csv, 'w', newline='') as f:
+        with open(self.search_results_csv, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(info_columns)
-            for output_id, pdb_id, meta in zip(
-                self.output_ids, self.pdb_ids, self.entry_metadata
+            writer.writerow(columns)
+            for output_id, pdb_id, result_id, score, meta in zip(
+                self.output_ids, self.pdb_ids, self.result_ids, self.search_scores, self.entry_metadata
             ):
                 writer.writerow([
                     output_id,
                     pdb_id,
+                    result_id,
+                    score,
                     meta.get("title", ""),
                     meta.get("resolution", ""),
                     meta.get("method", ""),
@@ -1119,19 +1114,13 @@ python "{self.pdb_py}" --config "{self.config_file}"
             "search_results": TableInfo(
                 name="search_results",
                 path=self.search_results_csv,
-                columns=["id", "pdb_id", "result_id", "score"],
-                description="RCSB search results with scores",
-                count=len(self.pdb_ids)
-            ),
-            "entry_info": TableInfo(
-                name="entry_info",
-                path=self.entry_info_csv,
-                columns=["id", "pdb_id", "title", "resolution", "method",
+                columns=["id", "pdb_id", "result_id", "score",
+                         "title", "resolution", "method",
                          "molecular_weight_kda", "organism", "entity_description",
                          "protein_entity_count", "residue_count",
                          "citation_title", "citation_journal", "citation_year",
                          "citation_authors", "release_date", "deposit_date"],
-                description="Entry metadata from RCSB (title, organism, citation, etc.)",
+                description="RCSB search results with scores and entry metadata",
                 count=len(self.pdb_ids)
             ),
             "failed": TableInfo(

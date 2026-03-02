@@ -28,6 +28,7 @@ Fetches protein structures with priority: `local_folder` → `PDBs/` → RCSB do
 - `biological_assembly`: bool = False - Download biological assembly
 - `remove_waters`: bool = True - Remove water molecules
 - `chain`: str = "longest" - Which chain to extract sequence from. "longest" (default) picks the longest chain. Specify a chain letter (e.g. "A", "B") to select that chain.
+- `fetch_compounds`: bool = True - Fetch SMILES for ligands from RCSB. Set to False when compounds are not needed to avoid per-ligand API calls.
 
 **Operations** (optional positional args):
 - `PDB.Rename(old, new)` - Rename residues (e.g., for RFdiffusion3 compatibility)
@@ -77,6 +78,7 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 - `ids`: str | List[str] = None - Custom IDs (defaults to PDB IDs)
 - `remove_waters`: bool = True - Remove water molecules
 - `chain`: str = "longest" - Which chain to extract sequence from
+- `fetch_compounds`: bool = True - Fetch SMILES for ligands from RCSB. Set to False when compounds are not needed to avoid per-ligand API calls.
 - `logical_operator`: str = "and" - How to combine queries ("and" or "or")
 
 **Query Types**:
@@ -139,8 +141,7 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 - `structures`: | id | pdb_id | file_path | format | source |
 - `sequences`: | id | sequence |
 - `compounds`: | id | code | smiles | ccd |
-- `search_results`: | id | pdb_id | result_id | score |
-- `entry_info`: | id | pdb_id | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date |
+- `search_results`: | id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date |
 
 **Examples**:
 

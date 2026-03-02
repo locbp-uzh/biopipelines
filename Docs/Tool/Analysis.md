@@ -357,7 +357,7 @@ Measures ligand pose distance between reference holo structure and sample struct
 from biopipelines.pose_change import PoseChange
 from biopipelines.pdb import PDB
 from biopipelines.boltz2 import Boltz2
-from biopipelines.filter import Filter
+from biopipelines.panda import Panda
 
 # Compare designed structures to XRC reference
 xrc = PDB(pdbs="4ufc", ids="reference")
@@ -375,10 +375,10 @@ pose_analysis = PoseChange(
 )
 
 # Filter structures with RMSD < 2.0 Å
-good_poses = Filter(
-    data=pose_analysis.tables.changes,
+good_poses = Panda(
+    tables=pose_analysis.tables.changes,
     pool=designed,
-    expression="ligand_rmsd < 2.0"
+    operations=[Panda.filter("ligand_rmsd < 2.0")]
 )
 ```
 

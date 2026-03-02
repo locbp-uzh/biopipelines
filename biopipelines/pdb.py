@@ -115,6 +115,7 @@ echo "=== PDB ready ==="
                  biological_assembly: bool = False,
                  remove_waters: bool = True,
                  chain: str = "longest",
+                 fetch_compounds: bool = True,
                  **kwargs):
         """
         Initialize PDB tool.
@@ -202,6 +203,7 @@ echo "=== PDB ready ==="
         self.biological_assembly = biological_assembly
         self.remove_waters = remove_waters
         self.chain = chain
+        self.fetch_compounds = fetch_compounds
 
         # Validate format
         if self.format not in ["pdb", "cif"]:
@@ -582,6 +584,7 @@ echo "=== PDB ready ==="
             "sequences_table": self.sequences_csv,
             "failed_table": self.failed_csv,
             "compounds_table": self.compounds_csv,
+            "fetch_compounds": self.fetch_compounds,
             "operations": [op.to_dict() for op in self.operations]
         }
 

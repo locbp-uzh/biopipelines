@@ -581,7 +581,8 @@ def find_local_structure(pdb_id: str, format: str, local_folder: str,
 def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
                         source_format: str, target_format: str, remove_waters: bool,
                         output_folder: str, operations: List[Dict[str, Any]] = None,
-                        chain: str = "longest") -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
+                        chain: str = "longest",
+                        fetch_compounds: bool = True) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Copy local structure file to output folder with optional format conversion.
 
@@ -645,7 +646,7 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
             print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
             for original_code in original_ligand_codes:
                 # Use original code for SMILES fetch from RCSB
-                smiles = fetch_ligand_smiles_from_rcsb(original_code)
+                smiles = fetch_ligand_smiles_from_rcsb(original_code) if fetch_compounds else None
                 # Use renamed code (if any) for output
                 output_code = rename_mapping.get(original_code, original_code)
                 ligands.append({
@@ -683,7 +684,8 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
 def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_assembly: bool,
                    remove_waters: bool, output_folder: str, repo_pdbs_folder: str,
                    operations: List[Dict[str, Any]] = None,
-                   chain: str = "longest") -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
+                   chain: str = "longest",
+                   fetch_compounds: bool = True) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
     """
     Download a single structure from RCSB PDB and save to both PDBs/ and output folder.
 
@@ -835,7 +837,7 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
             print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
             for original_code in original_ligand_codes:
                 # Use original code for SMILES fetch from RCSB
-                smiles = fetch_ligand_smiles_from_rcsb(original_code)
+                smiles = fetch_ligand_smiles_from_rcsb(original_code) if fetch_compounds else None
                 # Use renamed code (if any) for output
                 output_code = rename_mapping.get(original_code, original_code)
                 ligands.append({
@@ -1045,6 +1047,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     sequences_table = config_data['sequences_table']
     failed_table = config_data['failed_table']
     compounds_table = config_data.get('compounds_table', os.path.join(output_folder, 'compounds.csv'))
+    fetch_compounds = config_data.get('fetch_compounds', True)
     operations = config_data.get('operations', [])
     chain = config_data.get('chain', 'longest')
     from_upstream = config_data.get('from_upstream', False)
@@ -1093,7 +1096,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 # Detect source format from extension
                 source_format = "cif" if source_path.endswith(".cif") else "pdb"
                 success, file_path, sequence, ligands, metadata = copy_local_structure(
-                    pdb_id, custom_id, source_path, source_format, format, remove_waters, output_folder, operations, chain=chain
+                    pdb_id, custom_id, source_path, source_format, format, remove_waters, output_folder, operations, chain=chain, fetch_compounds=fetch_compounds
                 )
             else:
                 error_msg = f"Upstream file not found for '{pdb_id}': {source_path}"
@@ -1115,14 +1118,14 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 # Copy from local (may need conversion)
                 local_path, source_format = local_result
                 success, file_path, sequence, ligands, metadata = copy_local_structure(
-                    pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations, chain=chain
+                    pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations, chain=chain, fetch_compounds=fetch_compounds
                 )
             else:
                 # Download from RCSB (with automatic CIF fallback if PDB fails)
                 print(f"{pdb_id} not found locally, downloading from RCSB")
                 success, file_path, sequence, ligands, metadata = download_from_rcsb(
                     pdb_id, custom_id, format, biological_assembly, remove_waters,
-                    output_folder, repo_pdbs_folder, operations, chain=chain
+                    output_folder, repo_pdbs_folder, operations, chain=chain, fetch_compounds=fetch_compounds
                 )
 
         if success:
