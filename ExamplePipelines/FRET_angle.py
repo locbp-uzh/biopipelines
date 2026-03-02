@@ -8,25 +8,19 @@ from biopipelines.pipeline import *
 from biopipelines.fuse import Fuse
 from biopipelines.boltz2 import Boltz2
 from biopipelines.distance import Distance
+from biopipelines.angle import Angle
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
-from biopipelines.pymol import PyMOL
-
-donor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTHGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAA",
-                     ids="EBFP")  
-acceptor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFGYGLQCFARYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSYQSALSKDPNEKRDHMVLLEFVTAA",
-                        ids="EYFP") 
-
+from biopipelines.pymol import PyMOL 
 
 with Pipeline(project="Biosensor", job="CaFRET"):
     Resources(gpu="A100", time="8:00:00", memory="16GB")
-    #donor = Sequence("VSKGEELFTG...", ids="EBFP")     
-    #acceptor = Sequence("VSKGEELFTG...", ids="EYFP") 
     donor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTHGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAA",
-                     ids="EBFP")  
+                     ids="EBFP") 
+    cam = PDB("1CFD", 
+              ids="CaM")
     acceptor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFGYGLQCFARYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSYQSALSKDPNEKRDHMVLLEFVTAA",
                         ids="EYFP") 
-    cam = PDB("1CFD", ids="CaM")  
     fusions = Fuse(sequences=[donor, cam, acceptor],
                    name="CaFRET",
                    linker="GSG",
@@ -42,13 +36,32 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     dist_holo = Distance(structures=holo,
                          residue=["66", "-173"], 
                          metric_name="FRET_distance_holo")
-    R0 = 35.4  # Forster radius for EBFP-EYFP pair (Angstrom), assumes kappa2 = 2/3
-    derived_metrics = {"FRET_E_apo": f"1 / (1 + (FRET_distance_apo / {R0}) ** 6)",
-                       "FRET_E_holo": f"1 / (1 + (FRET_distance_holo / {R0}) ** 6)",
-                       "delta_FRET": "abs(FRET_E_holo - FRET_E_apo)"}
+    orientation_apo = Angle(structures=apo,
+                            atoms=(('66.NE1', '66.CA'), ('-173.OH', '-173.CA')),
+                            metric_name="orientation_apo",
+                            unit="radians")
+    orientation_holo = Angle(structures=holo,
+                            atoms=(('66.NE1', '66.CA'), ('-173.OH', '-173.CA')),
+                            metric_name="orientation_holo",
+                            unit="radians")
+    R0 = 35.4  # Forster radius for BFP-YFP pair (Angstrom), assumes kappa2 = 2/3
+    # kappa2 from the inter-chromophore transition dipole angle (orientation_apo/holo, in rad):
+    #   kappa2 = (2/3) * (1 + cos^2(theta))  -- approximation for random azimuthal averaging
+    # R0_eff = R0 * (kappa2 / (2/3))^(1/6) rescales R0 by the orientation factor
+    derived_metrics = {
+        "kappa2_apo":  "(2/3) * (1 + cos(orientation_apo) ** 2)",
+        "kappa2_holo": "(2/3) * (1 + cos(orientation_holo) ** 2)",
+        "R0_eff_apo":  f"{R0} * (kappa2_apo / (2/3)) ** (1/6)",
+        "R0_eff_holo": f"{R0} * (kappa2_holo / (2/3)) ** (1/6)",
+        "FRET_E_apo":  "1 / (1 + (FRET_distance_apo / R0_eff_apo) ** 6)",
+        "FRET_E_holo": "1 / (1 + (FRET_distance_holo / R0_eff_holo) ** 6)",
+        "delta_FRET":  "abs(FRET_E_holo - FRET_E_apo)",
+    }
     analysis = Panda(tables=[fusions.tables.sequences,
                              dist_apo.tables.distances,
-                             dist_holo.tables.distances],
+                             dist_holo.tables.distances,
+                             orientation_apo.tables.angles,
+                             orientation_holo.tables.angles],
                      operations=[Panda.merge(),
                                  Panda.calculate(derived_metrics)])
     #Plot(...)
