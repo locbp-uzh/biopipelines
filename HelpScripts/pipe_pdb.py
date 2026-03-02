@@ -376,13 +376,13 @@ def extract_sequence_from_cif(content: str, chain: str = "longest") -> str:
             parser = MMCIFParser(QUIET=True)
             structure = parser.get_structure("structure", cif_path)
 
-            # Extract sequences from all chains
+            # Extract sequences from all chains (use chain_obj to avoid shadowing the chain parameter)
             sequences = {}
             for model in structure:
-                for chain in model:
-                    chain_id = chain.id
+                for chain_obj in model:
+                    chain_id = chain_obj.id
                     residues = []
-                    for residue in chain:
+                    for residue in chain_obj:
                         res_name = residue.get_resname()
                         if res_name in aa_map:
                             res_id = residue.get_id()[1]  # Residue number
@@ -443,24 +443,63 @@ def extract_ligands_from_structure(content: str, format: str) -> List[str]:
     Returns:
         List of unique ligand 3-letter codes (e.g., ['ATP', 'GDP'])
     """
-    if format != "pdb":
-        print("Warning: Ligand extraction not implemented for CIF format")
-        return []
+    # Common non-ligand residues to exclude (solvents, ions, crystallization agents, caps)
+    exclude_residues = {
+        'HOH', 'WAT', 'H2O', 'SOL', 'TIP3', 'TIP4', 'SPC',
+        'NA', 'CL', 'K', 'CA', 'MG', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',
+        'SO4', 'PO4', 'NO3',
+        'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',
+        'ACT', 'ACE', 'ACY',
+        'PYR', 'PYO',
+        'DMS', 'BME', 'MPD', 'TRS', 'EPE',
+        'NME', 'NH2'
+    }
+
+    if format == "cif":
+        ligands = set()
+        lines = content.split('\n')
+        in_atom_site = False
+        column_names = []
+        group_col_idx = None   # _atom_site.group_PDB  (ATOM / HETATM)
+        comp_col_idx = None    # _atom_site.label_comp_id  (residue/ligand name)
+
+        for line in lines:
+            stripped = line.strip()
+
+            if stripped == 'loop_':
+                in_atom_site = False
+                column_names = []
+                group_col_idx = None
+                comp_col_idx = None
+                # Don't append yet — wait to see if this is an _atom_site loop
+                continue
+
+            if stripped.startswith('_atom_site.'):
+                in_atom_site = True
+                column_names.append(stripped)
+                if stripped == '_atom_site.group_PDB':
+                    group_col_idx = len(column_names) - 1
+                elif stripped == '_atom_site.label_comp_id':
+                    comp_col_idx = len(column_names) - 1
+                continue
+
+            if in_atom_site and column_names:
+                if stripped.startswith('ATOM') or stripped.startswith('HETATM'):
+                    fields = stripped.split()
+                    if (group_col_idx is not None and comp_col_idx is not None
+                            and len(fields) > max(group_col_idx, comp_col_idx)):
+                        if fields[group_col_idx] == 'HETATM':
+                            res_name = fields[comp_col_idx]
+                            if res_name and res_name not in exclude_residues:
+                                ligands.add(res_name)
+                    continue
+                elif not stripped.startswith('_'):
+                    in_atom_site = False
+
+        return sorted(set(ligands))
 
     ligands = set()
     lines = content.split('\n')
-
-    # Common non-ligand residues to exclude (solvents, ions, crystallization agents, caps)
-    exclude_residues = {
-        'HOH', 'WAT', 'H2O', 'SOL', 'TIP3', 'TIP4', 'SPC',  # Water variants
-        'NA', 'CL', 'K', 'CA', 'MG', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',  # Common ions
-        'SO4', 'PO4', 'NO3',  # Anions
-        'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',  # Glycols and PEGs
-        'ACT', 'ACE', 'ACY',  # Acetate
-        'PYR', 'PYO',  # Pyruvate
-        'DMS', 'BME', 'MPD', 'TRS', 'EPE',  # Common solvents
-        'NME', 'NH2'  # Caps and common modifications
-    }
 
     for line in lines:
         if line.startswith('HETATM'):
