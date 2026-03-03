@@ -22,10 +22,10 @@ dependencies = [
 bp-submit = "biopipelines.cli:submit"
 bp-run = "biopipelines.cli:run"
 bp-config = "biopipelines.cli:config"
+bp-otf = "biopipelines.cli:otf"
 biopipelines-submit = "biopipelines.cli:submit"
 biopipelines-run = "biopipelines.cli:run"
 biopipelines-config = "biopipelines.cli:config"
-bp-otf = "biopipelines.cli:otf"
 biopipelines-otf = "biopipelines.cli:otf"
 
 [tool.setuptools.packages.find]
