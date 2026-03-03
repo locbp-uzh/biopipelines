@@ -32,7 +32,6 @@ from .contacts import Contacts
 from .distance import Distance
 from .angle import Angle
 from .stitch_sequences import StitchSequences
-from .split_chains import SplitChains
 from .dna_encoder import DNAEncoder
 from .rbs_designer import RBSDesigner
 from .load import Load, LoadMultiple
@@ -99,7 +98,6 @@ __all__ = [
     'Distance',
     'Angle',
     'StitchSequences',
-    'SplitChains',
     'DNAEncoder',
     'RBSDesigner',
     'Load',

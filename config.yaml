@@ -78,7 +78,6 @@ environments:
   Mutagenesis: "MutationEnv"
   Fuse: "biopipelines"
   StitchSequences: "biopipelines"
-  SplitChains: "biopipelines"
   DNAEncoder: "biopipelines"
   RBSDesigner: "rbs_designer"
 

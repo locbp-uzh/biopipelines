@@ -173,9 +173,6 @@ boltz_covalent = Boltz2(
     }
 )
 
-# Multi-chain complex from SplitChains
-split = SplitChains(sequences=fused, split_positions=[200])
-boltz_complex = Boltz2(proteins=split, ligands=compounds)
 ```
 
 ---

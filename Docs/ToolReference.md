@@ -46,7 +46,6 @@ Design and manipulate sequences.
 - [Mutagenesis](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic substitutions
 - [Fuse](Tool/SequenceDesign.md#fuse) - Fusion proteins with linkers
 - [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Sequence combinations
-- [SplitChains](Tool/SequenceDesign.md#splitchains) - Split concatenated sequences
 - [DNAEncoder](Tool/SequenceDesign.md#dnaencoder) - Codon optimization
 - [RBSDesigner](Tool/SequenceDesign.md#rbsdesigner) - Ribosome binding site design
 
