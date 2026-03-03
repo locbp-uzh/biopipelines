@@ -565,18 +565,19 @@ def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
         return None
 
 
-def find_local_structure(pdb_id: str, format: str, local_folder: str,
+def find_local_structure(pdb_id: str, convert: Optional[str], local_folder: str,
                         repo_pdbs_folder: str) -> Optional[Tuple[str, str]]:
     """
-    Find structure file locally with fallback to CIF if PDB not found.
+    Find structure file locally.
 
-    Priority for PDB format: X.pdb -> X.cif (will convert)
-    Priority for CIF format: X.cif -> X.pdb (will convert, though unusual)
+    When convert is None: accepts any format found (pdb or cif), no conversion.
+    When convert is "pdb": tries pdb first, then cif (will convert cif -> pdb)
+    When convert is "cif": tries cif first, then pdb (will convert pdb -> cif)
     Search locations: local_folder (if given) -> repo_pdbs_folder
 
     Args:
         pdb_id: PDB identifier (with or without extension)
-        format: Requested format ("pdb" or "cif")
+        convert: Target format to convert to ("pdb", "cif", or None to keep whatever is found)
         local_folder: Custom local folder (can be None)
         repo_pdbs_folder: Repository PDBs folder
 
@@ -586,39 +587,48 @@ def find_local_structure(pdb_id: str, format: str, local_folder: str,
     # Remove extension if provided
     pdb_id_base = pdb_id.replace('.pdb', '').replace('.cif', '')
 
-    # Determine primary and fallback extensions
-    if format == "pdb":
-        primary_ext = ".pdb"
-        fallback_ext = ".cif"
-    else:
-        primary_ext = ".cif"
-        fallback_ext = ".pdb"
-
     search_locations = []
     if local_folder:
         search_locations.append(local_folder)
     search_locations.append(repo_pdbs_folder)
 
-    # Try primary format first
+    if convert is None:
+        # Accept any format: try pdb first, then cif - no conversion needed
+        for ext, fmt in [(".pdb", "pdb"), (".cif", "cif")]:
+            for location in search_locations:
+                candidate = os.path.join(location, f"{pdb_id_base}{ext}")
+                if os.path.exists(candidate):
+                    print(f"Found {pdb_id_base} locally: {candidate}")
+                    return candidate, fmt
+        return None
+
+    # Specific conversion target: primary then fallback with conversion
+    if convert == "pdb":
+        primary_ext, primary_fmt = ".pdb", "pdb"
+        fallback_ext, fallback_fmt = ".cif", "cif"
+    else:
+        primary_ext, primary_fmt = ".cif", "cif"
+        fallback_ext, fallback_fmt = ".pdb", "pdb"
+
+    # Try primary format first (no conversion needed)
     for location in search_locations:
         candidate = os.path.join(location, f"{pdb_id_base}{primary_ext}")
         if os.path.exists(candidate):
             print(f"Found {pdb_id_base} locally: {candidate}")
-            return candidate, format
+            return candidate, primary_fmt
 
-    # Try fallback format
+    # Try fallback format (will need conversion)
     for location in search_locations:
         candidate = os.path.join(location, f"{pdb_id_base}{fallback_ext}")
         if os.path.exists(candidate):
-            fallback_format = "cif" if fallback_ext == ".cif" else "pdb"
-            print(f"Found {pdb_id_base} as {fallback_format.upper()} (will convert to {format.upper()}): {candidate}")
-            return candidate, fallback_format
+            print(f"Found {pdb_id_base} as {fallback_fmt.upper()} (will convert to {convert.upper()}): {candidate}")
+            return candidate, fallback_fmt
 
     return None
 
 
 def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
-                        source_format: str, target_format: str, remove_waters: bool,
+                        source_format: str, convert: Optional[str], remove_waters: bool,
                         output_folder: str, operations: List[Dict[str, Any]] = None,
                         chain: str = "longest",
                         fetch_compounds: bool = True) -> Tuple[bool, str, str, List[Dict[str, str]], Dict[str, Any]]:
@@ -630,7 +640,7 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         custom_id: Custom ID for output filename
         source_path: Path to local structure file
         source_format: Format of source file ("pdb" or "cif")
-        target_format: Desired output format ("pdb" or "cif")
+        convert: Target format to convert to ("pdb", "cif", or None to keep source format as-is)
         remove_waters: Whether to remove water molecules
         output_folder: Directory to save the structure
         operations: List of operations to apply (e.g., rename)
@@ -640,6 +650,9 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
     """
     if operations is None:
         operations = []
+
+    # None means keep the source format as-is (no conversion)
+    target_format = convert if convert is not None else source_format
 
     try:
         with open(source_path, 'r') as f:
@@ -721,7 +734,7 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         return False, "", "", [], metadata
 
 
-def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_assembly: bool,
+def download_from_rcsb(pdb_id: str, custom_id: str, convert: Optional[str], biological_assembly: bool,
                    remove_waters: bool, output_folder: str, repo_pdbs_folder: str,
                    operations: List[Dict[str, Any]] = None,
                    chain: str = "longest",
@@ -729,12 +742,15 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
     """
     Download a single structure from RCSB PDB and save to both PDBs/ and output folder.
 
-    If PDB format is requested but not available, automatically falls back to CIF and converts.
+    If convert is None, tries PDB first and falls back to CIF if PDB is unavailable,
+    keeping whatever format downloads without converting.
+    If convert is "pdb", downloads PDB (falls back to CIF and converts if PDB unavailable).
+    If convert is "cif", downloads CIF directly.
 
     Args:
         pdb_id: PDB identifier (4 characters)
         custom_id: Custom ID for renaming the structure
-        format: File format ("pdb" or "cif")
+        convert: Target format ("pdb", "cif", or None to keep whatever is found on RCSB)
         biological_assembly: Whether to download biological assembly
         remove_waters: Whether to remove water molecules
         output_folder: Directory to save the structure
@@ -760,14 +776,8 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
         }
         return False, "", "", [], metadata
 
-    # Try primary format first, then fallback if needed
-    download_format = format
-    fallback_attempted = False
-
     def attempt_download(download_fmt: str):
         """Helper to attempt download in specified format."""
-        extension = ".pdb" if download_fmt == "pdb" else ".cif"
-
         if download_fmt == "pdb":
             if biological_assembly:
                 url = f"https://files.rcsb.org/download/{pdb_id}.pdb1.gz"
@@ -778,244 +788,145 @@ def download_from_rcsb(pdb_id: str, custom_id: str, format: str, biological_asse
                 url = f"https://files.rcsb.org/download/{pdb_id}-assembly1.cif.gz"
             else:
                 url = f"https://files.rcsb.org/download/{pdb_id}.cif"
+        return url
 
-        return url, extension
-
-    url, extension = attempt_download(download_format)
-
-    try:
-        print(f"Downloading {pdb_id} from RCSB: {url}")
-
-        # Import requests only when needed for download
+    def do_download(url: str) -> str:
+        """Execute HTTP download and return content string."""
         try:
             import requests
         except ImportError:
-            error_msg = f"Cannot download from RCSB: 'requests' module not available. Please install with: pip install requests"
-            print(f"Error: {error_msg}")
-            metadata = {
-                "error_message": error_msg,
-                "source": "rcsb_missing_dependency",
-                "attempted_path": url
-            }
-            return False, "", "", metadata
-
-        # Download with proper headers
-        headers = {
-            'User-Agent': 'BioPipelines-PDB/1.0 (https://github.com/locbp-uzh/biopipelines)'
-        }
-
+            raise RuntimeError("Cannot download from RCSB: 'requests' module not available. Please install with: pip install requests")
+        headers = {'User-Agent': 'BioPipelines-PDB/1.0 (https://github.com/locbp-uzh/biopipelines)'}
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-
-        # Handle gzipped content
         if url.endswith('.gz'):
             import gzip
-            downloaded_content = gzip.decompress(response.content).decode('utf-8')
-        else:
-            downloaded_content = response.text
+            return gzip.decompress(response.content).decode('utf-8')
+        return response.text
 
-        # Save downloaded file to PDBs/ folder for caching BEFORE conversion (using pdb_id and download format)
-        os.makedirs(repo_pdbs_folder, exist_ok=True)
-        cache_extension = ".pdb" if download_format == "pdb" else ".cif"
-        cache_filename = f"{pdb_id}{cache_extension}"
-        cache_path = os.path.join(repo_pdbs_folder, cache_filename)
-        with open(cache_path, 'w') as f:
-            f.write(downloaded_content)
-        print(f"Cached to PDBs/ folder: {cache_path}")
+    def process_and_save(downloaded_content: str, download_fmt: str, actual_fmt: str) -> Tuple[bool, str, str, list, dict]:
+        """Process downloaded content and save to output folder."""
+        content = downloaded_content
 
         # Convert format if needed
-        needs_conversion = (download_format != format)
+        needs_conversion = (download_fmt != actual_fmt)
         if needs_conversion:
-            if download_format == "cif" and format == "pdb":
+            if download_fmt == "cif" and actual_fmt == "pdb":
                 print(f"  Converting CIF to PDB format...")
-                content = convert_cif_to_pdb(downloaded_content)
-            elif download_format == "pdb" and format == "cif":
+                content = convert_cif_to_pdb(content)
+            elif download_fmt == "pdb" and actual_fmt == "cif":
                 raise NotImplementedError("PDB to CIF conversion not implemented")
-        else:
-            content = downloaded_content
 
-        # Remove waters if requested (use target format after conversion)
         if remove_waters:
-            content = remove_waters_from_content(content, format)
+            content = remove_waters_from_content(content, actual_fmt)
 
-        # Filter to specific chain if requested
         if chain != "longest":
-            content = filter_chain_from_content(content, format, chain)
+            content = filter_chain_from_content(content, actual_fmt, chain)
 
-        # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
-        original_ligand_codes = extract_ligands_from_structure(content, format)
-        rename_mapping = build_rename_mapping(operations) if operations else {}
-
-        # Apply operations (e.g., rename)
-        if operations:
-            content = apply_operations(content, format, operations)
-
-        # Validate file content (basic check - use target format)
-        if format == "pdb":
+        # Validate file content
+        if actual_fmt == "pdb":
             if not (content.startswith("HEADER") or content.startswith("ATOM") or content.startswith("MODEL") or content.startswith("REMARK")):
                 raise ValueError(f"Downloaded file does not appear to be valid PDB format")
         else:  # cif
             if not ("data_" in content or "_entry.id" in content):
                 raise ValueError(f"Downloaded file does not appear to be valid CIF format")
 
-        # Save to output folder (using custom_id and target format)
-        output_extension = ".pdb" if format == "pdb" else ".cif"
-        output_filename = f"{custom_id}{output_extension}"
-        output_path = os.path.join(output_folder, output_filename)
+        original_ligand_codes = extract_ligands_from_structure(content, actual_fmt)
+        rename_mapping = build_rename_mapping(operations) if operations else {}
+
+        if operations:
+            content = apply_operations(content, actual_fmt, operations)
+
+        output_extension = ".pdb" if actual_fmt == "pdb" else ".cif"
+        output_path = os.path.join(output_folder, f"{custom_id}{output_extension}")
         with open(output_path, 'w') as f:
             f.write(content)
 
-        # Get file size
         file_size = os.path.getsize(output_path)
+        sequence = extract_sequence_from_structure(content, actual_fmt, chain=chain)
 
-        # Extract sequence from structure
-        sequence = extract_sequence_from_structure(content, format, chain=chain)
-
-        # Build ligands list using original codes for SMILES lookup, renamed codes for output
         ligands = []
         if original_ligand_codes:
             print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
             for original_code in original_ligand_codes:
-                # Use original code for SMILES fetch from RCSB
                 smiles = fetch_ligand_smiles_from_rcsb(original_code) if fetch_compounds else None
-                # Use renamed code (if any) for output
                 output_code = rename_mapping.get(original_code, original_code)
                 ligands.append({
                     'id': f"{custom_id}_{output_code}",
                     'code': output_code,
                     'format': 'smiles' if smiles else '',
                     'smiles': smiles if smiles else '',
-                    'ccd': original_code  # Keep original CCD code for reference
+                    'ccd': original_code
                 })
 
-        source_info = f"rcsb_download ({download_format.upper()})"
+        source_info = f"rcsb_download ({download_fmt.upper()})"
         if needs_conversion:
-            source_info += f" -> converted to {format.upper()}"
+            source_info += f" -> converted to {actual_fmt.upper()}"
 
         metadata = {
             "file_size": file_size,
             "source": source_info,
             "url": url,
-            "actual_format": format
+            "actual_format": actual_fmt
         }
 
         print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes ({source_info})")
         return True, output_path, sequence, ligands, metadata
 
-    except Exception as e:
-        # Try fallback to CIF if PDB download failed and we haven't tried fallback yet
-        if format == "pdb" and not fallback_attempted and download_format == "pdb":
-            print(f"  PDB download failed, trying CIF format as fallback...")
-            fallback_attempted = True
-            download_format = "cif"
-            url, extension = attempt_download(download_format)
+    # Determine download order based on convert parameter
+    if convert is None:
+        # No conversion requested: try PDB first, fall back to CIF, keep whatever downloads
+        formats_to_try = [("pdb", "pdb"), ("cif", "cif")]
+    elif convert == "pdb":
+        # Want PDB: try PDB directly, fall back to CIF then convert
+        formats_to_try = [("pdb", "pdb"), ("cif", "pdb")]
+    else:  # convert == "cif"
+        # Want CIF: download CIF directly
+        formats_to_try = [("cif", "cif")]
 
-            try:
-                print(f"  Downloading {pdb_id} from RCSB: {url}")
-                import requests
-                headers = {'User-Agent': 'BioPipelines-PDB/1.0 (https://github.com/locbp-uzh/biopipelines)'}
-                response = requests.get(url, headers=headers, timeout=30)
-                response.raise_for_status()
+    last_error = None
+    for download_fmt, actual_fmt in formats_to_try:
+        url = attempt_download(download_fmt)
+        try:
+            print(f"Downloading {pdb_id} from RCSB: {url}")
+            downloaded_content = do_download(url)
 
-                # Handle gzipped content
-                if url.endswith('.gz'):
-                    import gzip
-                    cif_content = gzip.decompress(response.content).decode('utf-8')
-                else:
-                    cif_content = response.text
+            # Cache to PDBs/ folder (in download format, before conversion)
+            os.makedirs(repo_pdbs_folder, exist_ok=True)
+            cache_ext = ".pdb" if download_fmt == "pdb" else ".cif"
+            cache_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{cache_ext}")
+            with open(cache_path, 'w') as f:
+                f.write(downloaded_content)
+            print(f"Cached to PDBs/ folder: {cache_path}")
 
-                # Convert CIF to PDB
-                print(f"  Converting CIF to PDB format...")
-                content = convert_cif_to_pdb(cif_content)
-                actual_format = "pdb"
-                output_path = os.path.join(output_folder, f"{custom_id}.pdb")
-                source_label = "rcsb_download (CIF) -> converted to PDB"
+            return process_and_save(downloaded_content, download_fmt, actual_fmt)
 
-                # Remove waters if requested
-                if remove_waters:
-                    content = remove_waters_from_content(content, actual_format)
+        except Exception as e:
+            last_error = e
+            if download_fmt == "pdb" and len(formats_to_try) > 1:
+                print(f"  PDB download failed ({str(e)}), trying CIF as fallback...")
+            # else fall through to next format or fail
 
-                # Filter to specific chain if requested
-                if chain != "longest":
-                    content = filter_chain_from_content(content, actual_format, chain)
+    # All attempts failed
+    error_type = type(last_error).__name__
+    http_status = 'unknown'
+    if 'requests' in sys.modules and hasattr(last_error, 'response') and last_error.response:
+        http_status = getattr(last_error.response, 'status_code', 'unknown')
 
-                # Extract ligands BEFORE applying rename operations (to get original CCD codes for SMILES lookup)
-                original_ligand_codes = extract_ligands_from_structure(content, actual_format)
-                rename_mapping = build_rename_mapping(operations) if operations else {}
+    if 'RequestException' in error_type or 'HTTPError' in error_type:
+        error_msg = f"HTTP error downloading {pdb_id}: {str(last_error)}"
+        source = f"rcsb_download_failed_{http_status}"
+    else:
+        error_msg = f"Unexpected error downloading {pdb_id}: {str(last_error)}"
+        source = "rcsb_processing_error"
 
-                # Apply operations (e.g., rename)
-                if operations:
-                    content = apply_operations(content, actual_format, operations)
-
-                # Cache the CIF file
-                os.makedirs(repo_pdbs_folder, exist_ok=True)
-                cache_path = os.path.join(repo_pdbs_folder, f"{pdb_id}.cif")
-                with open(cache_path, 'w') as f:
-                    f.write(cif_content)
-                print(f"  Cached CIF to PDBs/ folder: {cache_path}")
-
-                # Save to output folder
-                with open(output_path, 'w') as f:
-                    f.write(content)
-
-                file_size = os.path.getsize(output_path)
-                sequence = extract_sequence_from_structure(content, actual_format, chain=chain)
-
-                # Build ligands list using original codes for SMILES lookup, renamed codes for output
-                ligands = []
-                if original_ligand_codes:
-                    print(f"  Found {len(original_ligand_codes)} ligand(s) in structure: {', '.join(original_ligand_codes)}")
-                    for original_code in original_ligand_codes:
-                        # Use original code for SMILES fetch from RCSB
-                        smiles = fetch_ligand_smiles_from_rcsb(original_code) if fetch_compounds else None
-                        # Use renamed code (if any) for output
-                        output_code = rename_mapping.get(original_code, original_code)
-                        ligands.append({
-                            'id': f"{custom_id}_{output_code}",
-                            'code': output_code,
-                            'format': 'smiles' if smiles else '',
-                            'smiles': smiles if smiles else '',
-                            'ccd': original_code  # Keep original CCD code for reference
-                        })
-
-                metadata = {
-                    "file_size": file_size,
-                    "source": source_label,
-                    "url": url,
-                    "actual_format": actual_format
-                }
-
-                print(f"Successfully downloaded {pdb_id} as {custom_id}: {file_size} bytes ({source_label})")
-                return True, output_path, sequence, ligands, metadata
-
-            except Exception as fallback_e:
-                print(f"  CIF fallback also failed: {str(fallback_e)}")
-                # Fall through to original error handling
-
-        # Handle both requests exceptions and other errors
-        error_type = type(e).__name__
-
-        # Try to extract HTTP status if it's a requests exception
-        http_status = 'unknown'
-        if 'requests' in sys.modules and hasattr(e, 'response') and e.response:
-            http_status = getattr(e.response, 'status_code', 'unknown')
-
-        if 'RequestException' in error_type or 'HTTPError' in error_type:
-            error_msg = f"HTTP error downloading {pdb_id}: {str(e)}"
-            source = f"rcsb_download_failed_{http_status}"
-        else:
-            error_msg = f"Unexpected error downloading {pdb_id}: {str(e)}"
-            source = "rcsb_processing_error"
-
-        print(f"Error: {error_msg}")
-
-        metadata = {
-            "error_message": error_msg,
-            "source": source,
-            "attempted_path": url
-        }
-
-        return False, "", "", [], metadata
+    print(f"Error: {error_msg}")
+    metadata = {
+        "error_message": error_msg,
+        "source": source,
+        "attempted_path": url
+    }
+    return False, "", "", [], metadata
 
 
 def resolve_upstream_file(pdb_id: str, upstream_files: List[str],
@@ -1081,7 +992,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     """
     pdb_ids = config_data['pdb_ids']
     custom_ids = config_data.get('custom_ids', pdb_ids)
-    format = config_data['format']
+    convert = config_data.get('convert')  # May be None (keep whatever format is found)
     local_folder = config_data.get('local_folder')
     repo_pdbs_folder = config_data['repo_pdbs_folder']
     biological_assembly = config_data.get('biological_assembly', False)
@@ -1090,6 +1001,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     structures_table = config_data['structures_table']
     sequences_table = config_data['sequences_table']
     failed_table = config_data['failed_table']
+    missing_table = config_data.get('missing_table', os.path.join(output_folder, 'missing_structures.csv'))
     compounds_table = config_data.get('compounds_table', os.path.join(output_folder, 'compounds.csv'))
     fetch_compounds = config_data.get('fetch_compounds', True)
     operations = config_data.get('operations', [])
@@ -1101,7 +1013,8 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     if from_upstream:
         print(f"Processing {len(pdb_ids)} structures from upstream tool")
     else:
-        print(f"Fetching {len(pdb_ids)} structures in {format.upper()} format")
+        convert_display = f"convert to {convert.upper()}" if convert else "keep as-is (pdb|cif)"
+        print(f"Fetching {len(pdb_ids)} structures ({convert_display})")
         print(f"Priority: {'local_folder -> ' if local_folder else ''}PDBs/ -> RCSB download")
     if biological_assembly:
         print("Including biological assemblies")
@@ -1124,6 +1037,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     successful_sequences = []
     all_ligands = []
     failed_downloads = []
+    missing_structures = []
 
     # Fetch each structure
     for i, (pdb_id, custom_id) in enumerate(zip(pdb_ids, custom_ids), 1):
@@ -1140,7 +1054,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 # Detect source format from extension
                 source_format = "cif" if source_path.endswith(".cif") else "pdb"
                 success, file_path, sequence, ligands, metadata = copy_local_structure(
-                    pdb_id, custom_id, source_path, source_format, format, remove_waters, output_folder, operations, chain=chain, fetch_compounds=fetch_compounds
+                    pdb_id, custom_id, source_path, source_format, convert, remove_waters, output_folder, operations, chain=chain, fetch_compounds=fetch_compounds
                 )
             else:
                 error_msg = f"Upstream file not found for '{pdb_id}': {source_path}"
@@ -1156,19 +1070,19 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 }
         else:
             # Try to find locally first (returns tuple of (path, source_format) or None)
-            local_result = find_local_structure(pdb_id, format, local_folder, repo_pdbs_folder)
+            local_result = find_local_structure(pdb_id, convert, local_folder, repo_pdbs_folder)
 
             if local_result:
                 # Copy from local (may need conversion)
                 local_path, source_format = local_result
                 success, file_path, sequence, ligands, metadata = copy_local_structure(
-                    pdb_id, custom_id, local_path, source_format, format, remove_waters, output_folder, operations, chain=chain, fetch_compounds=fetch_compounds
+                    pdb_id, custom_id, local_path, source_format, convert, remove_waters, output_folder, operations, chain=chain, fetch_compounds=fetch_compounds
                 )
             else:
-                # Download from RCSB (with automatic CIF fallback if PDB fails)
+                # Download from RCSB (tries PDB first if convert=None, falls back to CIF)
                 print(f"{pdb_id} not found locally, downloading from RCSB")
                 success, file_path, sequence, ligands, metadata = download_from_rcsb(
-                    pdb_id, custom_id, format, biological_assembly, remove_waters,
+                    pdb_id, custom_id, convert, biological_assembly, remove_waters,
                     output_folder, repo_pdbs_folder, operations, chain=chain, fetch_compounds=fetch_compounds
                 )
 
@@ -1177,7 +1091,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 'id': custom_id,
                 'pdb_id': pdb_id,
                 'file_path': file_path,
-                'format': metadata.get('actual_format', format),
+                'format': metadata.get('actual_format', convert or 'unknown'),
                 'file_size': metadata['file_size'],
                 'source': metadata['source']
             })
@@ -1189,12 +1103,14 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
             if ligands:  # Add ligands to the collection
                 all_ligands.extend(ligands)
         else:
-            failed_downloads.append({
+            failure_entry = {
                 'pdb_id': pdb_id,
                 'error_message': metadata['error_message'],
                 'source': metadata['source'],
                 'attempted_path': metadata['attempted_path']
-            })
+            }
+            failed_downloads.append(failure_entry)
+            missing_structures.append(failure_entry)
     
     # Save successful downloads table
     if successful_downloads:
@@ -1239,6 +1155,16 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         empty_failed_df = pd.DataFrame(columns=["pdb_id", "error_message", "source", "attempted_path"])
         empty_failed_df.to_csv(failed_table, index=False)
         print("No failed fetches")
+
+    # Save missing structures table (always create, even if empty)
+    if missing_table:
+        if missing_structures:
+            df_missing = pd.DataFrame(missing_structures)
+            df_missing.to_csv(missing_table, index=False)
+            print(f"Missing structures saved: {missing_table} ({len(missing_structures)} missing)")
+        else:
+            empty_missing_df = pd.DataFrame(columns=["pdb_id", "error_message", "source", "attempted_path"])
+            empty_missing_df.to_csv(missing_table, index=False)
     
     # Summary
     print(f"\n=== FETCH SUMMARY ===")
@@ -1283,7 +1209,7 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['pdb_ids', 'format', 'repo_pdbs_folder', 'output_folder', 'structures_table', 'sequences_table', 'failed_table']
+    required_params = ['pdb_ids', 'repo_pdbs_folder', 'output_folder', 'structures_table', 'sequences_table', 'failed_table']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")

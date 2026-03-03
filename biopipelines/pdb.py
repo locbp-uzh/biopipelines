@@ -110,7 +110,7 @@ echo "=== PDB ready ==="
                  pdbs: Union[str, List[str], 'StandardizedOutput', 'DataStream'],
                  *args,
                  ids: Optional[Union[str, List[str]]] = None,
-                 format: str = "pdb",
+                 convert: Optional[str] = None,
                  local_folder: Optional[str] = None,
                  biological_assembly: bool = False,
                  remove_waters: bool = True,
@@ -128,7 +128,10 @@ echo "=== PDB ready ==="
                   or a tool output whose structures will be used at execution time.
             *args: Operations to apply after loading (e.g., PDB.Rename("LIG", ":L:"))
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
-            format: File format ("pdb" or "cif", default: "pdb")
+            convert: Target format to convert structures to - "pdb", "cif", or None (default).
+                     When None, no conversion is performed: structures are kept in whatever
+                     format they are found locally or downloaded as from RCSB.
+                     The structures DataStream format will be "pdb|cif" when None.
             local_folder: Custom local folder to check first (before PDBs/). Default: None
             biological_assembly: Whether to download biological assembly from RCSB (default: False)
             remove_waters: Whether to remove water molecules from structures (default: True)
@@ -169,11 +172,12 @@ echo "=== PDB ready ==="
 
         if self.from_upstream:
             self.pdb_ids = list(self.structures_stream.ids)
-            self.format = self.structures_stream.format if self.structures_stream.format in ("pdb", "cif") else format.lower()
+            upstream_fmt = self.structures_stream.format
+            self.convert = upstream_fmt if upstream_fmt in ("pdb", "cif") else convert.lower() if convert else None
         else:
             # Check if pdbs is a folder path and load all files from it
             if isinstance(pdbs, str) and self._is_folder_path(pdbs):
-                self.pdb_ids = self._load_files_from_folder(pdbs, format)
+                self.pdb_ids = self._load_files_from_folder(pdbs)
             # Normalize pdbs to list - preserve original case for local file lookups
             elif isinstance(pdbs, str):
                 self.pdb_ids = [pdbs]
@@ -181,7 +185,7 @@ echo "=== PDB ready ==="
                 self.pdb_ids = list(pdbs)
             else:
                 raise ValueError(f"pdbs must be a string, list of strings, StandardizedOutput, or DataStream, got {type(pdbs)}")
-            self.format = format.lower()
+            self.convert = convert.lower() if convert else None
 
         # Handle custom IDs - default to pdb_ids if not provided
         if ids is None:
@@ -205,9 +209,9 @@ echo "=== PDB ready ==="
         self.chain = chain
         self.fetch_compounds = fetch_compounds
 
-        # Validate format
-        if self.format not in ["pdb", "cif"]:
-            raise ValueError(f"Invalid format: {self.format}. Must be 'pdb' or 'cif'")
+        # Validate convert
+        if self.convert is not None and self.convert not in ["pdb", "cif"]:
+            raise ValueError(f"Invalid convert: {self.convert}. Must be 'pdb', 'cif', or None")
 
         # Note: PDB ID format validation is skipped at init time because:
         # 1. local_folder may contain custom-named files
@@ -238,13 +242,12 @@ echo "=== PDB ready ==="
 
         return False
 
-    def _load_files_from_folder(self, folder_path: str, format: str) -> List[str]:
+    def _load_files_from_folder(self, folder_path: str) -> List[str]:
         """
         Load all PDB/CIF files from a folder.
 
         Args:
             folder_path: Path to folder (absolute or relative to current directory)
-            format: File format to look for ('pdb' or 'cif')
 
         Returns:
             List of file basenames without extension
@@ -254,8 +257,6 @@ echo "=== PDB ready ==="
             or relative to current directory. The folder will also be checked relative to PDBs folder
             later in configure_inputs if needed.
         """
-        extension = f".{format}"
-
         # Try absolute path first
         if os.path.isabs(folder_path) and os.path.isdir(folder_path):
             target_folder = folder_path
@@ -269,16 +270,16 @@ echo "=== PDB ready ==="
             self.folder_needs_resolution = True
             return []  # Will be populated in configure_inputs
 
-        # List all files with the specified extension
-        files = [f for f in os.listdir(target_folder) if f.endswith(extension)]
+        # List all PDB and CIF files
+        files = [f for f in os.listdir(target_folder) if f.endswith(".pdb") or f.endswith(".cif")]
 
         if not files:
-            raise ValueError(f"No {format.upper()} files found in folder '{folder_path}'")
+            raise ValueError(f"No PDB or CIF files found in folder '{folder_path}'")
 
         # Extract basenames without extension
         basenames = [os.path.splitext(f)[0] for f in sorted(files)]
 
-        print(f"  Found {len(basenames)} {format.upper()} files in folder: {folder_path}")
+        print(f"  Found {len(basenames)} structure file(s) in folder: {folder_path}")
 
         # Store the folder path for use in configure_inputs
         self.folder_source = target_folder
@@ -297,8 +298,8 @@ echo "=== PDB ready ==="
         if len(self.pdb_ids) != len(self.custom_ids):
             raise ValueError("pdbs and ids must have same length")
 
-        if self.format not in ["pdb", "cif"]:
-            raise ValueError("format must be 'pdb' or 'cif'")
+        if self.convert is not None and self.convert not in ["pdb", "cif"]:
+            raise ValueError("convert must be 'pdb', 'cif', or None")
     
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters and check for local files."""
@@ -317,17 +318,16 @@ echo "=== PDB ready ==="
             candidate_path = os.path.join(repo_pdbs_folder, self.folder_source)
 
             if os.path.isdir(candidate_path):
-                # Found the folder relative to PDBs
-                extension = f".{self.format}"
-                files = [f for f in os.listdir(candidate_path) if f.endswith(extension)]
+                # Found the folder relative to PDBs; scan for both pdb and cif files
+                files = [f for f in os.listdir(candidate_path) if f.endswith(".pdb") or f.endswith(".cif")]
 
                 if not files:
-                    raise ValueError(f"No {self.format.upper()} files found in folder '{candidate_path}'")
+                    raise ValueError(f"No PDB or CIF files found in folder '{candidate_path}'")
 
                 # Extract basenames without extension
                 basenames = [os.path.splitext(f)[0] for f in sorted(files)]
 
-                print(f"  Found {len(basenames)} {self.format.upper()} files in folder (relative to PDBs): {self.folder_source}")
+                print(f"  Found {len(basenames)} structure file(s) in folder (relative to PDBs): {self.folder_source}")
 
                 # Update pdb_ids and custom_ids
                 self.pdb_ids = basenames
@@ -341,32 +341,48 @@ echo "=== PDB ready ==="
         repo_pdbs_folder = pipeline_folders.get('PDBs', '')
         self.found_locally = []
         self.needs_download = []
+        # Track which formats are present locally (only relevant when convert=None)
+        self.local_formats = {"pdb": False, "cif": False}
 
         for pdb_id, custom_id in zip(self.pdb_ids, self.custom_ids):
-            extension = ".pdb" if self.format == "pdb" else ".cif"
             found = False
             local_path = None
 
-            # Check folder_source first if it was set (from folder loading)
-            if hasattr(self, 'folder_source') and self.folder_source:
-                local_path = os.path.join(self.folder_source, f"{pdb_id}{extension}")
-                if os.path.exists(local_path):
-                    self.found_locally.append((pdb_id, local_path))
-                    found = True
+            if self.convert is not None:
+                # Specific convert target: prefer that extension locally (may convert if only other found)
+                extensions_to_try = [".pdb" if self.convert == "pdb" else ".cif", ".cif" if self.convert == "pdb" else ".pdb"]
+            else:
+                # No conversion: accept both, pdb first then cif
+                extensions_to_try = [".pdb", ".cif"]
 
-            # Check local_folder if specified
-            if not found and self.local_folder:
-                local_path = os.path.join(self.local_folder, f"{pdb_id}{extension}")
-                if os.path.exists(local_path):
-                    self.found_locally.append((pdb_id, local_path))
-                    found = True
+            for extension in extensions_to_try:
+                # Check folder_source first if it was set (from folder loading)
+                if not found and hasattr(self, 'folder_source') and self.folder_source:
+                    local_path = os.path.join(self.folder_source, f"{pdb_id}{extension}")
+                    if os.path.exists(local_path):
+                        self.found_locally.append((pdb_id, local_path))
+                        found = True
 
-            # Check PDBs/ folder
-            if not found and repo_pdbs_folder:
-                local_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{extension}")
-                if os.path.exists(local_path):
-                    self.found_locally.append((pdb_id, local_path))
-                    found = True
+                # Check local_folder if specified
+                if not found and self.local_folder:
+                    local_path = os.path.join(self.local_folder, f"{pdb_id}{extension}")
+                    if os.path.exists(local_path):
+                        self.found_locally.append((pdb_id, local_path))
+                        found = True
+
+                # Check PDBs/ folder
+                if not found and repo_pdbs_folder:
+                    local_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{extension}")
+                    if os.path.exists(local_path):
+                        self.found_locally.append((pdb_id, local_path))
+                        found = True
+
+                if found:
+                    break
+
+            if found and self.convert is None and local_path:
+                fmt = "cif" if local_path.endswith(".cif") else "pdb"
+                self.local_formats[fmt] = True
 
             if found:
                 # Check if it's a valid RCSB ID and query for ligands
@@ -375,17 +391,16 @@ echo "=== PDB ready ==="
                     # Valid RCSB format - check for ligands
                     try:
                         has_ligands = self._check_rcsb_exists_silent(rcsb_id, custom_id)
-                        format_label = self.format.upper()
                         if has_ligands:
-                            print(f"  Found {format_label} {pdb_id} locally: {local_path} (contains ligands)")
+                            print(f"  Found {pdb_id} locally: {local_path} (contains ligands)")
                         else:
-                            print(f"  Found {format_label} {pdb_id} locally: {local_path}")
+                            print(f"  Found {pdb_id} locally: {local_path}")
                     except:
                         # RCSB query failed, just show found locally
-                        print(f"  Found {self.format.upper()} {pdb_id} locally: {local_path}")
+                        print(f"  Found {pdb_id} locally: {local_path}")
                 else:
                     # Custom file, not an RCSB ID
-                    print(f"  Found {self.format.upper()} {pdb_id} locally: {local_path}")
+                    print(f"  Found {pdb_id} locally: {local_path}")
             else:
                 # Not found locally - check if valid RCSB ID
                 rcsb_id = pdb_id.upper()
@@ -397,9 +412,9 @@ echo "=== PDB ready ==="
                 self.needs_download.append(pdb_id)
 
                 if has_ligands:
-                    print(f"  {self.format.upper()} {pdb_id} not found locally, will download from RCSB (contains ligands)")
+                    print(f"  {pdb_id} not found locally, will download from RCSB (contains ligands)")
                 else:
-                    print(f"  {self.format.upper()} {pdb_id} not found locally, will download from RCSB")
+                    print(f"  {pdb_id} not found locally, will download from RCSB")
 
         # Query RCSB API to get ligand information for all structures
         self._fetch_ligand_info_from_rcsb()
@@ -519,10 +534,11 @@ echo "=== PDB ready ==="
         """Get configuration display lines."""
         config_lines = super().get_config_display()
 
+        convert_display = f"convert to {self.convert.upper()}" if self.convert else "keep as-is (pdb|cif)"
         config_lines.extend([
             f"PDB_IDS: {', '.join(self.pdb_ids)} ({len(self.pdb_ids)} structures)",
             f"CUSTOM_IDS: {', '.join(self.custom_ids)}",
-            f"FORMAT: {self.format.upper()}",
+            f"CONVERT: {convert_display}",
             f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses PDBs/)'}",
             f"BIOLOGICAL_ASSEMBLY: {self.biological_assembly}",
             f"REMOVE_WATERS: {self.remove_waters}",
@@ -570,10 +586,11 @@ echo "=== PDB ready ==="
         # If folder_source is set (from folder loading), use it as local_folder for the runtime script
         effective_local_folder = getattr(self, 'folder_source', None) or self.local_folder
 
+        # When convert is None, pipe_pdb.py keeps whatever format is found locally or downloaded
         config_data = {
             "pdb_ids": self.pdb_ids,
             "custom_ids": self.custom_ids,
-            "format": self.format,
+            "convert": self.convert,  # None means no conversion
             "local_folder": effective_local_folder,
             "repo_pdbs_folder": repo_pdbs_folder,
             "biological_assembly": self.biological_assembly,
@@ -598,8 +615,9 @@ echo "=== PDB ready ==="
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
+        convert_display = f"convert to {self.convert.upper()}" if self.convert else "keep as-is (pdb|cif)"
         return f"""echo "Fetching {len(self.pdb_ids)} structures"
-echo "Format: {self.format.upper()}"
+echo "Convert: {convert_display}"
 echo "PDB IDs: {', '.join(self.pdb_ids)}"
 echo "Custom IDs: {', '.join(self.custom_ids)}"
 echo "Priority: {'local_folder -> ' if self.local_folder else ''}PDBs/ -> RCSB download"
@@ -611,10 +629,36 @@ python "{self.pdb_py}" --config "{self.config_file}"
     
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after structure fetching."""
-        # Generate structure file paths using custom IDs
-        extension = ".pdb" if self.format == "pdb" else ".cif"
-        structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
-                          for custom_id in self.custom_ids]
+        # When convert is set, output will always be that format; otherwise it can be either
+        if self.convert is not None:
+            extension = ".pdb" if self.convert == "pdb" else ".cif"
+            structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
+                              for custom_id in self.custom_ids]
+            stream_format = self.convert
+            files_contain_wildcards = False
+        else:
+            # No conversion: predict extension where possible
+            local_formats = getattr(self, 'local_formats', {"pdb": False, "cif": False})
+            has_downloads = bool(getattr(self, 'needs_download', []))
+            only_pdb = local_formats["pdb"] and not local_formats["cif"]
+            only_cif = local_formats["cif"] and not local_formats["pdb"]
+
+            if not has_downloads and only_pdb:
+                extension = ".pdb"
+                stream_format = "pdb"
+                files_contain_wildcards = False
+            elif not has_downloads and only_cif:
+                extension = ".cif"
+                stream_format = "cif"
+                files_contain_wildcards = False
+            else:
+                # Mixed formats or downloads present: extension unknown at config time
+                extension = ".*"
+                stream_format = "pdb|cif"
+                files_contain_wildcards = True
+
+            structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
+                              for custom_id in self.custom_ids]
 
         tables = {
             "structures": TableInfo(
@@ -653,7 +697,8 @@ python "{self.pdb_py}" --config "{self.config_file}"
             ids=self.custom_ids.copy(),
             files=structure_files,
             map_table=self.structures_csv,
-            format=self.format
+            format=stream_format,
+            files_contain_wildcards=files_contain_wildcards
         )
 
         sequences = DataStream(
@@ -689,7 +734,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
             "tool_params": {
                 "pdb_ids": self.pdb_ids,
                 "custom_ids": self.custom_ids,
-                "format": self.format,
+                "convert": self.convert,
                 "local_folder": self.local_folder,
                 "biological_assembly": self.biological_assembly,
                 "remove_waters": self.remove_waters,

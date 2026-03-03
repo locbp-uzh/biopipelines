@@ -451,7 +451,8 @@ echo "=============================="
         """
         import json as json_module
 
-        if structures_ds.format not in ("pdb", "cif"):
+        # Accept "pdb", "cif", or "pdb|cif" (any format)
+        if structures_ds.format not in ("pdb", "cif", "pdb|cif"):
             return ""
 
         pdb_data = []
@@ -459,7 +460,7 @@ echo "=============================="
             if file_path and os.path.isfile(file_path):
                 try:
                     with open(file_path, "r") as f:
-                        pdb_data.append((struct_id, f.read()))
+                        pdb_data.append((struct_id, f.read(), file_path))
                 except Exception:
                     pass
             if len(pdb_data) >= max_structures:
@@ -468,15 +469,26 @@ echo "=============================="
         if not pdb_data:
             return ""
 
-        fmt = "pdb" if structures_ds.format == "pdb" else "cif"
+        # Detect format per-file from extension when format is "pdb|cif"
+        def _detect_fmt(file_path: str, default: str) -> str:
+            if file_path.endswith(".cif"):
+                return "cif"
+            if file_path.endswith(".pdb"):
+                return "pdb"
+            return default
+
+        if structures_ds.format == "pdb|cif":
+            fmt = _detect_fmt(pdb_data[0][2], "pdb")
+        else:
+            fmt = "pdb" if structures_ds.format == "pdb" else "cif"
 
         # Unique ID for this viewer instance to avoid conflicts with multiple viewers
         import random
         viewer_id = f"bp3d_{random.randint(100000, 999999)}"
 
         # Serialize structure data for JavaScript
-        struct_ids_json = json_module.dumps([sid for sid, _ in pdb_data])
-        struct_data_json = json_module.dumps([content for _, content in pdb_data])
+        struct_ids_json = json_module.dumps([sid for sid, _, _fp in pdb_data])
+        struct_data_json = json_module.dumps([content for _, content, _fp in pdb_data])
 
         truncated = len(structures_ds) > max_structures
         total_label = f"{len(pdb_data)} structure{'s' if len(pdb_data) != 1 else ''}"

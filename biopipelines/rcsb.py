@@ -342,6 +342,7 @@ echo "=== RCSB ready ==="
     sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
     compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
     failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
+    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing_structures.csv"))
     search_results_csv = Path(lambda self: os.path.join(self.output_folder, "search_results.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
     pdb_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pdb.py"))
@@ -578,7 +579,7 @@ echo "=== RCSB ready ==="
                  max_results: int = 10,
                  return_type: str = "entry",
                  sort: str = "score",
-                 format: str = "pdb",
+                 convert: Optional[str] = None,
                  ids: Optional[Union[str, List[str]]] = None,
                  remove_waters: bool = True,
                  chain: str = "longest",
@@ -596,7 +597,10 @@ echo "=== RCSB ready ==="
                         "polymer_entity", "polymer_instance"
             sort: Sort field - "score" (default), "resolution", "release_date",
                   or any RCSB attribute path
-            format: Output structure format - "pdb" (default) or "cif"
+            convert: Target format to convert structures to - "pdb", "cif", or None (default).
+                     When None, no conversion is performed: each structure is kept in whatever
+                     format is downloaded from RCSB (PDB if available, CIF as fallback).
+                     The structures DataStream format will be "pdb|cif" when None.
             ids: Optional custom IDs. If None, uses PDB IDs from search results.
             remove_waters: Whether to remove water molecules (default: True)
             chain: Which chain to extract sequence from - "longest" (default) or chain letter
@@ -610,6 +614,7 @@ echo "=== RCSB ready ==="
                 sequences: id | sequence
                 compounds: id | code | format | smiles | ccd
                 search_results: id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date
+                missing: pdb_id | error_message | source | attempted_path
                 failed: pdb_id | error_message | source | attempted_path
         """
         # Validate queries
@@ -626,7 +631,7 @@ echo "=== RCSB ready ==="
 
         self.max_results = max_results
         self.return_type = return_type
-        self.format = format.lower()
+        self.convert = convert.lower() if convert is not None else None
         self.remove_waters = remove_waters
         self.chain = chain
         self.fetch_compounds = fetch_compounds
@@ -650,8 +655,8 @@ echo "=== RCSB ready ==="
         if self.return_type not in ["entry", "assembly", "polymer_entity", "polymer_instance"]:
             raise ValueError(f"Invalid return_type: {self.return_type}")
 
-        if self.format not in ["pdb", "cif"]:
-            raise ValueError(f"Invalid format: {self.format}. Must be 'pdb' or 'cif'")
+        if self.convert is not None and self.convert not in ["pdb", "cif"]:
+            raise ValueError(f"Invalid convert: {self.convert}. Must be 'pdb', 'cif', or None")
 
         if self.logical_operator not in ["and", "or"]:
             raise ValueError(f"Invalid logical_operator: {logical_operator}. Must be 'and' or 'or'")
@@ -896,8 +901,8 @@ echo "=== RCSB ready ==="
         if self.max_results < 1:
             raise ValueError("max_results must be at least 1")
 
-        if self.format not in ["pdb", "cif"]:
-            raise ValueError("format must be 'pdb' or 'cif'")
+        if self.convert is not None and self.convert not in ["pdb", "cif"]:
+            raise ValueError("convert must be 'pdb', 'cif', or None")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Perform RCSB search and configure inputs for download."""
@@ -978,12 +983,13 @@ echo "=== RCSB ready ==="
             else:
                 query_summaries.append(f"{service}(...)")
 
+        convert_display = f"convert to {self.convert.upper()}" if self.convert else "keep as-is (pdb|cif)"
         config_lines.extend([
             f"QUERIES: {f' {self.logical_operator.upper()} '.join(query_summaries)}",
             f"MAX_RESULTS: {self.max_results}",
             f"RETURN_TYPE: {self.return_type}",
             f"SORT: {self.sort_field}",
-            f"FORMAT: {self.format.upper()}",
+            f"CONVERT: {convert_display}",
         ])
 
         if self.pdb_ids:
@@ -1008,11 +1014,11 @@ echo "=== RCSB ready ==="
         """Generate the download execution part of the script."""
         repo_pdbs_folder = self.folders['PDBs']
 
-        # Build config for pipe_pdb.py (same format it expects)
+        # Build config for pipe_pdb.py
         config_data = {
             "pdb_ids": self.pdb_ids,
             "custom_ids": self.output_ids,
-            "format": self.format,
+            "convert": self.convert,  # None means keep whatever is found on RCSB
             "local_folder": None,
             "repo_pdbs_folder": repo_pdbs_folder,
             "biological_assembly": False,
@@ -1022,6 +1028,7 @@ echo "=== RCSB ready ==="
             "structures_table": self.structures_csv,
             "sequences_table": self.sequences_csv,
             "failed_table": self.failed_csv,
+            "missing_table": self.missing_csv,
             "compounds_table": self.compounds_csv,
             "fetch_compounds": self.fetch_compounds,
             "operations": []
@@ -1033,10 +1040,11 @@ echo "=== RCSB ready ==="
         # Write search results CSV
         self._write_search_results_csv()
 
+        convert_display = f"convert to {self.convert.upper()}" if self.convert else "keep as-is (pdb|cif)"
         return f"""echo "RCSB Search: downloading {len(self.pdb_ids)} structures"
 echo "PDB IDs: {', '.join(self.pdb_ids)}"
 echo "Output IDs: {', '.join(self.output_ids)}"
-echo "Format: {self.format.upper()}"
+echo "Convert: {convert_display}"
 echo "Output folder: {self.output_folder}"
 
 python "{self.pdb_py}" --config "{self.config_file}"
@@ -1085,9 +1093,19 @@ python "{self.pdb_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after search and download."""
-        extension = ".pdb" if self.format == "pdb" else ".cif"
-        structure_files = [os.path.join(self.output_folder, f"{oid}{extension}")
-                          for oid in self.output_ids]
+        if self.convert is not None:
+            extension = ".pdb" if self.convert == "pdb" else ".cif"
+            structure_files = [os.path.join(self.output_folder, f"{oid}{extension}")
+                              for oid in self.output_ids]
+            stream_format = self.convert
+            files_contain_wildcards = False
+        else:
+            # No conversion: RCSB downloads PDB if available, CIF as fallback.
+            # Extension is only known at runtime, so use wildcards.
+            structure_files = [os.path.join(self.output_folder, f"{oid}.*")
+                              for oid in self.output_ids]
+            stream_format = "pdb|cif"
+            files_contain_wildcards = True
 
         tables = {
             "structures": TableInfo(
@@ -1123,6 +1141,13 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 description="RCSB search results with scores and entry metadata",
                 count=len(self.pdb_ids)
             ),
+            "missing": TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["pdb_id", "error_message", "source", "attempted_path"],
+                description="Structures that could not be downloaded",
+                count="variable"
+            ),
             "failed": TableInfo(
                 name="failed",
                 path=self.failed_csv,
@@ -1137,7 +1162,8 @@ python "{self.pdb_py}" --config "{self.config_file}"
             ids=list(self.output_ids),
             files=structure_files,
             map_table=self.structures_csv,
-            format=self.format
+            format=stream_format,
+            files_contain_wildcards=files_contain_wildcards
         )
 
         sequences = DataStream(
@@ -1173,7 +1199,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 "max_results": self.max_results,
                 "return_type": self.return_type,
                 "sort_field": self.sort_field,
-                "format": self.format,
+                "convert": self.convert,
                 "pdb_ids": self.pdb_ids,
                 "output_ids": self.output_ids if hasattr(self, 'output_ids') else [],
                 "search_scores": self.search_scores,
