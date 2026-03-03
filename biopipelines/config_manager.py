@@ -210,6 +210,16 @@ class ConfigManager:
             return ""
         return "module load " + " ".join(modules)
 
+    def get_renderers_config(self) -> Dict[str, Any]:
+        """
+        Get renderers configuration section.
+
+        Returns:
+            Dictionary with 'streams' and 'tables' sub-dicts mapping
+            format/name to renderer script path, or empty dict if not configured.
+        """
+        return self._config.get('renderers', {})
+
     def get_repository_url(self) -> str:
         """
         Get repository URL for config updates.

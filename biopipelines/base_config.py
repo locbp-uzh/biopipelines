@@ -422,155 +422,6 @@ echo "=============================="
 
         return result
 
-    def _repr_notebook_html(self, output: 'StandardizedOutput') -> str:
-        """
-        Generate custom HTML visualization for notebook display.
-
-        Override in subclasses to provide tool-specific visualization.
-        The default implementation renders an interactive py3Dmol viewer
-        if the tool outputs a non-empty structures stream.
-
-        Args:
-            output: The StandardizedOutput being displayed
-
-        Returns:
-            HTML string for notebook display, or empty string if nothing to show
-        """
-        from .datastream import DataStream
-
-        structures_ds = output.streams.get("structures")
-        if not isinstance(structures_ds, DataStream) or len(structures_ds) == 0:
-            return ""
-
-        return self._build_py3dmol_html(structures_ds)
-
-    @staticmethod
-    def _build_py3dmol_html(structures_ds, max_structures: int = 50) -> str:
-        """
-        Build py3Dmol interactive 3D viewer HTML with prev/next navigation.
-
-        Displays one structure at a time with left/right buttons and an ID label.
-
-        Args:
-            structures_ds: DataStream containing structure files (pdb/cif)
-            max_structures: Maximum number of structures to load
-
-        Returns:
-            HTML string with the navigable 3D viewer
-        """
-        import json as json_module
-
-        # Accept "pdb", "cif", or "pdb|cif" (any format)
-        if structures_ds.format not in ("pdb", "cif", "pdb|cif"):
-            return ""
-
-        pdb_data = []
-        for struct_id, file_path in zip(structures_ds.ids, structures_ds.files):
-            if file_path and os.path.isfile(file_path):
-                try:
-                    with open(file_path, "r") as f:
-                        pdb_data.append((struct_id, f.read(), file_path))
-                except Exception:
-                    pass
-            if len(pdb_data) >= max_structures:
-                break
-
-        if not pdb_data:
-            return ""
-
-        # Detect format per-file from extension when format is "pdb|cif"
-        def _detect_fmt(file_path: str, default: str) -> str:
-            if file_path.endswith(".cif"):
-                return "cif"
-            if file_path.endswith(".pdb"):
-                return "pdb"
-            return default
-
-        if structures_ds.format == "pdb|cif":
-            fmt = _detect_fmt(pdb_data[0][2], "pdb")
-        else:
-            fmt = "pdb" if structures_ds.format == "pdb" else "cif"
-
-        # Unique ID for this viewer instance to avoid conflicts with multiple viewers
-        import random
-        viewer_id = f"bp3d_{random.randint(100000, 999999)}"
-
-        # Serialize structure data for JavaScript
-        struct_ids_json = json_module.dumps([sid for sid, _, _fp in pdb_data])
-        struct_data_json = json_module.dumps([content for _, content, _fp in pdb_data])
-
-        truncated = len(structures_ds) > max_structures
-        total_label = f"{len(pdb_data)} structure{'s' if len(pdb_data) != 1 else ''}"
-        if truncated:
-            total_label += f" (of {len(structures_ds)} total)"
-
-        colors = [
-            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-            "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-        ]
-        colors_json = json_module.dumps(colors)
-
-        html = f"""
-<script src="https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"></script>
-<div style="margin-top: 12px;">
-  <strong>3D Structure Viewer</strong> ({total_label})
-</div>
-<div id="{viewer_id}_container" style="position: relative; width: 800px;">
-  <div id="{viewer_id}_viewer" style="width: 800px; height: 500px; position: relative;"></div>
-  <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 6px; font-family: monospace;">
-    <button id="{viewer_id}_prev" onclick="{viewer_id}_navigate(-1)"
-            style="padding: 4px 14px; font-size: 1.1em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;">&#9664;</button>
-    <span id="{viewer_id}_label" style="min-width: 200px; text-align: center; font-size: 0.95em;"></span>
-    <button id="{viewer_id}_next" onclick="{viewer_id}_navigate(1)"
-            style="padding: 4px 14px; font-size: 1.1em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;">&#9654;</button>
-  </div>
-</div>
-<script>
-(function() {{
-  var ids = {struct_ids_json};
-  var data = {struct_data_json};
-  var fmt = "{fmt}";
-  var colors = {colors_json};
-  var idx = 0;
-  var viewer = null;
-
-  function initViewer() {{
-    if (typeof $3Dmol === "undefined") {{
-      setTimeout(initViewer, 200);
-      return;
-    }}
-    var el = document.getElementById("{viewer_id}_viewer");
-    viewer = $3Dmol.createViewer(el, {{backgroundColor: "white"}});
-    showStructure(0);
-  }}
-
-  function showStructure(i) {{
-    if (!viewer) return;
-    idx = i;
-    if (idx < 0) idx = ids.length - 1;
-    if (idx >= ids.length) idx = 0;
-    viewer.removeAllModels();
-    viewer.addModel(data[idx], fmt);
-    var color = colors[idx % colors.length];
-    viewer.setStyle({{}}, {{"cartoon": {{"color": color}}}});
-    viewer.zoomTo();
-    viewer.render();
-    document.getElementById("{viewer_id}_label").innerHTML =
-      '<span style="display:inline-block;width:12px;height:12px;background:' + color +
-      ';border-radius:2px;vertical-align:middle;margin-right:6px;"></span>' +
-      ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
-  }}
-
-  window.{viewer_id}_navigate = function(delta) {{
-    showStructure(idx + delta);
-  }};
-
-  initViewer();
-}})();
-</script>
-"""
-        return html
-
     def get_expected_output_paths(self) -> Dict[str, List[str]]:
         """
         Get expected output file paths without validating existence.
@@ -1568,9 +1419,6 @@ class StandardizedOutput:
         """Detailed representation."""
         return f"StandardizedOutput({dict(self._data)})"
 
-    # Image formats recognized for inline display in notebooks
-    _IMAGE_FORMATS = {"png", "jpg", "jpeg", "svg", "gif", "bmp", "tiff", "webp"}
-
     @staticmethod
     def _is_notebook() -> bool:
         """Check if currently running in a Jupyter/Colab notebook."""
@@ -1585,24 +1433,43 @@ class StandardizedOutput:
             pass
         return False
 
-    def _repr_html_(self) -> Optional[str]:
+    # Cache for loaded renderer modules
+    _renderer_cache = {}
+
+    @staticmethod
+    def _load_render_fn(script_path):
+        """Load and cache a renderer's render() function from a script path."""
+        if script_path not in StandardizedOutput._renderer_cache:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("renderer", script_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            StandardizedOutput._renderer_cache[script_path] = mod.render
+        return StandardizedOutput._renderer_cache[script_path]
+
+    def _get_renderers_config(self):
         """
-        Rich HTML display for Jupyter notebooks.
-
-        Renders streams as HTML tables, displays images inline,
-        and delegates tool-specific visualization (e.g. 3D viewer)
-        to the tool's _repr_notebook_html() method.
+        Load renderers config from config.yaml, resolving script paths
+        relative to the repository root.
         """
-        if not self._is_notebook():
-            return None
+        try:
+            config = ConfigManager().get_renderers_config()
+        except Exception:
+            return {}
+        if not config:
+            return {}
 
-        from .datastream import DataStream
-        import base64
-        import html as html_module
-        import pandas as pd
+        # Resolve script paths relative to repo root
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        resolved = {}
+        for section in ("streams", "tables"):
+            if section in config:
+                resolved[section] = {}
+                for key, path in config[section].items():
+                    resolved[section][key] = os.path.join(repo_root, path)
+        return resolved
 
-        html_parts = []
-        css = """<style>
+    _CSS = """<style>
 .bp-table { border-collapse: collapse; font-family: monospace; font-size: 0.9em; margin: 4px 0 12px 0; }
 .bp-table th { background: #f0f0f0; padding: 4px 10px; border: 1px solid #ddd; text-align: left; }
 .bp-table td { padding: 4px 10px; border: 1px solid #ddd; }
@@ -1612,53 +1479,48 @@ class StandardizedOutput:
 .bp-section-title { font-weight: bold; margin-bottom: 4px; }
 </style>"""
 
-        # Helper: make path relative to output_folder
-        def rel(path: str) -> str:
+    def _repr_html_(self) -> Optional[str]:
+        """
+        Rich HTML display for Jupyter notebooks.
+
+        Dispatches rendering to scripts configured in config.yaml renderers section.
+        Lookup order for streams: stream name -> format -> _default.
+        Lookup order for tables: table name -> _default.
+        """
+        if not self._is_notebook():
+            return None
+
+        from .datastream import DataStream
+        import html as html_module
+
+        renderers_config = self._get_renderers_config()
+        stream_renderers = renderers_config.get("streams", {})
+        table_renderers = renderers_config.get("tables", {})
+        metadata_script = stream_renderers.get("_metadata")
+
+        html_parts = [self._CSS]
+
+        def _rel(path):
             if self.output_folder and path.startswith(self.output_folder):
                 return "<output_folder>/" + os.path.relpath(path, self.output_folder)
             return path
 
-        # Helper: render a DataFrame as an HTML table with 2+...+2 truncation
-        def _render_dataframe(df, html_out):
-            columns = list(df.columns)
-            html_out.append('<table class="bp-table"><tr>')
-            for col in columns:
-                html_out.append(f'<th>{html_module.escape(str(col))}</th>')
-            html_out.append('</tr>')
+        # --- Tool-specific visualization (backwards compat) ---
+        # Run first: if the tool provides its own rendering, skip stream dispatch.
+        tool_html = ""
+        if hasattr(self, "tool") and hasattr(self.tool, "_repr_notebook_html"):
+            try:
+                tool_html = self.tool._repr_notebook_html(self) or ""
+            except Exception:
+                pass
 
-            n_rows = len(df)
-            if n_rows <= 4:
-                display_rows = list(range(n_rows))
-                ellipsis_after = None
-            else:
-                display_rows = list(range(2)) + list(range(n_rows - 2, n_rows))
-                ellipsis_after = 2
-
-            for row_i, idx in enumerate(display_rows):
-                if ellipsis_after is not None and row_i == ellipsis_after:
-                    html_out.append(
-                        f'<tr class="bp-ellipsis"><td colspan="{len(columns)}">'
-                        f'... {n_rows - 4} more ...</td></tr>'
-                    )
-                row = df.iloc[idx]
-                html_out.append('<tr>')
-                for col in columns:
-                    val = str(row[col]) if pd.notna(row[col]) else ''
-                    display_val = val if len(val) <= 60 else val[:57] + '...'
-                    html_out.append(f'<td>{html_module.escape(display_val)}</td>')
-                html_out.append('</tr>')
-            html_out.append('</table>')
-
-        # --- Streams ---
-        # Collect non-empty, non-image streams
+        # --- Streams summary ---
         active_streams = [
             (sn, s) for sn, s in self.streams.items()
             if isinstance(s, DataStream) and len(s) > 0
-            and s.format.lower() not in self._IMAGE_FORMATS
         ]
 
         if active_streams:
-            # Streams summary table
             html_parts.append(
                 '<div class="bp-section">'
                 '<div class="bp-section-title">STREAMS</div>'
@@ -1672,72 +1534,41 @@ class StandardizedOutput:
                     f'<tr><td>{html_module.escape(stream_name)}</td>'
                     f'<td>{html_module.escape(stream.format)}</td>'
                     f'<td>{len(stream)}</td>'
-                    f'<td>{html_module.escape(rel(stream.map_table) if stream.map_table else "")}</td></tr>'
+                    f'<td>{html_module.escape(_rel(stream.map_table) if stream.map_table else "")}</td></tr>'
                 )
             html_parts.append('</table></div>')
 
-            # Per-stream detail
-            for stream_name, stream in active_streams:
-                html_parts.append(
-                    f'<div class="bp-section">'
-                    f'<div class="bp-section-title">{stream_name}</div>'
-                )
+        # --- Render each stream via config ---
+        if not tool_html:
+            for stream_name, stream in self.streams.items():
+                if not isinstance(stream, DataStream) or len(stream) == 0:
+                    continue
+                # Lookup: stream name first, then format, then _default
+                script = (stream_renderers.get(stream_name)
+                          or stream_renderers.get(stream.format)
+                          or stream_renderers.get(stream.format.lower())
+                          or stream_renderers.get("_default"))
+                if not script:
+                    continue
+                try:
+                    # If the matched renderer is not the metadata script itself,
+                    # render metadata first, then the specialized renderer.
+                    if metadata_script and script != metadata_script:
+                        meta_fn = self._load_render_fn(metadata_script)
+                        meta_result = meta_fn(stream, self)
+                        if meta_result:
+                            html_parts.append(meta_result)
+                    render_fn = self._load_render_fn(script)
+                    result = render_fn(stream, self)
+                    if result:
+                        html_parts.append(result)
+                except Exception:
+                    pass
+        else:
+            html_parts.append(tool_html)
 
-                # Metadata table (horizontal)
-                meta_headers = ['name', 'format', 'items', 'map_table', 'files_contain_wildcards']
-                meta_values = [
-                    html_module.escape(stream.name),
-                    html_module.escape(stream.format),
-                    str(len(stream)),
-                    html_module.escape(rel(stream.map_table) if stream.map_table else ''),
-                    str(stream.files_contain_wildcards),
-                ]
-                if stream.metadata:
-                    meta_headers.append('metadata')
-                    meta_values.append(html_module.escape(
-                        ", ".join(f"{k}={v}" for k, v in stream.metadata.items())
-                    ))
-                html_parts.append('<table class="bp-table"><tr>')
-                for h in meta_headers:
-                    html_parts.append(f'<th>{h}</th>')
-                html_parts.append('</tr><tr>')
-                for v in meta_values:
-                    html_parts.append(f'<td>{v}</td>')
-                html_parts.append('</tr></table>')
-
-                # Data: map_table or id/file fallback
-                map_data = stream._get_map_data()
-                if map_data is not None and len(map_data) > 0:
-                    _render_dataframe(map_data, html_parts)
-                else:
-                    # Fallback: render id/file pairs
-                    items = list(zip(stream.ids, stream.files)) if stream.files else [(iid, "") for iid in stream.ids]
-                    n_items = len(items)
-                    html_parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
-                    if n_items <= 4:
-                        display_items = items
-                        ellipsis_after = None
-                    else:
-                        display_items = items[:2] + items[-2:]
-                        ellipsis_after = 2
-
-                    for item_i, (item_id, item_file) in enumerate(display_items):
-                        if ellipsis_after is not None and item_i == ellipsis_after:
-                            html_parts.append(
-                                f'<tr class="bp-ellipsis"><td colspan="2">'
-                                f'... {n_items - 4} more ...</td></tr>'
-                            )
-                        html_parts.append(
-                            f"<tr><td>{html_module.escape(str(item_id))}</td>"
-                            f"<td>{html_module.escape(rel(item_file) if item_file else '')}</td></tr>"
-                        )
-                    html_parts.append('</table>')
-
-                html_parts.append('</div>')
-
-        # --- Tables ---
+        # --- Tables summary ---
         if "tables" in self._data and hasattr(self.tables, "_tables") and self.tables._tables:
-            # Tables summary
             html_parts.append(
                 '<div class="bp-section">'
                 '<div class="bp-section-title">TABLES</div>'
@@ -1748,7 +1579,7 @@ class StandardizedOutput:
             )
             for name, info in self.tables._tables.items():
                 cols = ", ".join(info.info.columns) if info.info.columns else ""
-                path = rel(info.info.path) if info.info.path else ""
+                path = _rel(info.info.path) if info.info.path else ""
                 html_parts.append(
                     f"<tr><td>{html_module.escape(name)}</td>"
                     f"<td>{html_module.escape(cols)}</td>"
@@ -1756,104 +1587,22 @@ class StandardizedOutput:
                 )
             html_parts.append('</table></div>')
 
-            # Per-table detail
+            # Render each table via config
             for name, info in self.tables._tables.items():
-                html_parts.append(
-                    f'<div class="bp-section">'
-                    f'<div class="bp-section-title">{html_module.escape(name)}</div>'
-                )
-
-                # Table metadata (horizontal)
-                t_meta = info.info
-                t_headers = ['name', 'path', 'columns', 'description', 'count']
-                t_values = [
-                    html_module.escape(t_meta.name),
-                    html_module.escape(rel(t_meta.path) if t_meta.path else ''),
-                    html_module.escape(", ".join(t_meta.columns) if t_meta.columns else ''),
-                    html_module.escape(t_meta.description),
-                    str(t_meta.count),
-                ]
-                html_parts.append('<table class="bp-table"><tr>')
-                for h in t_headers:
-                    html_parts.append(f'<th>{h}</th>')
-                html_parts.append('</tr><tr>')
-                for v in t_values:
-                    html_parts.append(f'<td>{v}</td>')
-                html_parts.append('</tr></table>')
-
-                # Try to load and display CSV content
-                if t_meta.path and os.path.exists(t_meta.path):
+                script = (table_renderers.get(name)
+                          or table_renderers.get("_default"))
+                if script:
                     try:
-                        table_df = pd.read_csv(t_meta.path)
-                        if len(table_df) > 0:
-                            _render_dataframe(table_df, html_parts)
+                        render_fn = self._load_render_fn(script)
+                        result = render_fn(info, self)
+                        if result:
+                            html_parts.append(result)
                     except Exception:
                         pass
 
-                html_parts.append('</div>')
-
-        # --- Tool-specific visualization (e.g. 3D viewer, Plot) ---
-        # Run before generic image streams so tools can handle their own display.
-        tool_html = ""
-        if hasattr(self, "tool") and hasattr(self.tool, "_repr_notebook_html"):
-            try:
-                tool_html = self.tool._repr_notebook_html(self) or ""
-                if tool_html:
-                    html_parts.append(tool_html)
-            except Exception:
-                pass
-
-        # --- Image streams: display inline ---
-        # Skip if the tool already provided its own visualization.
-        if not tool_html:
-            for stream_name, stream in self.streams.items():
-                if not isinstance(stream, DataStream) or len(stream) == 0:
-                    continue
-                if stream.format.lower() not in self._IMAGE_FORMATS:
-                    continue
-
-                html_parts.append(
-                    f'<div class="bp-section">'
-                    f'<div class="bp-section-title">{stream_name} '
-                    f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
-                )
-
-                for item_id, file_path in zip(stream.ids, stream.files):
-                    if not file_path or not os.path.isfile(file_path):
-                        continue
-
-                    if stream.format.lower() == "svg":
-                        try:
-                            with open(file_path, "r") as f:
-                                svg_content = f.read()
-                            html_parts.append(
-                                f'<div style="margin: 4px 0;">'
-                                f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
-                                f"{svg_content}</div>"
-                            )
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            with open(file_path, "rb") as f:
-                                img_data = base64.b64encode(f.read()).decode("utf-8")
-                            mime = f"image/{stream.format.lower()}"
-                            if stream.format.lower() in ("jpg", "jpeg"):
-                                mime = "image/jpeg"
-                            html_parts.append(
-                                f'<div style="margin: 4px 0;">'
-                                f'<div style="color: #666; font-size: 0.85em;">{html_module.escape(str(item_id))}</div>'
-                                f'<img src="data:{mime};base64,{img_data}" '
-                                f'style="max-width: 100%; height: auto;" /></div>'
-                            )
-                        except Exception:
-                            pass
-
-                html_parts.append("</div>")
-
-        if not html_parts:
+        if len(html_parts) <= 1:  # only CSS
             return None
-        return css + "\n" + "\n".join(html_parts)
+        return "\n".join(html_parts)
 
     def get_filter_info(self) -> Dict[str, Any]:
         """

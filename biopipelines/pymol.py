@@ -95,6 +95,8 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
     def _repr_notebook_html(self, output) -> str:
         """Render py3Dmol viewer with structures from Load operations."""
         from .datastream import DataStream
+        import os as _os
+        import importlib.util
 
         # Collect structures from all sources referenced in Load operations
         all_ids = []
@@ -116,7 +118,14 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
             files=all_files,
             format="pdb",
         )
-        return self._build_py3dmol_html(combined)
+
+        # Load structures renderer
+        repo_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        renderer_path = _os.path.join(repo_root, "Renderers", "structures.py")
+        spec = importlib.util.spec_from_file_location("renderer", renderer_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.render(combined, output)
 
     # Lazy path descriptors
     config_file = Path(lambda self: os.path.join(self.output_folder, "pymol_config.json"))

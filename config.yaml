@@ -160,3 +160,26 @@ gnina:
     - "cuda/12.6.3"
     - "cudnn/9.8.0.87-12"
   ld_library_path: "/apps/u24/opt/x86_64_v3/cuda-12.6.3-ok2c7hqa5kefkh3iyolgxrajfpepvh6h/targets/x86_64-linux/lib"
+
+# Renderers
+# Controls how tool outputs are displayed in Jupyter notebooks.
+# Maps stream formats (or stream names) to renderer scripts in the Renderers/ folder.
+# Lookup order: stream name first, then format, then _default.
+renderers:
+  streams:
+    _metadata: Renderers/streams.py
+    pdb: Renderers/structures.py
+    cif: Renderers/structures.py
+    "pdb|cif": Renderers/structures.py
+    png: Renderers/images.py
+    jpg: Renderers/images.py
+    jpeg: Renderers/images.py
+    svg: Renderers/images.py
+    gif: Renderers/images.py
+    bmp: Renderers/images.py
+    tiff: Renderers/images.py
+    webp: Renderers/images.py
+    plots: Renderers/plots.py
+    _default: Renderers/streams.py
+  tables:
+    _default: Renderers/tables.py
