@@ -23,7 +23,7 @@ Fetches protein structures with priority: `local_folder` → `PDBs/` → RCSB do
 **Parameters**:
 - `pdbs`: str | List[str] - PDB IDs or folder path
 - `ids`: str | List[str] = None - Custom IDs (defaults to pdbs)
-- `format`: str = "pdb" - Output format ("pdb" or "cif")
+- `convert`: str = None - Target format to convert to ("pdb", "cif", or None). When None, no conversion is performed: structures are kept in whatever format they are found locally or downloaded from RCSB. The structures stream will have format "pdb|cif".
 - `local_folder`: str = None - Check first before PDBs/
 - `biological_assembly`: bool = False - Download biological assembly
 - `remove_waters`: bool = True - Remove water molecules
@@ -74,7 +74,7 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 - `max_results`: int = 10 - Maximum PDB entries to return
 - `return_type`: str = "entry" - Result granularity ("entry", "assembly", "polymer_entity", "polymer_instance")
 - `sort`: str = "score" - Sort field ("score", "resolution", "release_date", or RCSB attribute)
-- `format`: str = "pdb" - Output format ("pdb" or "cif")
+- `convert`: str = None - Target format to convert to ("pdb", "cif", or None). When None, no conversion is performed: each structure is kept in whatever format is downloaded from RCSB (PDB if available, CIF as fallback). The structures stream will have format "pdb|cif".
 - `ids`: str | List[str] = None - Custom IDs (defaults to PDB IDs)
 - `remove_waters`: bool = True - Remove water molecules
 - `chain`: str = "longest" - Which chain to extract sequence from
@@ -142,6 +142,7 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 - `sequences`: | id | sequence |
 - `compounds`: | id | code | smiles | ccd |
 - `search_results`: | id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date |
+- `missing`: | pdb_id | error_message | source | attempted_path |
 
 **Examples**:
 

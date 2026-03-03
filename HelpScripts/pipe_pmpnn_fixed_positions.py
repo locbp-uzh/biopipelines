@@ -166,13 +166,13 @@ def resolve_table_reference(reference, design_ids):
     Resolve table reference to per-design selections.
 
     Args:
-        reference: Either a table reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
+        reference: Either a table reference like "TABLE_REFERENCE:path:column" or direct PyMOL selection
         design_ids: List of design IDs from DataStream
 
     Returns:
         Dictionary mapping design IDs to position lists
     """
-    if not reference.startswith("DATASHEET_REFERENCE:"):
+    if not reference.startswith("TABLE_REFERENCE:"):
         # Direct PyMOL selection - same for all designs
         return {design_id: sele_to_list(reference) for design_id in design_ids}
 

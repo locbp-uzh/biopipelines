@@ -14,6 +14,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -21,6 +22,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids
+    from biopipelines_io import Resolve
 
 
 class ProteinMPNN(BaseConfig):
@@ -132,10 +134,10 @@ echo "=== ProteinMPNN installation complete ==="
             num_sequences: Number of sequences to generate per structure
             fixed: Fixed positions. Accepts:
                    - PyMOL-style selection string: "10-20+30-40"
-                   - Table column reference: (table, "column_name")
+                   - TableReference: table.column_name
             redesigned: Designed positions. Accepts:
                    - PyMOL-style selection string: "10-20+30-40"
-                   - Table column reference: (table, "column_name")
+                   - TableReference: table.column_name
             chain: Chain to apply fixed positions to ("auto" detects from input structure)
             plddt_threshold: pLDDT threshold for automatic fixing (100 = no fixing)
             sampling_temp: Sampling temperature for sequence generation
@@ -223,12 +225,8 @@ echo "=== ProteinMPNN installation complete ==="
         """Generate the input preparation part of the script."""
         import json
 
-        input_directory = os.path.dirname(self.structures_stream.files[0])
-
         # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
-        datastream_dict = self.structures_stream.to_dict()
-        with open(self.structures_json, 'w') as f:
-            json.dump(datastream_dict, f, indent=2)
+        self.structures_stream.save_json(self.structures_json)
 
         # Write pdb_basename -> stream_id map for runtime ID remapping
         id_map = {}
@@ -238,9 +236,8 @@ echo "=== ProteinMPNN installation complete ==="
         with open(self.id_map_json, 'w') as f:
             json.dump(id_map, f, indent=2)
 
-        # Resolve table references to DATASHEET_REFERENCE format
-        resolved_fixed = self.resolve_table_reference(self.fixed) if self.fixed else ""
-        resolved_redesigned = self.resolve_table_reference(self.redesigned) if self.redesigned else ""
+        resolved_fixed = self.fixed if self.fixed else ""
+        resolved_redesigned = self.redesigned if self.redesigned else ""
 
         # Determine input source for fixed positions
         if resolved_fixed or resolved_redesigned:
@@ -251,11 +248,17 @@ echo "=== ProteinMPNN installation complete ==="
         fixed_param = resolved_fixed if resolved_fixed else "-"
         designed_param = resolved_redesigned if resolved_redesigned else "-"
 
-        return f"""echo "Determining fixed positions"
+        # Resolve input directory at runtime (handles wildcard DataStreams)
+        first_id = self.structures_stream.ids[0]
+
+        return f"""FIRST_FILE={Resolve.stream_item(self.structures_json, first_id)}
+INPUT_DIR=$(dirname "$FIRST_FILE")
+
+echo "Determining fixed positions"
 python {self.fixed_py} "{self.structures_json}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
 
 echo "Parsing multiple PDBs"
-python {self.parse_py} --input_path {input_directory} --output_path {self.parsed_pdbs_jsonl}
+python {self.parse_py} --input_path $INPUT_DIR --output_path {self.parsed_pdbs_jsonl}
 
 """
 

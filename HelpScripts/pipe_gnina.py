@@ -590,7 +590,7 @@ def prepare_conformers(compounds_ds, output_folder, config):
 
 def _load_external_energies(ligand_id, conformer_energies_ref):
     """Load pre-computed conformer energies from a table reference."""
-    if not conformer_energies_ref or not conformer_energies_ref.startswith("DATASHEET_REFERENCE:"):
+    if not conformer_energies_ref or not conformer_energies_ref.startswith("TABLE_REFERENCE:"):
         return None
     try:
         table, column = load_table(conformer_energies_ref)

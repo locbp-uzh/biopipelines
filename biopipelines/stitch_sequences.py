@@ -195,11 +195,9 @@ echo "=== StitchSequences ready ==="
             if isinstance(pos_key, str):
                 key_info = {"type": "fixed", "positions": pos_key}
                 key_str = pos_key
-            elif isinstance(pos_key, tuple) and len(pos_key) == 2:
-                table_info, column_name = pos_key
-                table_path = table_info.info.path if hasattr(table_info, 'info') else str(table_info)
-                key_info = {"type": "table", "table_path": table_path, "column": column_name}
-                key_str = f"table:{column_name}"
+            elif hasattr(pos_key, 'path') and hasattr(pos_key, 'column'):
+                key_info = {"type": "table", "table_path": pos_key.path, "column": pos_key.column}
+                key_str = f"table:{pos_key.column}"
             else:
                 raise ValueError(f"Invalid substitution position key type: {type(pos_key)}")
 
@@ -214,11 +212,9 @@ echo "=== StitchSequences ready ==="
             if isinstance(pos_key, str):
                 key_info = {"type": "fixed", "positions": pos_key}
                 key_str = pos_key
-            elif isinstance(pos_key, tuple) and len(pos_key) == 2:
-                table_info, column_name = pos_key
-                table_path = table_info.info.path if hasattr(table_info, 'info') else str(table_info)
-                key_info = {"type": "table", "table_path": table_path, "column": column_name}
-                key_str = f"table:{column_name}"
+            elif hasattr(pos_key, 'path') and hasattr(pos_key, 'column'):
+                key_info = {"type": "table", "table_path": pos_key.path, "column": pos_key.column}
+                key_str = f"table:{pos_key.column}"
             else:
                 raise ValueError(f"Invalid indel position key type: {type(pos_key)}")
 

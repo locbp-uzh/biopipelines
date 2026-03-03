@@ -29,6 +29,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .config_manager import ConfigManager
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -36,6 +37,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from config_manager import ConfigManager
+    from biopipelines_io import Resolve
 
 
 class Gnina(BaseConfig):
@@ -118,6 +120,7 @@ echo "=== GNINA installation complete ==="
     compounds_json = Path(lambda self: os.path.join(self.output_folder, "compounds_ds.json"))
     structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
     missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+    autobox_ds_json = Path(lambda self: os.path.join(self.output_folder, "autobox_ligand_ds.json"))
     propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
 
     def __init__(self,
@@ -221,16 +224,19 @@ echo "=== GNINA installation complete ==="
         else:
             raise ValueError(f"compounds must be DataStream or StandardizedOutput, got {type(compounds)}")
 
-        # Resolve autobox_ligand
-        self.autobox_ligand_path = None
+        # Resolve autobox_ligand — store stream for runtime resolution
+        self.autobox_ligand_stream = None
+        self.autobox_ligand_id = None
+        self.autobox_ligand_path = None  # Only set for string paths (no runtime resolution needed)
         if autobox_ligand is not None:
             if isinstance(autobox_ligand, StandardizedOutput):
-                stream = autobox_ligand.streams.structures
-                if len(stream) > 0:
-                    _, self.autobox_ligand_path = stream[0]
+                self.autobox_ligand_stream = autobox_ligand.streams.structures
+                if len(self.autobox_ligand_stream) > 0:
+                    self.autobox_ligand_id = self.autobox_ligand_stream.ids[0]
             elif isinstance(autobox_ligand, DataStream):
-                if len(autobox_ligand) > 0:
-                    _, self.autobox_ligand_path = autobox_ligand[0]
+                self.autobox_ligand_stream = autobox_ligand
+                if len(self.autobox_ligand_stream) > 0:
+                    self.autobox_ligand_id = self.autobox_ligand_stream.ids[0]
             elif isinstance(autobox_ligand, str):
                 self.autobox_ligand_path = autobox_ligand
             else:
@@ -263,11 +269,10 @@ echo "=== GNINA installation complete ==="
         self.protonate = protonate
         self.pH = pH
 
-        # Resolve conformer_energies table reference if provided
+        # Store conformer_energies table reference if provided
         self.conformer_energies_ref = None
         if conformer_energies is not None:
-            self.validate_table_reference(conformer_energies)
-            self.conformer_energies_ref = self.resolve_table_reference(conformer_energies)
+            self.conformer_energies_ref = conformer_energies
 
         super().__init__(**kwargs)
 
@@ -280,7 +285,7 @@ echo "=== GNINA installation complete ==="
             raise ValueError("compounds parameter is required and must not be empty")
 
         has_explicit_box = self.center is not None and self.size is not None
-        has_autobox = self.autobox_ligand_path is not None
+        has_autobox = self.autobox_ligand_path is not None or self.autobox_ligand_stream is not None
         if not has_explicit_box and not has_autobox:
             print("  Note: No explicit box defined. Will auto-detect from crystal "
                   "ligand if available in the input PDB structure.")
@@ -320,7 +325,10 @@ echo "=== GNINA installation complete ==="
         if self.center is not None:
             config_lines.append(f"BOX CENTER: {self.center}")
             config_lines.append(f"BOX SIZE: {self.size}")
-        if self.autobox_ligand_path is not None:
+        if self.autobox_ligand_stream is not None:
+            config_lines.append(f"AUTOBOX LIGAND: {self.autobox_ligand_id}")
+            config_lines.append(f"AUTOBOX ADD: {self.autobox_add}")
+        elif self.autobox_ligand_path is not None:
             config_lines.append(f"AUTOBOX LIGAND: {self.autobox_ligand_path}")
             config_lines.append(f"AUTOBOX ADD: {self.autobox_add}")
         if self.generate_conformers:
@@ -335,17 +343,18 @@ echo "=== GNINA installation complete ==="
         """Write configuration and DataStreams to JSON files at pipeline time."""
         os.makedirs(self.output_folder, exist_ok=True)
 
-        with open(self.structures_json, 'w') as f:
-            json.dump(self.structures_stream.to_dict(), f, indent=2)
-
-        with open(self.compounds_json, 'w') as f:
-            json.dump(self.compounds_stream.to_dict(), f, indent=2)
+        self.structures_stream.save_json(self.structures_json)
+        self.compounds_stream.save_json(self.compounds_json)
 
         box_config = {"autobox_add": self.autobox_add}
         if self.center is not None and self.size is not None:
             box_config["center"] = self.center
             box_config["size"] = self.size
-        if self.autobox_ligand_path is not None:
+        if self.autobox_ligand_stream is not None:
+            # Serialize autobox ligand DataStream for runtime resolution
+            self.autobox_ligand_stream.save_json(self.autobox_ds_json)
+            box_config["autobox_ligand"] = "__RESOLVE_AUTOBOX_LIGAND__"
+        elif self.autobox_ligand_path is not None:
             box_config["autobox_ligand"] = self.autobox_ligand_path
 
         upstream_missing = self._get_upstream_missing_table_path(self.structures_input)
@@ -438,9 +447,21 @@ fi
 
 """
 
+    def _generate_script_resolve_autobox(self) -> str:
+        """Generate bash snippet to resolve autobox ligand at runtime."""
+        if self.autobox_ligand_stream is None:
+            return ""
+
+        return f"""# Resolve autobox ligand file at runtime
+AUTOBOX_LIGAND={Resolve.stream_item(self.autobox_ds_json, self.autobox_ligand_id)}
+echo "Resolved autobox ligand: $AUTOBOX_LIGAND"
+jq --arg path "$AUTOBOX_LIGAND" '.box.autobox_ligand = $path' "{self.config_json}" > "{self.config_json}.tmp" && mv "{self.config_json}.tmp" "{self.config_json}"
+
+"""
+
     def _generate_script_run_gnina(self) -> str:
         """Generate the GNINA execution part of the script."""
-        return f"""echo "Starting GNINA docking"
+        return f"""{self._generate_script_resolve_autobox()}echo "Starting GNINA docking"
 echo "Structures: {len(self.structures_stream)} proteins"
 echo "Compounds: {len(self.compounds_stream)} ligands"
 echo "Output folder: {self.output_folder}"
@@ -526,7 +547,7 @@ python {self.helper_py} {self.config_json}
             "gnina_params": {
                 "center": self.center,
                 "size": self.size,
-                "autobox_ligand": self.autobox_ligand_path,
+                "autobox_ligand": self.autobox_ligand_id or self.autobox_ligand_path,
                 "autobox_add": self.autobox_add,
                 "exhaustiveness": self.exhaustiveness,
                 "num_modes": self.num_modes,

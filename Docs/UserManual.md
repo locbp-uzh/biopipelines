@@ -242,7 +242,7 @@ protein = PDB("4ufc")
 proteins = PDB(["4ufc", "1aki"], ids=["POI1", "POI2"])
 
 # From folder
-proteins = PDB("/path/to/structures") # if the folder contains cif files, add format="cif"
+proteins = PDB("/path/to/structures")  # convert defaults to None (pdb|cif, no conversion); pass convert="pdb" to convert all to PDB
 ```
 
 **Sequence** - Creates sequences with auto-detection (protein/DNA/RNA):

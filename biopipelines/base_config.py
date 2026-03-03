@@ -18,11 +18,13 @@ from typing import Dict, List, Any, Optional, Union, TypeVar, overload, Type
 try:
     from .config_manager import ConfigManager
     from .file_paths import Path
+    from .biopipelines_io import TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from config_manager import ConfigManager
     from file_paths import Path
+    from biopipelines_io import TableReference
 
 
 # TypeVar for preserving concrete tool types in type hints
@@ -241,9 +243,16 @@ class BaseConfig(ABC):
         """
         config_manager = ConfigManager()
 
+        # Source resolve_stream_item.sh for runtime file resolution
+        resolve_source = ""
+        helpscripts = getattr(self, 'folders', {}).get("HelpScripts", "")
+        if helpscripts:
+            resolve_sh = os.path.join(helpscripts, "resolve_stream_item.sh")
+            resolve_source = f'source "{resolve_sh}"\n'
+
         # pip mode: no environment activation needed
         if config_manager.get_env_manager() == "pip":
-            return "# pip mode: no environment activation needed\n\n"
+            return f"# pip mode: no environment activation needed\n{resolve_source}\n"
 
         if name is not None:
             env_name = name
@@ -268,7 +277,7 @@ echo "Location: $CONDA_PREFIX"
 echo "Python: $(which python)"
 echo "Python version: $(python --version 2>&1)"
 echo "=============================="
-
+{resolve_source}
 """
 
     @abstractmethod
@@ -793,130 +802,6 @@ fi
     def __repr__(self) -> str:
         return self.__str__()
     
-    def resolve_table_reference(self, reference) -> str:
-        """
-        Resolve table column references to actual values.
-
-        Supports two formats:
-        - String: 'table_name.column_name' (e.g., "structures.fixed", "selections.within")
-        - Tuple: (table_object, "column_name") (e.g., (tool.tables.selections, "within"))
-
-        This provides a general way to reference any column from any input table across all tools.
-
-        Args:
-            reference: Reference string or tuple (e.g., "structures.fixed" or (tool.tables.selections, "within"))
-
-        Returns:
-            Resolved value from table or original reference if not a table reference
-        """
-        if not reference:
-            return reference
-
-        # Handle tuple format: (table_object, "column_name")
-        if isinstance(reference, tuple) and len(reference) == 2:
-            table_object, column_name = reference
-
-            # Get the table path from the object
-            if hasattr(table_object, 'info'):
-                table_path = table_object.info.path
-            else:
-                raise ValueError(f"Invalid table object in tuple reference: {table_object}")
-
-            # Read and resolve the column value
-            return self._resolve_column_from_table(table_path, column_name)
-
-        # Handle string format: "table.column"
-        if isinstance(reference, str) and "." in reference:
-            parts = reference.split(".")
-            if len(parts) == 2:
-                # Table reference format: "structures.fixed"
-                table_name = parts[0]
-                column_name = parts[1]
-
-                # Get the table path
-                table_path = self._find_table_path(table_name)
-
-                if not table_path:
-                    raise ValueError(f"Table '{table_name}' not found in input tables")
-
-                # Read and resolve the column value
-                return self._resolve_column_from_table(table_path, column_name)
-            else:
-                # Not a table reference
-                return reference
-        else:
-            # Not a table reference
-            return reference
-
-    def _resolve_column_from_table(self, table_path: str, column_name: str) -> str:
-        """
-        Resolve a column value from a table file.
-
-        Args:
-            table_path: Path to the table CSV file
-            column_name: Name of the column to resolve
-
-        Returns:
-            Placeholder string for script generation
-        """
-        # For script generation, return a placeholder that indicates this is a table reference
-        # The actual resolution will happen in the script generation where we have access to pandas
-        return f"DATASHEET_REFERENCE:{table_path}:{column_name}"
-    
-    def _find_table_path(self, table_name: str) -> Optional[str]:
-        """
-        Find the path to a named table from various input sources.
-        
-        Args:
-            table_name: Name of the table to find
-            
-        Returns:
-            Path to the table file, or None if not found
-        """
-        # Check StandardizedOutput format
-        if hasattr(self, 'standardized_input') and self.standardized_input and hasattr(self.standardized_input, 'tables'):
-            if hasattr(self.standardized_input.tables, '_tables') and table_name in self.standardized_input.tables._tables:
-                return self.standardized_input.tables._tables[table_name].info.path
-        
-        # Check dictionary format
-        if hasattr(self, 'input_tables') and isinstance(self.input_tables, dict) and table_name in self.input_tables:
-            return self.input_tables[table_name]["path"]
-        
-        # Check TableContainer format  
-        if hasattr(self, 'input_tables') and hasattr(self.input_tables, '_tables') and table_name in self.input_tables._tables:
-            return self.input_tables._tables[table_name].info.path
-        
-        return None
-    
-    def validate_table_reference(self, reference):
-        """Validate table reference format."""
-        if not reference:
-            return
-
-        # Handle tuple format: (table_object, "column_name")
-        if isinstance(reference, tuple):
-            if len(reference) == 2:
-                table_object, column_name = reference
-                if hasattr(table_object, 'info') and isinstance(column_name, str):
-                    # Valid tuple format
-                    return
-                else:
-                    raise ValueError(f"Invalid tuple format: expected (table_object, 'column_name'), got {reference}")
-            else:
-                raise ValueError(f"Invalid tuple format: expected (table_object, 'column_name'), got {reference}")
-
-        # Handle string format: table.column
-        if isinstance(reference, str) and "." in reference:
-            parts = reference.split(".")
-            if len(parts) == 2:
-                # Valid table reference format
-                return
-            else:
-                # Multiple dots - not a valid table reference
-                return
-
-        # No dots - regular value, not a table reference
-
     def _get_upstream_missing_table_path(self, *input_sources) -> Optional[str]:
         """
         Get the path to the missing table from upstream tool outputs.
@@ -1018,7 +903,8 @@ class TableInfo:
     Metadata is accessed via the .info property:
         table.info.path, table.info.columns, table.info.count, etc.
 
-    All other attribute access returns column reference tuples (TableInfo, column_name).
+    All other attribute access returns TableReference objects:
+        table.fixed -> TableReference(path, "fixed")
     """
 
     def __init__(self, name: str, path: str, columns: List[str] = None,
@@ -1035,11 +921,11 @@ class TableInfo:
         return self._info
 
     def _create_column_reference(self, column_name: str):
-        """Create a column reference tuple for table access."""
-        return (self, column_name)
+        """Create a TableReference for column access."""
+        return TableReference(self._info.path, column_name)
 
     def __getattr__(self, column_name: str):
-        """Return column reference tuple for any attribute access."""
+        """Return TableReference for any attribute access."""
         return self._create_column_reference(column_name)
 
     def __str__(self) -> str:

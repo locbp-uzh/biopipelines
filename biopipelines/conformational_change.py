@@ -16,12 +16,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .biopipelines_io import TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from biopipelines_io import TableReference
 
 
 class ConformationalChange(BaseConfig):
@@ -141,10 +143,8 @@ echo "=== ConformationalChange ready ==="
 
         if self.selection_spec is None:
             selection_display = "All atoms (whole structure)"
-        elif isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
-            table_obj, col_name = self.selection_spec
-            table_name = table_obj.info.name if hasattr(table_obj, 'info') else str(table_obj)
-            selection_display = f"Column reference: {table_name}.{col_name}"
+        elif isinstance(self.selection_spec, TableReference):
+            selection_display = f"Column reference: {self.selection_spec.column}"
         else:
             selection_display = self.selection_spec
 
@@ -183,14 +183,8 @@ echo "=== ConformationalChange ready ==="
         # Handle selection input
         if self.selection_spec is None:
             selection_config = {"type": "all"}
-        elif isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
-            # Table column reference: (TableInfo, "column_name")
-            table_object, column_name = self.selection_spec
-            if hasattr(table_object, 'info'):
-                table_path = table_object.info.path
-            else:
-                raise ValueError(f"Invalid table object in selection reference: {table_object}")
-            selection_config = {"type": "table_column", "table_path": table_path, "column_name": column_name}
+        elif isinstance(self.selection_spec, TableReference):
+            selection_config = {"type": "table_column", "table_path": self.selection_spec.path, "column_name": self.selection_spec.column}
         else:
             selection_config = {"type": "fixed", "value": self.selection_spec}
 
@@ -238,9 +232,8 @@ python "{self.analysis_py}" --config "{self.config_file}"
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
         base_dict = super().to_dict()
-        if isinstance(self.selection_spec, tuple) and len(self.selection_spec) == 2:
-            table_obj, col_name = self.selection_spec
-            selection_str = f"table_column:{table_obj.info.name}.{col_name}" if hasattr(table_obj, 'info') else str(self.selection_spec)
+        if isinstance(self.selection_spec, TableReference):
+            selection_str = f"table_column:{self.selection_spec.column}"
         else:
             selection_str = str(self.selection_spec)
         base_dict.update({

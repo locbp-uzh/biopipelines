@@ -214,7 +214,7 @@ def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict
     Args:
         restrict_spec: Either:
                       - "" (empty): No restriction
-                      - "DATASHEET_REFERENCE:path:column": Table reference
+                      - "TABLE_REFERENCE:path:column": Table reference
                       - "10-20+30-40": Direct PyMOL selection
         structure_id: Structure ID from the DataStream (not derived from filename)
         id_map: ID mapping dictionary for matching structure IDs to table IDs
@@ -226,7 +226,7 @@ def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict
         return []  # No restriction
 
     # Handle table reference using pipe_biopipelines_io
-    if restrict_spec.startswith("DATASHEET_REFERENCE:"):
+    if restrict_spec.startswith("TABLE_REFERENCE:"):
         try:
             table, column_name = load_table(restrict_spec)
         except FileNotFoundError as e:

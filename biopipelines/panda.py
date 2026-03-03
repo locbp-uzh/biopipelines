@@ -672,11 +672,9 @@ echo "=== Panda ready ==="
         Returns:
             Path to CSV file
         """
-        # Handle tuple from column reference (table_info, column_name)
-        if isinstance(table_input, tuple) and len(table_input) == 2:
-            table_info, _ = table_input
-            if hasattr(table_info, 'info'):
-                return table_info.info.path
+        # Handle TableReference from column access (table.column)
+        if hasattr(table_input, 'path') and hasattr(table_input, 'column'):
+            return table_input.path
 
         # Direct path string
         if isinstance(table_input, str):

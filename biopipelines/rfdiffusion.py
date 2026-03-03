@@ -17,12 +17,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
+    from biopipelines_io import Resolve
 
 
 class RFdiffusion(BaseConfig):
@@ -204,6 +206,7 @@ echo "=== RFdiffusion installation complete ==="
     main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion_results.csv"))
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
     inference_py_file = Path(lambda self: os.path.join(self.folders["RFdiffusion"], "scripts", "run_inference.py"))
+    pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
 
     def __init__(self,
                  contigs: str,
@@ -256,18 +259,17 @@ echo "=== RFdiffusion installation complete ==="
             Tables:
                 structures: id | source_id | pdb | fixed | designed | contigs | time | status
         """
-        # Resolve optional pdb input
-        self.pdb_file: Optional[str] = None
+        # Resolve optional pdb input — store stream for runtime resolution
+        self.pdb_stream: Optional[DataStream] = None
         self.pdb_input_id: Optional[str] = None
         if pdb is not None:
             if isinstance(pdb, StandardizedOutput):
-                self.pdb_file = pdb.streams.structures.files[0]
-                self.pdb_input_id = pdb.streams.structures.ids[0]
+                self.pdb_stream = pdb.streams.structures
             elif isinstance(pdb, DataStream):
-                self.pdb_file = pdb.files[0]
-                self.pdb_input_id = pdb.ids[0]
+                self.pdb_stream = pdb
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
+            self.pdb_input_id = self.pdb_stream.ids[0]
 
         self.contigs = contigs
         self.inpaint = inpaint
@@ -308,8 +310,8 @@ echo "=== RFdiffusion installation complete ==="
             f"STEPS: {self.steps}"
         ])
 
-        if self.pdb_file:
-            config_lines.append(f"PDB: {self.pdb_file}")
+        if self.pdb_stream:
+            config_lines.append(f"PDB: {self.pdb_input_id}")
         if self.inpaint:
             config_lines.append(f"INPAINT: {self.inpaint}")
         if self.partial_steps > 0:
@@ -321,6 +323,10 @@ echo "=== RFdiffusion installation complete ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate RFdiffusion execution script."""
+        # Serialize input DataStream to JSON for runtime file resolution
+        if self.pdb_stream:
+            self.pdb_stream.save_json(self.pdb_ds_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# RFdiffusion execution script\n"
         script_content += self.generate_completion_check_header()
@@ -332,13 +338,18 @@ echo "=== RFdiffusion installation complete ==="
 
     def _generate_script_run_rfdiffusion(self) -> str:
         """Generate the RFdiffusion execution part of the script."""
+        # Resolve input PDB at runtime if a DataStream is provided
+        resolve_snippet = ""
+        if self.pdb_stream:
+            resolve_snippet = f'INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}\n'
+
         rfd_options = f"'contigmap.contigs=[{self.contigs}]'"
 
         if self.inpaint:
             rfd_options += f" 'contigmap.inpaint_seq=[{self.inpaint}]'"
 
-        if self.pdb_file:
-            rfd_options += f" inference.input_pdb={self.pdb_file}"
+        if self.pdb_stream:
+            rfd_options += " inference.input_pdb=$INPUT_PDB"
 
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
         prefix = os.path.join(self.output_folder, output_name)
@@ -356,7 +367,7 @@ echo "=== RFdiffusion installation complete ==="
         if self.active_site:
             rfd_options += " inference.ckpt_override_path=models/ActiveSite_ckpt.pt"
 
-        return f"""echo "Starting RFdiffusion"
+        return f"""{resolve_snippet}echo "Starting RFdiffusion"
 echo "Options: {rfd_options}"
 echo "Output folder: {self.output_folder}"
 
@@ -427,7 +438,7 @@ python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_ch
         base_dict = super().to_dict()
         base_dict.update({
             "rfd_params": {
-                "pdb_file": self.pdb_file,
+                "pdb_input_id": self.pdb_input_id,
                 "contigs": self.contigs,
                 "inpaint": self.inpaint,
                 "num_designs": self.num_designs,

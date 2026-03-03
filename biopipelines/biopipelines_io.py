@@ -19,7 +19,7 @@ Functions:
     get_all_values: Get all values from map_table for an ID
 
     # Table reference utilities (for per-structure lookups from external tables)
-    load_table: Load a table from path or DATASHEET_REFERENCE string
+    load_table: Load a table from path or TABLE_REFERENCE string
     lookup_table_value: Look up a value from a table for a given ID
     iterate_table_values: Iterate over (id, value) pairs from a table
 
@@ -40,8 +40,8 @@ Example usage:
     # Table reference for per-structure data (e.g., fixed positions from DistanceSelector)
     from biopipelines.biopipelines_io import load_table, lookup_table_value, iterate_table_values
 
-    # Load table (supports DATASHEET_REFERENCE:path:column format)
-    table, column = load_table("DATASHEET_REFERENCE:/path/to/positions.csv:within")
+    # Load table (supports TABLE_REFERENCE:path:column format)
+    table, column = load_table("TABLE_REFERENCE:/path/to/positions.csv:within")
 
     # Look up value for a specific structure
     fixed_positions = lookup_table_value(table, "protein_1", column)
@@ -495,14 +495,14 @@ def load_table(
     id_map: Optional[Dict[str, str]] = None
 ) -> Tuple[pd.DataFrame, Optional[str]]:
     """
-    Load a table from a path or DATASHEET_REFERENCE string.
+    Load a table from a path or TABLE_REFERENCE string.
 
     Supports two formats:
     1. Direct path: "/path/to/table.csv" - returns (DataFrame, None)
-    2. Reference: "DATASHEET_REFERENCE:/path/to/table.csv:column" - returns (DataFrame, column)
+    2. Reference: "TABLE_REFERENCE:/path/to/table.csv:column" - returns (DataFrame, column)
 
     Args:
-        reference: Either a file path or DATASHEET_REFERENCE:path:column string
+        reference: Either a file path or TABLE_REFERENCE:path:column string
         id_map: Optional ID mapping pattern (currently stored for later use)
 
     Returns:
@@ -517,17 +517,16 @@ def load_table(
         table, _ = load_table("/path/to/positions.csv")
 
         # Reference with column
-        table, column = load_table("DATASHEET_REFERENCE:/path/to/positions.csv:within")
+        table, column = load_table("TABLE_REFERENCE:/path/to/positions.csv:within")
         value = lookup_table_value(table, "protein_1", column)
     """
     column_name = None
 
-    if reference.startswith("DATASHEET_REFERENCE:"):
-        # Parse reference: DATASHEET_REFERENCE:path:column
+    if reference.startswith("TABLE_REFERENCE:"):
+        prefix = "TABLE_REFERENCE:"
+        # Parse reference: PREFIX:path:column
         # Handle Windows paths with drive letters (e.g., C:\path\to\file.csv)
-        # Format: DATASHEET_REFERENCE:<path>:<column>
         # The column is always the LAST colon-separated part
-        prefix = "DATASHEET_REFERENCE:"
         remainder = reference[len(prefix):]
 
         # Find the last colon that's not part of a Windows drive letter
@@ -539,14 +538,14 @@ def load_table(
         if last_colon == 1 and remainder[0].isalpha():
             # Only the drive letter colon exists, no column specified
             raise ValueError(
-                f"Invalid DATASHEET_REFERENCE format: '{reference}'. "
-                f"Expected 'DATASHEET_REFERENCE:path:column'"
+                f"Invalid TABLE_REFERENCE format: '{reference}'. "
+                f"Expected 'TABLE_REFERENCE:path:column'"
             )
 
         if last_colon == -1:
             raise ValueError(
-                f"Invalid DATASHEET_REFERENCE format: '{reference}'. "
-                f"Expected 'DATASHEET_REFERENCE:path:column'"
+                f"Invalid TABLE_REFERENCE format: '{reference}'. "
+                f"Expected 'TABLE_REFERENCE:path:column'"
             )
 
         table_path = remainder[:last_colon]
@@ -554,8 +553,8 @@ def load_table(
 
         if not table_path or not column_name:
             raise ValueError(
-                f"Invalid DATASHEET_REFERENCE format: '{reference}'. "
-                f"Expected 'DATASHEET_REFERENCE:path:column'"
+                f"Invalid TABLE_REFERENCE format: '{reference}'. "
+                f"Expected 'TABLE_REFERENCE:path:column'"
             )
     else:
         # Direct path
@@ -686,7 +685,7 @@ def lookup_table_value(
         KeyError: If ID not found in table or column doesn't exist
 
     Example:
-        table, column = load_table("DATASHEET_REFERENCE:/path/to/positions.csv:within")
+        table, column = load_table("TABLE_REFERENCE:/path/to/positions.csv:within")
         positions = lookup_table_value(table, "protein_1", column)
 
         # With ID mapping (e.g., "protein_1_2" maps to "protein_1" in table)
@@ -782,7 +781,7 @@ def iterate_table_values(
         KeyError: If any ID not found in table or column doesn't exist
 
     Example:
-        table, column = load_table("DATASHEET_REFERENCE:/path/to/positions.csv:within")
+        table, column = load_table("TABLE_REFERENCE:/path/to/positions.csv:within")
         for struct_id, positions in iterate_table_values(table, structure_ids, column):
             print(f"{struct_id}: {positions}")
     """
@@ -872,4 +871,102 @@ def resolve_id_by_provenance(
                 return source_id
 
     return None
+
+
+# =============================================================================
+# Resolve: Bash snippet generators for runtime resolution
+# =============================================================================
+# Used at config time by tool classes to generate bash expressions that defer
+# file path and table column lookups to execution time.
+#
+# Usage in tool generate_script methods:
+#
+#     f'INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}'
+#     # -> 'INPUT_PDB=$(resolve_stream_item "/path/ds.json" "4ufc")'
+#
+#     f'python run.py --pdb {Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}'
+#     # -> 'python run.py --pdb $(resolve_stream_item "/path/ds.json" "4ufc")'
+#
+# The bash function resolve_stream_item is sourced automatically by
+# BaseConfig.activate_environment(). No per-tool setup needed.
+
+
+class Resolve:
+    """Static bash snippet generators for runtime resolution."""
+
+    @staticmethod
+    def stream_item(ds_json: str, item_id: str) -> str:
+        """
+        Bash expression to resolve a file path from a DataStream JSON at runtime.
+
+        Args:
+            ds_json: Path to the serialized DataStream JSON file
+            item_id: ID of the item to resolve
+
+        Returns:
+            Bash subshell expression, e.g. $(resolve_stream_item "..." "...")
+        """
+        return f'$(resolve_stream_item "{ds_json}" "{item_id}")'
+
+    @staticmethod
+    def table_column(reference, item_id: str, env_name: str = "biopipelines") -> str:
+        """
+        Bash expression to resolve a table value inline (slow — spawns Python).
+
+        Uses conda/mamba run to execute in the biopipelines environment.
+        For bulk lookups, prefer pipe scripts that import biopipelines_io directly.
+
+        Args:
+            reference: TableReference object or TABLE_REFERENCE:path:column string
+            item_id: ID of the item to look up
+            env_name: Conda environment name (default: "biopipelines")
+
+        Returns:
+            Bash subshell expression calling resolve_table_column.py
+        """
+        from .config_manager import ConfigManager
+        mgr = ConfigManager().get_env_manager()
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        script = os.path.join(script_dir, "..", "HelpScripts", "resolve_table_column.py")
+        if mgr == "pip":
+            return f'$(python "{script}" "{reference}" "{item_id}")'
+        return f'$({mgr} run -n {env_name} --no-banner python "{script}" "{reference}" "{item_id}")'
+
+
+class TableReference:
+    """Typed reference to a specific column in a CSV table.
+
+    Created by TableInfo attribute access: table.column -> TableReference(path, "column").
+    str() produces TABLE_REFERENCE:path:column format consumed by pipe scripts.
+    """
+    PREFIX = "TABLE_REFERENCE"
+
+    def __init__(self, path: str, column: str):
+        self.path = path
+        self.column = column
+
+    def __str__(self) -> str:
+        return f"{self.PREFIX}:{self.path}:{self.column}"
+
+    def __repr__(self) -> str:
+        return f"TableReference({self.path!r}, {self.column!r})"
+
+    def __bool__(self) -> bool:
+        return bool(self.path and self.column)
+
+    @classmethod
+    def from_string(cls, s: str) -> 'TableReference':
+        """Parse a TABLE_REFERENCE:path:column string."""
+        if not s.startswith(f"{cls.PREFIX}:"):
+            raise ValueError(f"Not a TABLE_REFERENCE string: {s}")
+        rest = s[len(cls.PREFIX) + 1:]
+        idx = rest.rfind(":")
+        if idx <= 0:
+            raise ValueError(f"Invalid TABLE_REFERENCE format: {s}")
+        return cls(rest[:idx], rest[idx + 1:])
+
+    def resolve(self, item_id: str):
+        """Resolve value directly in Python (requires pandas)."""
+        table, column = load_table(str(self))
+        return lookup_table_value(table, item_id, column)
 

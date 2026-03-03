@@ -166,9 +166,8 @@ def _unpack_input(name: str, value: Any) -> Tuple[Any, str, Optional[str]]:
             if not isinstance(actual_value, str):
                 return actual_value, stream_name, entity_type
         elif len(value) == 2 and isinstance(value[1], str):
-            # Check it's not a TableInfo tuple by verifying second element looks like a stream name
             actual_value, stream_name = value
-            if not isinstance(actual_value, str):  # Not a (TableInfo, column_name) tuple
+            if not isinstance(actual_value, str):
                 return actual_value, stream_name, None
     return value, name, None
 

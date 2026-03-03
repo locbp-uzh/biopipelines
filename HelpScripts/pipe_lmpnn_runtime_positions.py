@@ -105,13 +105,13 @@ def resolve_table_reference(reference, design_ids):
     Resolve table reference to per-design selections.
 
     Args:
-        reference: Either a table reference like "DATASHEET_REFERENCE:path:column" or direct PyMOL selection
+        reference: Either a table reference like "TABLE_REFERENCE:path:column" or direct PyMOL selection
         design_ids: List of design IDs from DataStream
 
     Returns:
         Dictionary mapping design IDs to position lists
     """
-    if not reference.startswith("DATASHEET_REFERENCE:"):
+    if not reference.startswith("TABLE_REFERENCE:"):
         # Direct PyMOL selection - same for all designs
         return {design_id: sele_to_list(reference) for design_id in design_ids}
 
@@ -148,8 +148,8 @@ def process_selection_source(fixed_positions, designed_positions, design_entries
     """Process direct PyMOL selections or table references for fixed/designed positions.
 
     Args:
-        fixed_positions: Fixed positions string or DATASHEET_REFERENCE
-        designed_positions: Designed positions string or DATASHEET_REFERENCE
+        fixed_positions: Fixed positions string or TABLE_REFERENCE
+        designed_positions: Designed positions string or TABLE_REFERENCE
         design_entries: List of (design_id, pdb_file) tuples from DataStream
     """
     design_ids = [entry[0] for entry in design_entries]

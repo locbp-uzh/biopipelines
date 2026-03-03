@@ -210,16 +210,9 @@ echo "MMseqs2 processing completed"
 
         id_map_json = json.dumps(self.id_map).replace('"', '\\"')
 
-        # Handle tuple format: (TableInfo, "column_name")
-        if isinstance(self.mask_positions, tuple):
-            if len(self.mask_positions) == 2:
-                table_info, column_name = self.mask_positions
-                if hasattr(table_info, 'info'):
-                    return f' \\\n    --mask_table "{table_info.info.path}" \\\n    --mask_column "{column_name}" \\\n    --id_map "{id_map_json}"'
-                else:
-                    raise ValueError(f"Invalid table reference in mask parameter: {self.mask_positions}")
-            else:
-                raise ValueError(f"Invalid tuple format for mask parameter: {self.mask_positions}")
+        # Handle TableReference format: table.column_name
+        if hasattr(self.mask_positions, 'path') and hasattr(self.mask_positions, 'column'):
+            return f' \\\n    --mask_table "{self.mask_positions.path}" \\\n    --mask_column "{self.mask_positions.column}" \\\n    --id_map "{id_map_json}"'
 
         # Handle string format: direct selection like "10-20+30-40"
         elif isinstance(self.mask_positions, str):

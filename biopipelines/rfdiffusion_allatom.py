@@ -17,6 +17,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .config_manager import ConfigManager
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -24,6 +25,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from config_manager import ConfigManager
+    from biopipelines_io import Resolve
 
 
 class RFdiffusionAllAtom(BaseConfig):
@@ -89,6 +91,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
     main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusionAA_results.csv"))
     inference_py_file = Path(lambda self: "run_inference.py")
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
+    pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
 
     def _use_container(self) -> bool:
         """Check if container mode is configured for this tool."""
@@ -153,18 +156,17 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
             Tables:
                 structures: id | source_id | pdb | fixed | designed | contigs | time | status
         """
-        # Resolve optional pdb input
-        self.pdb_file: Optional[str] = None
+        # Resolve optional pdb input — store stream for runtime resolution
+        self.pdb_stream: Optional[DataStream] = None
         self.pdb_input_id: Optional[str] = None
         if pdb is not None:
             if isinstance(pdb, StandardizedOutput):
-                self.pdb_file = pdb.streams.structures.files[0]
-                self.pdb_input_id = pdb.streams.structures.ids[0]
+                self.pdb_stream = pdb.streams.structures
             elif isinstance(pdb, DataStream):
-                self.pdb_file = pdb.files[0]
-                self.pdb_input_id = pdb.ids[0]
+                self.pdb_stream = pdb
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
+            self.pdb_input_id = self.pdb_stream.ids[0]
 
         # Core parameters
         self.contigs = contigs
@@ -237,8 +239,8 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
             f"STEPS: {self.steps}"
         ])
 
-        if self.pdb_file:
-            config_lines.append(f"PDB: {self.pdb_file}")
+        if self.pdb_stream:
+            config_lines.append(f"PDB: {self.pdb_input_id}")
         if self.inpaint:
             config_lines.append(f"INPAINT: {self.inpaint}")
         if self.partial_steps > 0:
@@ -269,6 +271,10 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         """Generate RFdiffusion-AllAtom execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
+        # Serialize input DataStream to JSON for runtime file resolution
+        if self.pdb_stream:
+            self.pdb_stream.save_json(self.pdb_ds_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# RFdiffusion-AllAtom execution script\n"
         script_content += self.generate_completion_check_header()
@@ -294,8 +300,8 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         aa_args.append("inference.ckpt_path=RFDiffusionAA_paper_weights.pt")
         aa_args.append(f"diffuser.T={self.steps}")
 
-        if self.pdb_file:
-            aa_args.append(f"inference.input_pdb={self.pdb_file}")
+        if self.pdb_stream:
+            aa_args.append("inference.input_pdb=$INPUT_PDB")
         else:
             aa_args.append("inference.input_pdb=null")
 
@@ -346,6 +352,11 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
 
     def _generate_script_run_rfdiffusion(self) -> str:
         """Generate the RFdiffusion-AllAtom execution part of the script."""
+        # Resolve input PDB at runtime if a DataStream is provided
+        resolve_snippet = ""
+        if self.pdb_stream:
+            resolve_snippet = f'INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}\n'
+
         aa_args = self._build_inference_args()
         args_str = ' '.join(aa_args)
         repo_dir = self.folders["RFdiffusionAllAtom"]
@@ -353,7 +364,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         if self._use_container():
             container_path = self.folders[f"container:{self.TOOL_NAME}"]
             container_exec = ConfigManager().get_container_executor()
-            return f"""echo "Starting RFdiffusion-AllAtom (container mode)"
+            return f"""{resolve_snippet}echo "Starting RFdiffusion-AllAtom (container mode)"
 echo "Container: {container_path}"
 echo "Arguments: {args_str}"
 echo "Output folder: {self.output_folder}"
@@ -363,7 +374,7 @@ cd {repo_dir}
 
 """
         else:
-            return f"""echo "Starting RFdiffusion-AllAtom (environment mode)"
+            return f"""{resolve_snippet}echo "Starting RFdiffusion-AllAtom (environment mode)"
 echo "Arguments: {args_str}"
 echo "Output folder: {self.output_folder}"
 
@@ -432,7 +443,7 @@ python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_ch
         base_dict = super().to_dict()
         base_dict.update({
             "rfdaa_params": {
-                "pdb_file": self.pdb_file,
+                "pdb_input_id": self.pdb_input_id,
                 "contigs": self.contigs,
                 "inpaint": self.inpaint,
                 "num_designs": self.num_designs,
@@ -471,6 +482,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     prepared_pdb = Path(lambda self: os.path.join(self.output_folder, "prepared_ligand.pdb"))
     structures_csv = Path(lambda self: os.path.join(self.output_folder, "structures.csv"))
     helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdaa_prepare_ligand.py"))
+    ligand_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_ligand.json"))
 
     def __init__(self,
                  ligand: Union[DataStream, StandardizedOutput],
@@ -487,20 +499,21 @@ class RFDAA_PrepareLigand(BaseConfig):
             Tables:
                 structures: id | file_path
         """
-        # Resolve ligand input
+        # Resolve ligand input — store stream for runtime resolution
         if isinstance(ligand, StandardizedOutput):
-            self.ligand_file = ligand.streams.structures.files[0]
+            self.ligand_stream = ligand.streams.structures
         elif isinstance(ligand, DataStream):
-            self.ligand_file = ligand.files[0]
+            self.ligand_stream = ligand
         else:
             raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
+        self.ligand_input_id = self.ligand_stream.ids[0]
 
         super().__init__(**kwargs)
 
     def validate_params(self):
         """Validate parameters."""
-        if not self.ligand_file:
-            raise ValueError("ligand file is required")
+        if not self.ligand_stream:
+            raise ValueError("ligand input is required")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure inputs."""
@@ -509,24 +522,28 @@ class RFDAA_PrepareLigand(BaseConfig):
     def get_config_display(self) -> List[str]:
         """Get configuration display."""
         config_lines = super().get_config_display()
-        config_lines.append(f"LIGAND_SOURCE: {os.path.basename(self.ligand_file)}")
+        config_lines.append(f"LIGAND_SOURCE: {self.ligand_input_id}")
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to combine ligand with dummy peptide."""
         os.makedirs(self.output_folder, exist_ok=True)
 
+        # Serialize input DataStream to JSON for runtime file resolution
+        self.ligand_stream.save_json(self.ligand_ds_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# RFDAA_PrepareLigand execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += f"""
+        script_content += f"""LIGAND_FILE={Resolve.stream_item(self.ligand_ds_json, self.ligand_input_id)}
+
 echo "Preparing ligand structure for RFdiffusion-AllAtom"
-echo "Input ligand: {self.ligand_file}"
+echo "Input ligand: $LIGAND_FILE"
 echo "Output: {self.prepared_pdb}"
 
 python "{self.helper_script}" \\
-  --ligand_pdb "{self.ligand_file}" \\
+  --ligand_pdb "$LIGAND_FILE" \\
   --output_pdb "{self.prepared_pdb}" \\
   --output_csv "{self.structures_csv}" \\
   --pdbs_folder "{self.folders['PDBs']}"
@@ -580,7 +597,7 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "ligand_source": self.ligand_file
+                "ligand_input_id": self.ligand_input_id
             }
         })
         return base_dict

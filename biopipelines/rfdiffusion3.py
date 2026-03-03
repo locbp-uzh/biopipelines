@@ -19,12 +19,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
+    from biopipelines_io import Resolve
 
 
 class RFdiffusion3(BaseConfig):
@@ -172,6 +174,7 @@ echo "=== RFdiffusion3 installation complete ==="
     checkpoint_dir = Path(lambda self: self.folders["RFdiffusion3"])
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_table.py"))
     postprocess_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_postprocess.py"))
+    pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
 
     def __init__(self,
                  contig: str = "",
@@ -222,37 +225,35 @@ echo "=== RFdiffusion3 installation complete ==="
                 specifications: id | design | model | sampled_contig | num_tokens_in | num_residues_in | num_chains | num_atoms | num_residues
                 sequences: id | source_id | source_pdb | chain | sequence | length
         """
-        # Resolve PDB input
-        self.input_pdb_file: Optional[str] = None
+        # Resolve PDB input — store stream for runtime resolution
+        self.pdb_stream: Optional[DataStream] = None
         self.pdb_input_id: Optional[str] = None
 
         # Handle ligand structure (takes precedence over pdb)
         if ligand_structure is not None:
             if isinstance(ligand_structure, StandardizedOutput):
-                self.input_pdb_file = ligand_structure.streams.structures.files[0]
-                self.pdb_input_id = ligand_structure.streams.structures.ids[0]
+                self.pdb_stream = ligand_structure.streams.structures
                 # Auto-extract ligand code from compound_ids if not provided
                 if not ligand_code and ligand_structure.streams.compounds:
                     ligand_code = ligand_structure.streams.compounds.ids[0] if ligand_structure.streams.compounds.ids else ""
             elif isinstance(ligand_structure, DataStream):
-                self.input_pdb_file = ligand_structure.files[0]
-                self.pdb_input_id = ligand_structure.ids[0]
+                self.pdb_stream = ligand_structure
             else:
                 raise ValueError(f"ligand_structure must be DataStream or StandardizedOutput, got {type(ligand_structure)}")
+            self.pdb_input_id = self.pdb_stream.ids[0]
         # Handle PDB input (only if ligand_structure not provided)
         elif pdb is not None:
             if isinstance(pdb, StandardizedOutput):
-                self.input_pdb_file = pdb.streams.structures.files[0]
-                self.pdb_input_id = pdb.streams.structures.ids[0]
-                if len(pdb.streams.structures.files) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures.files)}), using first: {pdb.streams.structures.files[0]}")
+                self.pdb_stream = pdb.streams.structures
+                if len(pdb.streams.structures.ids) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures.ids)}), using first: {pdb.streams.structures.ids[0]}")
             elif isinstance(pdb, DataStream):
-                self.input_pdb_file = pdb.files[0]
-                self.pdb_input_id = pdb.ids[0]
-                if len(pdb.files) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.files)}), using first: {pdb.files[0]}")
+                self.pdb_stream = pdb
+                if len(pdb.ids) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb.ids)}), using first: {pdb.ids[0]}")
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
+            self.pdb_input_id = self.pdb_stream.ids[0]
 
         # Store parameters
         self.contig = contig
@@ -400,9 +401,9 @@ echo "=== RFdiffusion3 installation complete ==="
         config[design_key] = {}
         entry = config[design_key]
 
-        # Input structure (ligand PDB or scaffold PDB)
-        if self.input_pdb_file:
-            entry["input"] = self.input_pdb_file
+        # Input structure — use placeholder; resolved at runtime via jq
+        if self.pdb_stream:
+            entry["input"] = "__RESOLVE_INPUT_PDB__"
 
         # Ligand specification
         if self.ligand_code:
@@ -443,8 +444,8 @@ echo "=== RFdiffusion3 installation complete ==="
         config_lines = super().get_config_display()
 
         # Input information
-        if self.input_pdb_file:
-            config_lines.append(f"INPUT PDB: {os.path.basename(self.input_pdb_file)}")
+        if self.pdb_stream:
+            config_lines.append(f"INPUT PDB: {self.pdb_input_id}")
         else:
             config_lines.append("INPUT: De novo design")
 
@@ -513,7 +514,16 @@ echo "=== RFdiffusion3 installation complete ==="
         with open(self.json_file, 'w') as f:
             json.dump(json_config, f, indent=2)
 
-        return f"""echo "Using RFdiffusion3 JSON configuration: {self.json_file}"
+        # If input PDB uses a DataStream, resolve the placeholder at runtime
+        resolve_snippet = ""
+        if self.pdb_stream:
+            resolve_snippet = f"""INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}
+
+# Patch the JSON config with the resolved input PDB path
+jq --arg path "$INPUT_PDB" '(.[] | select(.input == "__RESOLVE_INPUT_PDB__")).input = $path' "{self.json_file}" > "{self.json_file}.tmp" && mv "{self.json_file}.tmp" "{self.json_file}"
+"""
+
+        return f"""{resolve_snippet}echo "Using RFdiffusion3 JSON configuration: {self.json_file}"
 
 """
 
@@ -599,6 +609,10 @@ python "{self.table_py_file}" \\
         Returns:
             Script content as string
         """
+        # Serialize input DataStream to JSON for runtime file resolution
+        if self.pdb_stream:
+            self.pdb_stream.save_json(self.pdb_ds_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# RFdiffusion3 execution script\n"
         script_content += "# Generated by BioPipelines\n\n"
@@ -742,7 +756,7 @@ python "{self.table_py_file}" \\
                 "select_hbond_acceptor": self.select_hbond_acceptor,
                 "has_json_config": self.json_config is not None,
                 "design_startnum": self.design_startnum,
-                "input_pdb_file": self.input_pdb_file
+                "pdb_input_id": self.pdb_input_id
             }
         })
         return base_dict

@@ -14,6 +14,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -21,6 +22,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids
+    from biopipelines_io import Resolve
 
 
 class LigandMPNN(BaseConfig):
@@ -110,10 +112,10 @@ echo "=== LigandMPNN installation complete ==="
             num_sequences: Number of sequences per batch (maps to --batch_size in LigandMPNN)
             fixed: Fixed positions. Accepts:
                    - PyMOL selection string: "10-20+30-40"
-                   - Table column reference: (table, "column_name")
+                   - TableReference: table.column_name
             redesigned: Designed positions. Accepts:
                    - PyMOL selection string: "10-20+30-40"
-                   - Table column reference: (table, "column_name")
+                   - TableReference: table.column_name
             design_within: Distance in Angstrom from ligand to redesign (fallback if positions not specified)
             model: LigandMPNN model version to use
             num_batches: Number of batches to run
@@ -193,9 +195,7 @@ echo "=== LigandMPNN installation complete ==="
         import json
 
         # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
-        datastream_dict = self.structures_stream.to_dict()
-        with open(self.structures_json, 'w') as f:
-            json.dump(datastream_dict, f, indent=2)
+        self.structures_stream.save_json(self.structures_json)
 
         # Write pdb_basename -> stream_id map for runtime ID remapping
         id_map = {}
@@ -217,9 +217,8 @@ echo "=== LigandMPNN installation complete ==="
 
     def _generate_script_setup_positions(self) -> str:
         """Generate the position setup and script modification part."""
-        # Resolve table references to DATASHEET_REFERENCE format
-        resolved_fixed = self.resolve_table_reference(self.fixed) if self.fixed else ""
-        resolved_redesigned = self.resolve_table_reference(self.redesigned) if self.redesigned else ""
+        resolved_fixed = self.fixed if self.fixed else ""
+        resolved_redesigned = self.redesigned if self.redesigned else ""
 
         # Determine input source for positions
         if resolved_fixed or resolved_redesigned:
@@ -241,17 +240,20 @@ echo "=== LigandMPNN installation complete ==="
         base_options += f' --out_folder "{self.output_folder}"'
 
         # Generate commands for each structure using DataStream IDs
+        # File paths are resolved at runtime via resolve_stream_item
         commands = []
-        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
-            pdb_name = os.path.basename(pdb_path)
-            commands.append(f'echo "Processing {pdb_name} with positions for ID: {struct_id}"')
-            commands.append(f'python run.py {base_options} --pdb_path "{pdb_path}" {struct_id}_FIXED_OPTION_PLACEHOLDER {struct_id}_REDESIGNED_OPTION_PLACEHOLDER')
+        for struct_id in self.structures_stream.ids:
+            commands.append(f'echo "Processing structure for ID: {struct_id}"')
+            commands.append(f'{struct_id}_FILE=$(resolve_stream_item "{self.structures_json}" "{struct_id}")')
+            commands.append(f'python run.py {base_options} --pdb_path "${struct_id}_FILE" {struct_id}_FIXED_OPTION_PLACEHOLDER {struct_id}_REDESIGNED_OPTION_PLACEHOLDER')
             commands.append("")
 
         # Write commands file at configuration time (not execution time)
         os.makedirs(os.path.dirname(self.commands_file), exist_ok=True)
         with open(self.commands_file, 'w') as f:
             f.write("#!/bin/bash\n")
+            resolve_sh = os.path.join(self.folders["HelpScripts"], "resolve_stream_item.sh")
+            f.write(f'source "{resolve_sh}"\n')
             f.write(f"cd {self.lmpnn_folder}\n\n")
             f.write("# LigandMPNN commands with placeholders - will be replaced by position script\n")
             f.write(chr(10).join(commands))

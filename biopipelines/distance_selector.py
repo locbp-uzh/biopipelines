@@ -16,12 +16,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .biopipelines_io import TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from biopipelines_io import TableReference
 
 
 class DistanceSelector(BaseConfig):
@@ -108,10 +110,7 @@ echo "=== DistanceSelector ready ==="
         super().__init__(**kwargs)
 
         # Track dependency if restrict_to_selection is a table reference
-        if isinstance(restrict_to, tuple) and len(restrict_to) == 2:
-            table_obj, _ = restrict_to
-            if hasattr(table_obj, 'config'):
-                self.dependencies.append(table_obj.config)
+        # (TableReference no longer carries the source table object)
 
     def validate_params(self):
         """Validate DistanceSelector-specific parameters."""
@@ -132,11 +131,8 @@ echo "=== DistanceSelector ready ==="
 
         # Validate restrict_to_selection if provided
         if self.restrict_to_selection is not None:
-            if isinstance(self.restrict_to_selection, tuple):
-                if len(self.restrict_to_selection) != 2:
-                    raise ValueError("Table reference must be a tuple of (table, column_name)")
-            elif not isinstance(self.restrict_to_selection, str):
-                raise ValueError("restrict_to_selection must be a string, tuple, or None")
+            if not isinstance(self.restrict_to_selection, (str, TableReference)):
+                raise ValueError("restrict_to_selection must be a string, TableReference, or None")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -191,7 +187,7 @@ echo "=== DistanceSelector ready ==="
 
         # Resolve restrict_to_selection using base class method
         if self.restrict_to_selection is not None:
-            restrict_spec = self.resolve_table_reference(self.restrict_to_selection)
+            restrict_spec = self.restrict_to_selection
         else:
             restrict_spec = ""  # Empty means no restriction
 

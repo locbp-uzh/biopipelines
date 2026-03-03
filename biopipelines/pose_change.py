@@ -17,12 +17,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from biopipelines_io import Resolve
 
 
 class PoseChange(BaseConfig):
@@ -53,6 +55,7 @@ echo "=== PoseChange ready ==="
     analysis_csv = Path(lambda self: os.path.join(self.output_folder, "pose_analysis.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "pose_config.json"))
     samples_ds_json = Path(lambda self: os.path.join(self.output_folder, "samples_structures.json"))
+    reference_ds_json = Path(lambda self: os.path.join(self.output_folder, "reference_structure.json"))
     pose_change_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pose_change.py"))
 
     def __init__(self,
@@ -171,12 +174,15 @@ echo "=== PoseChange ready ==="
         """Generate the pose distance analysis part of the script."""
         import json
 
-        # Serialize sample structures DataStream to JSON for HelpScript to load
-        with open(self.samples_ds_json, 'w') as f:
-            json.dump(self.samples_stream.to_dict(), f, indent=2)
+        # Serialize DataStreams to JSON for runtime resolution
+        self.samples_stream.save_json(self.samples_ds_json)
+        self.reference_stream.save_json(self.reference_ds_json)
+
+        reference_id = self.reference_stream.ids[0]
 
         config_data = {
-            "reference_pdb": self.reference_stream.files[0],
+            "reference_json": self.reference_ds_json,
+            "reference_id": reference_id,
             "reference_ligand": self.reference_ligand,
             "samples_json": self.samples_ds_json,
             "ligand": self.sample_ligand,
@@ -188,14 +194,19 @@ echo "=== PoseChange ready ==="
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""echo "Running pose distance analysis"
-echo "Reference: {os.path.basename(self.reference_stream.files[0])}"
+        return f"""REFERENCE_PDB={Resolve.stream_item(self.reference_ds_json, reference_id)}
+
+echo "Running pose distance analysis"
+echo "Reference: $REFERENCE_PDB"
 echo "Reference ligand: {self.reference_ligand}"
 echo "Sample structures: {len(self.samples_stream)}"
 echo "Sample ligand: {self.sample_ligand}"
 echo "Reference alignment: {self.reference_alignment}"
 echo "Target alignment: {self.target_alignment}"
 echo "Output: {self.analysis_csv}"
+
+# Patch config with resolved reference PDB path
+jq --arg path "$REFERENCE_PDB" '.reference_pdb = $path' "{self.config_file}" > "{self.config_file}.tmp" && mv "{self.config_file}.tmp" "{self.config_file}"
 
 python "{self.pose_change_py}" --config "{self.config_file}"
 

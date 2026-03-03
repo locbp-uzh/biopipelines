@@ -17,12 +17,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .biopipelines_io import TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from biopipelines_io import TableReference
 
 
 class SelectionEditor(BaseConfig):
@@ -91,14 +93,15 @@ echo "=== SelectionEditor ready ==="
         self.invert = invert
 
         # Validate selection reference format
-        if not isinstance(selection, tuple) or len(selection) != 2:
+        if not isinstance(selection, TableReference):
             raise ValueError(
-                "selection must be a table column reference tuple. "
+                "selection must be a TableReference. "
                 "Example: tool.tables.structures.designed"
             )
 
         # Extract the source table and column from the selection reference
-        self.selection_table, self.selection_column = self.selection_ref
+        self.selection_table_path = self.selection_ref.path
+        self.selection_column = self.selection_ref.column
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -129,11 +132,7 @@ echo "=== SelectionEditor ready ==="
         """Configure input sources."""
         self.folders = pipeline_folders
 
-        # Get the selection table path
-        if hasattr(self.selection_table, 'info'):
-            self.selection_table_path = self.selection_table.info.path
-        else:
-            raise ValueError("Invalid selection table reference")
+        # selection_table_path already set from TableReference in __init__
 
     def get_config_display(self) -> List[str]:
         """Get SelectionEditor configuration display lines."""
@@ -142,7 +141,7 @@ echo "=== SelectionEditor ready ==="
         config_lines.extend([
             f"INPUT STRUCTURES: {len(self.structures_stream)} files",
             f"SELECTION COLUMN: {self.selection_column}",
-            f"SELECTION SOURCE: {self.selection_table.info.name}"
+            f"SELECTION SOURCE: {os.path.basename(self.selection_table_path)}"
         ])
 
         # Operations
@@ -253,7 +252,7 @@ echo "Modified selections saved to: {self.selections_csv}"
         base_dict.update({
             "selection_editor_params": {
                 "selection_column": self.selection_column,
-                "selection_table": self.selection_table.info.name,
+                "selection_table": self.selection_table_path,
                 "expand": self.expand,
                 "shrink": self.shrink,
                 "shift": self.shift,

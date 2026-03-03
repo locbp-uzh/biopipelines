@@ -528,7 +528,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                     self._structure_sources.append(structures)
 
                 selection = op.params.get("selection")
-                if isinstance(selection, tuple):
+                if hasattr(selection, 'path') and hasattr(selection, 'column'):
                     self._table_references.append(selection)
 
             elif op.op_type == "render_each":
@@ -538,7 +538,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
 
             elif op.op_type == "align":
                 selection = op.params.get("selection")
-                if isinstance(selection, tuple):
+                if hasattr(selection, 'path') and hasattr(selection, 'column'):
                     self._table_references.append(selection)
 
             elif op.op_type == "coloralign":
@@ -551,7 +551,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
 
             elif op.op_type == "names":
                 basename = op.params.get("basename")
-                if isinstance(basename, tuple):
+                if hasattr(basename, 'path') and hasattr(basename, 'column'):
                     self._table_references.append(basename)
 
     def validate_params(self):
@@ -620,17 +620,13 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                     "table_path": value.info.path,
                     "columns": value.info.columns
                 }
-            elif isinstance(value, tuple) and len(value) == 2:
-                # Table column reference: (TableInfo, column_name)
-                table_info, column_name = value
-                if hasattr(table_info, 'info'):
-                    result[key] = {
-                        "type": "table_column",
-                        "table_path": table_info.info.path,
-                        "column_name": column_name
-                    }
-                else:
-                    result[key] = str(value)
+            elif hasattr(value, 'path') and hasattr(value, 'column'):
+                # TableReference from table.column access
+                result[key] = {
+                    "type": "table_column",
+                    "table_path": value.path,
+                    "column_name": value.column
+                }
             elif hasattr(value, 'output_folder'):
                 # ToolOutput or similar - check for DataStream in structures
                 structures_attr = getattr(value, 'structures', None)

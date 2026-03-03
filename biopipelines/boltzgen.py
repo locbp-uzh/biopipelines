@@ -17,12 +17,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
+    from biopipelines_io import Resolve
 
 
 class BoltzGen(BaseConfig):
@@ -90,6 +92,7 @@ echo "=== BoltzGen installation complete ==="
     # Helper script paths
     boltzgen_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen.py"))
     boltzgen_config_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_config.py"))
+    target_ds_json = Path(lambda self: os.path.join(self.output_folder, "target_structure.json"))
 
     def __init__(self,
                  # Design specification - Option 1: Manual YAML/dict
@@ -223,7 +226,9 @@ echo "=== BoltzGen installation complete ==="
 
         # Track inputs from previous tools
         self.ligand_compounds_csv = None  # Path to compounds.csv from Ligand tool
-        self.target_structure_path = None  # Path to target protein structure
+        self.target_structure_path = None  # Raw path string (when given directly)
+        self.target_stream = None  # DataStream for runtime resolution
+        self.target_input_id = None  # ID of target structure
         self.reuse_path = None  # Will be set in configure_inputs if reuse is provided
 
         # Resolve input types and extract paths
@@ -252,7 +257,7 @@ echo "=== BoltzGen installation complete ==="
             self.design_spec_is_dict = False
             self.design_spec_is_yaml_str = False
             self.design_spec_is_file = False
-        elif self.target_structure_path is not None and binder_spec is not None:
+        elif (self.target_stream is not None or self.target_structure_path is not None) and binder_spec is not None:
             # Automatic mode: target_structure + binder_spec (protein-anything)
             self.spec_mode = "target"
             self.design_spec_is_dict = False
@@ -283,22 +288,24 @@ echo "=== BoltzGen installation complete ==="
             raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
 
     def _resolve_target_structure_input(self, target_structure: Union[str, DataStream, StandardizedOutput, None]):
-        """Resolve target structure input to file path."""
+        """Resolve target structure input — store stream for runtime resolution."""
         if target_structure is None:
             return
 
         if isinstance(target_structure, StandardizedOutput):
             if target_structure.streams.structures and len(target_structure.streams.structures) > 0:
-                # Get first structure file
-                self.target_structure_path = target_structure.streams.structures.files[0]
+                self.target_stream = target_structure.streams.structures
+                self.target_input_id = self.target_stream.ids[0]
             else:
                 raise ValueError("target_structure StandardizedOutput has no structures")
         elif isinstance(target_structure, DataStream):
             if len(target_structure) > 0:
-                self.target_structure_path = target_structure.files[0]
+                self.target_stream = target_structure
+                self.target_input_id = self.target_stream.ids[0]
             else:
                 raise ValueError("target_structure DataStream is empty")
         elif isinstance(target_structure, str):
+            # Raw path string — no DataStream, will be used directly
             self.target_structure_path = target_structure
         else:
             raise ValueError(f"target_structure must be str, DataStream, or StandardizedOutput, got {type(target_structure)}")
@@ -344,7 +351,7 @@ echo "=== BoltzGen installation complete ==="
                 raise ValueError("binder_spec is required for protein-small_molecule mode")
 
         if self.spec_mode == "target":
-            if not self.target_structure_path:
+            if not self.target_stream and not self.target_structure_path:
                 raise ValueError("target_structure is required for protein-anything mode")
             if not self.binder_spec:
                 raise ValueError("binder_spec is required for protein-anything mode")
@@ -438,7 +445,9 @@ echo "=== BoltzGen installation complete ==="
                 spec_display += f"\n  Binding region: {self.binding_region}"
         elif self.spec_mode == "target":
             spec_display = "Automatic (from target_structure + binder_spec)"
-            if self.target_structure_path:
+            if self.target_input_id:
+                spec_display += f"\n  Target: {self.target_input_id}"
+            elif self.target_structure_path:
                 spec_display += f"\n  Target: {os.path.basename(self.target_structure_path)}"
             if self.ligand_code:
                 spec_display += f"\n  Ligand code: {self.ligand_code}"
@@ -505,10 +514,11 @@ echo "=== BoltzGen installation complete ==="
         # Build entities section
         entities = []
 
-        # Add target structure
+        # Add target structure — path resolved at runtime
+        target_path = self.target_structure_path or "__RESOLVE_TARGET_STRUCTURE__"
         entities.append({
             "file": {
-                "path": self.target_structure_path,
+                "path": target_path,
                 "include": [{"chain": {"id": "A"}}]  # Default to chain A
             }
         })
@@ -550,6 +560,10 @@ echo "=== BoltzGen installation complete ==="
         # Create output directories
         os.makedirs(self.output_folder, exist_ok=True)
         os.makedirs(self.config_folder, exist_ok=True)
+
+        # Serialize target DataStream to JSON for runtime file resolution
+        if self.target_stream:
+            self.target_stream.save_json(self.target_ds_json)
 
         # Parse binder spec
         binder_min, binder_max = self._parse_binder_spec()
@@ -668,17 +682,22 @@ fi
 
         elif self.spec_mode == "target":
             # Target mode: generate YAML at runtime with target structure
-            target_args = f' --target-structure "{self.target_structure_path}"'
+            # Resolve target structure path at runtime if from a DataStream
+            resolve_snippet = ""
+            if self.target_stream:
+                resolve_snippet = f"""TARGET_STRUCTURE={Resolve.stream_item(self.target_ds_json, self.target_input_id)}
+"""
+                target_args = ' --target-structure "$TARGET_STRUCTURE"'
+            else:
+                target_args = f' --target-structure "{self.target_structure_path}"'
+
             if self.ligand_code:
                 target_args += f' --ligand-code "{self.ligand_code}"'
             if self.binding_region:
                 target_args += f' --binding-region "{self.binding_region}"'
 
-            # For target mode we need a ligand CSV - create a dummy one if not provided
-            # Or require ligand input for target mode too
-            return f'''# Generate design specification from target structure
+            return f'''{resolve_snippet}# Generate design specification from target structure
 echo "Generating design specification from target structure..."
-# Note: Target mode with protein structure - YAML will be built at runtime
 python "{self.boltzgen_config_py}" \\
   --ligand-csv "NONE" \\
   --output-yaml "{self.design_spec_yaml_file}" \\
@@ -962,7 +981,7 @@ fi
 
         # Prepare design spec for serialization
         if self.spec_mode == "automatic":
-            design_spec_value = f"<automatic from {self.target_structure_path}>"
+            design_spec_value = f"<automatic from {self.target_input_id or self.target_structure_path}>"
         elif self.design_spec_is_dict:
             design_spec_value = "<dict>"
         else:
@@ -972,7 +991,7 @@ fi
             "tool_params": {
                 "spec_mode": self.spec_mode,
                 "design_spec": design_spec_value,
-                "target_structure": str(self.target_structure_path) if self.target_structure_path else None,
+                "target_input_id": self.target_input_id,
                 "ligand_compounds_csv": self.ligand_compounds_csv,
                 "binder_spec": self.binder_spec,
                 "binding_region": self.binding_region,
