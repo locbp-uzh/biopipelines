@@ -282,6 +282,14 @@ class DataStream:
             'files_contain_wildcards': self.files_contain_wildcards
         }
 
+    def save_json(self, path: str) -> str:
+        """Save DataStream to JSON file. Returns path."""
+        import json
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(self.to_dict(), f, indent=2)
+        return path
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DataStream':
         """

@@ -181,9 +181,7 @@ echo "=== DistanceSelector ready ==="
         import json
 
         # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
-        datastream_dict = self.structures_stream.to_dict()
-        with open(self.structures_json, 'w') as f:
-            json.dump(datastream_dict, f, indent=2)
+        self.structures_stream.save_json(self.structures_json)
 
         # Determine reference specification
         if self.reference == "ligand":

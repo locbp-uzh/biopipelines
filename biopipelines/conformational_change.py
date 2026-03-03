@@ -177,11 +177,8 @@ echo "=== ConformationalChange ready ==="
         import json
 
         # Serialize DataStreams to JSON for HelpScript to load
-        with open(self.reference_ds_json, 'w') as f:
-            json.dump(self.reference_stream.to_dict(), f, indent=2)
-
-        with open(self.target_ds_json, 'w') as f:
-            json.dump(self.target_stream.to_dict(), f, indent=2)
+        self.reference_stream.save_json(self.reference_ds_json)
+        self.target_stream.save_json(self.target_ds_json)
 
         # Handle selection input
         if self.selection_spec is None:

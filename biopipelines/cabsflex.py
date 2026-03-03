@@ -208,8 +208,7 @@ echo "=== CABS-Flex installation complete ==="
         import json
 
         # Serialize structures DataStream to JSON
-        with open(self.structures_ds_json, 'w') as f:
-            json.dump(self.structures_stream.to_dict(), f, indent=2)
+        self.structures_stream.save_json(self.structures_ds_json)
 
         script_content = "#!/bin/bash\n"
         script_content += "# CABS-Flex execution script\n"

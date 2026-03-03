@@ -232,8 +232,7 @@ echo "=== Angle ready ==="
         os.makedirs(self.output_folder, exist_ok=True)
 
         # Serialize structures DataStream to JSON for HelpScript to load
-        with open(self.structures_ds_json, 'w') as f:
-            json.dump(self.structures_stream.to_dict(), f, indent=2)
+        self.structures_stream.save_json(self.structures_ds_json)
 
         # Create config data
         config_data = {

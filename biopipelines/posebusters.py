@@ -200,16 +200,14 @@ echo "=== PoseBusters installation complete ==="
     def generate_script_run_posebusters(self) -> str:
         """Generate the PoseBusters validation part of the script."""
         # Serialize structures DataStream to JSON
-        with open(self.structures_ds_json, 'w') as f:
-            json.dump(self.structures_stream.to_dict(), f, indent=2)
+        self.structures_stream.save_json(self.structures_ds_json)
 
         # Build reference_pdb path for redock mode
         reference_pdb = None
         if self.reference_ligand_stream is not None:
             # For redock, serialize reference DataStream and pass path
             ref_ds_json = os.path.join(self.output_folder, "reference_ligand.json")
-            with open(ref_ds_json, 'w') as f:
-                json.dump(self.reference_ligand_stream.to_dict(), f, indent=2)
+            self.reference_ligand_stream.save_json(ref_ds_json)
             reference_pdb = ref_ds_json
 
         config_data = {
