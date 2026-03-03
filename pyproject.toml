@@ -25,6 +25,8 @@ bp-config = "biopipelines.cli:config"
 biopipelines-submit = "biopipelines.cli:submit"
 biopipelines-run = "biopipelines.cli:run"
 biopipelines-config = "biopipelines.cli:config"
+bp-otf = "biopipelines.cli:otf"
+biopipelines-otf = "biopipelines.cli:otf"
 
 [tool.setuptools.packages.find]
 include = ["biopipelines*"]

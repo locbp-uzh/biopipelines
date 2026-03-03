@@ -5,7 +5,7 @@
 """
 Command-line entry points for BioPipelines.
 
-Provides biopipelines-submit, biopipelines-run, and biopipelines-config
+Provides biopipelines-submit, biopipelines-run, biopipelines-config, and biopipelines-otf
 commands that work from any directory by locating the repository root automatically.
 """
 
@@ -15,6 +15,7 @@ import re
 import sys
 import getpass
 import subprocess
+import tempfile
 
 
 def _get_repo_root():
@@ -103,6 +104,204 @@ def submit():
 def run():
     """Entry point for biopipelines-run."""
     _run_script("run")
+
+
+def _generate_gpu_line(gpu_spec):
+    """Generate SBATCH GPU line from a GPU specification string."""
+    if gpu_spec is None or gpu_spec in ("none", ""):
+        return ""
+    elif gpu_spec == "high-memory":
+        return '#SBATCH --gpus=1\n#SBATCH --constraint="GPUMEM32GB|GPUMEM80GB|GPUMEM96GB"'
+    elif gpu_spec in ("gpu", "any"):
+        return "#SBATCH --gpus=1"
+    elif gpu_spec.startswith("!"):
+        excluded = gpu_spec[1:]
+        if excluded.upper() == "L4":
+            return '#SBATCH --gpus=1\n#SBATCH --constraint="GPUMEM32GB|GPUMEM80GB|GPUMEM96GB"'
+        return f'#SBATCH --gpus=1\n#SBATCH --constraint="~GPU{excluded}"'
+    elif gpu_spec in ("24GB", "32GB", "80GB", "96GB") or "|" in gpu_spec:
+        if "|" in gpu_spec:
+            parts = [f"GPUMEM{m}" for m in gpu_spec.split("|")]
+            constraint = "|".join(parts)
+        else:
+            constraint = f"GPUMEM{gpu_spec}"
+        return f'#SBATCH --gpus=1\n#SBATCH --constraint="{constraint}"'
+    else:
+        return f"#SBATCH --gpus={gpu_spec}:1"
+
+
+def otf():
+    """Entry point for bp-otf: submit a pipeline for on-the-fly execution on SLURM.
+
+    Uses sbatch so the job survives terminal disconnects, then tails the output
+    file to stream results back to the terminal.  Ctrl+C stops tailing but the
+    job keeps running.  Use --detach to skip tailing.
+    """
+    from .config_manager import ConfigManager
+
+    args = sys.argv[1:]
+
+    # Parse arguments
+    pipeline_path = None
+    mem = "16GB"
+    time_limit = "24:00:00"
+    gpu = None
+    output_path = None
+    detach = False
+    extra_sbatch = []
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-h", "--help"):
+            print("Usage: bp-otf [options] <pipeline.py|notebook.ipynb>")
+            print("")
+            print("Submit a pipeline for on-the-fly execution on a SLURM compute node.")
+            print("The pipeline runs as a live Python process (on_the_fly mode).")
+            print("Output is streamed to the terminal. Ctrl+C stops tailing but the")
+            print("job keeps running on the compute node.")
+            print("")
+            print("Options:")
+            print("  --mem=<size>      Memory allocation (default: 16GB)")
+            print("  --time=<time>     Wall time limit (default: 24:00:00)")
+            print("  --gpu=<spec>      GPU specification (e.g., any, A100, 80GB)")
+            print("  --output=<path>   SLURM output file (default: <pipeline_dir>/<name>_otf.out)")
+            print("  --detach          Submit and exit without tailing output")
+            print("  --<key>=<value>   Any additional SBATCH parameter")
+            print("")
+            print("Examples:")
+            print("  bp-otf pipeline.py")
+            print("  bp-otf pipeline.py --mem=32GB --time=4:00:00 --gpu=any")
+            print("  bp-otf --detach notebook.ipynb --gpu=A100 --partition=gpu")
+            return
+        elif arg == "--detach":
+            detach = True
+        elif arg.startswith("--mem="):
+            mem = arg.split("=", 1)[1]
+        elif arg.startswith("--time="):
+            time_limit = arg.split("=", 1)[1]
+        elif arg.startswith("--gpu="):
+            gpu = arg.split("=", 1)[1]
+        elif arg.startswith("--output="):
+            output_path = arg.split("=", 1)[1]
+        elif arg.startswith("--"):
+            extra_sbatch.append(arg)
+        else:
+            pipeline_path = os.path.abspath(arg)
+        i += 1
+
+    if pipeline_path is None:
+        print("ERROR: No pipeline script specified.")
+        print("Run 'bp-otf --help' for usage.")
+        sys.exit(1)
+
+    if not os.path.exists(pipeline_path):
+        print(f"ERROR: Pipeline script not found: {pipeline_path}")
+        sys.exit(1)
+
+    # Convert notebook to script if needed
+    tmp_script = None
+    if pipeline_path.endswith('.ipynb'):
+        tmp_script = _notebook_to_script(pipeline_path)
+        pipeline_path = tmp_script
+
+    # Resolve output path
+    pipeline_dir = os.path.dirname(pipeline_path)
+    pipeline_stem = os.path.splitext(os.path.basename(pipeline_path))[0]
+    if tmp_script:
+        # Use the original notebook name for the output file
+        pipeline_stem = pipeline_stem.replace("._biopipelines_tmp_", "")
+    if output_path is None:
+        output_path = os.path.join(pipeline_dir, f"{pipeline_stem}_otf.out")
+
+    # Get cluster config
+    config_manager = ConfigManager()
+    module_load = config_manager.get_module_load_line()
+    shell_hook = config_manager.get_shell_hook_command()
+    activate = config_manager.get_activate_command("biopipelines")
+
+    # Build GPU line
+    gpu_line = _generate_gpu_line(gpu)
+
+    # Build extra SBATCH lines
+    extra_lines = ""
+    for opt in extra_sbatch:
+        # --partition=gpu -> #SBATCH --partition=gpu
+        extra_lines += f"\n#SBATCH {opt}"
+
+    # Generate sbatch script
+    sbatch_content = f"""#!/usr/bin/bash
+#SBATCH --mem={mem}
+#SBATCH --time={time_limit}
+#SBATCH --output={output_path}
+#SBATCH --job-name={pipeline_stem}_otf"""
+
+    if gpu_line:
+        sbatch_content += f"\n{gpu_line}"
+
+    if extra_lines:
+        sbatch_content += extra_lines
+
+    sbatch_content += f"""
+
+# Make all files group-writable by default
+umask 002
+{module_load}
+{shell_hook}
+{activate}
+
+# Force on-the-fly mode
+export BIOPIPELINES_OTF=1
+
+python "{pipeline_path}"
+"""
+
+    # Write temp sbatch script and submit
+    sbatch_path = None
+    try:
+        fd, sbatch_path = tempfile.mkstemp(suffix=".sh", prefix="bp_otf_")
+        with os.fdopen(fd, 'w') as f:
+            f.write(sbatch_content)
+
+        result = subprocess.run(
+            ["sbatch", "--parsable", sbatch_path],
+            capture_output=True, text=True
+        )
+
+        if result.returncode != 0:
+            print(f"ERROR: sbatch failed: {result.stderr.strip()}")
+            sys.exit(1)
+
+        job_id = result.stdout.strip()
+        print(f"Submitted job {job_id}")
+        print(f"Output: {output_path}")
+
+        if not detach:
+            # Tail the output file so the user sees live output.
+            # Poll squeue to stop automatically when the job finishes.
+            # Ctrl+C stops tailing but the SLURM job keeps running.
+            print(f"Tailing output (Ctrl+C to detach, job {job_id} keeps running)...")
+            print("---")
+            try:
+                subprocess.run(["bash", "-c",
+                    f'touch "{output_path}";'
+                    f' tail -f "{output_path}" &'
+                    f' TAIL_PID=$!;'
+                    f' while squeue -j {job_id} -h 2>/dev/null | grep -q {job_id}; do sleep 5; done;'
+                    f' sleep 1; kill $TAIL_PID 2>/dev/null; wait $TAIL_PID 2>/dev/null;'
+                    f' echo "---"; echo "Job {job_id} finished."'
+                ])
+            except KeyboardInterrupt:
+                print(f"\n---\nDetached. Job {job_id} is still running.")
+                print(f"Re-attach with: tail -f {output_path}")
+                print(f"Cancel with:   scancel {job_id}")
+
+    finally:
+        if sbatch_path and os.path.exists(sbatch_path):
+            os.remove(sbatch_path)
+        # Clean up notebook tmp script if created
+        if tmp_script and os.path.exists(tmp_script):
+            os.remove(tmp_script)
 
 
 def _resolve_folders():

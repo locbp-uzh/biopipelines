@@ -71,7 +71,10 @@ class Pipeline:
         self.description = description
 
         if on_the_fly is None:
-            on_the_fly = self._detect_notebook()
+            if os.environ.get("BIOPIPELINES_OTF") == "1":
+                on_the_fly = True
+            else:
+                on_the_fly = self._detect_notebook()
         self.on_the_fly = on_the_fly
 
         if local_output is None:
