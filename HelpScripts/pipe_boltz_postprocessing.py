@@ -124,7 +124,7 @@ for boltz_folder in sorted(boltz_results_folders):
                 matched = False
                 for seq_id in sequence_ids:
                     # Check if config_id contains seq_id as a component
-                    if config_id == seq_id or config_id.startswith(seq_id + '_') or config_id.endswith('_' + seq_id):
+                    if config_id == seq_id or config_id.startswith(seq_id + '+') or config_id.endswith('+' + seq_id):
                         sequence_id = seq_id
                         matched = True
                         print(f"Mapping {config_id} to sequence ID: {sequence_id} (pattern match)")

@@ -30,6 +30,12 @@ Examples:
 Note: The default pattern {"*": "*_<S>"} works for any kind of suffix (numeric
 or alphanumeric). Use {"*": "*_<N>"} if you need to restrict to numeric-only suffixes.
 
+Multi-axis combinatorics IDs use "+" as a separator (e.g., "prot1+lig1" for a
+protein-ligand pair). When generating candidate IDs, "+" components are expanded
+so that "prot1+lig1" also yields "prot1" and "lig1" as candidates. Each component
+also undergoes recursive suffix stripping. This makes provenance columns unnecessary
+for matching multi-axis IDs against their constituent input IDs.
+
 Matching priority order (when using get_mapped_ids with unique=True):
     1. Exact match (source_id == target_id)
     2. Exact provenance match (via map_table provenance columns)
@@ -121,6 +127,64 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
         raise ValueError(f"Invalid ID map pattern '{pattern_str}': {e}")
 
 
+def _strip_suffixes_recursive(
+    start_id: str,
+    delimiter: str,
+    has_s: bool,
+    literal_part: str,
+) -> List[str]:
+    """
+    Recursively strip suffixes from an ID according to the pattern parameters.
+
+    Returns list of progressively stripped IDs (NOT including start_id itself).
+    """
+    results = []
+    current_id = start_id
+
+    while True:
+        parts = current_id.split(delimiter)
+
+        if len(parts) <= 1:
+            break
+
+        stripped = False
+
+        if literal_part:
+            if len(parts) >= 2:
+                last_part = parts[-1]
+                second_last = parts[-2] if len(parts) >= 2 else ""
+
+                if has_s:
+                    if last_part and second_last == literal_part:
+                        parts = parts[:-2]
+                        stripped = True
+                else:
+                    if last_part.isdigit() and second_last == literal_part:
+                        parts = parts[:-2]
+                        stripped = True
+        else:
+            if has_s:
+                parts = parts[:-1]
+                stripped = True
+            else:
+                if parts[-1].isdigit():
+                    parts = parts[:-1]
+                    stripped = True
+
+        if not stripped or not parts:
+            break
+
+        current_id = delimiter.join(parts)
+        if not results or current_id != results[-1]:
+            results.append(current_id)
+
+    return results
+
+
+# Separator used for multi-axis combinatorics IDs (e.g., "prot1+lig1")
+MULTI_AXIS_SEPARATOR = '+'
+
+
 def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     """
     Generate all candidate IDs for lookup by recursively applying id_map pattern.
@@ -129,13 +193,16 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     It starts with the original ID and progressively strips suffixes according to the
     id_map pattern, generating all intermediate IDs in priority order (most specific first).
 
+    For multi-axis combinatorics IDs (containing "+"), the function also expands each
+    "+" component as an additional candidate. This allows "prot1+lig1" to match against
+    tables containing either "prot1" or "lig1" without requiring provenance columns.
+
     Args:
-        structure_id: Structure ID (e.g., "RFDAA_Hit_Screen_007_1_1")
+        structure_id: Structure ID (e.g., "RFDAA_Hit_Screen_007_1_1" or "prot1+lig1_2")
         id_map: ID mapping dictionary (e.g., {"*": "*_<N>"} or {"*": "*_<S>"})
 
     Returns:
-        List of candidate IDs to try, from most specific to least specific
-        (e.g., ["RFDAA_Hit_Screen_007_1_1", "RFDAA_Hit_Screen_007_1", "RFDAA_Hit_Screen_007", "RFDAA_Hit_Screen"])
+        List of candidate IDs to try, from most specific to least specific.
 
     Examples:
         >>> map_table_ids_to_ids("rifampicin_1_2", {"*": "*_<N>"})
@@ -143,6 +210,12 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
 
         >>> map_table_ids_to_ids("protein_1_19A", {"*": "*_<S>"})
         ['protein_1_19A', 'protein_1', 'protein']
+
+        >>> map_table_ids_to_ids("prot1+lig1", {"*": "*_<S>"})
+        ['prot1+lig1', 'prot1', 'lig1']
+
+        >>> map_table_ids_to_ids("prot1+lig1_2", {"*": "*_<S>"})
+        ['prot1+lig1_2', 'prot1+lig1', 'prot1', 'lig1_2', 'lig1']
 
         >>> map_table_ids_to_ids("protein-seq-42", {"*": "*-seq-<N>"})
         ['protein-seq-42', 'protein']
@@ -192,54 +265,28 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
         literal_part = literal_with_delim
 
     # Generate all intermediate IDs by progressively stripping suffixes
-    candidates = [structure_id]  # Start with original
-    current_id = structure_id
+    candidates = [structure_id]
+    stripped = _strip_suffixes_recursive(structure_id, delimiter, has_s, literal_part)
+    candidates.extend(stripped)
 
-    # Recursively strip suffixes
-    while True:
-        parts = current_id.split(delimiter)
-
-        if len(parts) <= 1:
-            break
-
-        stripped = False
-
-        if literal_part:
-            # Pattern like "*-seq-<N>" or "*-seq-<S>"
-            # Check if we can strip literal + segment at the end
-            if len(parts) >= 2:
-                last_part = parts[-1]
-                second_last = parts[-2] if len(parts) >= 2 else ""
-
-                if has_s:
-                    # <S>: strip any non-empty segment after literal
-                    if last_part and second_last == literal_part:
-                        parts = parts[:-2]
-                        stripped = True
-                else:
-                    # <N>: strip only numeric segment after literal
-                    if last_part.isdigit() and second_last == literal_part:
-                        parts = parts[:-2]
-                        stripped = True
-        else:
-            # Pattern like "*_<N>" or "*_<S>"
-            if has_s:
-                # <S>: strip any trailing segment unconditionally
-                parts = parts[:-1]
-                stripped = True
-            else:
-                # <N>: strip only trailing numeric part
-                if parts[-1].isdigit():
-                    parts = parts[:-1]
-                    stripped = True
-
-        if not stripped or not parts:
-            break
-
-        # Rejoin and add to candidates
-        current_id = delimiter.join(parts)
-        if current_id != candidates[-1]:  # Avoid duplicates
-            candidates.append(current_id)
+    # Expand multi-axis "+" components: for IDs containing "+", add each component
+    # and its suffix-stripped forms as additional candidates
+    if MULTI_AXIS_SEPARATOR in structure_id:
+        seen = set(candidates)
+        expanded = []
+        for cand in candidates:
+            if MULTI_AXIS_SEPARATOR not in cand:
+                continue
+            for part in cand.split(MULTI_AXIS_SEPARATOR):
+                if part and part not in seen:
+                    expanded.append(part)
+                    seen.add(part)
+                    # Also strip suffixes from this component
+                    for sub in _strip_suffixes_recursive(part, delimiter, has_s, literal_part):
+                        if sub not in seen:
+                            expanded.append(sub)
+                            seen.add(sub)
+        candidates.extend(expanded)
 
     return candidates
 

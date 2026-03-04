@@ -484,8 +484,13 @@ def predict_output_ids_with_provenance(
     Predict output IDs AND provenance mapping.
 
     ID generation always uses the full cartesian product of iterated axes
-    joined with "_". Provenance columns track which input from each axis
-    contributed to each output, enabling downstream joins on any axis.
+    joined with "+". The "+" separator is distinct from "_" which is reserved
+    for parent→child suffixes (e.g., protein_1, protein_2). This ensures that
+    multi-axis IDs like "prot1+lig1" are not confused with suffix patterns,
+    and id_map_utils can correctly match each component independently.
+
+    Provenance columns track which input from each axis contributed to each
+    output, enabling downstream joins on any axis.
 
     Each named_input value can be:
     - A bare value: the key serves as both alias and stream name
@@ -501,8 +506,8 @@ def predict_output_ids_with_provenance(
             proteins=(prot_source, "sequences"),
             ligands=(lig_source, "compounds")
         )
-        output_ids = ["prot1_lig1", "prot1_lig2", "prot1_lig3",
-                      "prot2_lig1", "prot2_lig2", "prot2_lig3"]
+        output_ids = ["prot1+lig1", "prot1+lig2", "prot1+lig3",
+                      "prot2+lig1", "prot2+lig2", "prot2+lig3"]
         provenance = {
             "proteins": ["prot1", "prot1", "prot1", "prot2", "prot2", "prot2"],
             "ligands": ["lig1", "lig2", "lig3", "lig1", "lig2", "lig3"]
@@ -550,7 +555,7 @@ def predict_output_ids_with_provenance(
         new_provenance[axis_name] = []
         for i, existing_id in enumerate(output_ids):
             for new_id in axis_ids:
-                new_ids.append(f"{existing_id}_{new_id}")
+                new_ids.append(f"{existing_id}+{new_id}")
                 for k in provenance:
                     new_provenance[k].append(provenance[k][i])
                 new_provenance[axis_name].append(new_id)
@@ -581,7 +586,7 @@ def predict_output_ids(
     The ID generation follows these rules:
     - If all axes are fully bundled (no iterate sources): single ID (bundled_name)
     - If one axis has iteration (each mode or bundle with iterate sources): IDs from that axis
-    - If multiple axes have iteration: cartesian product of IDs joined with "_"
+    - If multiple axes have iteration: cartesian product of IDs joined with "+"
 
     Args:
         bundled_name: Name to use when all axes are bundled (default: "bundled_complex")
@@ -607,7 +612,7 @@ def predict_single_output_id(
     This mirrors predict_output_ids() logic but for a single output row,
     ensuring pipeline-time and SLURM-time ID generation always agree.
 
-    Always uses full cartesian naming (all iterated axes joined with "_"),
+    Always uses full cartesian naming (all iterated axes joined with "+"),
     no shortcuts based on axis length.
 
     Args:
@@ -624,7 +629,7 @@ def predict_single_output_id(
             sequences=("each", ["prot1", "prot2"], 0),
             compounds=("each", ["lig1", "lig2", "lig3"], 1)
         )
-        → "prot1_lig2"
+        → "prot1+lig2"
     """
     # Collect selected IDs from iterated axes (in order)
     parts = []
@@ -639,7 +644,7 @@ def predict_single_output_id(
     if len(parts) == 1:
         return parts[0]
 
-    return "_".join(parts)
+    return "+".join(parts)
 
 
 def generate_multiplied_ids(
