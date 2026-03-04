@@ -303,8 +303,8 @@ Creates compound collections from dictionaries with optional combinatorial expan
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `library`: str | Dict - Dictionary with SMILES or path to CSV
-- `primary_key`: str = None - Root key for expansion (enables `<key>` placeholders)
+- `library`: str | Dict - Dictionary with SMILES, path to CSV, or path to `.cdxml` file (ChemDraw R-group enumeration)
+- `primary_key`: str = None - Root key for expansion (enables `<key>` placeholders, dict mode only)
 - `covalent`: bool = False - Generate CCD/PKL files for covalent binding
 - `validate_smiles`: bool = True - Validate SMILES during expansion
 - `conformer_method`: str = "UFF" - Conformer method (UFF, OpenFF, DFT)
@@ -335,7 +335,26 @@ library = CompoundLibrary(
     primary_key="scaffold"
 )
 # Generates 2 compounds: linker×fluorophore combinations
+
+# From CDXML file (ChemDraw R-group enumeration)
+library = CompoundLibrary(library="my_library.cdxml")
+# Enumerates all R-group combinations and generates SMILES
 ```
+
+**CDXML R-Group Enumeration**:
+
+Draw the following in a single ChemDraw `.cdxml` file:
+
+- **Core scaffold**: the main molecule with **R1**, **R2**, etc. at substitution points (using ChemDraw's generic label tool to draw R-group labels)
+- **R-group fragments**: separate small molecules, each with one R-group label (R1, R2, ...) indicating which core position it attaches to
+
+The tool identifies the core as the molecule with the most R-group labels, then groups fragments by their R-label number. All combinations are enumerated as a Cartesian product.
+
+Example: a core with R1 and R2 positions, plus 3 fragments labeled R1 and 2 fragments labeled R2 → 3×2 = 6 compounds.
+
+The output CSV includes branching columns (R1, R2, ...) showing which fragment SMILES was used at each position.
+
+Requires RDKit (`conda install -c conda-forge rdkit`).
 
 ---
 

@@ -12,6 +12,7 @@ and optional covalent ligand CCD/PKL file preparation for Boltz2.
 import os
 import json
 import csv
+import itertools
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -89,6 +90,7 @@ echo "=== CompoundLibrary ready ==="
         # Track library source type
         self.library_dict = None
         self.library_csv = None
+        self.library_cdxml = None
         self.expanded_compounds = []
         self.compound_ids = []
 
@@ -99,6 +101,9 @@ echo "=== CompoundLibrary ready ==="
         if isinstance(self.library, dict):
             self.library_dict = self.library
             self._expand_library()
+        elif isinstance(self.library, str) and self.library.endswith('.cdxml'):
+            self.library_cdxml = self.library
+            self._expand_cdxml()
 
     def validate_params(self):
         """Validate CompoundLibrary-specific parameters."""
@@ -112,8 +117,8 @@ echo "=== CompoundLibrary ready ==="
                 raise ValueError(f"primary_key '{self.primary_key}' not found in library dictionary")
         elif isinstance(self.library, str):
             # CSV file path
-            if not self.library.endswith('.csv'):
-                raise ValueError("library file must have .csv extension")
+            if not (self.library.endswith('.csv') or self.library.endswith('.cdxml')):
+                raise ValueError("library file must have .csv or .cdxml extension")
         else:
             raise ValueError("library must be a dictionary or CSV file path")
 
@@ -127,7 +132,20 @@ echo "=== CompoundLibrary ready ==="
         """Configure input library sources."""
         self.folders = pipeline_folders
 
-        if isinstance(self.library, str):
+        if isinstance(self.library, str) and self.library.endswith('.cdxml'):
+            # CDXML file - resolve path
+            if os.path.exists(self.library):
+                self.library_cdxml = self.library
+            else:
+                project_path = os.path.join(pipeline_folders["biopipelines"], self.library)
+                if os.path.exists(project_path):
+                    self.library_cdxml = project_path
+                else:
+                    raise ValueError(f"CDXML file not found: {self.library}")
+            # Expand if not already done (file resolved via project path)
+            if not self.expanded_compounds:
+                self._expand_cdxml()
+        elif isinstance(self.library, str):
             # CSV file - check if it exists
             if os.path.exists(self.library):
                 self.library_csv = self.library
@@ -239,49 +257,201 @@ echo "=== CompoundLibrary ready ==="
             self.expanded_compounds = final_compounds
             self.compound_ids = compound_ids
 
-    def generate_script(self, script_path: str) -> str:
+    def _expand_cdxml(self):
+        """Expand CDXML file with R-group labels into enumerated compounds."""
+        try:
+            from rdkit import Chem
+            from rdkit.Chem import rdmolops
+        except ImportError:
+            raise ImportError(
+                "RDKit is required for CDXML R-group enumeration. "
+                "Install with: conda install -c conda-forge rdkit"
+            )
+
+        cdxml_path = self.library_cdxml
+        if not cdxml_path or not os.path.exists(cdxml_path):
+            raise ValueError(f"CDXML file not found: {cdxml_path}")
+
+        # Parse CDXML file
+        mols = Chem.MolsFromCDXMLFile(cdxml_path)
+        if not mols:
+            raise ValueError(f"No molecules found in CDXML file: {cdxml_path}")
+
+        # Filter out None entries (failed parses)
+        valid_mols = [m for m in mols if m is not None]
+        if not valid_mols:
+            raise ValueError(f"All molecules failed to parse from CDXML file: {cdxml_path}")
+        if len(valid_mols) < 2:
+            raise ValueError(
+                "CDXML file must contain at least 2 molecules (1 core + 1 fragment). "
+                f"Found {len(valid_mols)} valid molecule(s)."
+            )
+
+        # Find R-group dummy atoms on each molecule
+        # Dummy atom: atomic num == 0, atom map num > 0
+        def get_rgroup_positions(mol):
+            positions = []
+            for atom in mol.GetAtoms():
+                if atom.GetAtomicNum() == 0 and atom.GetAtomMapNum() > 0:
+                    positions.append(atom.GetAtomMapNum())
+            return positions
+
+        # Identify core: molecule with the most R-group dummy atoms
+        mol_rgroups = [(mol, get_rgroup_positions(mol)) for mol in valid_mols]
+        if not any(positions for _, positions in mol_rgroups):
+            raise ValueError(
+                "No R-group labels (R1, R2, ...) found in the CDXML file. "
+                "Draw R-group labels on the core scaffold and fragments in ChemDraw."
+            )
+
+        # Core = molecule with the most R-group positions
+        core_idx = max(range(len(mol_rgroups)), key=lambda i: len(mol_rgroups[i][1]))
+        core_mol, core_positions = mol_rgroups[core_idx]
+
+        if not core_positions:
+            raise ValueError("No R-group labels found on any molecule in the CDXML file.")
+
+        core_position_set = set(core_positions)
+
+        # Group fragments by R-group position
+        # Each non-core molecule must have exactly one R-group dummy atom
+        fragments_by_position = {}  # position_num -> list of (mol, smiles)
+        for i, (mol, positions) in enumerate(mol_rgroups):
+            if i == core_idx:
+                continue
+            if len(positions) == 0:
+                # Molecule without R-group labels — skip with warning
+                continue
+            if len(positions) > 1:
+                raise ValueError(
+                    f"R-group fragment (molecule {i+1}) has {len(positions)} R-group labels "
+                    f"(R{', R'.join(str(p) for p in positions)}). "
+                    "Each fragment must have exactly one R-group label."
+                )
+            pos = positions[0]
+            if pos not in core_position_set:
+                raise ValueError(
+                    f"Fragment has R-group label R{pos}, but the core scaffold only has "
+                    f"positions: {', '.join(f'R{p}' for p in sorted(core_position_set))}."
+                )
+            if pos not in fragments_by_position:
+                fragments_by_position[pos] = []
+            fragments_by_position[pos].append(mol)
+
+        # Validate: every core position must have at least one fragment
+        missing_positions = core_position_set - set(fragments_by_position.keys())
+        if missing_positions:
+            raise ValueError(
+                f"No fragments found for core position(s): "
+                f"{', '.join(f'R{p}' for p in sorted(missing_positions))}. "
+                "Draw at least one fragment with each R-group label."
+            )
+
+        # Sort positions for deterministic enumeration
+        sorted_positions = sorted(fragments_by_position.keys())
+        position_labels = [f"R{p}" for p in sorted_positions]
+        fragment_groups = [fragments_by_position[p] for p in sorted_positions]
+
+        # Get SMILES for each fragment (for branching metadata)
+        def fragment_smiles(mol):
+            """Get SMILES for a fragment, removing the dummy atom for display."""
+            try:
+                # Create an editable copy and remove dummy atoms for display SMILES
+                rwmol = Chem.RWMol(mol)
+                dummy_indices = [a.GetIdx() for a in rwmol.GetAtoms()
+                                 if a.GetAtomicNum() == 0]
+                for idx in sorted(dummy_indices, reverse=True):
+                    rwmol.RemoveAtom(idx)
+                try:
+                    Chem.SanitizeMol(rwmol)
+                    return Chem.MolToSmiles(rwmol)
+                except Exception:
+                    return Chem.MolToSmiles(mol)
+            except Exception:
+                return "?"
+
+        # Enumerate all combinations
+        final_compounds = []
+        failed_count = 0
+        for combo in itertools.product(*fragment_groups):
+            assembled = self._assemble_molecule(core_mol, combo)
+            if assembled is None:
+                failed_count += 1
+                continue
+            smiles = Chem.MolToSmiles(assembled)
+            branching = {}
+            for label, frag in zip(position_labels, combo):
+                branching[label] = fragment_smiles(frag)
+            final_compounds.append({'smiles': smiles, 'branching': branching})
+
+        if not final_compounds:
+            raise ValueError(
+                f"All {failed_count} R-group combinations failed to assemble. "
+                "Check that R-group labels are correctly placed on attachment bonds."
+            )
+
+        if failed_count > 0:
+            import warnings
+            warnings.warn(
+                f"{failed_count} R-group combination(s) failed to assemble and were skipped."
+            )
+
+        # Generate compound IDs (same logic as dict mode)
+        base_name = os.path.splitext(os.path.basename(self.library_cdxml))[0]
+        num_compounds = len(final_compounds)
+        characters = 4
+        if num_compounds > 9: characters = 3
+        if num_compounds > 99: characters = 2
+        if num_compounds > 999: characters = 1
+        if num_compounds > 99999: characters = 0
+
+        compound_ids = []
+        for u_l_n in range(num_compounds):
+            u_l_n_str = str(u_l_n)
+            n0 = 5 - characters - len(u_l_n_str)
+            zeros_str = '0' * n0
+            compound_name = base_name if num_compounds == 1 else base_name[:characters] + zeros_str + u_l_n_str
+            compound_ids.append(compound_name)
+
+        self.expanded_compounds = final_compounds
+        self.compound_ids = compound_ids
+
+    @staticmethod
+    def _assemble_molecule(core, fragments):
         """
-        Generate bash script for CompoundLibrary processing.
+        Assemble a molecule from core scaffold and R-group fragments using molzip.
 
         Args:
-            script_path: Path where script should be written
+            core: RDKit Mol - core scaffold with R-group dummy atoms
+            fragments: tuple of RDKit Mol - one fragment per R-group position
 
         Returns:
-            Script content as string
+            Assembled RDKit Mol, or None on failure
         """
-        script_content = "#!/bin/bash\n"
-        script_content += "# CompoundLibrary processing script\n"
-        script_content += self.generate_completion_check_header()
-        script_content += self.activate_environment()
-        script_content += "echo \"Processing compound library\"\n"
+        try:
+            from rdkit import Chem
+            from rdkit.Chem import rdmolops
 
-        # Create output directories
-        script_content += f"""
-# Create output directories
-mkdir -p "{self.output_folder}"
-"""
-        if self.covalent:
-            script_content += f'mkdir -p "{self.covalent_folder}"\n'
+            # Combine core + all fragments into one Mol
+            combined = Chem.RWMol(core)
+            for frag in fragments:
+                combined = Chem.CombineMols(combined, frag)
 
-        if self.library_csv:
-            # Process existing CSV file
-            script_content += f"""
-echo "Loading compound library from CSV: {os.path.basename(self.library_csv)}"
-cp "{self.library_csv}" "{self.compounds_csv}"
-"""
-        elif self.library_dict:
-            # Generate from dictionary
-            # Write JSON files at configuration time (not execution time)
-            os.makedirs(self.output_folder, exist_ok=True)
-            with open(self.library_dict_json, 'w') as f:
-                json.dump(self.library_dict, f, indent=2)
+            # Use molzip to pair dummy atoms by atom map number
+            params = Chem.rdmolops.MolzipParams()
+            params.label = Chem.rdmolops.MolzipLabel.AtomMapNumber
+            assembled = Chem.molzip(combined, params)
 
-            compounds_data_json = os.path.join(self.output_folder, "compounds_data.json")
-            with open(compounds_data_json, 'w') as f:
-                json.dump({'expanded_compounds': self.expanded_compounds, 'compound_ids': self.compound_ids}, f, indent=2)
+            # Sanitize
+            Chem.SanitizeMol(assembled)
+            return assembled
+        except Exception:
+            return None
 
-            script_content += f"""
-echo "Generating compound library from dictionary ({len(self.expanded_compounds)} compounds)"
+    def _generate_csv_script(self, compounds_data_json: str, source_label: str) -> str:
+        """Generate inline Python script to write compounds CSV from JSON data."""
+        return f"""
+echo "Generating compound library from {source_label} ({len(self.expanded_compounds)} compounds)"
 
 # Generate CSV with expanded compounds
 python3 -c "
@@ -330,6 +500,53 @@ print(f'Generated compound library: {{len(expanded_compounds)}} compounds')
 "
 """
 
+    def generate_script(self, script_path: str) -> str:
+        """
+        Generate bash script for CompoundLibrary processing.
+
+        Args:
+            script_path: Path where script should be written
+
+        Returns:
+            Script content as string
+        """
+        script_content = "#!/bin/bash\n"
+        script_content += "# CompoundLibrary processing script\n"
+        script_content += self.generate_completion_check_header()
+        script_content += self.activate_environment()
+        script_content += "echo \"Processing compound library\"\n"
+
+        # Create output directories
+        script_content += f"""
+# Create output directories
+mkdir -p "{self.output_folder}"
+"""
+        if self.covalent:
+            script_content += f'mkdir -p "{self.covalent_folder}"\n'
+
+        if self.library_csv:
+            # Process existing CSV file
+            script_content += f"""
+echo "Loading compound library from CSV: {os.path.basename(self.library_csv)}"
+cp "{self.library_csv}" "{self.compounds_csv}"
+"""
+        elif self.library_dict or self.library_cdxml:
+            # Generate from dictionary or CDXML (both use pre-expanded compounds)
+            os.makedirs(self.output_folder, exist_ok=True)
+
+            if self.library_dict:
+                with open(self.library_dict_json, 'w') as f:
+                    json.dump(self.library_dict, f, indent=2)
+                source_label = "dictionary"
+            else:
+                source_label = f"CDXML ({os.path.basename(self.library_cdxml)})"
+
+            compounds_data_json = os.path.join(self.output_folder, "compounds_data.json")
+            with open(compounds_data_json, 'w') as f:
+                json.dump({'expanded_compounds': self.expanded_compounds, 'compound_ids': self.compound_ids}, f, indent=2)
+
+            script_content += self._generate_csv_script(compounds_data_json, source_label)
+
         # Generate covalent ligand files if requested
         if self.covalent:
             script_content += f"""
@@ -352,7 +569,7 @@ fi
 """
 
         # Generate summary
-        library_type = "Dictionary" if self.library_dict else "CSV file"
+        library_type = "Dictionary" if self.library_dict else ("CDXML" if self.library_cdxml else "CSV file")
         primary_key_str = self.primary_key if self.primary_key else "None"
         covalent_str = str(self.covalent)
         conformer_method_str = self.conformer_method
@@ -411,7 +628,7 @@ print(f'Output: {self.compounds_csv}')
         # Build tables with rich metadata
         tables = {}
         columns = ["id", "format", "smiles", "ccd"]
-        if self.library_dict:
+        if self.library_dict or self.library_cdxml:
             # Add branching columns
             all_branch_keys = set()
             for comp in self.expanded_compounds:
@@ -457,6 +674,15 @@ print(f'Output: {self.compounds_csv}')
             config_lines.append(f"LIBRARY: Dictionary ({len(self.library)} keys)")
             if self.primary_key:
                 config_lines.append(f"PRIMARY KEY: {self.primary_key}")
+        elif self.library_cdxml:
+            config_lines.append(f"LIBRARY: CDXML ({os.path.basename(self.library_cdxml)})")
+            # Show R-group positions
+            if self.expanded_compounds:
+                all_positions = set()
+                for comp in self.expanded_compounds:
+                    all_positions.update(comp['branching'].keys())
+                if all_positions:
+                    config_lines.append(f"R-GROUP POSITIONS: {', '.join(sorted(all_positions))}")
         else:
             config_lines.append(f"LIBRARY: {os.path.basename(self.library)}")
 
@@ -473,9 +699,17 @@ print(f'Output: {self.compounds_csv}')
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration including CompoundLibrary-specific parameters."""
         base_dict = super().to_dict()
+        if self.library_cdxml:
+            library_type = "cdxml"
+        elif self.library_dict:
+            library_type = "dictionary"
+        else:
+            library_type = "csv"
+
         base_dict.update({
             "compound_library_params": {
                 "library": self.library if isinstance(self.library, str) else "<dictionary>",
+                "library_type": library_type,
                 "primary_key": self.primary_key,
                 "covalent": self.covalent,
                 "validate_smiles": self.validate_smiles,
