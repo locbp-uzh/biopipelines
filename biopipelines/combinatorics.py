@@ -407,7 +407,7 @@ def _collect_ids_from_value(value: Any, stream_name: str, iterate_only: bool = F
         if hasattr(src, 'streams'):
             stream = getattr(src.streams, stream_name, None)
             if stream:
-                return list(stream.ids)
+                return list(stream.ids_expanded)
         if isinstance(src, str):
             return [stream_name]
         return []
@@ -685,3 +685,30 @@ def generate_multiplied_ids(
         provenance[input_stream_name] = parent_ids
 
     return output_ids, provenance
+
+
+def generate_multiplied_ids_pattern(
+    input_ids: List[str],
+    suffix_pattern: str,
+    input_stream_name: str = ""
+) -> List[str]:
+    """
+    Compose patterns: append suffix pattern to each input ID.
+
+    Returns pattern-based IDs (not expanded).
+
+    Args:
+        input_ids: Parent IDs (may contain patterns, e.g., ["5HG6_<0..4>"])
+        suffix_pattern: Pattern suffix (e.g., "<1..3>" or "<42A 42V>")
+        input_stream_name: Unused here but kept for API consistency
+
+    Returns:
+        Pattern-based IDs (e.g., ["5HG6_<0..4>_<1..3>"])
+
+    Example:
+        generate_multiplied_ids_pattern(
+            ["5HG6_<0..4>"], "<1..3>"
+        )
+        -> ["5HG6_<0..4>_<1..3>"]
+    """
+    return [f"{parent}_{suffix_pattern}" for parent in input_ids]

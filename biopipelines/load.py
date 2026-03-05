@@ -300,7 +300,7 @@ echo "=== Load ready ==="
 
             resolved[file_type]['files'] = resolved_files
             resolved[file_type]['ids'] = resolved_ids
-            resolved[file_type]['files_contain_wildcards'] = False
+            # Wildcards resolved — files are now concrete paths
 
             print(f"  Resolved: {len(resolved_files)}/{len(ids)} {file_type}")
 

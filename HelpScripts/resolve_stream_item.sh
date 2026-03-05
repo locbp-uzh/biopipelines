@@ -20,9 +20,6 @@ resolve_stream_item() {
         return 1
     fi
 
-    local has_wildcards
-    has_wildcards=$(jq -r '.files_contain_wildcards' "$ds_json")
-
     local ids_array files_array
     readarray -t ids_array < <(jq -r '.ids[]' "$ds_json")
     readarray -t files_array < <(jq -r '.files[]' "$ds_json")
@@ -52,8 +49,8 @@ resolve_stream_item() {
         return 1
     fi
 
-    # Resolve wildcards if needed
-    if [[ "$has_wildcards" == "true" ]]; then
+    # Detect wildcards by checking for '*' in the path
+    if [[ "$pattern" == *"*"* ]]; then
         local expanded=()
         for f in $pattern; do  # intentional: unquoted to allow glob expansion
             [[ -e "$f" ]] && expanded+=("$f")

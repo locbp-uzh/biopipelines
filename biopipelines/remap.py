@@ -146,7 +146,7 @@ echo "=== ReMap ready ==="
             stream_ids = {}
             for stream_name, stream in onto.streams.items():
                 if isinstance(stream, DataStream) and len(stream) > 0:
-                    stream_ids[stream_name] = list(stream.ids)
+                    stream_ids[stream_name] = list(stream.ids_expanded)
             if not stream_ids:
                 raise ValueError("onto tool has no non-empty streams")
             # Check all streams have the same IDs
@@ -173,10 +173,9 @@ echo "=== ReMap ready ==="
                     "name": stream.name,
                     "stream_key": stream_name,
                     "format": stream.format,
-                    "ids": list(stream.ids),
-                    "files": list(stream.files),
+                    "ids": list(stream.ids_expanded),
+                    "files": list(stream.files_expanded),
                     "map_table": stream.map_table,
-                    "files_contain_wildcards": stream.files_contain_wildcards,
                 }
                 streams_info.append(info)
         return streams_info
@@ -444,7 +443,7 @@ echo "=== ReMap ready ==="
             if not isinstance(stream, DataStream) or not stream.map_table:
                 continue
 
-            bridge_ids = list(stream.ids)
+            bridge_ids = list(stream.ids_expanded)
 
             # Check if bridge output IDs overlap with onto IDs
             if not all_onto_ids.intersection(bridge_ids):
@@ -588,7 +587,6 @@ echo "=== ReMap ready ==="
                 files=new_files,
                 map_table=map_table_path,
                 format=fmt,
-                files_contain_wildcards=stream_info.get("files_contain_wildcards", False),
             )
 
         # Build remapped tables

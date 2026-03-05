@@ -1170,13 +1170,13 @@ class StandardizedOutput:
 
         # Verify all streams share the same IDs
         reference_name, reference_ds = streams[0]
-        reference_ids = reference_ds.ids
+        reference_ids = reference_ds.ids_expanded
         for name, ds in streams[1:]:
-            if ds.ids != reference_ids:
+            if ds.ids_expanded != reference_ids:
                 raise ValueError(
                     f"Cannot iterate over StandardizedOutput: streams have mismatched IDs. "
                     f"'{reference_name}' has {len(reference_ids)} IDs, "
-                    f"'{name}' has {len(ds.ids)} IDs. "
+                    f"'{name}' has {len(ds)} IDs. "
                     f"Iterate over a specific stream instead (e.g., output.streams.{reference_name})."
                 )
 
@@ -1186,10 +1186,9 @@ class StandardizedOutput:
             for name, ds in streams:
                 single_streams[name] = DataStream(
                     name=ds.name,
-                    ids=[ds.ids[idx]],
-                    files=[ds.files[idx]] if ds.files else [],
-                    format=ds.format,
-                    files_contain_wildcards=ds.files_contain_wildcards
+                    ids=[ds.ids_expanded[idx]],
+                    files=[ds.files_expanded[idx]] if ds.files_expanded else [],
+                    format=ds.format
                 )
             single_streams["output_folder"] = self.output_folder
             yield StandardizedOutput(single_streams)
@@ -1274,7 +1273,8 @@ class StandardizedOutput:
             result.append(f"    format: {ds.format}")
             result.append(f"    items: {len(ds)}")
             result.append(f"    map_table: '{make_relative_path(ds.map_table) if ds.map_table else ''}'")
-            result.append(f"    files_contain_wildcards: {ds.files_contain_wildcards}")
+            if ds.has_patterns():
+                result.append(f"    has_patterns: True")
             if ds.metadata:
                 meta_str = ", ".join(f"{k}={v}" for k, v in ds.metadata.items())
                 result.append(f"    metadata: {meta_str}")
@@ -1303,7 +1303,7 @@ class StandardizedOutput:
                         parts.append(f"{col}={val}")
                     result.append(f"    – {', '.join(parts)}")
             else:
-                items = list(zip(ds.ids, ds.files)) if ds.files else [(iid, "") for iid in ds.ids]
+                items = list(zip(ds.ids_expanded, ds.files_expanded)) if ds.files_expanded else [(iid, "") for iid in ds.ids_expanded]
                 n_items = len(items)
                 if n_items <= 4:
                     display_items = items

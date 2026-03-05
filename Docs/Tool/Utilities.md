@@ -352,6 +352,8 @@ The tool identifies the core as the molecule with the most R-group labels, then 
 
 Example: a core with R1 and R2 positions, plus 3 fragments labeled R1 and 2 fragments labeled R2 → 3×2 = 6 compounds.
 
+ChemDraw: View > Other Toolbars > Query tools
+
 The output CSV includes branching columns (R1, R2, ...) showing which fragment SMILES was used at each position.
 
 Requires RDKit (`conda install -c conda-forge rdkit`).

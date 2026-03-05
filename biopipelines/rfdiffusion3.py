@@ -235,25 +235,25 @@ echo "=== RFdiffusion3 installation complete ==="
                 self.pdb_stream = ligand_structure.streams.structures
                 # Auto-extract ligand code from compound_ids if not provided
                 if not ligand_code and ligand_structure.streams.compounds:
-                    ligand_code = ligand_structure.streams.compounds.ids[0] if ligand_structure.streams.compounds.ids else ""
+                    ligand_code = ligand_structure.streams.compounds.ids_expanded[0] if ligand_structure.streams.compounds.ids else ""
             elif isinstance(ligand_structure, DataStream):
                 self.pdb_stream = ligand_structure
             else:
                 raise ValueError(f"ligand_structure must be DataStream or StandardizedOutput, got {type(ligand_structure)}")
-            self.pdb_input_id = self.pdb_stream.ids[0]
+            self.pdb_input_id = self.pdb_stream.ids_expanded[0]
         # Handle PDB input (only if ligand_structure not provided)
         elif pdb is not None:
             if isinstance(pdb, StandardizedOutput):
                 self.pdb_stream = pdb.streams.structures
-                if len(pdb.streams.structures.ids) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures.ids)}), using first: {pdb.streams.structures.ids[0]}")
+                if len(pdb.streams.structures) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures)}), using first: {pdb.streams.structures.ids_expanded[0]}")
             elif isinstance(pdb, DataStream):
                 self.pdb_stream = pdb
-                if len(pdb.ids) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.ids)}), using first: {pdb.ids[0]}")
+                if len(pdb) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb)}), using first: {pdb.ids_expanded[0]}")
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
-            self.pdb_input_id = self.pdb_stream.ids[0]
+            self.pdb_input_id = self.pdb_stream.ids_expanded[0]
 
         # Store parameters
         self.contig = contig
@@ -642,39 +642,33 @@ python "{self.table_py_file}" \\
         """
         prefix = self._get_prefix()
 
-        # Generate expected structure paths and IDs
-        design_pdbs = []
-        structure_ids = []
+        # Generate pattern-based IDs
+        d_start = self.design_startnum
+        d_end = self.design_startnum + self.num_designs - 1
+        m_start = self.design_startnum
+        m_end = self.design_startnum + self.num_models - 1
+
+        if self.num_models > 1:
+            structure_ids = [f"{prefix}_d<{d_start}..{d_end}>_m<{m_start}..{m_end}>"]
+        else:
+            structure_ids = [f"{prefix}_<{d_start}..{d_end}>"]
+        file_template = [os.path.join(self.output_folder, "<id>.pdb")]
 
         total_structures = self.num_designs * self.num_models
-        for i in range(self.num_designs):
-            for j in range(self.num_models):
-                design_num = self.design_startnum + i
-                model_num = self.design_startnum + j
-
-                # Conditional naming: include model suffix only if num_models > 1
-                if self.num_models > 1:
-                    structure_id = f"{prefix}_d{design_num}_m{model_num}"
-                else:
-                    structure_id = f"{prefix}_{design_num}"
-
-                structure_path = os.path.join(self.output_folder, f"{structure_id}.pdb")
-                design_pdbs.append(structure_path)
-                structure_ids.append(structure_id)
 
         # Build provenance if PDB input is available
         provenance = None
         if self.pdb_input_id:
-            provenance = {"structures": [self.pdb_input_id] * len(structure_ids)}
+            provenance = {"structures": [self.pdb_input_id] * total_structures}
 
-        # Create map_table for structures
+        # Create map_table for structures (expands patterns internally)
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, structure_ids, files=design_pdbs, provenance=provenance)
+        create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
             name="structures",
             ids=structure_ids,
-            files=design_pdbs,
+            files=file_template,
             map_table=structures_map,
             format="pdb"
         )

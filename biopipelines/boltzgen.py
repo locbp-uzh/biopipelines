@@ -295,13 +295,13 @@ echo "=== BoltzGen installation complete ==="
         if isinstance(target_structure, StandardizedOutput):
             if target_structure.streams.structures and len(target_structure.streams.structures) > 0:
                 self.target_stream = target_structure.streams.structures
-                self.target_input_id = self.target_stream.ids[0]
+                self.target_input_id = self.target_stream.ids_expanded[0]
             else:
                 raise ValueError("target_structure StandardizedOutput has no structures")
         elif isinstance(target_structure, DataStream):
             if len(target_structure) > 0:
                 self.target_stream = target_structure
-                self.target_input_id = self.target_stream.ids[0]
+                self.target_input_id = self.target_stream.ids_expanded[0]
             else:
                 raise ValueError("target_structure DataStream is empty")
         elif isinstance(target_structure, str):
@@ -883,7 +883,7 @@ fi
 
             # Generate structure IDs and paths
             # BoltzGen filtering outputs files named rank0001_<original_design_id>.cif
-            # The exact design ID suffix is only known at execution time, so we use wildcard patterns
+            # The exact design ID suffix is only known at execution time, so file paths use glob '*'
             structure_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
             structure_files = [os.path.join(final_designs_folder, f"rank{i:04d}_*.cif") for i in range(1, self.budget + 1)]
 
@@ -895,8 +895,7 @@ fi
                 ids=structure_ids,
                 files=structure_files,
                 map_table=self.structures_map,
-                format="cif",
-                files_contain_wildcards=True
+                format="cif"
             )
 
             # All designs metrics
@@ -1323,15 +1322,15 @@ echo "=== BoltzGenImport ready ==="
 
         if isinstance(designs, StandardizedOutput):
             if designs.streams.structures and len(designs.streams.structures) > 0:
-                for struct_id, struct_file in zip(designs.streams.structures.ids,
-                                                    designs.streams.structures.files):
+                for struct_id, struct_file in zip(designs.streams.structures.ids_expanded,
+                                                    designs.streams.structures.files_expanded):
                     self.design_ids.append(struct_id)
                     self.design_structures.append(struct_file)
             else:
                 raise ValueError("designs StandardizedOutput has no structures")
         elif isinstance(designs, DataStream):
-            self.design_ids = designs.ids.copy()
-            self.design_structures = designs.files.copy()
+            self.design_ids = list(designs.ids_expanded)
+            self.design_structures = list(designs.files_expanded)
         else:
             raise ValueError(f"designs must be DataStream or StandardizedOutput, got {type(designs)}")
 

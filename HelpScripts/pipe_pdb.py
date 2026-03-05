@@ -930,14 +930,14 @@ def download_from_rcsb(pdb_id: str, custom_id: str, convert: Optional[str], biol
 
 
 def resolve_upstream_file(pdb_id: str, upstream_files: List[str],
-                         files_contain_wildcards: bool) -> Optional[str]:
+                         files_contain_wildcards: bool = False) -> Optional[str]:
     """
     Resolve the source file for a structure from upstream tool output.
 
     Args:
         pdb_id: The structure ID to resolve
         upstream_files: List of file paths from the upstream tool
-        files_contain_wildcards: Whether the paths contain glob patterns
+        files_contain_wildcards: Deprecated, ignored. Wildcards detected from '*' in paths.
 
     Returns:
         Resolved file path, or None if not found
@@ -947,7 +947,9 @@ def resolve_upstream_file(pdb_id: str, upstream_files: List[str],
     if not upstream_files:
         return None
 
-    if files_contain_wildcards:
+    # Detect wildcards by checking for '*' in file paths
+    has_wildcards = any('*' in f for f in upstream_files)
+    if has_wildcards:
         # Try each pattern
         for pattern in upstream_files:
             expanded = glob_module.glob(pattern)
@@ -1008,7 +1010,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     chain = config_data.get('chain', 'longest')
     from_upstream = config_data.get('from_upstream', False)
     upstream_files = config_data.get('upstream_files', [])
-    upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)
+    upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)  # Legacy, ignored
 
     if from_upstream:
         print(f"Processing {len(pdb_ids)} structures from upstream tool")

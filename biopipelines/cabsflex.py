@@ -256,7 +256,7 @@ echo "=== CABS-Flex installation complete ==="
         flags_str = " ".join(flags)
 
         # Generate commands for each structure (runs under Py2.7 CABSflex env)
-        n_structures = len(self.structures_stream.ids)
+        n_structures = len(self.structures_stream)
         run_parallel = self.max_parallel > 1 and n_structures > 1
 
         cabsflex_cmds = ""
@@ -264,7 +264,7 @@ echo "=== CABS-Flex installation complete ==="
             cabsflex_cmds += f'\necho "Running {n_structures} structures in parallel (max {self.max_parallel} concurrent)"\n'
             cabsflex_cmds += "PIDS=()\nFAILED=0\n"
 
-        for sid, sfile in zip(self.structures_stream.ids, self.structures_stream.files):
+        for sid, sfile in zip(self.structures_stream.ids_expanded, self.structures_stream.files_expanded):
             work_dir = os.path.join(self.output_folder, sid)
             cmd = f'CABSflex -i "{sfile}" -w "{work_dir}"'
             if flags_str:
@@ -353,7 +353,7 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after CABS-Flex execution."""
-        input_ids = self.structures_stream.ids
+        input_ids = self.structures_stream.ids_expanded
 
         # --- Output structures: num_models per input ---
         structure_ids = []

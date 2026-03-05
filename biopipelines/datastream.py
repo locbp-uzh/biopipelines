@@ -7,12 +7,18 @@ DataStream: Unified container for tool I/O data.
 
 Provides a consistent interface for structures, sequences, compounds, and MSAs
 regardless of their underlying representation (files, SMILES strings, etc.).
+
+Supports pattern-based IDs for compact representation:
+    ids=["5HG6_<0..49>"]  →  lazily expands to 50 IDs
+    files=["<id>.pdb"]    →  lazily expands using expanded IDs
 """
 
 import os
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Set, Iterator, Tuple, Union
+
+from . import id_patterns
 
 
 @dataclass
@@ -25,16 +31,11 @@ class DataStream:
 
     Attributes:
         name: Name of this data stream (e.g., "structures", "sequences", "compounds")
-        ids: List of unique identifiers for each item
-        files: List of file paths (may be empty for inline formats like SMILES)
+        ids: List of identifiers, may contain patterns (e.g., ["5HG6_<0..49>"])
+        files: List of file paths, may contain "<id>" template or "*" globs
         map_table: Path to CSV file mapping ids to files/values and additional metadata
         format: Data format ("pdb", "cif", "fasta", "csv", "sdf", "smiles", "ccd", etc.)
         metadata: Additional tool-specific metadata
-        files_contain_wildcards: If True, file paths contain wildcard patterns (e.g.,
-            "/path/to/rank0001_*.cif") that will be resolved at execution time.
-            This is used when the exact filename cannot be predicted at configuration time,
-            such as BoltzGen's filtered outputs where the design ID suffix is only
-            known after filtering.
 
     The map_table CSV always contains at minimum:
         - id: The item identifier
@@ -51,24 +52,14 @@ class DataStream:
             format="pdb"
         )
 
-        # Compound data with SMILES (value-based, no files)
-        compounds = DataStream(
-            name="compounds",
-            ids=["ligand_1", "ligand_2"],
-            files=[],  # Empty for SMILES format
-            map_table="/path/to/compounds_map.csv",  # Contains id,smiles columns
-            format="smiles"
-        )
-
-        # Wildcard patterns (resolved at execution time)
-        filtered_structures = DataStream(
+        # Pattern-based IDs (compact representation)
+        designs = DataStream(
             name="structures",
-            ids=["rank0001", "rank0002"],
-            files=["/path/to/rank0001_*.cif", "/path/to/rank0002_*.cif"],
-            map_table="/path/to/structures_map.csv",
-            format="cif",
-            files_contain_wildcards=True
+            ids=["5HG6_<0..49>"],
+            files=[os.path.join(folder, "<id>.pdb")],
+            format="pdb"
         )
+        # len(designs) == 50, but ids stores only 1 pattern string
 
         # Iteration yields single-item DataStreams that can be passed to tools
         for structure in structures:
@@ -82,13 +73,17 @@ class DataStream:
     map_table: str = ""
     format: str = "pdb"
     metadata: Dict[str, Any] = field(default_factory=dict)
-    files_contain_wildcards: bool = False
 
-    # Internal cache for map_table data (loaded lazily)
+    # Internal caches (not serialized, not compared)
+    _ids_expanded: Optional[List[str]] = field(default=None, repr=False, compare=False)
+    _files_expanded: Optional[List[str]] = field(default=None, repr=False, compare=False)
     _map_data: Optional[pd.DataFrame] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         """Validate DataStream after initialization."""
+        # Skip validation when patterns or <id> template are present
+        if self.has_patterns() or self._has_file_template():
+            return
         # Validation rules for files:
         # - Empty files list: valid (value-based, data in map_table)
         # - Single file: valid (one file contains all records, e.g., CSV)
@@ -100,15 +95,54 @@ class DataStream:
                 f"or provide one file per id."
             )
 
+    def _invalidate_caches(self):
+        """Clear expansion caches (call when ids or files change)."""
+        self._ids_expanded = None
+        self._files_expanded = None
+
+    def has_patterns(self) -> bool:
+        """True if any ID contains a pattern slot."""
+        return any(id_patterns.contains_pattern(s) for s in self.ids)
+
+    def _has_file_template(self) -> bool:
+        """True if files list uses <id> template substitution."""
+        return len(self.files) == 1 and '<id>' in self.files[0]
+
+    @property
+    def ids_expanded(self) -> List[str]:
+        """Lazily expand patterns in ids. Cached after first call."""
+        if self._ids_expanded is None:
+            if self.has_patterns():
+                self._ids_expanded = id_patterns.expand_ids(self.ids)
+            else:
+                self._ids_expanded = self.ids  # No copy — same list reference
+        return self._ids_expanded
+
+    @property
+    def files_expanded(self) -> List[str]:
+        """Lazily expand file patterns using expanded IDs."""
+        if self._files_expanded is None:
+            if not self.files:
+                self._files_expanded = []
+            elif self._has_file_template():
+                template = self.files[0]
+                self._files_expanded = [
+                    id_patterns.expand_file_pattern(template, eid)
+                    for eid in self.ids_expanded
+                ]
+            else:
+                self._files_expanded = self.files  # Already explicit
+        return self._files_expanded
+
     def __len__(self) -> int:
         """
         Return number of items in the stream.
 
-        This is always the number of IDs, not files, because:
-        - File-based formats: one file per ID
-        - Value-based formats (SMILES): zero files, values in map_table
+        Uses pattern counting when possible to avoid full expansion.
         """
-        return len(self.ids)
+        if self._ids_expanded is not None:
+            return len(self._ids_expanded)
+        return id_patterns.count_ids(self.ids)
 
     def __iter__(self) -> Iterator['DataStream']:
         """
@@ -118,24 +152,21 @@ class DataStream:
         with ids containing a single ID and files containing the corresponding
         file (for file-based streams) or empty (for value-based streams).
 
-        This enables passing individual items directly to tools:
-            for structure in proteins.streams.structures:
-                tool = SomeTool(structures=structure)
-
         Yields:
             Single-item DataStream for each item
         """
-        if self.files:
-            for item_id, item_file in zip(self.ids, self.files):
+        expanded_ids = self.ids_expanded
+        expanded_files = self.files_expanded
+        if expanded_files:
+            for item_id, item_file in zip(expanded_ids, expanded_files):
                 yield DataStream(
                     name=self.name,
                     ids=[item_id],
                     files=[item_file],
-                    format=self.format,
-                    files_contain_wildcards=self.files_contain_wildcards
+                    format=self.format
                 )
         else:
-            for item_id in self.ids:
+            for item_id in expanded_ids:
                 yield DataStream(
                     name=self.name,
                     ids=[item_id],
@@ -150,30 +181,32 @@ class DataStream:
         For slice: returns new DataStream with sliced items.
         """
         if isinstance(index, slice):
-            # Handle slicing - return a new DataStream with sliced items
-            sliced_ids = self.ids[index]
-            sliced_files = self.files[index] if self.files else []
+            sliced_ids = self.ids_expanded[index]
+            sliced_files = self.files_expanded[index] if self.files_expanded else []
             return DataStream(
                 name=self.name,
                 ids=sliced_ids,
                 files=sliced_files,
                 map_table=self.map_table,
-                format=self.format,
-                files_contain_wildcards=self.files_contain_wildcards
+                format=self.format
             )
 
-        # Integer indexing - return single-item DataStream
-        if index < 0 or index >= len(self.ids):
-            raise IndexError(f"Index {index} out of range for DataStream with {len(self.ids)} items")
+        # Integer indexing — try O(1) expand_at for single-pattern case
+        n = len(self)
+        if index < 0 or index >= n:
+            raise IndexError(f"Index {index} out of range for DataStream with {n} items")
 
-        item_id = self.ids[index]
-        if self.files:
+        if len(self.ids) == 1 and self.has_patterns():
+            item_id = id_patterns.expand_at(self.ids[0], index)
+        else:
+            item_id = self.ids_expanded[index]
+
+        if self.files_expanded:
             return DataStream(
                 name=self.name,
                 ids=[item_id],
-                files=[self.files[index]],
-                format=self.format,
-                files_contain_wildcards=self.files_contain_wildcards
+                files=[self.files_expanded[index]],
+                format=self.format
             )
         else:
             return DataStream(
@@ -203,9 +236,11 @@ class DataStream:
         Returns:
             File path if found, None otherwise
         """
-        if item_id in self.ids and self.files:
-            idx = self.ids.index(item_id)
-            return self.files[idx]
+        expanded_ids = self.ids_expanded
+        expanded_files = self.files_expanded
+        if item_id in expanded_ids and expanded_files:
+            idx = expanded_ids.index(item_id)
+            return expanded_files[idx]
         return None
 
     def get_value(self, item_id: str, column: str = 'value') -> Optional[str]:
@@ -230,47 +265,37 @@ class DataStream:
         """
         Create a new DataStream containing only specified IDs.
 
-        Args:
-            keep_ids: Set or list of IDs to keep
-
-        Returns:
-            New DataStream with filtered items
-
-        Example:
-            passing_ids = {"protein_1", "protein_3"}
-            filtered = structures.filter_by_ids(passing_ids)
+        Triggers expansion (unavoidable — must check each ID).
         """
         if isinstance(keep_ids, list):
             keep_ids = set(keep_ids)
 
-        # Filter ids and files together
+        expanded_ids = self.ids_expanded
+        expanded_files = self.files_expanded
+
         new_ids = []
         new_files = []
 
-        for i, item_id in enumerate(self.ids):
+        for i, item_id in enumerate(expanded_ids):
             if item_id in keep_ids:
                 new_ids.append(item_id)
-                if self.files:
-                    new_files.append(self.files[i])
+                if expanded_files:
+                    new_files.append(expanded_files[i])
 
-        # Note: map_table path stays the same but represents different subset
-        # A filtered map_table should be created by the tool if needed
         return DataStream(
             name=self.name,
             ids=new_ids,
             files=new_files,
-            map_table=self.map_table,  # Original map still valid for lookups
+            map_table=self.map_table,
             format=self.format,
-            metadata={**self.metadata, '_filtered': True, '_original_count': len(self.ids)},
-            files_contain_wildcards=self.files_contain_wildcards
+            metadata={**self.metadata, '_filtered': True, '_original_count': len(self)}
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert to dictionary for serialization.
 
-        Returns:
-            Dictionary representation suitable for JSON serialization
+        Stores pattern-based ids/files (compact representation).
         """
         return {
             'name': self.name,
@@ -278,16 +303,26 @@ class DataStream:
             'files': self.files.copy(),
             'map_table': self.map_table,
             'format': self.format,
-            'metadata': self.metadata.copy(),
-            'files_contain_wildcards': self.files_contain_wildcards
+            'metadata': self.metadata.copy()
         }
 
     def save_json(self, path: str) -> str:
-        """Save DataStream to JSON file. Returns path."""
+        """Save DataStream to JSON file with expanded IDs/files.
+
+        Runtime contract: pipe scripts always receive fully expanded data.
+        """
         import json
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        data = {
+            'name': self.name,
+            'ids': list(self.ids_expanded),
+            'files': list(self.files_expanded),
+            'map_table': self.map_table,
+            'format': self.format,
+            'metadata': self.metadata.copy()
+        }
         with open(path, 'w') as f:
-            json.dump(self.to_dict(), f, indent=2)
+            json.dump(data, f, indent=2)
         return path
 
     @classmethod
@@ -295,11 +330,8 @@ class DataStream:
         """
         Create DataStream from dictionary.
 
-        Args:
-            data: Dictionary with DataStream fields
-
-        Returns:
-            New DataStream instance
+        Accepts both pattern and explicit ids. Silently ignores
+        legacy 'files_contain_wildcards' key for backward compat.
         """
         return cls(
             name=data.get('name', ''),
@@ -307,22 +339,12 @@ class DataStream:
             files=data.get('files', []),
             map_table=data.get('map_table', ''),
             format=data.get('format', 'pdb'),
-            metadata=data.get('metadata', {}),
-            files_contain_wildcards=data.get('files_contain_wildcards', False)
+            metadata=data.get('metadata', {})
         )
 
     @classmethod
     def empty(cls, name: str, format: str) -> 'DataStream':
-        """
-        Create an empty DataStream.
-
-        Args:
-            name: Name for the empty stream
-            format: Data format for the empty stream
-
-        Returns:
-            Empty DataStream instance
-        """
+        """Create an empty DataStream."""
         return cls(name=name, ids=[], files=[], map_table="", format=format, metadata={})
 
     def is_file_based(self) -> bool:
@@ -338,12 +360,11 @@ class DataStream:
 
     def __repr__(self) -> str:
         """Detailed string representation."""
-        wildcards_info = ", wildcards=True" if self.files_contain_wildcards else ""
         return (
             f"DataStream(name='{self.name}', format='{self.format}', "
             f"items={len(self)}, "
             f"files={len(self.files)}, "
-            f"map_table={'set' if self.map_table else 'unset'}{wildcards_info})"
+            f"map_table={'set' if self.map_table else 'unset'})"
         )
 
     def __str__(self) -> str:
@@ -351,6 +372,10 @@ class DataStream:
         name_part = self.name or "unnamed"
         if len(self) == 0:
             return f"DataStream({name_part}, {self.format}): empty"
+
+        if self.has_patterns():
+            id_preview = ", ".join(self.ids)
+            return f"DataStream({name_part}, {self.format}): [{id_preview}] ({len(self)} total)"
 
         if len(self) <= 3:
             id_preview = ", ".join(self.ids)
@@ -366,80 +391,83 @@ def create_map_table(
     files: Optional[List[str]] = None,
     values: Optional[List[str]] = None,
     additional_columns: Optional[Dict[str, List[Any]]] = None,
-    provenance: Optional[Dict[str, List[str]]] = None
+    provenance: Optional[Dict[str, List[str]]] = None,
+    parent_ids: Optional[List[str]] = None,
+    suffix_pattern: Optional[str] = None,
+    input_stream_name: Optional[str] = None
 ) -> str:
     """
     Create a map_table CSV file for a DataStream.
 
+    Accepts pattern-based ids/files and expands them internally.
+
     Args:
         output_path: Path where CSV will be written
-        ids: List of item identifiers
-        files: List of file paths (optional, for file-based formats)
+        ids: List of item identifiers (may contain patterns)
+        files: List of file paths (optional, may contain "<id>" template)
         values: List of inline values (optional, for value-based formats like SMILES)
         additional_columns: Dict of column_name -> values to include
-        provenance: Dict of {stream_name: [input_id_per_output, ...]} from
-                   predict_output_ids_with_provenance() or generate_multiplied_ids().
-                   Keys become columns named "{stream_name}.id".
+        provenance: Dict of {stream_name: [input_id_per_output, ...]}
+        parent_ids: Parent IDs (may contain patterns) for auto-provenance
+        suffix_pattern: Suffix pattern (e.g., "<1..3>") — when set along with
+            parent_ids and input_stream_name, auto-generates provenance by
+            stripping the suffix from each expanded ID.
+        input_stream_name: Name of the input stream for auto-provenance column
 
     Returns:
         Path to created CSV file
-
-    Example:
-        # For structures (file-based)
-        create_map_table(
-            "/path/to/structures_map.csv",
-            ids=["prot_1", "prot_2"],
-            files=["/path/prot_1.pdb", "/path/prot_2.pdb"]
-        )
-
-        # For SMILES (value-based)
-        create_map_table(
-            "/path/to/compounds_map.csv",
-            ids=["lig_1", "lig_2"],
-            values=["CCO", "CC(=O)O"],
-            additional_columns={"name": ["ethanol", "acetic acid"]}
-        )
-
-        # With provenance tracking
-        create_map_table(
-            "/path/to/structures_map.csv",
-            ids=["lig1", "lig2", "lig3"],
-            files=[...],
-            provenance={
-                "sequences": ["prot1", "prot1", "prot1"],
-                "compounds": ["lig1", "lig2", "lig3"]
-            }
-        )
-        # Creates CSV with columns: id, file, value, sequences.id, compounds.id
     """
-    data = {'id': ids}
+    # Expand pattern-based ids
+    expanded_ids = id_patterns.expand_ids(ids) if any(id_patterns.contains_pattern(s) for s in ids) else ids
 
-    if files:
-        data['file'] = files
+    # Expand file template if needed
+    if files and len(files) == 1 and '<id>' in files[0]:
+        template = files[0]
+        expanded_files = [id_patterns.expand_file_pattern(template, eid) for eid in expanded_ids]
+    elif files and any(id_patterns.contains_pattern(s) for s in files):
+        expanded_files = id_patterns.expand_ids(files)
     else:
-        data['file'] = [''] * len(ids)
+        expanded_files = files
+
+    data = {'id': expanded_ids}
+
+    if expanded_files:
+        data['file'] = expanded_files
+    else:
+        data['file'] = [''] * len(expanded_ids)
 
     if values:
         data['value'] = values
     else:
-        data['value'] = [''] * len(ids)
+        data['value'] = [''] * len(expanded_ids)
 
     if additional_columns:
         for col_name, col_values in additional_columns.items():
-            if len(col_values) != len(ids):
+            if len(col_values) != len(expanded_ids):
                 raise ValueError(
                     f"Column '{col_name}' has {len(col_values)} values "
-                    f"but expected {len(ids)}"
+                    f"but expected {len(expanded_ids)}"
                 )
             data[col_name] = col_values
+
+    # Auto-generate provenance from parent_ids + suffix_pattern
+    if parent_ids is not None and suffix_pattern and input_stream_name:
+        suffix_values = id_patterns.expand_pattern(suffix_pattern) if id_patterns.contains_pattern(suffix_pattern) else [suffix_pattern]
+        n_suffixes = len(suffix_values)
+        expanded_parents = id_patterns.expand_ids(parent_ids) if any(id_patterns.contains_pattern(s) for s in parent_ids) else parent_ids
+        prov_list = []
+        for pid in expanded_parents:
+            prov_list.extend([pid] * n_suffixes)
+        col_name = f"{input_stream_name}.id"
+        data[col_name] = prov_list
 
     if provenance:
         for stream_name, prov_ids in provenance.items():
             col_name = f"{stream_name}.id"
-            if len(prov_ids) != len(ids):
+            if len(prov_ids) != len(expanded_ids):
                 raise ValueError(
                     f"Provenance column '{col_name}' has {len(prov_ids)} values "
-                    f"but expected {len(ids)}"
+                    f"but expected {len(expanded_ids)}"
                 )
             data[col_name] = prov_ids
 

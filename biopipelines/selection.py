@@ -27,7 +27,7 @@ except ImportError:
     from biopipelines_io import TableReference
 
 
-class SelectionEditor(BaseConfig):
+class Selection(BaseConfig):
     """
     SelectionEditor configuration for structure-aware selection modification.
 

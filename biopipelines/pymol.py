@@ -105,7 +105,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
             if hasattr(source, "streams"):
                 structures_ds = source.streams.get("structures")
                 if isinstance(structures_ds, DataStream) and len(structures_ds) > 0:
-                    for struct_id, file_path in zip(structures_ds.ids, structures_ds.files):
+                    for struct_id, file_path in zip(structures_ds.ids_expanded, structures_ds.files_expanded):
                         all_ids.append(struct_id)
                         all_files.append(file_path)
 
@@ -598,8 +598,8 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                 # Serialize DataStream - use files and ids directly
                 result[key] = {
                     "type": "datastream",
-                    "structures": value.files,
-                    "structure_ids": value.ids,
+                    "structures": list(value.files_expanded),
+                    "structure_ids": list(value.ids_expanded),
                     "format": value.format
                 }
             elif isinstance(value, StandardizedOutput):
@@ -610,8 +610,8 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                     result[key] = {
                         "type": "standardized_output",
                         "output_folder": value.output_folder,
-                        "structures": structures_data.files,
-                        "structure_ids": structures_data.ids,
+                        "structures": list(structures_data.files_expanded),
+                        "structure_ids": list(structures_data.ids_expanded),
                         "map_table": structures_data.map_table or ""
                     }
                 else:
@@ -643,8 +643,8 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                     result[key] = {
                         "type": "tool_output",
                         "output_folder": value.output_folder,
-                        "structures": structures_attr.files,
-                        "structure_ids": structures_attr.ids
+                        "structures": list(structures_attr.files_expanded),
+                        "structure_ids": list(structures_attr.ids_expanded)
                     }
                 else:
                     result[key] = {
@@ -715,11 +715,11 @@ python "{self.pymol_py}" --config "{self.config_file}"
                     # Get structure IDs to predict render filenames
                     structure_ids = []
                     if isinstance(structures, DataStream):
-                        structure_ids = structures.ids
+                        structure_ids = structures.ids_expanded
                     elif isinstance(structures, StandardizedOutput):
                         structures_ds = structures.streams.structures
                         if isinstance(structures_ds, DataStream):
-                            structure_ids = structures_ds.ids
+                            structure_ids = structures_ds.ids_expanded
 
                     # RenderEach saves to renders/<id>.png
                     renders_folder = os.path.join(self.output_folder, "renders")

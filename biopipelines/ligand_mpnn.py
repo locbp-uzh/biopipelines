@@ -199,7 +199,7 @@ echo "=== LigandMPNN installation complete ==="
 
         # Write pdb_basename -> stream_id map for runtime ID remapping
         id_map = {}
-        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
+        for struct_id, pdb_path in zip(self.structures_stream.ids_expanded, self.structures_stream.files_expanded):
             pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
             id_map[pdb_base] = struct_id
         with open(self.id_map_json, 'w') as f:
@@ -242,7 +242,7 @@ echo "=== LigandMPNN installation complete ==="
         # Generate commands for each structure using DataStream IDs
         # File paths are resolved at runtime via resolve_stream_item
         commands = []
-        for struct_id in self.structures_stream.ids:
+        for struct_id in self.structures_stream.ids_expanded:
             commands.append(f'echo "Processing structure for ID: {struct_id}"')
             commands.append(f'{struct_id}_FILE=$(resolve_stream_item "{self.structures_json}" "{struct_id}")')
             commands.append(f'python run.py {base_options} --pdb_path "${struct_id}_FILE" {struct_id}_FIXED_OPTION_PLACEHOLDER {struct_id}_REDESIGNED_OPTION_PLACEHOLDER')
@@ -306,7 +306,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         fasta_files = []
         fasta_ids = []
 
-        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
+        for struct_id, pdb_path in zip(self.structures_stream.ids_expanded, self.structures_stream.files_expanded):
             pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
             fasta_path = os.path.join(self.seqs_folder, f"{pdb_base}.fa")
             fasta_files.append(fasta_path)
@@ -317,7 +317,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         total_seqs = self.num_sequences * self.num_batches
         suffixes = [str(i) for i in range(1, total_seqs + 1)]
         sequence_ids, provenance = generate_multiplied_ids(
-            self.structures_stream.ids, suffixes,
+            self.structures_stream.ids_expanded, suffixes,
             input_stream_name="structures"
         )
 

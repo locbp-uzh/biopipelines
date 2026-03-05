@@ -249,14 +249,14 @@ fi
             amino_acids = ''.join(aa for aa in amino_acids if aa not in self.exclude)
 
         # Multiply by number of input sequences
-        num_input = len(self.sequences_stream.ids)
+        num_input = len(self.sequences_stream)
         num_mutants_per_input = len(amino_acids)
         num_mutants = num_mutants_per_input * num_input
 
         # Generate sequence IDs (approximate — original_aa resolved at runtime)
         suffixes = [f"{self.position}{aa}" for aa in amino_acids]
         sequence_ids, provenance = generate_multiplied_ids(
-            self.sequences_stream.ids, suffixes,
+            self.sequences_stream.ids_expanded, suffixes,
             input_stream_name="original"
         )
 

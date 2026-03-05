@@ -166,7 +166,7 @@ python "{self.encoder_py}" --config "{self.config_file}"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after DNA encoding."""
         # DNA sequences inherit IDs from input sequences
-        sequence_ids = self.sequences_stream.ids.copy()
+        sequence_ids = list(self.sequences_stream.ids_expanded)
 
         sequences = DataStream(
             name="sequences",

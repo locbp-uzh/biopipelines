@@ -75,7 +75,6 @@ class DataStreamRuntime:
         map_table: Path to CSV file mapping ids to files/values
         format: Data format ("pdb", "cif", "fasta", "csv", "sdf", "smiles", etc.)
         metadata: Additional tool-specific metadata
-        files_contain_wildcards: If True, file paths contain glob patterns
     """
     name: str = ""
     ids: List[str] = field(default_factory=list)
@@ -83,7 +82,6 @@ class DataStreamRuntime:
     map_table: str = ""
     format: str = "pdb"
     metadata: Dict[str, Any] = field(default_factory=dict)
-    files_contain_wildcards: bool = False
 
     # Internal cache for map_table data (loaded lazily)
     _map_data: Optional[pd.DataFrame] = field(default=None, repr=False, compare=False)
@@ -175,8 +173,7 @@ def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStreamRuntime:
         files=files,
         map_table=data.get('map_table', ''),
         format=data.get('format', 'pdb'),
-        metadata=data.get('metadata', {}),
-        files_contain_wildcards=data.get('files_contain_wildcards', False)
+        metadata=data.get('metadata', {})
     )
 
 
@@ -230,7 +227,7 @@ def iterate_files(ds: DataStreamRuntime) -> Iterator[Tuple[str, str]]:
     Iterate over (id, resolved_file_path) pairs for file-based streams.
 
     Handles three cases:
-    1. files_contain_wildcards=True: Expand globs, match to IDs
+    1. File paths contain '*' glob: Expand globs, match to IDs
     2. len(files) == len(ids): Direct zip iteration
     3. len(files) == 1: Single file for all IDs (bundle case)
 
@@ -251,7 +248,10 @@ def iterate_files(ds: DataStreamRuntime) -> Iterator[Tuple[str, str]]:
     if not ds.files:
         raise ValueError(f"DataStream '{ds.name}' has no files configured")
 
-    if ds.files_contain_wildcards:
+    # Detect wildcards by checking for '*' in file paths
+    has_wildcards = any('*' in f for f in ds.files)
+
+    if has_wildcards:
         # Case 1: Wildcards - expand and match
         for i, item_id in enumerate(ds.ids):
             # Get the pattern for this ID (may be per-ID or single pattern)
@@ -376,7 +376,9 @@ def resolve_file(ds: DataStreamRuntime, item_id: str) -> str:
 
     idx = ds.ids.index(item_id)
 
-    if ds.files_contain_wildcards:
+    # Detect wildcards by checking for '*' in the file path
+    file_path_for_id = ds.files[idx] if len(ds.files) == len(ds.ids) else ds.files[0] if len(ds.files) == 1 else None
+    if file_path_for_id and '*' in file_path_for_id:
         # Get pattern for this ID
         if len(ds.files) == len(ds.ids):
             pattern = ds.files[idx]

@@ -232,11 +232,11 @@ echo "=== GNINA installation complete ==="
             if isinstance(autobox_ligand, StandardizedOutput):
                 self.autobox_ligand_stream = autobox_ligand.streams.structures
                 if len(self.autobox_ligand_stream) > 0:
-                    self.autobox_ligand_id = self.autobox_ligand_stream.ids[0]
+                    self.autobox_ligand_id = self.autobox_ligand_stream.ids_expanded[0]
             elif isinstance(autobox_ligand, DataStream):
                 self.autobox_ligand_stream = autobox_ligand
                 if len(self.autobox_ligand_stream) > 0:
-                    self.autobox_ligand_id = self.autobox_ligand_stream.ids[0]
+                    self.autobox_ligand_id = self.autobox_ligand_stream.ids_expanded[0]
             elif isinstance(autobox_ligand, str):
                 self.autobox_ligand_path = autobox_ligand
             else:
@@ -508,8 +508,8 @@ python {self.helper_py} {self.config_json}
             )
 
         best_poses_dir = os.path.join(self.output_folder, "best_poses")
-        protein_ids = self.structures_stream.ids
-        ligand_ids = self.compounds_stream.ids
+        protein_ids = self.structures_stream.ids_expanded
+        ligand_ids = self.compounds_stream.ids_expanded
 
         structure_ids = [
             f"{prot}_{lig}"

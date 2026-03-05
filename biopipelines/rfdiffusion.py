@@ -269,7 +269,7 @@ echo "=== RFdiffusion installation complete ==="
                 self.pdb_stream = pdb
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
-            self.pdb_input_id = self.pdb_stream.ids[0]
+            self.pdb_input_id = self.pdb_stream.ids_expanded[0]
 
         self.contigs = contigs
         self.inpaint = inpaint
@@ -391,28 +391,27 @@ python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_ch
         # Use PDB input ID as base when available, otherwise pipeline name
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
 
-        # Generate expected PDB file paths and IDs
-        design_pdbs = []
-        structure_ids = []
-        for i in range(self.num_designs):
-            design_id = f"{output_name}_{self.design_startnum + i}"
-            design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
-            design_pdbs.append(design_path)
-            structure_ids.append(design_id)
+        # Pattern-based IDs
+        start = self.design_startnum
+        end = self.design_startnum + self.num_designs - 1
+        structure_ids = [f"{output_name}_<{start}..{end}>"]
+        file_template = [os.path.join(self.output_folder, "<id>.pdb")]
 
         # Build provenance if PDB input is available
         provenance = None
         if self.pdb_input_id:
-            provenance = {"structures": [self.pdb_input_id] * len(structure_ids)}
+            from . import id_patterns
+            n = id_patterns.count_ids(structure_ids)
+            provenance = {"structures": [self.pdb_input_id] * n}
 
-        # Create map_table for structures
+        # Create map_table for structures (expands patterns internally)
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, structure_ids, files=design_pdbs, provenance=provenance)
+        create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
             name="structures",
             ids=structure_ids,
-            files=design_pdbs,
+            files=file_template,
             map_table=structures_map,
             format="pdb"
         )

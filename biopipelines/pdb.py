@@ -171,7 +171,7 @@ echo "=== PDB ready ==="
             self.from_upstream = True
 
         if self.from_upstream:
-            self.pdb_ids = list(self.structures_stream.ids)
+            self.pdb_ids = list(self.structures_stream.ids_expanded)
             upstream_fmt = self.structures_stream.format
             self.convert = upstream_fmt if upstream_fmt in ("pdb", "cif") else convert.lower() if convert else None
         else:
@@ -608,8 +608,7 @@ echo "=== PDB ready ==="
         # When input comes from upstream, provide the source files for the runtime script
         if self.from_upstream:
             config_data["from_upstream"] = True
-            config_data["upstream_files"] = list(self.structures_stream.files)
-            config_data["upstream_files_contain_wildcards"] = self.structures_stream.files_contain_wildcards
+            config_data["upstream_files"] = list(self.structures_stream.files_expanded)
             config_data["upstream_map_table"] = self.structures_stream.map_table
 
         with open(self.config_file, 'w') as f:
@@ -635,7 +634,6 @@ python "{self.pdb_py}" --config "{self.config_file}"
             structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
                               for custom_id in self.custom_ids]
             stream_format = self.convert
-            files_contain_wildcards = False
         else:
             # No conversion: predict extension where possible
             local_formats = getattr(self, 'local_formats', {"pdb": False, "cif": False})
@@ -646,16 +644,13 @@ python "{self.pdb_py}" --config "{self.config_file}"
             if not has_downloads and only_pdb:
                 extension = ".pdb"
                 stream_format = "pdb"
-                files_contain_wildcards = False
             elif not has_downloads and only_cif:
                 extension = ".cif"
                 stream_format = "cif"
-                files_contain_wildcards = False
             else:
                 # Mixed formats or downloads present: extension unknown at config time
                 extension = ".*"
                 stream_format = "pdb|cif"
-                files_contain_wildcards = True
 
             structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
                               for custom_id in self.custom_ids]
@@ -697,8 +692,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
             ids=self.custom_ids.copy(),
             files=structure_files,
             map_table=self.structures_csv,
-            format=stream_format,
-            files_contain_wildcards=files_contain_wildcards
+            format=stream_format
         )
 
         sequences = DataStream(

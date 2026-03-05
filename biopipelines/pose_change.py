@@ -178,7 +178,7 @@ echo "=== PoseChange ready ==="
         self.samples_stream.save_json(self.samples_ds_json)
         self.reference_stream.save_json(self.reference_ds_json)
 
-        reference_id = self.reference_stream.ids[0]
+        reference_id = self.reference_stream.ids_expanded[0]
 
         config_data = {
             "reference_json": self.reference_ds_json,
