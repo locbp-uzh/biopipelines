@@ -6,6 +6,8 @@
 
 from biopipelines.pipeline import *
 from biopipelines.fuse import Fuse
+from biopipelines.mutagenesis import Mutagenesis
+from biopipelines.selection import Selection
 from biopipelines.boltz2 import Boltz2
 from biopipelines.distance import Distance
 from biopipelines.panda import Panda
@@ -29,12 +31,22 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     cam = PDB("1CFD", ids="CaM")  
     fusions = Fuse(sequences=[donor, cam, acceptor],
                    name="CaFRET",
-                   linker="GSG",
-                   linker_lengths=["0-3", "0-3"])
-    apo = Boltz2(proteins=fusions)
-    calcium = Ligand("CA")
-    holo = Boltz2(proteins=fusions,
-                  ligands=Bundle(calcium,calcium,calcium,calcium),
+                   linker="GGG",
+                   linker_lengths=["0-2", "0-2"]) # reduced to 0-2
+    # mutate first linker, then second
+    mutants = Mutagenesis(original=Mutagenesis(original=fusions,
+                                               position=fusions.tables.sequences.L1,
+                                               mutate_to="ASLK"),
+                          position=fusions.tables.sequences.L2,
+                          mutate_to="ASLK")
+    # mutate sum of two selections
+    mutants = Mutagenesis(original=fusions,
+                          position=Selection([fusions.tables.sequences.L1,fusions.tables.sequences.L2]),
+                          mutate_to="ASLK")
+    apo = Boltz2(proteins=mutants)
+    ca = Ligand("CA")
+    holo = Boltz2(proteins=mutants,
+                  ligands=Bundle(ca,ca,ca,ca),
                   msas=apo)
     dist_apo = Distance(structures=apo,
                         residue=["66", "-173"], 
@@ -47,6 +59,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                        "FRET_E_holo": f"1 / (1 + (FRET_distance_holo / {R0}) ** 6)",
                        "delta_FRET": "abs(FRET_E_holo - FRET_E_apo)"}
     analysis = Panda(tables=[fusions.tables.sequences,
+                             mutants.tables.sequences,
                              dist_apo.tables.distances,
                              dist_holo.tables.distances],
                      operations=[Panda.merge(),

@@ -9,23 +9,23 @@ from biopipelines.compound_library import CompoundLibrary
 from biopipelines.boltz2 import Boltz2
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
-#    MarR = Sequence("LFNEIIPLG...")
-#    MarR = Sequence("LFNEIIPLGRLIHMVNQKKDRLLNEYLSPLDITAAQFKVLCSIRCAACITPVELKKVLSVDLGALTRMLDRLVCKGWVERLPNPNDKRGVLVKLTTGGAAICEQCHQLVGQDLHQELTKNLTADEVATLEYLLKKVLP")
 
-with Pipeline(project="MarR", job="FragmentScreen"):
+with Pipeline(project="CarbonicAnhydrase", job="FragmentScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")
-    MarR = Sequence("LFNEIIPLG...")
-    library = CompoundLibrary(library={"candidate": "<aryl><carboxylate>",
-                                       "aryl": ["<o-hydroxyphenyl>", 
-                                                "<m-hydroxyphenyl>",
-                                                "<p-hydroxyphenyl>"],
-                                       "o-hydroxyphenyl": r"c1ccc(O)c(c1)",
-                                       "m-hydroxyphenyl": r"c1cc(O)cc(c1)",
-                                       "p-hydroxyphenyl": r"c1c(O)ccc(c1)",
-                                       "carboxylate": r"C(=O)[O-]"},
+    CaII = Sequence("3KS3", ids="CaII")
+    library = CompoundLibrary(library={"candidate": "<sulfonamide><ring><acetamide>",
+                                       "sulfonamide": r"NS(=O)(=O)",
+                                       "ring": ["<thiadiazole>", 
+                                                "<furan>",
+                                                "<cyclopentane>"],
+                                       "thiadiazole": r"C1=NN=C(S1)",
+                                       "furan": r"C1=CC=C(O1)",
+                                       "cyclopentane": r"C1CCC(C1)",
+                                       "acetamide": r"NC(=O)C"},
                               primary_key="candidate")
-    cofolded = Boltz2(proteins=Bundle(MarR, MarR),
-                   ligands=Each(library))
+    zn = Ligand("ZN")
+    cofolded = Boltz2(proteins=CaII,
+                      ligands=Bundle(Each(library),zn))
     merged = Panda(tables=[cofolded.tables.affinity, 
                            library.tables.compounds],
                    operations=[Panda.merge(on="id"),
@@ -37,13 +37,6 @@ with Pipeline(project="MarR", job="FragmentScreen"):
                       xlabel="Aryl Group", 
                       ylabel="Predicted Affinity [uM]", 
                       grid=True))
-    
-    atp=Ligand("ATP")
-    boltz_ligand_affinity = Boltz2(proteins=Bundle(MarR, MarR),
-                                   ligands=Bundle(Each(library),atp))
-    boltz_atp_affinity = Boltz2(proteins=Bundle(MarR, MarR),
-                                   ligands=Bundle(atp,Each(library)))
-    
 
     
 
