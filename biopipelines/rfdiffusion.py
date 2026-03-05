@@ -269,7 +269,7 @@ echo "=== RFdiffusion installation complete ==="
                 self.pdb_stream = pdb
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
-            self.pdb_input_id = self.pdb_stream.ids_expanded[0]
+            self.pdb_input_id = self.pdb_stream.ids[0]
 
         self.contigs = contigs
         self.inpaint = inpaint

@@ -171,7 +171,7 @@ echo "=== PDB ready ==="
             self.from_upstream = True
 
         if self.from_upstream:
-            self.pdb_ids = list(self.structures_stream.ids_expanded)
+            self.pdb_ids = list(self.structures_stream.ids)
             upstream_fmt = self.structures_stream.format
             self.convert = upstream_fmt if upstream_fmt in ("pdb", "cif") else convert.lower() if convert else None
         else:
@@ -608,7 +608,7 @@ echo "=== PDB ready ==="
         # When input comes from upstream, provide the source files for the runtime script
         if self.from_upstream:
             config_data["from_upstream"] = True
-            config_data["upstream_files"] = list(self.structures_stream.files_expanded)
+            config_data["upstream_files"] = list(self.structures_stream.files)
             config_data["upstream_map_table"] = self.structures_stream.map_table
 
         with open(self.config_file, 'w') as f:

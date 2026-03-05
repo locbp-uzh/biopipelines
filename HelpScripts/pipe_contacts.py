@@ -374,7 +374,7 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
 
     print(f"Analyzing protein-ligand contacts")
-    print(f"Structures: {len(structures_ds.ids)}")
+    print(f"Structures: {len(structures_ds.ids_expanded)}")
     print(f"Protein selections: {selections_config}")
     print(f"Ligand: {ligand_name}")
     print(f"Contact threshold: {contact_threshold} Å")
@@ -386,13 +386,13 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
     if selections_config['type'] == 'all_protein':
         # All protein residues for all structures
         print(f"Using all protein residues for all structures")
-        for structure_id in structures_ds.ids:
+        for structure_id in structures_ds.ids_expanded:
             selections_map[structure_id] = None  # None means all protein
     elif selections_config['type'] == 'fixed':
         # Fixed selection for all structures
         fixed_selection = selections_config['value']
         print(f"Using fixed protein selection: {fixed_selection}")
-        for structure_id in structures_ds.ids:
+        for structure_id in structures_ds.ids_expanded:
             selections_map[structure_id] = fixed_selection
     else:
         # Load from table with ID mapping
@@ -401,7 +401,7 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
         table_selections = load_selections_from_table(table_path, column_name, id_map)
 
         # Map structure IDs to table IDs and populate selections_map
-        for structure_id in structures_ds.ids:
+        for structure_id in structures_ds.ids_expanded:
             candidate_ids = map_table_ids_to_ids(structure_id, id_map)
 
             # Try all candidate IDs in priority order (most specific to least specific)

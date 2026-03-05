@@ -14,9 +14,15 @@ Usage:
            --mode MODE [--mutate-to AAS] --include-original [true|false]
            --exclude EXCLUDE --output OUTPUT_CSV
 
+    python pipe_mutagenesis.py --sequences MAP_TABLE_CSV --selection TABLE_REF
+           --mode MODE [--mutate-to AAS] --include-original [true|false]
+           --exclude EXCLUDE --output OUTPUT_CSV
+
 Arguments:
     --sequences: Path to map_table CSV with id and sequence columns
-    --position: Position for mutagenesis (1-indexed)
+    --position: Position for mutagenesis (1-indexed). Mutually exclusive with --selection.
+    --selection: TABLE_REFERENCE string for per-row position lookups (e.g.,
+        TABLE_REFERENCE:/path/to/table.csv:L1). Mutually exclusive with --position.
     --mode: Mutagenesis mode (specific, saturation, hydrophobic, charged, etc.)
     --mutate-to: Target amino acid(s) for specific mode (e.g., "A" or "AV")
     --include-original: Whether to include original amino acid (true/false)
@@ -31,7 +37,11 @@ import sys
 import os
 import pandas as pd
 import argparse
-from typing import List, Dict
+from typing import List, Dict, Optional
+
+# Add repo root to path so biopipelines package is importable
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_table, lookup_table_value
 
 
 # Amino acid classifications
@@ -47,6 +57,40 @@ AMINO_ACID_CLASSES = {
     "positive": "HKR",
     "negative": "DE"
 }
+
+
+def parse_positions_selection(selection_str: str) -> List[int]:
+    """
+    Parse PyMOL-style position selection string into list of positions.
+
+    Args:
+        selection_str: Selection string like "141+143+145+147-149"
+                      '+' separates individual positions or ranges
+                      '-' indicates a range (e.g., "147-149" means 147, 148, 149)
+
+    Returns:
+        Sorted list of positions (1-indexed)
+    """
+    positions = []
+    parts = selection_str.split('+')
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part and not part.startswith('-'):
+            range_parts = part.split('-')
+            if len(range_parts) == 2:
+                start = int(range_parts[0])
+                end = int(range_parts[1])
+                positions.extend(range(start, end + 1))
+            else:
+                positions.append(int(part))
+        else:
+            positions.append(int(part))
+
+    return sorted(set(positions))
 
 
 def load_sequences_from_map_table(file_path: str) -> List[Dict]:
@@ -178,8 +222,10 @@ def main():
     parser = argparse.ArgumentParser(description='Generate mutants')
     parser.add_argument('--sequences', required=True,
                        help='Path to map_table CSV with id and sequence columns')
-    parser.add_argument('--position', type=int, required=True,
-                       help='Position for mutagenesis (1-indexed)')
+    parser.add_argument('--position', type=int, default=None,
+                       help='Position for mutagenesis (1-indexed). Mutually exclusive with --selection.')
+    parser.add_argument('--selection', default=None,
+                       help='TABLE_REFERENCE string for per-row position lookups')
     parser.add_argument('--mode', required=True,
                        help='Mutagenesis mode')
     parser.add_argument('--mutate-to', default='',
@@ -194,10 +240,23 @@ def main():
     args = parser.parse_args()
 
     try:
+        # Validate mutually exclusive args
+        if args.position is None and args.selection is None:
+            parser.error("Either --position or --selection must be provided")
+        if args.position is not None and args.selection is not None:
+            parser.error("--position and --selection are mutually exclusive")
+
         include_original = args.include_original.lower() == 'true'
 
         # Load all sequences from map_table
         sequences = load_sequences_from_map_table(args.sequences)
+
+        # Load selection table if using --selection mode
+        selection_table = None
+        selection_column = None
+        if args.selection:
+            selection_table, selection_column = load_table(args.selection)
+            print(f"Loaded selection table with column '{selection_column}'")
 
         # Generate mutants for all input sequences
         all_mutants = []
@@ -207,25 +266,51 @@ def main():
 
             print(f"Processing sequence: {sequence_id}")
             print(f"  Sequence length: {len(sequence)}")
-            print(f"  Position: {args.position}")
-            print(f"  Original amino acid: {sequence[args.position-1]}")
+
             if seq_info['prior_mutations']:
                 print(f"  Prior mutations: {seq_info['prior_mutations']}")
 
-            mutants = generate_mutants(
-                sequence=sequence,
-                sequence_id=sequence_id,
-                position=args.position,
-                mode=args.mode,
-                include_original=include_original,
-                exclude=args.exclude,
-                mutate_to=args.mutate_to,
-                prior_mutations=seq_info['prior_mutations'],
-                prior_positions=seq_info['prior_positions']
-            )
+            if args.selection:
+                # Selection mode: look up per-row positions from table
+                selection_value = lookup_table_value(
+                    selection_table, sequence_id, selection_column
+                )
+                positions = parse_positions_selection(str(selection_value))
+                print(f"  Selection positions: {positions}")
 
-            all_mutants.extend(mutants)
-            print(f"  Generated {len(mutants)} mutants")
+                for position in positions:
+                    print(f"  Position {position}: original AA = {sequence[position-1]}")
+                    mutants = generate_mutants(
+                        sequence=sequence,
+                        sequence_id=sequence_id,
+                        position=position,
+                        mode=args.mode,
+                        include_original=include_original,
+                        exclude=args.exclude,
+                        mutate_to=args.mutate_to,
+                        prior_mutations=seq_info['prior_mutations'],
+                        prior_positions=seq_info['prior_positions']
+                    )
+                    all_mutants.extend(mutants)
+                    print(f"    Generated {len(mutants)} mutants at position {position}")
+            else:
+                # Fixed position mode
+                print(f"  Position: {args.position}")
+                print(f"  Original amino acid: {sequence[args.position-1]}")
+
+                mutants = generate_mutants(
+                    sequence=sequence,
+                    sequence_id=sequence_id,
+                    position=args.position,
+                    mode=args.mode,
+                    include_original=include_original,
+                    exclude=args.exclude,
+                    mutate_to=args.mutate_to,
+                    prior_mutations=seq_info['prior_mutations'],
+                    prior_positions=seq_info['prior_positions']
+                )
+                all_mutants.extend(mutants)
+                print(f"  Generated {len(mutants)} mutants")
 
         print(f"\nTotal mutants generated: {len(all_mutants)}")
 
@@ -243,7 +328,10 @@ def main():
         # Print summary
         print(f"\nSummary:")
         print(f"  Mode: {args.mode}")
-        print(f"  Position: {args.position}")
+        if args.selection:
+            print(f"  Selection: {args.selection}")
+        else:
+            print(f"  Position: {args.position}")
         print(f"  Input sequences: {len(sequences)}")
         print(f"  Total mutants: {len(all_mutants)}")
         if all_mutants:

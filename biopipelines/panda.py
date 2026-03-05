@@ -642,13 +642,13 @@ echo "=== Panda ready ==="
                 if hasattr(pool, 'streams'):
                     for stream_name in pool.streams.keys():
                         stream = pool.streams.get(stream_name)
-                        if stream and len(stream) > 0 and len(stream.files_expanded) > 0:
+                        if stream and len(stream) > 0 and len(stream.files) > 0:
                             file_map[stream_name] = {}
-                            for i, sid in enumerate(stream.ids_expanded):
-                                if i < len(stream.files_expanded):
+                            for i, sid in enumerate(stream.ids):
+                                if i < len(stream.files):
                                     # Apply id_remap if the original ID should be remapped
                                     mapped_id = self.id_remap.get(sid, sid)
-                                    file_map[stream_name][mapped_id] = stream.files_expanded[i]
+                                    file_map[stream_name][mapped_id] = stream.files[i]
                 self.pool_file_maps.append(file_map)
 
                 # Build table map from pool tables (for filtering/copying at execution time)
@@ -883,11 +883,11 @@ fi
                                 "map_table": stream.map_table or ""
                             }
                         # Apply id_remap to IDs if present
-                        remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids_expanded]
+                        remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids]
                         stream_data[stream_name]["ids"].extend(remapped_ids)
                         # Only collect files for file-based streams
                         if stream.is_file_based():
-                            stream_data[stream_name]["files"].extend(stream.files_expanded)
+                            stream_data[stream_name]["files"].extend(stream.files)
 
             # Deduplicate IDs across pools (first occurrence wins)
             for sdata in stream_data.values():

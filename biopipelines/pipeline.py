@@ -1137,7 +1137,7 @@ umask 002
             ids = []
             for name, stream in std_output.streams.items():
                 if hasattr(stream, 'ids'):
-                    for sid in stream.ids_expanded:
+                    for sid in stream.ids:
                         if sid not in seen:
                             seen.add(sid)
                             ids.append(sid)

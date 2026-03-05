@@ -166,7 +166,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
                 self.pdb_stream = pdb
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
-            self.pdb_input_id = self.pdb_stream.ids_expanded[0]
+            self.pdb_input_id = self.pdb_stream.ids[0]
 
         # Core parameters
         self.contigs = contigs
@@ -505,7 +505,7 @@ class RFDAA_PrepareLigand(BaseConfig):
             self.ligand_stream = ligand
         else:
             raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
-        self.ligand_input_id = self.ligand_stream.ids_expanded[0]
+        self.ligand_input_id = self.ligand_stream.ids[0]
 
         super().__init__(**kwargs)
 

@@ -407,7 +407,7 @@ def _collect_ids_from_value(value: Any, stream_name: str, iterate_only: bool = F
         if hasattr(src, 'streams'):
             stream = getattr(src.streams, stream_name, None)
             if stream:
-                return list(stream.ids_expanded)
+                return list(stream.ids)
         if isinstance(src, str):
             return [stream_name]
         return []

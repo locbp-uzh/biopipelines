@@ -22,6 +22,7 @@ from pathlib import Path
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.pdb_parser import get_protein_sequence, parse_pdb_file
+from biopipelines.id_patterns import expand_ids, contains_pattern, expand_file_pattern
 
 
 def convert_cif_to_pdb(cif_content: str) -> str:
@@ -992,8 +993,10 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     Returns:
         Number of failed fetches
     """
-    pdb_ids = config_data['pdb_ids']
-    custom_ids = config_data.get('custom_ids', pdb_ids)
+    raw_pdb_ids = config_data['pdb_ids']
+    pdb_ids = expand_ids(raw_pdb_ids) if any(contains_pattern(s) for s in raw_pdb_ids) else raw_pdb_ids
+    raw_custom_ids = config_data.get('custom_ids', raw_pdb_ids)
+    custom_ids = expand_ids(raw_custom_ids) if any(contains_pattern(s) for s in raw_custom_ids) else raw_custom_ids
     convert = config_data.get('convert')  # May be None (keep whatever format is found)
     local_folder = config_data.get('local_folder')
     repo_pdbs_folder = config_data['repo_pdbs_folder']
@@ -1009,7 +1012,13 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     operations = config_data.get('operations', [])
     chain = config_data.get('chain', 'longest')
     from_upstream = config_data.get('from_upstream', False)
-    upstream_files = config_data.get('upstream_files', [])
+    raw_upstream_files = config_data.get('upstream_files', [])
+    if raw_upstream_files and len(raw_upstream_files) == 1 and '<id>' in raw_upstream_files[0]:
+        upstream_files = [expand_file_pattern(raw_upstream_files[0], eid) for eid in pdb_ids]
+    elif raw_upstream_files and any(contains_pattern(s) for s in raw_upstream_files):
+        upstream_files = expand_ids(raw_upstream_files)
+    else:
+        upstream_files = raw_upstream_files
     upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)  # Legacy, ignored
 
     if from_upstream:

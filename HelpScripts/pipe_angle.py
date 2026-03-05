@@ -256,7 +256,7 @@ def analyze_angles(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
 
     angle_type = {"bond": "bond", "torsion": "torsional", "vector": "vector-vector"}[mode]
-    print(f"Analyzing {angle_type} angles in {len(structures_ds.ids)} structures")
+    print(f"Analyzing {angle_type} angles in {len(structures_ds.ids_expanded)} structures")
     if mode == "vector":
         (a1, a2), (b1, b2) = atom_selections
         print(f"Vector 1: {a1} -> {a2}  |  Vector 2: {b1} -> {b2}")

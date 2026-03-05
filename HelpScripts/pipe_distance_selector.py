@@ -506,7 +506,7 @@ def main():
     # Parse include_reference boolean
     include_reference = include_reference_str.lower() in ['true', '1', 'yes']
 
-    print(f"Analyzing {len(structures_ds.ids)} structures with distance cutoff {distance_cutoff}Å")
+    print(f"Analyzing {len(structures_ds.ids_expanded)} structures with distance cutoff {distance_cutoff}Å")
     print(f"Reference: {reference_spec}")
     if restrict_spec:
         print(f"Restriction: {restrict_spec}")

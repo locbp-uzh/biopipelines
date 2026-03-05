@@ -300,7 +300,9 @@ def _load_compound_mols(compounds_ds, conf_dir):
     if compounds_ds.map_table and os.path.exists(compounds_ds.map_table):
         map_df = pd.read_csv(compounds_ds.map_table)
 
-    for ligand_id in compounds_ds.ids:
+    expanded_ids = compounds_ds.ids_expanded
+    expanded_files = compounds_ds.files_expanded
+    for ligand_id in expanded_ids:
         mol = None
         sdf_path = None
 
@@ -321,11 +323,11 @@ def _load_compound_mols(compounds_ds, conf_dir):
                     mol, sdf_path = _mol_from_smiles(smiles, ligand_id, conf_dir)
 
         # Strategy 3: DataStream files list
-        if mol is None and compounds_ds.files:
-            idx = compounds_ds.ids.index(ligand_id) if ligand_id in compounds_ds.ids else -1
+        if mol is None and expanded_files:
+            idx = expanded_ids.index(ligand_id) if ligand_id in expanded_ids else -1
             if idx >= 0:
-                if len(compounds_ds.files) == len(compounds_ds.ids):
-                    file_path = compounds_ds.files[idx]
+                if len(expanded_files) == len(expanded_ids):
+                    file_path = expanded_files[idx]
                 elif len(compounds_ds.files) == 1:
                     file_path = compounds_ds.files[0]
                 else:
@@ -1085,13 +1087,17 @@ def main():
         missing_df = pd.read_csv(missing_csv)
         missing_ids = set(missing_df["id"].astype(str))
         if missing_ids:
-            pairs = [(id_, f) for id_, f in zip(structures_ds.ids, structures_ds.files)
+            expanded_ids = structures_ds.ids_expanded
+            expanded_files = structures_ds.files_expanded
+            pairs = [(id_, f) for id_, f in zip(expanded_ids, expanded_files)
                      if id_ not in missing_ids]
-            skipped = len(structures_ds.ids) - len(pairs)
+            skipped = len(expanded_ids) - len(pairs)
             if skipped:
                 print(f"  Skipping {skipped} IDs from upstream missing table")
             structures_ds.ids = [p[0] for p in pairs]
             structures_ds.files = [p[1] for p in pairs]
+            structures_ds._ids_expanded_cache = None
+            structures_ds._files_expanded_cache = None
 
     print("\n--- Step 1: Protein Preparation ---")
     prepared_proteins = prepare_proteins(

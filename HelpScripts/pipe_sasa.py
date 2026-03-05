@@ -160,11 +160,11 @@ def main():
     # Load structures DataStream using pipe_biopipelines_io
     structures_ds = load_datastream(args.structures)
 
-    if not structures_ds.ids:
+    if not structures_ds.ids_expanded:
         print(f"Error: No structures found in: {args.structures}")
         sys.exit(1)
 
-    print(f"Loaded {len(structures_ds.ids)} structures from DataStream")
+    print(f"Loaded {len(structures_ds.ids_expanded)} structures from DataStream")
 
     # Initialize PyMOL in quiet mode
     pymol.finish_launching(['pymol', '-qc'])

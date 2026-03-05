@@ -157,9 +157,9 @@ echo "=== Fuse ready ==="
             raise ValueError(f"Slot {index}: DataStream is empty")
 
         slot = {
-            "ids": list(ds.ids_expanded),
+            "ids": list(ds.ids),
             "map_table": ds.map_table or "",
-            "files": list(ds.files_expanded) if ds.files_expanded else []
+            "files": list(ds.files) if ds.files else []
         }
 
         if not slot["map_table"] and not slot["files"]:

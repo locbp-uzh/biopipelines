@@ -10,19 +10,71 @@ Provides pattern syntax for compact representation of ID lists:
     <A B C>       Explicit set (space-separated): 3 IDs
     <0..2>_<A B>  Multi-slot: Cartesian product → 6 IDs
 
+Bracket syntax for runtime-dependent (lazy) patterns:
+    [_<N><S A L K>]  Bracket segment — cannot be expanded at config time
+    prot_<0..4>[_<N><S A L K>]  Mixed: deterministic prefix + lazy suffix
+
 All functions are standalone (no DataStream imports).
 """
 
 import re
 from itertools import product
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-# Regex to find pattern slots: <...> but not [_<...>] (runtime bracket syntax)
+# Regex to find pattern slots: <...> but not inside [...] (runtime bracket syntax)
 _SLOT_RE = re.compile(r'<([^>\[\]]+)>')
+
+# Regex to find bracket segments: [...]
+_BRACKET_RE = re.compile(r'\[([^\]]+)\]')
+
+
+class LazyPatternError(Exception):
+    """Raised when trying to fully expand a pattern that contains brackets."""
+    pass
+
+
+def is_lazy(s: str) -> bool:
+    """True if string contains a [...] bracket segment (runtime-dependent)."""
+    return bool(_BRACKET_RE.search(s))
+
+
+def has_brackets(s: str) -> bool:
+    """Alias for is_lazy — True if string contains [...] brackets."""
+    return is_lazy(s)
+
+
+def strip_brackets(s: str) -> str:
+    """Remove all [...] bracket segments from a pattern string.
+
+    Returns the deterministic prefix (the part that can be expanded at config time).
+
+    'prot_<0..4>[_<N><S A L K>]' → 'prot_<0..4>'
+    'base[_<N><A V>]'            → 'base'
+    'literal'                    → 'literal'
+    """
+    return _BRACKET_RE.sub('', s)
+
+
+def try_expand(s: str) -> Tuple[List[str], bool]:
+    """Expand the deterministic prefix of a pattern.
+
+    Returns:
+        (ids, is_complete) where:
+        - If no brackets: ids = full expansion, is_complete = True
+        - If brackets: ids = expansion of prefix only, is_complete = False
+
+    'prot_<0..2>'                → (['prot_0', 'prot_1', 'prot_2'], True)
+    'prot_<0..1>[_<N><A V>]'     → (['prot_0', 'prot_1'], False)
+    'base[_<N><A V>]'            → (['base'], False)
+    """
+    if not is_lazy(s):
+        return expand_pattern(s), True
+    prefix = strip_brackets(s)
+    return expand_pattern(prefix), False
 
 
 def contains_pattern(s: str) -> bool:
-    """True if string contains any <..> pattern slot."""
+    """True if string contains any <..> pattern slot (outside brackets)."""
     return bool(_SLOT_RE.search(s))
 
 
@@ -59,10 +111,15 @@ def _find_slots(s: str) -> List[re.Match]:
 def count_pattern(s: str) -> int:
     """Count how many IDs a pattern expands to (without expanding).
 
-    'base_<0..49>'      → 50
-    '<0..2>_<A B>'      → 6
-    'literal'           → 1
+    For lazy patterns (with brackets), counts only the deterministic prefix.
+
+    'base_<0..49>'               → 50
+    '<0..2>_<A B>'               → 6
+    'literal'                    → 1
+    'prot_<0..4>[_<N><A V>]'     → 5 (prefix only)
     """
+    if is_lazy(s):
+        s = strip_brackets(s)
     slots = _find_slots(s)
     if not slots:
         return 1
@@ -83,7 +140,14 @@ def expand_pattern(s: str) -> List[str]:
     'base_<0..2>'       → ['base_0', 'base_1', 'base_2']
     '<0..1>_<A B>'      → ['0_A', '0_B', '1_A', '1_B']
     'literal'           → ['literal']
+
+    Raises LazyPatternError if the string contains [...] brackets.
     """
+    if is_lazy(s):
+        raise LazyPatternError(
+            f"Cannot fully expand lazy pattern '{s}': contains bracket segments. "
+            f"Use try_expand() for partial expansion or expand at runtime."
+        )
     slots = _find_slots(s)
     if not slots:
         return [s]
@@ -103,11 +167,30 @@ def expand_pattern(s: str) -> List[str]:
 
 
 def expand_ids(ids: List[str]) -> List[str]:
-    """Expand each element in the list and concatenate results."""
+    """Expand each element in the list and concatenate results.
+
+    Raises LazyPatternError if any element contains brackets.
+    """
     result = []
     for s in ids:
         result.extend(expand_pattern(s))
     return result
+
+
+def try_expand_ids(ids: List[str]) -> Tuple[List[str], bool]:
+    """Expand deterministic prefixes of all IDs.
+
+    Returns:
+        (expanded_ids, is_complete) — is_complete is False if any ID had brackets.
+    """
+    result = []
+    complete = True
+    for s in ids:
+        expanded, is_complete = try_expand(s)
+        result.extend(expanded)
+        if not is_complete:
+            complete = False
+    return result, complete
 
 
 def expand_at(s: str, index: int) -> str:

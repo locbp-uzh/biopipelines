@@ -106,7 +106,7 @@ def build_outputs(structures_ds, output_dir, num_models, rmsf_all_csv, structure
     """
     # Merge per-ID RMSF CSVs
     rmsf_frames = []
-    for struct_id in structures_ds.ids:
+    for struct_id in structures_ds.ids_expanded:
         rmsf_path = os.path.join(output_dir, f"{struct_id}_RMSF.csv")
         if os.path.exists(rmsf_path):
             df = pd.read_csv(rmsf_path)
@@ -124,7 +124,7 @@ def build_outputs(structures_ds, output_dir, num_models, rmsf_all_csv, structure
 
     # Build structures map from actual output files
     rows = []
-    for input_id in structures_ds.ids:
+    for input_id in structures_ds.ids_expanded:
         for model_idx in range(1, num_models + 1):
             output_id = f"{input_id}_{model_idx}"
             pdb_path = os.path.join(output_dir, f"{output_id}.pdb")
@@ -154,14 +154,14 @@ def main():
 
     structures_ds = load_datastream(args.structures)
 
-    if not structures_ds.ids:
+    if not structures_ds.ids_expanded:
         print("Error: No structures found in input DataStream")
         sys.exit(1)
 
-    print(f"Post-processing CABS-Flex output for {len(structures_ds.ids)} structures")
+    print(f"Post-processing CABS-Flex output for {len(structures_ds.ids_expanded)} structures")
 
     # Post-process each structure's output
-    for struct_id in structures_ds.ids:
+    for struct_id in structures_ds.ids_expanded:
         postprocess(struct_id, args.output_dir, args.num_models)
 
     # Build merged outputs

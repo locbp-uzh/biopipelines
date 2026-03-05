@@ -13,7 +13,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_multiplied_ids
+    from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
@@ -21,7 +21,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_multiplied_ids
+    from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from biopipelines_io import Resolve
 
 
@@ -315,9 +315,9 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         # Predict sequence IDs (stream_id + sequence number)
         # Total sequences per structure = num_sequences (batch_size) * num_batches
         total_seqs = self.num_sequences * self.num_batches
-        suffixes = [str(i) for i in range(1, total_seqs + 1)]
-        sequence_ids, provenance = generate_multiplied_ids(
-            self.structures_stream.ids_expanded, suffixes,
+        suffix_pattern = f"<1..{total_seqs}>"
+        sequence_ids = generate_multiplied_ids_pattern(
+            self.structures_stream.ids, suffix_pattern,
             input_stream_name="structures"
         )
 

@@ -225,7 +225,7 @@ echo "MMseqs2 processing completed"
         """Predict sequence IDs from input sources."""
         # Get from sequences stream if available
         if self.sequences_stream and len(self.sequences_stream) > 0:
-            return list(self.sequences_stream.ids_expanded)
+            return list(self.sequences_stream.ids)
 
         # Handle raw sequences (string or list)
         if self.raw_sequences is not None:

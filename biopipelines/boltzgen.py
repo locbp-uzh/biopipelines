@@ -295,13 +295,13 @@ echo "=== BoltzGen installation complete ==="
         if isinstance(target_structure, StandardizedOutput):
             if target_structure.streams.structures and len(target_structure.streams.structures) > 0:
                 self.target_stream = target_structure.streams.structures
-                self.target_input_id = self.target_stream.ids_expanded[0]
+                self.target_input_id = self.target_stream.ids[0]
             else:
                 raise ValueError("target_structure StandardizedOutput has no structures")
         elif isinstance(target_structure, DataStream):
             if len(target_structure) > 0:
                 self.target_stream = target_structure
-                self.target_input_id = self.target_stream.ids_expanded[0]
+                self.target_input_id = self.target_stream.ids[0]
             else:
                 raise ValueError("target_structure DataStream is empty")
         elif isinstance(target_structure, str):
@@ -1322,15 +1322,15 @@ echo "=== BoltzGenImport ready ==="
 
         if isinstance(designs, StandardizedOutput):
             if designs.streams.structures and len(designs.streams.structures) > 0:
-                for struct_id, struct_file in zip(designs.streams.structures.ids_expanded,
-                                                    designs.streams.structures.files_expanded):
+                for struct_id, struct_file in zip(designs.streams.structures.ids,
+                                                    designs.streams.structures.files):
                     self.design_ids.append(struct_id)
                     self.design_structures.append(struct_file)
             else:
                 raise ValueError("designs StandardizedOutput has no structures")
         elif isinstance(designs, DataStream):
-            self.design_ids = list(designs.ids_expanded)
-            self.design_structures = list(designs.files_expanded)
+            self.design_ids = list(designs.ids)
+            self.design_structures = list(designs.files)
         else:
             raise ValueError(f"designs must be DataStream or StandardizedOutput, got {type(designs)}")
 

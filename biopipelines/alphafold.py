@@ -336,7 +336,7 @@ fi
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after AlphaFold execution."""
         # Use sequence IDs from input to predict structure files
-        sequence_ids = self.sequences_stream.ids_expanded
+        sequence_ids = list(self.sequences_stream.ids)
 
         # Generate structure file paths
         structure_files = []

@@ -1170,9 +1170,9 @@ class StandardizedOutput:
 
         # Verify all streams share the same IDs
         reference_name, reference_ds = streams[0]
-        reference_ids = reference_ds.ids_expanded
+        reference_ids = list(reference_ds.ids)
         for name, ds in streams[1:]:
-            if ds.ids_expanded != reference_ids:
+            if list(ds.ids) != reference_ids:
                 raise ValueError(
                     f"Cannot iterate over StandardizedOutput: streams have mismatched IDs. "
                     f"'{reference_name}' has {len(reference_ids)} IDs, "
@@ -1186,8 +1186,8 @@ class StandardizedOutput:
             for name, ds in streams:
                 single_streams[name] = DataStream(
                     name=ds.name,
-                    ids=[ds.ids_expanded[idx]],
-                    files=[ds.files_expanded[idx]] if ds.files_expanded else [],
+                    ids=[ds.ids[idx]],
+                    files=[ds.files[idx]] if len(ds.files) > idx else [],
                     format=ds.format
                 )
             single_streams["output_folder"] = self.output_folder
@@ -1303,7 +1303,7 @@ class StandardizedOutput:
                         parts.append(f"{col}={val}")
                     result.append(f"    – {', '.join(parts)}")
             else:
-                items = list(zip(ds.ids_expanded, ds.files_expanded)) if ds.files_expanded else [(iid, "") for iid in ds.ids_expanded]
+                items = list(zip(ds.ids, ds.files)) if ds.files else [(iid, "") for iid in ds.ids]
                 n_items = len(items)
                 if n_items <= 4:
                     display_items = items

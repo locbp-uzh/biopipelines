@@ -235,25 +235,25 @@ echo "=== RFdiffusion3 installation complete ==="
                 self.pdb_stream = ligand_structure.streams.structures
                 # Auto-extract ligand code from compound_ids if not provided
                 if not ligand_code and ligand_structure.streams.compounds:
-                    ligand_code = ligand_structure.streams.compounds.ids_expanded[0] if ligand_structure.streams.compounds.ids else ""
+                    ligand_code = ligand_structure.streams.compounds.ids[0] if ligand_structure.streams.compounds.ids else ""
             elif isinstance(ligand_structure, DataStream):
                 self.pdb_stream = ligand_structure
             else:
                 raise ValueError(f"ligand_structure must be DataStream or StandardizedOutput, got {type(ligand_structure)}")
-            self.pdb_input_id = self.pdb_stream.ids_expanded[0]
+            self.pdb_input_id = self.pdb_stream.ids[0]
         # Handle PDB input (only if ligand_structure not provided)
         elif pdb is not None:
             if isinstance(pdb, StandardizedOutput):
                 self.pdb_stream = pdb.streams.structures
                 if len(pdb.streams.structures) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures)}), using first: {pdb.streams.structures.ids_expanded[0]}")
+                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures)}), using first: {pdb.streams.structures.ids[0]}")
             elif isinstance(pdb, DataStream):
                 self.pdb_stream = pdb
                 if len(pdb) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb)}), using first: {pdb.ids_expanded[0]}")
+                    print(f"Warning: Multiple structures provided ({len(pdb)}), using first: {pdb.ids[0]}")
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
-            self.pdb_input_id = self.pdb_stream.ids_expanded[0]
+            self.pdb_input_id = self.pdb_stream.ids[0]
 
         # Store parameters
         self.contig = contig

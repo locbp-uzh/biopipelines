@@ -104,15 +104,25 @@ class DataStream:
         """True if any ID contains a pattern slot."""
         return any(id_patterns.contains_pattern(s) for s in self.ids)
 
+    @property
+    def is_lazy(self) -> bool:
+        """True if any ID contains [...] bracket segments (runtime-dependent)."""
+        return any(id_patterns.is_lazy(s) for s in self.ids)
+
     def _has_file_template(self) -> bool:
         """True if files list uses <id> template substitution."""
         return len(self.files) == 1 and '<id>' in self.files[0]
 
     @property
     def ids_expanded(self) -> List[str]:
-        """Lazily expand patterns in ids. Cached after first call."""
+        """Lazily expand patterns in ids. Cached after first call.
+
+        For lazy patterns (with brackets), expands only the deterministic prefix.
+        """
         if self._ids_expanded is None:
-            if self.has_patterns():
+            if self.is_lazy:
+                self._ids_expanded, _ = id_patterns.try_expand_ids(self.ids)
+            elif self.has_patterns():
                 self._ids_expanded = id_patterns.expand_ids(self.ids)
             else:
                 self._ids_expanded = self.ids  # No copy — same list reference
@@ -307,16 +317,16 @@ class DataStream:
         }
 
     def save_json(self, path: str) -> str:
-        """Save DataStream to JSON file with expanded IDs/files.
+        """Save DataStream to JSON file with compact patterns.
 
-        Runtime contract: pipe scripts always receive fully expanded data.
+        Patterns stay compact; pipe scripts expand at runtime via DataStreamRuntime.
         """
         import json
         os.makedirs(os.path.dirname(path), exist_ok=True)
         data = {
             'name': self.name,
-            'ids': list(self.ids_expanded),
-            'files': list(self.files_expanded),
+            'ids': self.ids.copy(),
+            'files': self.files.copy(),
             'map_table': self.map_table,
             'format': self.format,
             'metadata': self.metadata.copy()
@@ -417,8 +427,13 @@ def create_map_table(
     Returns:
         Path to created CSV file
     """
-    # Expand pattern-based ids
-    expanded_ids = id_patterns.expand_ids(ids) if any(id_patterns.contains_pattern(s) for s in ids) else ids
+    # Expand pattern-based ids (skip if lazy — lazy IDs are expanded at runtime)
+    if any(id_patterns.is_lazy(s) for s in ids):
+        expanded_ids, _ = id_patterns.try_expand_ids(ids)
+    elif any(id_patterns.contains_pattern(s) for s in ids):
+        expanded_ids = id_patterns.expand_ids(ids)
+    else:
+        expanded_ids = ids
 
     # Expand file template if needed
     if files and len(files) == 1 and '<id>' in files[0]:

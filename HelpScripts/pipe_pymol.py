@@ -20,6 +20,7 @@ from typing import Dict, List, Any, Optional
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.id_patterns import expand_ids, contains_pattern, expand_file_pattern
 
 # CRITICAL: Set environment variables for headless PyMOL BEFORE any import
 # This prevents libGL.so.1 errors on headless cluster nodes
@@ -109,8 +110,16 @@ class PyMOLSessionBuilder:
         import glob as glob_module
 
         ref_type = structures_ref.get("type", "")
-        structures = structures_ref.get("structures", [])
-        structure_ids = structures_ref.get("structure_ids", [])
+        raw_structures = structures_ref.get("structures", [])
+        raw_structure_ids = structures_ref.get("structure_ids", [])
+        # Expand pattern-based IDs and file templates
+        structure_ids = expand_ids(raw_structure_ids) if any(contains_pattern(s) for s in raw_structure_ids) else raw_structure_ids
+        if len(raw_structures) == 1 and '<id>' in raw_structures[0]:
+            structures = [expand_file_pattern(raw_structures[0], eid) for eid in structure_ids]
+        elif any(contains_pattern(s) for s in raw_structures):
+            structures = expand_ids(raw_structures)
+        else:
+            structures = raw_structures
 
         result = []
 

@@ -59,6 +59,14 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import pandas as pd
 
+try:
+    from . import id_patterns as _id_patterns
+except ImportError:
+    try:
+        import id_patterns as _id_patterns
+    except ImportError:
+        _id_patterns = None
+
 
 @dataclass
 class DataStreamRuntime:
@@ -85,6 +93,71 @@ class DataStreamRuntime:
 
     # Internal cache for map_table data (loaded lazily)
     _map_data: Optional[pd.DataFrame] = field(default=None, repr=False, compare=False)
+
+    # Internal caches
+    _ids_expanded_cache: Optional[List[str]] = field(default=None, repr=False, compare=False)
+    _files_expanded_cache: Optional[List[str]] = field(default=None, repr=False, compare=False)
+
+    @property
+    def ids_expanded(self) -> List[str]:
+        """Expand pattern-based IDs at runtime.
+
+        For lazy patterns (with [...] brackets), reads fully-expanded IDs from map_table.
+        For deterministic patterns (<...>), expands using id_patterns.
+        For plain IDs, returns as-is.
+        """
+        if self._ids_expanded_cache is not None:
+            return self._ids_expanded_cache
+
+        # Check for lazy bracket patterns
+        if any('[' in s for s in self.ids):
+            # Lazy patterns: fully-expanded IDs live in map_table
+            self._ids_expanded_cache = list(self._get_map_data()['id'])
+            return self._ids_expanded_cache
+
+        # Check for deterministic patterns
+        if _id_patterns and any(_id_patterns.contains_pattern(s) for s in self.ids):
+            self._ids_expanded_cache = _id_patterns.expand_ids(self.ids)
+            return self._ids_expanded_cache
+
+        self._ids_expanded_cache = self.ids
+        return self._ids_expanded_cache
+
+    @property
+    def files_expanded(self) -> List[str]:
+        """Expand file patterns using expanded IDs.
+
+        Handles <id> template substitution and pattern expansion.
+        """
+        if self._files_expanded_cache is not None:
+            return self._files_expanded_cache
+
+        if not self.files:
+            self._files_expanded_cache = []
+        elif len(self.files) == 1 and '<id>' in self.files[0]:
+            template = self.files[0]
+            if _id_patterns:
+                self._files_expanded_cache = [
+                    _id_patterns.expand_file_pattern(template, eid)
+                    for eid in self.ids_expanded
+                ]
+            else:
+                self._files_expanded_cache = [
+                    template.replace('<id>', eid)
+                    for eid in self.ids_expanded
+                ]
+        elif len(self.files) == len(self.ids) and len(self.files) != len(self.ids_expanded):
+            # Files were stored compact (one per pattern), need expansion
+            if _id_patterns:
+                expanded = []
+                for f in self.files:
+                    expanded.extend(_id_patterns.expand_pattern(f))
+                self._files_expanded_cache = expanded
+            else:
+                self._files_expanded_cache = self.files
+        else:
+            self._files_expanded_cache = self.files
+        return self._files_expanded_cache
 
     def _get_map_data(self) -> pd.DataFrame:
         """
@@ -159,8 +232,12 @@ def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStreamRuntime:
     # files defaults to empty list
     files = data.get('files', [])
 
-    # Validate files/ids relationship
-    if len(files) > 1 and len(files) != len(data['ids']):
+    # Validate files/ids relationship (skip for patterns and templates)
+    has_patterns = _id_patterns and any(
+        _id_patterns.contains_pattern(s) or '[' in s for s in data['ids']
+    )
+    has_template = len(files) == 1 and '<id>' in files[0]
+    if not has_patterns and not has_template and len(files) > 1 and len(files) != len(data['ids']):
         raise ValueError(
             f"Length mismatch: {len(data['ids'])} ids but {len(files)} files. "
             f"Use empty files list or single file for table-based data, "
@@ -245,50 +322,47 @@ def iterate_files(ds: DataStreamRuntime) -> Iterator[Tuple[str, str]]:
         for struct_id, struct_file in iterate_files(structures_ds):
             process_structure(struct_id, struct_file)
     """
-    if not ds.files:
+    # Use expanded IDs and files for iteration
+    ids = ds.ids_expanded
+    files = ds.files_expanded
+
+    if not files and not ds.files:
         raise ValueError(f"DataStream '{ds.name}' has no files configured")
 
-    # Detect wildcards by checking for '*' in file paths
-    has_wildcards = any('*' in f for f in ds.files)
-
-    if has_wildcards:
-        # Case 1: Wildcards - expand and match
-        for i, item_id in enumerate(ds.ids):
-            # Get the pattern for this ID (may be per-ID or single pattern)
-            if len(ds.files) == len(ds.ids):
-                pattern = ds.files[i]
-            elif len(ds.files) == 1:
-                pattern = ds.files[0]
-            else:
-                raise ValueError(
-                    f"Cannot match {len(ds.files)} patterns to {len(ds.ids)} IDs"
-                )
-
-            # Expand glob pattern
-            expanded = glob.glob(pattern)
-            if not expanded:
-                raise FileNotFoundError(
-                    f"No files found matching pattern '{pattern}' for ID '{item_id}'"
-                )
-
-            # Find best match for this ID
-            matched_file = _find_best_match(item_id, expanded)
-            yield (item_id, matched_file)
-
-    elif len(ds.files) == len(ds.ids):
-        # Case 2: Direct mapping
-        for item_id, file_path in zip(ds.ids, ds.files):
-            yield (item_id, file_path)
+    # If files_expanded produced results, use them
+    if files and len(files) == len(ids):
+        # Detect wildcards
+        has_wildcards = any('*' in f for f in files)
+        if has_wildcards:
+            for item_id, file_pattern in zip(ids, files):
+                expanded = glob.glob(file_pattern)
+                if not expanded:
+                    raise FileNotFoundError(
+                        f"No files found matching pattern '{file_pattern}' for ID '{item_id}'"
+                    )
+                yield (item_id, _find_best_match(item_id, expanded))
+        else:
+            for item_id, file_path in zip(ids, files):
+                yield (item_id, file_path)
 
     elif len(ds.files) == 1:
-        # Case 3: Single file for all IDs (bundle case)
-        single_file = ds.files[0]
-        for item_id in ds.ids:
-            yield (item_id, single_file)
+        # Single file/pattern for all IDs
+        single = ds.files[0]
+        if '*' in single:
+            for item_id in ids:
+                expanded = glob.glob(single)
+                if not expanded:
+                    raise FileNotFoundError(
+                        f"No files found matching pattern '{single}' for ID '{item_id}'"
+                    )
+                yield (item_id, _find_best_match(item_id, expanded))
+        else:
+            for item_id in ids:
+                yield (item_id, single)
 
     else:
         raise ValueError(
-            f"Cannot iterate: {len(ds.ids)} ids but {len(ds.files)} files"
+            f"Cannot iterate: {len(ids)} ids but {len(files)} files"
         )
 
 
@@ -339,7 +413,7 @@ def iterate_values(
 
     id_to_row = {row['id']: row for _, row in map_data.iterrows()}
 
-    for item_id in ds.ids:
+    for item_id in ds.ids_expanded:
         if item_id not in id_to_row:
             raise KeyError(f"ID '{item_id}' not found in map_table")
 
@@ -368,45 +442,42 @@ def resolve_file(ds: DataStreamRuntime, item_id: str) -> str:
     Example:
         file_path = resolve_file(structures_ds, "rank0001")
     """
-    if not ds.files:
+    ids = ds.ids_expanded
+    files = ds.files_expanded
+
+    if not files and not ds.files:
         raise ValueError(f"DataStream '{ds.name}' has no files configured")
 
-    if item_id not in ds.ids:
+    if item_id not in ids:
         raise ValueError(f"ID '{item_id}' not found in DataStream '{ds.name}'")
 
-    idx = ds.ids.index(item_id)
+    idx = ids.index(item_id)
 
-    # Detect wildcards by checking for '*' in the file path
-    file_path_for_id = ds.files[idx] if len(ds.files) == len(ds.ids) else ds.files[0] if len(ds.files) == 1 else None
-    if file_path_for_id and '*' in file_path_for_id:
-        # Get pattern for this ID
-        if len(ds.files) == len(ds.ids):
-            pattern = ds.files[idx]
-        elif len(ds.files) == 1:
-            pattern = ds.files[0]
-        else:
-            raise ValueError(
-                f"Cannot match {len(ds.files)} patterns to {len(ds.ids)} IDs"
-            )
-
-        # Expand and match
-        expanded = glob.glob(pattern)
-        if not expanded:
-            raise FileNotFoundError(
-                f"No files found matching pattern '{pattern}' for ID '{item_id}'"
-            )
-
-        return _find_best_match(item_id, expanded)
-
-    elif len(ds.files) == len(ds.ids):
-        return ds.files[idx]
+    if files and len(files) == len(ids):
+        file_path_for_id = files[idx]
+        if '*' in file_path_for_id:
+            expanded = glob.glob(file_path_for_id)
+            if not expanded:
+                raise FileNotFoundError(
+                    f"No files found matching pattern '{file_path_for_id}' for ID '{item_id}'"
+                )
+            return _find_best_match(item_id, expanded)
+        return file_path_for_id
 
     elif len(ds.files) == 1:
-        return ds.files[0]
+        single = ds.files[0]
+        if '*' in single:
+            expanded = glob.glob(single)
+            if not expanded:
+                raise FileNotFoundError(
+                    f"No files found matching pattern '{single}' for ID '{item_id}'"
+                )
+            return _find_best_match(item_id, expanded)
+        return single
 
     else:
         raise ValueError(
-            f"Cannot resolve file: {len(ds.ids)} ids but {len(ds.files)} files"
+            f"Cannot resolve file: {len(ids)} ids but {len(files)} files"
         )
 
 

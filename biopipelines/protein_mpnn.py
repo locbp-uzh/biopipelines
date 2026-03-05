@@ -13,7 +13,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_multiplied_ids
+    from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
@@ -21,7 +21,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_multiplied_ids
+    from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from biopipelines_io import Resolve
 
 
@@ -249,7 +249,7 @@ echo "=== ProteinMPNN installation complete ==="
         designed_param = resolved_redesigned if resolved_redesigned else "-"
 
         # Resolve input directory at runtime (handles wildcard DataStreams)
-        first_id = self.structures_stream.ids_expanded[0]
+        first_id = self.structures_stream.ids[0]
 
         return f"""FIRST_FILE={Resolve.stream_item(self.structures_json, first_id)}
 INPUT_DIR=$(dirname "$FIRST_FILE")
@@ -312,9 +312,9 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             fasta_ids.append(struct_id)
 
         # Predict sequence IDs (stream_id + sequence number)
-        suffixes = [str(i) for i in range(1, self.num_sequences + 1)]
-        sequence_ids, provenance = generate_multiplied_ids(
-            self.structures_stream.ids_expanded, suffixes,
+        suffix_pattern = f"<1..{self.num_sequences}>"
+        sequence_ids = generate_multiplied_ids_pattern(
+            self.structures_stream.ids, suffix_pattern,
             input_stream_name="structures"
         )
 

@@ -20,12 +20,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
+    from .combinatorics import generate_multiplied_ids_pattern
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
+    from combinatorics import generate_multiplied_ids_pattern
 
 
 class CABSflex(BaseConfig):
@@ -353,31 +355,30 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after CABS-Flex execution."""
-        input_ids = self.structures_stream.ids_expanded
-
         # --- Output structures: num_models per input ---
-        structure_ids = []
-        structure_files = []
-        provenance = {"structures": []}
-        for input_id in input_ids:
-            for model_idx in range(1, self.num_models + 1):
-                output_id = f"{input_id}_{model_idx}"
-                output_file = os.path.join(self.output_folder, f"{output_id}.pdb")
-                structure_ids.append(output_id)
-                structure_files.append(output_file)
-                provenance["structures"].append(input_id)
+        suffix_pattern = f"<1..{self.num_models}>"
+        structure_ids = generate_multiplied_ids_pattern(
+            self.structures_stream.ids, suffix_pattern
+        )
 
-        create_map_table(self.structures_map, structure_ids, files=structure_files, provenance=provenance)
+        create_map_table(
+            self.structures_map, structure_ids,
+            files=[os.path.join(self.output_folder, "<id>.pdb")],
+            parent_ids=self.structures_stream.ids,
+            suffix_pattern=suffix_pattern,
+            input_stream_name="structures"
+        )
 
         structures = DataStream(
             name="structures",
             ids=structure_ids,
-            files=structure_files,
+            files=[os.path.join(self.output_folder, "<id>.pdb")],
             map_table=self.structures_map,
             format="pdb"
         )
 
         # --- Output images: SVG plots per input ---
+        input_ids = list(self.structures_stream.ids)
         image_ids = []
         image_files = []
         svg_names = ["RMSF_seq.svg", "E_RMSD_A_total.svg", "RMSD_frame_A_replica_0.svg"]

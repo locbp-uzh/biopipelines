@@ -10,20 +10,20 @@ various class-based strategies for comprehensive mutagenesis studies.
 """
 
 import os
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Optional, Union
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_multiplied_ids
+    from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_multiplied_ids
+    from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
 
 
 class Mutagenesis(BaseConfig):
@@ -65,7 +65,8 @@ echo "=== Mutagenesis ready ==="
 
     def __init__(self,
                  original: Union[DataStream, StandardizedOutput],
-                 position: int,
+                 position: Optional[int] = None,
+                 selection=None,
                  mutate_to: str = "",
                  mode: str = "specific",
                  include_original: bool = False,
@@ -77,7 +78,11 @@ echo "=== Mutagenesis ready ==="
         Args:
             original: Input sequence as DataStream or StandardizedOutput
                       (e.g., from Sequence() entity or upstream tool)
-            position: Target position for mutagenesis (1-indexed)
+            position: Target position for mutagenesis (1-indexed). Fixed for all sequences.
+                Mutually exclusive with `selection`.
+            selection: TableReference for per-row position lookups (e.g.,
+                fuse.tables.sequences.L1). Each row gets its own position(s).
+                Mutually exclusive with `position`.
             mutate_to: Target amino acid(s) for "specific" mode, as single letter
                 codes (e.g., "A" for alanine, "AV" for alanine and valine).
                 Required when mode is "specific".
@@ -105,6 +110,7 @@ echo "=== Mutagenesis ready ==="
         """
         # Store Mutagenesis-specific parameters
         self.position = position
+        self.selection = selection
         self.mutate_to = mutate_to.upper()
         self.mode = mode
         self.include_original = include_original
@@ -147,8 +153,14 @@ echo "=== Mutagenesis ready ==="
             if invalid_aas_target:
                 raise ValueError(f"Invalid amino acids in mutate_to: {invalid_aas_target}")
 
+        # Validate position / selection — exactly one must be provided
+        if self.position is not None and self.selection is not None:
+            raise ValueError("Provide either 'position' or 'selection', not both")
+        if self.position is None and self.selection is None:
+            raise ValueError("Either 'position' or 'selection' must be provided")
+
         # Validate position
-        if self.position <= 0:
+        if self.position is not None and self.position <= 0:
             raise ValueError("Position must be positive (1-indexed)")
 
         # Validate exclude string
@@ -177,8 +189,16 @@ echo "=== Mutagenesis ready ==="
     def _generate_script_run_sdm(self) -> str:
         """Generate the Mutagenesis execution part of the script."""
         mutate_to_line = f'    --mutate-to "{self.mutate_to}" \\\n' if self.mutate_to else ""
+
+        if self.selection:
+            position_line = f'    --selection "{self.selection}" \\\n'
+            position_display = f"Selection: {self.selection}"
+        else:
+            position_line = f'    --position {self.position} \\\n'
+            position_display = f"Position: {self.position}"
+
         return f"""echo "Running Mutagenesis"
-echo "Position: {self.position}"
+echo "{position_display}"
 echo "Mode: {self.mode}"
 {"echo " + '"' + "Mutate to: " + self.mutate_to + '"' if self.mutate_to else ""}
 echo "Include original: {self.include_original}"
@@ -187,8 +207,7 @@ echo "Exclude: {self.exclude}"
 # Run Mutagenesis generation
 python {self.mutagenesis_helper_py} \\
     --sequences "{self.sequences_stream.map_table}" \\
-    --position {self.position} \\
-    --mode {self.mode} \\
+{position_line}    --mode {self.mode} \\
 {mutate_to_line}    --include-original {str(self.include_original).lower()} \\
     --exclude "{self.exclude}" \\
     --output "{self.sequences_csv}"
@@ -251,22 +270,31 @@ fi
         # Multiply by number of input sequences
         num_input = len(self.sequences_stream)
         num_mutants_per_input = len(amino_acids)
-        num_mutants = num_mutants_per_input * num_input
 
-        # Generate sequence IDs (approximate — original_aa resolved at runtime)
-        suffixes = [f"{self.position}{aa}" for aa in amino_acids]
-        sequence_ids, provenance = generate_multiplied_ids(
-            self.sequences_stream.ids_expanded, suffixes,
-            input_stream_name="original"
-        )
+        if self.selection:
+            # Selection mode: positions vary per row — use lazy bracket pattern
+            aa_list = ' '.join(amino_acids)
+            bracket_suffix = f"[_<N><{aa_list}>]"
+            sequence_ids = [f"{pid}{bracket_suffix}" for pid in self.sequences_stream.ids]
+            num_mutants = "variable"
+        else:
+            num_mutants = num_mutants_per_input * num_input
+            # Generate sequence IDs using pattern composition
+            suffixes = [f"{self.position}{aa}" for aa in amino_acids]
+            suffix_pattern = f"<{' '.join(suffixes)}>"
+            sequence_ids = generate_multiplied_ids_pattern(
+                self.sequences_stream.ids, suffix_pattern,
+                input_stream_name="original"
+            )
 
         # Prepare tables
+        position_desc = f"selection-based positions" if self.selection else f"position {self.position}"
         tables = {
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "original.id", "sequence", "mutations", "mutation_positions", "original_aa", "new_aa"],
-                description=f"mutants at position {self.position} using {self.mode} mode",
+                description=f"mutants at {position_desc} using {self.mode} mode",
                 count=num_mutants
             )
         }
@@ -301,7 +329,10 @@ fi
         config_lines = super().get_config_display()
         config_lines.append(f"INPUT: {len(self.sequences_stream)} sequences from DataStream")
 
-        config_lines.append(f"POSITION: {self.position}")
+        if self.selection:
+            config_lines.append(f"SELECTION: {self.selection}")
+        else:
+            config_lines.append(f"POSITION: {self.position}")
         config_lines.append(f"MODE: {self.mode}")
         if self.mutate_to:
             config_lines.append(f"MUTATE TO: {self.mutate_to}")
@@ -316,6 +347,7 @@ fi
         base_dict.update({
             "sdm_params": {
                 "position": self.position,
+                "selection": str(self.selection) if self.selection else None,
                 "mutate_to": self.mutate_to,
                 "mode": self.mode,
                 "include_original": self.include_original,
