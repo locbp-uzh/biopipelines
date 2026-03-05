@@ -2,6 +2,9 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
+# tested: 
+
+
 """
 This pipeline shows how to run RFdiffusion3, generate sequences far from the ligand with ProteinMPNN and close with LigandMPNN, and fold the sequences with Boltz2.
 """

@@ -2,6 +2,8 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
+# tested: 
+
 from biopipelines.pipeline import *
 from biopipelines.boltz2 import Boltz2
 from biopipelines.combinatorics import Bundle, Each
@@ -11,7 +13,7 @@ with Pipeline(project="Examples",
               description="Boltz2 with various inputs"):
 
     Resources(gpu="any",
-              time="4:00:00",
+              time="24:00:00",
               memory="16GB")
 
     # =========================================================================
