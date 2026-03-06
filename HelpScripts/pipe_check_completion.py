@@ -18,6 +18,9 @@ import json
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines import id_patterns
+
 def check_file_exists(file_path: str) -> bool:
     """
     Check if a file or directory exists.
@@ -85,6 +88,9 @@ def extract_file_list(category_data) -> List[str]:
     - A list of file paths (legacy format)
     - A dict (serialized DataStream) with a 'files' key containing the list
 
+    When files contains a single '<id>' template, expands it using the 'ids'
+    field (which may contain compact patterns like 'name_<0..9>').
+
     Args:
         category_data: List or dict from expected_outputs[category]
 
@@ -92,7 +98,13 @@ def extract_file_list(category_data) -> List[str]:
         List of file paths
     """
     if isinstance(category_data, dict):
-        return category_data.get('files', [])
+        files = category_data.get('files', [])
+        ids = category_data.get('ids', [])
+        if len(files) == 1 and '<id>' in files[0] and ids:
+            template = files[0]
+            expanded_ids = id_patterns.expand_ids(ids)
+            return [template.replace('<id>', eid) for eid in expanded_ids]
+        return files
     elif isinstance(category_data, list):
         return category_data
     return []

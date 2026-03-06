@@ -872,6 +872,16 @@ class Resolve:
         return f'$(resolve_stream_item "{ds_json}" "{item_id}")'
 
     @staticmethod
+    def stream_ids(ds_json: str) -> str:
+        """Bash expression that prints expanded IDs from a DataStream JSON, one per line.
+
+        Handles lazy patterns by matching against map_table at runtime.
+        """
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "HelpScripts", "resolve_stream_ids.py")
+        return f'$(python "{script}" "{ds_json}")'
+
+    @staticmethod
     def table_column(reference, item_id: str, env_name: str = "biopipelines") -> str:
         """
         Bash expression to resolve a table value inline (slow — spawns Python).
