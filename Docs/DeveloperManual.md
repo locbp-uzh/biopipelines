@@ -281,6 +281,8 @@ except ImportError:
     from datastream import DataStream
     from biopipelines_io import Resolve
 
+> **Why the dual import?** Tools are normally imported as part of the `biopipelines` package (relative imports via `.base_config`, etc.). The `except ImportError` fallback adds the module's own directory to `sys.path` so the same file can also be imported standalone — useful for debugging or running a tool file directly. Always include this pattern in new tool files.
+
 
 class MyTool(BaseConfig):
     TOOL_NAME = "MyTool"
@@ -410,6 +412,14 @@ done
 
 Return standardized output structure. Use compact `ids` patterns (not expanded) and `<id>` file templates:
 
+#### File Templates with \<id\>
+
+`<id>` is a placeholder in the `files` list that represents all output files at once. Instead of listing one file per ID, you provide a single-element list like `["<id>.pdb"]`. At expansion time, `<id>` is replaced with each expanded ID. For example:
+
+- `files=["<id>.pdb"]` + `ids=["prot_<0..2>"]` → `prot_0.pdb`, `prot_1.pdb`, `prot_2.pdb`
+
+This prevents a length-mismatch validation error (1 file vs N ids). The implementation lives in `datastream.py:_has_file_template()` (detects the pattern) and `id_patterns.py:expand_file_pattern()` (performs the substitution).
+
 ```python
 def get_output_files(self) -> Dict[str, Any]:
     # Keep IDs compact — don't expand
@@ -443,6 +453,14 @@ def get_output_files(self) -> Dict[str, Any]:
     }
 ```
 
+`get_output_files()` returns a plain dict, **not** a `StandardizedOutput`. The wrapping into `StandardizedOutput` happens automatically in the `ToolOutput.output` property (`base_config.py:1768`). This is by design:
+
+- Pipeline infrastructure (`pipeline.py`, `base_config.py:get_id_provenance()`) iterates the raw dict with `.items()` and `isinstance()` checks before any user accesses it — dicts are natural for this.
+- `StandardizedOutput.__init__` takes a dict and destructures it into `.streams`, `.tables`, etc. — returning `StandardizedOutput` from tools would just add an object whose constructor immediately unpacks it back.
+- Keeps tools simple: tool authors build plain dicts, the framework handles the user-facing API.
+
+**Rule:** tool authors return dicts; consumers get `StandardizedOutput` with dot-notation (e.g., `tool.output.structures`).
+
 ---
 
 ## HelpScript Development
@@ -474,6 +492,8 @@ from biopipelines.biopipelines_io import (
     iterate_table_values, # Iterate (id, value) pairs
 )
 ```
+
+> **Why `sys.path.insert`?** HelpScripts run on SLURM nodes where `biopipelines` is not an installed package. The `sys.path.insert(0, ...)` line adds the repository root so that `from biopipelines.biopipelines_io import ...` resolves correctly. This boilerplate is required in every HelpScript that imports from `biopipelines`.
 
 #### DataStream Iteration
 
@@ -627,6 +647,46 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
+### Error Handling
+
+HelpScripts should handle per-item failures gracefully: skip failures, collect partial results, and report at the end.
+
+**Pattern:** wrap the per-item loop body in `try/except`, accumulate failures, write whatever succeeded, and exit with an error only if everything failed.
+
+```python
+def main():
+    ds = load_datastream(sys.argv[1])
+    output_csv = sys.argv[2]
+
+    results = []
+    failed = []
+
+    for struct_id, struct_file in iterate_files(ds):
+        try:
+            result = process(struct_file)
+            results.append({"id": struct_id, "score": result})
+        except Exception as e:
+            print(f"WARNING: {struct_id} failed: {e}", file=sys.stderr)
+            failed.append(struct_id)
+
+    # Always write partial results (even if some items failed)
+    if results:
+        pd.DataFrame(results).to_csv(output_csv, index=False)
+
+    # Report summary
+    if failed:
+        print(f"Failed {len(failed)}/{len(failed)+len(results)}: {failed}", file=sys.stderr)
+
+    # Exit with error only if ALL items failed
+    if not results:
+        sys.exit(1)
+```
+
+Key points:
+- **Always write partial results** — downstream tools can work with a subset.
+- **Print failure summary to stderr** — it appears in SLURM logs for debugging.
+- **`sys.exit(1)` only if nothing succeeded** — partial success is still useful in a pipeline.
 
 ---
 
@@ -919,6 +979,40 @@ with Pipeline("Test", "Debug", "Testing", local_output=True):
     result = MyTool(...)
     print(result)
 ```
+
+#### Testing a HelpScript in Isolation
+
+Create a mock DataStream JSON and run the script directly:
+
+```bash
+# Create mock input
+echo '{"name":"structures","ids":["prot_1","prot_2"],"files":["/tmp/prot_1.pdb","/tmp/prot_2.pdb"],"map_table":"","format":"pdb"}' > /tmp/test_ds.json
+
+# Run the HelpScript
+python HelpScripts/pipe_my_tool.py /tmp/test_ds.json /tmp/output.csv
+
+# Inspect output
+cat /tmp/output.csv
+```
+
+#### Testing Config-Time Logic
+
+Instantiate the tool with `local_output=True` and inspect the generated outputs:
+
+```python
+from biopipelines.pipeline import Pipeline
+from biopipelines.my_tool import MyTool
+
+with Pipeline("Test", "Debug", "Testing", local_output=True):
+    result = MyTool(structures=..., param1="test")
+    # Check predicted output IDs
+    print(result.output.structures.ids)
+    # Read the generated bash script
+    with open(result.script_path) as f:
+        print(f.read())
+```
+
+> **Note:** No automated test suite exists yet; the `tests/` directory is for manual output inspection.
 
 ### Critical Files (rarely need changes)
 
