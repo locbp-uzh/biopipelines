@@ -68,7 +68,7 @@ echo "=== CompoundLibrary ready ==="
 
         Args:
             library: Dictionary with expansion keys or path to existing CSV library
-            primary_key: Root key for expansion when library is a dictionary
+            primary_key: Root key for expansion when library is a dictionary. Set automatically to first key if a placeholder <> is detected.
             covalent: Generate CCD/PKL files for covalent ligand binding (calls runtime script)
             validate_smiles: Validate SMILES strings during expansion
             conformer_method: Method for conformer generation ("UFF", "OpenFF", "DFT")
@@ -82,6 +82,11 @@ echo "=== CompoundLibrary ready ==="
         """
         # Store CompoundLibrary-specific parameters
         self.library = library
+        if not primary_key and isinstance(self.library, dict):
+            first = self.library[self.library.keys()[0]]
+            first = [first] if isinstance(first, str) else first # list
+            if any(['<' in x or '>' in x for x in first]):
+                primary_key = self.library.keys()[0]
         self.primary_key = primary_key
         self.covalent = covalent
         self.validate_smiles = validate_smiles

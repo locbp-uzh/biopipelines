@@ -10,33 +10,17 @@ from biopipelines.boltz2 import Boltz2
 from biopipelines.panda import Panda
 from biopipelines.plot import Plot
 
-with Pipeline(project="CarbonicAnhydrase", job="FragmentScreen"):
+with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")
-    CaII = Sequence("3KS3", ids="CaII")
-    library = CompoundLibrary(library={"candidate": "<sulfonamide><ring><acetamide>",
-                                       "sulfonamide": r"NS(=O)(=O)",
-                                       "ring": ["<thiadiazole>", 
-                                                "<furan>",
-                                                "<cyclopentane>"],
-                                       "thiadiazole": r"C1=NN=C(S1)",
-                                       "furan": r"C1=CC=C(O1)",
-                                       "cyclopentane": r"C1CCC(C1)",
-                                       "acetamide": r"NC(=O)C"},
-                              primary_key="candidate")
-    zn = Ligand("ZN")
-    cofolded = Boltz2(proteins=CaII,
-                      ligands=Bundle(Each(library),zn))
-    merged = Panda(tables=[cofolded.tables.affinity, 
-                           library.tables.compounds],
-                   operations=[Panda.merge(on="id"),
-                               Panda.calculate({"aff_uM":"10**affinity_pred_value"})])
-    Plot(Plot.Scatter(data=merged.tables.result,
-                      x="aryl", 
-                      y="aff_uM",
-                      title="Predicted Affinity by Aryl Substituent",
-                      xlabel="Aryl Group", 
-                      ylabel="Predicted Affinity [uM]", 
-                      grid=True))
+    TrpR = Sequence("MAQQSPYSAAMAEERHQEWLRFVDLLKNAYQNDLHLPLLNLMLTPDEREALGTRVRIVEELLRGEMSQRELKNELGAGIATITRGSNSLKAAPVELRQWLEEVLLKSD")
+    DNA = Sequence("TGTACTAGTTAACTAGTAC")
+    library = CompoundLibrary("/path/to/library.cdxml")
+    cofolded = Boltz2(proteins=Bundle(TrpR,TrpR),
+                      dna=DNA,
+                      ligands=Each(library))
+    merged = Panda(tables=cofolded.tables.affinity,
+                   operations=[Panda.calculate({"aff_uM":"10**affinity_pred_value"})])
+
 
     
 
