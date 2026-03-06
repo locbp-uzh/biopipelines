@@ -672,6 +672,12 @@ echo "=== Panda ready ==="
         Returns:
             Path to CSV file
         """
+        # TableInfo object (must check before the duck-type TableReference check
+        # below, because TableInfo.__getattr__ returns TableReference for any
+        # attribute access including .path and .column)
+        if isinstance(table_input, TableInfo):
+            return table_input.info.path
+
         # Handle TableReference from column access (table.column)
         if hasattr(table_input, 'path') and hasattr(table_input, 'column'):
             return table_input.path
@@ -679,10 +685,6 @@ echo "=== Panda ready ==="
         # Direct path string
         if isinstance(table_input, str):
             return table_input
-
-        # TableInfo object
-        if isinstance(table_input, TableInfo):
-            return table_input.info.path
 
         # StandardizedOutput object
         if hasattr(table_input, 'tables'):
