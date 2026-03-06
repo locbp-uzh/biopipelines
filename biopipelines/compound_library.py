@@ -258,145 +258,503 @@ echo "=== CompoundLibrary ready ==="
             self.compound_ids = compound_ids
 
     def _expand_cdxml(self):
-        """Expand CDXML file with R-group labels into enumerated compounds."""
+        """
+        Expand CDXML file using ChemDraw's native R-group substitution table format.
+
+        Parses <altgroup> elements (R-group tables) and <bracketedgroup> elements
+        (repeat units / polymer brackets) directly from the CDXML XML, then enumerates
+        all combinations via RDKit molzip.
+        """
         try:
-            from rdkit import Chem
-            from rdkit.Chem import rdmolops
+            import warnings
+            import xml.etree.ElementTree as ET
+            from rdkit import Chem, RDLogger
+            from rdkit.Chem import rdmolops, RWMol
         except ImportError:
             raise ImportError(
                 "RDKit is required for CDXML R-group enumeration. "
                 "Install with: conda install -c conda-forge rdkit"
             )
 
+        # Suppress RDKit "Incomplete atom labelling" warnings that fire while parsing
+        # scaffold/fragment CDXMLs that have unmatched ExternalConnectionPoint atoms.
+        RDLogger.DisableLog('rdApp.warning')
+
         cdxml_path = self.library_cdxml
         if not cdxml_path or not os.path.exists(cdxml_path):
             raise ValueError(f"CDXML file not found: {cdxml_path}")
 
-        # Parse CDXML file
-        mols = Chem.MolsFromCDXMLFile(cdxml_path)
-        if not mols:
-            raise ValueError(f"No molecules found in CDXML file: {cdxml_path}")
+        # --- Parse XML ---
+        tree = ET.parse(cdxml_path)
+        root = tree.getroot()
+        page = root.find('page')
+        if page is None:
+            raise ValueError("No <page> element found in CDXML file.")
 
-        # Filter out None entries (failed parses)
-        valid_mols = [m for m in mols if m is not None]
-        if not valid_mols:
-            raise ValueError(f"All molecules failed to parse from CDXML file: {cdxml_path}")
-        if len(valid_mols) < 2:
-            raise ValueError(
-                "CDXML file must contain at least 2 molecules (1 core + 1 fragment). "
-                f"Found {len(valid_mols)} valid molecule(s)."
-            )
+        # Collect all existing numeric IDs to assign collision-free synthetic IDs
+        all_ids = set()
+        for elem in root.iter():
+            for attr in ('id', 'B', 'E'):
+                val = elem.attrib.get(attr, '')
+                if val.isdigit():
+                    all_ids.add(int(val))
+        _next_id = [max(all_ids, default=0) + 100000]
 
-        # Find R-group dummy atoms on each molecule
-        # Dummy atom: atomic num == 0, atom map num > 0
-        def get_rgroup_positions(mol):
-            positions = []
-            for atom in mol.GetAtoms():
-                if atom.GetAtomicNum() == 0 and atom.GetAtomMapNum() > 0:
-                    positions.append(atom.GetAtomMapNum())
-            return positions
+        def _fresh_id():
+            nid = _next_id[0]
+            _next_id[0] += 1
+            return str(nid)
 
-        # Identify core: molecule with the most R-group dummy atoms
-        mol_rgroups = [(mol, get_rgroup_positions(mol)) for mol in valid_mols]
-        if not any(positions for _, positions in mol_rgroups):
-            raise ValueError(
-                "No R-group labels (R1, R2, ...) found in the CDXML file. "
-                "Draw R-group labels on the core scaffold and fragments in ChemDraw."
-            )
+        CDXML_HEADER = '<?xml version="1.0" encoding="UTF-8" ?><CDXML><page>'
+        CDXML_FOOTER = '</page></CDXML>'
 
-        # Core = molecule with the most R-group positions
-        core_idx = max(range(len(mol_rgroups)), key=lambda i: len(mol_rgroups[i][1]))
-        core_mol, core_positions = mol_rgroups[core_idx]
+        def _make_dummy(rwmol, atom_idx, mapnum):
+            atom = rwmol.GetAtomWithIdx(atom_idx)
+            atom.SetAtomicNum(0)
+            atom.SetAtomMapNum(mapnum)
+            atom.SetNoImplicit(True)
+            atom.SetNumExplicitHs(0)
 
-        if not core_positions:
-            raise ValueError("No R-group labels found on any molecule in the CDXML file.")
+        def _parse_fragment_mol(frag_elem, conn_to_mapnum):
+            """
+            Parse a <fragment> element via MolsFromCDXML.
+            ExternalConnectionPoint atoms (identified by CDX_NODE_ID) are converted to
+            dummy * atoms with atomMapNum = conn_to_mapnum[ExternalConnectionNum].
 
-        core_position_set = set(core_positions)
+            conn_to_mapnum: {ExternalConnectionNum (int) -> global_mapnum (int)}
+            """
+            # Build node_id -> ExternalConnectionNum from XML
+            frag_conn = {}
+            for n in frag_elem.findall('n'):
+                if n.attrib.get('NodeType') == 'ExternalConnectionPoint':
+                    frag_conn[n.attrib['id']] = int(n.attrib.get('ExternalConnectionNum', '1'))
 
-        # Group fragments by R-group position
-        # Each non-core molecule must have exactly one R-group dummy atom
-        fragments_by_position = {}  # position_num -> list of (mol, smiles)
-        for i, (mol, positions) in enumerate(mol_rgroups):
-            if i == core_idx:
-                continue
-            if len(positions) == 0:
-                # Molecule without R-group labels — skip with warning
-                continue
-            if len(positions) > 1:
-                raise ValueError(
-                    f"R-group fragment (molecule {i+1}) has {len(positions)} R-group labels "
-                    f"(R{', R'.join(str(p) for p in positions)}). "
-                    "Each fragment must have exactly one R-group label."
-                )
-            pos = positions[0]
-            if pos not in core_position_set:
-                raise ValueError(
-                    f"Fragment has R-group label R{pos}, but the core scaffold only has "
-                    f"positions: {', '.join(f'R{p}' for p in sorted(core_position_set))}."
-                )
-            if pos not in fragments_by_position:
-                fragments_by_position[pos] = []
-            fragments_by_position[pos].append(mol)
+            frag_str = ET.tostring(frag_elem, encoding='unicode')
+            mols = Chem.MolsFromCDXML(CDXML_HEADER + frag_str + CDXML_FOOTER)
+            if not mols or mols[0] is None:
+                return None
+            rwmol = RWMol(mols[0])
+            for atom in rwmol.GetAtoms():
+                cdx_id = atom.GetPropsAsDict().get('CDX_NODE_ID', None)
+                if cdx_id is not None:
+                    cdx_str = str(cdx_id)
+                    if cdx_str in frag_conn:
+                        conn_num = frag_conn[cdx_str]
+                        mapnum = conn_to_mapnum.get(conn_num, conn_num)
+                        _make_dummy(rwmol, atom.GetIdx(), mapnum)
+            return rwmol.GetMol()
 
-        # Validate: every core position must have at least one fragment
-        missing_positions = core_position_set - set(fragments_by_position.keys())
-        if missing_positions:
-            raise ValueError(
-                f"No fragments found for core position(s): "
-                f"{', '.join(f'R{p}' for p in sorted(missing_positions))}. "
-                "Draw at least one fragment with each R-group label."
-            )
-
-        # Sort positions for deterministic enumeration
-        sorted_positions = sorted(fragments_by_position.keys())
-        position_labels = [f"R{p}" for p in sorted_positions]
-        fragment_groups = [fragments_by_position[p] for p in sorted_positions]
-
-        # Get SMILES for each fragment (for branching metadata)
-        def fragment_smiles(mol):
-            """Get SMILES for a fragment, removing the dummy atom for display."""
+        def _frag_display_smiles(mol):
+            """Return SMILES for a fragment with dummy attachment atoms removed."""
             try:
-                # Create an editable copy and remove dummy atoms for display SMILES
-                rwmol = Chem.RWMol(mol)
-                dummy_indices = [a.GetIdx() for a in rwmol.GetAtoms()
-                                 if a.GetAtomicNum() == 0]
-                for idx in sorted(dummy_indices, reverse=True):
+                rwmol = RWMol(mol)
+                dummy_idxs = sorted(
+                    [a.GetIdx() for a in rwmol.GetAtoms() if a.GetAtomicNum() == 0],
+                    reverse=True
+                )
+                # Before removing each dummy, clear noImplicit + explicit Hs on its
+                # neighbors so RDKit re-computes implicit Hs correctly after removal
+                for idx in dummy_idxs:
+                    for nb in rwmol.GetAtomWithIdx(idx).GetNeighbors():
+                        nb.SetNoImplicit(False)
+                        nb.SetNumExplicitHs(0)
+                for idx in dummy_idxs:
                     rwmol.RemoveAtom(idx)
-                try:
-                    Chem.SanitizeMol(rwmol)
-                    return Chem.MolToSmiles(rwmol)
-                except Exception:
-                    return Chem.MolToSmiles(mol)
+                Chem.SanitizeMol(rwmol)
+                return Chem.MolToSmiles(rwmol)
             except Exception:
-                return "?"
+                return Chem.MolToSmiles(mol)
 
-        # Enumerate all combinations
+        def _assemble(scaffold_mol, frag_mols):
+            """Combine scaffold + fragments and zip by atom map number."""
+            params = rdmolops.MolzipParams()
+            params.label = rdmolops.MolzipLabel.AtomMapNumber
+            combined = scaffold_mol
+            for frag in frag_mols:
+                combined = Chem.CombineMols(combined, frag)
+            result = Chem.molzip(combined, params)
+            Chem.SanitizeMol(result)
+            return result
+
+        # --- Identify scaffold fragment and altgroups ---
+        scaffold_frag_elem = None
+        altgroups = {}
+        for child in page:
+            if child.tag == 'fragment' and scaffold_frag_elem is None:
+                scaffold_frag_elem = child
+            elif child.tag == 'altgroup':
+                altgroups[child.attrib['id']] = child
+
+        if scaffold_frag_elem is None:
+            raise ValueError(f"No scaffold fragment found in CDXML file: {cdxml_path}")
+
+        # --- Find R-group nodes (NamedAlternativeGroup) on scaffold ---
+        rgroup_nodes = []  # (node_id, label, ag_id, bond_ordering, valence)
+        for n in scaffold_frag_elem.findall('n'):
+            if n.attrib.get('NodeType') == 'NamedAlternativeGroup':
+                node_id = n.attrib['id']
+                ag_id = n.attrib.get('AltGroupID', '')
+                bond_ordering = n.attrib.get('BondOrdering', '').split()
+                s_elem = n.find('./t/s')
+                label = s_elem.text.strip() if s_elem is not None and s_elem.text else f'R{node_id}'
+                valence = int(altgroups[ag_id].attrib.get('Valence', '1')) if ag_id in altgroups else 1
+                rgroup_nodes.append((node_id, label, ag_id, bond_ordering, valence))
+
+        # --- Find polymer/repeat unit brackets ---
+        # bracketedgroup: BracketedObjectIDs (node ids inside bracket),
+        #   bracketattachment/crossingbond: BondID + InnerAtomID
+        # parameterizedBracketLabel on the graphic gives the repeat range (e.g. "1-3")
+        bracket_groups = []  # list of dicts with parsed bracket info
+        graphic_id_to_param_label = {}  # graphic id -> repeat range string
+        for child in page:
+            if child.tag == 'graphic' and child.attrib.get('BracketUsage') == 'MultipleGroup':
+                gid = child.attrib.get('id', '')
+                for tag in child.findall('objecttag'):
+                    if tag.attrib.get('Name') == 'parameterizedBracketLabel':
+                        s = tag.find('./t/s')
+                        if s is not None and s.text:
+                            graphic_id_to_param_label[gid] = s.text.strip()
+            elif child.tag == 'bracketedgroup' and child.attrib.get('BracketUsage') == 'MultipleGroup':
+                inner_node_ids = set(child.attrib.get('BracketedObjectIDs', '').split())
+                default_repeat = int(child.attrib.get('RepeatCount', '1'))
+                crossings = []  # list of (bond_id, inner_atom_node_id, graphic_id)
+                for att in child.findall('bracketattachment'):
+                    graphic_id = att.attrib.get('GraphicID', '')
+                    for cb in att.findall('crossingbond'):
+                        crossings.append((
+                            cb.attrib.get('BondID', ''),
+                            cb.attrib.get('InnerAtomID', ''),
+                            graphic_id
+                        ))
+                bracket_groups.append({
+                    'inner_node_ids': inner_node_ids,
+                    'default_repeat': default_repeat,
+                    'crossings': crossings,
+                })
+
+        # Resolve parameterized repeat ranges from graphic labels
+        # Match each bracket_group's crossings to graphic_id_to_param_label
+        for bg in bracket_groups:
+            repeat_range = None
+            for bond_id, inner_node_id, graphic_id in bg['crossings']:
+                if graphic_id in graphic_id_to_param_label:
+                    label_str = graphic_id_to_param_label[graphic_id]
+                    if '-' in label_str:
+                        parts = label_str.split('-')
+                        try:
+                            repeat_range = list(range(int(parts[0]), int(parts[1]) + 1))
+                        except ValueError:
+                            pass
+                    else:
+                        try:
+                            repeat_range = [int(label_str)]
+                        except ValueError:
+                            pass
+                    break
+            if repeat_range is None:
+                repeat_range = [bg['default_repeat']]
+            bg['repeat_range'] = repeat_range
+
+        # --- Assign global map numbers for R-groups ---
+        # node_map_info: node_id -> [(global_mapnum, synthetic_id_str, ExternalConnectionNum)]
+        map_counter = [1]
+        node_map_info = {}
+        label_order = []
+
+        for node_id, label, ag_id, bond_ordering, valence in rgroup_nodes:
+            label_order.append(label)
+            if valence == 1:
+                node_map_info[node_id] = [(map_counter[0], node_id, 1)]
+                map_counter[0] += 1
+            else:
+                entries = []
+                for i, bond_id in enumerate(bond_ordering):
+                    syn_id = _fresh_id()
+                    entries.append((map_counter[0], syn_id, i + 1))
+                    map_counter[0] += 1
+                node_map_info[node_id] = entries
+
+        # --- Assign map numbers for repeat unit attachment points ---
+        # Each bracket group needs 2 map numbers (left/right attachment)
+        for bg in bracket_groups:
+            crossings = bg['crossings']
+            bg['map_left'] = map_counter[0]
+            bg['map_right'] = map_counter[0] + 1
+            map_counter[0] += 2
+            # Identify which crossing is "left" (inner atom connects to outer-left)
+            # and which is "right" — order determined by crossings list order
+            if len(crossings) >= 2:
+                bg['crossing_left'] = crossings[0]   # (bond_id, inner_node_id, graphic_id)
+                bg['crossing_right'] = crossings[1]
+            elif len(crossings) == 1:
+                bg['crossing_left'] = crossings[0]
+                bg['crossing_right'] = None
+
+        # --- Build modified scaffold XML ---
+        import copy
+        scaffold_copy = copy.deepcopy(scaffold_frag_elem)
+        id_to_node = {n.attrib['id']: n for n in scaffold_copy.findall('n')}
+        id_to_bond = {b.attrib['id']: b for b in scaffold_copy.findall('b')}
+
+        nodes_to_remove = []
+        nodes_to_add = []
+
+        # Replace NamedAlternativeGroup nodes with ExternalConnectionPoint dummies
+        for node_id, label, ag_id, bond_ordering, valence in rgroup_nodes:
+            n_elem = id_to_node[node_id]
+            entries = node_map_info[node_id]
+            if valence == 1:
+                n_elem.attrib.clear()
+                n_elem.attrib['id'] = node_id
+                n_elem.attrib['NodeType'] = 'ExternalConnectionPoint'
+                n_elem.attrib['ExternalConnectionNum'] = '1'
+                for child in list(n_elem):
+                    n_elem.remove(child)
+            else:
+                for i, bond_id in enumerate(bond_ordering):
+                    global_mapnum, syn_id, conn_num = entries[i]
+                    d = ET.Element('n')
+                    d.attrib['id'] = syn_id
+                    d.attrib['NodeType'] = 'ExternalConnectionPoint'
+                    d.attrib['ExternalConnectionNum'] = str(conn_num)
+                    nodes_to_add.append(d)
+                    if bond_id in id_to_bond:
+                        b = id_to_bond[bond_id]
+                        if b.attrib.get('B') == node_id:
+                            b.attrib['B'] = syn_id
+                        elif b.attrib.get('E') == node_id:
+                            b.attrib['E'] = syn_id
+                nodes_to_remove.append(node_id)
+
+        # Replace bracket inner atoms with ExternalConnectionPoint dummies
+        for bg in bracket_groups:
+            crossing_left = bg.get('crossing_left')
+            crossing_right = bg.get('crossing_right')
+            map_left = bg['map_left']
+            map_right = bg['map_right']
+
+            for crossing, mapnum in [(crossing_left, map_left), (crossing_right, map_right)]:
+                if crossing is None:
+                    continue
+                bond_id, inner_node_id, _ = crossing
+                syn_id = _fresh_id()
+                # Track: inner_node_id -> syn_id (for repeat unit mol building later)
+                # Add a new ExternalConnectionPoint node to the scaffold
+                d = ET.Element('n')
+                d.attrib['id'] = syn_id
+                d.attrib['NodeType'] = 'ExternalConnectionPoint'
+                # Store mapnum in a custom attrib for later CDX_NODE_ID lookup
+                d.attrib['ExternalConnectionNum'] = '1'  # placeholder, we use CDX_NODE_ID to find it
+                nodes_to_add.append(d)
+
+                # Rewire the crossing bond: replace the inner atom end with the dummy
+                if bond_id in id_to_bond:
+                    b = id_to_bond[bond_id]
+                    if b.attrib.get('B') == inner_node_id:
+                        b.attrib['B'] = syn_id
+                    elif b.attrib.get('E') == inner_node_id:
+                        b.attrib['E'] = syn_id
+
+                # Store the syn_id -> mapnum for post-parse labelling
+                bg.setdefault('syn_id_to_mapnum', {})[syn_id] = mapnum
+
+            # Remove ALL inner bracket atoms from scaffold (they belong to the repeat unit only)
+            inner_ids = bg['inner_node_ids']
+            for inner_node_id in inner_ids:
+                if inner_node_id in id_to_node:
+                    nodes_to_remove.append(inner_node_id)
+
+            # Remove bonds that connect only to inner bracket atoms
+            for b_elem in list(scaffold_copy.findall('b')):
+                b_b = b_elem.attrib.get('B', '')
+                b_e = b_elem.attrib.get('E', '')
+                if b_b in inner_ids and b_e in inner_ids:
+                    scaffold_copy.remove(b_elem)
+
+        for node_id in nodes_to_remove:
+            if node_id in id_to_node:
+                scaffold_copy.remove(id_to_node[node_id])
+        for n_elem in nodes_to_add:
+            scaffold_copy.append(n_elem)
+
+        # Build CDX_NODE_ID -> global_mapnum mapping for scaffold post-parse
+        cdxid_to_mapnum = {}
+        for node_id, entries in node_map_info.items():
+            for global_mapnum, syn_id, conn_num in entries:
+                if syn_id.isdigit():
+                    cdxid_to_mapnum[int(syn_id)] = global_mapnum
+                else:
+                    # valence=1: syn_id == node_id (original)
+                    if node_id.isdigit():
+                        cdxid_to_mapnum[int(node_id)] = global_mapnum
+        for bg in bracket_groups:
+            for syn_id, mapnum in bg.get('syn_id_to_mapnum', {}).items():
+                if syn_id.isdigit():
+                    cdxid_to_mapnum[int(syn_id)] = mapnum
+
+        # Parse scaffold mol, convert attachment atoms to * dummies
+        scaffold_cdxml = CDXML_HEADER + ET.tostring(scaffold_copy, encoding='unicode') + CDXML_FOOTER
+        scaffold_mols = Chem.MolsFromCDXML(scaffold_cdxml)
+        if not scaffold_mols or scaffold_mols[0] is None:
+            RDLogger.EnableLog('rdApp.warning')
+            raise ValueError(f"Failed to parse modified scaffold from: {cdxml_path}")
+        scaffold_mol = scaffold_mols[0]
+        rwmol = RWMol(scaffold_mol)
+        for atom in rwmol.GetAtoms():
+            cdx_id = atom.GetPropsAsDict().get('CDX_NODE_ID', None)
+            if cdx_id is not None and cdx_id in cdxid_to_mapnum:
+                _make_dummy(rwmol, atom.GetIdx(), cdxid_to_mapnum[cdx_id])
+        scaffold_mol = rwmol.GetMol()
+
+        # --- Parse altgroup fragments ---
+        rgroup_fragments = {}  # label -> [mol, ...]
+        for node_id, label, ag_id, bond_ordering, valence in rgroup_nodes:
+            if ag_id not in altgroups:
+                continue
+            conn_to_mapnum = {conn_num: global_mapnum
+                              for global_mapnum, syn_id, conn_num in node_map_info[node_id]}
+            frags = []
+            for frag_elem in altgroups[ag_id].findall('fragment'):
+                mol = _parse_fragment_mol(frag_elem, conn_to_mapnum)
+                if mol is not None:
+                    frags.append(mol)
+            rgroup_fragments[label] = frags
+
+        if not rgroup_fragments and not bracket_groups:
+            raise ValueError(
+                f"No R-group fragments or repeat units found in CDXML file: {cdxml_path}. "
+                "Use ChemDraw's R-group substitution table (Rn labels with an R-group table)."
+            )
+
+        # --- Parse repeat unit mols ---
+        # For each bracket group, build a mini-fragment with the inner atoms + 2 ECP nodes
+        repeat_unit_mols = []  # list of (mol_with_two_dummy_atoms, map_left, map_right, repeat_range)
+        for bg in bracket_groups:
+            inner_ids = bg['inner_node_ids']
+            map_left = bg['map_left']
+            map_right = bg['map_right']
+            crossing_left = bg.get('crossing_left')
+            crossing_right = bg.get('crossing_right')
+
+            if crossing_left is None:
+                continue
+
+            # Build mini-fragment XML: inner atoms + bonds between them + 2 ECP attachment nodes
+            syn_left = _fresh_id()
+            syn_right = _fresh_id()
+
+            frag_elem = ET.Element('fragment')
+            frag_elem.attrib['id'] = _fresh_id()
+
+            # Add inner nodes from original scaffold
+            for n in scaffold_frag_elem.findall('n'):
+                if n.attrib.get('id', '') in inner_ids:
+                    frag_elem.append(copy.deepcopy(n))
+
+            # Add ECP attachment nodes
+            d_left = ET.SubElement(frag_elem, 'n')
+            d_left.attrib['id'] = syn_left
+            d_left.attrib['NodeType'] = 'ExternalConnectionPoint'
+            d_left.attrib['ExternalConnectionNum'] = '1'
+
+            d_right = ET.SubElement(frag_elem, 'n')
+            d_right.attrib['id'] = syn_right
+            d_right.attrib['NodeType'] = 'ExternalConnectionPoint'
+            d_right.attrib['ExternalConnectionNum'] = '2'
+
+            # Add bonds between inner atoms
+            for b in scaffold_frag_elem.findall('b'):
+                b_b = b.attrib.get('B', '')
+                b_e = b.attrib.get('E', '')
+                if b_b in inner_ids and b_e in inner_ids:
+                    frag_elem.append(copy.deepcopy(b))
+
+            # Add crossing bonds: ECP_left -- inner_left_atom, inner_right_atom -- ECP_right
+            inner_left_node_id = crossing_left[1]   # InnerAtomID for left crossing
+            inner_right_node_id = crossing_right[1] if crossing_right else None
+
+            b_left = ET.SubElement(frag_elem, 'b')
+            b_left.attrib['id'] = _fresh_id()
+            b_left.attrib['B'] = syn_left
+            b_left.attrib['E'] = inner_left_node_id
+
+            if inner_right_node_id:
+                b_right = ET.SubElement(frag_elem, 'b')
+                b_right.attrib['id'] = _fresh_id()
+                b_right.attrib['B'] = inner_right_node_id
+                b_right.attrib['E'] = syn_right
+
+            frag_str = ET.tostring(frag_elem, encoding='unicode')
+            mols = Chem.MolsFromCDXML(CDXML_HEADER + frag_str + CDXML_FOOTER)
+            if not mols or mols[0] is None:
+                continue
+
+            rwmol = RWMol(mols[0])
+            for atom in rwmol.GetAtoms():
+                cdx_id = atom.GetPropsAsDict().get('CDX_NODE_ID', None)
+                if cdx_id is not None:
+                    if cdx_id == int(syn_left):
+                        _make_dummy(rwmol, atom.GetIdx(), map_left)
+                    elif cdx_id == int(syn_right):
+                        _make_dummy(rwmol, atom.GetIdx(), map_right)
+            repeat_mol = rwmol.GetMol()
+            repeat_unit_mols.append((repeat_mol, map_left, map_right, bg['repeat_range']))
+
+        # --- Build expanded scaffold variants (one per repeat count combo) ---
+        # If there are repeat units, we need to enumerate repeat counts and
+        # chain the repeat unit n times, then zip with the scaffold.
+        # Strategy: produce one scaffold_mol variant per repeat count combination.
+        if repeat_unit_mols:
+            scaffold_variants = []
+            repeat_count_lists = [ru[3] for ru in repeat_unit_mols]
+            for count_combo in itertools.product(*repeat_count_lists):
+                variant_scaffold = scaffold_mol
+                for (repeat_mol, map_left, map_right, _), count in zip(repeat_unit_mols, count_combo):
+                    # Chain `count` copies: left_dummy -- [unit]^n -- right_dummy
+                    # Build by iteratively zipping copies via intermediate map numbers
+                    chained = self._chain_repeat_unit(
+                        repeat_mol, count, map_left, map_right,
+                        map_counter, _fresh_id
+                    )
+                    if chained is None:
+                        variant_scaffold = None
+                        break
+                    variant_scaffold = Chem.CombineMols(variant_scaffold, chained)
+                if variant_scaffold is not None:
+                    scaffold_variants.append((variant_scaffold, count_combo))
+        else:
+            scaffold_variants = [(scaffold_mol, ())]
+
+        # --- Enumerate all R-group + repeat count combinations ---
+        frag_lists = [rgroup_fragments[lbl] for lbl in label_order]
         final_compounds = []
         failed_count = 0
-        for combo in itertools.product(*fragment_groups):
-            assembled = self._assemble_molecule(core_mol, combo)
-            if assembled is None:
-                failed_count += 1
-                continue
-            smiles = Chem.MolToSmiles(assembled)
-            branching = {}
-            for label, frag in zip(position_labels, combo):
-                branching[label] = fragment_smiles(frag)
-            final_compounds.append({'smiles': smiles, 'branching': branching})
+
+        for scaffold_variant, count_combo in scaffold_variants:
+            for rgroup_combo in (itertools.product(*frag_lists) if frag_lists else [()]):
+                try:
+                    result = _assemble(scaffold_variant, list(rgroup_combo))
+                    smiles = Chem.MolToSmiles(result)
+                    branching = {lbl: _frag_display_smiles(frag)
+                                 for lbl, frag in zip(label_order, rgroup_combo)}
+                    if count_combo:
+                        for i, (_, _, _, repeat_range) in enumerate(repeat_unit_mols):
+                            branching[f'repeat_unit_{i+1}_count'] = str(count_combo[i])
+                    final_compounds.append({'smiles': smiles, 'branching': branching})
+                except Exception:
+                    failed_count += 1
 
         if not final_compounds:
             raise ValueError(
-                f"All {failed_count} R-group combinations failed to assemble. "
-                "Check that R-group labels are correctly placed on attachment bonds."
+                f"All {failed_count} enumeration combinations failed to assemble. "
+                "Check that R-group labels and repeat unit brackets are correctly drawn in ChemDraw."
             )
 
         if failed_count > 0:
             import warnings
-            warnings.warn(
-                f"{failed_count} R-group combination(s) failed to assemble and were skipped."
-            )
+            warnings.warn(f"{failed_count} combination(s) failed to assemble and were skipped.")
 
-        # Generate compound IDs (same logic as dict mode)
+        # Generate compound IDs
         base_name = os.path.splitext(os.path.basename(self.library_cdxml))[0]
         num_compounds = len(final_compounds)
         characters = 4
@@ -413,8 +771,67 @@ echo "=== CompoundLibrary ready ==="
             compound_name = base_name if num_compounds == 1 else base_name[:characters] + zeros_str + u_l_n_str
             compound_ids.append(compound_name)
 
+        RDLogger.EnableLog('rdApp.warning')
         self.expanded_compounds = final_compounds
         self.compound_ids = compound_ids
+
+    @staticmethod
+    def _chain_repeat_unit(repeat_mol, count, map_left, map_right, map_counter, fresh_id_fn):
+        """
+        Build a molecule representing `count` copies of repeat_mol chained together.
+
+        repeat_mol has [*:map_left] and [*:map_right] attachment points.
+        Returns a mol with [*:map_left] on the left end and [*:map_right] on the right end,
+        ready to be zipped into the scaffold.
+
+        For count=1: returns repeat_mol as-is.
+        For count>1: chains copies by zipping right end of copy i to left end of copy i+1,
+                     using fresh intermediate map numbers.
+        """
+        try:
+            from rdkit import Chem
+            from rdkit.Chem import rdmolops, RWMol
+
+            if count <= 0:
+                return None
+            if count == 1:
+                return repeat_mol
+
+            params = rdmolops.MolzipParams()
+            params.label = rdmolops.MolzipLabel.AtomMapNumber
+
+            # Start with first copy, keep map_left on left, use a temp map on right
+            result = repeat_mol
+
+            for i in range(1, count):
+                # Assign a fresh intermediate map number for the junction
+                junction_map = map_counter[0]
+                map_counter[0] += 1
+
+                # On current result: relabel map_right -> junction_map
+                rwresult = RWMol(result)
+                for atom in rwresult.GetAtoms():
+                    if atom.GetAtomMapNum() == map_right:
+                        atom.SetAtomMapNum(junction_map)
+                result = rwresult.GetMol()
+
+                # On next copy: relabel map_left -> junction_map
+                rwcopy = RWMol(repeat_mol)
+                for atom in rwcopy.GetAtoms():
+                    if atom.GetAtomMapNum() == map_left:
+                        atom.SetAtomMapNum(junction_map)
+                next_copy = rwcopy.GetMol()
+
+                # Zip them together
+                combined = Chem.CombineMols(result, next_copy)
+                result = Chem.molzip(combined, params)
+                Chem.SanitizeMol(result)
+
+            # The final result has map_left on left and map_right on right
+            return result
+
+        except Exception:
+            return None
 
     @staticmethod
     def _assemble_molecule(core, fragments):
@@ -422,7 +839,7 @@ echo "=== CompoundLibrary ready ==="
         Assemble a molecule from core scaffold and R-group fragments using molzip.
 
         Args:
-            core: RDKit Mol - core scaffold with R-group dummy atoms
+            core: RDKit Mol - core scaffold with * dummy atoms (atomMapNum > 0)
             fragments: tuple of RDKit Mol - one fragment per R-group position
 
         Returns:
@@ -432,17 +849,13 @@ echo "=== CompoundLibrary ready ==="
             from rdkit import Chem
             from rdkit.Chem import rdmolops
 
-            # Combine core + all fragments into one Mol
-            combined = Chem.RWMol(core)
+            combined = core
             for frag in fragments:
                 combined = Chem.CombineMols(combined, frag)
 
-            # Use molzip to pair dummy atoms by atom map number
-            params = Chem.rdmolops.MolzipParams()
-            params.label = Chem.rdmolops.MolzipLabel.AtomMapNumber
+            params = rdmolops.MolzipParams()
+            params.label = rdmolops.MolzipLabel.AtomMapNumber
             assembled = Chem.molzip(combined, params)
-
-            # Sanitize
             Chem.SanitizeMol(assembled)
             return assembled
         except Exception:
