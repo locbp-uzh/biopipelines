@@ -4,23 +4,18 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-Structure-aware PyMOL selection editor for BioPipelines.
+Structure-aware selection pipeline for BioPipelines.
 
-Modifies PyMOL-formatted selection strings (e.g., "3-45+58-60") with operations
-like expand, shrink, shift, and invert, while validating against actual PDB residue numbers.
+Applies a sequence of operations (add, subtract, expand, shrink, shift, invert)
+to build and modify PyMOL-formatted selection strings per design ID.
 
 Usage:
-    python pipe_selection_editor.py <config_json>
+    python pipe_selection.py <config_json>
 
-Config JSON should contain:
-    - selection_table: Path to CSV with selection column
-    - selection_column: Name of column containing selections
-    - structures_json: Path to DataStream JSON file with structures
-    - expand: Residues to add on each side (int)
-    - shrink: Residues to remove from each side (int)
-    - shift: Residues to shift by (+/-) (int)
-    - invert: Whether to invert selection (bool)
-    - output_csv: Path to output CSV file
+Config JSON:
+    - operations: list of {op, refs?, value?} dicts
+    - structures_json: (optional) path to DataStream JSON with PDB files
+    - output_csv: path to output CSV file
 """
 
 import sys
@@ -29,393 +24,258 @@ import json
 import pandas as pd
 from typing import List, Tuple, Set
 
-# Import unified I/O utilities and PDB parser
+# Import unified I/O utilities and selection helpers
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
-from biopipelines.pdb_parser import parse_pdb_file, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
+from biopipelines.sele_utils import sele_to_list, list_to_sele
+from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES
 
 
-def parse_pymol_selection(selection: str) -> List[Tuple[int, int]]:
-    """Parse PyMOL selection string. Delegates to :func:`pdb_parser.parse_pymol_ranges`."""
-    return parse_pymol_ranges(selection)
+# ── PDB-aware helpers ──
 
-
-def format_pymol_selection(ranges: List[Tuple[int, int]]) -> str:
-    """Format (start, end) tuples as PyMOL selection string."""
-    if not ranges:
-        return ""
-
-    parts = []
-    for start, end in ranges:
-        if start == end:
-            parts.append(f"{start}")
-        else:
-            parts.append(f"{start}-{end}")
-
-    return "+".join(parts)
-
-
-def get_protein_residues(pdb_path: str) -> Set[int]:
-    """
-    Get set of valid protein residue numbers from PDB file.
-
-    Args:
-        pdb_path: Path to PDB file
-
-    Returns:
-        Set of residue numbers present in the structure
-    """
+def get_protein_residues(pdb_path: str) -> Set[Tuple[str, int]]:
+    """Get set of (chain, resnum) tuples from a PDB/CIF file."""
     atoms = parse_pdb_file(pdb_path)
-
-    residue_numbers = set()
+    residues = set()
     for atom in atoms:
         if atom.res_name in STANDARD_RESIDUES:
-            residue_numbers.add(atom.res_num)
-
-    if not residue_numbers:
+            residues.add((atom.chain_id, atom.res_num))
+    if not residues:
         raise ValueError(f"No protein residues found in {pdb_path}")
-
-    return residue_numbers
-
-
-def merge_overlapping_ranges(ranges: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-    """
-    Merge overlapping or adjacent ranges.
-
-    Args:
-        ranges: List of (start, end) tuples
-
-    Returns:
-        Merged list of ranges
-    """
-    if not ranges:
-        return []
-
-    # Sort ranges by start position
-    sorted_ranges = sorted(ranges)
-
-    merged = [sorted_ranges[0]]
-    for current_start, current_end in sorted_ranges[1:]:
-        last_start, last_end = merged[-1]
-
-        # Check if ranges overlap or are adjacent
-        if current_start <= last_end + 1:
-            # Merge by extending the last range
-            merged[-1] = (last_start, max(last_end, current_end))
-        else:
-            # No overlap, add as new range
-            merged.append((current_start, current_end))
-
-    return merged
+    return residues
 
 
-def expand_selection(ranges: List[Tuple[int, int]], expand_by: int,
-                    valid_residues: Set[int]) -> List[Tuple[int, int]]:
-    """
-    Expand selection ranges by adding residues on each side.
-
-    Args:
-        ranges: List of (start, end) tuples
-        expand_by: Number of residues to add on each side
-        valid_residues: Set of valid residue numbers from PDB
-
-    Returns:
-        Expanded and merged ranges
-    """
+def expand_selection(residues: Set[Tuple[str, int]], expand_by: int,
+                     valid_residues: Set[Tuple[str, int]]) -> Set[Tuple[str, int]]:
+    """Expand selection by adding *expand_by* residues on each side per chain."""
     if expand_by == 0:
-        return ranges
+        return residues
 
-    expanded = []
-    for start, end in ranges:
-        # Attempt to expand
-        new_start = start - expand_by
-        new_end = end + expand_by
+    # Group valid residues by chain for fast lookup
+    by_chain = {}
+    for chain, rnum in valid_residues:
+        by_chain.setdefault(chain, sorted(set())).append(rnum)
+    for chain in by_chain:
+        by_chain[chain] = sorted(set(by_chain[chain]))
 
-        # Find actual valid start (first valid residue >= new_start)
-        actual_start = start
-        for res in sorted(valid_residues):
-            if res >= new_start:
-                actual_start = res
-                break
-
-        # Find actual valid end (last valid residue <= new_end)
-        actual_end = end
-        for res in sorted(valid_residues, reverse=True):
-            if res <= new_end:
-                actual_end = res
-                break
-
-        expanded.append((actual_start, actual_end))
-
-    # Merge any overlapping ranges created by expansion
-    return merge_overlapping_ranges(expanded)
-
-
-def shrink_selection(ranges: List[Tuple[int, int]], shrink_by: int,
-                    valid_residues: Set[int]) -> List[Tuple[int, int]]:
-    """
-    Shrink selection ranges by removing residues from each side.
-
-    Args:
-        ranges: List of (start, end) tuples
-        shrink_by: Number of residues to remove from each side
-        valid_residues: Set of valid residue numbers from PDB
-
-    Returns:
-        Shrunk ranges (empty ranges are removed)
-    """
-    if shrink_by == 0:
-        return ranges
-
-    shrunk = []
-    for start, end in ranges:
-        # Calculate new boundaries
-        new_start = start + shrink_by
-        new_end = end - shrink_by
-
-        # Skip if range would become invalid
-        if new_start > new_end:
+    expanded = set(residues)
+    for chain, rnum in residues:
+        chain_nums = by_chain.get(chain, [])
+        try:
+            idx = chain_nums.index(rnum)
+        except ValueError:
             continue
+        lo = max(0, idx - expand_by)
+        hi = min(len(chain_nums) - 1, idx + expand_by)
+        for i in range(lo, hi + 1):
+            expanded.add((chain, chain_nums[i]))
+    return expanded
 
-        # Validate against PDB residues
-        if new_start not in valid_residues or new_end not in valid_residues:
-            # Find nearest valid residues
-            valid_in_range = sorted([r for r in valid_residues if new_start <= r <= new_end])
-            if not valid_in_range:
+
+def shrink_selection(residues: Set[Tuple[str, int]], shrink_by: int,
+                     valid_residues: Set[Tuple[str, int]]) -> Set[Tuple[str, int]]:
+    """Shrink selection by removing *shrink_by* residues from each boundary per chain."""
+    if shrink_by == 0:
+        return residues
+
+    by_chain = {}
+    for chain, rnum in valid_residues:
+        by_chain.setdefault(chain, []).append(rnum)
+    for chain in by_chain:
+        by_chain[chain] = sorted(set(by_chain[chain]))
+
+    # Group selected residues by chain into contiguous intervals
+    sel_by_chain = {}
+    for chain, rnum in residues:
+        sel_by_chain.setdefault(chain, []).append(rnum)
+
+    shrunk = set()
+    for chain, nums in sel_by_chain.items():
+        chain_nums = by_chain.get(chain, [])
+        nums_sorted = sorted(nums)
+
+        # Find contiguous intervals
+        intervals = []
+        start = nums_sorted[0]
+        prev = start
+        for n in nums_sorted[1:]:
+            # Check if n is the next valid residue after prev
+            try:
+                prev_idx = chain_nums.index(prev)
+            except ValueError:
+                prev = n
+                start = n
                 continue
-            new_start = valid_in_range[0]
-            new_end = valid_in_range[-1]
+            if prev_idx + 1 < len(chain_nums) and chain_nums[prev_idx + 1] == n:
+                prev = n
+            else:
+                intervals.append((start, prev))
+                start = n
+                prev = n
+        intervals.append((start, prev))
 
-        shrunk.append((new_start, new_end))
-
+        # Shrink each interval
+        for s, e in intervals:
+            try:
+                s_idx = chain_nums.index(s)
+                e_idx = chain_nums.index(e)
+            except ValueError:
+                continue
+            new_s_idx = s_idx + shrink_by
+            new_e_idx = e_idx - shrink_by
+            if new_s_idx > new_e_idx:
+                continue
+            for i in range(new_s_idx, new_e_idx + 1):
+                shrunk.add((chain, chain_nums[i]))
     return shrunk
 
 
-def shift_selection(ranges: List[Tuple[int, int]], shift_by: int,
-                   valid_residues: Set[int]) -> List[Tuple[int, int]]:
-    """
-    Shift selection ranges by a fixed offset.
-
-    Args:
-        ranges: List of (start, end) tuples
-        shift_by: Number of residues to shift (+/-)
-        valid_residues: Set of valid residue numbers from PDB
-
-    Returns:
-        Shifted ranges (only includes valid ranges)
-    """
+def shift_selection(residues: Set[Tuple[str, int]], shift_by: int,
+                    valid_residues: Set[Tuple[str, int]]) -> Set[Tuple[str, int]]:
+    """Shift selection by *shift_by* positions in the valid residue sequence per chain."""
     if shift_by == 0:
-        return ranges
+        return residues
 
-    shifted = []
-    for start, end in ranges:
-        new_start = start + shift_by
-        new_end = end + shift_by
+    by_chain = {}
+    for chain, rnum in valid_residues:
+        by_chain.setdefault(chain, []).append(rnum)
+    for chain in by_chain:
+        by_chain[chain] = sorted(set(by_chain[chain]))
 
-        # Check if shifted range is valid
-        if new_start not in valid_residues or new_end not in valid_residues:
-            # Check if any part of the shifted range is valid
-            range_residues = [r for r in valid_residues if new_start <= r <= new_end]
-            if not range_residues:
-                # Skip this range entirely if no valid residues
-                continue
-            # Adjust to valid boundaries
-            new_start = min(range_residues)
-            new_end = max(range_residues)
-
-        shifted.append((new_start, new_end))
-
+    shifted = set()
+    for chain, rnum in residues:
+        chain_nums = by_chain.get(chain, [])
+        try:
+            idx = chain_nums.index(rnum)
+        except ValueError:
+            continue
+        new_idx = idx + shift_by
+        if 0 <= new_idx < len(chain_nums):
+            shifted.add((chain, chain_nums[new_idx]))
     return shifted
 
 
-def invert_selection(ranges: List[Tuple[int, int]],
-                    valid_residues: Set[int]) -> List[Tuple[int, int]]:
-    """
-    Invert selection to get complement (all residues NOT in selection).
-
-    Args:
-        ranges: List of (start, end) tuples representing current selection
-        valid_residues: Set of valid residue numbers from PDB
-
-    Returns:
-        Inverted selection ranges
-    """
-    # Get all selected residues
-    selected = set()
-    for start, end in ranges:
-        for res in range(start, end + 1):
-            if res in valid_residues:
-                selected.add(res)
-
-    # Get complement
-    inverted_residues = valid_residues - selected
-
-    if not inverted_residues:
-        return []
-
-    # Convert back to ranges
-    sorted_residues = sorted(inverted_residues)
-    ranges = []
-    start = sorted_residues[0]
-    end = sorted_residues[0]
-
-    for res in sorted_residues[1:]:
-        if res == end + 1:
-            end = res
-        else:
-            ranges.append((start, end))
-            start = res
-            end = res
-
-    ranges.append((start, end))
-    return ranges
+def invert_selection(residues: Set[Tuple[str, int]],
+                     valid_residues: Set[Tuple[str, int]]) -> Set[Tuple[str, int]]:
+    """Replace selection with its complement."""
+    return valid_residues - residues
 
 
-def modify_selection(selection: str, pdb_path: str, expand: int = 0,
-                    shrink: int = 0, shift: int = 0, invert: bool = False) -> str:
-    """
-    Modify a PyMOL selection string with structure-aware operations.
+# ── Table lookup ──
 
-    Args:
-        selection: Original PyMOL selection string
-        pdb_path: Path to PDB structure file
-        expand: Residues to add on each side
-        shrink: Residues to remove from each side
-        shift: Residues to shift by (+/-)
-        invert: Whether to invert selection
+def lookup_column_values(table_path: str, column: str) -> dict:
+    """Load a CSV table and return {id: value} mapping for the given column."""
+    df = pd.read_csv(table_path)
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found in {table_path}. Available: {list(df.columns)}")
+    return dict(zip(df["id"].astype(str), df[column].astype(str)))
 
-    Returns:
-        Modified selection string
-    """
-    # Parse selection
-    ranges = parse_pymol_selection(selection)
 
-    # Get valid residues from PDB
-    valid_residues = get_protein_residues(pdb_path)
-
-    # Apply operations in order
-    if expand > 0:
-        ranges = expand_selection(ranges, expand, valid_residues)
-
-    if shrink > 0:
-        ranges = shrink_selection(ranges, shrink, valid_residues)
-
-    if shift != 0:
-        ranges = shift_selection(ranges, shift, valid_residues)
-
-    if invert:
-        ranges = invert_selection(ranges, valid_residues)
-
-    # Format back to string
-    return format_pymol_selection(ranges)
-
+# ── Main pipeline ──
 
 def process_selections(config_path: str):
-    """
-    Process selections according to config file.
-
-    Args:
-        config_path: Path to JSON config file
-    """
-    # Load config
+    """Apply sequential operations to build selections per ID."""
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    selection_table = config['selection_table']
-    selection_column = config['selection_column']
-    structures_json = config['structures_json']
-    expand = config.get('expand', 0)
-    shrink = config.get('shrink', 0)
-    shift = config.get('shift', 0)
-    invert = config.get('invert', False)
-    output_csv = config['output_csv']
+    operations = config["operations"]
+    output_csv = config["output_csv"]
 
-    # Load selection table
-    if not os.path.exists(selection_table):
-        raise ValueError(f"Selection table not found: {selection_table}")
-
-    df = pd.read_csv(selection_table)
-
-    # Validate column exists
-    if selection_column not in df.columns:
-        raise ValueError(
-            f"Column '{selection_column}' not found in table. "
-            f"Available columns: {list(df.columns)}"
-        )
-
-    # Load structures DataStream using pipe_biopipelines_io
-    structures_ds = load_datastream(structures_json)
-
-    # Create structure ID to path mapping from DataStream
+    # Load structures if available
     struct_map = {}
-    for struct_id, struct_path in iterate_files(structures_ds):
-        struct_map[struct_id] = struct_path
+    if "structures_json" in config:
+        structures_ds = load_datastream(config["structures_json"])
+        for sid, spath in iterate_files(structures_ds):
+            struct_map[sid] = spath
 
-    print(f"Loaded {len(struct_map)} structures from DataStream")
-    print(f"Processing {len(df)} selections")
-    print(f"Operations: expand={expand}, shrink={shrink}, shift={shift}, invert={invert}")
+    # Collect all IDs from the first add/subtract operation's table refs
+    all_ids = None
+    for op in operations:
+        if op["op"] in ("add", "subtract"):
+            for ref in op["refs"]:
+                vals = lookup_column_values(ref["table"], ref["column"])
+                if all_ids is None:
+                    all_ids = list(vals.keys())
+                break
+            if all_ids is not None:
+                break
 
-    # Process each row
+    if all_ids is None:
+        raise ValueError("No add/subtract operation found — cannot determine IDs")
+
+    print(f"Processing {len(all_ids)} IDs through {len(operations)} operations")
+
+    # Pre-load all referenced tables
+    ref_cache = {}
+    for op in operations:
+        if op["op"] in ("add", "subtract"):
+            for ref in op["refs"]:
+                key = (ref["table"], ref["column"])
+                if key not in ref_cache:
+                    ref_cache[key] = lookup_column_values(ref["table"], ref["column"])
+
+    # Cache for PDB residues (avoid re-parsing)
+    pdb_residue_cache = {}
+
     results = []
-    for idx, row in df.iterrows():
-        struct_id = row['id']
-        original_selection = row[selection_column]
+    for design_id in all_ids:
+        current = set()  # set of (chain, resnum) tuples
 
-        # Find corresponding PDB
-        if struct_id not in struct_map:
-            print(f"Warning: No PDB found for structure ID '{struct_id}', skipping")
-            continue
+        for op in operations:
+            op_type = op["op"]
 
-        pdb_path = struct_map[struct_id]
+            if op_type == "add":
+                for ref in op["refs"]:
+                    vals = ref_cache[(ref["table"], ref["column"])]
+                    value = vals.get(design_id, "")
+                    current |= set(sele_to_list(value))
 
-        if not os.path.exists(pdb_path):
-            print(f"Warning: PDB file not found: {pdb_path}, skipping")
-            continue
+            elif op_type == "subtract":
+                for ref in op["refs"]:
+                    vals = ref_cache[(ref["table"], ref["column"])]
+                    value = vals.get(design_id, "")
+                    current -= set(sele_to_list(value))
 
-        try:
-            # Modify selection
-            modified_selection = modify_selection(
-                original_selection,
-                pdb_path,
-                expand=expand,
-                shrink=shrink,
-                shift=shift,
-                invert=invert
-            )
+            elif op_type in ("expand", "shrink", "shift", "invert"):
+                pdb_path = struct_map.get(design_id)
+                if not pdb_path or not os.path.exists(pdb_path):
+                    print(f"Warning: No PDB found for '{design_id}', skipping PDB-aware op '{op_type}'")
+                    continue
 
-            results.append({
-                'id': struct_id,
-                'pdb': pdb_path,
-                selection_column: modified_selection,
-                f'original_{selection_column}': original_selection
-            })
+                if pdb_path not in pdb_residue_cache:
+                    pdb_residue_cache[pdb_path] = get_protein_residues(pdb_path)
+                valid = pdb_residue_cache[pdb_path]
 
-            print(f"  {struct_id}: '{original_selection}' -> '{modified_selection}'")
+                n = op.get("value", 0)
+                if op_type == "expand":
+                    current = expand_selection(current, n, valid)
+                elif op_type == "shrink":
+                    current = shrink_selection(current, n, valid)
+                elif op_type == "shift":
+                    current = shift_selection(current, n, valid)
+                elif op_type == "invert":
+                    current = invert_selection(current, valid)
 
-        except Exception as e:
-            print(f"Error processing {struct_id}: {e}")
-            raise
+        sele_str = list_to_sele(sorted(current, key=lambda x: (x[0], x[1])))
+        results.append({"id": design_id, "selection": sele_str})
+        print(f"  {design_id}: {sele_str}")
 
     if not results:
-        raise ValueError("No selections were processed successfully")
+        raise ValueError("No selections were produced")
 
-    # Save results
     result_df = pd.DataFrame(results)
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
     result_df.to_csv(output_csv, index=False)
 
-    print(f"\nSelection modification completed!")
-    print(f"Processed {len(results)} structures")
-    print(f"Results saved to: {output_csv}")
+    print(f"\nSelection pipeline completed — {len(results)} entries saved to {output_csv}")
 
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python pipe_selection_editor.py <config_json>")
+        print("Usage: python pipe_selection.py <config_json>")
         sys.exit(1)
 
     config_path = sys.argv[1]
-
     if not os.path.exists(config_path):
         print(f"Error: Config file not found: {config_path}")
         sys.exit(1)

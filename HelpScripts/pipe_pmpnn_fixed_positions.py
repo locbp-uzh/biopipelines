@@ -34,66 +34,22 @@ FIXED_CHAIN=args.FIXED_CHAIN
 fixed_jsonl_file=args.fixed_jsonl_file
 sele_csv_file=args.sele_csv_file
 
-#Converts a selection string into an array
+from biopipelines.sele_utils import sele_to_list as _sele_to_list_chain_aware, list_to_sele
+
 def sele_to_list(s):
-    """Convert selection string to list of residue numbers."""
-    a = []
-    if not s or s == "":
-        return a
+    """Convert selection string to flat list of residue numbers (strips chain info)."""
+    return [r for _, r in _sele_to_list_chain_aware(s)]
 
-    # Convert to string to handle numeric types
-    s = str(s)
-    if s == "nan":
-        return a
+def sele_to_dict(s):
+    """Convert selection string to dict of chain -> sorted residue list.
 
-    # Handle both '+' separated ranges and space-separated legacy format
-    if '+' in s:
-        parts = s.split('+')
-    else:
-        # Legacy space-separated format
-        parts = s.split()
-
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-
-        if '-' in part and not part.startswith('-'):
-            # Range like "10-15"
-            range_parts = part.split('-')
-            if len(range_parts) == 2:
-                min_val, max_val = range_parts
-                for ri in range(int(min_val), int(max_val) + 1):
-                    a.append(ri)
-            else:
-                print(f"Warning: Malformed range '{part}', skipping")
-        else:
-            # Single residue
-            try:
-                a.append(int(part))
-            except ValueError:
-                print(f"Warning: Could not parse '{part}' as integer, skipping")
-
-    return sorted(a)
-
-def list_to_sele(a):
-    s = ""
-    i = 0
-    while i < len(a):
-        if i > 0: s += "+"
-        s += f"{a[i]}"
-        #represent consecutive indeces with a dash
-        if i < len(a) - 1:
-            if int(a[i])+1 == int(a[i+1]):
-                s += "-"
-                j = i + 2
-                while j < len(a):
-                    if int(a[j]) != int(a[j-1])+1: break
-                    j += 1
-                i = j - 1
-                s += f"{a[i]}"
-        i += 1
-    return s
+    For chainless input, all residues go under key ''.
+    """
+    pairs = _sele_to_list_chain_aware(s)
+    d = {}
+    for chain, resnum in pairs:
+        d.setdefault(chain, []).append(resnum)
+    return d
 
 def get_protein_chains_from_pdb(pdb_path):
     """
@@ -240,18 +196,29 @@ if input_source == "table": #derive from table
                 fixed_dict[design_id] = dict()
                 mobile_dict[design_id] = dict()
 
-                # Parse fixed and designed selections from table
+                # Parse fixed and designed selections from table (chain-aware)
                 if 'fixed' in df.columns and pd.notna(row['fixed']) and row['fixed'] != '':
-                    fixed_dict[design_id][FIXED_CHAIN] = sele_to_list(str(row['fixed']))
+                    fixed_by_chain = sele_to_dict(str(row['fixed']))
                 else:
-                    fixed_dict[design_id][FIXED_CHAIN] = []
+                    fixed_by_chain = {}
 
                 if 'designed' in df.columns and pd.notna(row['designed']) and row['designed'] != '':
-                    mobile_dict[design_id][FIXED_CHAIN] = sele_to_list(str(row['designed']))
+                    designed_by_chain = sele_to_dict(str(row['designed']))
                 else:
-                    mobile_dict[design_id][FIXED_CHAIN] = []
+                    designed_by_chain = {}
 
-                print(f"Design: {design_id}, Fixed: {fixed_dict[design_id][FIXED_CHAIN]}, Designed: {mobile_dict[design_id][FIXED_CHAIN]}")
+                # Populate per-chain entries; chainless ('') data maps to FIXED_CHAIN
+                all_chains = set(fixed_by_chain.keys()) | set(designed_by_chain.keys())
+                for ch in all_chains:
+                    target_ch = FIXED_CHAIN if ch == '' else ch
+                    fixed_dict[design_id][target_ch] = fixed_by_chain.get(ch, [])
+                    mobile_dict[design_id][target_ch] = designed_by_chain.get(ch, [])
+
+                # Ensure FIXED_CHAIN always has an entry
+                fixed_dict[design_id].setdefault(FIXED_CHAIN, [])
+                mobile_dict[design_id].setdefault(FIXED_CHAIN, [])
+
+                print(f"Design: {design_id}, Fixed: {fixed_dict[design_id]}, Designed: {mobile_dict[design_id]}")
             else:
                 print(f"Warning: No table entry found for {design_id}")
 

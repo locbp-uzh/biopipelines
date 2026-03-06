@@ -50,6 +50,8 @@ echo "=== Ligand ready ==="
     compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
     failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
     config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
+    images_folder = Path(lambda self: os.path.join(self.output_folder, "images") if self.generate_images else None)
+    compound_images_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_compound_images.py"))
     ligand_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_ligand.py"))
 
     def __init__(self,
@@ -60,6 +62,8 @@ echo "=== Ligand ready ==="
                  local_folder: Optional[str] = None,
                  output_format: str = "pdb",
                  smiles: Optional[Union[str, List[str]]] = None,
+                 cdxml: Optional[str] = None,
+                 generate_images: bool = False,
                  **kwargs):
         """
         Initialize Ligand tool.
@@ -70,36 +74,36 @@ echo "=== Ligand ready ==="
                     - PubChem CID: "2244"
                     - PubChem CAS: "50-78-2"
                     - PubChem name: "aspirin", "caffeine"
-                    Can be None if using smiles parameter instead.
+                    Can be None if using smiles or cdxml instead.
             ids: Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb).
-                 If not provided, defaults to lookup values (for lookup) or "smiles_1", "smiles_2", etc. (for smiles).
+                 If not provided, defaults to lookup values (for lookup), "smiles_N" (for smiles),
+                 or names/indices from CDXML (for cdxml).
             codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
-                   If not provided, defaults to lookup[:3].upper() (for lookup) or "LIG" (for smiles).
-            source: Force source ("rcsb" or "pubchem"). If None, auto-detects:
-                    - 1-3 uppercase alphanumeric -> RCSB (CCD)
-                    - Purely numeric -> PubChem (CID)
-                    - XX-XX-X format -> PubChem (CAS)
-                    - Otherwise -> PubChem (name)
-                    Ignored when using smiles parameter.
+                   If not provided, defaults to lookup[:3].upper() (for lookup) or "LIG" (for smiles/cdxml).
+            source: Force source ("rcsb" or "pubchem"). If None, auto-detects.
+                    Ignored when using smiles or cdxml.
             local_folder: Custom local folder to check first (before Ligands/). Default: None
-            output_format: Output format - "pdb" or "cif". CIF includes explicit bond orders
-                          which is recommended for tools like RFdiffusion3. Default: "pdb"
+            output_format: Output format - "pdb" or "cif". Default: "pdb"
             smiles: SMILES string(s) for direct molecule input. Bypasses lookup entirely.
-                    Molecules are converted to 3D structures using RDKit.
+            cdxml: Path to a ChemDraw CDXML file containing individual molecules (not R-groups).
+                   Each fragment is extracted as a separate ligand. Names from ChemDraw chemical
+                   property labels are used as IDs; falls back to ligand_1, ligand_2, etc.
+            generate_images: Generate PNG images for each ligand using RDKit. Default: False
             **kwargs: Additional parameters
 
-        Fetch Priority (for lookup):
-            For each ligand, searches in order:
-            1. local_folder (if parameter provided)
-            2. ./Ligands/ folder in repository
-            3. Download from RCSB or PubChem (saved to both Ligands/ and output folder)
-
         Output:
-            Streams: structures (.pdb/.cif), compounds (.csv)
+            Streams: structures (.pdb/.cif), compounds (.csv), images (.png, if generate_images=True)
             Tables:
                 compounds: id | format | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path
                 failed: lookup | error_message | source | attempted_path
         """
+        # Parse CDXML into SMILES + IDs at config time
+        self.cdxml_path = cdxml
+        cdxml_smiles = []
+        cdxml_ids = []
+        if cdxml is not None:
+            cdxml_smiles, cdxml_ids = self._parse_cdxml_ligands(cdxml)
+
         # Handle smiles input
         if smiles is not None:
             if isinstance(smiles, str):
@@ -108,6 +112,8 @@ echo "=== Ligand ready ==="
                 self.smiles_values = list(smiles)
         else:
             self.smiles_values = []
+        # Append CDXML-derived SMILES
+        self.smiles_values.extend(cdxml_smiles)
 
         # Handle lookup
         if lookup is not None:
@@ -118,9 +124,9 @@ echo "=== Ligand ready ==="
         else:
             self.lookup_values = []
 
-        # Validate: must have at least one of lookup or smiles
+        # Validate: must have at least one of lookup, smiles, or cdxml
         if not self.lookup_values and not self.smiles_values:
-            raise ValueError("Must provide at least one of 'lookup' or 'smiles'")
+            raise ValueError("Must provide at least one of 'lookup', 'smiles', or 'cdxml'")
 
         # Total number of ligands
         total_count = len(self.lookup_values) + len(self.smiles_values)
@@ -132,10 +138,12 @@ echo "=== Ligand ready ==="
             else:
                 self.custom_ids = list(ids)
         else:
-            # Default ids: lookup values for lookup, "smiles_N" for smiles
+            # Default ids: lookup values, then user-supplied smiles as "smiles_N", then CDXML names
             self.custom_ids = self.lookup_values.copy()
-            for i in range(len(self.smiles_values)):
+            n_plain_smiles = len(self.smiles_values) - len(cdxml_smiles)
+            for i in range(n_plain_smiles):
                 self.custom_ids.append(f"smiles_{i + 1}")
+            self.custom_ids.extend(cdxml_ids)
 
         # Handle codes - default based on input type
         if codes is not None:
@@ -144,7 +152,7 @@ echo "=== Ligand ready ==="
             else:
                 self.residue_codes = [c.upper() for c in codes]
         else:
-            # Default codes: lookup[:3].upper() for lookup, "LIG" for smiles
+            # Default codes: lookup[:3].upper() for lookup, "LIG" for smiles/cdxml
             self.residue_codes = [lv.upper()[:3] for lv in self.lookup_values]
             for _ in range(len(self.smiles_values)):
                 self.residue_codes.append("LIG")
@@ -166,6 +174,7 @@ echo "=== Ligand ready ==="
         if output_format not in ["pdb", "cif"]:
             raise ValueError(f"Invalid output_format: {output_format}. Must be 'pdb' or 'cif'")
         self.output_format = output_format
+        self.generate_images = generate_images
 
         # Warn about non-standard residue codes (standard PDB is 1-3 alphanumeric)
         for code in self.residue_codes:
@@ -176,6 +185,85 @@ echo "=== Ligand ready ==="
 
         # Initialize base class
         super().__init__(**kwargs)
+
+    @staticmethod
+    def _parse_cdxml_ligands(cdxml_path: str):
+        """
+        Parse individual molecule fragments from a CDXML file.
+
+        Each top-level <fragment> on the page is converted to a SMILES string.
+        Names come from <chemicalproperty> elements whose BasisObjects reference the fragment;
+        falls back to "ligand_N" (1-based) if no name is defined.
+
+        Returns:
+            (smiles_list, ids_list) - parallel lists, one entry per molecule
+        """
+        import xml.etree.ElementTree as ET
+        try:
+            from rdkit import Chem, RDLogger
+        except ImportError:
+            raise ImportError("RDKit is required for CDXML parsing. Install with: conda install -c conda-forge rdkit")
+
+        if not os.path.exists(cdxml_path):
+            raise ValueError(f"CDXML file not found: {cdxml_path}")
+
+        RDLogger.DisableLog('rdApp.warning')
+
+        tree = ET.parse(cdxml_path)
+        root = tree.getroot()
+        page = root.find('page')
+        if page is None:
+            raise ValueError(f"No <page> element found in CDXML file: {cdxml_path}")
+
+        CDXML_HEADER = '<?xml version="1.0" encoding="UTF-8" ?><CDXML><page>'
+        CDXML_FOOTER = '</page></CDXML>'
+
+        # Build id -> text for all <t> elements on the page
+        t_id_to_text = {}
+        for child in page:
+            if child.tag == 't':
+                tid = child.attrib.get('id', '')
+                s_elem = child.find('s')
+                if s_elem is not None and s_elem.text:
+                    t_id_to_text[tid] = s_elem.text.strip()
+
+        # Map fragment_id -> name via chemicalproperty (same as CompoundLibrary)
+        frag_id_to_name = {}
+        for child in page:
+            if child.tag == 'chemicalproperty':
+                display_id = child.attrib.get('ChemicalPropertyDisplayID', '')
+                basis = child.attrib.get('BasisObjects', '').split()
+                name = t_id_to_text.get(display_id, '')
+                if name and basis:
+                    frag_id_to_name[basis[0]] = name
+
+        # Parse each top-level fragment as a separate molecule
+        smiles_list = []
+        ids_list = []
+        frag_index = 0
+        for child in page:
+            if child.tag != 'fragment':
+                continue
+            frag_id = child.attrib.get('id', '')
+            frag_str = ET.tostring(child, encoding='unicode')
+            mols = Chem.MolsFromCDXML(CDXML_HEADER + frag_str + CDXML_FOOTER)
+            if not mols or mols[0] is None:
+                continue
+            mol = mols[0]
+            smiles = Chem.MolToSmiles(mol)
+            if not smiles:
+                continue
+            frag_index += 1
+            name = frag_id_to_name.get(frag_id, f"ligand_{frag_index}")
+            smiles_list.append(smiles)
+            ids_list.append(name)
+
+        RDLogger.EnableLog('rdApp.warning')
+
+        if not smiles_list:
+            raise ValueError(f"No valid molecules found in CDXML file: {cdxml_path}")
+
+        return smiles_list, ids_list
 
     def _detect_lookup_type(self, lookup: str) -> str:
         """
@@ -204,7 +292,10 @@ echo "=== Ligand ready ==="
             raise ValueError("ids cannot be empty")
 
         if not self.lookup_values and not self.smiles_values:
-            raise ValueError("Must have at least one of lookup or smiles")
+            raise ValueError("Must have at least one of 'lookup', 'smiles', or 'cdxml'")
+
+        if self.cdxml_path is not None and not os.path.exists(self.cdxml_path):
+            raise ValueError(f"CDXML file not found: {self.cdxml_path}")
 
         if not self.residue_codes:
             raise ValueError("codes cannot be empty")
@@ -223,6 +314,7 @@ echo "=== Ligand ready ==="
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters and check for local files."""
         self.folders = pipeline_folders
+
 
         # Check which files exist locally and which will need to be downloaded
         repo_ligands_folder = pipeline_folders.get('Ligands', '')
@@ -280,7 +372,9 @@ echo "=== Ligand ready ==="
             config_lines.append(f"SOURCE: {self.source if self.source else 'auto-detect'}")
             config_lines.append(f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses Ligands/)'}")
 
-        if self.smiles_values:
+        if self.cdxml_path:
+            config_lines.append(f"CDXML: {os.path.basename(self.cdxml_path)} ({len([s for s in self.smiles_values])} molecules)")
+        elif self.smiles_values:
             smiles_preview = [s[:20] + "..." if len(s) > 20 else s for s in self.smiles_values]
             config_lines.append(f"SMILES: {', '.join(smiles_preview)} ({len(self.smiles_values)} molecules)")
 
@@ -332,6 +426,13 @@ echo "=== Ligand ready ==="
         lookup_info = f"Lookup: {', '.join(self.lookup_values)}" if self.lookup_values else ""
         smiles_info = f"SMILES: {len(self.smiles_values)} molecule(s)" if self.smiles_values else ""
 
+        image_script = ""
+        if self.generate_images:
+            image_script = f"""
+echo "Generating ligand images"
+python3 "{self.compound_images_py}" "{self.compounds_csv}" "{self.images_folder}"
+"""
+
         return f"""echo "Processing {total_count} ligands"
 echo "Custom IDs: {', '.join(self.custom_ids)}"
 echo "Residue codes: {', '.join(self.residue_codes)}"
@@ -340,7 +441,7 @@ echo "Residue codes: {', '.join(self.residue_codes)}"
 echo "Output folder: {self.output_folder}"
 
 python "{self.ligand_py}" --config "{self.config_file}"
-
+{image_script}
 """
 
     def get_output_files(self) -> Dict[str, Any]:
@@ -385,12 +486,24 @@ python "{self.ligand_py}" --config "{self.config_file}"
             format="csv"
         )
 
-        return {
+        result = {
             "structures": structures,
             "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder
         }
+
+        if self.generate_images:
+            image_files = [os.path.join(self.images_folder, f"{cid}.png")
+                           for cid in self.custom_ids]
+            result["images"] = DataStream(
+                name="images",
+                ids=self.custom_ids.copy(),
+                files=image_files,
+                format="png"
+            )
+
+        return result
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
@@ -403,7 +516,9 @@ python "{self.ligand_py}" --config "{self.config_file}"
                 "smiles_values": self.smiles_values,
                 "source": self.source,
                 "local_folder": self.local_folder,
-                "output_format": self.output_format
+                "output_format": self.output_format,
+                "cdxml": self.cdxml_path,
+                "generate_images": self.generate_images
             }
         })
         return base_dict

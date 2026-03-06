@@ -27,6 +27,24 @@ except ImportError:
     from datastream import DataStream
 
 
+def _make_indexed_ids(base_name: str, num_compounds: int) -> List[str]:
+    """Generate compound IDs: base_name when count=1, else base_name[:chars] + zero-padded index."""
+    if num_compounds == 1:
+        return [base_name]
+    characters = 4
+    if num_compounds > 9: characters = 3
+    if num_compounds > 99: characters = 2
+    if num_compounds > 999: characters = 1
+    if num_compounds > 99999: characters = 0
+    prefix = base_name[:characters]
+    ids = []
+    for i in range(num_compounds):
+        i_str = str(i)
+        zeros = '0' * (5 - characters - len(i_str))
+        ids.append(prefix + zeros + i_str)
+    return ids
+
+
 class CompoundLibrary(BaseConfig):
     """
     CompoundLibrary configuration for dictionary-based SMILES library generation.
@@ -50,6 +68,8 @@ echo "=== CompoundLibrary ready ==="
     compound_properties_csv = Path(lambda self: os.path.join(self.output_folder, "compound_properties.csv"))
     summary_file = Path(lambda self: os.path.join(self.output_folder, "summary.txt"))
     library_dict_json = Path(lambda self: os.path.join(self.output_folder, "library_dict.json"))
+    images_folder = Path(lambda self: os.path.join(self.output_folder, "images") if self.generate_images else None)
+    compound_images_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_compound_images.py"))
     covalent_folder = Path(lambda self: os.path.join(self.output_folder, "covalent_library") if self.covalent else None)
     covalent_compounds_csv = Path(lambda self: os.path.join(self.output_folder, "covalent_library", "compounds.csv") if self.covalent else None)
     compound_expansion_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_compound_library.py"))
@@ -61,21 +81,22 @@ echo "=== CompoundLibrary ready ==="
                  primary_key: Optional[str] = None,
                  covalent: bool = False,
                  validate_smiles: bool = True,
-                 conformer_method: str = "UFF",
+                 generate_images: bool = False,
                  **kwargs):
         """
         Initialize CompoundLibrary configuration.
 
         Args:
-            library: Dictionary with expansion keys or path to existing CSV library
-            primary_key: Root key for expansion when library is a dictionary. Set automatically to first key if a placeholder <> is detected.
+            library: Dictionary with expansion keys or path to existing CSV/CDXML library
+            primary_key: Root key for expansion when library is a dictionary. Auto-detected
+                         by scanning keys in order for <placeholder> patterns.
             covalent: Generate CCD/PKL files for covalent ligand binding (calls runtime script)
             validate_smiles: Validate SMILES strings during expansion
-            conformer_method: Method for conformer generation ("UFF", "OpenFF", "DFT")
+            generate_images: Generate PNG images for each compound using RDKit
             **kwargs: Additional parameters
 
         Output:
-            Streams: compounds (.csv)
+            Streams: compounds (.csv), images (.png, if generate_images=True)
             Tables:
                 compounds: id | format | smiles | ccd | ...branching_keys
                 covalent_compounds: id | format | smiles | ccd (if covalent=True)
@@ -83,14 +104,15 @@ echo "=== CompoundLibrary ready ==="
         # Store CompoundLibrary-specific parameters
         self.library = library
         if not primary_key and isinstance(self.library, dict):
-            first = self.library[self.library.keys()[0]]
-            first = [first] if isinstance(first, str) else first # list
-            if any(['<' in x or '>' in x for x in first]):
-                primary_key = self.library.keys()[0]
+            for key, val in self.library.items():
+                vals = [val] if isinstance(val, str) else val
+                if any('<' in v and '>' in v for v in vals):
+                    primary_key = key
+                    break
         self.primary_key = primary_key
         self.covalent = covalent
         self.validate_smiles = validate_smiles
-        self.conformer_method = conformer_method
+        self.generate_images = generate_images
 
         # Track library source type
         self.library_dict = None
@@ -127,11 +149,6 @@ echo "=== CompoundLibrary ready ==="
         else:
             raise ValueError("library must be a dictionary or CSV file path")
 
-        # Validate conformer method for covalent ligands
-        if self.covalent:
-            valid_methods = ["UFF", "OpenFF", "DFT"]
-            if self.conformer_method not in valid_methods:
-                raise ValueError(f"conformer_method must be one of: {valid_methods}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input library sources."""
@@ -161,6 +178,9 @@ echo "=== CompoundLibrary ready ==="
                     self.library_csv = project_path
                 else:
                     raise ValueError(f"Library CSV file not found: {self.library}")
+            # Expand CSV if it contains <placeholder> patterns
+            if not self.expanded_compounds:
+                self._expand_csv()
         elif isinstance(self.library, dict):
             # Dictionary-based library (expansion already done in __init__)
             if not self.library_dict:
@@ -172,7 +192,6 @@ echo "=== CompoundLibrary ready ==="
         if not self.library_dict:
             return
 
-        # Use the same expansion logic as boltz_compound_library.py but with <key> format
         library = self.library_dict.copy()
         library_keys = list(library.keys())
         primary_lib_key = self.primary_key
@@ -180,6 +199,15 @@ echo "=== CompoundLibrary ready ==="
         # Find the primary key in the base configuration
         if primary_lib_key and primary_lib_key not in library:
             raise ValueError(f"Primary key '{primary_lib_key}' not found in library")
+
+        # Auto-detect primary key: first key (by insertion order) whose value(s) contain <placeholders>
+        if not primary_lib_key:
+            for key in library_keys:
+                vals = library[key]
+                vals = [vals] if isinstance(vals, str) else vals
+                if any('<' in v and '>' in v for v in vals):
+                    primary_lib_key = key
+                    break
 
         # Expand each base compound from the primary key
         if primary_lib_key:
@@ -233,21 +261,8 @@ echo "=== CompoundLibrary ready ==="
 
                 final_compounds = updated_compounds
 
-            # Generate compound IDs based on the pattern from boltz_compound_library.py
-            num_compounds = len(final_compounds)
-            characters = 4
-            if num_compounds > 9: characters = 3
-            if num_compounds > 99: characters = 2
-            if num_compounds > 999: characters = 1
-            if num_compounds > 99999: characters = 0
-
-            compound_ids = []
-            for u_l_n in range(num_compounds):
-                u_l_n_str = str(u_l_n)
-                n0 = 5 - characters - len(u_l_n_str)
-                zeros_str = '0' * n0
-                compound_name = primary_lib_key if num_compounds == 1 else primary_lib_key[:characters] + zeros_str + u_l_n_str
-                compound_ids.append(compound_name)
+            # Generate compound IDs by order of appearance (0-based index)
+            compound_ids = _make_indexed_ids(primary_lib_key, len(final_compounds))
 
             # Store expanded compounds
             self.expanded_compounds = final_compounds
@@ -261,6 +276,78 @@ echo "=== CompoundLibrary ready ==="
                 final_compounds.append({'smiles': smiles, 'branching': {}})
             self.expanded_compounds = final_compounds
             self.compound_ids = compound_ids
+
+    def _expand_csv(self):
+        """
+        Optionally expand a CSV library that contains <placeholder> patterns in a SMILES column.
+
+        Reads the CSV, detects the column whose values contain '<key>' patterns, then performs
+        the same iterative substitution as _expand_library. If no placeholders are found the
+        CSV rows are loaded as-is (no expansion).
+        """
+        if not self.library_csv:
+            return
+
+        with open(self.library_csv, newline='') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        fieldnames = list(reader.fieldnames or [])
+
+        if not rows:
+            return
+
+        # Detect the SMILES scaffold column: first column whose values contain '<...>'
+        smiles_col = None
+        for col in fieldnames:
+            if any('<' in (row.get(col) or '') and '>' in (row.get(col) or '') for row in rows):
+                smiles_col = col
+                break
+
+        if smiles_col is None:
+            # No expansion: load rows as-is
+            id_col = fieldnames[0] if fieldnames else 'id'
+            for row in rows:
+                compound_id = row.get(id_col, '') or row.get('id', '')
+                smiles = row.get('smiles', row.get('SMILES', ''))
+                self.compound_ids.append(compound_id)
+                self.expanded_compounds.append({'smiles': smiles, 'branching': {}})
+            return
+
+        # Build a fragment library from other columns: col -> list of values
+        fragment_cols = [c for c in fieldnames if c != smiles_col]
+        # Each row is one scaffold variant; fragment options come from other columns
+        # Convention: other columns hold the substitution options (|‑separated or single)
+        # We use unique non-empty values per column as options
+        fragment_library = {}
+        for col in fragment_cols:
+            options = []
+            seen = set()
+            for row in rows:
+                val = (row.get(col) or '').strip()
+                if val and val not in seen:
+                    seen.add(val)
+                    options.append(val)
+            if options:
+                fragment_library[col] = options
+
+        # Collect unique scaffold SMILES (preserving order)
+        scaffold_smiles_list = []
+        seen_scaffolds = set()
+        for row in rows:
+            s = (row.get(smiles_col) or '').strip()
+            if s and s not in seen_scaffolds:
+                seen_scaffolds.add(s)
+                scaffold_smiles_list.append(s)
+
+        # Run same iterative expansion as _expand_library
+        library = {smiles_col: scaffold_smiles_list}
+        library.update(fragment_library)
+        old_dict, old_key = self.library_dict, self.primary_key
+        self.library_dict = library
+        self.primary_key = smiles_col
+        self._expand_library()
+        self.library_dict = old_dict
+        self.primary_key = old_key
 
     def _expand_cdxml(self):
         """
@@ -392,6 +479,26 @@ echo "=== CompoundLibrary ready ==="
 
         if scaffold_frag_elem is None:
             raise ValueError(f"No scaffold fragment found in CDXML file: {cdxml_path}")
+
+        # --- Parse fragment names from chemicalproperty elements ---
+        # Build id -> text map for all <t> elements on the page
+        t_id_to_text = {}
+        for child in page:
+            if child.tag == 't':
+                tid = child.attrib.get('id', '')
+                s_elem = child.find('s')
+                if s_elem is not None and s_elem.text:
+                    t_id_to_text[tid] = s_elem.text.strip()
+        # Map fragment_id -> user-defined name via chemicalproperty
+        frag_id_to_name = {}
+        for child in page:
+            if child.tag == 'chemicalproperty':
+                display_id = child.attrib.get('ChemicalPropertyDisplayID', '')
+                basis = child.attrib.get('BasisObjects', '').split()
+                name = t_id_to_text.get(display_id, '')
+                if name and basis:
+                    # First item in BasisObjects is the fragment id
+                    frag_id_to_name[basis[0]] = name
 
         # --- Find R-group nodes (NamedAlternativeGroup) on scaffold ---
         rgroup_nodes = []  # (node_id, label, ag_id, bond_ordering, valence)
@@ -612,18 +719,24 @@ echo "=== CompoundLibrary ready ==="
         scaffold_mol = rwmol.GetMol()
 
         # --- Parse altgroup fragments ---
-        rgroup_fragments = {}  # label -> [mol, ...]
+        rgroup_fragments = {}       # label -> [mol, ...]
+        rgroup_frag_names = {}      # label -> [display_name, ...]  (name or SMILES fallback)
         for node_id, label, ag_id, bond_ordering, valence in rgroup_nodes:
             if ag_id not in altgroups:
                 continue
             conn_to_mapnum = {conn_num: global_mapnum
                               for global_mapnum, syn_id, conn_num in node_map_info[node_id]}
             frags = []
+            names = []
             for frag_elem in altgroups[ag_id].findall('fragment'):
                 mol = _parse_fragment_mol(frag_elem, conn_to_mapnum)
                 if mol is not None:
                     frags.append(mol)
+                    frag_id = frag_elem.attrib.get('id', '')
+                    # Use user-defined name if present, else fall back to SMILES later
+                    names.append(frag_id_to_name.get(frag_id, None))
             rgroup_fragments[label] = frags
+            rgroup_frag_names[label] = names
 
         if not rgroup_fragments and not bracket_groups:
             raise ValueError(
@@ -732,16 +845,26 @@ echo "=== CompoundLibrary ready ==="
 
         # --- Enumerate all R-group + repeat count combinations ---
         frag_lists = [rgroup_fragments[lbl] for lbl in label_order]
+        # Parallel lists of per-fragment display names (None = use SMILES fallback)
+        name_lists = [rgroup_frag_names.get(lbl, [None] * len(rgroup_fragments[lbl]))
+                      for lbl in label_order]
         final_compounds = []
         failed_count = 0
 
         for scaffold_variant, count_combo in scaffold_variants:
-            for rgroup_combo in (itertools.product(*frag_lists) if frag_lists else [()]):
+            for combo_info in (itertools.product(*[enumerate(fl) for fl in frag_lists])
+                               if frag_lists else [()]):
                 try:
+                    if frag_lists:
+                        frag_indices, rgroup_combo = zip(*combo_info)
+                    else:
+                        frag_indices, rgroup_combo = (), ()
                     result = _assemble(scaffold_variant, list(rgroup_combo))
                     smiles = Chem.MolToSmiles(result)
-                    branching = {lbl: _frag_display_smiles(frag)
-                                 for lbl, frag in zip(label_order, rgroup_combo)}
+                    branching = {}
+                    for lbl, frag, fi, names in zip(label_order, rgroup_combo, frag_indices, name_lists):
+                        user_name = names[fi] if fi < len(names) else None
+                        branching[lbl] = user_name if user_name is not None else _frag_display_smiles(frag)
                     if count_combo:
                         for i, (_, _, _, repeat_range) in enumerate(repeat_unit_mols):
                             branching[f'repeat_unit_{i+1}_count'] = str(count_combo[i])
@@ -759,22 +882,9 @@ echo "=== CompoundLibrary ready ==="
             import warnings
             warnings.warn(f"{failed_count} combination(s) failed to assemble and were skipped.")
 
-        # Generate compound IDs
+        # Generate compound IDs by order of appearance
         base_name = os.path.splitext(os.path.basename(self.library_cdxml))[0]
-        num_compounds = len(final_compounds)
-        characters = 4
-        if num_compounds > 9: characters = 3
-        if num_compounds > 99: characters = 2
-        if num_compounds > 999: characters = 1
-        if num_compounds > 99999: characters = 0
-
-        compound_ids = []
-        for u_l_n in range(num_compounds):
-            u_l_n_str = str(u_l_n)
-            n0 = 5 - characters - len(u_l_n_str)
-            zeros_str = '0' * n0
-            compound_name = base_name if num_compounds == 1 else base_name[:characters] + zeros_str + u_l_n_str
-            compound_ids.append(compound_name)
+        compound_ids = _make_indexed_ids(base_name, len(final_compounds))
 
         RDLogger.EnableLog('rdApp.warning')
         self.expanded_compounds = final_compounds
@@ -942,28 +1052,37 @@ mkdir -p "{self.output_folder}"
         if self.covalent:
             script_content += f'mkdir -p "{self.covalent_folder}"\n'
 
-        if self.library_csv:
-            # Process existing CSV file
+        if self.library_csv and not self.expanded_compounds:
+            # CSV with no expansion: copy as-is
             script_content += f"""
 echo "Loading compound library from CSV: {os.path.basename(self.library_csv)}"
 cp "{self.library_csv}" "{self.compounds_csv}"
 """
-        elif self.library_dict or self.library_cdxml:
-            # Generate from dictionary or CDXML (both use pre-expanded compounds)
+        elif self.library_csv or self.library_dict or self.library_cdxml:
+            # Generate from pre-expanded compounds (dict, CDXML, or expanded CSV)
             os.makedirs(self.output_folder, exist_ok=True)
 
             if self.library_dict:
                 with open(self.library_dict_json, 'w') as f:
                     json.dump(self.library_dict, f, indent=2)
                 source_label = "dictionary"
-            else:
+            elif self.library_cdxml:
                 source_label = f"CDXML ({os.path.basename(self.library_cdxml)})"
+            else:
+                source_label = f"CSV ({os.path.basename(self.library_csv)})"
 
             compounds_data_json = os.path.join(self.output_folder, "compounds_data.json")
             with open(compounds_data_json, 'w') as f:
                 json.dump({'expanded_compounds': self.expanded_compounds, 'compound_ids': self.compound_ids}, f, indent=2)
 
             script_content += self._generate_csv_script(compounds_data_json, source_label)
+
+        # Generate compound images if requested
+        if self.generate_images:
+            script_content += f"""
+echo "Generating compound images"
+python3 "{self.compound_images_py}" "{self.compounds_csv}" "{self.images_folder}"
+"""
 
         # Generate covalent ligand files if requested
         if self.covalent:
@@ -978,8 +1097,7 @@ if [ -n "$BOLTZ_CACHE_FOLDER" ] && [ -d "$BOLTZ_CACHE_FOLDER" ]; then
         "{self.compounds_csv}" \\
         "{self.covalent_folder}" \\
         "{self.covalent_folder}" \\
-        "{self.covalent_compounds_csv}" \\
-        "{self.conformer_method}"
+        "{self.covalent_compounds_csv}"
 else
     echo "Warning: BOLTZ_CACHE_FOLDER not set or not found. Skipping covalent file generation."
     echo "To generate covalent files, ensure Boltz2 environment is available and BOLTZ_CACHE_FOLDER is set."
@@ -990,7 +1108,6 @@ fi
         library_type = "Dictionary" if self.library_dict else ("CDXML" if self.library_cdxml else "CSV file")
         primary_key_str = self.primary_key if self.primary_key else "None"
         covalent_str = str(self.covalent)
-        conformer_method_str = self.conformer_method
         compounds_csv_basename = os.path.basename(self.compounds_csv)
         is_covalent = self.covalent
 
@@ -1013,7 +1130,6 @@ with open('{self.summary_file}', 'w') as f:
         f.write(f'Primary key: {primary_key_str}\\n')
     f.write(f'Total compounds: {{compound_count}}\\n')
     f.write(f'Covalent ligands: {covalent_str}\\n')
-    f.write(f'Conformer method: {conformer_method_str}\\n')
     f.write(f'Output file: {compounds_csv_basename}\\n')
     if {is_covalent}:
         f.write(f'Covalent library folder: covalent_library/\\n')
@@ -1034,20 +1150,11 @@ print(f'Output: {self.compounds_csv}')
         Returns:
             Dictionary with DataStream objects and tables
         """
-        # Generate predicted compound IDs if not already done
-        if not self.compound_ids and self.library_dict:
-            if self.covalent:
-                # For covalent: use library keys as-is (they're already expanded)
-                self.compound_ids = list(self.library_dict.keys())
-            else:
-                # For simple library: use library keys as-is
-                self.compound_ids = list(self.library_dict.keys())
-
         # Build tables with rich metadata
         tables = {}
         columns = ["id", "format", "smiles", "ccd"]
-        if self.library_dict or self.library_cdxml:
-            # Add branching columns
+        if self.expanded_compounds:
+            # Add branching columns (from dict, CDXML, or expanded CSV)
             all_branch_keys = set()
             for comp in self.expanded_compounds:
                 all_branch_keys.update(comp['branching'].keys())
@@ -1078,11 +1185,23 @@ print(f'Output: {self.compounds_csv}')
             format="csv"
         )
 
-        return {
+        result = {
             "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder
         }
+
+        if self.generate_images:
+            image_files = [os.path.join(self.images_folder, f"{cid}.png")
+                           for cid in self.compound_ids]
+            result["images"] = DataStream(
+                name="images",
+                ids=self.compound_ids,
+                files=image_files,
+                format="png"
+            )
+
+        return result
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines for pipeline output."""
@@ -1106,11 +1225,9 @@ print(f'Output: {self.compounds_csv}')
 
         config_lines.extend([
             f"COVALENT LIGANDS: {self.covalent}",
-            f"VALIDATE SMILES: {self.validate_smiles}"
+            f"VALIDATE SMILES: {self.validate_smiles}",
+            f"GENERATE IMAGES: {self.generate_images}"
         ])
-
-        if self.covalent:
-            config_lines.append(f"CONFORMER METHOD: {self.conformer_method}")
 
         return config_lines
 
@@ -1131,7 +1248,7 @@ print(f'Output: {self.compounds_csv}')
                 "primary_key": self.primary_key,
                 "covalent": self.covalent,
                 "validate_smiles": self.validate_smiles,
-                "conformer_method": self.conformer_method,
+                "generate_images": self.generate_images,
                 "num_compounds": len(self.expanded_compounds) if self.expanded_compounds else 0
             }
         })

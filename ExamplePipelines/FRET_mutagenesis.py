@@ -41,7 +41,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                           mutate_to="ASLK")
     # mutate sum of two selections
     mutants = Mutagenesis(original=fusions,
-                          position=Selection([fusions.tables.sequences.L1,fusions.tables.sequences.L2]),
+                          position=Selection(Selection.add(fusions.tables.sequences.L1, fusions.tables.sequences.L2)),
                           mutate_to="ASLK")
     apo = Boltz2(proteins=mutants)
     ca = Ligand("CA")

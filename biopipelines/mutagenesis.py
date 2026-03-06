@@ -110,7 +110,11 @@ echo "=== Mutagenesis ready ==="
         """
         # Store Mutagenesis-specific parameters
         self.position = position
-        self.selection = selection
+        # Accept StandardizedOutput from Selection tool (extract TableReference)
+        if isinstance(selection, StandardizedOutput):
+            self.selection = selection.tables.selections.selection
+        else:
+            self.selection = selection
         self.mutate_to = mutate_to.upper()
         self.mode = mode
         self.include_original = include_original

@@ -257,7 +257,7 @@ echo "=== RFdiffusion installation complete ==="
         Output:
             Streams: structures (.pdb)
             Tables:
-                structures: id | source_id | pdb | fixed | designed | contigs | time | status
+                structures: id | pdb | fixed | designed | source_fixed | plddt_mean | status
         """
         # Resolve optional pdb input — store stream for runtime resolution
         self.pdb_stream: Optional[DataStream] = None
@@ -378,11 +378,9 @@ python {self.inference_py_file} {rfd_options}
 
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
-        design_character = "-"
-
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
         return f"""echo "Creating results table"
-python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_character}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+python {self.table_py_file} "{self.output_folder}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
 
 """
 
@@ -420,7 +418,7 @@ python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_ch
             "structures": TableInfo(
                 name="structures",
                 path=self.main_table,
-                columns=["id", "source_id", "pdb", "fixed", "designed", "contigs", "time", "status"],
+                columns=["id", "pdb", "fixed", "designed", "source_fixed", "plddt_mean", "status"],
                 description="RFdiffusion structure generation results",
                 count=self.num_designs
             )

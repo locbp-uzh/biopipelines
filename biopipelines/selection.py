@@ -3,10 +3,34 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-SelectionEditor configuration for structure-aware PyMOL selection modification.
+Selection tool with composable, operations-based API.
 
-Modifies PyMOL-formatted selection strings (e.g., "3-45+58-60") with operations
-like expand, shrink, shift, and invert, while respecting actual PDB residue numbering.
+Combines and modifies PyMOL-formatted selection strings using a sequence of
+operations (add, subtract, expand, shrink, shift, invert) applied left-to-right
+to a running selection set.
+
+Example::
+
+    # Union two columns
+    sel = Selection(Selection.add(fuse.tables.sequences.L1,
+                                  fuse.tables.sequences.L2))
+
+    # Sequential: union, subtract, then expand
+    sel = Selection(
+        Selection.add(fuse.tables.sequences.L1,
+                      fuse.tables.sequences.L2),
+        Selection.subtract(other.tables.structures.col8),
+        Selection.expand(1),
+        structures=rfd
+    )
+
+    # Single column with expand + invert (backward-compatible ``selection=`` kwarg)
+    sel = Selection(
+        Selection.expand(5),
+        Selection.invert(),
+        selection=rfd.tables.structures.designed,
+        structures=rfd
+    )
 """
 
 import os
@@ -27,13 +51,40 @@ except ImportError:
     from biopipelines_io import TableReference
 
 
+class SelectionOp:
+    """Lightweight descriptor for a selection operation."""
+
+    def __init__(self, op_type: str, refs=None, value=None):
+        self.op_type = op_type      # "add" | "subtract" | "expand" | "shrink" | "shift" | "invert"
+        self.refs = refs or []      # list of TableReference (for add/subtract)
+        self.value = value          # int (for expand/shrink/shift) or None
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = {"op": self.op_type}
+        if self.refs:
+            d["refs"] = [{"table": ref.path, "column": ref.column} for ref in self.refs]
+        if self.value is not None:
+            d["value"] = self.value
+        return d
+
+    PDB_AWARE_OPS = {"expand", "shrink", "shift", "invert"}
+
+
 class Selection(BaseConfig):
     """
-    SelectionEditor configuration for structure-aware selection modification.
+    Selection tool with composable, operations-based API.
 
-    Takes PyMOL-formatted selection strings from a table column and modifies them
-    using expand, shrink, shift, or invert operations while validating against actual
-    PDB residue numbers.
+    Takes a sequence of ``SelectionOp`` objects as positional arguments.
+    Operations are applied left-to-right to a running selection (set of
+    residues per ID).
+
+    Operations:
+        - ``Selection.add(*refs)``      — union referenced columns into running selection
+        - ``Selection.subtract(*refs)`` — remove referenced columns from running selection
+        - ``Selection.expand(n)``       — PDB-aware: expand intervals by *n* residues each side
+        - ``Selection.shrink(n)``       — PDB-aware: shrink intervals by *n* residues each side
+        - ``Selection.shift(n)``        — PDB-aware: shift intervals by *n* residues
+        - ``Selection.invert()``        — PDB-aware: replace with complement
     """
 
     TOOL_NAME = "SelectionEditor"
@@ -50,158 +101,170 @@ echo "=== SelectionEditor ready ==="
     selections_csv = Path(lambda self: os.path.join(self.output_folder, "selections.csv"))
     config_json = Path(lambda self: os.path.join(self.output_folder, "config.json"))
     structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
-    selection_editor_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_selection_editor.py"))
+    selection_editor_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_selection.py"))
+
+    # ── Static factory methods (return SelectionOp, NOT StandardizedOutput) ──
+
+    @staticmethod
+    def add(*refs) -> SelectionOp:
+        return SelectionOp("add", refs=list(refs))
+
+    @staticmethod
+    def subtract(*refs) -> SelectionOp:
+        return SelectionOp("subtract", refs=list(refs))
+
+    @staticmethod
+    def expand(n: int) -> SelectionOp:
+        return SelectionOp("expand", value=n)
+
+    @staticmethod
+    def shrink(n: int) -> SelectionOp:
+        return SelectionOp("shrink", value=n)
+
+    @staticmethod
+    def shift(n: int) -> SelectionOp:
+        return SelectionOp("shift", value=n)
+
+    @staticmethod
+    def invert() -> SelectionOp:
+        return SelectionOp("invert")
+
+    # ── Constructor ──
 
     def __init__(self,
-                 structures: Union[DataStream, StandardizedOutput],
-                 selection: tuple,
-                 expand: int = 0,
-                 shrink: int = 0,
-                 shift: int = 0,
-                 invert: bool = False,
+                 *operations: SelectionOp,
+                 selection=None,
+                 structures=None,
                  **kwargs):
         """
-        Initialize SelectionEditor configuration.
+        Initialize Selection tool.
 
         Args:
-            structures: Input structures as DataStream or StandardizedOutput
-            selection: Table column reference tuple (e.g., tool.tables.structures.designed)
-            expand: Number of residues to add on each side of intervals (default: 0)
-            shrink: Number of residues to remove from each side of intervals (default: 0)
-            shift: Number of residues to shift all intervals (+/-) (default: 0)
-            invert: Whether to invert the selection (select complement) (default: False)
-            **kwargs: Additional parameters
+            *operations: Sequence of SelectionOp objects describing the pipeline.
+            selection: Optional single TableReference — convenience shorthand,
+                equivalent to ``Selection.add(ref)`` as the first operation.
+            structures: DataStream or StandardizedOutput providing PDB files.
+                Required when any PDB-aware operation (expand/shrink/shift/invert)
+                is used.
+            **kwargs: Additional parameters forwarded to BaseConfig.
 
         Output:
-            Streams: (none)
             Tables:
-                selections: id | pdb | <modified_column> | original_<modified_column>
+                selections: id | selection
         """
-        # Resolve input to DataStream
+        # Build ordered operations list
+        self.operations: List[SelectionOp] = []
+
+        # Prepend selection= as an add op if given
+        if selection is not None:
+            if not isinstance(selection, TableReference):
+                raise ValueError(
+                    "selection must be a TableReference. "
+                    "Example: tool.tables.structures.designed"
+                )
+            self.operations.append(SelectionOp("add", refs=[selection]))
+
+        for op in operations:
+            if not isinstance(op, SelectionOp):
+                raise TypeError(
+                    f"Positional arguments must be SelectionOp objects (use Selection.add(), "
+                    f"Selection.expand(), etc.), got {type(op).__name__}"
+                )
+            self.operations.append(op)
+
+        # Resolve structures (needed for PDB-aware ops)
+        self.structures_stream = None
         if isinstance(structures, StandardizedOutput):
-            self.structures_stream: DataStream = structures.streams.structures
+            self.structures_stream = structures.streams.structures
         elif isinstance(structures, DataStream):
             self.structures_stream = structures
-        else:
+        elif structures is not None:
             raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
 
-        # Store SelectionEditor-specific parameters
-        self.selection_ref = selection
-        self.expand = expand
-        self.shrink = shrink
-        self.shift = shift
-        self.invert = invert
-
-        # Validate selection reference format
-        if not isinstance(selection, TableReference):
-            raise ValueError(
-                "selection must be a TableReference. "
-                "Example: tool.tables.structures.designed"
-            )
-
-        # Extract the source table and column from the selection reference
-        self.selection_table_path = self.selection_ref.path
-        self.selection_column = self.selection_ref.column
-
-        # Initialize base class
         super().__init__(**kwargs)
 
     def validate_params(self):
-        """Validate SelectionEditor-specific parameters."""
-        if not self.structures_stream or len(self.structures_stream) == 0:
-            raise ValueError("structures parameter is required and must not be empty")
-
-        if not self.selection_ref:
-            raise ValueError("selection parameter is required")
-
-        # Validate that at least one operation is specified
-        if (self.expand == 0 and self.shrink == 0 and
-            self.shift == 0 and not self.invert):
+        """Validate Selection parameters."""
+        # Must have at least one add (directly or via selection=)
+        has_add = any(op.op_type in ("add", "subtract") for op in self.operations)
+        if not has_add:
             raise ValueError(
-                "At least one operation must be specified: "
-                "expand, shrink, shift, or invert"
+                "At least one add() or subtract() operation (or selection= kwarg) is required "
+                "to provide an initial selection value."
             )
 
-        # Validate operation values
-        if self.expand < 0:
-            raise ValueError("expand must be non-negative")
-        if self.shrink < 0:
-            raise ValueError("shrink must be non-negative")
+        # PDB-aware ops require structures
+        has_pdb_op = any(op.op_type in SelectionOp.PDB_AWARE_OPS for op in self.operations)
+        if has_pdb_op and self.structures_stream is None:
+            raise ValueError(
+                "structures= is required when using PDB-aware operations "
+                "(expand, shrink, shift, invert)."
+            )
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sources."""
         self.folders = pipeline_folders
 
-        # selection_table_path already set from TableReference in __init__
-
     def get_config_display(self) -> List[str]:
-        """Get SelectionEditor configuration display lines."""
+        """Get configuration display lines."""
         config_lines = super().get_config_display()
 
-        config_lines.extend([
-            f"INPUT STRUCTURES: {len(self.structures_stream)} files",
-            f"SELECTION COLUMN: {self.selection_column}",
-            f"SELECTION SOURCE: {os.path.basename(self.selection_table_path)}"
-        ])
+        if self.structures_stream:
+            config_lines.append(f"INPUT STRUCTURES: {len(self.structures_stream)} files")
 
-        # Operations
-        operations = []
-        if self.expand > 0:
-            operations.append(f"expand={self.expand}")
-        if self.shrink > 0:
-            operations.append(f"shrink={self.shrink}")
-        if self.shift != 0:
-            operations.append(f"shift={self.shift:+d}")
-        if self.invert:
-            operations.append("invert=True")
+        # Summarise operations
+        op_summaries = []
+        for op in self.operations:
+            if op.op_type in ("add", "subtract"):
+                cols = ", ".join(ref.column for ref in op.refs)
+                op_summaries.append(f"{op.op_type}({cols})")
+            elif op.value is not None:
+                op_summaries.append(f"{op.op_type}({op.value})")
+            else:
+                op_summaries.append(f"{op.op_type}()")
 
-        config_lines.append(f"OPERATIONS: {', '.join(operations)}")
-
+        config_lines.append(f"OPERATIONS: {' -> '.join(op_summaries)}")
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """
-        Generate SelectionEditor execution script.
-
-        Args:
-            script_path: Path where script should be written
-
-        Returns:
-            Script content as string
-        """
-        # Ensure output folder exists
+        """Generate execution script."""
         os.makedirs(self.output_folder, exist_ok=True)
 
-        # Serialize structures DataStream to JSON for HelpScript to load
-        self.structures_stream.save_json(self.structures_ds_json)
+        # Serialize structures DataStream if available
+        structures_json_path = None
+        if self.structures_stream:
+            self.structures_stream.save_json(self.structures_ds_json)
+            structures_json_path = self.structures_ds_json
 
-        # Create config file for helper script
+        # Build config for HelpScript
         config_data = {
-            "selection_table": self.selection_table_path,
-            "selection_column": self.selection_column,
-            "structures_json": self.structures_ds_json,
-            "expand": self.expand,
-            "shrink": self.shrink,
-            "shift": self.shift,
-            "invert": self.invert,
+            "operations": [op.to_dict() for op in self.operations],
             "output_csv": self.selections_csv
         }
+        if structures_json_path:
+            config_data["structures_json"] = structures_json_path
 
         with open(self.config_json, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        # Generate bash script
+        # Build display string for echo
+        op_display = " -> ".join(
+            op.op_type + (f"({op.value})" if op.value is not None else
+                          f"({', '.join(r.column for r in op.refs)})" if op.refs else "()")
+            for op in self.operations
+        )
+        num_structures = len(self.structures_stream) if self.structures_stream else "N/A"
+
         script_content = "#!/bin/bash\n"
         script_content += "# SelectionEditor execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
 
-        script_content += f"""echo "Modifying PyMOL selections"
-echo "Input structures: {len(self.structures_stream)} files"
-echo "Selection column: {self.selection_column}"
-echo "Operations: expand={self.expand}, shrink={self.shrink}, shift={self.shift}, invert={self.invert}"
+        script_content += f"""echo "Modifying selections"
+echo "Structures: {num_structures}"
+echo "Operations: {op_display}"
 
-# Run selection modification
+# Run selection pipeline
 python {self.selection_editor_py} \\
     "{self.config_json}"
 
@@ -216,28 +279,19 @@ echo "Modified selections saved to: {self.selections_csv}"
 
 """
         script_content += self.generate_completion_check_footer()
-
         return script_content
 
     def get_output_files(self) -> Dict[str, Any]:
-        """
-        Get expected output files after SelectionEditor execution.
+        """Get expected output files."""
+        count = len(self.structures_stream) if self.structures_stream else "variable"
 
-        Returns:
-            Dictionary with DataStream objects and tables
-        """
-        # Create column names
-        modified_col = self.selection_column
-        original_col = f"original_{self.selection_column}"
-
-        # Organize tables
         tables = {
             "selections": TableInfo(
                 name="selections",
                 path=self.selections_csv,
-                columns=["id", "pdb", modified_col, original_col],
-                description=f"Modified PyMOL selections from {self.selection_column}",
-                count=len(self.structures_stream)
+                columns=["id", "selection"],
+                description="Modified selections",
+                count=count
             )
         }
 
@@ -247,16 +301,12 @@ echo "Modified selections saved to: {self.selections_csv}"
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize configuration including SelectionEditor-specific parameters."""
+        """Serialize configuration."""
         base_dict = super().to_dict()
         base_dict.update({
-            "selection_editor_params": {
-                "selection_column": self.selection_column,
-                "selection_table": self.selection_table_path,
-                "expand": self.expand,
-                "shrink": self.shrink,
-                "shift": self.shift,
-                "invert": self.invert
+            "selection_params": {
+                "operations": [op.to_dict() for op in self.operations],
+                "has_structures": self.structures_stream is not None
             }
         })
         return base_dict
