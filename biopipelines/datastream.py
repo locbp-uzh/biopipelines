@@ -78,6 +78,7 @@ class DataStream:
     _ids_expanded: Optional[List[str]] = field(default=None, repr=False, compare=False)
     _files_expanded: Optional[List[str]] = field(default=None, repr=False, compare=False)
     _map_data: Optional[pd.DataFrame] = field(default=None, repr=False, compare=False)
+    _runtime_mode: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self):
         """Validate DataStream after initialization."""
@@ -117,11 +118,17 @@ class DataStream:
     def ids_expanded(self) -> List[str]:
         """Lazily expand patterns in ids. Cached after first call.
 
-        For lazy patterns (with brackets), expands only the deterministic prefix.
+        For lazy patterns (with brackets), expands only the deterministic prefix
+        at config time. In runtime mode, reads fully-expanded IDs from map_table.
         """
         if self._ids_expanded is None:
             if self.is_lazy:
-                self._ids_expanded, _ = id_patterns.try_expand_ids(self.ids)
+                if self._runtime_mode:
+                    # Runtime: fully-expanded IDs are in the map_table written by bash
+                    self._ids_expanded = list(self._get_map_data()['id'])
+                else:
+                    # Config time: expand only the deterministic prefix
+                    self._ids_expanded, _ = id_patterns.try_expand_ids(self.ids)
             elif self.has_patterns():
                 self._ids_expanded = id_patterns.expand_ids(self.ids)
             else:
@@ -140,6 +147,12 @@ class DataStream:
                     id_patterns.expand_file_pattern(template, eid)
                     for eid in self.ids_expanded
                 ]
+            elif len(self.files) == len(self.ids) and len(self.files) != len(self.ids_expanded):
+                # Files stored compact (one per pattern), need expansion to match expanded IDs
+                expanded = []
+                for f in self.files:
+                    expanded.extend(id_patterns.expand_pattern(f))
+                self._files_expanded = expanded
             else:
                 self._files_expanded = self.files  # Already explicit
         return self._files_expanded
@@ -158,9 +171,10 @@ class DataStream:
         """
         Iterate over single-item DataStream objects.
 
-        Each yielded DataStream has the same name and format as the parent,
-        with ids containing a single ID and files containing the corresponding
-        file (for file-based streams) or empty (for value-based streams).
+        Each yielded DataStream has the same name, format, map_table, and
+        _runtime_mode as the parent, with ids containing a single ID and files
+        containing the corresponding file (for file-based streams) or empty
+        (for value-based streams, where values are read via map_table).
 
         Yields:
             Single-item DataStream for each item
@@ -173,7 +187,9 @@ class DataStream:
                     name=self.name,
                     ids=[item_id],
                     files=[item_file],
-                    format=self.format
+                    map_table=self.map_table,
+                    format=self.format,
+                    _runtime_mode=self._runtime_mode
                 )
         else:
             for item_id in expanded_ids:
@@ -181,7 +197,9 @@ class DataStream:
                     name=self.name,
                     ids=[item_id],
                     files=[],
-                    format=self.format
+                    map_table=self.map_table,
+                    format=self.format,
+                    _runtime_mode=self._runtime_mode
                 )
 
     def __getitem__(self, index):
@@ -198,7 +216,8 @@ class DataStream:
                 ids=sliced_ids,
                 files=sliced_files,
                 map_table=self.map_table,
-                format=self.format
+                format=self.format,
+                _runtime_mode=self._runtime_mode
             )
 
         # Integer indexing — try O(1) expand_at for single-pattern case
@@ -216,14 +235,18 @@ class DataStream:
                 name=self.name,
                 ids=[item_id],
                 files=[self.files_expanded[index]],
-                format=self.format
+                map_table=self.map_table,
+                format=self.format,
+                _runtime_mode=self._runtime_mode
             )
         else:
             return DataStream(
                 name=self.name,
                 ids=[item_id],
                 files=[],
-                format=self.format
+                map_table=self.map_table,
+                format=self.format,
+                _runtime_mode=self._runtime_mode
             )
 
     def __bool__(self) -> bool:
@@ -232,7 +255,15 @@ class DataStream:
 
     def _get_map_data(self) -> Optional[pd.DataFrame]:
         """Lazily load map_table data."""
-        if self._map_data is None and self.map_table and os.path.exists(self.map_table):
+        if self._map_data is None:
+            if not self.map_table:
+                if self._runtime_mode:
+                    raise ValueError(f"DataStream '{self.name}' has no map_table configured")
+                return None
+            if not os.path.exists(self.map_table):
+                if self._runtime_mode:
+                    raise FileNotFoundError(f"map_table not found: {self.map_table}")
+                return None
             self._map_data = pd.read_csv(self.map_table)
         return self._map_data
 
@@ -298,7 +329,8 @@ class DataStream:
             files=new_files,
             map_table=self.map_table,
             format=self.format,
-            metadata={**self.metadata, '_filtered': True, '_original_count': len(self)}
+            metadata={**self.metadata, '_filtered': True, '_original_count': len(self)},
+            _runtime_mode=self._runtime_mode
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -319,7 +351,7 @@ class DataStream:
     def save_json(self, path: str) -> str:
         """Save DataStream to JSON file with compact patterns.
 
-        Patterns stay compact; pipe scripts expand at runtime via DataStreamRuntime.
+        Patterns stay compact; pipe scripts load at runtime via load_datastream().
         """
         import json
         os.makedirs(os.path.dirname(path), exist_ok=True)

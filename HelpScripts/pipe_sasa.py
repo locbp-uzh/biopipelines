@@ -80,7 +80,7 @@ def process_structures(structures_ds, ligand_resn: str,
     Process multiple structures and calculate SASA for each.
 
     Args:
-        structures_ds: DataStreamRuntime with structure files
+        structures_ds: DataStream with structure files
         ligand_resn: Ligand residue name
         output_csv: Output CSV file path
         dot_density: Dot density for SASA calculation

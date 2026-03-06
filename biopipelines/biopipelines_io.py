@@ -54,7 +54,6 @@ Example usage:
 import glob
 import json
 import os
-from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import pandas as pd
@@ -67,123 +66,13 @@ except ImportError:
     except ImportError:
         _id_patterns = None
 
-
-@dataclass
-class DataStreamRuntime:
-    """
-    Runtime representation of a DataStream for SLURM job execution.
-
-    This is a lightweight version of DataStream designed for use in pipe scripts
-    at execution time. It supports lazy loading of map_table data.
-
-    Attributes:
-        name: Name of this data stream
-        ids: List of unique identifiers for each item
-        files: List of file paths (may contain wildcards or be empty)
-        map_table: Path to CSV file mapping ids to files/values
-        format: Data format ("pdb", "cif", "fasta", "csv", "sdf", "smiles", etc.)
-        metadata: Additional tool-specific metadata
-    """
-    name: str = ""
-    ids: List[str] = field(default_factory=list)
-    files: List[str] = field(default_factory=list)
-    map_table: str = ""
-    format: str = "pdb"
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    # Internal cache for map_table data (loaded lazily)
-    _map_data: Optional[pd.DataFrame] = field(default=None, repr=False, compare=False)
-
-    # Internal caches
-    _ids_expanded_cache: Optional[List[str]] = field(default=None, repr=False, compare=False)
-    _files_expanded_cache: Optional[List[str]] = field(default=None, repr=False, compare=False)
-
-    @property
-    def ids_expanded(self) -> List[str]:
-        """Expand pattern-based IDs at runtime.
-
-        For lazy patterns (with [...] brackets), reads fully-expanded IDs from map_table.
-        For deterministic patterns (<...>), expands using id_patterns.
-        For plain IDs, returns as-is.
-        """
-        if self._ids_expanded_cache is not None:
-            return self._ids_expanded_cache
-
-        # Check for lazy bracket patterns
-        if any('[' in s for s in self.ids):
-            # Lazy patterns: fully-expanded IDs live in map_table
-            self._ids_expanded_cache = list(self._get_map_data()['id'])
-            return self._ids_expanded_cache
-
-        # Check for deterministic patterns
-        if _id_patterns and any(_id_patterns.contains_pattern(s) for s in self.ids):
-            self._ids_expanded_cache = _id_patterns.expand_ids(self.ids)
-            return self._ids_expanded_cache
-
-        self._ids_expanded_cache = self.ids
-        return self._ids_expanded_cache
-
-    @property
-    def files_expanded(self) -> List[str]:
-        """Expand file patterns using expanded IDs.
-
-        Handles <id> template substitution and pattern expansion.
-        """
-        if self._files_expanded_cache is not None:
-            return self._files_expanded_cache
-
-        if not self.files:
-            self._files_expanded_cache = []
-        elif len(self.files) == 1 and '<id>' in self.files[0]:
-            template = self.files[0]
-            if _id_patterns:
-                self._files_expanded_cache = [
-                    _id_patterns.expand_file_pattern(template, eid)
-                    for eid in self.ids_expanded
-                ]
-            else:
-                self._files_expanded_cache = [
-                    template.replace('<id>', eid)
-                    for eid in self.ids_expanded
-                ]
-        elif len(self.files) == len(self.ids) and len(self.files) != len(self.ids_expanded):
-            # Files were stored compact (one per pattern), need expansion
-            if _id_patterns:
-                expanded = []
-                for f in self.files:
-                    expanded.extend(_id_patterns.expand_pattern(f))
-                self._files_expanded_cache = expanded
-            else:
-                self._files_expanded_cache = self.files
-        else:
-            self._files_expanded_cache = self.files
-        return self._files_expanded_cache
-
-    def _get_map_data(self) -> pd.DataFrame:
-        """
-        Lazily load map_table data.
-
-        Returns:
-            DataFrame with map_table contents
-
-        Raises:
-            FileNotFoundError: If map_table path is set but file doesn't exist
-            ValueError: If map_table is not set
-        """
-        if self._map_data is not None:
-            return self._map_data
-
-        if not self.map_table:
-            raise ValueError(f"DataStream '{self.name}' has no map_table configured")
-
-        if not os.path.exists(self.map_table):
-            raise FileNotFoundError(f"map_table not found: {self.map_table}")
-
-        self._map_data = pd.read_csv(self.map_table)
-        return self._map_data
+try:
+    from .datastream import DataStream
+except ImportError:
+    from datastream import DataStream
 
 
-def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStreamRuntime:
+def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStream:
     """
     Load a DataStream from a JSON file or dictionary.
 
@@ -191,7 +80,7 @@ def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStreamRuntime:
         source: Either a path to a JSON file or a dictionary with DataStream fields
 
     Returns:
-        DataStreamRuntime instance
+        DataStream instance
 
     Raises:
         FileNotFoundError: If source is a path that doesn't exist
@@ -244,13 +133,14 @@ def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStreamRuntime:
             f"or provide one file per id."
         )
 
-    return DataStreamRuntime(
+    return DataStream(
         name=data['name'],
         ids=data['ids'],
         files=files,
         map_table=data.get('map_table', ''),
         format=data.get('format', 'pdb'),
-        metadata=data.get('metadata', {})
+        metadata=data.get('metadata', {}),
+        _runtime_mode=True
     )
 
 
@@ -299,7 +189,7 @@ def _find_best_match(item_id: str, file_paths: List[str]) -> str:
     return file_paths[0]
 
 
-def iterate_files(ds: DataStreamRuntime) -> Iterator[Tuple[str, str]]:
+def iterate_files(ds: DataStream) -> Iterator[Tuple[str, str]]:
     """
     Iterate over (id, resolved_file_path) pairs for file-based streams.
 
@@ -309,7 +199,7 @@ def iterate_files(ds: DataStreamRuntime) -> Iterator[Tuple[str, str]]:
     3. len(files) == 1: Single file for all IDs (bundle case)
 
     Args:
-        ds: DataStreamRuntime instance
+        ds: DataStream instance
 
     Yields:
         Tuple of (item_id, file_path)
@@ -367,7 +257,7 @@ def iterate_files(ds: DataStreamRuntime) -> Iterator[Tuple[str, str]]:
 
 
 def iterate_values(
-    ds: DataStreamRuntime,
+    ds: DataStream,
     columns: Optional[List[str]] = None
 ) -> Iterator[Tuple[str, Dict[str, Any]]]:
     """
@@ -377,7 +267,7 @@ def iterate_values(
     requested columns for each ID.
 
     Args:
-        ds: DataStreamRuntime instance
+        ds: DataStream instance
         columns: List of column names to include (None = all columns)
 
     Yields:
@@ -422,14 +312,14 @@ def iterate_values(
         yield (item_id, values)
 
 
-def resolve_file(ds: DataStreamRuntime, item_id: str) -> str:
+def resolve_file(ds: DataStream, item_id: str) -> str:
     """
     Resolve a single file path for an ID.
 
     Handles wildcard patterns by expanding and matching.
 
     Args:
-        ds: DataStreamRuntime instance
+        ds: DataStream instance
         item_id: The item identifier
 
     Returns:
@@ -481,12 +371,12 @@ def resolve_file(ds: DataStreamRuntime, item_id: str) -> str:
         )
 
 
-def get_value(ds: DataStreamRuntime, item_id: str, column: str = "value") -> Any:
+def get_value(ds: DataStream, item_id: str, column: str = "value") -> Any:
     """
     Get a single value from the map_table for an ID.
 
     Args:
-        ds: DataStreamRuntime instance
+        ds: DataStream instance
         item_id: The item identifier
         column: Column name to retrieve (default: "value")
 
@@ -519,12 +409,12 @@ def get_value(ds: DataStreamRuntime, item_id: str, column: str = "value") -> Any
     return row.iloc[0][column]
 
 
-def get_all_values(ds: DataStreamRuntime, item_id: str) -> Dict[str, Any]:
+def get_all_values(ds: DataStream, item_id: str) -> Dict[str, Any]:
     """
     Get all column values from the map_table for an ID.
 
     Args:
-        ds: DataStreamRuntime instance
+        ds: DataStream instance
         item_id: The item identifier
 
     Returns:
