@@ -102,8 +102,12 @@ def extract_file_list(category_data) -> List[str]:
         ids = category_data.get('ids', [])
         if len(files) == 1 and '<id>' in files[0] and ids:
             template = files[0]
-            expanded_ids = id_patterns.expand_ids(ids)
-            return [template.replace('<id>', eid) for eid in expanded_ids]
+            expanded_ids, is_complete = id_patterns.try_expand_ids(ids)
+            if is_complete:
+                return [template.replace('<id>', eid) for eid in expanded_ids]
+            else:
+                # Lazy patterns: use glob-compatible paths (check_file_exists supports wildcards)
+                return [template.replace('<id>', eid + '*') for eid in expanded_ids]
         return files
     elif isinstance(category_data, list):
         return category_data
@@ -366,11 +370,16 @@ def check_completion_status(output_folder: str, tool_name: str) -> Optional[str]
         completed_file = os.path.join(parent_dir, f"{tool_name}_COMPLETED")
         failed_file = os.path.join(parent_dir, f"{tool_name}_FAILED")
     
+    # Derive warning file path
+    warning_file = completed_file.replace("_COMPLETED", "_WARNING")
+
     if os.path.exists(completed_file):
         return "COMPLETED"
+    elif os.path.exists(warning_file):
+        return "WARNING"
     elif os.path.exists(failed_file):
         return "FAILED"
-    
+
     return None
 
 def clean_old_status_files(output_folder: str, tool_name: str) -> None:
@@ -393,8 +402,11 @@ def clean_old_status_files(output_folder: str, tool_name: str) -> None:
         completed_file = os.path.join(parent_dir, f"{tool_name}_COMPLETED")
         failed_file = os.path.join(parent_dir, f"{tool_name}_FAILED")
     
+    # Derive warning file path
+    warning_file = completed_file.replace("_COMPLETED", "_WARNING")
+
     # Remove old status files if they exist
-    for status_file in [completed_file, failed_file]:
+    for status_file in [completed_file, failed_file, warning_file]:
         if os.path.exists(status_file):
             try:
                 os.remove(status_file)
@@ -435,6 +447,9 @@ def main():
         existing_status = check_completion_status(args.output_folder, args.tool_name)
         if existing_status == "COMPLETED":
             print(f"Tool {args.tool_name} already completed")
+            sys.exit(0)
+        elif existing_status == "WARNING":
+            print(f"Tool {args.tool_name} completed with warnings")
             sys.exit(0)
         elif existing_status == "FAILED":
             print(f"Tool {args.tool_name} previously failed")
@@ -481,9 +496,15 @@ def main():
             details = {}
             if filter_info.get('is_filter'):
                 details['filter_info'] = filter_info
-            
-            status_file = create_status_file(args.output_folder, args.tool_name, "COMPLETED", details)
-            print(f"Created completion status file: {os.path.basename(status_file)}")
+
+            # Use WARNING status when success but filter warnings exist
+            if filter_info.get('warnings'):
+                status = "WARNING"
+            else:
+                status = "COMPLETED"
+
+            status_file = create_status_file(args.output_folder, args.tool_name, status, details)
+            print(f"Created {status.lower()} status file: {os.path.basename(status_file)}")
         sys.exit(0)
     else:
         print(f"Missing critical outputs for {args.tool_name}:")
