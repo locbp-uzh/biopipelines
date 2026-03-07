@@ -155,7 +155,11 @@ Performs mutagenesis at specified positions. Generates systematic amino acid sub
 
 **Parameters**:
 - `original`: Union[str, ToolOutput, StandardizedOutput] (required) - Input structure/sequence
-- `position`: int (required) - Target position for mutagenesis (1-indexed)
+- `position`: Union[int, str, TableReference, StandardizedOutput] (required) - Target position(s) for mutagenesis:
+  - `int`: Fixed position (1-indexed) for all sequences
+  - `str`: PyMOL-style selection (e.g., `"141+143+145-149"`)
+  - `TableReference`: Per-row position lookup (e.g., `fuse.tables.sequences.L1`)
+  - `StandardizedOutput`: From Selection tool (extracts `selections.selection` column)
 - `mutate_to`: str = "" - Target amino acid(s) for "specific" mode (e.g., "A" for alanine, "AV" for alanine and valine). Required when mode is "specific".
 - `mode`: str = "specific" - Mutagenesis strategy:
   - "specific": Only the amino acid(s) given in `mutate_to` (default)
@@ -197,6 +201,15 @@ sdm = Mutagenesis(original=template, position=42, mutate_to="A")
 
 # Saturation mutagenesis at position 42 (excluding cysteine and proline)
 sdm = Mutagenesis(original=template, position=42, mode="saturation", exclude="CP")
+
+# Multiple positions
+sdm = Mutagenesis(original=template, position="42+50+55-60", mode="saturation")
+
+# Per-row positions from a table column (e.g., linker positions from Fuse)
+sdm = Mutagenesis(original=fused, position=fused.tables.sequences.L1, mode="saturation")
+
+# Positions from Selection tool
+sdm = Mutagenesis(original=template, position=selection_output, mode="saturation")
 ```
 
 ---

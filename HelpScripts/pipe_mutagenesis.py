@@ -222,8 +222,10 @@ def main():
     parser = argparse.ArgumentParser(description='Generate mutants')
     parser.add_argument('--sequences', required=True,
                        help='Path to map_table CSV with id and sequence columns')
-    parser.add_argument('--position', type=int, default=None,
-                       help='Position for mutagenesis (1-indexed). Mutually exclusive with --selection.')
+    parser.add_argument('--position', default=None,
+                       help='Position(s) for mutagenesis (1-indexed). '
+                            'Single int or PyMOL-style selection (e.g., "141+143+145-149"). '
+                            'Mutually exclusive with --selection.')
     parser.add_argument('--selection', default=None,
                        help='TABLE_REFERENCE string for per-row position lookups')
     parser.add_argument('--mode', required=True,
@@ -294,23 +296,25 @@ def main():
                     all_mutants.extend(mutants)
                     print(f"    Generated {len(mutants)} mutants at position {position}")
             else:
-                # Fixed position mode
-                print(f"  Position: {args.position}")
-                print(f"  Original amino acid: {sequence[args.position-1]}")
+                # Fixed position mode (single int or multi-position string)
+                positions = parse_positions_selection(str(args.position))
+                print(f"  Position(s): {positions}")
 
-                mutants = generate_mutants(
-                    sequence=sequence,
-                    sequence_id=sequence_id,
-                    position=args.position,
-                    mode=args.mode,
-                    include_original=include_original,
-                    exclude=args.exclude,
-                    mutate_to=args.mutate_to,
-                    prior_mutations=seq_info['prior_mutations'],
-                    prior_positions=seq_info['prior_positions']
-                )
-                all_mutants.extend(mutants)
-                print(f"  Generated {len(mutants)} mutants")
+                for position in positions:
+                    print(f"  Position {position}: original AA = {sequence[position-1]}")
+                    mutants = generate_mutants(
+                        sequence=sequence,
+                        sequence_id=sequence_id,
+                        position=position,
+                        mode=args.mode,
+                        include_original=include_original,
+                        exclude=args.exclude,
+                        mutate_to=args.mutate_to,
+                        prior_mutations=seq_info['prior_mutations'],
+                        prior_positions=seq_info['prior_positions']
+                    )
+                    all_mutants.extend(mutants)
+                    print(f"    Generated {len(mutants)} mutants at position {position}")
 
         print(f"\nTotal mutants generated: {len(all_mutants)}")
 

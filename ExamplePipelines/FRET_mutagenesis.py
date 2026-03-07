@@ -33,15 +33,9 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                    name="CaFRET",
                    linker="GGG",
                    linker_lengths=["0-2", "0-2"]) # reduced to 0-2
-    # mutate first linker, then second
-    mutants = Mutagenesis(original=Mutagenesis(original=fusions,
-                                               position=fusions.tables.sequences.L1,
-                                               mutate_to="ASLK"),
-                          position=fusions.tables.sequences.L2,
-                          mutate_to="ASLK")
-    # mutate sum of two selections
     mutants = Mutagenesis(original=fusions,
-                          position=Selection(Selection.add(fusions.tables.sequences.L1, fusions.tables.sequences.L2)),
+                          position=Selection(Selection.add(fusions.tables.sequences.L1),
+                                             Selection.add(fusions.tables.sequences.L2)),
                           mutate_to="ASLK")
     apo = Boltz2(proteins=mutants)
     ca = Ligand("CA")
@@ -95,3 +89,14 @@ with Pipeline(project="Biosensor", job="CaFRET"):
           PyMOL.Color("pink", selection=fusions.tables.sequences.S2),
           PyMOL.Color("yellow", selection=fusions.tables.sequences.S3))
     
+"""
+    # mutate first linker, then second
+    mutants = Mutagenesis(original=Mutagenesis(original=fusions,
+                                               position=fusions.tables.sequences.L1,
+                                               mutate_to="ASLK"),
+                          position=fusions.tables.sequences.L2,
+                          mutate_to="ASLK")
+    # mutate sum of two selections
+    mutants = Mutagenesis(original=fusions,
+                          position=Selection(Selection.add(fusions.tables.sequences.L1, fusions.tables.sequences.L2)),
+                          mutate_to="ASLK")"""
