@@ -509,14 +509,29 @@ def create_map_table(
         data[col_name] = prov_list
 
     if provenance:
+        # Compute per-element expansion factors from the original ids list.
+        # Each element in ids (which may be a pattern like "a_<0..1>") expands
+        # to N concrete IDs. Provenance has one value per ids element, so each
+        # provenance value must be replicated by the same factor.
+        expansion_factors = [id_patterns.count_pattern(s) for s in ids]
+
         for stream_name, prov_ids in provenance.items():
             col_name = f"{stream_name}.id"
-            # Expand provenance IDs the same way as the main ids
-            if any(id_patterns.is_lazy(s) for s in prov_ids):
-                expanded_prov, _ = id_patterns.try_expand_ids(prov_ids)
-            elif any(id_patterns.contains_pattern(s) for s in prov_ids):
-                expanded_prov = id_patterns.expand_ids(prov_ids)
+            if len(prov_ids) == len(ids):
+                # Provenance is at pattern-element level — replicate each value
+                # by the expansion factor of the corresponding main ID pattern,
+                # then expand any patterns within the provenance values themselves.
+                expanded_prov = []
+                for prov_val, factor in zip(prov_ids, expansion_factors):
+                    if id_patterns.is_lazy(prov_val):
+                        vals, _ = id_patterns.try_expand(prov_val)
+                    elif id_patterns.contains_pattern(prov_val):
+                        vals = id_patterns.expand_pattern(prov_val)
+                    else:
+                        vals = [prov_val] * factor
+                    expanded_prov.extend(vals)
             else:
+                # Already at expanded level — use as-is
                 expanded_prov = prov_ids
             if len(expanded_prov) != len(expanded_ids):
                 raise ValueError(
