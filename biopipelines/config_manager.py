@@ -10,7 +10,6 @@ including pull/repull functionality from the repository.
 """
 
 import os
-import yaml
 import shutil
 import urllib.request
 from typing import Dict, Any, List, Optional
@@ -83,6 +82,7 @@ class ConfigManager:
             )
 
         try:
+            import yaml
             with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
 
@@ -260,6 +260,7 @@ class ConfigManager:
         try:
             # If config exists, try to read repository URL from it
             if os.path.exists(config_path):
+                import yaml
                 with open(config_path, 'r') as f:
                     existing_config = yaml.safe_load(f)
                     repo_config = existing_config.get('repository', {})
