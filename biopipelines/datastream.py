@@ -471,6 +471,8 @@ def create_map_table(
     if files and len(files) == 1 and '<id>' in files[0]:
         template = files[0]
         expanded_files = [id_patterns.expand_file_pattern(template, eid) for eid in expanded_ids]
+    elif files and any(id_patterns.is_lazy(s) for s in files):
+        expanded_files, _ = id_patterns.try_expand_ids(files)
     elif files and any(id_patterns.contains_pattern(s) for s in files):
         expanded_files = id_patterns.expand_ids(files)
     else:
@@ -499,9 +501,19 @@ def create_map_table(
 
     # Auto-generate provenance from parent_ids + suffix_pattern
     if parent_ids is not None and suffix_pattern and input_stream_name:
-        suffix_values = id_patterns.expand_pattern(suffix_pattern) if id_patterns.contains_pattern(suffix_pattern) else [suffix_pattern]
+        if id_patterns.is_lazy(suffix_pattern):
+            suffix_values, _ = id_patterns.try_expand(suffix_pattern)
+        elif id_patterns.contains_pattern(suffix_pattern):
+            suffix_values = id_patterns.expand_pattern(suffix_pattern)
+        else:
+            suffix_values = [suffix_pattern]
         n_suffixes = len(suffix_values)
-        expanded_parents = id_patterns.expand_ids(parent_ids) if any(id_patterns.contains_pattern(s) for s in parent_ids) else parent_ids
+        if any(id_patterns.is_lazy(s) for s in parent_ids):
+            expanded_parents, _ = id_patterns.try_expand_ids(parent_ids)
+        elif any(id_patterns.contains_pattern(s) for s in parent_ids):
+            expanded_parents = id_patterns.expand_ids(parent_ids)
+        else:
+            expanded_parents = parent_ids
         prov_list = []
         for pid in expanded_parents:
             prov_list.extend([pid] * n_suffixes)

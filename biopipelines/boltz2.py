@@ -569,7 +569,7 @@ fi
 
         # Structure files
         structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
-        structure_files = [os.path.join(self.output_folder, f"{seq_id}{structure_ext}") for seq_id in predicted_ids]
+        structure_files = [os.path.join(self.output_folder, f"<id>{structure_ext}")]
 
         # Create structures DataStream
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
@@ -585,7 +585,7 @@ fi
 
         # MSA files
         msa_ext = ".csv" if self.msa_server == "public" else ".a3m"
-        msa_files = [os.path.join(self.msa_cache_folder, f"{seq_id}{msa_ext}") for seq_id in predicted_ids]
+        msa_files = [os.path.join(self.msa_cache_folder, f"<id>{msa_ext}")]
 
         msas = DataStream(
             name="msas",

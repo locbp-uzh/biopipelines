@@ -339,10 +339,7 @@ fi
         sequence_ids = list(self.sequences_stream.ids)
 
         # Generate structure file paths
-        structure_files = []
-        for seq_id in sequence_ids:
-            pdb_path = os.path.join(self.output_folder, f"{seq_id}.pdb")
-            structure_files.append(pdb_path)
+        structure_files = [os.path.join(self.output_folder, "<id>.pdb")]
 
         # Create map_table for structures
         create_map_table(self.structures_map, sequence_ids, files=structure_files)
@@ -356,16 +353,11 @@ fi
         )
 
         # MSA files (AlphaFold generates .a3m files)
-        msa_ids = []
-        msa_files = []
-        for seq_id in sequence_ids:
-            msa_file = os.path.join(self.msas_folder, f"{seq_id}.a3m")
-            msa_ids.append(seq_id)
-            msa_files.append(msa_file)
+        msa_files = [os.path.join(self.msas_folder, "<id>.a3m")]
 
         msas = DataStream(
             name="msas",
-            ids=msa_ids,
+            ids=sequence_ids,
             files=msa_files,
             map_table=self.msa_csv,
             format="a3m"

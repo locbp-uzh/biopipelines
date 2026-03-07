@@ -398,10 +398,7 @@ fi
 
         # --- Output RMSF stream: one CSV per input structure ---
         rmsf_columns = ["id", "chain", "resi", "rmsf"]
-        rmsf_files = [
-            os.path.join(self.output_folder, f"{input_id}_RMSF.csv")
-            for input_id in input_ids
-        ]
+        rmsf_files = [os.path.join(self.output_folder, "<id>_RMSF.csv")]
         create_map_table(self.rmsf_map, list(input_ids), files=rmsf_files)
         rmsf_stream = DataStream(
             name="rmsf",

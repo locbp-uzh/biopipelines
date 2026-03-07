@@ -516,10 +516,7 @@ python {self.helper_py} {self.config_json}
             for prot in protein_ids
             for lig in ligand_ids
         ]
-        structure_files = [
-            os.path.join(best_poses_dir, f"{sid}_best.pdb")
-            for sid in structure_ids
-        ]
+        structure_files = [os.path.join(best_poses_dir, "<id>_best.pdb")]
         provenance = {
             "structures": [prot for prot in protein_ids for _ in ligand_ids],
             "compounds": [lig for _ in protein_ids for lig in ligand_ids],

@@ -418,7 +418,7 @@ Return standardized output structure. Use compact `ids` patterns (not expanded) 
 
 - `files=["<id>.pdb"]` + `ids=["prot_<0..2>"]` → `prot_0.pdb`, `prot_1.pdb`, `prot_2.pdb`
 
-This prevents a length-mismatch validation error (1 file vs N ids). The implementation lives in `datastream.py:_has_file_template()` (detects the pattern) and `id_patterns.py:expand_file_pattern()` (performs the substitution).
+This prevents a length-mismatch validation error (1 file vs N ids) and is **required** when inputs may carry lazy IDs — building per-ID file paths with f-strings embeds bracket patterns into paths, causing `LazyPatternError`. The implementation lives in `datastream.py:_has_file_template()` (detects the pattern) and `id_patterns.py:expand_file_pattern()` (performs the substitution).
 
 ```python
 def get_output_files(self) -> Dict[str, Any]:
