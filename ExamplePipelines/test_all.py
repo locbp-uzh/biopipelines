@@ -99,14 +99,12 @@ with Pipeline(project="Debug",
     # ------------------------------------------------------------------
     # Structure generation
     # ------------------------------------------------------------------
-    Suffix("RFD")
     rfd = RFdiffusion(
         contigs="50-70",
         num_designs=2,
         steps=20,           # fewer steps for speed
     )
 
-    Suffix("RFDAA")
     rfdaa = RFdiffusionAllAtom(
         pdb=abl1,
         ligand="STI",
@@ -115,7 +113,6 @@ with Pipeline(project="Debug",
         steps=20,
     )
 
-    Suffix("RFD3")
     rfd3 = RFdiffusion3(
         contig="50-70",
         num_designs=2,
@@ -124,13 +121,11 @@ with Pipeline(project="Debug",
     # ------------------------------------------------------------------
     # Sequence design
     # ------------------------------------------------------------------
-    Suffix("PMPNN")
     pmpnn = ProteinMPNN(
-        structures=rfd,
+        structures=rfd3,
         num_sequences=2,
     )
 
-    Suffix("LMPNN")
     lmpnn = LigandMPNN(
         structures=rfdaa,
         ligand="STI",
@@ -138,13 +133,11 @@ with Pipeline(project="Debug",
         redesigned=rfdaa.tables.structures.designed,
     )
 
-    Suffix("MutProfiler")
     profiler = MutationProfiler(
-        original=rfd,
+        original=rfd3,
         mutants=pmpnn,
     )
 
-    Suffix("MutComposer")
     composer = MutationComposer(
         frequencies=profiler.tables.absolute_frequencies,
         num_sequences=2,
@@ -152,26 +145,24 @@ with Pipeline(project="Debug",
         max_mutations=3,
     )
 
-    Suffix("Mutagenesis")
     sdm = Mutagenesis(
         original=short_seq,
         position=1,
         mode="saturation",
     )
 
-    Suffix("Fuse")
     fused = Fuse(
         sequences=[short_seq, short_seq],
         linker="GSGSG",
         linker_lengths=["1-3"],
     )
 
-    Suffix("Stitch")
     distances_rfd = DistanceSelector(
         structures=rfdaa,
         ligand="STI",
         distance=5.0,
     )
+
     stitched = StitchSequences(
         template=rfdaa,
         substitutions={
@@ -180,13 +171,11 @@ with Pipeline(project="Debug",
         },
     )
 
-    Suffix("DNA")
     dna = DNAEncoder(
         sequences=pmpnn,
         organism="EC",
     )
 
-    Suffix("RBS")
     rbs = RBSDesigner(
         sequences=dna,
         tir="high",
@@ -195,14 +184,12 @@ with Pipeline(project="Debug",
     # ------------------------------------------------------------------
     # Structure prediction
     # ------------------------------------------------------------------
-    Suffix("AF2")
     af = AlphaFold(
         sequences=pmpnn,
         msa_mode="single_sequence",
         num_recycle=1
     )
 
-    Suffix("Boltz")
     boltz_apo = Boltz2(
         proteins=pmpnn
     )
@@ -213,7 +200,6 @@ with Pipeline(project="Debug",
         affinity=True
     )
 
-    Suffix("Gnina")
     docking = Gnina(
         structures=boltz_holo,
         compounds=imatinib,
@@ -225,7 +211,6 @@ with Pipeline(project="Debug",
     # ------------------------------------------------------------------
     # Analysis
     # ------------------------------------------------------------------
-    Suffix("Distance")
     dist = Distance(
         structures=boltz_holo,
         atom="LIG.Cl",
@@ -234,48 +219,41 @@ with Pipeline(project="Debug",
         metric_name="cl_dist"
     )
 
-    Suffix("Angle")
     ang = Angle(
         structures=boltz_holo,
         atoms=("1.N", "1.CA", "1.C"),
         metric_name="nca_angle"
     )
 
-    Suffix("DistSel")
     selector = DistanceSelector(
         structures=boltz_holo,
         ligand="LIG",
         distance=5.0
     )
 
-    Suffix("Selection")
     expanded = Selection(
         Selection.add(selector.tables.selections.within),
         Selection.expand(2),
         structures=boltz_holo
     )
 
-    Suffix("ConfChange")
     conf_change = ConformationalChange(
         reference_structures=rfd,
         target_structures=af,
         atoms="CA"
     )
 
-    Suffix("Contacts")
     contacts = Contacts(
         structures=boltz_holo,
         ligand="LIG",
         contact_threshold=5.0
     )
 
-    Suffix("PoseBusters")
     pb = PoseBusters(
         structures=boltz_holo,
         ligand="LIG"
     )
 
-    Suffix("PoseChange")
     pc = PoseChange(
         reference_structure=abl1,
         sample_structures=docking,
@@ -283,7 +261,6 @@ with Pipeline(project="Debug",
         sample_ligand="LIG"
     )
 
-    Suffix("CABSflex")
     flex = CABSflex(
         structures=abl1,
         num_models=2,
@@ -296,13 +273,11 @@ with Pipeline(project="Debug",
     # ------------------------------------------------------------------
     # MSA generation
     # ------------------------------------------------------------------
-    #Suffix("MMseqs2")
     #msas = MMseqs2(sequences=pmpnn)
 
     # ------------------------------------------------------------------
     # Statistics
     # ------------------------------------------------------------------
-    Suffix("SeqMetCorr")
     correlation = SequenceMetricCorrelation(
         mutants=pmpnn,
         data=boltz_holo.tables.affinity,
@@ -310,7 +285,6 @@ with Pipeline(project="Debug",
         metric="affinity_pred_value",
     )
 
-    Suffix("BayesAdj")
     adjuster = BayesianAdjuster(
         frequencies=profiler.tables.absolute_frequencies,
         correlations=correlation.tables.correlation_2d,
@@ -321,7 +295,6 @@ with Pipeline(project="Debug",
     # ------------------------------------------------------------------
     # Data management
     # ------------------------------------------------------------------
-    Suffix("Panda")
     best = Panda(
         tables=boltz_holo.tables.affinity,
         operations=[
@@ -339,10 +312,8 @@ with Pipeline(project="Debug",
         ]
     )
 
-    Suffix("ReMap")
     remapped = ReMap(source=pmpnn, onto="design")
 
-    Suffix("ExtractMetrics")
     extracted = ExtractMetrics(
         tables=[boltz_holo.tables.affinity],
         metrics=["affinity_pred_value"],
@@ -352,7 +323,6 @@ with Pipeline(project="Debug",
     # ------------------------------------------------------------------
     # Visualization
     # ------------------------------------------------------------------
-    Suffix("PyMOL")
     PyMOL(
         PyMOL.Load(boltz_holo),
         PyMOL.ColorAF(boltz_holo, upper=1),
@@ -360,7 +330,6 @@ with Pipeline(project="Debug",
         session="test_all_boltz",
     )
 
-    Suffix("Plot")
     Plot(
         Plot.Scatter(
             data=merged.tables.result,
