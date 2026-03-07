@@ -102,20 +102,22 @@ with Pipeline(project="Debug",
     rfd = RFdiffusion(
         contigs="50-70",
         num_designs=2,
-        steps=20,           # fewer steps for speed
+        steps=20,          
     )
 
     rfdaa = RFdiffusionAllAtom(
         pdb=abl1,
         ligand="STI",
-        contigs="10-20,A1-267",
+        contigs="A227-377,10-20",
         num_designs=2,
-        steps=20,
+        steps=20
     )
 
     rfd3 = RFdiffusion3(
-        contig="50-70",
-        num_designs=2,
+        pdb=abl1,
+        ligand_code="STI",
+        contig="A227-377,10-20",
+        num_designs=2
     )
 
     # ------------------------------------------------------------------
