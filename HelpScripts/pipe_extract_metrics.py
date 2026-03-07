@@ -173,6 +173,11 @@ def main():
             print(f"  Failed to load")
     print()
 
+    loaded_count = sum(1 for df in tables if df is not None)
+    if loaded_count == 0:
+        print(f"Error: None of the {len(table_paths)} input tables could be loaded")
+        sys.exit(1)
+
     # Extract metrics
     try:
         output_files = extract_multiple_metrics(tables, table_paths, table_names, metrics, output_folder)

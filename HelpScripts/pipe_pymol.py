@@ -346,6 +346,11 @@ class PyMOLSessionBuilder:
             except Exception as e:
                 print(f"  Error loading {struct_path}: {e}")
 
+        if not self.loaded_objects:
+            raise RuntimeError(
+                f"Load failed: no structures could be loaded from {len(structures)} attempted"
+            )
+
     def execute_color(self, op: Dict[str, Any]):
         """
         Execute Color operation - color structures or selections.
