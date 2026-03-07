@@ -89,7 +89,7 @@ with Pipeline(project="Debug",
     # Input entities
     # ------------------------------------------------------------------
     abl1 = PDB("3QRK")                          # protein with a ligand (imatinib STI)
-    imatinib = Ligand("STI")
+    imatinib = Ligand("9DP")
     short_seq = Sequence("MKTVRQERLKSIVRILERSKEPVSGAQ", ids="short")
     library = CompoundLibrary({
         "imatinib": "Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1",
@@ -107,7 +107,7 @@ with Pipeline(project="Debug",
 
     rfdaa = RFdiffusionAllAtom(
         pdb=abl1,
-        ligand="STI",
+        ligand="9DP",
         contigs="A227-377,10-20",
         num_designs=2,
         steps=20
@@ -115,7 +115,7 @@ with Pipeline(project="Debug",
 
     rfd3 = RFdiffusion3(
         pdb=abl1,
-        ligand_code="STI",
+        ligand_code="9DP",
         contig="A227-377,10-20",
         num_designs=2
     )
@@ -130,7 +130,7 @@ with Pipeline(project="Debug",
 
     lmpnn = LigandMPNN(
         structures=rfdaa,
-        ligand="STI",
+        ligand="9DP",
         num_sequences=2,
         redesigned=rfdaa.tables.structures.designed,
     )
@@ -161,7 +161,7 @@ with Pipeline(project="Debug",
 
     distances_rfd = DistanceSelector(
         structures=rfdaa,
-        ligand="STI",
+        ligand="9DP",
         distance=5.0,
     )
 
@@ -256,7 +256,7 @@ with Pipeline(project="Debug",
     pc = PoseChange(
         reference_structure=abl1,
         sample_structures=docking,
-        reference_ligand="STI",
+        reference_ligand="9DP",
         sample_ligand="LIG"
     )
 
