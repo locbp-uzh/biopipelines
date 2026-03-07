@@ -184,9 +184,8 @@ with Pipeline(project="Debug",
     # Structure prediction
     # ------------------------------------------------------------------
     af = AlphaFold(
-        sequences=pmpnn,
-        msa_mode="single_sequence",
-        num_recycle=1
+        proteins=pmpnn,
+        num_recycle=4
     )
 
     boltz_apo = Boltz2(
@@ -195,8 +194,7 @@ with Pipeline(project="Debug",
     boltz_holo = Boltz2(
         proteins=pmpnn,
         ligands=imatinib,
-        msas=boltz_apo,
-        affinity=True
+        msas=boltz_apo
     )
 
     docking = Gnina(
