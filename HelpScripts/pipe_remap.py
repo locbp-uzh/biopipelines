@@ -22,6 +22,9 @@ import shutil
 import platform
 import pandas as pd
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'biopipelines'))
+import id_patterns
+
 
 def create_link_or_copy(source_path, link_path):
     """Create a symlink or copy if symlinks are not supported."""
@@ -71,6 +74,44 @@ def remap_csv_ids(csv_path, output_path, id_mapping):
     print(f"  Wrote remapped CSV: {output_path}")
 
 
+def expand_id_mapping(raw_mapping):
+    """Expand pattern-based id_mapping into concrete old->new pairs.
+
+    E.g. {"design_<0..1>_<1..2>": "design_<1..4>"} expands to
+         {"design_0_1": "design_1", "design_0_2": "design_2",
+          "design_1_1": "design_3", "design_1_2": "design_4"}
+    """
+    expanded = {}
+    for old_pattern, new_pattern in raw_mapping.items():
+        old_ids = id_patterns.expand_pattern(old_pattern) if id_patterns.contains_pattern(old_pattern) else [old_pattern]
+        new_ids = id_patterns.expand_pattern(new_pattern) if id_patterns.contains_pattern(new_pattern) else [new_pattern]
+        if len(new_ids) == 1 and len(old_ids) > 1:
+            # Single new value replicated (shouldn't happen in normal use)
+            for oid in old_ids:
+                expanded[oid] = new_ids[0]
+        else:
+            for oid, nid in zip(old_ids, new_ids):
+                expanded[oid] = nid
+    return expanded
+
+
+def expand_stream_ids(stream):
+    """Expand pattern-based IDs and files in a stream dict."""
+    raw_ids = stream.get("ids", [])
+    raw_files = stream.get("files", [])
+    expanded_ids = id_patterns.expand_ids(raw_ids) if any(id_patterns.contains_pattern(s) for s in raw_ids) else raw_ids
+    if raw_files and len(raw_files) == 1 and '<id>' in raw_files[0]:
+        template = raw_files[0]
+        expanded_files = [template.replace('<id>', eid) for eid in expanded_ids]
+    elif raw_files and any(id_patterns.contains_pattern(s) for s in raw_files):
+        expanded_files = id_patterns.expand_ids(raw_files)
+    else:
+        expanded_files = raw_files
+    stream["ids"] = expanded_ids
+    stream["files"] = expanded_files
+    return stream
+
+
 def main():
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} <config_json>")
@@ -80,9 +121,9 @@ def main():
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    id_mapping = config["id_mapping"]
+    id_mapping = expand_id_mapping(config["id_mapping"])
     output_folder = config["output_folder"]
-    streams = config.get("streams", [])
+    streams = [expand_stream_ids(s) for s in config.get("streams", [])]
     tables = config.get("tables", [])
     map_tables = config.get("map_tables", [])
 

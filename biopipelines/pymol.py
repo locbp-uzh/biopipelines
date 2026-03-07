@@ -765,7 +765,7 @@ python "{self.pymol_py}" --config "{self.config_file}"
 
         # Show operation summary
         op_types = [op.op_type for op in self.operations]
-        config_lines.append(f"SEQUENCE: {' → '.join(op_types)}")
+        config_lines.append(f"SEQUENCE: {' -> '.join(op_types)}")
 
         return config_lines
 
@@ -784,4 +784,4 @@ python "{self.pymol_py}" --config "{self.config_file}"
     def __str__(self) -> str:
         """String representation."""
         op_types = [op.op_type for op in self.operations]
-        return f"PyMOL({' → '.join(op_types)})"
+        return f"PyMOL({' -> '.join(op_types)})"

@@ -278,7 +278,7 @@ with Pipeline(project="Debug",
     correlation = SequenceMetricCorrelation(
         mutants=pmpnn,
         data=boltz_holo.tables.affinity,
-        original=rfd,
+        original=rfd3,
         metric="affinity_pred_value",
     )
 

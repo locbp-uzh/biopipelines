@@ -550,7 +550,7 @@ echo "=== PDB ready ==="
             op_summaries = []
             for op in self.operations:
                 if op.op_type == "rename":
-                    op_summaries.append(f"Rename({op.params['old']} → {op.params['new']})")
+                    op_summaries.append(f"Rename({op.params['old']} -> {op.params['new']})")
                 else:
                     op_summaries.append(op.op_type)
             config_lines.append(f"OPERATIONS: {', '.join(op_summaries)}")
