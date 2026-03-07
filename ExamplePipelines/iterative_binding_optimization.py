@@ -19,15 +19,15 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization"):
     protein = PDB("5OT9")
     ligand = Ligand("Histopine")
     original = Boltz2(proteins=protein, 
-                    ligands=ligand)
+                      ligands=ligand)
     
     current_best = Panda(tables=original.tables.affinity,
-                        pool=original)
+                         pool=original)
     for cycle in range(5):
         Suffix(f"Cycle{cycle+1}")
         pocket = DistanceSelector(structures=current_best,
-                                ligand="LIG", 
-                                distance=5)
+                                  ligand="LIG", 
+                                  distance=5)
         variants = LigandMPNN(structures=current_best,
                             ligand="LIG",
                             num_sequences=1000,
@@ -35,17 +35,18 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization"):
         profile = MutationProfiler(original=current_best, 
                                 mutants=variants)
         candidates = MutationComposer(frequencies=profile.tables.absolute_frequencies,
-                                    num_sequences=3, 
-                                    mode="weighted_random", 
-                                    max_mutations=3)
+                                      num_sequences=3, 
+                                      mode="weighted_random", 
+                                      max_mutations=3)
         predicted = Boltz2(proteins=candidates, 
-                        ligands=ligand)
+                           ligands=ligand)
         current_best = Panda(tables=[current_best.tables.result, 
                                     predicted.tables.affinity],
                             operations=[Panda.concat(add_source=True),
-                                        Panda.sort("affinity_pred_value"),
+                                        Panda.sort("affinity_probability_binary",
+                                                   ascending=False),
                                         Panda.head(1)],
                             pool=[current_best, 
-                                    predicted])
+                                  predicted])
 
 

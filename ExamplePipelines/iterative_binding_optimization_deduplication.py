@@ -66,7 +66,8 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization"):
         current_best = Panda(tables=[current_best.tables.result, 
                                     predicted.tables.affinity],
                             operations=[Panda.concat(add_source=True),
-                                        Panda.sort("affinity_pred_value"),
+                                        Panda.sort("affinity_probability_binary",
+                                                   ascending=False),
                                         Panda.head(1)],
                             pool=[current_best, 
                                     predicted])
