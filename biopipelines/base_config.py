@@ -513,8 +513,10 @@ echo "=============================="
 
         parent_dir = os.path.dirname(self.output_folder)
 
+        warning_file = completed_file.replace("_COMPLETED", "_WARNING")
+
         return f"""# Check if already completed
-if [ -f "{parent_dir}/{completed_file}" ]; then
+if [ -f "{parent_dir}/{completed_file}" ] || [ -f "{parent_dir}/{warning_file}" ]; then
     echo "{self.TOOL_NAME} already completed, skipping..."
     exit 0
 fi
