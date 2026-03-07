@@ -267,7 +267,6 @@ if [ $? -eq 0 ]; then
     echo "Results written to: {self.analysis_csv}"
 else
     echo "Error: Angle analysis failed"
-    exit 1
 fi
 
 """

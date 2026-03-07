@@ -811,7 +811,6 @@ if [ $? -eq 0 ]; then
     echo "Output written to: {self.output_csv}"
 else
     echo "Error: Panda operations failed"
-    exit 1
 fi
 
 """

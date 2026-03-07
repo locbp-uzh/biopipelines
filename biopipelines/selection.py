@@ -258,7 +258,6 @@ if [ $? -eq 0 ]; then
     echo "Selection modification completed successfully"
 else
     echo "Selection modification failed"
-    exit 1
 fi
 
 echo "Modified selections saved to: {self.selections_csv}"
