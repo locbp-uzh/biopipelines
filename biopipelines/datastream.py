@@ -511,12 +511,19 @@ def create_map_table(
     if provenance:
         for stream_name, prov_ids in provenance.items():
             col_name = f"{stream_name}.id"
-            if len(prov_ids) != len(expanded_ids):
+            # Expand provenance IDs the same way as the main ids
+            if any(id_patterns.is_lazy(s) for s in prov_ids):
+                expanded_prov, _ = id_patterns.try_expand_ids(prov_ids)
+            elif any(id_patterns.contains_pattern(s) for s in prov_ids):
+                expanded_prov = id_patterns.expand_ids(prov_ids)
+            else:
+                expanded_prov = prov_ids
+            if len(expanded_prov) != len(expanded_ids):
                 raise ValueError(
-                    f"Provenance column '{col_name}' has {len(prov_ids)} values "
+                    f"Provenance column '{col_name}' has {len(expanded_prov)} values "
                     f"but expected {len(expanded_ids)}"
                 )
-            data[col_name] = prov_ids
+            data[col_name] = expanded_prov
 
     df = pd.DataFrame(data)
 
