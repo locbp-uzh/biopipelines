@@ -201,19 +201,23 @@ metrics = ExtractMetrics(
 
 ---
 
-## SelectionEditor
+## Selection
 
-Modifies PyMOL selection strings (e.g., "3-45+58-60") with structure-aware operations.
+Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right.
 
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `selection`: tuple - Table column reference (e.g., `tool.tables.structures.designed`)
-- `structures`: StandardizedOutput = None - Auto-detected from selection source
-- `expand`: int = 0 - Residues to add on each side
-- `shrink`: int = 0 - Residues to remove from each side
-- `shift`: int = 0 - Shift all intervals (+/-)
-- `invert`: bool = False - Select complement
+- `*ops`: Sequence of `SelectionOp` objects (from `Selection.add`, `Selection.subtract`, `Selection.expand`, `Selection.shrink`, `Selection.shift`, `Selection.invert`)
+- `structures`: StandardizedOutput = None - Required for structure-aware ops (expand, shrink, shift, invert)
+
+**Operations**:
+- `Selection.add(*refs)` - Union of one or more column references
+- `Selection.subtract(*refs)` - Remove residues from running selection
+- `Selection.expand(n)` - Add n residues on each side
+- `Selection.shrink(n)` - Remove n residues from each side
+- `Selection.shift(n)` - Shift all intervals by n
+- `Selection.invert()` - Select complement
 
 **Tables**:
 - `selections`: | id | pdb | {column} | original_{column} |
@@ -221,20 +225,22 @@ Modifies PyMOL selection strings (e.g., "3-45+58-60") with structure-aware opera
 **Example**:
 
 ```python
-from biopipelines.selection_editor import SelectionEditor
+from biopipelines.selection import Selection
 from biopipelines.distance_selector import DistanceSelector
 
 distances = DistanceSelector(structures=rfdaa, ligand="LIG", distance=5)
 
 # Expand by 2 residues
-expanded = SelectionEditor(
-    selection=distances.tables.selections.within,
-    expand=2
+expanded = Selection(
+    Selection.add(distances.tables.selections.within),
+    Selection.expand(2),
+    structures=rfdaa,
 )
 
-# Invert selection
-fixed = SelectionEditor(
-    selection=distances.tables.selections.within,
-    invert=True
+# Union two columns then invert
+fixed = Selection(
+    Selection.add(fuse.tables.sequences.L1, fuse.tables.sequences.L2),
+    Selection.invert(),
+    structures=rfdaa,
 )
 ```

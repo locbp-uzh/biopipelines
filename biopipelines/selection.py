@@ -24,11 +24,11 @@ Example::
         structures=rfd
     )
 
-    # Single column with expand + invert (backward-compatible ``selection=`` kwarg)
+    # Single column with expand + invert
     sel = Selection(
+        Selection.add(rfd.tables.structures.designed),
         Selection.expand(5),
         Selection.invert(),
-        selection=rfd.tables.structures.designed,
         structures=rfd
     )
 """
@@ -133,7 +133,6 @@ echo "=== SelectionEditor ready ==="
 
     def __init__(self,
                  *operations: SelectionOp,
-                 selection=None,
                  structures=None,
                  **kwargs):
         """
@@ -141,8 +140,6 @@ echo "=== SelectionEditor ready ==="
 
         Args:
             *operations: Sequence of SelectionOp objects describing the pipeline.
-            selection: Optional single TableReference — convenience shorthand,
-                equivalent to ``Selection.add(ref)`` as the first operation.
             structures: DataStream or StandardizedOutput providing PDB files.
                 Required when any PDB-aware operation (expand/shrink/shift/invert)
                 is used.
@@ -154,15 +151,6 @@ echo "=== SelectionEditor ready ==="
         """
         # Build ordered operations list
         self.operations: List[SelectionOp] = []
-
-        # Prepend selection= as an add op if given
-        if selection is not None:
-            if not isinstance(selection, TableReference):
-                raise ValueError(
-                    "selection must be a TableReference. "
-                    "Example: tool.tables.structures.designed"
-                )
-            self.operations.append(SelectionOp("add", refs=[selection]))
 
         for op in operations:
             if not isinstance(op, SelectionOp):
@@ -185,12 +173,10 @@ echo "=== SelectionEditor ready ==="
 
     def validate_params(self):
         """Validate Selection parameters."""
-        # Must have at least one add (directly or via selection=)
-        has_add = any(op.op_type in ("add", "subtract") for op in self.operations)
-        if not has_add:
+        # First operation must be add to initialise the running selection
+        if not self.operations or self.operations[0].op_type != "add":
             raise ValueError(
-                "At least one add() or subtract() operation (or selection= kwarg) is required "
-                "to provide an initial selection value."
+                "The first operation must be add() to provide an initial selection value."
             )
 
         # PDB-aware ops require structures
