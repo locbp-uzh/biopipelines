@@ -164,10 +164,9 @@ with Pipeline(project="Debug",
     )
 
     stitched = StitchSequences(
-        template=rfdaa,
+        template=rfd3,
         substitutions={
-            distances_rfd.tables.selections.beyond: pmpnn,
-            distances_rfd.tables.selections.within: lmpnn,
+            "23-57": pmpnn,
         },
     )
 
