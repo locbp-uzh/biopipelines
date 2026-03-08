@@ -72,6 +72,7 @@ echo "=== Mutagenesis ready ==="
                  mode: str = "specific",
                  include_original: bool = False,
                  exclude: str = "",
+                 combinatorial: bool = False,
                  **kwargs):
         """
         Initialize Mutagenesis tool.
@@ -103,6 +104,9 @@ echo "=== Mutagenesis ready ==="
                 - "negative": D, E
             include_original: Whether to include original amino acid (default: False)
             exclude: Amino acids to exclude as single string (e.g., "CEFGL")
+            combinatorial: If True and multiple positions are specified, generate
+                all combinations (cartesian product) of mutations across positions.
+                Default False generates independent single-point mutants per position.
             **kwargs: Additional parameters
 
         Output:
@@ -135,6 +139,7 @@ echo "=== Mutagenesis ready ==="
         self.mode = mode
         self.include_original = include_original
         self.exclude = exclude.upper()
+        self.combinatorial = combinatorial
 
         # Handle input types
         self.sequences_stream = None
@@ -181,6 +186,10 @@ echo "=== Mutagenesis ready ==="
         if isinstance(self.position, int) and self.position <= 0:
             raise ValueError("Position must be positive (1-indexed)")
 
+        # Warn if combinatorial=True but only a single fixed position (no effect)
+        if self.combinatorial and isinstance(self.position, int):
+            print(f"Warning: combinatorial=True has no effect with a single fixed position ({self.position})")
+
         # Validate exclude string
         if self.exclude:
             invalid_aas = set(self.exclude) - valid_aas
@@ -207,6 +216,7 @@ echo "=== Mutagenesis ready ==="
     def _generate_script_run_sdm(self) -> str:
         """Generate the Mutagenesis execution part of the script."""
         mutate_to_line = f'    --mutate-to "{self.mutate_to}" \\\n' if self.mutate_to else ""
+        combinatorial_line = '    --combinatorial \\\n' if self.combinatorial else ""
 
         if self.selection:
             position_line = f'    --selection "{self.selection}" \\\n'
@@ -215,12 +225,15 @@ echo "=== Mutagenesis ready ==="
             position_line = f'    --position "{self.position}" \\\n'
             position_display = f"Position: {self.position}"
 
+        step_tool_name = os.path.basename(self.output_folder)
+
         return f"""echo "Running Mutagenesis"
 echo "{position_display}"
 echo "Mode: {self.mode}"
 {"echo " + '"' + "Mutate to: " + self.mutate_to + '"' if self.mutate_to else ""}
 echo "Include original: {self.include_original}"
 echo "Exclude: {self.exclude}"
+{"echo " + '"' + "Combinatorial: True" + '"' if self.combinatorial else ""}
 
 # Run Mutagenesis generation
 python {self.mutagenesis_helper_py} \\
@@ -228,6 +241,8 @@ python {self.mutagenesis_helper_py} \\
 {position_line}    --mode {self.mode} \\
 {mutate_to_line}    --include-original {str(self.include_original).lower()} \\
     --exclude "{self.exclude}" \\
+{combinatorial_line}    --missing-output "{self.missing_csv}" \\
+    --missing-step "{step_tool_name}" \\
     --output "{self.sequences_csv}"
 
 echo "Mutagenesis completed successfully"
@@ -236,47 +251,8 @@ echo "Generated sequences saved to: {self.sequences_csv}"
 """
 
     def _generate_script_missing_sequences(self) -> str:
-        """Generate the missing sequences creation part of the script."""
-        step_tool_name = os.path.basename(self.output_folder)
-        return f"""# Generate missing.csv if original is excluded
-if [ "{str(self.include_original).lower()}" = "false" ]; then
-    echo "Creating missing table..."
-    python -c "
-import pandas as pd
-
-try:
-    sequences_df = pd.read_csv('{self.sequences_csv}')
-    if len(sequences_df) > 0:
-        # Identify excluded originals from mutation data
-        missing_data = []
-        seen = set()
-        for _, row in sequences_df.iterrows():
-            base_id = row['id'].rsplit('_', 1)[0]
-            pos = row['mutation_positions']
-            orig_aa = row['original_aa']
-            key = (base_id, str(pos), orig_aa)
-            if key not in seen:
-                seen.add(key)
-                original_id = f'{{base_id}}_{{pos}}{{orig_aa}}'
-                missing_data.append({{
-                    'id': original_id,
-                    'removed_by': '{step_tool_name}',
-                    'cause': f'Original amino acid ({{orig_aa}}) excluded from mutagenesis at position {{pos}}'
-                }})
-        missing_df = pd.DataFrame(missing_data)
-        missing_df.to_csv('{self.missing_csv}', index=False)
-        print(f'Created missing.csv with {{len(missing_data)}} entries')
-    else:
-        print('Warning: No sequences found in main CSV')
-        pd.DataFrame(columns=['id', 'removed_by', 'cause']).to_csv('{self.missing_csv}', index=False)
-except Exception as e:
-    print(f'Error creating missing.csv: {{e}}')
-"
-else
-    echo "id,removed_by,cause" > "{self.missing_csv}"
-fi
-
-"""
+        """Missing table is now generated by the pipe script via --missing-output."""
+        return ""
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after Mutagenesis execution."""
@@ -366,6 +342,7 @@ fi
             config_lines.append(f"MUTATE TO: {self.mutate_to}")
         config_lines.append(f"INCLUDE ORIGINAL: {self.include_original}")
         config_lines.append(f"EXCLUDE: {self.exclude if self.exclude else 'None'}")
+        config_lines.append(f"COMBINATORIAL: {self.combinatorial}")
 
         return config_lines
 
@@ -378,7 +355,8 @@ fi
                 "mutate_to": self.mutate_to,
                 "mode": self.mode,
                 "include_original": self.include_original,
-                "exclude": self.exclude
+                "exclude": self.exclude,
+                "combinatorial": self.combinatorial
             }
         })
         return base_dict
