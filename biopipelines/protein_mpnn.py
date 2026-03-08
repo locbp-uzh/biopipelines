@@ -319,7 +319,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             name="fasta",
             ids=fasta_ids,
             files=fasta_files,
-            format="fasta"
+            format="fasta",
+            metadata={
+                "sequences_per_file": self.num_sequences,
+                "contains_original": False,
+            }
         )
 
         tables = {
