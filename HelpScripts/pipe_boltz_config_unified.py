@@ -561,12 +561,18 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
         config = {'sequences': []}
         chain_counter = [0]
         first_ligand_chain = None
+        axis_selections = {}
         for sa in static_only_axes:
+            axis_selections[sa['axis_name']] = ('bundle', [s['id'] for s in sa['items']], None)
             flc = add_axis_items_to_config(config, sa['entity_type'], sa['items'], chain_counter)
             if first_ligand_chain is None:
                 first_ligand_chain = flc
         config = apply_decorations(config, first_ligand_chain)
-        return [('bundled_complex', config)]
+        config_id = predict_single_output_id(
+            bundled_name="bundled_complex",
+            **axis_selections
+        )
+        return [(config_id, config)]
 
     # Compute cartesian product of all iteration axes
     item_lists = [list(enumerate(ia['items'])) for ia in iteration_axes]
