@@ -205,6 +205,9 @@ echo "=== ReMap ready ==="
                         all_source_ids.append(sid)
                         seen.add(sid)
 
+            # Remove expanded children already covered by a parent pattern
+            all_source_ids = id_patterns.dedup_parent_children(all_source_ids)
+
             has_lazy = any(id_patterns.is_lazy(s) for s in all_source_ids)
             if has_lazy:
                 # Lazy: can't know count at config time — use <N> marker
