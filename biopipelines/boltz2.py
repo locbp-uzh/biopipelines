@@ -643,7 +643,7 @@ fi
         tables = {
             "structures": TableInfo(
                 name="structures",
-                path=structures_map,
+                path=self.structures_map_csv,
                 columns=["id", "file"],
                 description="Boltz2 predicted structures",
                 count=len(predicted_ids)
