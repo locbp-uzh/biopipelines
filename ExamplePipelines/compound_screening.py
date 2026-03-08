@@ -16,7 +16,7 @@ with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
                     ids="TrpR")
     DNA = Sequence("TGTACTAGTTAACTAGTAC",
                    ids="dna")
-    library = CompoundLibrary("/path/to/library.cdxml")
+    library = CompoundLibrary("./ExamplePipelines/compound_library_TrpR.cdxml")
     cofolded = Boltz2(proteins=Bundle(TrpR,TrpR),
                       dsDNA=DNA,
                       ligands=Each(library))
