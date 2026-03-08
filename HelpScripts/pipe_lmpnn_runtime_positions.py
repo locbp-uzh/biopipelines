@@ -35,28 +35,8 @@ from pathlib import Path
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
-from biopipelines.pdb_parser import parse_pdb_file
-
-
-def sele_to_list(sele_str):
-    """Convert selection string to list of residue numbers."""
-    # Handle None, empty, or "-"
-    if not sele_str or sele_str == "-" or pd.isna(sele_str):
-        return []
-
-    residues = []
-    parts = str(sele_str).split('+')
-
-    for part in parts:
-        if '-' in part and not part.startswith('-'):
-            # Range like "10-20"
-            start, end = map(int, part.split('-', 1))
-            residues.extend(range(start, end + 1))
-        else:
-            # Single residue
-            residues.append(int(part))
-
-    return sorted(residues)
+from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES
+from biopipelines.sele_utils import sele_to_list
 
 
 def process_table_source(input_table, design_entries):
@@ -111,6 +91,8 @@ def resolve_table_reference(reference, design_ids):
     Returns:
         Dictionary mapping design IDs to position lists
     """
+    if not reference or reference == "-":
+        return {design_id: [] for design_id in design_ids}
     if not reference.startswith("TABLE_REFERENCE:"):
         # Direct PyMOL selection - same for all designs
         return {design_id: sele_to_list(reference) for design_id in design_ids}
@@ -130,18 +112,14 @@ def resolve_table_reference(reference, design_ids):
     return positions_per_design
 
 
-def get_protein_residues_from_pdb(pdb_path, chain="A"):
-    """Get all protein residue numbers for a specific chain from PDB file."""
-    standard_residues = {
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
-    }
+def get_protein_residues_from_pdb(pdb_path):
+    """Get all protein (chain, resnum) tuples from PDB file."""
     atoms = parse_pdb_file(pdb_path)
     residues = set()
     for atom in atoms:
-        if atom.chain == chain and atom.res_name in standard_residues:
-            residues.add(atom.res_num)
-    return sorted(list(residues))
+        if atom.res_name in STANDARD_RESIDUES:
+            residues.add((atom.chain, atom.res_num))
+    return sorted(residues, key=lambda x: (x[0], x[1]))
 
 
 def process_selection_source(fixed_positions, designed_positions, design_entries):
@@ -216,13 +194,13 @@ def write_positions_json(positions_data, output_file):
         # Build fixed positions option for this design
         fixed_option = ""
         if positions['fixed_positions']:
-            fixed_str = " ".join([f"A{pos}" for pos in positions['fixed_positions']])
+            fixed_str = " ".join([f"{chain}{resnum}" for chain, resnum in positions['fixed_positions']])
             fixed_option = f'--fixed_residues "{fixed_str}"'
 
         # Build designed positions option for this design
         redesigned_option = ""
         if positions['designed_positions']:
-            designed_str = " ".join([f"A{pos}" for pos in positions['designed_positions']])
+            designed_str = " ".join([f"{chain}{resnum}" for chain, resnum in positions['designed_positions']])
             redesigned_option = f'--redesigned_residues "{designed_str}"'
 
         result[design_id] = {
