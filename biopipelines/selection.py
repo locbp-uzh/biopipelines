@@ -87,14 +87,14 @@ class Selection(BaseConfig):
         - ``Selection.invert()``        — PDB-aware: replace with complement
     """
 
-    TOOL_NAME = "SelectionEditor"
+    TOOL_NAME = "Selection"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        return """echo "=== SelectionEditor ==="
+        return """echo "=== Selection ==="
 echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
-echo "=== SelectionEditor ready ==="
+echo "=== Selection ready ==="
 """
 
     # Lazy path descriptors

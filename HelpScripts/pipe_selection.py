@@ -39,7 +39,7 @@ def get_protein_residues(pdb_path: str) -> Set[Tuple[str, int]]:
     residues = set()
     for atom in atoms:
         if atom.res_name in STANDARD_RESIDUES:
-            residues.add((atom.chain_id, atom.res_num))
+            residues.add((atom.chain, atom.res_num))
     if not residues:
         raise ValueError(f"No protein residues found in {pdb_path}")
     return residues

@@ -106,7 +106,7 @@ environments:
   # Data management
   Panda: "biopipelines"
   ExtractMetrics: "biopipelines"
-  SelectionEditor: "ProteinEnv"
+  Selection: "ProteinEnv"
 
   # Utilities
   Load: "biopipelines"
