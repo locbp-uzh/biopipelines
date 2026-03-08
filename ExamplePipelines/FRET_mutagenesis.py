@@ -36,7 +36,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     mutants = Mutagenesis(original=fusions,
                           position=Selection(Selection.add(fusions.tables.sequences.L1),
                                              Selection.add(fusions.tables.sequences.L2)),
-                          mutate_to="ASLK",
+                          mutate_to="LK",
                           combinatorial=True)
     apo = Boltz2(proteins=mutants)
     ca = Ligand("CA")
