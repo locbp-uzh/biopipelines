@@ -24,9 +24,8 @@ with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
                    operations=[Panda.calculate({"aff_uM":"10**affinity_pred_value"})])
     Plot(Plot.Scatter(data=merged.tables.result,
                       x="R1",
-                      y="aff_uM",
-                      x_label="R1 group",
-                      y_label="Predicted Affinity [uM]"))
+                      xlabel="R1 group",
+                      ylabel="Predicted Affinity [uM]"))
 
 
     
