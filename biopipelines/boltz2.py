@@ -84,6 +84,7 @@ echo "=== Boltz2 installation complete ==="
     expanded_library_csv = Path(lambda self: os.path.join(self.output_folder, "expanded_smiles_library.csv"))
     fasta_files_list_file = Path(lambda self: os.path.join(self.output_folder, ".input_fasta_files.txt"))
     sequence_ids_file = Path(lambda self: os.path.join(self.output_folder, "sequence_ids.csv"))
+    structures_map_csv = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
 
     # Output files
     library_scores_csv = Path(lambda self: os.path.join(self.library_folder, "library_scores.csv"))
@@ -525,7 +526,7 @@ python {self.boltz_msa_copy_py} \\
         """Generate script section for post-processing."""
         return f"""
 echo "Post-processing Boltz2 results"
-python {self.boltz_postprocessing_py} {self.output_folder} {self.output_folder} {self.sequence_ids_file}
+python {self.boltz_postprocessing_py} {self.output_folder} {self.output_folder} {self.sequence_ids_file} --structures-map {self.structures_map_csv}
 
 if [ $? -ne 0 ]; then
     echo "Error: Post-processing failed"
@@ -590,14 +591,13 @@ fi
         structure_files = [os.path.join(self.output_folder, f"<id>{structure_ext}")]
 
         # Create structures DataStream
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, predicted_ids, files=structure_files, provenance=provenance)
+        create_map_table(self.structures_map_csv, predicted_ids, files=structure_files, provenance=provenance)
 
         structures = DataStream(
             name="structures",
             ids=predicted_ids,
             files=structure_files,
-            map_table=structures_map,
+            map_table=self.structures_map_csv,
             format=self.output_format
         )
 

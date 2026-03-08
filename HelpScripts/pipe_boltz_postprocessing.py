@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser(description='Post-process Boltz2 outputs for pi
 parser.add_argument('PREDICTION_FOLDER', type=str, help='Boltz2 prediction folder')
 parser.add_argument('OUTPUT_FOLDER', type=str, help='Tool output folder where results will be organized')
 parser.add_argument('SEQUENCE_IDS_FILE', type=str, help='CSV file with sequence IDs for renaming')
+parser.add_argument('--structures-map', type=str, default=None, help='Path to structures_map.csv to update with runtime IDs')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -53,6 +54,7 @@ def flatten_confidence(conf, parent_key=""):
 PREDICTION_FOLDER = args.PREDICTION_FOLDER
 OUTPUT_FOLDER = args.OUTPUT_FOLDER
 SEQUENCE_IDS_FILE = args.SEQUENCE_IDS_FILE
+STRUCTURES_MAP = args.structures_map
 
 # Load provenance from combinatorics config if available
 stored_provenance = {}
@@ -227,6 +229,28 @@ for boltz_folder in sorted(boltz_results_folders):
         # Store structural file path
         if target_filepath:
             structural_files[sequence_id] = target_filepath
+
+# Update structures_map.csv with actual runtime IDs and file paths
+# (config-time map only has prefix IDs when inputs use lazy patterns)
+if STRUCTURES_MAP and structural_files:
+    map_rows = []
+    for seq_id, struct_path in structural_files.items():
+        map_rows.append({'id': seq_id, 'file': struct_path, 'value': ''})
+    map_df = pd.DataFrame(map_rows)
+
+    # Preserve provenance columns from combinatorics config
+    if stored_provenance and stored_predicted_ids:
+        prov_lookup = {sid: i for i, sid in enumerate(stored_predicted_ids)}
+        for stream_name, prov_ids in stored_provenance.items():
+            col_name = f"{stream_name}.id"
+            col_values = []
+            for row in map_rows:
+                idx = prov_lookup.get(row['id'])
+                col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
+            map_df[col_name] = col_values
+
+    map_df.to_csv(STRUCTURES_MAP, index=False)
+    print(f"Updated {STRUCTURES_MAP} with {len(map_rows)} structures")
 
 # Check if we have any data
 print(f"> Total sequences processed: {len(confidence_data)}")
