@@ -1261,23 +1261,55 @@ umask 002
 
         all_rows = []
 
-        # Rows for IDs in the final tool's output
+        # Identify disconnected tools: no provenance AND no ID overlap with
+        # any upstream tool (e.g. Plot which produces synthetic IDs like plot_1)
+        all_upstream_ids = set()
+        disconnected_tool_indices = set()
+        for tool_idx, (label, ids, provenance) in enumerate(tool_info):
+            if tool_idx == 0:
+                all_upstream_ids.update(ids)
+                continue
+            has_provenance = bool(provenance)
+            has_id_overlap = bool(set(ids) & all_upstream_ids)
+            if not has_provenance and not has_id_overlap:
+                disconnected_tool_indices.add(tool_idx)
+            all_upstream_ids.update(ids)
+
+        # Add standalone rows for disconnected tools
+        for tool_idx in disconnected_tool_indices:
+            label, ids, _ = tool_info[tool_idx]
+            for oid in ids:
+                row = {h: "" for h in headers}
+                row[label] = oid
+                all_rows.append(row)
+
+        # Find the last connected tool for main lineage tracing
+        last_connected_idx = len(tool_info) - 1
+        while last_connected_idx in disconnected_tool_indices and last_connected_idx > 0:
+            last_connected_idx -= 1
+        last_connected_ids = tool_info[last_connected_idx][1]
+
+        # Rows for IDs in the last connected tool's output
         for path_spec in paths:
-            for output_id in last_ids:
-                row = _trace_backward(len(tool_info) - 1, output_id, path_spec)
+            for output_id in last_connected_ids:
+                row = _trace_backward(last_connected_idx, output_id, path_spec)
                 all_rows.append(row)
 
         # Rows for IDs that were filtered out mid-pipeline
-        all_ids_ever = set()
-        for _, ids, _ in tool_info:
-            all_ids_ever.update(ids)
-        filtered_ids = list(all_ids_ever - set(last_ids))
+        # Only consider connected tools for filtering logic
+        connected_ids_ever = set()
+        for idx, (_, ids, _) in enumerate(tool_info):
+            if idx not in disconnected_tool_indices:
+                connected_ids_ever.update(ids)
+        filtered_ids = list(connected_ids_ever - set(last_connected_ids))
 
         if filtered_ids:
-            # Map each filtered ID to the last tool index where it appeared
+            # Map each filtered ID to the last connected tool index where it appeared
             filtered_id_last_tool = {}
             for fid in filtered_ids:
-                for idx in range(len(tool_info) - 1, -1, -1):
+                for idx in range(last_connected_idx, -1, -1):
+                    if idx in disconnected_tool_indices:
+                        continue
                     if fid in tool_info[idx][1]:
                         filtered_id_last_tool[fid] = idx
                         break
@@ -1288,9 +1320,12 @@ umask 002
                     if last_idx is None:
                         continue
                     row = _trace_backward(last_idx, fid, path_spec)
-                    # Mark the tool that filtered this ID
-                    if last_idx + 1 < len(tool_info):
-                        row[tool_info[last_idx + 1][0]] = "[filtered]"
+                    # Mark the next connected tool that filtered this ID
+                    next_connected = last_idx + 1
+                    while next_connected in disconnected_tool_indices:
+                        next_connected += 1
+                    if next_connected < len(tool_info):
+                        row[tool_info[next_connected][0]] = "-"
                     all_rows.append(row)
 
         # 5. Remove duplicate rows and rows that are strict subsets
