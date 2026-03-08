@@ -193,6 +193,27 @@ def try_expand_ids(ids: List[str]) -> Tuple[List[str], bool]:
     return result, complete
 
 
+def dedup_parent_children(ids: List[str]) -> List[str]:
+    """Remove literal IDs that are already covered by a pattern in the list.
+
+    ['prot_<0..2>', 'prot_0', 'prot_1'] -> ['prot_<0..2>']
+    ['prot_0', 'prot_1', 'other']       -> ['prot_0', 'prot_1', 'other']
+    """
+    patterns = [s for s in ids if contains_pattern(s)]
+    if not patterns:
+        return ids
+
+    covered = set()
+    for p in patterns:
+        try:
+            covered.update(expand_pattern(p))
+        except LazyPatternError:
+            expanded, _ = try_expand(p)
+            covered.update(expanded)
+
+    return [s for s in ids if contains_pattern(s) or s not in covered]
+
+
 def expand_at(s: str, index: int) -> str:
     """Get a single expanded element by index without full expansion.
 
