@@ -25,6 +25,7 @@ with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
     Plot(Plot.Scatter(data=merged.tables.result,
                       x="R1",
                       xlabel="R1 group",
+                      y="aff_uM",
                       ylabel="Predicted Affinity [uM]"))
 
 
