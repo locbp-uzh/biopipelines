@@ -277,6 +277,21 @@ def main():
                 selection_value = lookup_table_value(
                     selection_table, sequence_id, selection_column
                 )
+
+                # Empty selection (NaN): no positions to mutate — pass through original
+                if pd.isna(selection_value) or str(selection_value).strip() == '':
+                    print(f"  No selection positions — passing through unchanged")
+                    all_mutants.append({
+                        'id': sequence_id,
+                        'original.id': sequence_id,
+                        'sequence': sequence,
+                        'mutations': seq_info['prior_mutations'],
+                        'mutation_positions': seq_info['prior_positions'],
+                        'original_aa': '',
+                        'new_aa': ''
+                    })
+                    continue
+
                 positions = parse_positions_selection(str(selection_value))
                 print(f"  Selection positions: {positions}")
 
