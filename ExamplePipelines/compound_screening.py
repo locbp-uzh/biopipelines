@@ -12,14 +12,21 @@ from biopipelines.plot import Plot
 
 with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")
-    TrpR = Sequence("MAQQSPYSAAMAEERHQEWLRFVDLLKNAYQNDLHLPLLNLMLTPDEREALGTRVRIVEELLRGEMSQRELKNELGAGIATITRGSNSLKAAPVELRQWLEEVLLKSD")
-    DNA = Sequence("TGTACTAGTTAACTAGTAC")
+    TrpR = Sequence("MAQQSPYSAAMAEERHQEWLRFVDLLKNAYQNDLHLPLLNLMLTPDEREALGTRVRIVEELLRGEMSQRELKNELGAGIATITRGSNSLKAAPVELRQWLEEVLLKSD",
+                    ids="TrpR")
+    DNA = Sequence("TGTACTAGTTAACTAGTAC",
+                   ids="DNA")
     library = CompoundLibrary("/path/to/library.cdxml")
     cofolded = Boltz2(proteins=Bundle(TrpR,TrpR),
-                      dna=DNA,
+                      dsDNA=DNA,
                       ligands=Each(library))
     merged = Panda(tables=cofolded.tables.affinity,
                    operations=[Panda.calculate({"aff_uM":"10**affinity_pred_value"})])
+    Plot(Plot.Scatter(data=merged.tables.result,
+                      x="R1",
+                      y="aff_uM",
+                      x_label="R1 group",
+                      y_label="Predicted Affinity [uM]"))
 
 
     
