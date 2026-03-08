@@ -629,27 +629,27 @@ echo "=== Panda ready ==="
         # Configure pool mode - collect all pool folders and file mappings
         if self.use_pool_mode:
             self.pool_folders = []
-            self.pool_file_maps = []  # List of {stream_name: {id: file_path}} dicts for each pool
+            self.pool_stream_jsons = []  # List of {stream_name: json_path} dicts per pool
             self.pool_table_maps = []  # List of {table_name: {"path": str, "columns": list}} for each pool
-            for pool in self.pool_outputs:
+            for pool_idx, pool in enumerate(self.pool_outputs):
                 if hasattr(pool, 'output_folder'):
                     self.pool_folders.append(pool.output_folder)
                 else:
                     raise ValueError("Each pool must have an output_folder attribute")
 
-                # Build file map from all pool streams
-                file_map = {}
+                # Save each pool stream's DataStream to JSON for runtime expansion
+                stream_jsons = {}
                 if hasattr(pool, 'streams'):
                     for stream_name in pool.streams.keys():
                         stream = pool.streams.get(stream_name)
                         if stream and len(stream) > 0 and len(stream.files) > 0:
-                            file_map[stream_name] = {}
-                            for i, sid in enumerate(stream.ids):
-                                if i < len(stream.files):
-                                    # Apply id_remap if the original ID should be remapped
-                                    mapped_id = self.id_remap.get(sid, sid)
-                                    file_map[stream_name][mapped_id] = stream.files[i]
-                self.pool_file_maps.append(file_map)
+                            json_path = os.path.join(
+                                self.output_folder,
+                                f"pool_{pool_idx}_{stream_name}_ds.json"
+                            )
+                            stream.save_json(json_path)
+                            stream_jsons[stream_name] = json_path
+                self.pool_stream_jsons.append(stream_jsons)
 
                 # Build table map from pool tables (for filtering/copying at execution time)
                 table_map = {}
@@ -781,7 +781,7 @@ echo "=== Panda ready ==="
             "output_csv": self.output_csv,
             "use_pool_mode": self.use_pool_mode,
             "pool_folders": getattr(self, 'pool_folders', []),
-            "pool_file_maps": getattr(self, 'pool_file_maps', []),
+            "pool_stream_jsons": getattr(self, 'pool_stream_jsons', []),
             "pool_table_maps": getattr(self, 'pool_table_maps', []),
             "id_map_forward": getattr(self, 'id_map_forward', {}),
             "rename": self.rename,
