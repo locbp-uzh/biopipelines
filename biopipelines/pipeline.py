@@ -1200,83 +1200,98 @@ umask 002
                     paths.append((tool_idx, axis_name))
 
         # 4. Build rows
-        all_rows = []
 
-        for path_spec in paths:
-            for output_id in last_ids:
-                row = {h: "" for h in headers}
-                row[last_label] = output_id
+        # Helper: trace an ID backward through tool_info from start_idx
+        def _trace_backward(start_idx, start_id, path_spec):
+            row = {h: "" for h in headers}
+            row[tool_info[start_idx][0]] = start_id
+            current_id = start_id
+            for i in range(start_idx - 1, -1, -1):
+                label_i, parent_ids_i, _ = tool_info[i]
+                next_idx = i + 1
+                next_provenance = tool_info[next_idx][2]
+                child_id = current_id
 
-                # Walk backward from second-to-last tool
-                current_id = output_id
-                for i in range(len(tool_info) - 2, -1, -1):
-                    label_i, parent_ids_i, _ = tool_info[i]
-                    next_idx = i + 1
-                    next_provenance = tool_info[next_idx][2]
-                    child_id = current_id
+                if path_spec is not None:
+                    branch_tool_idx, branch_axis = path_spec
 
-                    # Determine if we're on this path
-                    if path_spec is not None:
-                        branch_tool_idx, branch_axis = path_spec
-
-                        if next_idx == branch_tool_idx:
-                            # At the branch point: use the specific axis
-                            prov_map = next_provenance.get(branch_axis, {})
-                            if child_id in prov_map:
-                                candidate = prov_map[child_id]
-                                if candidate in parent_ids_i:
-                                    row[label_i] = candidate
-                                    current_id = candidate
-                                    continue
-                            # This axis doesn't connect to this tool — skip
-                            row[label_i] = ""
-                            continue
-                        elif next_idx > branch_tool_idx:
-                            # After the branch: same as default, trace normally
-                            pass
-                        else:
-                            # Before the branch: check if this tool is on the
-                            # branch's source chain
-                            source_idx = axis_source.get(
-                                (branch_tool_idx, branch_axis)
-                            )
-                            if source_idx is not None and i > source_idx:
-                                # We're between the branch source and the branch
-                                # tool, but not on this axis's lineage
-                                # Check if provenance maps through here
-                                pass
-                            elif source_idx is not None and i < source_idx:
-                                # Before the source tool of this axis — trace normally
-                                pass
-
-                    # Default matching: try provenance first, then get_mapped_ids
-                    matched = None
-
-                    # Try provenance from the next tool
-                    for axis_name, prov_map in next_provenance.items():
-                        if path_spec is not None:
-                            branch_tool_idx, branch_axis = path_spec
-                            if next_idx == branch_tool_idx and axis_name != branch_axis:
-                                continue
+                    if next_idx == branch_tool_idx:
+                        prov_map = next_provenance.get(branch_axis, {})
                         if child_id in prov_map:
                             candidate = prov_map[child_id]
                             if candidate in parent_ids_i:
-                                matched = candidate
-                                break
-
-                    if matched is None:
-                        # Fallback: use get_mapped_ids
-                        mapping = get_mapped_ids([child_id], parent_ids_i)
-                        matched = mapping.get(child_id)
-
-                    if matched:
-                        row[label_i] = matched
-                        current_id = matched
-                    else:
-                        # Can't trace further back on this path — leave blank
+                                row[label_i] = candidate
+                                current_id = candidate
+                                continue
                         row[label_i] = ""
+                        continue
+                    elif next_idx > branch_tool_idx:
+                        pass
+                    else:
+                        source_idx = axis_source.get(
+                            (branch_tool_idx, branch_axis)
+                        )
+                        if source_idx is not None and i > source_idx:
+                            pass
+                        elif source_idx is not None and i < source_idx:
+                            pass
 
+                matched = None
+                for axis_name, prov_map in next_provenance.items():
+                    if path_spec is not None:
+                        branch_tool_idx, branch_axis = path_spec
+                        if next_idx == branch_tool_idx and axis_name != branch_axis:
+                            continue
+                    if child_id in prov_map:
+                        candidate = prov_map[child_id]
+                        if candidate in parent_ids_i:
+                            matched = candidate
+                            break
+
+                if matched is None:
+                    mapping = get_mapped_ids([child_id], parent_ids_i)
+                    matched = mapping.get(child_id)
+
+                if matched:
+                    row[label_i] = matched
+                    current_id = matched
+                else:
+                    row[label_i] = ""
+            return row
+
+        all_rows = []
+
+        # Rows for IDs in the final tool's output
+        for path_spec in paths:
+            for output_id in last_ids:
+                row = _trace_backward(len(tool_info) - 1, output_id, path_spec)
                 all_rows.append(row)
+
+        # Rows for IDs that were filtered out mid-pipeline
+        all_ids_ever = set()
+        for _, ids, _ in tool_info:
+            all_ids_ever.update(ids)
+        filtered_ids = list(all_ids_ever - set(last_ids))
+
+        if filtered_ids:
+            # Map each filtered ID to the last tool index where it appeared
+            filtered_id_last_tool = {}
+            for fid in filtered_ids:
+                for idx in range(len(tool_info) - 1, -1, -1):
+                    if fid in tool_info[idx][1]:
+                        filtered_id_last_tool[fid] = idx
+                        break
+
+            for path_spec in paths:
+                for fid in filtered_ids:
+                    last_idx = filtered_id_last_tool.get(fid)
+                    if last_idx is None:
+                        continue
+                    row = _trace_backward(last_idx, fid, path_spec)
+                    # Mark the tool that filtered this ID
+                    if last_idx + 1 < len(tool_info):
+                        row[tool_info[last_idx + 1][0]] = "[filtered]"
+                    all_rows.append(row)
 
         # 5. Remove duplicate rows and rows that are strict subsets
         # (a row is a subset if every non-blank cell matches another row that
