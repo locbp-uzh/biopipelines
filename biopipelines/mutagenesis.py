@@ -10,20 +10,22 @@ various class-based strategies for comprehensive mutagenesis studies.
 """
 
 import os
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Optional, Union
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_multiplied_ids
+    from .biopipelines_io import TableReference
+    from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_multiplied_ids
+    from biopipelines_io import TableReference
+    from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
 
 
 class Mutagenesis(BaseConfig):
@@ -65,11 +67,12 @@ echo "=== Mutagenesis ready ==="
 
     def __init__(self,
                  original: Union[DataStream, StandardizedOutput],
-                 position: int,
+                 position: Union[int, str, TableReference, StandardizedOutput] = None,
                  mutate_to: str = "",
                  mode: str = "specific",
                  include_original: bool = False,
                  exclude: str = "",
+                 combinatorial: bool = False,
                  **kwargs):
         """
         Initialize Mutagenesis tool.
@@ -77,7 +80,13 @@ echo "=== Mutagenesis ready ==="
         Args:
             original: Input sequence as DataStream or StandardizedOutput
                       (e.g., from Sequence() entity or upstream tool)
-            position: Target position for mutagenesis (1-indexed)
+            position: Target position(s) for mutagenesis. Accepts:
+                - int: Fixed position (1-indexed) applied to all sequences
+                - str: PyMOL-style selection (e.g., "141+143+145-149")
+                - TableReference: Per-row position lookup from a table column
+                  (e.g., fuse.tables.sequences.L1)
+                - StandardizedOutput: From Selection tool (extracts
+                  selections.selection column)
             mutate_to: Target amino acid(s) for "specific" mode, as single letter
                 codes (e.g., "A" for alanine, "AV" for alanine and valine).
                 Required when mode is "specific".
@@ -95,6 +104,9 @@ echo "=== Mutagenesis ready ==="
                 - "negative": D, E
             include_original: Whether to include original amino acid (default: False)
             exclude: Amino acids to exclude as single string (e.g., "CEFGL")
+            combinatorial: If True and multiple positions are specified, generate
+                all combinations (cartesian product) of mutations across positions.
+                Default False generates independent single-point mutants per position.
             **kwargs: Additional parameters
 
         Output:
@@ -104,11 +116,30 @@ echo "=== Mutagenesis ready ==="
                 missing: id | removed_by | cause
         """
         # Store Mutagenesis-specific parameters
-        self.position = position
+        # Resolve position into either a fixed int/str or a TableReference (selection)
+        if isinstance(position, StandardizedOutput):
+            if hasattr(position.tables, 'selections'):
+                self.position = None
+                self.selection = position.tables.selections.selection
+            else:
+                raise ValueError("StandardizedOutput passed as position must have a selections table (e.g., from Selection tool)")
+        elif isinstance(position, TableReference):
+            self.position = None
+            self.selection = position
+        elif isinstance(position, (int, str)):
+            self.position = position
+            self.selection = None
+        elif position is None:
+            self.position = None
+            self.selection = None
+        else:
+            raise ValueError(f"position must be int, str, TableReference, or StandardizedOutput (from Selection), got {type(position)}")
+
         self.mutate_to = mutate_to.upper()
         self.mode = mode
         self.include_original = include_original
         self.exclude = exclude.upper()
+        self.combinatorial = combinatorial
 
         # Handle input types
         self.sequences_stream = None
@@ -147,9 +178,17 @@ echo "=== Mutagenesis ready ==="
             if invalid_aas_target:
                 raise ValueError(f"Invalid amino acids in mutate_to: {invalid_aas_target}")
 
-        # Validate position
-        if self.position <= 0:
+        # Validate position / selection — exactly one must be set
+        if self.position is None and self.selection is None:
+            raise ValueError("position must be provided")
+
+        # Validate fixed position
+        if isinstance(self.position, int) and self.position <= 0:
             raise ValueError("Position must be positive (1-indexed)")
+
+        # Warn if combinatorial=True but only a single fixed position (no effect)
+        if self.combinatorial and isinstance(self.position, int):
+            print(f"Warning: combinatorial=True has no effect with a single fixed position ({self.position})")
 
         # Validate exclude string
         if self.exclude:
@@ -177,20 +216,33 @@ echo "=== Mutagenesis ready ==="
     def _generate_script_run_sdm(self) -> str:
         """Generate the Mutagenesis execution part of the script."""
         mutate_to_line = f'    --mutate-to "{self.mutate_to}" \\\n' if self.mutate_to else ""
+        combinatorial_line = '    --combinatorial \\\n' if self.combinatorial else ""
+
+        if self.selection:
+            position_line = f'    --selection "{self.selection}" \\\n'
+            position_display = f"Selection: {self.selection}"
+        else:
+            position_line = f'    --position "{self.position}" \\\n'
+            position_display = f"Position: {self.position}"
+
+        step_tool_name = os.path.basename(self.output_folder)
+
         return f"""echo "Running Mutagenesis"
-echo "Position: {self.position}"
+echo "{position_display}"
 echo "Mode: {self.mode}"
 {"echo " + '"' + "Mutate to: " + self.mutate_to + '"' if self.mutate_to else ""}
 echo "Include original: {self.include_original}"
 echo "Exclude: {self.exclude}"
+{"echo " + '"' + "Combinatorial: True" + '"' if self.combinatorial else ""}
 
 # Run Mutagenesis generation
 python {self.mutagenesis_helper_py} \\
     --sequences "{self.sequences_stream.map_table}" \\
-    --position {self.position} \\
-    --mode {self.mode} \\
+{position_line}    --mode {self.mode} \\
 {mutate_to_line}    --include-original {str(self.include_original).lower()} \\
     --exclude "{self.exclude}" \\
+{combinatorial_line}    --missing-output "{self.missing_csv}" \\
+    --missing-step "{step_tool_name}" \\
     --output "{self.sequences_csv}"
 
 echo "Mutagenesis completed successfully"
@@ -199,42 +251,8 @@ echo "Generated sequences saved to: {self.sequences_csv}"
 """
 
     def _generate_script_missing_sequences(self) -> str:
-        """Generate the missing sequences creation part of the script."""
-        step_tool_name = os.path.basename(self.output_folder)
-        return f"""# Generate missing.csv if original is excluded
-if [ "{str(self.include_original).lower()}" = "false" ]; then
-    echo "Creating missing table..."
-    python -c "
-import pandas as pd
-
-try:
-    sequences_df = pd.read_csv('{self.sequences_csv}')
-    if len(sequences_df) > 0:
-        first_row = sequences_df.iloc[0]
-        base_id = first_row['id'].rsplit('_', 1)[0]
-        original_aa = first_row['original_aa']
-
-        original_id = f'{{base_id}}_{self.position}{{original_aa}}'
-        missing_data = [{{
-            'id': original_id,
-            'removed_by': '{step_tool_name}',
-            'cause': f'Original amino acid ({{original_aa}}) excluded from mutagenesis at position {self.position}'
-        }}]
-
-        missing_df = pd.DataFrame(missing_data)
-        missing_df.to_csv('{self.missing_csv}', index=False)
-        print(f'Created missing.csv: {self.missing_csv}')
-    else:
-        print('Warning: No sequences found in main CSV')
-        pd.DataFrame(columns=['id', 'removed_by', 'cause']).to_csv('{self.missing_csv}', index=False)
-except Exception as e:
-    print(f'Error creating missing.csv: {{e}}')
-"
-else
-    echo "id,removed_by,cause" > "{self.missing_csv}"
-fi
-
-"""
+        """Missing table is now generated by the pipe script via --missing-output."""
+        return ""
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after Mutagenesis execution."""
@@ -249,24 +267,41 @@ fi
             amino_acids = ''.join(aa for aa in amino_acids if aa not in self.exclude)
 
         # Multiply by number of input sequences
-        num_input = len(self.sequences_stream.ids)
+        num_input = len(self.sequences_stream)
         num_mutants_per_input = len(amino_acids)
-        num_mutants = num_mutants_per_input * num_input
 
-        # Generate sequence IDs (approximate — original_aa resolved at runtime)
-        suffixes = [f"{self.position}{aa}" for aa in amino_acids]
-        sequence_ids, provenance = generate_multiplied_ids(
-            self.sequences_stream.ids, suffixes,
-            input_stream_name="original"
-        )
+        if self.selection:
+            # Selection mode: positions vary per row — use lazy bracket pattern
+            aa_list = ' '.join(amino_acids)
+            bracket_suffix = f"[_<N><{aa_list}>]"
+            sequence_ids = [f"{pid}{bracket_suffix}" for pid in self.sequences_stream.ids]
+            num_mutants = "variable"
+        elif isinstance(self.position, str) and ('+' in self.position or '-' in self.position):
+            # Multi-position string (e.g., "141+143+145-149") — use lazy bracket pattern
+            aa_list = ' '.join(amino_acids)
+            bracket_suffix = f"[_<N><{aa_list}>]"
+            sequence_ids = [f"{pid}{bracket_suffix}" for pid in self.sequences_stream.ids]
+            num_mutants = "variable"
+        else:
+            # Single fixed position (int or single-position string)
+            pos = self.position if isinstance(self.position, int) else int(self.position)
+            num_mutants = num_mutants_per_input * num_input
+            # Generate sequence IDs using pattern composition
+            suffixes = [f"{pos}{aa}" for aa in amino_acids]
+            suffix_pattern = f"<{' '.join(suffixes)}>"
+            sequence_ids = generate_multiplied_ids_pattern(
+                self.sequences_stream.ids, suffix_pattern,
+                input_stream_name="original"
+            )
 
         # Prepare tables
+        position_desc = f"selection-based positions" if self.selection else f"position {self.position}"
         tables = {
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "original.id", "sequence", "mutations", "mutation_positions", "original_aa", "new_aa"],
-                description=f"mutants at position {self.position} using {self.mode} mode",
+                description=f"mutants at {position_desc} using {self.mode} mode",
                 count=num_mutants
             )
         }
@@ -301,12 +336,13 @@ fi
         config_lines = super().get_config_display()
         config_lines.append(f"INPUT: {len(self.sequences_stream)} sequences from DataStream")
 
-        config_lines.append(f"POSITION: {self.position}")
+        config_lines.append(f"POSITION: {self.selection if self.selection else self.position}")
         config_lines.append(f"MODE: {self.mode}")
         if self.mutate_to:
             config_lines.append(f"MUTATE TO: {self.mutate_to}")
         config_lines.append(f"INCLUDE ORIGINAL: {self.include_original}")
         config_lines.append(f"EXCLUDE: {self.exclude if self.exclude else 'None'}")
+        config_lines.append(f"COMBINATORIAL: {self.combinatorial}")
 
         return config_lines
 
@@ -315,11 +351,12 @@ fi
         base_dict = super().to_dict()
         base_dict.update({
             "sdm_params": {
-                "position": self.position,
+                "position": str(self.selection) if self.selection else self.position,
                 "mutate_to": self.mutate_to,
                 "mode": self.mode,
                 "include_original": self.include_original,
-                "exclude": self.exclude
+                "exclude": self.exclude,
+                "combinatorial": self.combinatorial
             }
         })
         return base_dict

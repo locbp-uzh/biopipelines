@@ -513,8 +513,10 @@ echo "=============================="
 
         parent_dir = os.path.dirname(self.output_folder)
 
+        warning_file = completed_file.replace("_COMPLETED", "_WARNING")
+
         return f"""# Check if already completed
-if [ -f "{parent_dir}/{completed_file}" ]; then
+if [ -f "{parent_dir}/{completed_file}" ] || [ -f "{parent_dir}/{warning_file}" ]; then
     echo "{self.TOOL_NAME} already completed, skipping..."
     exit 0
 fi
@@ -1170,13 +1172,13 @@ class StandardizedOutput:
 
         # Verify all streams share the same IDs
         reference_name, reference_ds = streams[0]
-        reference_ids = reference_ds.ids
+        reference_ids = list(reference_ds.ids)
         for name, ds in streams[1:]:
-            if ds.ids != reference_ids:
+            if list(ds.ids) != reference_ids:
                 raise ValueError(
                     f"Cannot iterate over StandardizedOutput: streams have mismatched IDs. "
                     f"'{reference_name}' has {len(reference_ids)} IDs, "
-                    f"'{name}' has {len(ds.ids)} IDs. "
+                    f"'{name}' has {len(ds)} IDs. "
                     f"Iterate over a specific stream instead (e.g., output.streams.{reference_name})."
                 )
 
@@ -1187,9 +1189,8 @@ class StandardizedOutput:
                 single_streams[name] = DataStream(
                     name=ds.name,
                     ids=[ds.ids[idx]],
-                    files=[ds.files[idx]] if ds.files else [],
-                    format=ds.format,
-                    files_contain_wildcards=ds.files_contain_wildcards
+                    files=[ds.files[idx]] if len(ds.files) > idx else [],
+                    format=ds.format
                 )
             single_streams["output_folder"] = self.output_folder
             yield StandardizedOutput(single_streams)
@@ -1274,7 +1275,8 @@ class StandardizedOutput:
             result.append(f"    format: {ds.format}")
             result.append(f"    items: {len(ds)}")
             result.append(f"    map_table: '{make_relative_path(ds.map_table) if ds.map_table else ''}'")
-            result.append(f"    files_contain_wildcards: {ds.files_contain_wildcards}")
+            if ds.has_patterns():
+                result.append(f"    has_patterns: True")
             if ds.metadata:
                 meta_str = ", ".join(f"{k}={v}" for k, v in ds.metadata.items())
                 result.append(f"    metadata: {meta_str}")

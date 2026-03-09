@@ -22,6 +22,7 @@ from pathlib import Path
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.pdb_parser import get_protein_sequence, parse_pdb_file
+from biopipelines.id_patterns import expand_ids, contains_pattern, expand_file_pattern
 
 
 def convert_cif_to_pdb(cif_content: str) -> str:
@@ -930,14 +931,14 @@ def download_from_rcsb(pdb_id: str, custom_id: str, convert: Optional[str], biol
 
 
 def resolve_upstream_file(pdb_id: str, upstream_files: List[str],
-                         files_contain_wildcards: bool) -> Optional[str]:
+                         files_contain_wildcards: bool = False) -> Optional[str]:
     """
     Resolve the source file for a structure from upstream tool output.
 
     Args:
         pdb_id: The structure ID to resolve
         upstream_files: List of file paths from the upstream tool
-        files_contain_wildcards: Whether the paths contain glob patterns
+        files_contain_wildcards: Deprecated, ignored. Wildcards detected from '*' in paths.
 
     Returns:
         Resolved file path, or None if not found
@@ -947,7 +948,9 @@ def resolve_upstream_file(pdb_id: str, upstream_files: List[str],
     if not upstream_files:
         return None
 
-    if files_contain_wildcards:
+    # Detect wildcards by checking for '*' in file paths
+    has_wildcards = any('*' in f for f in upstream_files)
+    if has_wildcards:
         # Try each pattern
         for pattern in upstream_files:
             expanded = glob_module.glob(pattern)
@@ -990,8 +993,10 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     Returns:
         Number of failed fetches
     """
-    pdb_ids = config_data['pdb_ids']
-    custom_ids = config_data.get('custom_ids', pdb_ids)
+    raw_pdb_ids = config_data['pdb_ids']
+    pdb_ids = expand_ids(raw_pdb_ids) if any(contains_pattern(s) for s in raw_pdb_ids) else raw_pdb_ids
+    raw_custom_ids = config_data.get('custom_ids', raw_pdb_ids)
+    custom_ids = expand_ids(raw_custom_ids) if any(contains_pattern(s) for s in raw_custom_ids) else raw_custom_ids
     convert = config_data.get('convert')  # May be None (keep whatever format is found)
     local_folder = config_data.get('local_folder')
     repo_pdbs_folder = config_data['repo_pdbs_folder']
@@ -1007,8 +1012,14 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     operations = config_data.get('operations', [])
     chain = config_data.get('chain', 'longest')
     from_upstream = config_data.get('from_upstream', False)
-    upstream_files = config_data.get('upstream_files', [])
-    upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)
+    raw_upstream_files = config_data.get('upstream_files', [])
+    if raw_upstream_files and len(raw_upstream_files) == 1 and '<id>' in raw_upstream_files[0]:
+        upstream_files = [expand_file_pattern(raw_upstream_files[0], eid) for eid in pdb_ids]
+    elif raw_upstream_files and any(contains_pattern(s) for s in raw_upstream_files):
+        upstream_files = expand_ids(raw_upstream_files)
+    else:
+        upstream_files = raw_upstream_files
+    upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)  # Legacy, ignored
 
     if from_upstream:
         print(f"Processing {len(pdb_ids)} structures from upstream tool")

@@ -1,0 +1,49 @@
+# BioPipelines Configuration (Supplementary Information)
+# Adapt this file to your HPC cluster before running pipelines.
+
+folders:
+  base:
+    home: "/home/<username>"
+    data: "<home>/data"                    # where tool repositories are installed
+    scratch: "/scratch/<username>"
+    group: "/shares/your_group"            # shared group storage
+    user: "<group>/<username>"
+    biopipelines: "<cwd>"                  # auto-set to repository root
+    biopipelines_output: "<user>/BioPipelines"
+
+  infrastructure:
+    HelpScripts: "<biopipelines>/HelpScripts"
+    PDBs: "<biopipelines>/PDBs"
+    Ligands: "<biopipelines>/Ligands"
+    Sequences: "<biopipelines>/Sequences"
+    Tables: "<biopipelines>/Tables"
+    cache: "<group>/cache"
+    containers: "<group>/containers"
+
+  # Tool installation paths — point to where each tool is cloned/installed
+  repositories:
+    RFdiffusion: "<data>/RFdiffusion"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    LigandMPNN: "<data>/LigandMPNN"
+    AlphaFold: "<data>/localcolabfold"
+    Boltz: "<data>/boltz"
+    # ... add additional tools as needed
+
+# Conda/mamba environment names for each tool
+environments:
+  RFdiffusion: "SE3nv"
+  ProteinMPNN: "SE3nv"
+  LigandMPNN: "ligandmpnn_env"
+  AlphaFold: "biopipelines"
+  Boltz2: "Boltz2Env"
+  # ... add additional tools as needed
+
+# Cluster settings — modify for your HPC system
+cluster:
+  emails:
+    your_username: "your.email@institution.edu"
+  env_manager: "mamba"            # "mamba" or "conda"
+  container_executor: "apptainer" # "apptainer" or "singularity"
+  slurm_modules:                  # modules loaded in SLURM scripts
+    - "miniforge3"
+    - "apptainer"

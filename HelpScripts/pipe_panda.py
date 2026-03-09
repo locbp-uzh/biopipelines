@@ -19,6 +19,10 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional
 
+# Import unified I/O utilities for runtime DataStream expansion
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
+
 
 def validate_expression(expr: str) -> None:
     """
@@ -454,6 +458,27 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
         return df
 
 
+def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str],
+                                     id_remap: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, str]]:
+    """Build {stream_name: {id: file_path}} from saved DataStream JSONs.
+
+    Args:
+        stream_jsons: {stream_name: json_path} from config
+        id_remap: Optional mapping from pattern ID to remapped ID (id_map_forward values)
+
+    Returns:
+        file_map dict ready for extract_pool_data_for_filtered_ids
+    """
+    file_map = {}
+    for stream_name, json_path in stream_jsons.items():
+        ds = load_datastream(json_path)
+        file_map[stream_name] = {}
+        for sid, fpath in iterate_files(ds):
+            mapped_id = id_remap.get(sid, sid) if id_remap else sid
+            file_map[stream_name][mapped_id] = fpath
+    return file_map
+
+
 def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str,
                                         output_folder: str,
                                         rename_map: Optional[Dict[str, str]] = None,
@@ -708,7 +733,7 @@ def filter_and_copy_pool_tables(
                 continue
 
             # Load the pool table
-            pool_df = pd.read_csv(table_path)
+            pool_df = pd.read_csv(table_path, keep_default_na=False, na_values=['NA', 'N/A', '#N/A'])
 
             if 'id' not in pool_df.columns:
                 print(f"  Warning: Table {table_name} has no 'id' column, skipping")
@@ -804,7 +829,11 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
     use_pool_mode = config_data.get('use_pool_mode', False)
     pool_folders = config_data.get('pool_folders', [])
-    pool_file_maps = config_data.get('pool_file_maps', [])
+    pool_stream_jsons = config_data.get('pool_stream_jsons', [])
+    # Build file maps at runtime by expanding DataStream patterns
+    pool_file_maps = []
+    for stream_jsons in pool_stream_jsons:
+        pool_file_maps.append(build_file_map_from_stream_jsons(stream_jsons))
     pool_table_maps = config_data.get('pool_table_maps', [])
     id_map_forward = config_data.get('id_map_forward', {})
     rename = config_data.get('rename')
@@ -824,7 +853,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
             raise FileNotFoundError(f"Input file not found: {csv_path}")
 
         print(f"Loading: {csv_path}")
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, keep_default_na=False, na_values=['NA', 'N/A', '#N/A'])
         print(f"  Shape: {df.shape}")
         print(f"  Columns: {list(df.columns)}")
         dataframes.append(df)

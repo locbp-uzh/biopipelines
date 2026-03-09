@@ -520,20 +520,41 @@ def predict_output_ids_with_provenance(
     if not axes_info:
         return [bundled_name], {}
 
-    # If no iterated axes, return single bundled name
+    # If no iterated axes, return single ID from unique bundle IDs
     if not iterated_axes:
         provenance = {}
+        all_unique_parts = []
+        seen_all = set()
         for name, ids in pure_bundle_axes:
             bundled_value = "+".join(ids)
             provenance[name] = [bundled_value]
             if len(ids) > 1:
                 for i, bid in enumerate(ids, start=1):
                     provenance[f"{name}.{i}"] = [bid]
-        return [bundled_name], provenance
+            for bid in ids:
+                if bid not in seen_all:
+                    seen_all.add(bid)
+                    all_unique_parts.append(bid)
+        output_name = "+".join(all_unique_parts) if all_unique_parts else bundled_name
+        return [output_name], provenance
 
-    # If single iterated axis, return its IDs directly (no join needed)
+    # Build prefix from pure bundle axes (unique IDs only, order-preserving)
+    bundle_prefix_parts = []
+    for _, bundle_ids in pure_bundle_axes:
+        seen_b = set()
+        for bid in bundle_ids:
+            if bid not in seen_b:
+                seen_b.add(bid)
+                bundle_prefix_parts.append(bid)
+    bundle_prefix = "+".join(bundle_prefix_parts) if bundle_prefix_parts else ""
+
+    # If single iterated axis, return its IDs (with bundle prefix if any)
     if len(iterated_axes) == 1:
         iter_name, iter_ids = iterated_axes[0]
+        if bundle_prefix:
+            output_ids = [f"{bundle_prefix}+{iid}" for iid in iter_ids]
+        else:
+            output_ids = list(iter_ids)
         provenance = {iter_name: list(iter_ids)}
         # Add pure bundle axes: repeat a joined representation for every output
         for bundle_name, bundle_ids in pure_bundle_axes:
@@ -542,7 +563,7 @@ def predict_output_ids_with_provenance(
             if len(bundle_ids) > 1:
                 for i, bid in enumerate(bundle_ids, start=1):
                     provenance[f"{bundle_name}.{i}"] = [bid] * len(iter_ids)
-        return list(iter_ids), provenance
+        return output_ids, provenance
 
     # Multiple iterated axes: always full cartesian product, no shortcuts
     # Start with first axis
@@ -561,6 +582,10 @@ def predict_output_ids_with_provenance(
                 new_provenance[axis_name].append(new_id)
         output_ids = new_ids
         provenance = new_provenance
+
+    # Prepend bundle prefix to output IDs
+    if bundle_prefix:
+        output_ids = [f"{bundle_prefix}+{oid}" for oid in output_ids]
 
     # Add pure bundle axes: repeat a joined representation for every output
     for bundle_name, bundle_ids in pure_bundle_axes:
@@ -631,12 +656,24 @@ def predict_single_output_id(
         )
         → "prot1+lig2"
     """
+    # Collect unique IDs from pure bundle axes (prefix)
+    bundle_parts = []
+    seen_bundle = set()
+    for name, (mode, all_ids, idx) in axis_selections.items():
+        if mode == "bundle" and idx is None:
+            for bid in all_ids:
+                if bid not in seen_bundle:
+                    seen_bundle.add(bid)
+                    bundle_parts.append(bid)
+
     # Collect selected IDs from iterated axes (in order)
-    parts = []
+    iter_parts = []
     for name, (mode, all_ids, idx) in axis_selections.items():
         if mode == "each" or idx is not None:
             selected_idx = idx if idx is not None else 0
-            parts.append(all_ids[selected_idx])
+            iter_parts.append(all_ids[selected_idx])
+
+    parts = bundle_parts + iter_parts
 
     if not parts:
         return bundled_name
@@ -685,3 +722,30 @@ def generate_multiplied_ids(
         provenance[input_stream_name] = parent_ids
 
     return output_ids, provenance
+
+
+def generate_multiplied_ids_pattern(
+    input_ids: List[str],
+    suffix_pattern: str,
+    input_stream_name: str = ""
+) -> List[str]:
+    """
+    Compose patterns: append suffix pattern to each input ID.
+
+    Returns pattern-based IDs (not expanded).
+
+    Args:
+        input_ids: Parent IDs (may contain patterns, e.g., ["5HG6_<0..4>"])
+        suffix_pattern: Pattern suffix (e.g., "<1..3>" or "<42A 42V>")
+        input_stream_name: Unused here but kept for API consistency
+
+    Returns:
+        Pattern-based IDs (e.g., ["5HG6_<0..4>_<1..3>"])
+
+    Example:
+        generate_multiplied_ids_pattern(
+            ["5HG6_<0..4>"], "<1..3>"
+        )
+        -> ["5HG6_<0..4>_<1..3>"]
+    """
+    return [f"{parent}_{suffix_pattern}" for parent in input_ids]

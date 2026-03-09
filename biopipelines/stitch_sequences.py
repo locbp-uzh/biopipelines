@@ -247,14 +247,14 @@ echo "=== StitchSequences ready ==="
                     "type": "tool_output",
                     "sequences_file": source.map_table,
                     "source_name": "DataStream",
-                    "sequence_ids": source.ids or []
+                    "sequence_ids": list(source.ids) or []
                 }
             elif source.files:
                 return {
                     "type": "tool_output",
                     "sequences_file": source.files[0],
                     "source_name": "DataStream",
-                    "sequence_ids": source.ids or []
+                    "sequence_ids": list(source.ids) or []
                 }
             else:
                 raise ValueError(f"{name}: DataStream has no files or map_table")
@@ -278,13 +278,13 @@ echo "=== StitchSequences ready ==="
                 "type": "tool_output",
                 "sequences_file": sequences_file,
                 "source_name": source.__class__.__name__,
-                "sequence_ids": source.streams.sequences.ids if source.streams.sequences else []
+                "sequence_ids": list(source.streams.sequences.ids) if source.streams.sequences else []
             }
 
             # Include structure files if available (for PDB residue number mapping)
             if source.streams.structures and len(source.streams.structures) > 0:
-                result["structure_files"] = source.streams.structures.files
-                result["structure_ids"] = source.streams.structures.ids or []
+                result["structure_files"] = list(source.streams.structures.files)
+                result["structure_ids"] = list(source.streams.structures.ids) or []
 
             return result
 
@@ -461,7 +461,7 @@ fi
         elif isinstance(self.template, list):
             template_ids = [f"seq_{i+1}" for i in range(len(self.template))]
         elif self.template_stream:
-            template_ids = self.template_stream.ids or ["seq"]
+            template_ids = list(self.template_stream.ids) or ["seq"]
         else:
             template_ids = ["seq"]
 
@@ -500,17 +500,17 @@ fi
         sub_ids_list = []
         for options in self.substitutions.values():
             if isinstance(options, StandardizedOutput):
-                sub_ids_list.append(options.streams.sequences.ids if options.streams.sequences else [])
+                sub_ids_list.append(list(options.streams.sequences.ids) if options.streams.sequences else [])
             elif isinstance(options, DataStream):
-                sub_ids_list.append(options.ids or [])
+                sub_ids_list.append(list(options.ids) or [])
 
         # Get sequence_ids from each indel source
         indel_ids_list = []
         for options in self.indels.values():
             if isinstance(options, StandardizedOutput):
-                indel_ids_list.append(options.streams.sequences.ids if options.streams.sequences else [])
+                indel_ids_list.append(list(options.streams.sequences.ids) if options.streams.sequences else [])
             elif isinstance(options, DataStream):
-                indel_ids_list.append(options.ids or [])
+                indel_ids_list.append(list(options.ids) or [])
 
         predicted_ids = []
         for template_id in template_ids:

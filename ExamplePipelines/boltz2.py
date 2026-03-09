@@ -2,6 +2,8 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
+# tested: 
+
 from biopipelines.pipeline import *
 from biopipelines.boltz2 import Boltz2
 from biopipelines.combinatorics import Bundle, Each
@@ -11,7 +13,7 @@ with Pipeline(project="Examples",
               description="Boltz2 with various inputs"):
 
     Resources(gpu="any",
-              time="4:00:00",
+              time="24:00:00",
               memory="16GB")
 
     # =========================================================================
@@ -213,29 +215,36 @@ with Pipeline(project="Examples",
     # DNA examples
     # =========================================================================
 
-    # 17: DNA only - predict structure of a DNA duplex
+    # 17: Double-stranded DNA - predict structure of a DNA duplex
+    # dsDNA emits two chains (Boltz2 generates the reverse complement internally)
     Suffix("17")
     dna_strand = Sequence("ACGTACGTACGTACGT", type="dna", ids="DNA_strand")
     boltz_dna = Boltz2(
-        dna=dna_strand
+        dsDNA=dna_strand
     )
 
-    # 18: DNA + ligand - predict binding of a small molecule to DNA
+    # 18: Single-stranded DNA - predict structure of a single DNA strand
     Suffix("18")
+    boltz_ssdna = Boltz2(
+        ssDNA=dna_strand
+    )
+
+    # 19: dsDNA + ligand - predict binding of a small molecule to DNA
+    Suffix("19")
     dna_target = Sequence("AATTAATTAATTAATT", type="dna", ids="DNA_target")
     daunorubicin = Ligand("daunorubicin")
     boltz_dna_ligand = Boltz2(
-        dna=dna_target,
+        dsDNA=dna_target,
         ligands=daunorubicin
     )
 
-    # 19: Protein + DNA + ligand - three-axis combinatorics
-    Suffix("19")
-    # With 2 proteins, 1 DNA, and 2 ligands (all Each): generates 4 predictions
+    # 20: Protein + dsDNA + ligand - three-axis combinatorics
+    Suffix("20")
+    # With 2 proteins, 1 dsDNA, and 2 ligands (all Each): generates 4 predictions
     # ProteinA_DNA_target_aspirin, ProteinA_DNA_target_caffeine,
     # ProteinB_DNA_target_aspirin, ProteinB_DNA_target_caffeine
     boltz_three_axis = Boltz2(
         proteins=Each(protein_a, protein_b),
-        dna=dna_target,
+        dsDNA=dna_target,
         ligands=Each(Ligand("aspirin"), Ligand("caffeine"))
     )

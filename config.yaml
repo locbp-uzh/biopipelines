@@ -106,7 +106,7 @@ environments:
   # Data management
   Panda: "biopipelines"
   ExtractMetrics: "biopipelines"
-  SelectionEditor: "ProteinEnv"
+  Selection: "ProteinEnv"
 
   # Utilities
   Load: "biopipelines"
@@ -180,6 +180,8 @@ renderers:
     tiff: Renderers/images.py
     webp: Renderers/images.py
     plots: Renderers/plots.py
+    fasta: Renderers/fasta.py
+    fa: Renderers/fasta.py
     _default: Renderers/streams.py
   tables:
     _default: Renderers/tables.py

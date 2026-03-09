@@ -6,16 +6,25 @@
   - [Two-Phase Execution](#two-phase-execution)
   - [Core Classes](#core-classes)
   - [Data Flow](#data-flow)
+- [IDs: Configuration Time vs Execution Time](#ids-configuration-time-vs-execution-time)
+  - [ID Patterns](#id-patterns)
+  - [Lazy IDs](#lazy-ids)
+  - [The Rule](#the-rule)
+  - [How to Iterate Structures in Generated Bash](#how-to-iterate-structures-in-generated-bash)
+  - [How to Resolve a Single File](#how-to-resolve-a-single-file)
+  - [Passing IDs to HelpScripts](#passing-ids-to-helpscripts)
 - [Tool Development](#tool-development)
   - [Creating a Tool](#creating-a-tool)
   - [Required Methods](#required-methods)
   - [Path Descriptors](#path-descriptors)
   - [Script Generation](#script-generation)
   - [Output Prediction](#output-prediction)
+    - [File Templates with \<id\>](#file-templates-with-id)
 - [HelpScript Development](#helpscript-development)
-  - [pipe_biopipelines_io Module](#pipe_biopipelines_io-module)
+  - [biopipelines_io Module](#biopipelines_io-module)
   - [pdb_parser Module](#pdb_parser-module)
   - [Table References](#table-references)
+  - [Error Handling](#error-handling)
 - [ID Generation and Provenance](#id-generation-and-provenance)
   - [Output ID Rules](#output-id-rules)
   - [Provenance Columns](#provenance-columns)
@@ -33,8 +42,8 @@
 
 | Phase | Location | What Happens |
 |-------|----------|--------------|
-| **configuration time** | biopipelines/ | Python generates bash scripts, predicts outputs |
-| **execution time** | HelpScripts/ | Bash scripts execute, `pipe_*.py` scripts run |
+| **Configuration time** | `biopipelines/` | Python generates bash scripts, predicts outputs |
+| **Execution time** | `HelpScripts/` | Bash scripts execute, `pipe_*.py` scripts run |
 
 Tools never execute computations directly. They:
 1. Validate parameters
@@ -43,7 +52,7 @@ Tools never execute computations directly. They:
 
 ### Core Classes
 
-**BaseConfig** (`base_config.py`) - Abstract base for all tools:
+**BaseConfig** (`base_config.py`) — Abstract base for all tools:
 ```python
 class MyTool(BaseConfig):
     TOOL_NAME = "MyTool"
@@ -54,7 +63,7 @@ class MyTool(BaseConfig):
     def get_output_files(self): ...
 ```
 
-**DataStream** (`datastream.py`) - Unified container for files and IDs:
+**DataStream** (`datastream.py`) — Unified container for files and IDs:
 ```python
 DataStream(
     name="structures",
@@ -66,12 +75,12 @@ DataStream(
 ```
 
 DataStream attributes:
-- `ids` - List of identifiers
-- `files` - List of file paths (may be empty for value-based formats)
-- `map_table` - CSV with additional metadata
-- `format` - Data format (pdb, cif, fasta, csv, smiles, etc.)
+- `ids` — List of identifiers (may contain compact patterns)
+- `files` — List of file paths (may be empty for value-based formats)
+- `map_table` — CSV with additional metadata
+- `format` — Data format (pdb, cif, fasta, csv, smiles, etc.)
 
-**TableInfo** (`base_config.py`) - Metadata for CSV outputs:
+**TableInfo** (`base_config.py`) — Metadata for CSV outputs:
 ```python
 TableInfo(
     name="results",
@@ -82,7 +91,7 @@ TableInfo(
 )
 ```
 
-**StandardizedOutput** (`base_config.py`) - Tool output wrapper:
+**StandardizedOutput** (`base_config.py`) — Tool output wrapper:
 ```python
 output.structures  # DataStream
 output.sequences   # DataStream
@@ -114,6 +123,149 @@ mpnn = ProteinMPNN(structures=rfd, num_sequences=2)
 
 ---
 
+## IDs: Configuration Time vs Execution Time
+
+### ID Patterns
+
+DataStream IDs can be stored in compact pattern form instead of listing every ID explicitly:
+
+| Pattern | Meaning | Expansion |
+|---------|---------|-----------|
+| `prot_<0..2>` | Numeric range | `prot_0`, `prot_1`, `prot_2` |
+| `<A B C>` | Enumeration | `A`, `B`, `C` |
+| `prot_<N><S A L K>` | Deterministic prefix + lazy suffix | See below |
+
+The `<..>` angle-bracket patterns are **deterministic** — they can be fully expanded at configuration time.
+
+### Lazy IDs
+
+Bracket `[...]` segments mark parts of an ID that depend on runtime data and **cannot be expanded at configuration time**:
+
+```
+prot[_<N><S A L K>]
+```
+
+Here `prot` is the deterministic prefix, and `[_<N><S A L K>]` is a lazy suffix whose actual values come from an upstream tool's output (which doesn't exist yet at config time). Lazy IDs expand at runtime by matching patterns against IDs found in the DataStream's `map_table` CSV.
+
+At configuration time, `ids_expanded` on a lazy DataStream returns only the deterministic prefix:
+```python
+ds.ids_expanded  # → ["prot"] (incomplete)
+```
+
+At execution time (with `_runtime_mode=True`, as set by `load_datastream()`), `ids_expanded` reads the full set of IDs from the map_table:
+```python
+ds = load_datastream("structures.json")
+ds.ids_expanded  # → ["prot_1S", "prot_2A", "prot_3L", ...] (complete)
+```
+
+### The Rule
+
+**Never call `ids_expanded` or `files_expanded` at configuration time to generate per-ID bash commands.** This breaks when the DataStream has lazy patterns, because the full ID list doesn't exist yet.
+
+Instead:
+- **Serialize the DataStream** to JSON via `save_json()` at config time
+- **Expand IDs at runtime** inside the generated bash script using `Resolve.stream_ids()` or inside HelpScripts using `load_datastream()` + `ids_expanded` / `iterate_files()`
+
+### How to Iterate Structures in Generated Bash
+
+Use `Resolve.stream_ids()` to get a bash expression that prints all expanded IDs at runtime, and `resolve_stream_item` (sourced by `activate_environment()`) to resolve each ID to its file path:
+
+```python
+from .biopipelines_io import Resolve
+
+def generate_script(self, script_path):
+    self.structures_stream.save_json(self.structures_json)
+
+    script = "#!/bin/bash\n"
+    script += self.activate_environment()  # sources resolve_stream_item.sh
+    script += f"""
+for struct_id in {Resolve.stream_ids(self.structures_json)}; do
+    PDB_FILE=$(resolve_stream_item "{self.structures_json}" "$struct_id")
+    echo "Processing $struct_id: $PDB_FILE"
+    python run.py --pdb "$PDB_FILE"
+done
+"""
+    return script
+```
+
+This generates bash like:
+```bash
+for struct_id in $(python "/path/to/resolve_stream_ids.py" "/path/to/structures.json"); do
+    PDB_FILE=$(resolve_stream_item "/path/to/structures.json" "$struct_id")
+    ...
+done
+```
+
+The loop works correctly whether the DataStream has literal IDs, deterministic patterns, or lazy patterns.
+
+#### Using `eval` for pre-formatted argument variables
+
+When a HelpScript outputs a pre-formatted command-line fragment with embedded quotes (e.g. `--fixed_residues "A10 A11 A12"`), storing it in a bash variable and expanding it with `$VAR` does **not** interpret the embedded quotes — bash treats them as literal characters and word-splits on spaces. Use `eval` so the shell re-parses the line and respects the embedded quotes:
+
+```python
+script += f"""
+    OPTIONS=$(python helper.py "{self.config_json}" "$struct_id")
+    eval python run.py --pdb '"$PDB_FILE"' $OPTIONS
+"""
+```
+
+Note that `$PDB_FILE` is wrapped in `'"..."'` (single-quoted double quotes) so `eval` preserves the quoting around the variable expansion. Only use `eval` when you need embedded quotes interpreted; for simple arguments, plain `python run.py --flag "$VAR"` is preferred.
+
+### How to Resolve a Single File
+
+When a tool processes one fixed input (not iterating over all IDs), use `Resolve.stream_item()`:
+
+```python
+# At config time — produces a bash expression, not the actual path
+first_id = self.structures_stream.ids[0]
+script += f'INPUT_PDB={Resolve.stream_item(self.structures_json, first_id)}\n'
+```
+
+This generates:
+```bash
+INPUT_PDB=$(resolve_stream_item "/path/structures.json" "prot_1")
+```
+
+Note: `ids[0]` (not `ids_expanded[0]`) is safe here because we only need the compact pattern, not the expanded list.
+
+### Passing IDs to HelpScripts
+
+Don't build per-ID data structures at config time. Instead, pass the DataStream JSON path to HelpScripts and let them expand IDs at runtime:
+
+```python
+# BAD — breaks with lazy IDs
+id_map = {}
+for sid, path in zip(ds.ids_expanded, ds.files_expanded):
+    id_map[os.path.basename(path)] = sid
+
+# GOOD — HelpScript builds the map at runtime
+script += f'python {self.helper_py} --ds-json "{self.structures_json}"\n'
+```
+
+In the HelpScript:
+```python
+from biopipelines.biopipelines_io import load_datastream, iterate_files
+
+ds = load_datastream(sys.argv[1])
+for struct_id, pdb_path in iterate_files(ds):
+    process(struct_id, pdb_path)
+```
+
+### Summary Table
+
+| Operation | Config time | Execution time |
+|-----------|------------|----------------|
+| Store DataStream | `ds.save_json(path)` | — |
+| Load DataStream | — | `load_datastream(path)` |
+| Get all IDs | `ds.ids` (compact patterns) | `ds.ids_expanded` (full list) |
+| Iterate in bash | `Resolve.stream_ids(json)` | — |
+| Resolve one file in bash | `Resolve.stream_item(json, id)` | — |
+| Iterate in Python | — | `iterate_files(ds)` |
+| Resolve one file in Python | — | `resolve_file(ds, id)` |
+| Build per-ID data | **Don't** | Do it in HelpScripts |
+
+---
+
 ## Tool Development
 
 ### Creating a Tool
@@ -133,12 +285,16 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from biopipelines_io import Resolve
+
+> **Why the dual import?** Tools are normally imported as part of the `biopipelines` package (relative imports via `.base_config`, etc.). The `except ImportError` fallback adds the module's own directory to `sys.path` so the same file can also be imported standalone — useful for debugging or running a tool file directly. Always include this pattern in new tool files.
 
 
 class MyTool(BaseConfig):
@@ -146,6 +302,7 @@ class MyTool(BaseConfig):
 
     # Path descriptors (lazy evaluation)
     results_csv = Path(lambda self: os.path.join(self.output_folder, "results.csv"))
+    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
     helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_my_tool.py"))
 
     def __init__(self,
@@ -155,7 +312,7 @@ class MyTool(BaseConfig):
                  **kwargs):
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
-            self.structures_stream = structures.structures
+            self.structures_stream = structures.streams.structures
         elif isinstance(structures, DataStream):
             self.structures_stream = structures
         else:
@@ -176,13 +333,16 @@ class MyTool(BaseConfig):
         self.folders = pipeline_folders
 
     def generate_script(self, script_path: str) -> str:
+        # Serialize DataStream for runtime access
+        self.structures_stream.save_json(self.structures_json)
+
         script_content = "#!/bin/bash\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += f"""
 echo "Running MyTool"
 python {self.helper_py} \\
-    --input "{','.join(self.structures_stream.files)}" \\
+    --ds-json "{self.structures_json}" \\
     --param1 "{self.param1}" \\
     --param2 {self.param2} \\
     --output "{self.results_csv}"
@@ -234,16 +394,28 @@ class MyTool(BaseConfig):
 
 ### Script Generation
 
-Use provided helpers:
+Use provided helpers and runtime resolution:
 
 ```python
 def generate_script(self, script_path: str) -> str:
+    # Save DataStream for runtime access
+    self.structures_stream.save_json(self.structures_json)
+
     script_content = "#!/bin/bash\n"
     script_content += self.generate_completion_check_header()  # Skip if completed
-    script_content += self.activate_environment()              # Activate conda
-    script_content += """
-# Your commands here
-python script.py --args
+    script_content += self.activate_environment()              # Activate conda + source resolve_stream_item.sh
+
+    # Option A: Pass DataStream to HelpScript (preferred for complex processing)
+    script_content += f"""
+python {self.helper_py} --ds-json "{self.structures_json}" --output "{self.results_csv}"
+"""
+
+    # Option B: Bash for-loop (for simple per-structure commands)
+    script_content += f"""
+for struct_id in {Resolve.stream_ids(self.structures_json)}; do
+    PDB_FILE=$(resolve_stream_item "{self.structures_json}" "$struct_id")
+    python external_tool.py --input "$PDB_FILE" --output "{self.output_folder}/$struct_id.out"
+done
 """
     script_content += self.generate_completion_check_footer()  # Check outputs
     return script_content
@@ -251,33 +423,37 @@ python script.py --args
 
 ### Output Prediction
 
-Return standardized output structure:
+Return standardized output structure. Use compact `ids` patterns (not expanded) and `<id>` file templates:
+
+#### File Templates with \<id\>
+
+`<id>` is a placeholder in the `files` list that represents all output files at once. Instead of listing one file per ID, you provide a single-element list like `["<id>.pdb"]`. At expansion time, `<id>` is replaced with each expanded ID. For example:
+
+- `files=["<id>.pdb"]` + `ids=["prot_<0..2>"]` → `prot_0.pdb`, `prot_1.pdb`, `prot_2.pdb`
+
+This prevents a length-mismatch validation error (1 file vs N ids) and is **required** when inputs may carry lazy IDs — building per-ID file paths with f-strings embeds bracket patterns into paths, causing `LazyPatternError`. The implementation lives in `datastream.py:_has_file_template()` (detects the pattern) and `id_patterns.py:expand_file_pattern()` (performs the substitution).
 
 ```python
 def get_output_files(self) -> Dict[str, Any]:
-    # Predict file paths
-    structure_files = [
-        os.path.join(self.output_folder, f"{sid}.pdb")
-        for sid in self.predicted_ids
-    ]
+    # Keep IDs compact — don't expand
+    structure_ids = self.structures_stream.ids
+    structure_files = [os.path.join(self.output_folder, "<id>.pdb")]
 
-    # Create DataStreams
     structures = DataStream(
         name="structures",
-        ids=self.predicted_ids,
+        ids=structure_ids,
         files=structure_files,
         map_table=self.structures_csv,
         format="pdb"
     )
 
-    # Create tables
     tables = {
         "results": TableInfo(
             name="results",
             path=self.results_csv,
             columns=["id", "score"],
             description="Analysis results",
-            count=len(self.predicted_ids)
+            count=len(self.structures_stream)
         )
     }
 
@@ -290,18 +466,31 @@ def get_output_files(self) -> Dict[str, Any]:
     }
 ```
 
+`get_output_files()` returns a plain dict, **not** a `StandardizedOutput`. The wrapping into `StandardizedOutput` happens automatically in the `ToolOutput.output` property (`base_config.py:1768`). This is by design:
+
+- Pipeline infrastructure (`pipeline.py`, `base_config.py:get_id_provenance()`) iterates the raw dict with `.items()` and `isinstance()` checks before any user accesses it — dicts are natural for this.
+- `StandardizedOutput.__init__` takes a dict and destructures it into `.streams`, `.tables`, etc. — returning `StandardizedOutput` from tools would just add an object whose constructor immediately unpacks it back.
+- Keeps tools simple: tool authors build plain dicts, the framework handles the user-facing API.
+
+**Rule:** tool authors return dicts; consumers get `StandardizedOutput` with dot-notation (e.g., `tool.output.structures`).
+
 ---
 
 ## HelpScript Development
 
 HelpScripts (`HelpScripts/pipe_*.py`) execute at execution time. They process data, generate outputs, and communicate results back to the pipeline.
 
-### pipe_biopipelines_io Module
+**Key rule**: HelpScripts must not generate bash code. They process data and write output files (CSV, JSON, FASTA, etc.).
 
-The `pipe_biopipelines_io.py` module provides utilities for reading DataStreams and tables at execution time:
+### biopipelines_io Module
+
+The `biopipelines.biopipelines_io` module provides utilities for reading DataStreams and tables at execution time:
 
 ```python
-from pipe_biopipelines_io import (
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from biopipelines.biopipelines_io import (
     # DataStream utilities
     load_datastream,      # Load DataStream from JSON or dict
     iterate_files,        # Iterate (id, file_path) pairs
@@ -311,11 +500,13 @@ from pipe_biopipelines_io import (
     get_all_values,       # Get all values for an ID
 
     # Table reference utilities
-    load_table,           # Load table from path or DATASHEET_REFERENCE
+    load_table,           # Load table from path or TABLE_REFERENCE
     lookup_table_value,   # Look up value for an ID
     iterate_table_values, # Iterate (id, value) pairs
 )
 ```
+
+> **Why `sys.path.insert`?** HelpScripts run on SLURM nodes where `biopipelines` is not an installed package. The `sys.path.insert(0, ...)` line adds the repository root so that `from biopipelines.biopipelines_io import ...` resolves correctly. This boilerplate is required in every HelpScript that imports from `biopipelines`.
 
 #### DataStream Iteration
 
@@ -324,7 +515,7 @@ For file-based streams (structures, sequences):
 ```python
 ds = load_datastream("/path/to/structures.json")
 
-# Iterate over all files (handles wildcards automatically)
+# Iterate over all files (handles wildcards and lazy patterns)
 for struct_id, struct_file in iterate_files(ds):
     process_structure(struct_id, struct_file)
 
@@ -345,12 +536,14 @@ for comp_id, values in iterate_values(ds, columns=['smiles', 'name']):
 smiles = get_value(ds, "ligand_001", column="smiles")
 ```
 
+`load_datastream()` sets `_runtime_mode=True`, which means `ids_expanded` reads the full set of IDs from the map_table CSV. This is how lazy patterns get resolved at runtime.
+
 ### pdb_parser Module
 
 The `pdb_parser.py` module provides PDB parsing and selection utilities for HelpScripts:
 
 ```python
-from pdb_parser import (
+from biopipelines.pdb_parser import (
     # Data
     Atom,               # NamedTuple: x, y, z, atom_name, res_name, res_num, chain, element
     STANDARD_RESIDUES,  # Set of 20 standard amino acid 3-letter codes
@@ -397,21 +590,30 @@ parse_pymol_ranges("3-45+58-60")  # [(3, 45), (58, 60)]
 format_pymol_ranges([3, 4, 5, 10, 11])  # "3-5+10-11"
 ```
 
+#### Selection format convention
+
+Inter-tool selections (table columns like `within`, `beyond`, `designed`) must use **chain-aware format** (`"A1-50+B10"`) so downstream tools can correctly identify residues. `sele_utils.py` provides the shared conversion functions:
+
+- `sele_to_list(s)` — parse any format (chain-aware, chainless, legacy) → sorted `(chain, resnum)` tuples
+- `chain_aware_sele(residues)` / `list_to_sele(a)` — tuples → compact chain-aware string
+
+Tools that accept user-provided position strings (e.g. `fixed="10-20"`) should include a `chain` parameter (default `"A"`) to fill in missing chain info at runtime. Chainless format (`"1-50+10"`) is acceptable only for tool-internal use (e.g. ProteinMPNN's native jsonl format).
+
 ### Table References
 
 Tools can pass per-structure data (e.g., fixed positions) to HelpScripts via table references. The format is:
 
 ```
-DATASHEET_REFERENCE:/path/to/table.csv:column_name
+TABLE_REFERENCE:/path/to/table.csv:column_name
 ```
 
-Use `pipe_biopipelines_io` to resolve these:
+Use `biopipelines_io` to resolve these:
 
 ```python
-from pipe_biopipelines_io import load_table, lookup_table_value, iterate_table_values
+from biopipelines.biopipelines_io import load_table, lookup_table_value, iterate_table_values
 
 # Parse reference and load table
-table, column = load_table("DATASHEET_REFERENCE:/path/to/positions.csv:within")
+table, column = load_table("TABLE_REFERENCE:/path/to/positions.csv:within")
 
 # Look up value for a specific structure
 positions = lookup_table_value(table, "protein_1", column)
@@ -434,19 +636,19 @@ The lookup handles ID matching automatically:
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from pipe_biopipelines_io import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from biopipelines.biopipelines_io import (
     load_datastream, iterate_files,
     load_table, lookup_table_value
 )
 
 def main():
     structures_json = sys.argv[1]
-    positions_ref = sys.argv[2]  # DATASHEET_REFERENCE:path:column
+    positions_ref = sys.argv[2]  # TABLE_REFERENCE:path:column
     output_csv = sys.argv[3]
 
-    # Load structures
+    # Load structures — ids_expanded works here (runtime mode)
     ds = load_datastream(structures_json)
 
     # Load positions table
@@ -467,6 +669,46 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
+### Error Handling
+
+HelpScripts should handle per-item failures gracefully: skip failures, collect partial results, and report at the end.
+
+**Pattern:** wrap the per-item loop body in `try/except`, accumulate failures, write whatever succeeded, and exit with an error only if everything failed.
+
+```python
+def main():
+    ds = load_datastream(sys.argv[1])
+    output_csv = sys.argv[2]
+
+    results = []
+    failed = []
+
+    for struct_id, struct_file in iterate_files(ds):
+        try:
+            result = process(struct_file)
+            results.append({"id": struct_id, "score": result})
+        except Exception as e:
+            print(f"WARNING: {struct_id} failed: {e}", file=sys.stderr)
+            failed.append(struct_id)
+
+    # Always write partial results (even if some items failed)
+    if results:
+        pd.DataFrame(results).to_csv(output_csv, index=False)
+
+    # Report summary
+    if failed:
+        print(f"Failed {len(failed)}/{len(failed)+len(results)}: {failed}", file=sys.stderr)
+
+    # Exit with error only if ALL items failed
+    if not results:
+        sys.exit(1)
+```
+
+Key points:
+- **Always write partial results** — downstream tools can work with a subset.
+- **Print failure summary to stderr** — it appears in SLURM logs for debugging.
+- **`sys.exit(1)` only if nothing succeeded** — partial success is still useful in a pipeline.
 
 ---
 
@@ -534,9 +776,10 @@ All ID generation uses functions from `combinatorics.py`:
 | Function | Use case |
 |----------|----------|
 | `predict_output_ids_with_provenance()` | Multi-axis tools (Boltz2) at configuration time |
-| `predict_output_ids()` | Same, without provenance (backward compat) |
+| `predict_output_ids()` | Same, without provenance |
 | `predict_single_output_id()` | Single-row ID at execution time (pipe scripts) |
 | `generate_multiplied_ids()` | Multiplier tools (ProteinMPNN, Mutagenesis) |
+| `generate_multiplied_ids_pattern()` | Same, but keeps compact ID patterns |
 
 #### Using `predict_output_ids_with_provenance` (multi-axis tools)
 
@@ -555,17 +798,18 @@ predicted_ids, provenance = predict_output_ids_with_provenance(
 create_map_table(map_path, predicted_ids, files=structure_files, provenance=provenance)
 ```
 
-#### Using `generate_multiplied_ids` (multiplier tools)
+#### Using `generate_multiplied_ids_pattern` (multiplier tools)
+
+Prefer `generate_multiplied_ids_pattern` over `generate_multiplied_ids` to keep IDs compact:
 
 ```python
-from .combinatorics import generate_multiplied_ids
+from .combinatorics import generate_multiplied_ids_pattern
 
-suffixes = [str(i) for i in range(1, self.num_sequences + 1)]
-sequence_ids, provenance = generate_multiplied_ids(
-    self.structures_stream.ids, suffixes,
+suffix_pattern = f"<1..{self.num_sequences}>"
+sequence_ids = generate_multiplied_ids_pattern(
+    self.structures_stream.ids, suffix_pattern,
     input_stream_name="structures"
 )
-# provenance = {"structures": ["struct1", "struct1", ..., "struct2", ...]}
 ```
 
 #### Passing provenance to `create_map_table`
@@ -679,6 +923,10 @@ def configure_inputs(self):
     # File will exist at execution time
 ```
 
+### HelpScripts Don't Write Bash
+
+HelpScripts run Python at execution time. They must produce data outputs (CSV, JSON, FASTA) — never bash scripts. If a tool needs per-structure bash commands, use a `for` loop in the generated script with `Resolve.stream_ids()`.
+
 ---
 
 ## Working with Git
@@ -753,6 +1001,40 @@ with Pipeline("Test", "Debug", "Testing", local_output=True):
     result = MyTool(...)
     print(result)
 ```
+
+#### Testing a HelpScript in Isolation
+
+Create a mock DataStream JSON and run the script directly:
+
+```bash
+# Create mock input
+echo '{"name":"structures","ids":["prot_1","prot_2"],"files":["/tmp/prot_1.pdb","/tmp/prot_2.pdb"],"map_table":"","format":"pdb"}' > /tmp/test_ds.json
+
+# Run the HelpScript
+python HelpScripts/pipe_my_tool.py /tmp/test_ds.json /tmp/output.csv
+
+# Inspect output
+cat /tmp/output.csv
+```
+
+#### Testing Config-Time Logic
+
+Instantiate the tool with `local_output=True` and inspect the generated outputs:
+
+```python
+from biopipelines.pipeline import Pipeline
+from biopipelines.my_tool import MyTool
+
+with Pipeline("Test", "Debug", "Testing", local_output=True):
+    result = MyTool(structures=..., param1="test")
+    # Check predicted output IDs
+    print(result.output.structures.ids)
+    # Read the generated bash script
+    with open(result.script_path) as f:
+        print(f.read())
+```
+
+> **Note:** No automated test suite exists yet; the `tests/` directory is for manual output inspection.
 
 ### Critical Files (rarely need changes)
 

@@ -176,7 +176,6 @@ echo "=== ReMap ready ==="
                     "ids": list(stream.ids),
                     "files": list(stream.files),
                     "map_table": stream.map_table,
-                    "files_contain_wildcards": stream.files_contain_wildcards,
                 }
                 streams_info.append(info)
         return streams_info
@@ -195,7 +194,9 @@ echo "=== ReMap ready ==="
         mapping = {}
 
         if isinstance(onto, str):
-            # String basename: generate numbered IDs from all source streams
+            # String basename: generate pattern-based numbered IDs
+            # Collect unique source IDs preserving compact patterns
+            from . import id_patterns
             all_source_ids = []
             seen = set()
             for stream_info in self.source_streams:
@@ -203,8 +204,32 @@ echo "=== ReMap ready ==="
                     if sid not in seen:
                         all_source_ids.append(sid)
                         seen.add(sid)
-            for i, old_id in enumerate(all_source_ids, start=1):
-                mapping[old_id] = f"{onto}_{i}"
+
+            # Remove expanded children already covered by a parent pattern
+            all_source_ids = id_patterns.dedup_parent_children(all_source_ids)
+
+            has_lazy = any(id_patterns.is_lazy(s) for s in all_source_ids)
+            if has_lazy:
+                # Lazy: can't know count at config time — use <N> marker
+                new_id_pattern = f"{onto}_<N>"
+                for old_id in all_source_ids:
+                    mapping[old_id] = new_id_pattern
+            else:
+                # Compute total count and build a matching pattern
+                total = id_patterns.count_ids(all_source_ids)
+                if total == 1:
+                    mapping[all_source_ids[0]] = f"{onto}_1"
+                else:
+                    new_pattern = f"{onto}_<1..{total}>"
+                    # Map each old pattern to a slice of the new pattern
+                    offset = 1
+                    for old_id in all_source_ids:
+                        n = id_patterns.count_pattern(old_id)
+                        if n == 1:
+                            mapping[old_id] = f"{onto}_{offset}"
+                        else:
+                            mapping[old_id] = f"{onto}_<{offset}..{offset + n - 1}>"
+                        offset += n
             return mapping
 
         if isinstance(onto, list):
@@ -588,7 +613,6 @@ echo "=== ReMap ready ==="
                 files=new_files,
                 map_table=map_table_path,
                 format=fmt,
-                files_contain_wildcards=stream_info.get("files_contain_wildcards", False),
             )
 
         # Build remapped tables

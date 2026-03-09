@@ -13,7 +13,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_multiplied_ids
+    from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
@@ -21,7 +21,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_multiplied_ids
+    from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from biopipelines_io import Resolve
 
 
@@ -80,9 +80,7 @@ echo "=== LigandMPNN installation complete ==="
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"queries.csv"))
     queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"queries.fasta"))
     structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
-    commands_file = Path(lambda self: os.path.join(self.output_folder, "lmpnn_commands.sh"))
-    replacement_script = Path(lambda self: os.path.join(self.output_folder, "lmpnn_positions_replacement.sh"))
-    id_map_json = Path(lambda self: os.path.join(self.output_folder, ".pdb_to_stream_id_map.json"))
+    positions_json = Path(lambda self: os.path.join(self.output_folder, "lmpnn_positions.json"))
 
     missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
 
@@ -90,6 +88,7 @@ echo "=== LigandMPNN installation complete ==="
     fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
     lmpnn_folder = Path(lambda self: os.path.join(self.folders["data"], "LigandMPNN"))
     runtime_positions_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_lmpnn_runtime_positions.py"))
+    resolve_positions_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "resolve_lmpnn_positions.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -98,6 +97,7 @@ echo "=== LigandMPNN installation complete ==="
                  fixed: Union[str, Tuple['TableInfo', str]] = "",
                  redesigned: Union[str, Tuple['TableInfo', str]] = "",
                  design_within: float = 5.0,
+                 chain: str = "A",
                  model: str = "v_32_010",
                  num_batches: int = 1,
                  remove_duplicates: bool = True,
@@ -117,6 +117,7 @@ echo "=== LigandMPNN installation complete ==="
                    - PyMOL selection string: "10-20+30-40"
                    - TableReference: table.column_name
             design_within: Distance in Angstrom from ligand to redesign (fallback if positions not specified)
+            chain: Default chain ID for chainless position input (default "A")
             model: LigandMPNN model version to use
             num_batches: Number of batches to run
             remove_duplicates: Remove duplicate sequences from output (default True)
@@ -143,6 +144,7 @@ echo "=== LigandMPNN installation complete ==="
         self.fixed = fixed
         self.redesigned = redesigned
         self.design_within = design_within
+        self.chain = chain
         self.model = model
         self.num_batches = num_batches
         self.remove_duplicates = remove_duplicates
@@ -183,6 +185,7 @@ echo "=== LigandMPNN installation complete ==="
             f"LIGAND: {self.ligand}",
             f"FIXED: {self.fixed or 'Auto (from table or ligand-based)'}",
             f"REDESIGNED: {self.redesigned or 'Auto (from table or ligand-based)'}",
+            f"CHAIN: {self.chain}",
             f"DESIGN WITHIN: {self.design_within}A",
             f"NUM SEQUENCES: {self.num_sequences}",
             f"NUM BATCHES: {self.num_batches}",
@@ -192,18 +195,9 @@ echo "=== LigandMPNN installation complete ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate LigandMPNN execution script."""
-        import json
 
         # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
         self.structures_stream.save_json(self.structures_json)
-
-        # Write pdb_basename -> stream_id map for runtime ID remapping
-        id_map = {}
-        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
-            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-            id_map[pdb_base] = struct_id
-        with open(self.id_map_json, 'w') as f:
-            json.dump(id_map, f, indent=2)
 
         script_content = "#!/bin/bash\n"
         script_content += "# LigandMPNN execution script\n"
@@ -216,7 +210,7 @@ echo "=== LigandMPNN installation complete ==="
         return script_content
 
     def _generate_script_setup_positions(self) -> str:
-        """Generate the position setup and script modification part."""
+        """Generate the position setup part — produces positions JSON."""
         resolved_fixed = self.fixed if self.fixed else ""
         resolved_redesigned = self.redesigned if self.redesigned else ""
 
@@ -231,6 +225,16 @@ echo "=== LigandMPNN installation complete ==="
         fixed_param = resolved_fixed if resolved_fixed else "-"
         designed_param = resolved_redesigned if resolved_redesigned else "-"
 
+        return f"""echo "Setting up LigandMPNN position constraints"
+
+# Create positions JSON for runtime lookup
+echo "Computing position constraints..."
+python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand}" "{self.design_within}" "{self.positions_json}" "{self.chain}"
+
+"""
+
+    def _generate_script_run_ligandmpnn(self) -> str:
+        """Generate the LigandMPNN execution part of the script."""
         # Build base LigandMPNN options
         base_options = f'--model_type "ligand_mpnn"'
         base_options += f' --checkpoint_ligand_mpnn "./model_params/ligandmpnn_{self.model}_25.pt"'
@@ -239,47 +243,19 @@ echo "=== LigandMPNN installation complete ==="
         base_options += f' --ligand_mpnn_cutoff_for_score "{self.design_within}"'
         base_options += f' --out_folder "{self.output_folder}"'
 
-        # Generate commands for each structure using DataStream IDs
-        # File paths are resolved at runtime via resolve_stream_item
-        commands = []
-        for struct_id in self.structures_stream.ids:
-            commands.append(f'echo "Processing structure for ID: {struct_id}"')
-            commands.append(f'{struct_id}_FILE=$(resolve_stream_item "{self.structures_json}" "{struct_id}")')
-            commands.append(f'python run.py {base_options} --pdb_path "${struct_id}_FILE" {struct_id}_FIXED_OPTION_PLACEHOLDER {struct_id}_REDESIGNED_OPTION_PLACEHOLDER')
-            commands.append("")
+        return f"""echo "Executing LigandMPNN commands..."
+cd {self.lmpnn_folder}
+for struct_id in {Resolve.stream_ids(self.structures_json)}; do
+    echo "Processing structure: $struct_id"
+    PDB_FILE=$(resolve_stream_item "{self.structures_json}" "$struct_id")
 
-        # Write commands file at configuration time (not execution time)
-        os.makedirs(os.path.dirname(self.commands_file), exist_ok=True)
-        with open(self.commands_file, 'w') as f:
-            f.write("#!/bin/bash\n")
-            resolve_sh = os.path.join(self.folders["HelpScripts"], "resolve_stream_item.sh")
-            f.write(f'source "{resolve_sh}"\n')
-            f.write(f"cd {self.lmpnn_folder}\n\n")
-            f.write("# LigandMPNN commands with placeholders - will be replaced by position script\n")
-            f.write(chr(10).join(commands))
-            f.write("\n")
+    # Read position options from JSON
+    POSITIONS=$(python "{self.resolve_positions_py}" "{self.positions_json}" "$struct_id")
+    FIXED_OPTION=$(echo "$POSITIONS" | head -n1)
+    REDESIGNED_OPTION=$(echo "$POSITIONS" | sed -n '2p')
 
-        return f"""echo "Setting up LigandMPNN position constraints"
-# Commands file: {self.commands_file}
-
-# Make the commands file executable
-chmod +x {self.commands_file}
-
-# Use existing HelpScript to create position replacement script
-echo "Creating position replacement script..."
-python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand}" "{self.design_within}" "{self.replacement_script}"
-
-"""
-
-    def _generate_script_run_ligandmpnn(self) -> str:
-        """Generate the LigandMPNN execution part of the script."""
-        return f"""# Run the replacement script on the commands file (not this script)
-echo "Running position replacement script on commands file: {self.commands_file}"
-bash {self.replacement_script} {self.commands_file}
-
-# Now execute the modified commands file
-echo "Executing LigandMPNN commands..."
-bash {self.commands_file}
+    eval python run.py {base_options} --pdb_path '"$PDB_FILE"' $FIXED_OPTION $REDESIGNED_OPTION
+done
 
 """
 
@@ -296,28 +272,22 @@ bash {self.commands_file}
         upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
 
         return f"""echo "Converting FASTA outputs to CSV format"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag}{fill_gaps_flag} --id-map {self.id_map_json} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag}{fill_gaps_flag} --ds-json "{self.structures_json}" --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 
 """
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after LigandMPNN execution."""
-        # Expected FASTA files - one per input structure
-        fasta_files = []
-        fasta_ids = []
-
-        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
-            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-            fasta_path = os.path.join(self.seqs_folder, f"{pdb_base}.fa")
-            fasta_files.append(fasta_path)
-            fasta_ids.append(struct_id)
+        # Expected FASTA files - one per input structure (keep compact/lazy patterns)
+        fasta_ids = self.structures_stream.ids
+        fasta_files = [os.path.join(self.seqs_folder, "<id>.fa")]
 
         # Predict sequence IDs (stream_id + sequence number)
         # Total sequences per structure = num_sequences (batch_size) * num_batches
         total_seqs = self.num_sequences * self.num_batches
-        suffixes = [str(i) for i in range(1, total_seqs + 1)]
-        sequence_ids, provenance = generate_multiplied_ids(
-            self.structures_stream.ids, suffixes,
+        suffix_pattern = f"<1..{total_seqs}>"
+        sequence_ids = generate_multiplied_ids_pattern(
+            self.structures_stream.ids, suffix_pattern,
             input_stream_name="structures"
         )
 
@@ -335,7 +305,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             name="fasta",
             ids=fasta_ids,
             files=fasta_files,
-            format="fasta"
+            format="fasta",
+            metadata={
+                "sequences_per_file": total_seqs,
+                "contains_original": False,
+            }
         )
 
         tables = {
@@ -373,6 +347,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "fixed": self.fixed,
                 "redesigned": self.redesigned,
                 "design_within": self.design_within,
+                "chain": self.chain,
                 "model": self.model,
                 "remove_duplicates": self.remove_duplicates
             }

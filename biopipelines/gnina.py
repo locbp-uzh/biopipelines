@@ -122,6 +122,7 @@ echo "=== GNINA installation complete ==="
     missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
     autobox_ds_json = Path(lambda self: os.path.join(self.output_folder, "autobox_ligand_ds.json"))
     propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
+    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -419,9 +420,18 @@ echo "=== GNINA installation complete ==="
 
         script_content += "\n"
         script_content += self._generate_script_run_gnina()
+        script_content += self._generate_script_update_structures_map()
         script_content += self._generate_missing_table_propagation()
         script_content += self.generate_completion_check_footer()
         return script_content
+
+    def _generate_script_update_structures_map(self) -> str:
+        """Generate script to update structures_map.csv with actual runtime output files."""
+        best_poses_dir = os.path.join(self.output_folder, "best_poses")
+        return f"""echo "Updating structures map with actual output files"
+python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{self.output_folder}" --best-poses-dir "{best_poses_dir}"
+
+"""
 
     def _generate_missing_table_propagation(self) -> str:
         """Generate script section to propagate missing.csv from upstream tools."""
@@ -508,18 +518,15 @@ python {self.helper_py} {self.config_json}
             )
 
         best_poses_dir = os.path.join(self.output_folder, "best_poses")
-        protein_ids = self.structures_stream.ids
-        ligand_ids = self.compounds_stream.ids
+        protein_ids = list(self.structures_stream.ids)
+        ligand_ids = list(self.compounds_stream.ids)
 
         structure_ids = [
             f"{prot}_{lig}"
             for prot in protein_ids
             for lig in ligand_ids
         ]
-        structure_files = [
-            os.path.join(best_poses_dir, f"{sid}_best.pdb")
-            for sid in structure_ids
-        ]
+        structure_files = [os.path.join(best_poses_dir, "<id>_best.pdb")]
         provenance = {
             "structures": [prot for prot in protein_ids for _ in ligand_ids],
             "compounds": [lig for _ in protein_ids for lig in ligand_ids],

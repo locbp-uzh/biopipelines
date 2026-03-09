@@ -56,13 +56,13 @@ def render(stream, output):
     )
 
     # Metadata table (horizontal)
-    meta_headers = ['name', 'format', 'items', 'map_table', 'files_contain_wildcards']
+    meta_headers = ['name', 'format', 'items', 'map_table', 'has_patterns']
     meta_values = [
         html_module.escape(stream.name),
         html_module.escape(stream.format),
         str(len(stream)),
         html_module.escape(rel(stream.map_table) if stream.map_table else ''),
-        str(stream.files_contain_wildcards),
+        str(stream.has_patterns()),
     ]
     if stream.metadata:
         meta_headers.append('metadata')
@@ -82,7 +82,7 @@ def render(stream, output):
     if map_data is not None and len(map_data) > 0:
         parts.append(_render_dataframe(map_data))
     else:
-        items = list(zip(stream.ids, stream.files)) if stream.files else [(iid, "") for iid in stream.ids]
+        items = list(zip(stream.ids_expanded, stream.files_expanded)) if stream.files_expanded else [(iid, "") for iid in stream.ids_expanded]
         n_items = len(items)
         parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
         if n_items <= 4:

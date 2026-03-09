@@ -97,6 +97,7 @@ echo "=== AlphaFold installation complete ==="
     alphafold_confidence_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_confidence.py"))
     alphafold_msas_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py"))
     propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
+    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
 
     def __init__(self,
                  proteins: Union[DataStream, StandardizedOutput],
@@ -181,6 +182,7 @@ echo "=== AlphaFold installation complete ==="
         script_content += self._generate_script_prepare_sequences()
         script_content += self._generate_script_run_alphafold()
         script_content += self._generate_script_extract_best_rank()
+        script_content += self._generate_script_update_structures_map()
         script_content += self._generate_script_extract_confidence()
         script_content += self._generate_script_create_msas_table()
         script_content += self._generate_missing_table_propagation()
@@ -292,6 +294,13 @@ cd - > /dev/null
 
 """
 
+    def _generate_script_update_structures_map(self) -> str:
+        """Generate script to update structures_map.csv with actual runtime output files."""
+        return f"""echo "Updating structures map with actual output files"
+python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{self.output_folder}"
+
+"""
+
     def _generate_script_extract_confidence(self) -> str:
         """Generate script section to extract confidence metrics from JSON files."""
         return f"""echo "Extracting confidence metrics from JSON files"
@@ -336,13 +345,10 @@ fi
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after AlphaFold execution."""
         # Use sequence IDs from input to predict structure files
-        sequence_ids = self.sequences_stream.ids
+        sequence_ids = list(self.sequences_stream.ids)
 
         # Generate structure file paths
-        structure_files = []
-        for seq_id in sequence_ids:
-            pdb_path = os.path.join(self.output_folder, f"{seq_id}.pdb")
-            structure_files.append(pdb_path)
+        structure_files = [os.path.join(self.output_folder, "<id>.pdb")]
 
         # Create map_table for structures
         create_map_table(self.structures_map, sequence_ids, files=structure_files)
@@ -356,16 +362,11 @@ fi
         )
 
         # MSA files (AlphaFold generates .a3m files)
-        msa_ids = []
-        msa_files = []
-        for seq_id in sequence_ids:
-            msa_file = os.path.join(self.msas_folder, f"{seq_id}.a3m")
-            msa_ids.append(seq_id)
-            msa_files.append(msa_file)
+        msa_files = [os.path.join(self.msas_folder, "<id>.a3m")]
 
         msas = DataStream(
             name="msas",
-            ids=msa_ids,
+            ids=sequence_ids,
             files=msa_files,
             map_table=self.msa_csv,
             format="a3m"

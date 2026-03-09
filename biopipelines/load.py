@@ -170,10 +170,11 @@ echo "=== Load ready ==="
         output_structure = self.loaded_result['output_structure']
 
         # Check DataStream files
-        for stream_name in ['structures', 'sequences', 'compounds']:
-            if stream_name in output_structure and isinstance(output_structure[stream_name], dict):
-                ds_dict = output_structure[stream_name]
-                for file_path in ds_dict.get('files', []):
+        for key, value in output_structure.items():
+            if key in ('tables', 'output_folder'):
+                continue
+            if isinstance(value, dict) and 'files' in value:
+                for file_path in value.get('files', []):
                     if isinstance(file_path, str) and not os.path.exists(file_path):
                         self.missing_files.append(file_path)
 
@@ -217,11 +218,11 @@ echo "=== Load ready ==="
 
         resolved = output_structure.copy()
 
-        for file_type in ['structures', 'sequences', 'compounds']:
-            if file_type not in resolved or not isinstance(resolved[file_type], dict):
+        for file_type, ds_dict in list(resolved.items()):
+            if file_type in ('tables', 'output_folder'):
                 continue
-
-            ds_dict = resolved[file_type]
+            if not isinstance(ds_dict, dict) or 'ids' not in ds_dict:
+                continue
             files = ds_dict.get('files', [])
             ids = ds_dict.get('ids', [])
 
@@ -300,7 +301,7 @@ echo "=== Load ready ==="
 
             resolved[file_type]['files'] = resolved_files
             resolved[file_type]['ids'] = resolved_ids
-            resolved[file_type]['files_contain_wildcards'] = False
+            # Wildcards resolved — files are now concrete paths
 
             print(f"  Resolved: {len(resolved_files)}/{len(ids)} {file_type}")
 
@@ -398,11 +399,11 @@ echo "=== Load ready ==="
         filtered_structure = output_structure.copy()
 
         # Filter DataStream dicts
-        for stream_name in ['structures', 'sequences', 'compounds']:
-            if stream_name not in output_structure or not isinstance(output_structure[stream_name], dict):
+        for stream_name, ds_dict in list(output_structure.items()):
+            if stream_name in ('tables', 'output_folder'):
                 continue
-
-            ds_dict = output_structure[stream_name]
+            if not isinstance(ds_dict, dict) or 'ids' not in ds_dict:
+                continue
             ids = ds_dict.get('ids', [])
             files = ds_dict.get('files', [])
 
@@ -491,7 +492,7 @@ echo "=== Load ready ==="
         Return the loaded output structure converted to DataStream format.
 
         Returns:
-            Dict with DataStream objects for structures, sequences, compounds,
+            Dict with DataStream objects for all streams,
             plus tables dict and output_folder string.
         """
         if not self.loaded_result:
@@ -516,10 +517,11 @@ echo "=== Load ready ==="
 
     def _filter_missing_ids(self, output_structure: Dict[str, Any], missing_ids: set):
         """Filter out missing IDs from output structure in place."""
-        for stream_name in ['structures', 'sequences', 'compounds']:
-            if stream_name not in output_structure or not isinstance(output_structure[stream_name], dict):
+        for stream_name, ds_dict in list(output_structure.items()):
+            if stream_name in ('tables', 'output_folder'):
                 continue
-            ds_dict = output_structure[stream_name]
+            if not isinstance(ds_dict, dict) or 'ids' not in ds_dict:
+                continue
             ids = ds_dict.get('ids', [])
             files = ds_dict.get('files', [])
             if len(files) == len(ids):
@@ -534,6 +536,10 @@ echo "=== Load ready ==="
                 if len(filtered_files) < len(files):
                     print(f"  - Filtered {stream_name}: {len(filtered_files)}/{len(files)} kept")
 
+    def _is_datastream_dict(self, obj: Any) -> bool:
+        """Check if a dict looks like a serialized DataStream."""
+        return isinstance(obj, dict) and 'ids' in obj and 'files' in obj
+
     def _convert_to_datastream_format(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
         """
         Convert output structure to DataStream format.
@@ -542,23 +548,21 @@ echo "=== Load ready ==="
             output_structure: Dict with DataStream dicts
 
         Returns:
-            Dict with DataStream objects for structures, sequences, compounds
+            Dict with DataStream objects for all streams, plus tables and output_folder
         """
         from .datastream import DataStream
 
         output_folder = output_structure.get('output_folder', '')
+        reserved_keys = {'tables', 'output_folder'}
 
-        def convert_data_type(data_key: str, default_format: str) -> DataStream:
-            raw_data = output_structure.get(data_key)
+        result = {"output_folder": output_folder}
 
-            if isinstance(raw_data, dict) and 'ids' in raw_data and 'files' in raw_data:
-                return DataStream.from_dict(raw_data)
-
-            return None
-
-        structures = convert_data_type('structures', 'pdb')
-        sequences = convert_data_type('sequences', 'fasta')
-        compounds = convert_data_type('compounds', 'sdf')
+        # Convert all DataStream dicts (structures, sequences, compounds, plots, etc.)
+        for key, value in output_structure.items():
+            if key in reserved_keys:
+                continue
+            if self._is_datastream_dict(value):
+                result[key] = DataStream.from_dict(value)
 
         # Convert tables to TableInfo objects
         tables_dict = {}
@@ -575,14 +579,9 @@ echo "=== Load ready ==="
                     )
                 elif isinstance(table_info, TableInfo):
                     tables_dict[table_name] = table_info
+        result["tables"] = tables_dict
 
-        return {
-            "structures": structures,
-            "sequences": sequences,
-            "compounds": compounds,
-            "tables": tables_dict,
-            "output_folder": output_folder
-        }
+        return result
 
     def generate_script(self, script_path: str) -> str:
         """
@@ -624,9 +623,11 @@ fi
 
         output_structure = self.loaded_result['output_structure']
 
-        for stream_name in ['structures', 'sequences', 'compounds']:
-            if stream_name in output_structure and isinstance(output_structure[stream_name], dict):
-                files_list = output_structure[stream_name].get('files', [])
+        for stream_name, stream_data in output_structure.items():
+            if stream_name in ('tables', 'output_folder'):
+                continue
+            if isinstance(stream_data, dict) and 'files' in stream_data:
+                files_list = stream_data.get('files', [])
                 files_to_check = files_list[:3]
                 for file_path in files_to_check:
                     if isinstance(file_path, str):
@@ -704,11 +705,13 @@ echo "Files loaded from {original_tool} are ready for use"
             ])
 
             output_structure = self.loaded_result['output_structure']
-            for stream_name in ['structures', 'sequences', 'compounds']:
-                if stream_name in output_structure and isinstance(output_structure[stream_name], dict):
-                    count = len(output_structure[stream_name].get('ids', []))
+            for key, value in output_structure.items():
+                if key in ('tables', 'output_folder'):
+                    continue
+                if isinstance(value, dict) and 'ids' in value:
+                    count = len(value.get('ids', []))
                     if count > 0:
-                        config_lines.append(f"Loaded {stream_name}: {count}")
+                        config_lines.append(f"Loaded {key}: {count}")
 
             if 'tables' in output_structure:
                 table_count = len(output_structure['tables'])

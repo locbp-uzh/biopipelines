@@ -18,31 +18,8 @@ import os
 import sys
 import re
 
-
-def list_to_sele(a):
-    """Convert list of residue numbers to PyMOL selection string."""
-    if not a:
-        return ""
-
-    s = ""
-    i = 0
-    while i < len(a):
-        if i > 0:
-            s += "+"
-        s += f"{a[i]}"
-        # Represent consecutive indices with a dash
-        if i < len(a) - 1:
-            if int(a[i])+1 == int(a[i+1]):
-                s += "-"
-                j = i + 2
-                while j < len(a):
-                    if int(a[j]) != int(a[j-1])+1:
-                        break
-                    j += 1
-                i = j - 1
-                s += f"{a[i]}"
-        i += 1
-    return s
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.sele_utils import list_to_sele
 
 
 def parse_sampled_contig(sampled_contig, total_length):

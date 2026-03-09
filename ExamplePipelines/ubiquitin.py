@@ -2,10 +2,7 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
-# tested: 17.2.2026
-# pubs.acs.org/doi/10.1021/jacs.5c19875
-# 4LCD: add a keep parameter e.g. chain A and resi 100-150 keep chain E
-# Conformational change alignment add option CA for resi pymol selection (is it standardized?)
+# tested: 
 
 from biopipelines.pipeline import *
 from biopipelines.protein_mpnn import ProteinMPNN

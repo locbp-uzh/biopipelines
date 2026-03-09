@@ -13,7 +13,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_multiplied_ids
+    from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
@@ -21,7 +21,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_multiplied_ids
+    from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from biopipelines_io import Resolve
 
 
@@ -100,7 +100,6 @@ echo "=== ProteinMPNN installation complete ==="
     queries_csv = Path(lambda self: os.path.join(self.output_folder, f"queries.csv"))
     queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"queries.fasta"))
     structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
-    id_map_json = Path(lambda self: os.path.join(self.output_folder, ".pdb_to_stream_id_map.json"))
 
     missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
 
@@ -223,18 +222,9 @@ echo "=== ProteinMPNN installation complete ==="
 
     def _generate_script_prepare_inputs(self) -> str:
         """Generate the input preparation part of the script."""
-        import json
 
         # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
         self.structures_stream.save_json(self.structures_json)
-
-        # Write pdb_basename -> stream_id map for runtime ID remapping
-        id_map = {}
-        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
-            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-            id_map[pdb_base] = struct_id
-        with open(self.id_map_json, 'w') as f:
-            json.dump(id_map, f, indent=2)
 
         resolved_fixed = self.fixed if self.fixed else ""
         resolved_redesigned = self.redesigned if self.redesigned else ""
@@ -248,11 +238,14 @@ echo "=== ProteinMPNN installation complete ==="
         fixed_param = resolved_fixed if resolved_fixed else "-"
         designed_param = resolved_redesigned if resolved_redesigned else "-"
 
-        # Resolve input directory at runtime (handles wildcard DataStreams)
-        first_id = self.structures_stream.ids[0]
-
-        return f"""FIRST_FILE={Resolve.stream_item(self.structures_json, first_id)}
-INPUT_DIR=$(dirname "$FIRST_FILE")
+        # Resolve input directory at runtime via Python one-liner
+        return f"""INPUT_DIR=$(python -c "
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(sys.argv[1]), '..'))
+from biopipelines.biopipelines_io import load_datastream, iterate_files
+ds = load_datastream(sys.argv[1])
+print(os.path.dirname(next(iterate_files(ds))[1]))
+" "{self.structures_json}")
 
 echo "Determining fixed positions"
 python {self.fixed_py} "{self.structures_json}" "{input_source}" "-" {self.plddt_threshold} "{fixed_param}" "{designed_param}" "{self.chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
@@ -295,26 +288,20 @@ python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_j
 python {self.table_py} {self.seqs_folder} {self.pipeline_name} "-" {self.main_table}
 
 echo "Creating queries CSV and FASTA from results table"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --id-map {self.id_map_json}{duplicates_flag}{fill_gaps_flag} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --ds-json "{self.structures_json}"{duplicates_flag}{fill_gaps_flag} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 
 """
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after ProteinMPNN execution."""
-        # Expected FASTA files - one per input structure
-        fasta_files = []
-        fasta_ids = []
-
-        for struct_id, pdb_path in zip(self.structures_stream.ids, self.structures_stream.files):
-            pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
-            fasta_path = os.path.join(self.seqs_folder, f"{pdb_base}.fa")
-            fasta_files.append(fasta_path)
-            fasta_ids.append(struct_id)
+        # Expected FASTA files - one per input structure (keep compact/lazy patterns)
+        fasta_ids = self.structures_stream.ids
+        fasta_files = [os.path.join(self.seqs_folder, "<id>.fa")]
 
         # Predict sequence IDs (stream_id + sequence number)
-        suffixes = [str(i) for i in range(1, self.num_sequences + 1)]
-        sequence_ids, provenance = generate_multiplied_ids(
-            self.structures_stream.ids, suffixes,
+        suffix_pattern = f"<1..{self.num_sequences}>"
+        sequence_ids = generate_multiplied_ids_pattern(
+            self.structures_stream.ids, suffix_pattern,
             input_stream_name="structures"
         )
 
@@ -332,7 +319,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             name="fasta",
             ids=fasta_ids,
             files=fasta_files,
-            format="fasta"
+            format="fasta",
+            metadata={
+                "sequences_per_file": self.num_sequences,
+                "contains_original": False,
+            }
         )
 
         tables = {

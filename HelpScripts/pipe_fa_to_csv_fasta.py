@@ -21,6 +21,8 @@ parser.add_argument('--upstream-missing', type=str, default=None,
                     help='Path to upstream missing.csv to propagate')
 parser.add_argument('--fill-gaps', type=str, default=None,
                     help='Replace X (unknown/gap residues) with this amino acid (e.g., G for glycine)')
+parser.add_argument('--ds-json', type=str, default=None,
+                    help='DataStream JSON for runtime id_map generation (alternative to --id-map)')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -31,7 +33,16 @@ import pandas as pd
 
 # Load optional ID map
 id_map = None
-if args.id_map and os.path.exists(args.id_map):
+if args.ds_json and os.path.exists(args.ds_json):
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from biopipelines.biopipelines_io import load_datastream, iterate_files
+    ds = load_datastream(args.ds_json)
+    id_map = {}
+    for struct_id, pdb_path in iterate_files(ds):
+        pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
+        id_map[pdb_base] = struct_id
+elif args.id_map and os.path.exists(args.id_map):
     with open(args.id_map, 'r') as f:
         id_map = json.load(f)
 

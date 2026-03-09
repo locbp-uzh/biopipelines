@@ -2,6 +2,8 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
+# tested: 
+
 """
 This shows how to refold the filtered results from a BoltzGen run with Boltz (full MSA from MMseqs2 public server),
 plot a metrics comparison between the two, add some analysis steps (apo vs holo),

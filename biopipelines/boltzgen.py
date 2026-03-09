@@ -883,7 +883,7 @@ fi
 
             # Generate structure IDs and paths
             # BoltzGen filtering outputs files named rank0001_<original_design_id>.cif
-            # The exact design ID suffix is only known at execution time, so we use wildcard patterns
+            # The exact design ID suffix is only known at execution time, so file paths use glob '*'
             structure_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
             structure_files = [os.path.join(final_designs_folder, f"rank{i:04d}_*.cif") for i in range(1, self.budget + 1)]
 
@@ -895,8 +895,7 @@ fi
                 ids=structure_ids,
                 files=structure_files,
                 map_table=self.structures_map,
-                format="cif",
-                files_contain_wildcards=True
+                format="cif"
             )
 
             # All designs metrics
@@ -1330,8 +1329,8 @@ echo "=== BoltzGenImport ready ==="
             else:
                 raise ValueError("designs StandardizedOutput has no structures")
         elif isinstance(designs, DataStream):
-            self.design_ids = designs.ids.copy()
-            self.design_structures = designs.files.copy()
+            self.design_ids = list(designs.ids)
+            self.design_structures = list(designs.files)
         else:
             raise ValueError(f"designs must be DataStream or StandardizedOutput, got {type(designs)}")
 

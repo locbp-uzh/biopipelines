@@ -80,7 +80,7 @@ def process_structures(structures_ds, ligand_resn: str,
     Process multiple structures and calculate SASA for each.
 
     Args:
-        structures_ds: DataStreamRuntime with structure files
+        structures_ds: DataStream with structure files
         ligand_resn: Ligand residue name
         output_csv: Output CSV file path
         dot_density: Dot density for SASA calculation
@@ -160,11 +160,11 @@ def main():
     # Load structures DataStream using pipe_biopipelines_io
     structures_ds = load_datastream(args.structures)
 
-    if not structures_ds.ids:
+    if not structures_ds.ids_expanded:
         print(f"Error: No structures found in: {args.structures}")
         sys.exit(1)
 
-    print(f"Loaded {len(structures_ds.ids)} structures from DataStream")
+    print(f"Loaded {len(structures_ds.ids_expanded)} structures from DataStream")
 
     # Initialize PyMOL in quiet mode
     pymol.finish_launching(['pymol', '-qc'])

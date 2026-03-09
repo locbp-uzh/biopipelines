@@ -205,7 +205,7 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
 
     print(f"PoseBusters validation")
-    print(f"Structures: {len(structures_ds.ids)}")
+    print(f"Structures: {len(structures_ds.ids_expanded)}")
     print(f"Ligand: {ligand_name}")
     print(f"Mode: {mode}")
 

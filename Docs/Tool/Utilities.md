@@ -252,12 +252,14 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 
 **Parameters**:
 - `lookup`: str | List[str] = None - Lookup values (CCD, CID, CAS, or name)
-- `ids`: str | List[str] = None - Custom IDs (defaults to lookup)
-- `codes`: str | List[str] = None - 3-letter PDB residue codes (defaults to lookup[:3])
+- `ids`: str | List[str] = None - Custom IDs (defaults to lookup / CDXML names / "smiles_N")
+- `codes`: str | List[str] = None - 3-letter PDB residue codes (defaults to lookup[:3] or "LIG")
 - `source`: str = None - Force "rcsb" or "pubchem" (auto-detects if None)
 - `local_folder`: str = None - Check first before Ligands/
 - `output_format`: str = "pdb" - Output format ("pdb" or "cif")
 - `smiles`: str | List[str] = None - Direct SMILES input (bypasses lookup)
+- `cdxml`: str = None - Path to CDXML file with individual molecules; names from ChemDraw labels used as IDs
+- `generate_images`: bool = False - Generate PNG images per ligand using RDKit
 
 **Auto-detection** (when source=None):
 - 1-3 uppercase alphanumeric → RCSB (CCD)
@@ -265,7 +267,7 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 - XX-XX-X format → PubChem (CAS)
 - Otherwise → PubChem (name)
 
-**Streams**: `structures`, `compounds`
+**Streams**: `structures`, `compounds`, `images` (if `generate_images=True`)
 
 **Tables**:
 - `compounds`: | id | code | lookup | source | smiles | formula |
@@ -281,17 +283,11 @@ atp = Ligand("ATP")
 # PubChem by name
 aspirin = Ligand("aspirin", codes="ASP")
 
-# PubChem by CID
-caffeine = Ligand("2157", ids="caffeine", codes="CAF")
-
-# PubChem by CAS
-ibuprofen = Ligand("15687-27-1", ids="ibuprofen", codes="IBU")
-
 # Direct SMILES
 ethanol = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
 
-# Multiple SMILES
-ligands = Ligand(smiles=["CCO", "CC(=O)O"], ids=["ethanol", "acetic"], codes=["ETH", "ACE"])
+# From CDXML file: each molecule becomes a ligand; ChemDraw names used as IDs
+ligands = Ligand(cdxml="my_ligands.cdxml")
 ```
 
 ---
@@ -304,12 +300,12 @@ Creates compound collections from dictionaries with optional combinatorial expan
 
 **Parameters**:
 - `library`: str | Dict - Dictionary with SMILES, path to CSV, or path to `.cdxml` file (ChemDraw R-group enumeration)
-- `primary_key`: str = None - Root key for expansion (enables `<key>` placeholders, dict mode only)
+- `primary_key`: str = None - Root key for expansion. Auto-detected by scanning keys in insertion order for `<placeholder>` patterns.
 - `covalent`: bool = False - Generate CCD/PKL files for covalent binding
 - `validate_smiles`: bool = True - Validate SMILES during expansion
-- `conformer_method`: str = "UFF" - Conformer method (UFF, OpenFF, DFT)
+- `generate_images`: bool = False - Generate a PNG image per compound using RDKit (no extra dependencies)
 
-**Streams**: `compounds`
+**Streams**: `compounds`, `images` (if `generate_images=True`)
 
 **Tables**:
 - `compounds`: | id | format | smiles | ccd | {branching_keys} |
@@ -319,40 +315,41 @@ Creates compound collections from dictionaries with optional combinatorial expan
 ```python
 from biopipelines.entities import CompoundLibrary
 
-# Simple dictionary (no expansion)
+# Simple dictionary (no expansion): keys are compound IDs, values are SMILES
 library = CompoundLibrary({
     "aspirin": "CC(=O)OC1=CC=CC=C1C(=O)O",
     "caffeine": "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"
 })
 
-# With expansion using <key> placeholders
-library = CompoundLibrary(
-    library={
-        "scaffold": "<linker><fluorophore>",
-        "linker": ["CCOCC", "CCOCCOCC"],
-        "fluorophore": ["c1ccc(N)cc1"]
-    },
-    primary_key="scaffold"
-)
-# Generates 2 compounds: linker×fluorophore combinations
+# With expansion using <key> placeholders — primary key auto-detected by order of appearance
+library = CompoundLibrary({
+    "scaffold": "<linker><fluorophore>",
+    "linker": ["CCOCC", "CCOCCOCC"],
+    "fluorophore": ["c1ccc(N)cc1"]
+})
+# Generates 2 compounds; branching columns 'linker' and 'fluorophore' track substituents
 
 # From CDXML file (ChemDraw R-group enumeration)
-library = CompoundLibrary(library="my_library.cdxml")
-# Enumerates all R-group combinations and generates SMILES
+# Fragment names defined in ChemDraw are used in branching columns
+library = CompoundLibrary("my_library.cdxml")
+
+# From CSV file (expansion supported if SMILES column contains <placeholders>)
+library = CompoundLibrary("my_library.csv")
+
+# With 2D molecule images
+library = CompoundLibrary({...}, generate_images=True)
 ```
 
 **CDXML R-Group Enumeration**:
 
 Draw the following in a single ChemDraw `.cdxml` file:
 
-- **Core scaffold**: the main molecule with **R1**, **R2**, etc. at substitution points (using ChemDraw's generic label tool to draw R-group labels)
-- **R-group fragments**: separate small molecules, each with one R-group label (R1, R2, ...) indicating which core position it attaches to
+- **Core scaffold**: the main molecule with **R1**, **R2**, etc. at substitution points (using ChemDraw's R-group substitution table)
+- **R-group fragments**: defined in the R-group table, one per substitution point
 
-The tool identifies the core as the molecule with the most R-group labels, then groups fragments by their R-label number. All combinations are enumerated as a Cartesian product.
+To assign display names to substituents (shown in branching columns instead of SMILES), add chemical property labels to the fragment structures in ChemDraw (Structure > Chemical Properties, or use text labels linked to fragments via the ChemDraw property tool).
 
-Example: a core with R1 and R2 positions, plus 3 fragments labeled R1 and 2 fragments labeled R2 → 3×2 = 6 compounds.
-
-The output CSV includes branching columns (R1, R2, ...) showing which fragment SMILES was used at each position.
+The output CSV includes branching columns (R1, R2, ...) showing the substituent name or SMILES at each position.
 
 Requires RDKit (`conda install -c conda-forge rdkit`).
 

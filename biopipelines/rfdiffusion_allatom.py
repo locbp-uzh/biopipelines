@@ -92,6 +92,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
     inference_py_file = Path(lambda self: "run_inference.py")
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
     pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
+    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
 
     def _use_container(self) -> bool:
         """Check if container mode is configured for this tool."""
@@ -154,7 +155,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         Output:
             Streams: structures (.pdb)
             Tables:
-                structures: id | source_id | pdb | fixed | designed | contigs | time | status
+                structures: id | pdb | fixed | designed | source_fixed | plddt_mean | status
         """
         # Resolve optional pdb input — store stream for runtime resolution
         self.pdb_stream: Optional[DataStream] = None
@@ -287,6 +288,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
             script_content += self.activate_environment()
             script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
+        script_content += self._generate_script_update_structures_map()
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -385,11 +387,17 @@ python {self.inference_py_file} {args_str}
 
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
-        design_character = "?"
-
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
         return f"""echo "Creating results table"
-python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_character}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+python {self.table_py_file} "{self.output_folder}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+
+"""
+
+    def _generate_script_update_structures_map(self) -> str:
+        """Generate script to update structures_map.csv with actual runtime output files."""
+        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        return f"""echo "Updating structures map with actual output files"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{self.output_folder}"
 
 """
 
@@ -397,27 +405,26 @@ python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_ch
         """Get expected output files after RFdiffusion-AllAtom execution."""
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
 
-        design_pdbs = []
-        structure_ids = []
-        for i in range(self.num_designs):
-            design_id = f"{output_name}_{self.design_startnum + i}"
-            design_path = os.path.join(self.output_folder, f"{design_id}.pdb")
-            design_pdbs.append(design_path)
-            structure_ids.append(design_id)
+        start = self.design_startnum
+        end = self.design_startnum + self.num_designs - 1
+        structure_ids = [f"{output_name}_<{start}..{end}>"]
+        file_template = [os.path.join(self.output_folder, "<id>.pdb")]
 
         # Build provenance if PDB input is available
         provenance = None
         if self.pdb_input_id:
-            provenance = {"structures": [self.pdb_input_id] * len(structure_ids)}
+            from . import id_patterns
+            n = id_patterns.count_ids(structure_ids)
+            provenance = {"structures": [self.pdb_input_id] * n}
 
-        # Create map_table for structures
+        # Create map_table for structures (expands patterns internally)
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, structure_ids, files=design_pdbs, provenance=provenance)
+        create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
             name="structures",
             ids=structure_ids,
-            files=design_pdbs,
+            files=file_template,
             map_table=structures_map,
             format="pdb"
         )
@@ -426,7 +433,7 @@ python {self.table_py_file} "{self.output_folder}" "{self.log_file}" "{design_ch
             "structures": TableInfo(
                 name="structures",
                 path=self.main_table,
-                columns=["id", "source_id", "pdb", "fixed", "designed", "contigs", "time", "status"],
+                columns=["id", "pdb", "fixed", "designed", "source_fixed", "plddt_mean", "status"],
                 description="RFdiffusion-AllAtom structure generation results with fixed/designed regions",
                 count=self.num_designs
             )

@@ -32,10 +32,10 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
+    from datastream import DataStream
 
 # Standard amino acids - guaranteed output structure
 AMINO_ACIDS = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
-    from datastream import DataStream
 
 
 class BayesianAdjuster(BaseConfig):

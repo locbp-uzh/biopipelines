@@ -22,6 +22,7 @@ from itertools import product
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
+from biopipelines.id_patterns import expand_ids, contains_pattern
 
 
 def parse_length_spec(spec: str) -> List[int]:
@@ -63,7 +64,8 @@ def load_sequences_from_slot(slot: Dict[str, Any]) -> Dict[str, str]:
     Returns:
         Dict mapping ID → sequence string
     """
-    ids = slot["ids"]
+    raw_ids = slot["ids"]
+    ids = expand_ids(raw_ids) if any(contains_pattern(s) for s in raw_ids) else raw_ids
     map_table = slot.get("map_table", "")
     files = slot.get("files", [])
 
@@ -132,7 +134,10 @@ def generate_fusion_sequences(
         slot_sequences.append(id_to_seq)
 
     # Get per-slot ID lists
-    slot_id_lists = [slot["ids"] for slot in slots]
+    slot_id_lists = [
+        expand_ids(slot["ids"]) if any(contains_pattern(s) for s in slot["ids"]) else slot["ids"]
+        for slot in slots
+    ]
 
     # Parse linker length ranges
     junction_length_lists = []

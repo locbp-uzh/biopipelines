@@ -119,7 +119,7 @@ def analyze_distances(config_data: Dict[str, Any]) -> None:
     unit = config_data.get('unit', 'angstrom')
     output_csv = config_data['output_csv']
 
-    print(f"Analyzing distances in {len(structures_ds.ids)} structures")
+    print(f"Analyzing distances in {len(structures_ds.ids_expanded)} structures")
     print(f"Output unit: {unit}")
 
     # Determine and display mode

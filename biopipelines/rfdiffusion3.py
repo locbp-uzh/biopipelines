@@ -175,6 +175,7 @@ echo "=== RFdiffusion3 installation complete ==="
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_table.py"))
     postprocess_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_postprocess.py"))
     pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
+    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
 
     def __init__(self,
                  contig: str = "",
@@ -245,12 +246,12 @@ echo "=== RFdiffusion3 installation complete ==="
         elif pdb is not None:
             if isinstance(pdb, StandardizedOutput):
                 self.pdb_stream = pdb.streams.structures
-                if len(pdb.streams.structures.ids) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures.ids)}), using first: {pdb.streams.structures.ids[0]}")
+                if len(pdb.streams.structures) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures)}), using first: {pdb.streams.structures.ids[0]}")
             elif isinstance(pdb, DataStream):
                 self.pdb_stream = pdb
-                if len(pdb.ids) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.ids)}), using first: {pdb.ids[0]}")
+                if len(pdb) > 1:
+                    print(f"Warning: Multiple structures provided ({len(pdb)}), using first: {pdb.ids[0]}")
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
             self.pdb_input_id = self.pdb_stream.ids[0]
@@ -622,9 +623,18 @@ python "{self.table_py_file}" \\
         script_content += self.generate_script_run_rfdiffusion3()
         script_content += self._generate_postprocess_section()
         script_content += self.generate_script_create_table()
+        script_content += self._generate_script_update_structures_map()
         script_content += self.generate_completion_check_footer()
 
         return script_content
+
+    def _generate_script_update_structures_map(self) -> str:
+        """Generate script to update structures_map.csv with actual runtime output files."""
+        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        return f"""echo "Updating structures map with actual output files"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{self.output_folder}"
+
+"""
 
     def get_output_files(self) -> Dict[str, Any]:
         """
@@ -642,39 +652,33 @@ python "{self.table_py_file}" \\
         """
         prefix = self._get_prefix()
 
-        # Generate expected structure paths and IDs
-        design_pdbs = []
-        structure_ids = []
+        # Generate pattern-based IDs
+        d_start = self.design_startnum
+        d_end = self.design_startnum + self.num_designs - 1
+        m_start = self.design_startnum
+        m_end = self.design_startnum + self.num_models - 1
+
+        if self.num_models > 1:
+            structure_ids = [f"{prefix}_d<{d_start}..{d_end}>_m<{m_start}..{m_end}>"]
+        else:
+            structure_ids = [f"{prefix}_<{d_start}..{d_end}>"]
+        file_template = [os.path.join(self.output_folder, "<id>.pdb")]
 
         total_structures = self.num_designs * self.num_models
-        for i in range(self.num_designs):
-            for j in range(self.num_models):
-                design_num = self.design_startnum + i
-                model_num = self.design_startnum + j
-
-                # Conditional naming: include model suffix only if num_models > 1
-                if self.num_models > 1:
-                    structure_id = f"{prefix}_d{design_num}_m{model_num}"
-                else:
-                    structure_id = f"{prefix}_{design_num}"
-
-                structure_path = os.path.join(self.output_folder, f"{structure_id}.pdb")
-                design_pdbs.append(structure_path)
-                structure_ids.append(structure_id)
 
         # Build provenance if PDB input is available
         provenance = None
         if self.pdb_input_id:
-            provenance = {"structures": [self.pdb_input_id] * len(structure_ids)}
+            provenance = {"structures": [self.pdb_input_id] * total_structures}
 
-        # Create map_table for structures
+        # Create map_table for structures (expands patterns internally)
         structures_map = os.path.join(self.output_folder, "structures_map.csv")
-        create_map_table(structures_map, structure_ids, files=design_pdbs, provenance=provenance)
+        create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
             name="structures",
             ids=structure_ids,
-            files=design_pdbs,
+            files=file_template,
             map_table=structures_map,
             format="pdb"
         )

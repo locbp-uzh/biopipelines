@@ -258,7 +258,7 @@ seqs = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
 seqs = Sequence("/path/to/sequences.csv", type="dna") # must have columns id, sequence
 ```
 
-**Ligand** - Fetches from RCSB (CCD codes) or PubChem (names, CID, CAS):
+**Ligand** - Fetches from RCSB (CCD codes), PubChem (names, CID, CAS), SMILES, or CDXML:
 
 ```python
 # RCSB by CCD code
@@ -269,26 +269,36 @@ aspirin = Ligand("aspirin", codes="ASP")
 
 # Direct SMILES
 ethanol = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
+
+# From CDXML file: each molecule is a separate ligand; ChemDraw names used as IDs
+ligands = Ligand(cdxml="my_ligands.cdxml")
 ```
 
 **CompoundLibrary** - Creates compound collections:
 
 ```python
-# Simple dictionary (no expansion)
+# Simple dictionary (no expansion): keys are compound IDs, values are SMILES
 library = CompoundLibrary({
     "aspirin": "CC(=O)OC1=CC=CC=C1C(=O)O",
     "caffeine": "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"
 })
 
-# With expansion using <key> placeholders
-library = CompoundLibrary(
-    library={
-        "scaffold": "<aryl><amide>",
-        "aryl": ["C1(=CC(F)=CC=C1)", "C1(=CC(O)=CC=C1)"],
-        "amide": ["C(=O)N","C(=O)NC","C(=O)NCC(F)(F)F"]
-    },
-    primary_key="scaffold"
-)
+# With expansion using <key> placeholders — primary key auto-detected by order of appearance
+library = CompoundLibrary({
+    "scaffold": "<aryl><amide>",
+    "aryl": ["C1(=CC(F)=CC=C1)", "C1(=CC(O)=CC=C1)"],
+    "amide": ["C(=O)N","C(=O)NC","C(=O)NCC(F)(F)F"]
+})
+# Generates 2×3=6 compounds; branching columns 'aryl' and 'amide' track substituents
+
+# From CDXML file (ChemDraw R-group enumeration); names defined in ChemDraw are used
+library = CompoundLibrary("my_library.cdxml")
+
+# From CSV file (expansion supported if SMILES column contains <placeholders>)
+library = CompoundLibrary("my_library.csv")
+
+# With 2D molecule images (PNG per compound, uses RDKit — no extra dependencies)
+library = CompoundLibrary({...}, generate_images=True)
 ```
 
 **Table** - Loads existing CSV files:

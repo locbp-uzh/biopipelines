@@ -2,6 +2,9 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
+# tested: 
+
+
 """
 This pipeline shows how to determine the flexibility of a protein (RMSF) using a coarse grained simulation with cabs flex.
 """

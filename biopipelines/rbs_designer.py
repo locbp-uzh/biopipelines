@@ -226,7 +226,7 @@ python "{self.designer_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after RBS design."""
-        sequence_ids = self.sequences_stream.ids.copy()
+        sequence_ids = list(self.sequences_stream.ids)
 
         sequences = DataStream(
             name="sequences",

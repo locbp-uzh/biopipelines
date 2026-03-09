@@ -550,7 +550,7 @@ echo "=== PDB ready ==="
             op_summaries = []
             for op in self.operations:
                 if op.op_type == "rename":
-                    op_summaries.append(f"Rename({op.params['old']} → {op.params['new']})")
+                    op_summaries.append(f"Rename({op.params['old']} -> {op.params['new']})")
                 else:
                     op_summaries.append(op.op_type)
             config_lines.append(f"OPERATIONS: {', '.join(op_summaries)}")
@@ -609,7 +609,6 @@ echo "=== PDB ready ==="
         if self.from_upstream:
             config_data["from_upstream"] = True
             config_data["upstream_files"] = list(self.structures_stream.files)
-            config_data["upstream_files_contain_wildcards"] = self.structures_stream.files_contain_wildcards
             config_data["upstream_map_table"] = self.structures_stream.map_table
 
         with open(self.config_file, 'w') as f:
@@ -635,7 +634,6 @@ python "{self.pdb_py}" --config "{self.config_file}"
             structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
                               for custom_id in self.custom_ids]
             stream_format = self.convert
-            files_contain_wildcards = False
         else:
             # No conversion: predict extension where possible
             local_formats = getattr(self, 'local_formats', {"pdb": False, "cif": False})
@@ -646,16 +644,13 @@ python "{self.pdb_py}" --config "{self.config_file}"
             if not has_downloads and only_pdb:
                 extension = ".pdb"
                 stream_format = "pdb"
-                files_contain_wildcards = False
             elif not has_downloads and only_cif:
                 extension = ".cif"
                 stream_format = "cif"
-                files_contain_wildcards = False
             else:
                 # Mixed formats or downloads present: extension unknown at config time
                 extension = ".*"
                 stream_format = "pdb|cif"
-                files_contain_wildcards = True
 
             structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
                               for custom_id in self.custom_ids]
@@ -697,8 +692,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
             ids=self.custom_ids.copy(),
             files=structure_files,
             map_table=self.structures_csv,
-            format=stream_format,
-            files_contain_wildcards=files_contain_wildcards
+            format=stream_format
         )
 
         sequences = DataStream(

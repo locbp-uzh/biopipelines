@@ -178,7 +178,7 @@ def main():
     pymol.finish_launching(['pymol', '-cq'])
     print("PyMOL initialized")
 
-    print(f"Analyzing pose distances for {len(samples_ds.ids)} structures")
+    print(f"Analyzing pose distances for {len(samples_ds.ids_expanded)} structures")
     print(f"Reference: {os.path.basename(reference_pdb)}")
     print(f"Reference ligand: {reference_ligand}")
     print(f"Target ligand: {ligand}")

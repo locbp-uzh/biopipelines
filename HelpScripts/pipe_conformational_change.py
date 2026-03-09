@@ -237,8 +237,8 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
 
     print(f"Analyzing conformational changes")
-    print(f"Reference structures: {len(reference_ds.ids)}")
-    print(f"Target structures: {len(target_ds.ids)}")
+    print(f"Reference structures: {len(reference_ds.ids_expanded)}")
+    print(f"Target structures: {len(target_ds.ids_expanded)}")
     print(f"Selection: {selection_config}")
     print(f"Alignment method: {alignment_method}")
     print(f"Atoms: {atoms}")
@@ -258,13 +258,13 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
     if selection_config['type'] == 'all':
         # Use all CA atoms (whole structure RMSD)
         print("Using all atoms (whole structure RMSD)")
-        for target_id in target_ds.ids:
+        for target_id in target_ds.ids_expanded:
             selection_map[target_id] = "all"
     elif selection_config['type'] == 'fixed':
         # Fixed selection for all structures
         fixed_selection = selection_config['value']
         print(f"Using fixed selection: {fixed_selection}")
-        for target_id in target_ds.ids:
+        for target_id in target_ds.ids_expanded:
             selection_map[target_id] = fixed_selection
     else:
         # Load from table
@@ -273,7 +273,7 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         selection_map = load_selection_from_table(table_path, column_name)
 
     # Determine if reference is single or multiple
-    use_single_reference = len(reference_ds.ids) == 1
+    use_single_reference = len(reference_ds.ids_expanded) == 1
     if use_single_reference:
         single_ref_id, single_ref_path = next(iterate_files(reference_ds))
         print(f"Using single reference structure: {single_ref_path}")
@@ -281,8 +281,8 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         print(f"Using paired reference structures")
 
     # Ensure we have compatible number of structures
-    if not use_single_reference and len(reference_ds.ids) != len(target_ds.ids):
-        print(f"Warning: Reference structures ({len(reference_ds.ids)}) and target structures ({len(target_ds.ids)}) count mismatch")
+    if not use_single_reference and len(reference_ds.ids_expanded) != len(target_ds.ids_expanded):
+        print(f"Warning: Reference structures ({len(reference_ds.ids_expanded)}) and target structures ({len(target_ds.ids_expanded)}) count mismatch")
 
     # Process structure pairs using iterate_files for proper ID-file matching
     results = []

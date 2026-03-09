@@ -457,9 +457,9 @@ def analyze_structure_distance(structure_id: str, pdb_file: str, reference_spec:
         atoms, reference_atoms, distance_cutoff, restrict_to_residues, exclude_reference_residues
     )
 
-    # Format as universal selections (numbers only) - works for all tools
-    within_selection = format_ligandmpnn_selection(within_residues)
-    beyond_selection = format_ligandmpnn_selection(beyond_residues)
+    # Format as chain-aware selections (e.g. "A12+A15+B10") - preserves chain info
+    within_selection = format_pymol_selection(within_residues)
+    beyond_selection = format_pymol_selection(beyond_residues)
 
     return {
         "id": structure_id,
@@ -506,7 +506,7 @@ def main():
     # Parse include_reference boolean
     include_reference = include_reference_str.lower() in ['true', '1', 'yes']
 
-    print(f"Analyzing {len(structures_ds.ids)} structures with distance cutoff {distance_cutoff}Å")
+    print(f"Analyzing {len(structures_ds.ids_expanded)} structures with distance cutoff {distance_cutoff}Å")
     print(f"Reference: {reference_spec}")
     if restrict_spec:
         print(f"Restriction: {restrict_spec}")

@@ -1098,14 +1098,12 @@ python "{self.pdb_py}" --config "{self.config_file}"
             structure_files = [os.path.join(self.output_folder, f"{oid}{extension}")
                               for oid in self.output_ids]
             stream_format = self.convert
-            files_contain_wildcards = False
         else:
             # No conversion: RCSB downloads PDB if available, CIF as fallback.
             # Extension is only known at runtime, so use wildcards.
             structure_files = [os.path.join(self.output_folder, f"{oid}.*")
                               for oid in self.output_ids]
             stream_format = "pdb|cif"
-            files_contain_wildcards = True
 
         tables = {
             "structures": TableInfo(
@@ -1162,8 +1160,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
             ids=list(self.output_ids),
             files=structure_files,
             map_table=self.structures_csv,
-            format=stream_format,
-            files_contain_wildcards=files_contain_wildcards
+            format=stream_format
         )
 
         sequences = DataStream(
