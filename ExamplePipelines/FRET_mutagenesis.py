@@ -72,7 +72,8 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                   x="mutations",
                   y="delta_FRET",
                   xlabel="Mutations",
-                  ylabel="FRET difference"))
+                  ylabel="FRET difference",
+                  x_tick_rotation=90))
     
     best = Panda(tables=[analysis.tables.result],
                  operations=[Panda.sort("delta_FRET",ascending=False)])

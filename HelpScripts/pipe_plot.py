@@ -102,6 +102,7 @@ class PlotBuilder:
             for label in ax.get_xticklabels():
                 label.set_rotation(x_tick_rotation)
                 label.set_horizontalalignment(ha)
+                label.set_rotation_mode('anchor')
         if y_tick_rotation != 0:
             for label in ax.get_yticklabels():
                 label.set_rotation(y_tick_rotation)
