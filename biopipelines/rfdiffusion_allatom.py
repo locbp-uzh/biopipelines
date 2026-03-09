@@ -92,6 +92,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
     inference_py_file = Path(lambda self: "run_inference.py")
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
     pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
+    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
 
     def _use_container(self) -> bool:
         """Check if container mode is configured for this tool."""
@@ -287,6 +288,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
             script_content += self.activate_environment()
             script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
+        script_content += self._generate_script_update_structures_map()
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -388,6 +390,14 @@ python {self.inference_py_file} {args_str}
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
         return f"""echo "Creating results table"
 python {self.table_py_file} "{self.output_folder}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+
+"""
+
+    def _generate_script_update_structures_map(self) -> str:
+        """Generate script to update structures_map.csv with actual runtime output files."""
+        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        return f"""echo "Updating structures map with actual output files"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{self.output_folder}"
 
 """
 

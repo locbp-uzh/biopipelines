@@ -175,6 +175,7 @@ echo "=== RFdiffusion3 installation complete ==="
     table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_table.py"))
     postprocess_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_postprocess.py"))
     pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
+    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
 
     def __init__(self,
                  contig: str = "",
@@ -622,9 +623,18 @@ python "{self.table_py_file}" \\
         script_content += self.generate_script_run_rfdiffusion3()
         script_content += self._generate_postprocess_section()
         script_content += self.generate_script_create_table()
+        script_content += self._generate_script_update_structures_map()
         script_content += self.generate_completion_check_footer()
 
         return script_content
+
+    def _generate_script_update_structures_map(self) -> str:
+        """Generate script to update structures_map.csv with actual runtime output files."""
+        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        return f"""echo "Updating structures map with actual output files"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{self.output_folder}"
+
+"""
 
     def get_output_files(self) -> Dict[str, Any]:
         """

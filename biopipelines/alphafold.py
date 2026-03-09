@@ -97,6 +97,7 @@ echo "=== AlphaFold installation complete ==="
     alphafold_confidence_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_confidence.py"))
     alphafold_msas_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py"))
     propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
+    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
 
     def __init__(self,
                  proteins: Union[DataStream, StandardizedOutput],
@@ -181,6 +182,7 @@ echo "=== AlphaFold installation complete ==="
         script_content += self._generate_script_prepare_sequences()
         script_content += self._generate_script_run_alphafold()
         script_content += self._generate_script_extract_best_rank()
+        script_content += self._generate_script_update_structures_map()
         script_content += self._generate_script_extract_confidence()
         script_content += self._generate_script_create_msas_table()
         script_content += self._generate_missing_table_propagation()
@@ -289,6 +291,13 @@ for file in *_unrelaxed_rank_001_*.pdb; do
 done
 {msa_section}
 cd - > /dev/null
+
+"""
+
+    def _generate_script_update_structures_map(self) -> str:
+        """Generate script to update structures_map.csv with actual runtime output files."""
+        return f"""echo "Updating structures map with actual output files"
+python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{self.output_folder}"
 
 """
 
