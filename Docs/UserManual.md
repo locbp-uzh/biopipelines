@@ -520,7 +520,7 @@ best = Panda(
 merged = Panda(
     tables=[apo.tables.affinity, holo.tables.affinity],
     operations=[
-        Panda.merge(on="id", prefixes=["apo_", "holo_"]),
+        Panda.merge(prefixes=["apo_", "holo_"]),
         Panda.calculate({"delta": "holo_affinity - apo_affinity"})
     ]
 )

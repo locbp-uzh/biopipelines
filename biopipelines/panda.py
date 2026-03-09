@@ -35,7 +35,7 @@ class Operation:
     Operations are created via static methods on the Panda class:
         Panda.filter("pLDDT > 80")
         Panda.sort("affinity", ascending=False)
-        Panda.merge(on="id", prefixes=["apo_", "holo_"])
+        Panda.merge(prefixes=["apo_", "holo_"])
     """
 
     type: str
@@ -72,7 +72,7 @@ class Panda(BaseConfig):
         merged = Panda(
             tables=[apo.tables.affinity, holo.tables.affinity],
             operations=[
-                Panda.merge(on="id", prefixes=["apo_", "holo_"]),
+                Panda.merge(prefixes=["apo_", "holo_"]),
                 Panda.calculate({"delta": "holo_affinity - apo_affinity"})
             ]
         )
@@ -81,7 +81,7 @@ class Panda(BaseConfig):
         fret = Panda(
             tables=[distances.tables.result, angles.tables.angles],
             operations=[
-                Panda.merge(on="id"),
+                Panda.merge(),
                 Panda.calculate({
                     "kappa2": "cos(orientation) ** 2",
                     "R0_eff": "49.0 * (kappa2 / 0.6667) ** (1.0 / 6.0)",
@@ -332,9 +332,8 @@ echo "=== Panda ready ==="
         return Operation(type="fillna", params={"value": value, "column": column})
 
     @staticmethod
-    def merge(on: Union[str, List[str]] = "id", how: str = "outer",
-              prefixes: Optional[List[str]] = None,
-              id_map: Optional[Dict[str, List[str]]] = None) -> Operation:
+    def merge(on: Optional[Union[str, List[str]]] = None, how: str = "outer",
+              prefixes: Optional[List[str]] = None) -> Operation:
         """
         Merge multiple tables horizontally (like SQL JOIN).
 
@@ -343,24 +342,24 @@ echo "=== Panda ready ==="
 
         Args:
             on: Column name(s) to merge on. Can be:
-                - A single string: same column name used in all tables (e.g., "id")
+                - None (default): uses biopipelines ID matching (get_mapped_ids)
+                  which handles exact, child/parent, sibling, and provenance matching
+                - A single string: exact pandas merge on that column (e.g., "id")
                 - A list of strings (one per table): each table is joined on its
                   own column, which is renamed to the first entry before merging
                   (e.g., ["id", "id", "structures.id"])
             how: Join type ("inner", "outer", "left", "right")
             prefixes: List of prefixes for each table's columns (prevents name collisions)
-            id_map: Dictionary mapping new_id -> [old_id1, old_id2, ...] to consolidate IDs
 
         Returns:
             Operation to merge tables
 
         Example:
-            Panda.merge(on="id", prefixes=["apo_", "holo_"])
+            Panda.merge(prefixes=["apo_", "holo_"])
             Panda.merge(on=["id", "id", "structures.id"])
-            Panda.merge(on="structure_id", how="inner", id_map={"common": ["id_a", "id_b"]})
         """
         return Operation(type="merge", params={
-            "on": on, "how": how, "prefixes": prefixes, "id_map": id_map
+            "on": on, "how": how, "prefixes": prefixes
         })
 
     @staticmethod
@@ -596,19 +595,15 @@ echo "=== Panda ready ==="
 
         self.input_csv_paths = [self._resolve_table_path(t) for t in self.tables_input]
 
-        # Extract id_map from merge operation if present (maps new_id -> [old_ids])
-        # We store both directions for different use cases:
-        # - id_remap: old_id -> new_id (for remapping pool IDs to merged IDs)
-        # - id_map_forward: new_id -> [old_ids] (for reverse lookup at execution time)
-        self.id_remap = {}  # old_id -> new_id
-        self.id_map_forward = {}  # new_id -> [old_ids] (original id_map)
-        for op in self.operations:
-            if op.type == "merge" and op.params.get("id_map"):
-                id_map = op.params["id_map"]
-                self.id_map_forward = id_map  # Store original for execution time
-                for new_id, old_ids in id_map.items():
-                    for old_id in old_ids:
-                        self.id_remap[old_id] = new_id
+        # Collect map_table paths from pool outputs for ID matching at runtime
+        self.map_table_paths = []
+        if self.use_pool_mode:
+            for pool in self.pool_outputs:
+                if hasattr(pool, 'streams') and pool.streams:
+                    for stream_name in pool.streams.keys():
+                        stream = pool.streams.get(stream_name)
+                        if stream and stream.map_table:
+                            self.map_table_paths.append(stream.map_table)
 
         # Auto-rename for pool mode:
         # - sort/head/tail/sample present: rename (output IDs are unpredictable at configuration time)
@@ -783,7 +778,7 @@ echo "=== Panda ready ==="
             "pool_folders": getattr(self, 'pool_folders', []),
             "pool_stream_jsons": getattr(self, 'pool_stream_jsons', []),
             "pool_table_maps": getattr(self, 'pool_table_maps', []),
-            "id_map_forward": getattr(self, 'id_map_forward', {}),
+            "map_table_paths": getattr(self, 'map_table_paths', []),
             "rename": self.rename,
             "ignore_missing": self.ignore_missing,
             "step_tool_name": step_tool_name
@@ -856,16 +851,6 @@ fi
         }
 
         if self.use_pool_mode and self.pool_outputs:
-            # Extract id_map from merge operation if present (maps new_id -> [old_ids])
-            # We need to reverse it: old_id -> new_id for remapping pool IDs
-            id_remap = {}  # old_id -> new_id
-            for op in self.operations:
-                if op.type == "merge" and op.params.get("id_map"):
-                    id_map = op.params["id_map"]
-                    for new_id, old_ids in id_map.items():
-                        for old_id in old_ids:
-                            id_remap[old_id] = new_id
-
             # Pool mode: dynamically collect all streams from all pools
             # Collect stream info: {stream_name: {"ids": [], "files": [], "format": str, "map_table": str}}
             stream_data = {}
@@ -883,9 +868,7 @@ fi
                                 "format": stream.format,
                                 "map_table": stream.map_table or ""
                             }
-                        # Apply id_remap to IDs if present
-                        remapped_ids = [id_remap.get(sid, sid) for sid in stream.ids]
-                        stream_data[stream_name]["ids"].extend(remapped_ids)
+                        stream_data[stream_name]["ids"].extend(list(stream.ids))
                         # Only collect files for file-based streams
                         if stream.is_file_based():
                             stream_data[stream_name]["files"].extend(stream.files)

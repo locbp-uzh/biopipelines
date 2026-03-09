@@ -53,26 +53,24 @@ with Pipeline(project="Biosensor", job="CaFRET"):
     derived_metrics = {"FRET_E_apo": f"1 / (1 + (FRET_distance_apo / {R0}) ** 6)",
                        "FRET_E_holo": f"1 / (1 + (FRET_distance_holo / {R0}) ** 6)",
                        "delta_FRET": "abs(FRET_E_holo - FRET_E_apo)"}
-    analysis = Panda(tables=[fusions.tables.sequences,
-                             mutants.tables.sequences,
+    analysis = Panda(tables=[mutants.tables.sequences,
                              dist_apo.tables.distances,
                              dist_holo.tables.distances],
                      operations=[Panda.merge(),
                                  Panda.calculate(derived_metrics)])
-    #Plot(...)
     Plot(Plot.Bar(data=analysis.tables.result,
-                  title="FRET efficiency by Linker Length",
-                  x="lengths",
+                  title="FRET efficiency by Mutation",
+                  x="mutations",
                   y="FRET_E_apo",
                   y_right="FRET_E_holo",
-                  xlabel="Linker Lengths",
+                  xlabel="Mutations",
                   ylabel="FRET apo",
                   ylabel_right="FRET holo"),
          Plot.Bar(data=analysis.tables.result,
-                  title="Calcium-Induced FRET Change by Linker Length",
-                  x="lengths",
+                  title="Calcium-Induced FRET Change by Mutation",
+                  x="mutations",
                   y="delta_FRET",
-                  xlabel="Linker Lengths",
+                  xlabel="Mutations",
                   ylabel="FRET difference"))
     
     best = Panda(tables=[analysis.tables.result],

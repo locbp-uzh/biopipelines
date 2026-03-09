@@ -22,6 +22,7 @@ from typing import Dict, List, Any, Optional
 # Import unified I/O utilities for runtime DataStream expansion
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.id_map_utils import get_mapped_ids
 
 
 def validate_expression(expr: str) -> None:
@@ -198,71 +199,125 @@ def execute_fillna(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
 
 def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.DataFrame:
-    """Merge multiple dataframes horizontally."""
-    on = params.get("on", "id")
+    """Merge multiple dataframes horizontally.
+
+    Two code paths based on ``on``:
+    - ``on`` is not None: exact pandas merge (original behaviour)
+    - ``on`` is None: biopipelines ID matching via get_mapped_ids
+    """
+    on = params.get("on")
     how = params.get("how", "outer")
     prefixes = params.get("prefixes", [])
-    id_map = params.get("id_map", {})
+    map_table_paths = params.get("map_table_paths", [])
 
-    # Normalise `on` to a per-table list of column names.
-    # When a list is provided, each entry names the merge key for the
-    # corresponding table; the common key used for the join is the first entry.
-    if isinstance(on, list):
-        on_per_table = on
-        merge_key = on_per_table[0]  # canonical column name after renaming
-    else:
-        on_per_table = [on] * len(dataframes)
-        merge_key = on
+    # --- Path A: explicit column merge (on is not None) ---
+    if on is not None:
+        # Normalise `on` to a per-table list of column names.
+        if isinstance(on, list):
+            on_per_table = on
+            merge_key = on_per_table[0]
+        else:
+            on_per_table = [on] * len(dataframes)
+            merge_key = on
 
-    print(f"  Merge: on={on}, how={how}, merge_key={merge_key}")
+        print(f"  Merge (exact): on={on}, how={how}, merge_key={merge_key}")
 
-    # Apply per-table key renaming, id mapping, and prefixes
-    renamed_dfs = []
+        renamed_dfs = []
+        for i, df in enumerate(dataframes):
+            df = df.copy()
+
+            # Rename per-table key to the canonical merge key
+            table_key = on_per_table[i] if i < len(on_per_table) else merge_key
+            if table_key != merge_key:
+                if table_key in df.columns:
+                    if merge_key in df.columns:
+                        df = df.drop(columns=[merge_key])
+                        print(f"    Dropped original '{merge_key}' column in dataframe {i} (replaced by '{table_key}')")
+                    df = df.rename(columns={table_key: merge_key})
+                    print(f"    Renamed '{table_key}' -> '{merge_key}' in dataframe {i}")
+
+            # Apply prefix
+            if prefixes and i < len(prefixes) and prefixes[i]:
+                prefix = prefixes[i]
+                rename_dict = {col: f"{prefix}{col}" for col in df.columns if col != merge_key}
+                df = df.rename(columns=rename_dict)
+                print(f"    Applied prefix '{prefix}' to dataframe {i}")
+
+            renamed_dfs.append(df)
+
+        result = renamed_dfs[0]
+        for i, df in enumerate(renamed_dfs[1:], 1):
+            overlap = set(result.columns) & set(df.columns) - {merge_key}
+            if overlap:
+                print(f"    Warning: Overlapping columns: {overlap}")
+                df = df.drop(columns=list(overlap))
+
+            before_rows = len(result)
+            result = pd.merge(result, df, on=merge_key, how=how)
+            print(f"    Merged dataframe {i+1}: {before_rows} -> {len(result)} rows")
+
+        return result
+
+    # --- Path B: ID matching merge (on is None) ---
+    merge_key = "id"
+    print(f"  Merge (ID matching): how={how}, merge_key={merge_key}")
+    if map_table_paths:
+        print(f"    Using {len(map_table_paths)} map_table(s) for provenance")
+
+    # Verify all dataframes have the merge key
     for i, df in enumerate(dataframes):
-        df = df.copy()
+        if merge_key not in df.columns:
+            raise ValueError(f"Dataframe {i} has no '{merge_key}' column. "
+                             f"Use on=<column> for explicit column merge.")
 
-        # Rename per-table key to the canonical merge key
-        table_key = on_per_table[i] if i < len(on_per_table) else merge_key
-        if table_key != merge_key:
-            if table_key in df.columns:
-                # Drop the existing merge_key column to avoid duplicates after rename
-                if merge_key in df.columns:
-                    df = df.drop(columns=[merge_key])
-                    print(f"    Dropped original '{merge_key}' column in dataframe {i} (replaced by '{table_key}')")
-                df = df.rename(columns={table_key: merge_key})
-                print(f"    Renamed '{table_key}' -> '{merge_key}' in dataframe {i}")
+    # Start with first dataframe
+    result = dataframes[0].copy()
+    if prefixes and len(prefixes) > 0 and prefixes[0]:
+        prefix = prefixes[0]
+        rename_dict = {col: f"{prefix}{col}" for col in result.columns if col != merge_key}
+        result = result.rename(columns=rename_dict)
+        print(f"    Applied prefix '{prefix}' to dataframe 0")
 
-        # Apply ID mapping
-        if id_map:
-            reverse_map = {}
-            for new_id, old_id_list in id_map.items():
-                for old_id in old_id_list:
-                    reverse_map[old_id] = new_id
+    # Merge each subsequent dataframe using ID matching
+    for i, df_i in enumerate(dataframes[1:], 1):
+        df_i = df_i.copy()
 
-            if merge_key in df.columns:
-                df[merge_key] = df[merge_key].replace(reverse_map)
-                print(f"    Applied ID mapping to dataframe {i}")
+        # Get current IDs from the running result and the incoming dataframe
+        result_ids = result[merge_key].astype(str).tolist()
+        df_i_ids = df_i[merge_key].astype(str).tolist()
+
+        # Use get_mapped_ids to find matches: result_id -> df_i_id
+        matched = get_mapped_ids(result_ids, df_i_ids, unique=True,
+                                 map_table_paths=map_table_paths)
+
+        # Build reverse_map: df_i_id -> result_id (so we can rewrite df_i's IDs)
+        reverse_map = {}
+        for res_id, df_i_id in matched.items():
+            if df_i_id is not None:
+                reverse_map[df_i_id] = res_id
+
+        n_matched = sum(1 for v in matched.values() if v is not None)
+        print(f"    ID matching df {i}: {n_matched}/{len(result_ids)} result IDs matched")
+
+        # Replace df_i's merge key values using reverse_map
+        df_i[merge_key] = df_i[merge_key].astype(str).map(
+            lambda x: reverse_map.get(x, x))
 
         # Apply prefix
         if prefixes and i < len(prefixes) and prefixes[i]:
             prefix = prefixes[i]
-            rename_dict = {col: f"{prefix}{col}" for col in df.columns if col != merge_key}
-            df = df.rename(columns=rename_dict)
+            rename_dict = {col: f"{prefix}{col}" for col in df_i.columns if col != merge_key}
+            df_i = df_i.rename(columns=rename_dict)
             print(f"    Applied prefix '{prefix}' to dataframe {i}")
 
-        renamed_dfs.append(df)
-
-    # Perform merge
-    result = renamed_dfs[0]
-    for i, df in enumerate(renamed_dfs[1:], 1):
-        # Check for overlapping columns (excluding merge key)
-        overlap = set(result.columns) & set(df.columns) - {merge_key}
+        # Handle overlapping columns
+        overlap = set(result.columns) & set(df_i.columns) - {merge_key}
         if overlap:
             print(f"    Warning: Overlapping columns: {overlap}")
-            df = df.drop(columns=list(overlap))
+            df_i = df_i.drop(columns=list(overlap))
 
         before_rows = len(result)
-        result = pd.merge(result, df, on=merge_key, how=how)
+        result = pd.merge(result, df_i, on=merge_key, how=how)
         print(f"    Merged dataframe {i+1}: {before_rows} -> {len(result)} rows")
 
     return result
@@ -458,13 +513,11 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
         return df
 
 
-def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str],
-                                     id_remap: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, str]]:
+def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str]) -> Dict[str, Dict[str, str]]:
     """Build {stream_name: {id: file_path}} from saved DataStream JSONs.
 
     Args:
         stream_jsons: {stream_name: json_path} from config
-        id_remap: Optional mapping from pattern ID to remapped ID (id_map_forward values)
 
     Returns:
         file_map dict ready for extract_pool_data_for_filtered_ids
@@ -474,8 +527,7 @@ def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str],
         ds = load_datastream(json_path)
         file_map[stream_name] = {}
         for sid, fpath in iterate_files(ds):
-            mapped_id = id_remap.get(sid, sid) if id_remap else sid
-            file_map[stream_name][mapped_id] = fpath
+            file_map[stream_name][sid] = fpath
     return file_map
 
 
@@ -515,9 +567,16 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
 
             for selected_id in filtered_ids:
                 if selected_id not in id_to_file:
-                    continue
+                    # Fallback: use ID matching to find the file
+                    match = get_mapped_ids([selected_id], list(id_to_file.keys()), unique=True)
+                    matched_id = match.get(selected_id)
+                    if not matched_id or matched_id not in id_to_file:
+                        continue
+                    selected_id_lookup = matched_id
+                else:
+                    selected_id_lookup = selected_id
 
-                source = id_to_file[selected_id]
+                source = id_to_file[selected_id_lookup]
 
                 if not os.path.exists(source):
                     if ignore_missing:
@@ -603,9 +662,16 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
         # Extract from all streams in this pool's file map
         for stream_name, id_to_file in file_map.items():
             if lookup_id not in id_to_file:
-                continue
+                # Fallback: use ID matching to find the file
+                match = get_mapped_ids([lookup_id], list(id_to_file.keys()), unique=True)
+                matched_id = match.get(lookup_id)
+                if not matched_id or matched_id not in id_to_file:
+                    continue
+                actual_lookup_id = matched_id
+            else:
+                actual_lookup_id = lookup_id
 
-            source = id_to_file[lookup_id]
+            source = id_to_file[actual_lookup_id]
 
             if not os.path.exists(source):
                 if ignore_missing:
@@ -677,7 +743,6 @@ def filter_and_copy_pool_tables(
     pool_table_maps: List[Dict[str, Dict[str, Any]]],
     pool_folders: List[str],
     output_folder: str,
-    id_map_forward: Dict[str, List[str]],
     rename_map: Optional[Dict[str, str]] = None
 ) -> Dict[str, str]:
     """
@@ -685,16 +750,14 @@ def filter_and_copy_pool_tables(
 
     For each table in the pool(s), this function:
     1. Loads the table
-    2. Filters rows to match the IDs in result_df
-    3. Applies ID remapping (using id_map_forward for reverse lookup)
-    4. Saves the filtered table to output_folder
+    2. Filters rows to match the IDs in result_df (using get_mapped_ids fallback)
+    3. Saves the filtered table to output_folder
 
     Args:
         result_df: DataFrame with filtered IDs (has 'id' column, may have 'source_table')
         pool_table_maps: List of table maps per pool: [{table_name: {"path": str, "columns": list}}]
         pool_folders: List of pool folder paths
         output_folder: Where to save filtered tables
-        id_map_forward: Mapping new_id -> [old_ids] for reverse lookup
         rename_map: Optional mapping from lookup_id to output_id
 
     Returns:
@@ -764,14 +827,13 @@ def filter_and_copy_pool_tables(
                 # Strategy 1: Direct match
                 matching = pool_df[pool_df['id'].astype(str) == lookup_id]
 
-                # Strategy 2: If no match and we have id_map_forward, try reverse lookup
-                if matching.empty and id_map_forward:
-                    # lookup_id might be the new (merged) ID, find original IDs
-                    original_ids = id_map_forward.get(lookup_id, [])
-                    for orig_id in original_ids:
-                        matching = pool_df[pool_df['id'].astype(str) == orig_id]
-                        if not matching.empty:
-                            break
+                # Strategy 2: If no direct match, use ID matching fallback
+                if matching.empty:
+                    pool_table_ids = pool_df['id'].astype(str).tolist()
+                    match = get_mapped_ids([lookup_id], pool_table_ids, unique=True)
+                    matched_id = match.get(lookup_id)
+                    if matched_id:
+                        matching = pool_df[pool_df['id'].astype(str) == matched_id]
 
                 if not matching.empty:
                     # Copy matching row(s) and update ID, adding provenance
@@ -835,7 +897,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     for stream_jsons in pool_stream_jsons:
         pool_file_maps.append(build_file_map_from_stream_jsons(stream_jsons))
     pool_table_maps = config_data.get('pool_table_maps', [])
-    id_map_forward = config_data.get('id_map_forward', {})
+    map_table_paths = config_data.get('map_table_paths', [])
     rename = config_data.get('rename')
     ignore_missing = config_data.get('ignore_missing', False)
 
@@ -868,6 +930,11 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     # Start with either single df or list of dfs
     is_multi_table = len(dataframes) > 1
     current = dataframes if is_multi_table else dataframes[0]
+
+    # Inject map_table_paths into merge operations for ID matching
+    for operation in operations:
+        if operation.get('type') == 'merge':
+            operation.setdefault('params', {})['map_table_paths'] = map_table_paths
 
     # Execute operations sequentially
     print("\nExecuting operations:")
@@ -971,7 +1038,6 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                 pool_table_maps=pool_table_maps,
                 pool_folders=pool_folders,
                 output_folder=output_dir,
-                id_map_forward=id_map_forward,
                 rename_map=original_to_new_id if rename else None
             )
             print(f"Copied {len(copied_tables)} tables")

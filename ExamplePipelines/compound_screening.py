@@ -20,13 +20,23 @@ with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
     cofolded = Boltz2(proteins=Bundle(TrpR,TrpR),
                       dsDNA=DNA,
                       ligands=Each(library))
-    merged = Panda(tables=cofolded.tables.affinity,
-                   operations=[Panda.calculate({"aff_uM":"10**affinity_pred_value"})])
+    merged = Panda(tables=[library.tables.compounds, cofolded.tables.affinity],
+                    operations=[Panda.merge(),
+                                Panda.calculate({"aff_uM":"10**affinity_pred_value"})])
     Plot(Plot.Scatter(data=merged.tables.result,
-                      x="R1",
-                      xlabel="R1 group",
-                      y="aff_uM",
-                      ylabel="Predicted Affinity [uM]"))
+                        x="R1",
+                        y="aff_uM", # affinity_probability_binary
+                        title="Predicted Affinity by R1 group",
+                        xlabel="R1",
+                        ylabel="Predicted Affinity [uM]" # Predicted Binding Probability [0-1]
+                     ),
+         Plot.Scatter(data=merged.tables.result,
+                        x="R1",
+                        y="aff_uM", # affinity_probability_binary
+                        title="Predicted Affinity by R1 group",
+                        xlabel="R1",
+                        ylabel="Predicted Affinity [uM]" # Predicted Binding Probability [0-1]
+                     ))
 
 
     
