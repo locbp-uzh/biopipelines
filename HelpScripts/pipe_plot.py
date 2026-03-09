@@ -51,7 +51,11 @@ class PlotBuilder:
         """Load a table CSV file."""
         if not os.path.exists(path):
             raise FileNotFoundError(f"Table not found: {path}")
-        return pd.read_csv(path)
+        df = pd.read_csv(path)
+        # Replace NaN in string columns with empty strings so labels don't show "nan"
+        str_cols = df.select_dtypes(include=["object"]).columns
+        df[str_cols] = df[str_cols].fillna("")
+        return df
 
     def _resolve_data_source(self, data_ref: Dict[str, Any]) -> pd.DataFrame:
         """
@@ -185,7 +189,7 @@ class PlotBuilder:
         export_cols = [x_col, y_col]
         if color_col and color_col in df.columns:
             export_cols.append(color_col)
-        df[export_cols].to_csv(csv_path, index=False)
+        df[export_cols].to_csv(csv_path, index=False, na_rep="")
         print(f"  Exported data: {csv_path}")
 
         # Record metadata
@@ -249,7 +253,7 @@ class PlotBuilder:
 
         # Export CSV with plot data
         csv_path = os.path.splitext(output_path)[0] + ".csv"
-        values.reset_index(drop=True).to_frame(name=x_col).to_csv(csv_path, index=False)
+        values.reset_index(drop=True).to_frame(name=x_col).to_csv(csv_path, index=False, na_rep="")
         print(f"  Exported data: {csv_path}")
 
         # Record metadata
@@ -365,7 +369,7 @@ class PlotBuilder:
 
         # Export CSV with plot data (aggregated if applicable)
         csv_path = os.path.splitext(output_path)[0] + ".csv"
-        agg_df.to_csv(csv_path, index=False)
+        agg_df.to_csv(csv_path, index=False, na_rep="")
         print(f"  Exported data: {csv_path}")
 
         # Record metadata
@@ -571,7 +575,7 @@ class PlotBuilder:
         for label, df in zip(group_labels, dataframes):
             export_series[label] = df[y_col].dropna().reset_index(drop=True)
         export_df = pd.DataFrame(export_series)
-        export_df.to_csv(csv_path, index=False)
+        export_df.to_csv(csv_path, index=False, na_rep="")
         print(f"  Exported data: {csv_path}")
 
         # Record metadata
@@ -689,9 +693,9 @@ class PlotBuilder:
         # Export CSV with the matrix data
         csv_path = os.path.splitext(output_path)[0] + ".csv"
         if columns:
-            corr_matrix.to_csv(csv_path)
+            corr_matrix.to_csv(csv_path, na_rep="")
         else:
-            pivot_df.to_csv(csv_path)
+            pivot_df.to_csv(csv_path, na_rep="")
         print(f"  Exported data: {csv_path}")
 
         # Record metadata
@@ -769,7 +773,7 @@ class PlotBuilder:
             df = pd.DataFrame(self.metadata)
         else:
             df = pd.DataFrame(columns=["filename", "type", "title", "x_column", "y_column", "data_sources"])
-        df.to_csv(metadata_path, index=False)
+        df.to_csv(metadata_path, index=False, na_rep="")
         print(f"\nMetadata written to: {metadata_path}")
 
 
