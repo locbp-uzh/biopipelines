@@ -76,6 +76,7 @@ pip3 install -r requirements.txt
 - `fixed`: str = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or table reference)
 - `redesigned`: str = "" - Designed positions (LigandMPNN format or table reference)
 - `design_within`: float = 5.0 - Distance in Angstroms from ligand for post-generation analysis only (does not control design). For actually designing residues within a distance, use [DistanceSelector](Analysis.md#distanceselector) to select positions first.
+- `chain`: str = "A" - Default chain ID applied to chainless position input (e.g. when positions are given as "10-20" without chain prefix)
 - `model`: str = "v_32_010" - LigandMPNN model version (v_32_005, v_32_010, v_32_020, v_32_025)
 - `num_batches`: int = 1 - Number of batches to run. Total sequences = num_sequences × num_batches
 - `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine). 

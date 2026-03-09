@@ -198,6 +198,19 @@ done
 
 The loop works correctly whether the DataStream has literal IDs, deterministic patterns, or lazy patterns.
 
+#### Using `eval` for pre-formatted argument variables
+
+When a HelpScript outputs a pre-formatted command-line fragment with embedded quotes (e.g. `--fixed_residues "A10 A11 A12"`), storing it in a bash variable and expanding it with `$VAR` does **not** interpret the embedded quotes — bash treats them as literal characters and word-splits on spaces. Use `eval` so the shell re-parses the line and respects the embedded quotes:
+
+```python
+script += f"""
+    OPTIONS=$(python helper.py "{self.config_json}" "$struct_id")
+    eval python run.py --pdb '"$PDB_FILE"' $OPTIONS
+"""
+```
+
+Note that `$PDB_FILE` is wrapped in `'"..."'` (single-quoted double quotes) so `eval` preserves the quoting around the variable expansion. Only use `eval` when you need embedded quotes interpreted; for simple arguments, plain `python run.py --flag "$VAR"` is preferred.
+
 ### How to Resolve a Single File
 
 When a tool processes one fixed input (not iterating over all IDs), use `Resolve.stream_item()`:
@@ -576,6 +589,15 @@ parse_pymol_ranges("3-45+58-60")  # [(3, 45), (58, 60)]
 # Numbers → string
 format_pymol_ranges([3, 4, 5, 10, 11])  # "3-5+10-11"
 ```
+
+#### Selection format convention
+
+Inter-tool selections (table columns like `within`, `beyond`, `designed`) must use **chain-aware format** (`"A1-50+B10"`) so downstream tools can correctly identify residues. `sele_utils.py` provides the shared conversion functions:
+
+- `sele_to_list(s)` — parse any format (chain-aware, chainless, legacy) → sorted `(chain, resnum)` tuples
+- `chain_aware_sele(residues)` / `list_to_sele(a)` — tuples → compact chain-aware string
+
+Tools that accept user-provided position strings (e.g. `fixed="10-20"`) should include a `chain` parameter (default `"A"`) to fill in missing chain info at runtime. Chainless format (`"1-50+10"`) is acceptable only for tool-internal use (e.g. ProteinMPNN's native jsonl format).
 
 ### Table References
 

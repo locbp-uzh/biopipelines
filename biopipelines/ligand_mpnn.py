@@ -97,6 +97,7 @@ echo "=== LigandMPNN installation complete ==="
                  fixed: Union[str, Tuple['TableInfo', str]] = "",
                  redesigned: Union[str, Tuple['TableInfo', str]] = "",
                  design_within: float = 5.0,
+                 chain: str = "A",
                  model: str = "v_32_010",
                  num_batches: int = 1,
                  remove_duplicates: bool = True,
@@ -116,6 +117,7 @@ echo "=== LigandMPNN installation complete ==="
                    - PyMOL selection string: "10-20+30-40"
                    - TableReference: table.column_name
             design_within: Distance in Angstrom from ligand to redesign (fallback if positions not specified)
+            chain: Default chain ID for chainless position input (default "A")
             model: LigandMPNN model version to use
             num_batches: Number of batches to run
             remove_duplicates: Remove duplicate sequences from output (default True)
@@ -142,6 +144,7 @@ echo "=== LigandMPNN installation complete ==="
         self.fixed = fixed
         self.redesigned = redesigned
         self.design_within = design_within
+        self.chain = chain
         self.model = model
         self.num_batches = num_batches
         self.remove_duplicates = remove_duplicates
@@ -182,6 +185,7 @@ echo "=== LigandMPNN installation complete ==="
             f"LIGAND: {self.ligand}",
             f"FIXED: {self.fixed or 'Auto (from table or ligand-based)'}",
             f"REDESIGNED: {self.redesigned or 'Auto (from table or ligand-based)'}",
+            f"CHAIN: {self.chain}",
             f"DESIGN WITHIN: {self.design_within}A",
             f"NUM SEQUENCES: {self.num_sequences}",
             f"NUM BATCHES: {self.num_batches}",
@@ -225,7 +229,7 @@ echo "=== LigandMPNN installation complete ==="
 
 # Create positions JSON for runtime lookup
 echo "Computing position constraints..."
-python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand}" "{self.design_within}" "{self.positions_json}"
+python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand}" "{self.design_within}" "{self.positions_json}" "{self.chain}"
 
 """
 
@@ -250,7 +254,7 @@ for struct_id in {Resolve.stream_ids(self.structures_json)}; do
     FIXED_OPTION=$(echo "$POSITIONS" | head -n1)
     REDESIGNED_OPTION=$(echo "$POSITIONS" | sed -n '2p')
 
-    python run.py {base_options} --pdb_path "$PDB_FILE" $FIXED_OPTION $REDESIGNED_OPTION
+    eval python run.py {base_options} --pdb_path '"$PDB_FILE"' $FIXED_OPTION $REDESIGNED_OPTION
 done
 
 """
@@ -343,6 +347,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "fixed": self.fixed,
                 "redesigned": self.redesigned,
                 "design_within": self.design_within,
+                "chain": self.chain,
                 "model": self.model,
                 "remove_duplicates": self.remove_duplicates
             }

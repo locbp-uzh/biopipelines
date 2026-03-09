@@ -9,7 +9,7 @@ Position determination for LigandMPNN from tables or direct specifications.
 This script processes a DataStream JSON file to create a JSON file with LigandMPNN position arguments.
 
 Usage:
-    python pipe_lmpnn_runtime_positions.py <structures_json> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>
+    python pipe_lmpnn_runtime_positions.py <structures_json> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file> [default_chain]
 
 Arguments:
     structures_json: Path to DataStream JSON file with input structures
@@ -20,6 +20,7 @@ Arguments:
     ligand: Ligand identifier
     design_within: Distance cutoff for ligand-based design
     output_file: Path to output JSON file
+    default_chain: Fallback chain ID for chainless positions (default "A")
 
 Output:
     JSON file mapping design_id -> {fixed_option, redesigned_option} for LigandMPNN
@@ -182,25 +183,26 @@ def process_ligand_source(ligand, design_within, design_entries):
     return positions_data
 
 
-def write_positions_json(positions_data, output_file):
+def write_positions_json(positions_data, output_file, default_chain="A"):
     """Write positions data as JSON for runtime lookup.
 
     Args:
         positions_data: Dict mapping design_id -> {fixed_positions, designed_positions, pdb_file}
         output_file: Path to output JSON file
+        default_chain: Fallback chain ID for chainless positions (default "A")
     """
     result = {}
     for design_id, positions in positions_data.items():
         # Build fixed positions option for this design
         fixed_option = ""
         if positions['fixed_positions']:
-            fixed_str = " ".join([f"{chain}{resnum}" for chain, resnum in positions['fixed_positions']])
+            fixed_str = " ".join([f"{chain if chain else default_chain}{resnum}" for chain, resnum in positions['fixed_positions']])
             fixed_option = f'--fixed_residues "{fixed_str}"'
 
         # Build designed positions option for this design
         redesigned_option = ""
         if positions['designed_positions']:
-            designed_str = " ".join([f"{chain}{resnum}" for chain, resnum in positions['designed_positions']])
+            designed_str = " ".join([f"{chain if chain else default_chain}{resnum}" for chain, resnum in positions['designed_positions']])
             redesigned_option = f'--redesigned_residues "{designed_str}"'
 
         result[design_id] = {
@@ -216,8 +218,8 @@ def write_positions_json(positions_data, output_file):
 
 
 def main():
-    if len(sys.argv) != 9:
-        print("Usage: python pipe_lmpnn_runtime_positions.py <structures_json> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file>")
+    if len(sys.argv) < 9 or len(sys.argv) > 10:
+        print("Usage: python pipe_lmpnn_runtime_positions.py <structures_json> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file> [default_chain]")
         sys.exit(1)
 
     structures_json = sys.argv[1]
@@ -228,6 +230,7 @@ def main():
     ligand = sys.argv[6]
     design_within = float(sys.argv[7])
     output_file = sys.argv[8]
+    default_chain = sys.argv[9] if len(sys.argv) > 9 else "A"
 
     # Load DataStream and get (id, file) pairs
     structures_ds = load_datastream(structures_json)
@@ -249,7 +252,7 @@ def main():
         raise ValueError(f"Invalid input_source: {input_source}")
 
     # Write positions JSON for runtime lookup
-    write_positions_json(positions_data, output_file)
+    write_positions_json(positions_data, output_file, default_chain)
 
 
 if __name__ == "__main__":
