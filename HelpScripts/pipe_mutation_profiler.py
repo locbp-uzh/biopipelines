@@ -70,19 +70,36 @@ def parse_positions_selection(selection_str: Optional[str]) -> Optional[List[int
 
     return sorted(set(positions)) if positions else None
 
-# Color scheme for amino acids (based on chemical properties)
-AMINO_ACID_COLORS = {
-    # Hydrophobic (blue shades)
-    'A': '#1f77b4', 'V': '#aec7e8', 'I': '#1f77b4', 'L': '#aec7e8', 
-    'M': '#1f77b4', 'F': '#aec7e8', 'W': '#1f77b4', 'P': '#aec7e8',
-    # Polar (green shades)
-    'S': '#2ca02c', 'T': '#98df8a', 'Y': '#2ca02c', 'N': '#98df8a', 'Q': '#2ca02c',
-    # Charged positive (red shades)
-    'K': '#d62728', 'R': '#ff7f7f', 'H': '#d62728',
-    # Charged negative (orange shades)
-    'D': '#ff7f0e', 'E': '#ffbb78',
-    # Special cases
-    'C': '#9467bd', 'G': '#c5b0d5'  # Cysteine (purple), Glycine (light purple)
+# Color palettes for amino acids
+COLOR_PALETTES = {
+    'okabe-ito': {
+        # Charged positive (blue)
+        'K': '#0072B2', 'H': '#0072B2', 'R': '#0072B2',
+        # Charged negative (vermillion)
+        'D': '#D55E00', 'E': '#D55E00',
+        # Polar uncharged (sky blue)
+        'N': '#56B4E9', 'Q': '#56B4E9',
+        # Hydrophobic (green)
+        'L': '#009E73', 'I': '#009E73', 'V': '#009E73', 'A': '#009E73',
+        'W': '#009E73', 'F': '#009E73', 'M': '#009E73',
+        # Hydroxyl/aromatic (orange)
+        'S': '#E69F00', 'T': '#E69F00', 'Y': '#E69F00',
+        # Special (pink)
+        'C': '#CC79A7', 'G': '#CC79A7', 'P': '#CC79A7',
+    },
+    'standard': {
+        # Hydrophobic (blue shades)
+        'A': '#1f77b4', 'V': '#aec7e8', 'I': '#1f77b4', 'L': '#aec7e8',
+        'M': '#1f77b4', 'F': '#aec7e8', 'W': '#1f77b4', 'P': '#aec7e8',
+        # Polar (green shades)
+        'S': '#2ca02c', 'T': '#98df8a', 'Y': '#2ca02c', 'N': '#98df8a', 'Q': '#2ca02c',
+        # Charged positive (red shades)
+        'K': '#d62728', 'R': '#ff7f7f', 'H': '#d62728',
+        # Charged negative (orange shades)
+        'D': '#ff7f0e', 'E': '#ffbb78',
+        # Special cases
+        'C': '#9467bd', 'G': '#c5b0d5',
+    },
 }
 
 
@@ -254,7 +271,8 @@ def analyze_mutations(original_seqs: List[str], mutant_seqs: List[str],
 
 def create_sequence_logo(relative_freq_df: pd.DataFrame, absolute_freq_df: pd.DataFrame, profile_df: pd.DataFrame,
                         relative_svg: str, relative_png: str, absolute_svg: str, absolute_png: str,
-                        counts_svg: str, counts_png: str, positions_filter: Optional[List[int]] = None):
+                        counts_svg: str, counts_png: str, positions_filter: Optional[List[int]] = None,
+                        color_palette: str = 'okabe-ito'):
     """
     Create sequence logo visualizations showing mutation patterns.
 
@@ -311,30 +329,30 @@ def create_sequence_logo(relative_freq_df: pd.DataFrame, absolute_freq_df: pd.Da
     
     # Plot 1: Relative frequencies
     fig, ax = plt.subplots(figsize=(max(12, num_positions * 0.8), 6))
-    _create_logo_plot(ax, mutation_positions, 'relative', 'Relative Mutation Frequency', 'Relative Frequency Sequence Logo')
+    _create_logo_plot(ax, mutation_positions, 'relative', 'Relative Mutation Frequency', 'Relative Frequency Sequence Logo', color_palette)
     plt.tight_layout()
     plt.savefig(relative_svg, format='svg', dpi=300, bbox_inches='tight')
     plt.savefig(relative_png, format='png', dpi=300, bbox_inches='tight')
     plt.close()
-    
-    # Plot 2: Absolute frequencies  
+
+    # Plot 2: Absolute frequencies
     fig, ax = plt.subplots(figsize=(max(12, num_positions * 0.8), 6))
-    _create_logo_plot(ax, mutation_positions, 'absolute', 'Absolute Mutation Frequency', 'Absolute Frequency Sequence Logo')
+    _create_logo_plot(ax, mutation_positions, 'absolute', 'Absolute Mutation Frequency', 'Absolute Frequency Sequence Logo', color_palette)
     plt.tight_layout()
     plt.savefig(absolute_svg, format='svg', dpi=300, bbox_inches='tight')
     plt.savefig(absolute_png, format='png', dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     # Plot 3: Counts
     fig, ax = plt.subplots(figsize=(max(12, num_positions * 0.8), 6))
-    _create_logo_plot(ax, mutation_positions, 'count', 'Mutation Count', 'Mutation Count Sequence Logo')
+    _create_logo_plot(ax, mutation_positions, 'count', 'Mutation Count', 'Mutation Count Sequence Logo', color_palette)
     plt.tight_layout()
     plt.savefig(counts_svg, format='svg', dpi=300, bbox_inches='tight')
     plt.savefig(counts_png, format='png', dpi=300, bbox_inches='tight')
     plt.close()
 
 
-def _create_logo_plot(ax, mutation_positions, data_type, ylabel, title):
+def _create_logo_plot(ax, mutation_positions, data_type, ylabel, title, color_palette='okabe-ito'):
     """Create a single sequence logo plot using logomaker."""
     if not mutation_positions:
         ax.text(0.5, 0.5, 'No significant mutations found', 
@@ -391,7 +409,7 @@ def _create_logo_plot(ax, mutation_positions, data_type, ylabel, title):
     logo_df = logo_df.drop('pos', axis=1)  # Remove the position column
     
     # Create logo using logomaker
-    logo = logomaker.Logo(logo_df, ax=ax, color_scheme='chemistry')
+    logo = logomaker.Logo(logo_df, ax=ax, color_scheme=COLOR_PALETTES[color_palette])
     
     # Customize the plot
     ax.set_ylabel(ylabel, fontsize=14)
@@ -468,11 +486,13 @@ def main():
         if positions_filter:
             logger.info(f"Using positions filter: {positions_filter} ({len(positions_filter)} positions)")
 
+        color_palette = config.get('color_palette', 'okabe-ito')
         create_sequence_logo(relative_freq_df, absolute_freq_df, profile_df,
                            config['sequence_logo_relative_svg'], config['sequence_logo_relative_png'],
                            config['sequence_logo_absolute_svg'], config['sequence_logo_absolute_png'],
                            config['sequence_logo_counts_svg'], config['sequence_logo_counts_png'],
-                           positions_filter=positions_filter)
+                           positions_filter=positions_filter,
+                           color_palette=color_palette)
         logger.info(f"Sequence logos saved to:")
         logger.info(f"  Relative frequencies: {config['sequence_logo_relative_svg']} and {config['sequence_logo_relative_png']}")
         logger.info(f"  Absolute frequencies: {config['sequence_logo_absolute_svg']} and {config['sequence_logo_absolute_png']}")

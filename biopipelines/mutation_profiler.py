@@ -85,11 +85,14 @@ echo "=== MutationEnv installation complete ==="
     config_file = Path(lambda self: os.path.join(self.output_folder, "mutation_profiler_config.json"))
     profiler_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutation_profiler.py"))
 
+    VALID_COLOR_PALETTES = ("okabe-ito", "standard")
+
     def __init__(self,
                  original: Union[DataStream, StandardizedOutput],
                  mutants: Union[DataStream, StandardizedOutput],
                  include_original: bool = True,
                  positions: Optional[str] = None,
+                 color_palette: str = "okabe-ito",
                  **kwargs):
         """
         Initialize mutation profiler tool.
@@ -100,6 +103,8 @@ echo "=== MutationEnv installation complete ==="
             include_original: Whether to include original sequence in analysis (default: True)
             positions: PyMOL-style selection string for positions to display in plots (e.g., "141+143+145+147-149")
                       If None, shows all positions with mutations.
+            color_palette: Color palette for sequence logos. Options: "okabe-ito" (default, colorblind-friendly),
+                          "standard" (property-based shading).
             **kwargs: Additional parameters
 
         Output:
@@ -128,6 +133,9 @@ echo "=== MutationEnv installation complete ==="
 
         self.include_original = include_original
         self.positions = positions
+        if color_palette not in self.VALID_COLOR_PALETTES:
+            raise ValueError(f"color_palette must be one of {self.VALID_COLOR_PALETTES}, got '{color_palette}'")
+        self.color_palette = color_palette
 
         super().__init__(**kwargs)
 
@@ -152,7 +160,8 @@ echo "=== MutationEnv installation complete ==="
             f"ORIGINAL: {len(self.original_stream)} sequences",
             f"MUTANTS: {len(self.mutants_stream)} sequences",
             f"INCLUDE_ORIGINAL: {self.include_original}",
-            f"POSITIONS: {self.positions if self.positions else 'auto (all mutations)'}"
+            f"POSITIONS: {self.positions if self.positions else 'auto (all mutations)'}",
+            f"COLOR_PALETTE: {self.color_palette}"
         ])
 
         return config_lines
@@ -179,6 +188,7 @@ echo "=== MutationEnv installation complete ==="
             "mutants_sequences": self.mutants_stream.map_table,
             "include_original": self.include_original,
             "positions": self.positions,
+            "color_palette": self.color_palette,
             "profile_output": self.profile_csv,
             "mutations_output": self.mutations_csv,
             "absolute_frequencies_output": self.absolute_freq_csv,
@@ -254,7 +264,8 @@ python "{self.profiler_py}" --config "{self.config_file}"
         base_dict.update({
             "tool_params": {
                 "include_original": self.include_original,
-                "positions": self.positions
+                "positions": self.positions,
+                "color_palette": self.color_palette
             }
         })
         return base_dict

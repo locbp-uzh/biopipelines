@@ -17,6 +17,7 @@ mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 - `original`: Union[ToolOutput, StandardizedOutput] (required) - Original/reference sequences
 - `mutants`: Union[ToolOutput, StandardizedOutput] (required) - Mutant sequences to analyze
 - `include_original`: bool = True - Include original sequence in frequency analysis
+- `color_palette`: str = "okabe-ito" - Color palette for sequence logos. Options: "okabe-ito" (colorblind-friendly), "standard" (property-based shading)
 
 **Tables**:
 - `profile`:
