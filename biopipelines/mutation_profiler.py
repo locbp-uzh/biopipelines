@@ -248,13 +248,16 @@ python "{self.profiler_py}" --config "{self.config_file}"
             )
         }
 
+        plots = DataStream(
+            name="plots",
+            ids=["sequence_logo_relative_frequencies", "sequence_logo_absolute_frequencies", "sequence_logo_counts"],
+            files=[self.sequence_logo_relative_png, self.sequence_logo_absolute_png, self.sequence_logo_counts_png],
+            format="png"
+        )
+
         return {
+            "plots": plots,
             "tables": tables,
-            "visualizations": [
-                self.sequence_logo_relative_svg, self.sequence_logo_relative_png,
-                self.sequence_logo_absolute_svg, self.sequence_logo_absolute_png,
-                self.sequence_logo_counts_svg, self.sequence_logo_counts_png
-            ],
             "output_folder": self.output_folder
         }
     
