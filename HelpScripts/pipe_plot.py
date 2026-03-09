@@ -317,16 +317,20 @@ class PlotBuilder:
             # Dual-axis mode: side-by-side bars
             bar_width = 0.35
             ax.bar(x_positions - bar_width / 2, agg_df[y_col],
-                   bar_width, color=color_left, edgecolor='white', alpha=0.8, label=ylabel)
+                   bar_width, color=color_left, edgecolor='white', alpha=0.8, label=ylabel, zorder=3)
             ax.set_ylabel(ylabel, fontsize=10, color=color_left)
             ax.tick_params(axis='y', labelcolor=color_left)
 
             ax2 = ax.twinx()
             ax2.bar(x_positions + bar_width / 2, agg_df[y_right_col],
-                    bar_width, color=color_right, edgecolor='white', alpha=0.8, label=ylabel_right)
+                    bar_width, color=color_right, edgecolor='white', alpha=0.8, label=ylabel_right, zorder=3)
             ax2.set_ylabel(ylabel_right, fontsize=10, color=color_right)
             ax2.tick_params(axis='y', labelcolor=color_right)
             ax2.spines['top'].set_visible(False)
+
+            # Ensure both sets of bars render above the grid
+            ax.set_zorder(ax2.get_zorder() + 1)
+            ax.patch.set_visible(False)
 
             ax.set_xticks(x_positions)
             ax.set_xticklabels(agg_df[x_col])
