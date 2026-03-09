@@ -33,7 +33,7 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization"):
                             num_sequences=1000,
                             redesigned=pocket.tables.selections.within)
         profile = MutationProfiler(original=current_best, 
-                                mutants=variants)
+                                   mutants=variants)
         candidates = MutationComposer(frequencies=profile.tables.absolute_frequencies,
                                       num_sequences=3, 
                                       mode="weighted_random", 

@@ -12,6 +12,8 @@ frequency statistics, and generates sequence logo visualizations.
 
 import argparse
 import json
+import os
+os.environ['MPLBACKEND'] = 'agg'
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
