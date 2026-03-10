@@ -145,13 +145,15 @@ mkdir -p models && cd models
 {wget_lines}
 cd ..
 
-# Install dependencies via pip
-pip install -r {biopipelines}/Environments/SE3nv_pip_requirements.txt
+# Install dependencies via pip (Colab-specific, Python 3.12 compatible)
+pip install -r {biopipelines}/Environments/SE3nv_colab_requirements.txt
 
 # Install SE3Transformer and RFdiffusion
+# Skip SE3Transformer's own requirements.txt (has hydra/wandb/pathtools
+# which are incompatible with Python 3.12); dependencies already covered
+# by SE3nv_colab_requirements.txt above
 cd env/SE3Transformer
-pip install --no-cache-dir -r requirements.txt
-python setup.py install
+pip install --no-deps .
 cd ../..
 pip install -e .
 
