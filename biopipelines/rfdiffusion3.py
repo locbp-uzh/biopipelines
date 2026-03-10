@@ -549,6 +549,9 @@ if [ ! -d "${{FOUNDRY_CHECKPOINT_DIRS}}" ]; then
     exit 1
 fi
 
+# Pre-import torch and torchvision to avoid circular import error on Colab
+python -c "import torch; import torchvision" 2>/dev/null || true
+
 # Run RFdiffusion3 (outputs CIF.gz format to raw folder)
 # n_batches: number of designs to generate (default: 1)
 # diffusion_batch_size: number of models per design (default: 8)
