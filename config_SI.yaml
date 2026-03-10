@@ -1,6 +1,3 @@
-# BioPipelines Configuration (Supplementary Information)
-# Adapt this file to your HPC cluster before running pipelines.
-
 folders:
   base:
     home: "/home/<username>"

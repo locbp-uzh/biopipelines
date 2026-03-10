@@ -33,7 +33,7 @@ with Pipeline(project="Examples",
     Gnina.install()
 
     # Shared protein — fetched once, reused across all three tests
-    protein = PDB("9RTM", ids="rhotag")
+    protein = PDB("9RTM", ids="rhotag", convert="pdb")
 
     # =========================================================================
     # Test 1: Basic docking — box auto-detected from crystal ligand

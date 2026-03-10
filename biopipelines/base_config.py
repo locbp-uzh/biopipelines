@@ -52,7 +52,7 @@ class BaseConfig(ABC):
         """
         Type hint overload for IDE autocomplete support.
 
-        This tells type checkers that Boltz(...) returns a Boltz instance,
+        This tells type checkers that Tool(...) returns a Tool instance,
         enabling IDE parameter suggestions for tool constructors even though
         the actual runtime returns StandardizedOutput when in Pipeline context.
         """

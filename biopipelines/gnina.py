@@ -65,7 +65,7 @@ class Gnina(BaseConfig):
     Usage:
         with Pipeline(...):
             Resources(gpu="A100", memory="16GB", time="8:00:00")
-            protein = PDB("9RTM")
+            protein = PDB("9RTM", convert="pdb")
             ligand = Ligand(smiles="CN(C)c1ccc2...", ids="TMR")
             docking = Gnina(structures=protein, compounds=ligand)
     """
@@ -281,6 +281,12 @@ echo "=== GNINA installation complete ==="
         """Validate GNINA parameters."""
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
+
+        if self.structures_stream.format != "pdb":
+            raise ValueError(
+                f"GNINA requires PDB format structures, got '{self.structures_stream.format}'. "
+                f"Use convert='pdb' in PDB() or RCSB() to ensure PDB format output."
+            )
 
         if not self.compounds_stream or len(self.compounds_stream) == 0:
             raise ValueError("compounds parameter is required and must not be empty")

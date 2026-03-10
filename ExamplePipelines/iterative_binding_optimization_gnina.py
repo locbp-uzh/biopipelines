@@ -18,7 +18,7 @@ from biopipelines.remap import ReMap
 
 with Pipeline(project="NocT", job=f"IterativeBindingOptimization_Gnina"):
     Resources(gpu="A100", time="24:00:00", memory="16GB")
-    protein = PDB("5OT9")
+    protein = PDB("5OT9", convert="pdb")
     ligand = Ligand("Histopine")
     original = Boltz2(proteins=protein,
                     ligands=ligand)
