@@ -587,7 +587,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                     'structure_ids': getattr(source, 'structure_ids', [])
                 }
 
-    def _serialize_operation(self, op: PyMOLOperation) -> Dict[str, Any]:
+    def _serialize_operation(self, op: PyMOLOperation, op_index: int) -> Dict[str, Any]:
         """Serialize an operation to a dictionary for JSON config."""
         result = {"op": op.op_type}
 
@@ -595,31 +595,29 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
             if value is None:
                 result[key] = None
             elif isinstance(value, DataStream):
-                # Serialize DataStream - use files and ids directly
+                # Save DataStream to JSON file; store path in config
+                ds_json_path = os.path.join(self.output_folder, f"op{op_index}_{key}.json")
+                value.save_json(ds_json_path)
                 result[key] = {
                     "type": "datastream",
-                    "structures": list(value.files),
-                    "structure_ids": list(value.ids),
-                    "format": value.format
+                    "ds_json": ds_json_path,
+                    "map_table": value.map_table or ""
                 }
             elif isinstance(value, StandardizedOutput):
-                # Serialize StandardizedOutput reference
-                # Check if structures is a DataStream
+                # Extract structures DataStream and save to JSON file
                 structures_data = value.streams.structures
                 if isinstance(structures_data, DataStream):
+                    ds_json_path = os.path.join(self.output_folder, f"op{op_index}_{key}.json")
+                    structures_data.save_json(ds_json_path)
                     result[key] = {
-                        "type": "standardized_output",
-                        "output_folder": value.output_folder,
-                        "structures": list(structures_data.files),
-                        "structure_ids": list(structures_data.ids),
+                        "type": "datastream",
+                        "ds_json": ds_json_path,
                         "map_table": structures_data.map_table or ""
                     }
                 else:
                     result[key] = {
-                        "type": "standardized_output",
-                        "output_folder": value.output_folder,
-                        "structures": structures_data if isinstance(structures_data, list) else [],
-                        "structure_ids": value.structure_ids if hasattr(value, 'structure_ids') else [],
+                        "type": "datastream",
+                        "ds_json": "",
                         "map_table": ""
                     }
             elif isinstance(value, TableInfo):
@@ -640,18 +638,18 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                 # ToolOutput or similar - check for DataStream in structures
                 structures_attr = getattr(value, 'structures', None)
                 if isinstance(structures_attr, DataStream):
+                    ds_json_path = os.path.join(self.output_folder, f"op{op_index}_{key}.json")
+                    structures_attr.save_json(ds_json_path)
                     result[key] = {
-                        "type": "tool_output",
-                        "output_folder": value.output_folder,
-                        "structures": list(structures_attr.files),
-                        "structure_ids": list(structures_attr.ids)
+                        "type": "datastream",
+                        "ds_json": ds_json_path,
+                        "map_table": structures_attr.map_table or ""
                     }
                 else:
                     result[key] = {
-                        "type": "tool_output",
-                        "output_folder": value.output_folder,
-                        "structures": structures_attr if isinstance(structures_attr, list) else [],
-                        "structure_ids": getattr(value, 'structure_ids', [])
+                        "type": "datastream",
+                        "ds_json": "",
+                        "map_table": ""
                     }
             else:
                 result[key] = value
@@ -674,7 +672,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
     def generate_script_run_pymol(self) -> str:
         """Generate the PyMOL session creation part of the script."""
         config = {
-            "operations": [self._serialize_operation(op) for op in self.operations],
+            "operations": [self._serialize_operation(op, i) for i, op in enumerate(self.operations)],
             "session_name": self.session_name,
             "output_folder": self.output_folder
         }

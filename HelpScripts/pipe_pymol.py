@@ -21,6 +21,7 @@ from typing import Dict, List, Any, Optional
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.id_patterns import expand_ids, contains_pattern, expand_file_pattern
+from biopipelines.biopipelines_io import load_datastream, iterate_files
 
 # CRITICAL: Set environment variables for headless PyMOL BEFORE any import
 # This prevents libGL.so.1 errors on headless cluster nodes
@@ -95,117 +96,22 @@ class PyMOLSessionBuilder:
         """
         Resolve structure reference to list of {id, path} dicts.
 
-        Note: When Load is used with validate_files=True (default), glob patterns
-        are already resolved at configuration time. This method handles:
-        1. Standard: len(structures) == len(structure_ids), one file per ID
-        2. Legacy glob: structures contains glob pattern(s) - fallback for validate_files=False
-        3. Single file: one structure path with multiple IDs (expand by searching directory)
-
         Args:
-            structures_ref: Serialized structure reference from config
+            structures_ref: Serialized structure reference from config (must contain 'ds_json')
 
         Returns:
             List of dicts with 'id' and 'path' keys
         """
-        import glob as glob_module
-
-        ref_type = structures_ref.get("type", "")
-        raw_structures = structures_ref.get("structures", [])
-        raw_structure_ids = structures_ref.get("structure_ids", [])
-        # Expand pattern-based IDs and file templates
-        structure_ids = expand_ids(raw_structure_ids) if any(contains_pattern(s) for s in raw_structure_ids) else raw_structure_ids
-        if len(raw_structures) == 1 and '<id>' in raw_structures[0]:
-            structures = [expand_file_pattern(raw_structures[0], eid) for eid in structure_ids]
-        elif any(contains_pattern(s) for s in raw_structures):
-            structures = expand_ids(raw_structures)
-        else:
-            structures = raw_structures
-
+        ds_json = structures_ref.get("ds_json")
+        if not ds_json:
+            return []
+        ds = load_datastream(ds_json)
         result = []
-
-        # Case 1: Standard format - one file per ID
-        if len(structures) == len(structure_ids) and len(structures) > 0:
-            for i, path in enumerate(structures):
-                struct_id = structure_ids[i]
-                result.append({"id": struct_id, "path": path})
-            return result
-
-        # Case 2: Legacy format - glob pattern(s) or fewer files than IDs
-        # Need to match structure_ids to actual files in the directory
-        if len(structures) > 0 and len(structure_ids) > 0:
-            # Get directory from first structure path
-            first_path = structures[0]
-
-            # Check if it's a glob pattern (contains * or ?)
-            if '*' in first_path or '?' in first_path:
-                # Expand glob pattern
-                expanded_files = sorted(glob_module.glob(first_path))
-                print(f"  Expanded glob pattern: {len(expanded_files)} files found")
-
-                # Try to match IDs to expanded files
-                for struct_id in structure_ids:
-                    matched_path = None
-                    for file_path in expanded_files:
-                        basename = os.path.splitext(os.path.basename(file_path))[0]
-                        # Match if ID is in filename or filename contains ID
-                        if struct_id in basename or basename in struct_id:
-                            matched_path = file_path
-                            break
-                        # Also try matching rank numbers (e.g., rank0001 -> rankNNNN_something)
-                        if struct_id.startswith("rank") and basename.startswith("rank"):
-                            # Extract rank number from both
-                            id_num = ''.join(filter(str.isdigit, struct_id))
-                            file_num = ''.join(filter(str.isdigit, basename.split('_')[0]))
-                            if id_num == file_num:
-                                matched_path = file_path
-                                break
-
-                    if matched_path:
-                        result.append({"id": struct_id, "path": matched_path})
-                    else:
-                        print(f"  Warning: No file found for ID '{struct_id}'")
-
-            else:
-                # Not a glob - try to find files in the same directory
-                directory = os.path.dirname(first_path)
-                if os.path.isdir(directory):
-                    # List all structure files in directory
-                    extensions = ['.pdb', '.cif', '.mmcif']
-                    all_files = []
-                    for ext in extensions:
-                        all_files.extend(glob_module.glob(os.path.join(directory, f"*{ext}")))
-
-                    # Match IDs to files
-                    for struct_id in structure_ids:
-                        matched_path = None
-                        for file_path in all_files:
-                            basename = os.path.splitext(os.path.basename(file_path))[0]
-                            if struct_id in basename or basename == struct_id:
-                                matched_path = file_path
-                                break
-
-                        if matched_path:
-                            result.append({"id": struct_id, "path": matched_path})
-                        else:
-                            print(f"  Warning: No file found for ID '{struct_id}'")
-                else:
-                    # Just use what we have
-                    for i, path in enumerate(structures):
-                        if i < len(structure_ids):
-                            result.append({"id": structure_ids[i], "path": path})
-
-        # Case 3: Only structure_ids, no paths - try to infer from output_folder
-        elif len(structure_ids) > 0 and len(structures) == 0:
-            output_folder = structures_ref.get("output_folder", "")
-            if output_folder and os.path.isdir(output_folder):
-                extensions = ['.pdb', '.cif', '.mmcif']
-                for struct_id in structure_ids:
-                    for ext in extensions:
-                        potential_path = os.path.join(output_folder, f"{struct_id}{ext}")
-                        if os.path.exists(potential_path):
-                            result.append({"id": struct_id, "path": potential_path})
-                            break
-
+        try:
+            for struct_id, file_path in iterate_files(ds):
+                result.append({"id": struct_id, "path": file_path})
+        except (FileNotFoundError, ValueError) as e:
+            print(f"  Warning: {e}")
         return result
 
     def _resolve_table_column(self, column_ref: Dict[str, Any]) -> Dict[str, str]:
