@@ -425,8 +425,13 @@ def _collect_ids_from_value(value: Any, stream_name: str, iterate_only: bool = F
                         all_ids.extend(_collect_ids_from_value(each_src, stream_name))
             return all_ids
         else:
-            # Pure Bundle - return IDs from first source (single bundled config)
-            return _collect_ids_from_value(value.sources[0], stream_name)
+            # Pure Bundle - return unique IDs from all sources (order-preserving)
+            all_ids = []
+            for src in value.sources:
+                for id_ in _collect_ids_from_value(src, stream_name):
+                    if id_ not in all_ids:
+                        all_ids.append(id_)
+            return all_ids
 
     elif isinstance(value, Each):
         # Collect IDs from all sources in the Each
