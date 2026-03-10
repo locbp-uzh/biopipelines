@@ -12,22 +12,16 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.pdb_parser import parse_pdb_file
 from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
-parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion table, use direct selections, or apply pLDDT threshold')
+parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion table or use direct selections.')
 parser.add_argument('structures_json', type=str, help="Path to DataStream JSON file with input structures")
-parser.add_argument('input_source', type=str, help = "'table' for reading from table, 'selection' for direct input, 'plddt' for threshold")
-parser.add_argument('input_table', type=str, help='Path to input table (e.g., tool_results.csv) or "-" if not used')
-parser.add_argument('pLDDT_thr', type=float, help="Will consider residues with pLDDT > threshold as fixed ")
-parser.add_argument('FIXED', type=str, help="PyMOL selection for fixed positions or '-'")
-parser.add_argument('DESIGNED', type=str, help="PyMOL selection for designed positions or '-'")
+parser.add_argument('FIXED', type=str, help="Selection for fixed positions or '-'")
+parser.add_argument('DESIGNED', type=str, help="Selection for designed positions or '-'")
 parser.add_argument('FIXED_CHAIN', type=str, help="A or B or whatever")
 parser.add_argument('fixed_jsonl_file', type=str, help="output file")
 parser.add_argument('sele_csv_file', type=str, help="output file with selections of fixed and mobile parts")
 # Parse the arguments
 args = parser.parse_args()
 structures_json=args.structures_json
-input_source=args.input_source
-input_table=args.input_table
-pLDDT_thr=args.pLDDT_thr
 FIXED=args.FIXED
 DESIGNED=args.DESIGNED
 FIXED_CHAIN=args.FIXED_CHAIN
@@ -151,8 +145,6 @@ def resolve_table_reference(reference, design_ids):
 
 import os
 import pandas as pd
-import pymol
-from pymol import cmd
 
 # Load DataStream and get (id, file) pairs
 structures_ds = load_datastream(structures_json)
@@ -175,151 +167,49 @@ if FIXED_CHAIN == "auto":
         FIXED_CHAIN = "A"
         print(f"Warning: No protein chains detected, defaulting to chain A")
 
+# Sanitize '-' placeholders (used when no positions are specified)
+FIXED = '' if FIXED == '-' else FIXED
+DESIGNED = '' if DESIGNED == '-' else DESIGNED
+
 fixed_dict = dict()
 mobile_dict = dict()
 
-if input_source == "table": #derive from table
-    try:
-        # Read input table
-        df = pd.read_csv(input_table)
-        print(f"Reading from table: {input_table}")
+# Resolve table references if present
+fixed_per_design = resolve_table_reference(FIXED, design_ids) if FIXED else {design_id: [] for design_id in design_ids}
+designed_per_design = resolve_table_reference(DESIGNED, design_ids) if DESIGNED else {design_id: [] for design_id in design_ids}
 
-        for design_id in design_ids:
-            # Find matching row - try by id column first, then by pdb column
-            matching_rows = df[df['id'] == design_id] if 'id' in df.columns else pd.DataFrame()
-            if matching_rows.empty and 'pdb' in df.columns:
-                # Try matching by pdb filename
-                matching_rows = df[df['pdb'].apply(lambda x: os.path.splitext(os.path.basename(str(x)))[0]) == design_id]
+for design_id in design_ids:
+    fixed_dict[design_id] = dict()
+    mobile_dict[design_id] = dict()
 
-            if not matching_rows.empty:
-                row = matching_rows.iloc[0]
-                fixed_dict[design_id] = dict()
-                mobile_dict[design_id] = dict()
+    # Store original mobile/designed positions for documentation
+    mobile_dict[design_id][FIXED_CHAIN] = designed_per_design[design_id]
 
-                # Parse fixed and designed selections from table (chain-aware)
-                if 'fixed' in df.columns and pd.notna(row['fixed']) and row['fixed'] != '':
-                    fixed_by_chain = sele_to_dict(str(row['fixed']))
-                else:
-                    fixed_by_chain = {}
+    # Compute what ProteinMPNN should keep fixed:
+    # Union of explicit fixed + complement of redesigned
+    pdb_path = design_files[design_id]
 
-                if 'designed' in df.columns and pd.notna(row['designed']) and row['designed'] != '':
-                    designed_by_chain = sele_to_dict(str(row['designed']))
-                else:
-                    designed_by_chain = {}
+    # Start with explicit fixed positions
+    final_fixed = list(fixed_per_design[design_id])
 
-                # Populate per-chain entries; chainless ('') data maps to FIXED_CHAIN
-                all_chains = set(fixed_by_chain.keys()) | set(designed_by_chain.keys())
-                for ch in all_chains:
-                    target_ch = FIXED_CHAIN if ch == '' else ch
-                    fixed_dict[design_id][target_ch] = fixed_by_chain.get(ch, [])
-                    mobile_dict[design_id][target_ch] = designed_by_chain.get(ch, [])
+    # Get all protein residues from PDB
+    all_residues = get_protein_residues_from_pdb(pdb_path, FIXED_CHAIN)
 
-                # Ensure FIXED_CHAIN always has an entry
-                fixed_dict[design_id].setdefault(FIXED_CHAIN, [])
-                mobile_dict[design_id].setdefault(FIXED_CHAIN, [])
-
-                print(f"Design: {design_id}, Fixed: {fixed_dict[design_id]}, Designed: {mobile_dict[design_id]}")
-            else:
-                print(f"Warning: No table entry found for {design_id}")
-
-    except Exception as e:
-        print(f"Error reading table {input_table}: {e}")
-        print("Falling back to pLDDT threshold method...")
-        input_source = "plddt"
-
-if input_source == "selection":
-    # Use direct selections or table references
-    FIXED = FIXED if FIXED != '-' else ''
-    DESIGNED = DESIGNED if DESIGNED != '-' else ''
-
-    # Resolve table references if present
-    fixed_per_design = resolve_table_reference(FIXED, design_ids) if FIXED else {design_id: [] for design_id in design_ids}
-    designed_per_design = resolve_table_reference(DESIGNED, design_ids) if DESIGNED else {design_id: [] for design_id in design_ids}
-
-    for design_id in design_ids:
-        fixed_dict[design_id] = dict()
-        mobile_dict[design_id] = dict()
-
-        # Store original mobile/designed positions for documentation
-        mobile_dict[design_id][FIXED_CHAIN] = designed_per_design[design_id]
-
-        # Compute what ProteinMPNN should keep fixed:
-        # Option C: Union of explicit fixed + complement of redesigned
-        pdb_path = design_files[design_id]
-
-        # Start with explicit fixed positions
-        final_fixed = list(fixed_per_design[design_id])
-
+    if designed_per_design[design_id]:
         # If redesigned positions are specified, add their complement to fixed
-        # Get all protein residues from PDB
-        all_residues = get_protein_residues_from_pdb(pdb_path, FIXED_CHAIN)
+        complement = compute_complement(all_residues, designed_per_design[design_id])
+        final_fixed = sorted(list(set(final_fixed + complement)))
 
-        if designed_per_design[design_id]:
-            # Compute complement of redesigned positions
-            complement = compute_complement(all_residues, designed_per_design[design_id])
+        print(f"Design: {design_id}, Explicit Fixed: {list_to_sele(fixed_per_design[design_id]) if fixed_per_design[design_id] else ''}, Redesigned: {list_to_sele(designed_per_design[design_id])}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
+    elif final_fixed:
+        # No redesigned specified but fixed specified, use fixed as-is
+        print(f"Design: {design_id}, Fixed: {list_to_sele(final_fixed)}, Redesigned: all")
+    else:
+        # Neither redesigned nor fixed specified - redesign everything (no fixed positions)
+        print(f"Design: {design_id}, No fixed/redesigned specified, redesigning all residues")
 
-            # Union: fixed + complement
-            final_fixed = sorted(list(set(final_fixed + complement)))
-
-            print(f"Design: {design_id}, Selection-based - Explicit Fixed: {list_to_sele(fixed_per_design[design_id]) if fixed_per_design[design_id] else ''}, Redesigned: {list_to_sele(designed_per_design[design_id])}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
-        elif final_fixed:
-            # No redesigned specified but fixed specified, use fixed as-is
-            print(f"Design: {design_id}, Selection-based - Fixed: {list_to_sele(final_fixed)}, Redesigned: ")
-        else:
-            # Neither redesigned nor fixed specified - fix all residues
-            # This handles table references that resolved to empty at runtime
-            final_fixed = all_residues
-            print(f"Design: {design_id}, No positions to redesign, fixing all residues")
-
-        # Store final fixed positions (what ProteinMPNN will use)
-        fixed_dict[design_id][FIXED_CHAIN] = final_fixed
-        
-elif input_source == "plddt" or input_source == "table":  # table fallback
-    # Use pLDDT threshold method
-    FIXED = FIXED if FIXED != '-' else ''
-    if pLDDT_thr < 100:
-        try:
-            # Initialize PyMOL in headless mode (no GUI)
-            pymol.pymol_argv = ['pymol', '-c']  # -q for quiet, -c for no GUI
-            pymol.finish_launching()
-        except Exception as e:
-            print("Error while initializing pymol")
-            print(str(e))
-
-    for design_id in design_ids:
-        if design_id not in fixed_dict:  # Skip if already processed from table
-            fixed_dict[design_id] = dict()
-            mobile_dict[design_id] = dict()
-
-            if pLDDT_thr < 100:
-                pdb_file = design_files[design_id]
-                try:
-                    cmd.load(pdb_file,"prot")
-                    fixed_residues = []
-                    mobile_residues = []
-                    atom_iterator = cmd.get_model("prot and name CA")
-                    parfixed = sele_to_list(FIXED)
-                    for atom in atom_iterator.atom:
-                        resi = int(atom.resi)
-                        if atom.b < pLDDT_thr and not resi in parfixed:
-                            if not resi in mobile_residues:
-                                mobile_residues.append(int(atom.resi))
-                        else:
-                            if not resi in fixed_residues:
-                                fixed_residues.append(int(atom.resi))
-                    cmd.delete("prot")
-                    fixed_dict[design_id][FIXED_CHAIN] = fixed_residues[:]
-                    mobile_dict[design_id][FIXED_CHAIN] = mobile_residues[:]
-                    print(f"Design: {design_id}, pLDDT-based - Fixed: {len(fixed_residues)}, Mobile: {len(mobile_residues)}")
-                except Exception as e:
-                    print("Error while calculating fixed positions")
-                    print(str(e))
-                    fixed_dict[design_id][FIXED_CHAIN] = sele_to_list(FIXED)
-                    mobile_dict[design_id][FIXED_CHAIN] = []
-            else:
-                fixed_dict[design_id][FIXED_CHAIN] = sele_to_list(FIXED)
-                mobile_dict[design_id][FIXED_CHAIN] = sele_to_list(DESIGNED)
-                print(f"Design: {design_id}, Selection-based - Fixed: {FIXED}, Redesigned: {DESIGNED}")
+    # Store final fixed positions (what ProteinMPNN will use)
+    fixed_dict[design_id][FIXED_CHAIN] = final_fixed
 
 # Ensure all protein chains in each structure have entries in fixed_dict
 # ProteinMPNN expects a key for every chain present in the structure

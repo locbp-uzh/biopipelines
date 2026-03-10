@@ -22,7 +22,6 @@ git clone https://github.com/dauparas/ProteinMPN
 - `fixed`: str = "" - Fixed positions (PyMOL selection or table reference)
 - `redesigned`: str = "" - Redesigned positions (PyMOL selection or table reference)
 - `chain`: str = "auto" - Chain to apply fixed positions ("auto" detects from input structure)
-- `plddt_threshold`: float = 100.0 - pLDDT threshold for automatic fixing (residues above threshold are fixed)
 - `sampling_temp`: float = 0.1 - Sampling temperature
 - `model_name`: str = "v_48_020" - ProteinMPNN model variant
 - `soluble_model`: bool = True - Use soluble protein model
