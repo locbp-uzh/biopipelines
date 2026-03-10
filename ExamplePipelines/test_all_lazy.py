@@ -176,10 +176,23 @@ with Pipeline(project="Debug",
 
     # ------------------------------------------------------------------
     # Second Mutagenesis: selection-based positions → lazy IDs
+    # Use PDB-based selection (matching abl1_seq IDs) instead of boltz_holo
     # ------------------------------------------------------------------
+    selector_pdb = DistanceSelector(
+        structures=abl1,
+        ligand="STI",
+        distance=5.0,
+    )
+
+    expanded_pdb = Selection(
+        Selection.add(selector_pdb.tables.selections.within),
+        Selection.expand(2),
+        structures=abl1,
+    )
+
     sdm_selection = Mutagenesis(
         original=abl1_seq,
-        position=expanded,             # Selection output → lazy IDs
+        position=expanded_pdb,         # PDB-based Selection → matching IDs
         mode="charged",                # D, E, H, K, R
     )
 

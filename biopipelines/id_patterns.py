@@ -73,6 +73,32 @@ def try_expand(s: str) -> Tuple[List[str], bool]:
     return expand_pattern(prefix), False
 
 
+def glob_from_lazy(s: str) -> str:
+    """Replace [...] bracket segments with '*' to produce a glob pattern.
+
+    'prot_<0..2>[_<N><A I L V>]+9DP'  → 'prot_<0..2>*+9DP'
+    'prot_<0..2>[_<N><A I L V>]'       → 'prot_<0..2>*'
+    'literal'                           → 'literal'
+    """
+    return _BRACKET_RE.sub('*', s)
+
+
+def glob_from_lazy_ids(ids: List[str]) -> List[str]:
+    """Expand deterministic slots and insert '*' where brackets were.
+
+    For each ID pattern, replaces [...] with '*' then expands <..> slots.
+    Returns glob-ready strings suitable for file matching.
+
+    ['prot_<0..1>[_<N><A V>]+X']  → ['prot_0*+X', 'prot_1*+X']
+    ['prot_<0..1>']               → ['prot_0', 'prot_1']
+    """
+    result = []
+    for s in ids:
+        globbed = glob_from_lazy(s)          # [...] → *
+        result.extend(expand_pattern(globbed))  # expand <..> slots (no brackets left)
+    return result
+
+
 def contains_pattern(s: str) -> bool:
     """True if string contains any <..> pattern slot (outside brackets)."""
     return bool(_SLOT_RE.search(s))

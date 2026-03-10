@@ -106,8 +106,9 @@ def extract_file_list(category_data) -> List[str]:
             if is_complete:
                 return [template.replace('<id>', eid) for eid in expanded_ids]
             else:
-                # Lazy patterns: use glob-compatible paths (check_file_exists supports wildcards)
-                return [template.replace('<id>', eid + '*') for eid in expanded_ids]
+                # Lazy patterns: replace [...] with '*' then expand <..> slots
+                glob_ids = id_patterns.glob_from_lazy_ids(ids)
+                return [template.replace('<id>', gid) for gid in glob_ids]
         return files
     elif isinstance(category_data, list):
         return category_data

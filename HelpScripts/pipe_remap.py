@@ -80,9 +80,16 @@ def expand_id_mapping(raw_mapping):
     E.g. {"design_<0..1>_<1..2>": "design_<1..4>"} expands to
          {"design_0_1": "design_1", "design_0_2": "design_2",
           "design_1_1": "design_3", "design_1_2": "design_4"}
+
+    For lazy patterns (with [...] brackets), returns None — the mapping
+    must be resolved at runtime after concrete IDs are known.
     """
     expanded = {}
+    has_lazy = False
     for old_pattern, new_pattern in raw_mapping.items():
+        if id_patterns.is_lazy(old_pattern) or id_patterns.is_lazy(new_pattern):
+            has_lazy = True
+            continue
         old_ids = id_patterns.expand_pattern(old_pattern) if id_patterns.contains_pattern(old_pattern) else [old_pattern]
         new_ids = id_patterns.expand_pattern(new_pattern) if id_patterns.contains_pattern(new_pattern) else [new_pattern]
         if len(new_ids) == 1 and len(old_ids) > 1:
@@ -92,14 +99,35 @@ def expand_id_mapping(raw_mapping):
         else:
             for oid, nid in zip(old_ids, new_ids):
                 expanded[oid] = nid
-    return expanded
+    if has_lazy:
+        return expanded, raw_mapping
+    return expanded, None
 
 
 def expand_stream_ids(stream):
-    """Expand pattern-based IDs and files in a stream dict."""
+    """Expand pattern-based IDs and files in a stream dict.
+
+    For lazy patterns, reads the map_table CSV at runtime to get concrete IDs.
+    """
     raw_ids = stream.get("ids", [])
     raw_files = stream.get("files", [])
-    expanded_ids = id_patterns.expand_ids(raw_ids) if any(id_patterns.contains_pattern(s) for s in raw_ids) else raw_ids
+
+    # Check if any IDs are lazy (contain [...] brackets)
+    has_lazy = any(id_patterns.is_lazy(s) for s in raw_ids)
+
+    if has_lazy:
+        # Read concrete IDs from map_table CSV (written by the source tool at runtime)
+        map_table = stream.get("map_table", "")
+        if map_table and os.path.exists(map_table):
+            df = pd.read_csv(map_table)
+            expanded_ids = df['id'].astype(str).tolist()
+        else:
+            # Fallback: expand deterministic prefixes only
+            expanded_ids, _ = id_patterns.try_expand_ids(raw_ids)
+            print(f"  Warning: lazy IDs but no map_table found, using prefixes only")
+    else:
+        expanded_ids = id_patterns.expand_ids(raw_ids) if any(id_patterns.contains_pattern(s) for s in raw_ids) else raw_ids
+
     if raw_files and len(raw_files) == 1 and '<id>' in raw_files[0]:
         template = raw_files[0]
         expanded_files = [template.replace('<id>', eid) for eid in expanded_ids]
@@ -121,11 +149,35 @@ def main():
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    id_mapping = expand_id_mapping(config["id_mapping"])
+    id_mapping, lazy_raw = expand_id_mapping(config["id_mapping"])
     output_folder = config["output_folder"]
     streams = [expand_stream_ids(s) for s in config.get("streams", [])]
     tables = config.get("tables", [])
     map_tables = config.get("map_tables", [])
+
+    # Resolve lazy mappings now that streams have concrete IDs
+    if lazy_raw:
+        concrete_ids = []
+        for stream in streams:
+            concrete_ids.extend(stream.get("ids", []))
+
+        for old_pattern, new_pattern in lazy_raw.items():
+            if not id_patterns.is_lazy(old_pattern) and not id_patterns.is_lazy(new_pattern):
+                continue  # already handled
+            # Match concrete IDs against the lazy prefix
+            old_prefix = id_patterns.strip_brackets(old_pattern)
+            old_prefixes = id_patterns.expand_pattern(old_prefix) if id_patterns.contains_pattern(old_prefix) else [old_prefix]
+            # Build new_pattern base (strip brackets from new pattern too)
+            new_base = id_patterns.strip_brackets(new_pattern)
+            new_bases = id_patterns.expand_pattern(new_base) if id_patterns.contains_pattern(new_base) else [new_base]
+
+            # Collect concrete IDs matching each prefix
+            for i, prefix in enumerate(old_prefixes):
+                base = new_bases[i] if i < len(new_bases) else new_bases[-1]
+                matching = [cid for cid in concrete_ids if cid == prefix or cid.startswith(prefix)]
+                for j, cid in enumerate(matching):
+                    new_id = f"{base}_{j}" if len(matching) > 1 else base
+                    id_mapping[cid] = new_id
 
     os.makedirs(output_folder, exist_ok=True)
 
