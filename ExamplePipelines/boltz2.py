@@ -12,7 +12,7 @@ with Pipeline(project="Examples",
               job="Boltz2",
               description="Boltz2 with various inputs"):
 
-    Resources(gpu="any",
+    Resources(gpu="A100",
               time="24:00:00",
               memory="16GB")
 
