@@ -64,6 +64,9 @@ wget -nc http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_wei
 git submodule init
 git submodule update
 
+#additional dependencies
+pip install icecream openbabel-wheel assertpy
+
 echo "=== RFdiffusion-AllAtom installation complete ==="
 echo "Requires RFdiffusion.install() for SE3nv dependencies (pip mode)"
 """
@@ -279,6 +282,9 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         script_content = "#!/bin/bash\n"
         script_content += "# RFdiffusion-AllAtom execution script\n"
         script_content += self.generate_completion_check_header()
+        # e3nn 0.3.3 uses torch.load() without weights_only=False,
+        # which fails on PyTorch 2.6+ where the default flipped to True
+        script_content += "export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1\n" 
         if self._use_container():
             # Container mode: no conda env needed for inference,
             # but activate biopipelines for the table creation helper script

@@ -147,6 +147,8 @@ cd ..
 
 # Install dependencies via pip (Colab-specific, Python 3.12 compatible)
 pip install -r {biopipelines}/Environments/SE3nv_colab_requirements.txt
+# Install DGL from pre-built wheel (torch-2.4 / CUDA 12.4)
+pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
 
 # Install SE3Transformer and RFdiffusion
 # Skip SE3Transformer's own requirements.txt (has hydra/wandb/pathtools
@@ -334,6 +336,9 @@ echo "=== RFdiffusion installation complete ==="
         script_content += "# RFdiffusion execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
+        # e3nn 0.3.3 uses torch.load() without weights_only=False,
+        # which fails on PyTorch 2.6+ where the default flipped to True
+        script_content += "export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1\n" 
         script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
