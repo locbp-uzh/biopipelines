@@ -20,6 +20,7 @@
   - [Script Generation](#script-generation)
   - [Output Prediction](#output-prediction)
     - [File Templates with \<id\>](#file-templates-with-id)
+  - [Map Table Contract](#map-table-contract)
 - [HelpScript Development](#helpscript-development)
   - [biopipelines_io Module](#biopipelines_io-module)
   - [pdb_parser Module](#pdb_parser-module)
@@ -478,6 +479,39 @@ def get_output_files(self) -> Dict[str, Any]:
 - Keeps tools simple: tool authors build plain dicts, the framework handles the user-facing API.
 
 **Rule:** tool authors return dicts; consumers get `StandardizedOutput` with dot-notation (e.g., `tool.output.structures`).
+
+### Map Table Contract
+
+Every non-empty output DataStream must have a valid `map_table` CSV at runtime. Downstream tools rely on `load_datastream()` → `ids_expanded` / `iterate_files()` to discover what the upstream tool actually produced, and this reads from the map_table.
+
+There are three valid strategies for ensuring the map_table exists:
+
+| Strategy | When to use | Example tools |
+|----------|------------|---------------|
+| **Config-time only** (`create_map_table()`) | Output files are fully predictable from inputs (file templates with `<id>` are fine) | Boltz2, BoltzGen |
+| **Config-time + runtime update** | Output files are predictable but may change (e.g., some structures fail, best-pose selection) | AlphaFold, Gnina, RFdiffusion |
+| **Runtime-only** (pipe script writes the CSV) | Outputs cannot be predicted at config time (e.g., scanning a local folder, downloading from RCSB) | PDB, RCSB, Ligand, Sequence |
+
+**Config-time creation** uses `create_map_table()` in `get_output_files()`:
+
+```python
+from .datastream import create_map_table
+
+create_map_table(
+    self.structures_map,
+    ids=structure_ids,
+    files=[os.path.join(self.output_folder, "<id>.pdb")],
+    provenance=provenance
+)
+```
+
+File templates with `<id>` are the preferred approach — they keep path definitions compact and work correctly with lazy IDs. At runtime, `iterate_files()` expands `<id>` against each ID in the map_table to resolve actual file paths.
+
+**Runtime updates** are needed when the config-time map may become inaccurate (e.g., partial failures). Use `pipe_update_structures_map.py` or write the CSV directly in the pipe script.
+
+**Runtime-only creation** is for tools whose outputs are entirely determined at execution time. The pipe script writes the map CSV with at minimum `id` and `file` columns, plus any provenance columns (`{alias}.id`).
+
+**Rule:** if a tool returns a DataStream with a `map_table` path, that CSV **must exist and be accurate** by the time the tool's script finishes. Downstream tools will read it.
 
 ---
 
