@@ -251,14 +251,13 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `lookup`: str | List[str] = None - Lookup values (CCD, CID, CAS, or name)
-- `ids`: str | List[str] = None - Custom IDs (defaults to lookup / CDXML names / "smiles_N")
+- `lookup`: str | List[str] = None - Lookup values (CCD, CID, CAS, name), or path to a `.txt` file (one SMILES per line) or `.cdxml` file (ChemDraw molecules). File types are auto-detected by extension.
+- `ids`: str | List[str] = None - Custom IDs (defaults to lookup / file-derived names / "smilesN")
 - `codes`: str | List[str] = None - 3-letter PDB residue codes (defaults to lookup[:3] or "LIG")
 - `source`: str = None - Force "rcsb" or "pubchem" (auto-detects if None)
 - `local_folder`: str = None - Check first before Ligands/
 - `output_format`: str = "pdb" - Output format ("pdb" or "cif")
 - `smiles`: str | List[str] = None - Direct SMILES input (bypasses lookup)
-- `cdxml`: str = None - Path to CDXML file with individual molecules; names from ChemDraw labels used as IDs
 - `generate_images`: bool = False - Generate PNG images per ligand using RDKit
 
 **Auto-detection** (when source=None):
@@ -286,8 +285,11 @@ aspirin = Ligand("aspirin", codes="ASP")
 # Direct SMILES
 ethanol = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
 
-# From CDXML file: each molecule becomes a ligand; ChemDraw names used as IDs
-ligands = Ligand(cdxml="my_ligands.cdxml")
+# From a .txt file (one SMILES per line): IDs become myligands1, myligands2, ...
+ligands = Ligand("myligands.txt")
+
+# From a .cdxml file: each molecule becomes a ligand; ChemDraw names used as IDs
+ligands = Ligand("my_ligands.cdxml")
 ```
 
 ---

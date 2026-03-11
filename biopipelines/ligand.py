@@ -62,7 +62,6 @@ echo "=== Ligand ready ==="
                  local_folder: Optional[str] = None,
                  output_format: str = "pdb",
                  smiles: Optional[Union[str, List[str]]] = None,
-                 cdxml: Optional[str] = None,
                  generate_images: bool = False,
                  **kwargs):
         """
@@ -74,7 +73,9 @@ echo "=== Ligand ready ==="
                     - PubChem CID: "2244"
                     - PubChem CAS: "50-78-2"
                     - PubChem name: "aspirin", "caffeine"
-                    Can be None if using smiles or cdxml instead.
+                    - Path to a .txt file: one SMILES per line
+                    - Path to a .cdxml file: ChemDraw molecules
+                    Can be None if using smiles instead.
             ids: Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb).
                  If not provided, defaults to lookup values (for lookup), "smilesN" (for smiles),
                  or names/indices from CDXML (for cdxml).
@@ -85,9 +86,6 @@ echo "=== Ligand ready ==="
             local_folder: Custom local folder to check first (before Ligands/). Default: None
             output_format: Output format - "pdb" or "cif". Default: "pdb"
             smiles: SMILES string(s) for direct molecule input. Bypasses lookup entirely.
-            cdxml: Path to a ChemDraw CDXML file containing individual molecules (not R-groups).
-                   Each fragment is extracted as a separate ligand. Names from ChemDraw chemical
-                   property labels are used as IDs; falls back to ligand1, ligand2, etc.
             generate_images: Generate PNG images for each ligand using RDKit. Default: False
             **kwargs: Additional parameters
 
@@ -97,13 +95,6 @@ echo "=== Ligand ready ==="
                 compounds: id | format | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path
                 failed: lookup | error_message | source | attempted_path
         """
-        # Parse CDXML into SMILES + IDs at config time
-        self.cdxml_path = cdxml
-        cdxml_smiles = []
-        cdxml_ids = []
-        if cdxml is not None:
-            cdxml_smiles, cdxml_ids = self._parse_cdxml_ligands(cdxml)
-
         # Handle smiles input
         if smiles is not None:
             if isinstance(smiles, str):
@@ -112,21 +103,34 @@ echo "=== Ligand ready ==="
                 self.smiles_values = list(smiles)
         else:
             self.smiles_values = []
-        # Append CDXML-derived SMILES
-        self.smiles_values.extend(cdxml_smiles)
 
-        # Handle lookup
+        # Handle lookup - detect file paths (.txt, .cdxml) and extract SMILES from them
         if lookup is not None:
             if isinstance(lookup, str):
-                self.lookup_values = [lookup]
+                raw_lookups = [lookup]
             else:
-                self.lookup_values = list(lookup)
+                raw_lookups = list(lookup)
         else:
-            self.lookup_values = []
+            raw_lookups = []
 
-        # Validate: must have at least one of lookup, smiles, or cdxml
+        self.lookup_values = []
+        self.file_smiles_ids = []  # (smiles_list, ids_list) pairs from parsed files
+        for val in raw_lookups:
+            lower = val.lower()
+            if lower.endswith('.txt'):
+                file_smiles, file_ids = self._parse_txt_smiles(val)
+                self.smiles_values.extend(file_smiles)
+                self.file_smiles_ids.append((val, file_ids))
+            elif lower.endswith('.cdxml'):
+                file_smiles, file_ids = self._parse_cdxml_ligands(val)
+                self.smiles_values.extend(file_smiles)
+                self.file_smiles_ids.append((val, file_ids))
+            else:
+                self.lookup_values.append(val)
+
+        # Validate: must have at least one of lookup or smiles
         if not self.lookup_values and not self.smiles_values:
-            raise ValueError("Must provide at least one of 'lookup', 'smiles', or 'cdxml'")
+            raise ValueError("Must provide at least one of 'lookup' or 'smiles'")
 
         # Total number of ligands
         total_count = len(self.lookup_values) + len(self.smiles_values)
@@ -138,12 +142,15 @@ echo "=== Ligand ready ==="
             else:
                 self.custom_ids = list(ids)
         else:
-            # Default ids: lookup values, then user-supplied smiles as "smilesN", then CDXML names
+            # Default ids: lookup values, then user-supplied smiles as "smilesN", then file-derived IDs
             self.custom_ids = self.lookup_values.copy()
-            n_plain_smiles = len(self.smiles_values) - len(cdxml_smiles)
+            # Count SMILES that came from files
+            n_file_smiles = sum(len(ids) for _, ids in self.file_smiles_ids)
+            n_plain_smiles = len(self.smiles_values) - n_file_smiles
             for i in range(n_plain_smiles):
                 self.custom_ids.append(f"smiles{i + 1}")
-            self.custom_ids.extend(cdxml_ids)
+            for _, file_ids in self.file_smiles_ids:
+                self.custom_ids.extend(file_ids)
 
         # Handle codes - default based on input type
         if codes is not None:
@@ -185,6 +192,33 @@ echo "=== Ligand ready ==="
 
         # Initialize base class
         super().__init__(**kwargs)
+
+    @staticmethod
+    def _parse_txt_smiles(txt_path: str):
+        """
+        Parse SMILES strings from a text file (one SMILES per line).
+
+        The file name (without extension) is used as the root for IDs:
+        e.g., "myligands.txt" -> myligands1, myligands2, ...
+
+        Returns:
+            (smiles_list, ids_list) - parallel lists
+        """
+        if not os.path.exists(txt_path):
+            raise ValueError(f"TXT file not found: {txt_path}")
+
+        root = os.path.splitext(os.path.basename(txt_path))[0]
+
+        with open(txt_path, 'r') as f:
+            lines = [line.strip() for line in f if line.strip()]
+
+        if not lines:
+            raise ValueError(f"No SMILES found in TXT file: {txt_path}")
+
+        smiles_list = lines
+        ids_list = [f"{root}{i + 1}" for i in range(len(lines))]
+
+        return smiles_list, ids_list
 
     @staticmethod
     def _parse_cdxml_ligands(cdxml_path: str):
@@ -292,10 +326,7 @@ echo "=== Ligand ready ==="
             raise ValueError("ids cannot be empty")
 
         if not self.lookup_values and not self.smiles_values:
-            raise ValueError("Must have at least one of 'lookup', 'smiles', or 'cdxml'")
-
-        if self.cdxml_path is not None and not os.path.exists(self.cdxml_path):
-            raise ValueError(f"CDXML file not found: {self.cdxml_path}")
+            raise ValueError("Must have at least one of 'lookup' or 'smiles'")
 
         if not self.residue_codes:
             raise ValueError("codes cannot be empty")
@@ -372,8 +403,9 @@ echo "=== Ligand ready ==="
             config_lines.append(f"SOURCE: {self.source if self.source else 'auto-detect'}")
             config_lines.append(f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses Ligands/)'}")
 
-        if self.cdxml_path:
-            config_lines.append(f"CDXML: {os.path.basename(self.cdxml_path)} ({len([s for s in self.smiles_values])} molecules)")
+        if self.file_smiles_ids:
+            for file_path, file_ids in self.file_smiles_ids:
+                config_lines.append(f"FILE: {os.path.basename(file_path)} ({len(file_ids)} molecules)")
         elif self.smiles_values:
             smiles_preview = [s[:20] + "..." if len(s) > 20 else s for s in self.smiles_values]
             config_lines.append(f"SMILES: {', '.join(smiles_preview)} ({len(self.smiles_values)} molecules)")
@@ -517,7 +549,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
                 "source": self.source,
                 "local_folder": self.local_folder,
                 "output_format": self.output_format,
-                "cdxml": self.cdxml_path,
+                "parsed_files": [fp for fp, _ in self.file_smiles_ids],
                 "generate_images": self.generate_images
             }
         })
