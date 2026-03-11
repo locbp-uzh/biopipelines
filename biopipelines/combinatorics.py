@@ -446,7 +446,6 @@ def _collect_ids_from_value(value: Any, stream_name: str, iterate_only: bool = F
 
 
 def _collect_axes_info(
-    bundled_name: str = "bundled_complex",
     **named_inputs: Any
 ) -> Tuple[List[tuple], List[tuple], List[tuple]]:
     """
@@ -482,7 +481,6 @@ def _collect_axes_info(
 
 
 def predict_output_ids_with_provenance(
-    bundled_name: str = "bundled_complex",
     **named_inputs: Any
 ) -> Tuple[List[str], Dict[str, List[str]]]:
     """
@@ -518,12 +516,12 @@ def predict_output_ids_with_provenance(
             "ligands": ["lig1", "lig2", "lig3", "lig1", "lig2", "lig3"]
         }
     """
-    axes_info, iterated_axes, pure_bundle_axes = _collect_axes_info(
-        bundled_name, **named_inputs
-    )
+    if not named_inputs:
+        raise ValueError("predict_output_ids_with_provenance requires at least one named input")
 
-    if not axes_info:
-        return [bundled_name], {}
+    axes_info, iterated_axes, pure_bundle_axes = _collect_axes_info(
+        **named_inputs
+    )
 
     # If no iterated axes, return single ID from unique bundle IDs
     if not iterated_axes:
@@ -540,7 +538,7 @@ def predict_output_ids_with_provenance(
                 if bid not in seen_all:
                     seen_all.add(bid)
                     all_unique_parts.append(bid)
-        output_name = "+".join(all_unique_parts) if all_unique_parts else bundled_name
+        output_name = "+".join(all_unique_parts)
         return [output_name], provenance
 
     # Build prefix from pure bundle axes (unique IDs only, order-preserving)
@@ -604,7 +602,6 @@ def predict_output_ids_with_provenance(
 
 
 def predict_output_ids(
-    bundled_name: str = "bundled_complex",
     **named_inputs: Any
 ) -> List[str]:
     """
@@ -614,23 +611,21 @@ def predict_output_ids(
     will be generated at execution time based on the combinatorics modes.
 
     The ID generation follows these rules:
-    - If all axes are fully bundled (no iterate sources): single ID (bundled_name)
+    - If all axes are fully bundled (no iterate sources): single ID from unique bundled IDs joined with "+"
     - If one axis has iteration (each mode or bundle with iterate sources): IDs from that axis
     - If multiple axes have iteration: cartesian product of IDs joined with "+"
 
     Args:
-        bundled_name: Name to use when all axes are bundled (default: "bundled_complex")
         **named_inputs: Named inputs, each may be wrapped in Bundle/Each or bare
 
     Returns:
         List of expected output IDs
     """
-    output_ids, _ = predict_output_ids_with_provenance(bundled_name, **named_inputs)
+    output_ids, _ = predict_output_ids_with_provenance(**named_inputs)
     return output_ids
 
 
 def predict_single_output_id(
-    bundled_name: str = "bundled_complex",
     **axis_selections: Tuple[str, List[str], Optional[int]]
 ) -> str:
     """
@@ -646,7 +641,6 @@ def predict_single_output_id(
     no shortcuts based on axis length.
 
     Args:
-        bundled_name: Name for fully-bundled case
         **axis_selections: Named tuples of (mode, all_ids, selected_idx)
             where selected_idx is None for bundle mode (no iteration)
 
@@ -655,7 +649,6 @@ def predict_single_output_id(
 
     Example:
         predict_single_output_id(
-            bundled_name="bundled_complex",
             sequences=("each", ["prot1", "prot2"], 0),
             compounds=("each", ["lig1", "lig2", "lig3"], 1)
         )
@@ -681,7 +674,7 @@ def predict_single_output_id(
     parts = bundle_parts + iter_parts
 
     if not parts:
-        return bundled_name
+        raise ValueError("predict_single_output_id requires at least one axis with IDs")
 
     if len(parts) == 1:
         return parts[0]

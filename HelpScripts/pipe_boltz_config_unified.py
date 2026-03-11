@@ -569,7 +569,6 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
                 first_ligand_chain = flc
         config = apply_decorations(config, first_ligand_chain)
         config_id = predict_single_output_id(
-            bundled_name="bundled_complex",
             **axis_selections
         )
         return [(config_id, config)]
@@ -635,7 +634,6 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
         config = apply_decorations(config, first_ligand_chain)
 
         config_id = predict_single_output_id(
-            bundled_name="bundled_complex",
             **axis_selections
         )
         configs.append((config_id, config))

@@ -571,14 +571,12 @@ fi
     def _predict_sequence_ids(self) -> List[str]:
         """Predict sequence IDs from input sources using combinatorics module."""
         return predict_output_ids(
-            bundled_name="bundled_complex",
             **self._build_combinatorics_kwargs()
         )
 
     def _predict_sequence_ids_with_provenance(self):
         """Predict sequence IDs and provenance from input sources."""
         return predict_output_ids_with_provenance(
-            bundled_name="bundled_complex",
             **self._build_combinatorics_kwargs()
         )
 
