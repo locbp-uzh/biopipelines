@@ -76,7 +76,7 @@ echo "=== Ligand ready ==="
                     - PubChem name: "aspirin", "caffeine"
                     Can be None if using smiles or cdxml instead.
             ids: Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb).
-                 If not provided, defaults to lookup values (for lookup), "smiles_N" (for smiles),
+                 If not provided, defaults to lookup values (for lookup), "smilesN" (for smiles),
                  or names/indices from CDXML (for cdxml).
             codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
                    If not provided, defaults to lookup[:3].upper() (for lookup) or "LIG" (for smiles/cdxml).
@@ -87,7 +87,7 @@ echo "=== Ligand ready ==="
             smiles: SMILES string(s) for direct molecule input. Bypasses lookup entirely.
             cdxml: Path to a ChemDraw CDXML file containing individual molecules (not R-groups).
                    Each fragment is extracted as a separate ligand. Names from ChemDraw chemical
-                   property labels are used as IDs; falls back to ligand_1, ligand_2, etc.
+                   property labels are used as IDs; falls back to ligand1, ligand2, etc.
             generate_images: Generate PNG images for each ligand using RDKit. Default: False
             **kwargs: Additional parameters
 
@@ -138,11 +138,11 @@ echo "=== Ligand ready ==="
             else:
                 self.custom_ids = list(ids)
         else:
-            # Default ids: lookup values, then user-supplied smiles as "smiles_N", then CDXML names
+            # Default ids: lookup values, then user-supplied smiles as "smilesN", then CDXML names
             self.custom_ids = self.lookup_values.copy()
             n_plain_smiles = len(self.smiles_values) - len(cdxml_smiles)
             for i in range(n_plain_smiles):
-                self.custom_ids.append(f"smiles_{i + 1}")
+                self.custom_ids.append(f"smiles{i + 1}")
             self.custom_ids.extend(cdxml_ids)
 
         # Handle codes - default based on input type
@@ -193,7 +193,7 @@ echo "=== Ligand ready ==="
 
         Each top-level <fragment> on the page is converted to a SMILES string.
         Names come from <chemicalproperty> elements whose BasisObjects reference the fragment;
-        falls back to "ligand_N" (1-based) if no name is defined.
+        falls back to "ligandN" (1-based) if no name is defined.
 
         Returns:
             (smiles_list, ids_list) - parallel lists, one entry per molecule
@@ -254,7 +254,7 @@ echo "=== Ligand ready ==="
             if not smiles:
                 continue
             frag_index += 1
-            name = frag_id_to_name.get(frag_id, f"ligand_{frag_index}")
+            name = frag_id_to_name.get(frag_id, f"ligand{frag_index}")
             smiles_list.append(smiles)
             ids_list.append(name)
 
