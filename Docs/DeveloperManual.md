@@ -226,7 +226,12 @@ This generates:
 INPUT_PDB=$(resolve_stream_item "/path/structures.json" "prot_1")
 ```
 
-Note: `ids[0]` (not `ids_expanded[0]`) is safe here because we only need the compact pattern, not the expanded list.
+**Warning:** `ids[0]` is only safe when the stream has deterministic IDs (literal or patterns like `<1..5>`, which expand on indexing). If the stream has lazy IDs (e.g. `<N>`), `ids[0]` returns the unexpanded pattern, which may represent multiple structures. For lazy streams, resolve all IDs at runtime and take the first:
+
+```python
+script += f'FIRST_ID={Resolve.stream_ids(self.structures_json, index=0)}\n'
+script += f'INPUT_PDB={Resolve.stream_item(self.structures_json, "$FIRST_ID")}\n'
+```
 
 ### Passing IDs to HelpScripts
 
@@ -718,15 +723,13 @@ All output ID generation and provenance tracking is centralized in `combinatoric
 
 ### Output ID Rules
 
-When a tool combines multiple input axes (e.g., proteins × ligands), the output ID is always the full cartesian product of all iterated axes joined with `_`:
+When a tool combines multiple input axes (e.g., proteins × ligands), the output ID is always the full cartesian product of all iterated axes joined with `+`:
 
 | Inputs | Output IDs |
 |--------|-----------|
-| 1 protein × 3 ligands | `prot1_lig1`, `prot1_lig2`, `prot1_lig3` |
-| 2 proteins × 3 ligands | `prot1_lig1`, `prot1_lig2`, ..., `prot2_lig3` |
-| 2 proteins × 1 ligand | `prot1_lig1`, `prot2_lig1` |
-| All bundled | `bundled_complex` |
-| Single iterated axis | IDs from that axis directly |
+| 1 protein × 3 ligands | `prot1+lig1`, `prot1+lig2`, `prot1+lig3` |
+| 2 proteins × 3 ligands | `prot1+lig1`, `prot1+lig2`, ..., `prot2+lig3` |
+| 2 proteins × 1 ligand | `prot1+lig1`, `prot2+lig1` |
 
 There are no shortcuts (e.g., dropping single-element axes from the ID). This keeps the ID format predictable and eliminates case-specific logic.
 
@@ -746,9 +749,9 @@ Example `structures_map.csv` from Boltz2 with 1 protein × 3 ligands:
 
 ```csv
 id,file,value,proteins.id,ligands.id
-prot1_lig1,/path/prot1_lig1.pdb,,prot1,lig1
-prot1_lig2,/path/prot1_lig2.pdb,,prot1,lig2
-prot1_lig3,/path/prot1_lig3.pdb,,prot1,lig3
+prot1+lig1,/path/prot1+lig1.pdb,,prot1,lig1
+prot1+lig2,/path/prot1+lig2.pdb,,prot1,lig2
+prot1+lig3,/path/prot1+lig3.pdb,,prot1,lig3
 ```
 
 For multiplier tools, the provenance column tracks the parent:
@@ -789,7 +792,6 @@ Each kwarg is a `(value, stream_name)` tuple — the key becomes the provenance 
 from .combinatorics import predict_output_ids_with_provenance
 
 predicted_ids, provenance = predict_output_ids_with_provenance(
-    bundled_name="bundled_complex",
     proteins=(self.proteins, "sequences"),
     ligands=(self.ligands, "compounds")
 )
@@ -844,7 +846,6 @@ For pipe scripts that iterate and need single-row IDs, use `predict_single_outpu
 from combinatorics import predict_single_output_id
 
 config_id = predict_single_output_id(
-    bundled_name="bundled_complex",
     sequences=("each", protein_ids, prot_idx),
     compounds=("each", ligand_ids, lig_idx)
 )

@@ -469,7 +469,8 @@ fi
             return ""
 
         return f"""# Resolve autobox ligand file at runtime
-AUTOBOX_LIGAND={Resolve.stream_item(self.autobox_ds_json, self.autobox_ligand_id)}
+AUTOBOX_LIGAND_ID={Resolve.stream_ids(self.autobox_ds_json, index=0)}
+AUTOBOX_LIGAND={Resolve.stream_item(self.autobox_ds_json, '$AUTOBOX_LIGAND_ID')}
 echo "Resolved autobox ligand: $AUTOBOX_LIGAND"
 jq --arg path "$AUTOBOX_LIGAND" '.box.autobox_ligand = $path' "{self.config_json}" > "{self.config_json}.tmp" && mv "{self.config_json}.tmp" "{self.config_json}"
 

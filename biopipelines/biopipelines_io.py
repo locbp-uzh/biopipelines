@@ -844,11 +844,12 @@ def resolve_id_by_provenance(
 #
 # Usage in tool generate_script methods:
 #
-#     f'INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}'
-#     # -> 'INPUT_PDB=$(resolve_stream_item "/path/ds.json" "4ufc")'
+#     # Resolve first ID at runtime (safe with lazy streams):
+#     f'INPUT_PDB_ID={Resolve.stream_ids(self.pdb_ds_json, index=0)}'
+#     f'INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, "$INPUT_PDB_ID")}'
 #
-#     f'python run.py --pdb {Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}'
-#     # -> 'python run.py --pdb $(resolve_stream_item "/path/ds.json" "4ufc")'
+#     # In a loop (Resolve.stream_ids without index returns all IDs):
+#     f'for sid in {Resolve.stream_ids(self.pdb_ds_json)}; do ...'
 #
 # The bash function resolve_stream_item is sourced automatically by
 # BaseConfig.activate_environment(). No per-tool setup needed.
@@ -872,13 +873,20 @@ class Resolve:
         return f'$(resolve_stream_item "{ds_json}" "{item_id}")'
 
     @staticmethod
-    def stream_ids(ds_json: str) -> str:
+    def stream_ids(ds_json: str, index: Optional[int] = None) -> str:
         """Bash expression that prints expanded IDs from a DataStream JSON, one per line.
 
         Handles lazy patterns by matching against map_table at runtime.
+
+        Args:
+            ds_json: Path to the serialized DataStream JSON file
+            index: If provided, return only the ID at this position (0-based).
         """
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "..", "HelpScripts", "resolve_stream_ids.py")
+        if index is not None:
+            n = index + 1  # head -n is 1-based
+            return f'$(python "{script}" "{ds_json}" | head -n{n} | tail -n1)'
         return f'$(python "{script}" "{ds_json}")'
 
     @staticmethod

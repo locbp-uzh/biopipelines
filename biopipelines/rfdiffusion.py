@@ -350,7 +350,9 @@ echo "=== RFdiffusion installation complete ==="
         # Resolve input PDB at runtime if a DataStream is provided
         resolve_snippet = ""
         if self.pdb_stream:
-            resolve_snippet = f'INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}\n'
+            resolve_snippet = f"""INPUT_PDB_ID={Resolve.stream_ids(self.pdb_ds_json, index=0)}
+INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$INPUT_PDB_ID')}
+"""
 
         rfd_options = f"'contigmap.contigs=[{self.contigs}]'"
 

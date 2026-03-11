@@ -194,7 +194,8 @@ echo "=== PoseChange ready ==="
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""REFERENCE_PDB={Resolve.stream_item(self.reference_ds_json, reference_id)}
+        return f"""REFERENCE_ID={Resolve.stream_ids(self.reference_ds_json, index=0)}
+REFERENCE_PDB={Resolve.stream_item(self.reference_ds_json, '$REFERENCE_ID')}
 
 echo "Running pose distance analysis"
 echo "Reference: $REFERENCE_PDB"

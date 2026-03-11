@@ -685,7 +685,8 @@ fi
             # Resolve target structure path at runtime if from a DataStream
             resolve_snippet = ""
             if self.target_stream:
-                resolve_snippet = f"""TARGET_STRUCTURE={Resolve.stream_item(self.target_ds_json, self.target_input_id)}
+                resolve_snippet = f"""TARGET_ID={Resolve.stream_ids(self.target_ds_json, index=0)}
+TARGET_STRUCTURE={Resolve.stream_item(self.target_ds_json, '$TARGET_ID')}
 """
                 target_args = ' --target-structure "$TARGET_STRUCTURE"'
             else:

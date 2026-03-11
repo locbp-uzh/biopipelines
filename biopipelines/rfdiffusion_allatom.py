@@ -363,7 +363,9 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         # Resolve input PDB at runtime if a DataStream is provided
         resolve_snippet = ""
         if self.pdb_stream:
-            resolve_snippet = f'INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}\n'
+            resolve_snippet = f"""INPUT_PDB_ID={Resolve.stream_ids(self.pdb_ds_json, index=0)}
+INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$INPUT_PDB_ID')}
+"""
 
         aa_args = self._build_inference_args()
         args_str = ' '.join(aa_args)
@@ -549,7 +551,8 @@ class RFDAA_PrepareLigand(BaseConfig):
         script_content += "# RFDAA_PrepareLigand execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += f"""LIGAND_FILE={Resolve.stream_item(self.ligand_ds_json, self.ligand_input_id)}
+        script_content += f"""LIGAND_ID={Resolve.stream_ids(self.ligand_ds_json, index=0)}
+LIGAND_FILE={Resolve.stream_item(self.ligand_ds_json, '$LIGAND_ID')}
 
 echo "Preparing ligand structure for RFdiffusion-AllAtom"
 echo "Input ligand: $LIGAND_FILE"

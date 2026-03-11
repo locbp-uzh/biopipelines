@@ -518,7 +518,8 @@ echo "=== RFdiffusion3 installation complete ==="
         # If input PDB uses a DataStream, resolve the placeholder at runtime
         resolve_snippet = ""
         if self.pdb_stream:
-            resolve_snippet = f"""INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, self.pdb_input_id)}
+            resolve_snippet = f"""INPUT_PDB_ID={Resolve.stream_ids(self.pdb_ds_json, index=0)}
+INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$INPUT_PDB_ID')}
 
 # Patch the JSON config with the resolved input PDB path
 jq --arg path "$INPUT_PDB" '(.[] | select(.input == "__RESOLVE_INPUT_PDB__")).input = $path' "{self.json_file}" > "{self.json_file}.tmp" && mv "{self.json_file}.tmp" "{self.json_file}"
