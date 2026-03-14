@@ -385,14 +385,14 @@ def load_ids_from_sources(sources: List[Union[str, Dict]], iterate_only: bool = 
     return all_ids
 
 
-def _collect_ids_from_value(value: Any, stream_name: str, iterate_only: bool = False) -> List[str]:
+def _collect_iterated_ids_from_value(value: Any, stream_name: str, iterate_only: bool = False) -> List[str]:
     """
-    Collect all IDs from a value, handling Bundle/Each wrappers.
+    Collect iterated IDs from a value, handling Bundle/Each wrappers.
 
     For Each(a, b), collects IDs from both a and b.
     For Bundle(Each(library), cofactor), collects IDs from the Each (library) only.
     For Bundle(cofactor, Each(library)), finds the Each and collects its IDs only.
-    For pure Bundle(a, b), collects IDs from first source only (single bundled config).
+    For pure Bundle(a, b), collects IDs from all sources (single bundled config).
 
     Args:
         value: A value that may be wrapped in Bundle/Each (already unpacked from tuple)
@@ -422,13 +422,13 @@ def _collect_ids_from_value(value: Any, stream_name: str, iterate_only: bool = F
             for src in value.sources:
                 if isinstance(src, Each):
                     for each_src in src.sources:
-                        all_ids.extend(_collect_ids_from_value(each_src, stream_name))
+                        all_ids.extend(_collect_iterated_ids_from_value(each_src, stream_name))
             return all_ids
         else:
             # Pure Bundle - return unique IDs from all sources (order-preserving)
             all_ids = []
             for src in value.sources:
-                for id_ in _collect_ids_from_value(src, stream_name):
+                for id_ in _collect_iterated_ids_from_value(src, stream_name):
                     if id_ not in all_ids:
                         all_ids.append(id_)
             return all_ids
@@ -437,12 +437,44 @@ def _collect_ids_from_value(value: Any, stream_name: str, iterate_only: bool = F
         # Collect IDs from all sources in the Each
         all_ids = []
         for src in value.sources:
-            all_ids.extend(_collect_ids_from_value(src, stream_name))
+            all_ids.extend(_collect_iterated_ids_from_value(src, stream_name))
         return all_ids
 
     else:
         # Bare value - get IDs directly
         return get_ids_from_source(value)
+
+
+def _collect_static_ids_from_value(value: Any, stream_name: str) -> Tuple[List[str], bool]:
+    """
+    For Bundle with nested Each, collect IDs from non-Each (static) sources.
+
+    Returns:
+        (static_ids, static_first):
+        - static_ids: IDs from bare/static sources inside the Bundle
+        - static_first: True if static sources appear before the Each in the Bundle
+    """
+    if not isinstance(value, Bundle):
+        return [], False
+    has_each = any(isinstance(src, Each) for src in value.sources)
+    if not has_each:
+        return [], False  # Pure bundle — no static/iterated split
+    static_ids = []
+    for src in value.sources:
+        if not isinstance(src, Each):
+            ids = _collect_iterated_ids_from_value(src, stream_name)
+            for id_ in ids:
+                if id_ not in static_ids:
+                    static_ids.append(id_)
+    # static_first: True if first non-Each source comes before first Each
+    static_first = False
+    for src in value.sources:
+        if isinstance(src, Each):
+            break
+        else:
+            static_first = True
+            break
+    return static_ids, static_first
 
 
 def _collect_axes_info(
@@ -456,8 +488,8 @@ def _collect_axes_info(
 
     Returns:
         (axes_info, iterated_axes, pure_bundle_axes) where:
-        - axes_info: [(name, mode, has_iteration, ids), ...]
-        - iterated_axes: [(name, ids), ...] for axes with iteration
+        - axes_info: [(name, mode, has_iteration, ids, static_ids, static_first), ...]
+        - iterated_axes: [(name, ids, static_ids, static_first), ...] for axes with iteration
         - pure_bundle_axes: [(name, ids), ...] for pure bundle axes
     """
     axes_info = []
@@ -467,14 +499,17 @@ def _collect_axes_info(
             continue
         mode, sources = _unwrap_sources(actual_value, stream_name)
         has_iteration = any(s.get("iterate", True) for s in sources)
-        ids = _collect_ids_from_value(actual_value, stream_name)
+        ids = _collect_iterated_ids_from_value(actual_value, stream_name)
+        static_ids, static_first = _collect_static_ids_from_value(actual_value, stream_name)
         if not ids:
             raise ValueError(f"No {name} found in input")
-        axes_info.append((name, mode, has_iteration, ids))
+        axes_info.append((name, mode, has_iteration, ids, static_ids, static_first))
 
-    iterated_axes = [(name, ids) for name, mode, has_iteration, ids in axes_info
+    iterated_axes = [(name, ids, static_ids, static_first)
+                     for name, mode, has_iteration, ids, static_ids, static_first in axes_info
                      if mode == "each" or has_iteration]
-    pure_bundle_axes = [(name, ids) for name, mode, has_iteration, ids in axes_info
+    pure_bundle_axes = [(name, ids)
+                        for name, mode, has_iteration, ids, static_ids, static_first in axes_info
                         if mode == "bundle" and not has_iteration]
 
     return axes_info, iterated_axes, pure_bundle_axes
@@ -553,11 +588,18 @@ def predict_output_ids_with_provenance(
 
     # If single iterated axis, return its IDs (with bundle prefix if any)
     if len(iterated_axes) == 1:
-        iter_name, iter_ids = iterated_axes[0]
-        if bundle_prefix:
-            output_ids = [f"{bundle_prefix}+{iid}" for iid in iter_ids]
+        iter_name, iter_ids, iter_static_ids, iter_static_first = iterated_axes[0]
+        # Apply static IDs from Bundle(Each(...), static) pattern
+        if iter_static_ids:
+            static_part = "+".join(iter_static_ids)
+            if iter_static_first:
+                output_ids = [f"{static_part}+{iid}" for iid in iter_ids]
+            else:
+                output_ids = [f"{iid}+{static_part}" for iid in iter_ids]
         else:
             output_ids = list(iter_ids)
+        if bundle_prefix:
+            output_ids = [f"{bundle_prefix}+{oid}" for oid in output_ids]
         provenance = {iter_name: list(iter_ids)}
         # Add pure bundle axes: repeat a joined representation for every output
         for bundle_name, bundle_ids in pure_bundle_axes:
@@ -569,20 +611,38 @@ def predict_output_ids_with_provenance(
         return output_ids, provenance
 
     # Multiple iterated axes: always full cartesian product, no shortcuts
-    # Start with first axis
-    output_ids = list(iterated_axes[0][1])
-    provenance = {iterated_axes[0][0]: list(iterated_axes[0][1])}
+    # Start with first axis — apply static IDs per axis
+    first_name, first_ids, first_static_ids, first_static_first = iterated_axes[0]
+    output_ids = list(first_ids)
+    provenance = {first_name: list(first_ids)}
 
-    for axis_name, axis_ids in iterated_axes[1:]:
+    # Apply static IDs for first axis
+    if first_static_ids:
+        static_part = "+".join(first_static_ids)
+        if first_static_first:
+            output_ids = [f"{static_part}+{oid}" for oid in output_ids]
+        else:
+            output_ids = [f"{oid}+{static_part}" for oid in output_ids]
+
+    for axis_name, axis_ids, axis_static_ids, axis_static_first in iterated_axes[1:]:
         new_ids = []
         new_provenance = {k: [] for k in provenance}
         new_provenance[axis_name] = []
+        # Prepare axis IDs with their static parts
+        if axis_static_ids:
+            static_part = "+".join(axis_static_ids)
+            if axis_static_first:
+                display_ids = [f"{static_part}+{aid}" for aid in axis_ids]
+            else:
+                display_ids = [f"{aid}+{static_part}" for aid in axis_ids]
+        else:
+            display_ids = list(axis_ids)
         for i, existing_id in enumerate(output_ids):
-            for new_id in axis_ids:
+            for j, new_id in enumerate(display_ids):
                 new_ids.append(f"{existing_id}+{new_id}")
                 for k in provenance:
                     new_provenance[k].append(provenance[k][i])
-                new_provenance[axis_name].append(new_id)
+                new_provenance[axis_name].append(axis_ids[j])
         output_ids = new_ids
         provenance = new_provenance
 
@@ -626,12 +686,11 @@ def predict_output_ids(
 
 
 def predict_single_output_id(
-    **axis_selections: Tuple[str, List[str], Optional[int]]
+    **axis_selections: Tuple[str, List[str], Optional[int], List[str], bool]
 ) -> str:
     """
     Predict the output ID for a single combination of axis selections.
 
-    Each axis_selection is (mode, all_ids, selected_idx_or_None).
     Used by pipe scripts at execution time in their iteration loops.
 
     This mirrors predict_output_ids() logic but for a single output row,
@@ -641,7 +700,7 @@ def predict_single_output_id(
     no shortcuts based on axis length.
 
     Args:
-        **axis_selections: Named tuples of (mode, all_ids, selected_idx)
+        **axis_selections: Named tuples of (mode, all_ids, selected_idx, static_ids, static_first)
             where selected_idx is None for bundle mode (no iteration)
 
     Returns:
@@ -649,15 +708,15 @@ def predict_single_output_id(
 
     Example:
         predict_single_output_id(
-            sequences=("each", ["prot1", "prot2"], 0),
-            compounds=("each", ["lig1", "lig2", "lig3"], 1)
+            sequences=("each", ["prot1", "prot2"], 0, [], False),
+            compounds=("each", ["lig1", "lig2", "lig3"], 1, [], False)
         )
         → "prot1+lig2"
     """
     # Collect unique IDs from pure bundle axes (prefix)
     bundle_parts = []
     seen_bundle = set()
-    for name, (mode, all_ids, idx) in axis_selections.items():
+    for name, (mode, all_ids, idx, static_ids, static_first) in axis_selections.items():
         if mode == "bundle" and idx is None:
             for bid in all_ids:
                 if bid not in seen_bundle:
@@ -666,10 +725,18 @@ def predict_single_output_id(
 
     # Collect selected IDs from iterated axes (in order)
     iter_parts = []
-    for name, (mode, all_ids, idx) in axis_selections.items():
+    for name, (mode, all_ids, idx, static_ids, static_first) in axis_selections.items():
         if mode == "each" or idx is not None:
             selected_idx = idx if idx is not None else 0
-            iter_parts.append(all_ids[selected_idx])
+            selected_id = all_ids[selected_idx]
+            if static_ids:
+                static_part = "+".join(static_ids)
+                if static_first:
+                    iter_parts.append(f"{static_part}+{selected_id}")
+                else:
+                    iter_parts.append(f"{selected_id}+{static_part}")
+            else:
+                iter_parts.append(selected_id)
 
     parts = bundle_parts + iter_parts
 
