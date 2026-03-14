@@ -216,9 +216,9 @@ with Pipeline(project="Examples",
     # =========================================================================
 
     # 17: Double-stranded DNA - predict structure of a DNA duplex
-    # dsDNA emits two chains (Boltz2 generates the reverse complement internally)
+    # dsDNA emits two chains (reverse complement is auto-generated)
     Suffix("17")
-    dna_strand = Sequence("ACGTACGTACGTACGT", type="dna", ids="DNA_strand")
+    dna_strand = Sequence("GATTACAGATTACA", type="dna", ids="DNA_strand")
     boltz_dna = Boltz2(
         dsDNA=dna_strand
     )
