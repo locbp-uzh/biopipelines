@@ -4,51 +4,36 @@ Complete example pipelines demonstrating BioPipelines capabilities. All examples
 
 ---
 
-## RFdiffusion + ProteinMPNN + AlphaFold
+## Inverse Folding: Ubiquitin
 
-**File:** `rfd_pmpnn_af2.py`
+**File:** `ubiquitin.py`
 
-A classic protein design pipeline: generate novel backbones with RFdiffusion, design sequences with ProteinMPNN, and validate with AlphaFold. Includes confidence plotting and PyMOL visualization.
+Retrieve a structure from PDB, design new sequences with ProteinMPNN, validate with AlphaFold, generate DNA sequences, and filter results based on confidence and structural similarity.
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
 from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.alphafold import AlphaFold
-from biopipelines.plot import Plot
-from biopipelines.pymol import PyMOL
+from biopipelines.conformational_change import ConformationalChange
+from biopipelines.panda import Panda
+from biopipelines.dna_encoder import DNAEncoder
 
-with Pipeline(project="Examples",
-              job="RFD-ProteinMPNN-AlphaFold2",
-              description="Redesign of N terminus domain of lysozyme"):
-
-    Resources(gpu="any", time="4:00:00", memory="16GB")
-
-    lysozyme = PDB("168L")
-
-    rfd = RFdiffusion(pdb=lysozyme,
-                      contigs='50-70/A81-140',
-                      num_designs=3)
-
-    pmpnn = ProteinMPNN(structures=rfd,
-                        num_sequences=2,
-                        redesigned=rfd.tables.structures.designed)
-
-    af = AlphaFold(proteins=pmpnn)
-
-    Plot(
-        Plot.Scatter(data=af.tables.confidence, x="plddt", y="ptm",
-                     title="pLDDT vs pTM", xlabel="pLDDT", ylabel="pTM", grid=True),
-        Plot.Histogram(data=af.tables.confidence, x="plddt", bins=20,
-                       title="pLDDT Distribution", xlabel="pLDDT", ylabel="Count")
-    )
-
-    PyMOL(
-        PyMOL.Load(af),
-        PyMOL.ColorAF(af),
-        PyMOL.Align(),
-        session="Final results"
-    )
+with Pipeline(project="Ubiquitin", job="InverseFolding"):
+    Resources(gpu="A100", time="4:00:00", memory="16GB")
+    ubiquitin = PDB("4LCD", chain="E")
+    sequences = ProteinMPNN(structures=ubiquitin,
+                            num_sequences=10,
+                            soluble_model=True)
+    folded = AlphaFold(proteins=sequences)
+    dna = DNAEncoder(sequences=sequences, organism="EC")
+    conf_change = ConformationalChange(reference_structures=ubiquitin,
+                                       target_structures=folded)
+    filtered_sequences = Panda(tables=[folded.tables.confidence,
+                                       conf_change.tables.changes],
+                               operations=[Panda.merge(),
+                                           Panda.filter("RMSD < 1.5 and plddt > 80")],
+                               pool=sequences)
+    dna = DNAEncoder(sequences=filtered_sequences, organism="EC")
 ```
 
 ---
@@ -125,11 +110,44 @@ with Pipeline(project="Examples",
 
 ---
 
+## Compound Library Screening
+
+**File:** `compound_screening.py`
+
+Protein–DNA–ligand co-folding with combinatorial compound library screening. Uses `CompoundLibrary` with a ChemDraw R-group enumeration file, `Bundle` for the homodimer, and `Each` to screen each compound individually.
+
+```python
+from biopipelines.pipeline import *
+from biopipelines.compound_library import CompoundLibrary
+from biopipelines.boltz2 import Boltz2
+from biopipelines.panda import Panda
+from biopipelines.plot import Plot
+
+with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
+    Resources(gpu="A100", time="8:00:00", memory="32GB")
+    TrpR = Sequence("MAQQSPYSAAMA...EVLLKSD", ids="TrpR")
+    DNA = Sequence("TGTACTAGTTAACTAGTAC", ids="dna")
+    library = CompoundLibrary("./ExamplePipelines/compound_library_TrpR.cdxml")
+    cofolded = Boltz2(proteins=Bundle(TrpR, TrpR),
+                      dsDNA=DNA,
+                      ligands=Each(library))
+    merged = Panda(tables=[library.tables.compounds, cofolded.tables.affinity],
+                   operations=[Panda.merge(),
+                               Panda.calculate({"aff_uM": "10**affinity_pred_value"})])
+    Plot(Plot.Scatter(data=merged.tables.result,
+                      x="R1", y="aff_uM",
+                      title="Predicted Affinity by R1 group",
+                      xlabel="R1",
+                      ylabel="Predicted Affinity [uM]"))
+```
+
+---
+
 ## Boltz2 with Combinatorics
 
 **File:** `boltz2.py`
 
-Comprehensive examples of Boltz2 with various input types and combinatorics (Bundle/Each). Demonstrates sequences, PDB structures, ligands, CompoundLibrary, MSAs, and nested combinatorics.
+Comprehensive examples of Boltz2 with various input types and combinatorics (Bundle/Each). Demonstrates sequences, PDB structures, ligands, MSAs, and nested combinatorics.
 
 ```python
 from biopipelines.pipeline import *
@@ -137,17 +155,14 @@ from biopipelines.boltz2 import Boltz2
 from biopipelines.combinatorics import Bundle, Each
 
 with Pipeline(project="Examples", job="Boltz2",
-              description="Test Boltz2 with various inputs"):
+              description="Boltz2 with various inputs"):
 
-    Resources(gpu="any", time="4:00:00", memory="16GB")
+    Resources(gpu="A100", time="24:00:00", memory="16GB")
 
     protein_a = Sequence("MVLSPADKT...", ids="ProteinA")
     protein_b = Sequence("MNIFEMLRI...", ids="ProteinB")
-    ligand_library = CompoundLibrary({
-        'aspirin': 'CC(=O)OC1=CC=CC=C1C(=O)O',
-        'caffeine': 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C',
-        'ibuprofen': 'CC(C)CC1=CC=C(C=C1)C(C)C(=O)O'
-    })
+
+    ligand_library = Ligand(['aspirin', 'caffeine', 'ibuprofen'])
 
     # Default: Each protein x Each ligand = 6 predictions
     boltz_each = Boltz2(
@@ -174,7 +189,7 @@ with Pipeline(project="Examples", job="Boltz2",
 
 ## Iterative Design with LigandMPNN + MutationComposer
 
-**File:** `ligandmpnn_composer_cycle.py`
+**File:** `iterative_binding_optimization.py`
 
 Multi-cycle iterative optimization: generate sequences with LigandMPNN, profile mutations, compose new sequences, fold with Boltz2, and select the best across cycles. Demonstrates the Panda tool for merging, filtering, and tracking results.
 

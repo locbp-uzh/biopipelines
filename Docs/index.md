@@ -8,23 +8,13 @@ A Python framework for automated computational protein design workflows on SLURM
 
 BioPipelines provides standardized interfaces to connect bioinformatics tools into reproducible workflows. It does not execute computations directly -- instead, it generates bash scripts and predicts output file paths, which are then executed on SLURM clusters or interactively in notebooks.
 
-```python
-from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
+<figure markdown>
+  ![Ubiquitin inverse folding pipeline](images/figure1_ubiquitin_pipeline.png){ width="800" }
+</figure>
 
-with Pipeline(project="Examples",
-              job="RFD-ProteinMPNN-AlphaFold2",
-              description="Redesign of N terminus domain of lysozyme"):
-    Resources(gpu="A100", time="4:00:00", memory="16GB")
-    lysozyme = PDB("168L")
-    rfd = RFdiffusion(pdb=lysozyme,
-                      contigs='50-70/A81-140',
-                      num_designs=3)
-    pmpnn = ProteinMPNN(structures=rfd, num_sequences=2)
-    af = AlphaFold(proteins=pmpnn)
-```
+<figure markdown>
+  ![Boltz2 compound library screening](images/figure3_boltz2_compound_screening.png){ width="800" }
+</figure>
 
 ---
 
@@ -73,7 +63,7 @@ with Pipeline(project="Examples",
     ### Run an Example
 
     ```bash
-    biopipelines-submit rfd_pmpnn_af2.py
+    biopipelines-submit ubiquitin.py
     ```
 
 === "Google Colab"

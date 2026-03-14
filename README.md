@@ -5,28 +5,19 @@
 
 ## Overview
 
-A Python framework for automated computational protein design workflows that can run in Jupyter/Colab notebooks as well as on SLURM-based computing clusters. BioPipelines provides standardized interfaces to connect bioinformatics tools. 
+A Python framework for automated computational protein design workflows that can run in Jupyter/Colab notebooks as well as on SLURM-based computing clusters. BioPipelines provides standardized interfaces to connect bioinformatics tools.
 
-## Example pipeline
+## Example: Inverse Folding Pipeline
 
-PDB download -> RFdiffusion -> ProteinMPNN -> AlphaFold.
+<p align="center">
+  <img src="Docs/images/figure1_ubiquitin_pipeline.png" alt="Ubiquitin inverse folding pipeline: PDB → ProteinMPNN → AlphaFold + DNAEncoder" width="800">
+</p>
 
-```python
-#imports omitted
-with Pipeline(project="Examples",
-              job="RFD-ProteinMPNN-AlphaFold2",
-              description="Redesign of N terminus domain of lysozyme"):
-    Resources(gpu="A100", 
-              time="4:00:00",
-              memory="16GB")
-    lysozyme = PDB("168L")
-    rfd = RFdiffusion(pdb=lysozyme,
-                        contigs='50-70/A81-140', #redesign N terminus
-                        num_designs=3)
-    pmpnn = ProteinMPNN(structures=rfd, 
-                      num_sequences=2)
-    af = AlphaFold(proteins=pmpnn)
-```
+## Example: Compound Library Screening with Boltz2
+
+<p align="center">
+  <img src="Docs/images/figure3_boltz2_compound_screening.png" alt="Boltz2 compound library screening with protein-DNA-ligand co-folding" width="800">
+</p>
 
 ## Documentation
 
@@ -36,4 +27,3 @@ Full documentation is available at **[biopipelines.readthedocs.io](https://biopi
 - **[Tool Reference](Docs/ToolReference.md)**
 - **[Examples](ExamplePipelines/)**
 - **[Developer Manual](Docs/DeveloperManual.md)**
-
