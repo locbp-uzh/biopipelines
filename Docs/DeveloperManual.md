@@ -866,7 +866,7 @@ The `CombinatoricsConfig` JSON file stores pre-computed `predicted_ids` and `pro
 ```json
 {
   "axes": { ... },
-  "predicted_ids": ["prot1_lig1", "prot1_lig2", "prot1_lig3"],
+  "predicted_ids": ["prot1+lig1", "prot1+lig2", "prot1+lig3"],
   "provenance": {
     "sequences": ["prot1", "prot1", "prot1"],
     "compounds": ["lig1", "lig2", "lig3"]
@@ -874,14 +874,14 @@ The `CombinatoricsConfig` JSON file stores pre-computed `predicted_ids` and `pro
 }
 ```
 
-For pipe scripts that iterate and need single-row IDs, use `predict_single_output_id()` which mirrors the pipeline-time logic exactly:
+For pipe scripts that iterate and need single-row IDs, use `predict_single_output_id()` which mirrors the config-time logic exactly:
 
 ```python
 from combinatorics import predict_single_output_id
 
 config_id = predict_single_output_id(
-    sequences=("each", protein_ids, prot_idx),
-    compounds=("each", ligand_ids, lig_idx)
+    sequences=("each", protein_ids, prot_idx, [], False),
+    compounds=("each", ligand_ids, lig_idx, static_ids, static_first)
 )
 ```
 
