@@ -91,6 +91,9 @@ BioPipelines automatically detects the Colab environment and loads `colab.yaml` 
 - Tool installation uses `pip install` instead of creating conda environments
 - SLURM-related settings are disabled
 
+!!! warning "Pip dependency conflicts"
+    Because all tools are installed via `pip` into Colab's single shared Python environment, installing multiple tools with incompatible dependency requirements can cause conflicts (e.g., one tool requiring `numpy<2.0` while another needs `numpy>=2.0`). If you encounter import errors or unexpected behavior after installing several tools, dependency conflicts are the likely cause. We are working on switching to `micromamba` for Colab, which will provide isolated environments per tool — matching the cluster behavior — and eliminate these conflicts.
+
 ### Installing Tools
 
 Install the tools you need using `.install()`. This only needs to run once per Colab session (completed steps are skipped on re-run):

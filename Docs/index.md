@@ -88,6 +88,9 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
     The Colab configuration (`colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `pip` into Colab's existing Python environment. See [Google Colab](UserManual.md#google-colab) in the User Guide for details.
 
+    !!! warning "Pip dependency conflicts"
+        Colab installations currently use `pip`, which installs all tools into a single shared Python environment. This can cause dependency conflicts when installing multiple tools with incompatible requirements (e.g., different versions of the same library). We are working on switching to `micromamba` for isolated environment management on Colab, which will resolve these conflicts.
+
 ---
 
 ## Documentation
