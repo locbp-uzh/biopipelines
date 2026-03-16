@@ -72,27 +72,26 @@ Edit config.yaml to fit your cluster configuration.
 
 ## Google Colab
 
-BioPipelines runs on Google Colab with GPU support out of the box. No conda, no SLURM — tools are installed via `pip` into Colab's existing Python environment.
+BioPipelines runs on Google Colab with GPU support out of the box. No SLURM needed — tools are installed via `micromamba` into isolated environments, matching the cluster behavior.
 
 ### Setup
 
-Run these cells at the top of your Colab notebook:
+Run this cell at the top of your Colab notebook:
 
 ```python
-# Cell 1: Clone and install BioPipelines
+# Cell 1: Install BioPipelines and micromamba
 !git clone https://github.com/locbp-uzh/biopipelines
 %cd biopipelines
 !pip install -e .
+!curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local bin/micromamba
+!micromamba create -f Environments/biopipelines.yaml -y
 ```
 
-BioPipelines automatically detects the Colab environment and loads `colab.yaml` instead of `config.yaml`. This sets `env_manager: "pip"`, which means:
+BioPipelines automatically detects the Colab environment and loads `colab.yaml` instead of `config.yaml`. This sets `env_manager: "micromamba"`, which means:
 
-- Environment activation becomes a no-op (everything runs in Colab's single Python environment)
-- Tool installation uses `pip install` instead of creating conda environments
+- Each tool gets its own isolated conda environment (same as on the cluster)
+- Tool installation uses `micromamba` to create environments from YAML specs
 - SLURM-related settings are disabled
-
-!!! warning "Pip dependency conflicts"
-    Because all tools are installed via `pip` into Colab's single shared Python environment, installing multiple tools with incompatible dependency requirements can cause conflicts (e.g., one tool requiring `numpy<2.0` while another needs `numpy>=2.0`). If you encounter import errors or unexpected behavior after installing several tools, dependency conflicts are the likely cause. We are working on switching to `micromamba` for Colab, which will provide isolated environments per tool — matching the cluster behavior — and eliminate these conflicts.
 
 ### Installing Tools
 
@@ -130,12 +129,12 @@ af = AlphaFold(proteins=pmpnn)
 
 | | Cluster | Google Colab |
 |---|---|---|
-| **Environment manager** | mamba/conda | pip |
+| **Environment manager** | mamba/conda | micromamba |
 | **Execution** | SLURM or on-the-fly | On-the-fly only |
 | **GPU** | Configured via `Resources()` | Colab's assigned GPU |
 | **Output location** | Configured in `config.yaml` | `./BioPipelines/` |
 | **Config file** | `config.yaml` | `colab.yaml` (auto-detected) |
-| **Tool install** | Creates conda environments | `pip install` into existing env |
+| **Tool install** | Creates conda environments | Creates micromamba environments |
 
 !!! note "Colab session limits"
     Colab sessions are ephemeral. Installed tools and generated outputs are lost when the runtime disconnects. Mount Google Drive or download results before the session ends.

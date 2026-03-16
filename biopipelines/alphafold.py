@@ -58,6 +58,23 @@ fi
 # pre-built wheel for Python 3.12 and fails to build from source on Colab.
 # alphafold-minus-jax skips reinstalling JAX, which Colab already provides.
 pip install -q --no-warn-conflicts "colabfold[alphafold-minus-jax] @ git+https://github.com/sokrypton/ColabFold"
+# Fix TF crash (as from official ColabFold notebook)
+rm -f /usr/local/lib/python3.*/dist-packages/tensorflow/core/kernels/libtfkernel_sobol_op.so
+
+echo "=== AlphaFold installation complete ==="
+"""
+        if env_manager == "micromamba":
+            skip = "" if force_reinstall else """# Check if already installed
+if /usr/bin/python3 -c "import colabfold" 2>/dev/null; then
+    echo "AlphaFold (ColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing AlphaFold (ColabFold via micromamba) ==="
+{skip}# Install into Colab's base Python to reuse JAX/GPU stack
+/usr/bin/python3 -m pip install -q --no-warn-conflicts "colabfold[alphafold-minus-jax] @ git+https://github.com/sokrypton/ColabFold"
+# Fix TF crash (from official ColabFold notebook)
+rm -f /usr/local/lib/python3.*/dist-packages/tensorflow/core/kernels/libtfkernel_sobol_op.so
 
 echo "=== AlphaFold installation complete ==="
 """
@@ -219,6 +236,9 @@ fi
 
     def _generate_script_run_alphafold(self) -> str:
         """Generate the AlphaFold execution part of the script."""
+        from .config_manager import ConfigManager
+        env_manager = ConfigManager().get_env_manager()
+
         # Build AlphaFold options
         af_options = ""
         if self.num_relax > 0:
@@ -228,6 +248,22 @@ fi
         if self.rand_seed != 0:
             af_options += f" --random-seed {self.rand_seed}"
 
+        # Determine colabfold_batch command
+        if env_manager == "micromamba":
+            # Run in a clean subshell without micromamba env to avoid interference
+            # with Colab's JAX/GPU/tensorflow stack
+            colabfold_cmd = "/usr/local/bin/colabfold_batch"
+        elif env_manager == "pip":
+            colabfold_cmd = "colabfold_batch"
+        else:
+            # Cluster: absolute path to LocalColabFold binary
+            colabfold_cmd = str(self.colabfold_batch)
+
+        if env_manager == "micromamba":
+            run_colabfold = f"""(unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL; PATH="/usr/local/bin:/usr/bin:/bin:$PATH" {colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options})"""
+        else:
+            run_colabfold = f"""{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}"""
+
         return f"""echo "Running AlphaFold2/ColabFold"
 echo "Options: {af_options}"
 echo "Output folder: {self.output_folder}"
@@ -235,8 +271,8 @@ echo "Output folder: {self.output_folder}"
 # Create Folding subfolder for raw ColabFold outputs
 mkdir -p "{self.folding_folder}"
 
-# Run ColabFold batch - output to Folding subfolder
-{self.colabfold_batch} {self.queries_csv} "{self.folding_folder}" {af_options}
+# Run ColabFold batch
+{run_colabfold}
 
 """
 

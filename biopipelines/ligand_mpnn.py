@@ -56,6 +56,28 @@ pip install -r requirements.txt
 
 echo "=== LigandMPNN installation complete ==="
 """
+        if env_manager == "micromamba":
+            skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ] && micromamba env list 2>/dev/null | grep -q "ligandmpnn_env"; then
+    echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing LigandMPNN (micromamba) ==="
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/dauparas/LigandMPNN.git
+fi
+cd {repo_dir}
+bash get_model_params.sh "./model_params"
+
+micromamba create -n ligandmpnn_env python=3.11 -y
+micromamba run -n ligandmpnn_env pip install -r requirements.txt
+micromamba run -n ligandmpnn_env pip install "numpy<2" "pandas<2" "setuptools<70"
+
+echo "=== LigandMPNN installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] && {env_manager} env list 2>/dev/null | grep -q "ligandmpnn_env"; then
     echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
@@ -63,14 +85,18 @@ if [ -d "{repo_dir}" ] && {env_manager} env list 2>/dev/null | grep -q "ligandmp
 fi
 """
         return f"""echo "=== Installing LigandMPNN ==="
-{skip}cd {parent_dir}
-git clone https://github.com/dauparas/LigandMPNN.git
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/dauparas/LigandMPNN.git
+fi
 cd {repo_dir}
 bash get_model_params.sh "./model_params"
 
 {env_manager} create -n ligandmpnn_env python=3.11 -y
 {env_manager} activate ligandmpnn_env
 pip install -r requirements.txt
+pip install "numpy<2" "pandas<2"
 
 echo "=== LigandMPNN installation complete ==="
 """

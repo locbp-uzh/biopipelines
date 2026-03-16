@@ -70,6 +70,32 @@ pip install icecream openbabel-wheel assertpy
 echo "=== RFdiffusion-AllAtom installation complete ==="
 echo "Requires RFdiffusion.install() for SE3nv dependencies (pip mode)"
 """
+        if env_manager == "micromamba":
+            return f"""echo "=== Installing RFdiffusion-AllAtom (micromamba) ==="
+# SE3nv environment must exist — run RFdiffusion.install() first
+if ! micromamba env list 2>/dev/null | grep -q "SE3nv"; then
+    echo "ERROR: SE3nv environment not found. Run RFdiffusion.install() before RFdiffusionAllAtom.install()."
+    exit 1
+fi
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git
+fi
+cd {repo_dir}
+
+# Download model weights
+wget -nc http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt
+
+# Initialize git submodules
+git submodule init
+git submodule update
+
+# Additional dependencies into SE3nv environment
+micromamba run -n SE3nv pip install icecream openbabel-wheel assertpy
+
+echo "=== RFdiffusion-AllAtom installation complete ==="
+"""
         return f"""echo "=== Installing RFdiffusion-AllAtom ==="
 {skip}cd {parent_dir}
 git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git

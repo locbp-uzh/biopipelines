@@ -71,10 +71,12 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     Run these two cells at the top of your Colab notebook:
 
     ```python
-    # Cell 1: Install BioPipelines
+    # Cell 1: Install BioPipelines and micromamba
     !git clone https://github.com/locbp-uzh/biopipelines
     %cd biopipelines
     !pip install -e .
+    !curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local bin/micromamba
+    !micromamba create -f Environments/biopipelines.yaml -y
     ```
 
     ```python
@@ -86,10 +88,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
         RFdiffusion.install()
     ```
 
-    The Colab configuration (`colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `pip` into Colab's existing Python environment. See [Google Colab](UserManual.md#google-colab) in the User Guide for details.
-
-    !!! warning "Pip dependency conflicts"
-        Colab installations currently use `pip`, which installs all tools into a single shared Python environment. This can cause dependency conflicts when installing multiple tools with incompatible requirements (e.g., different versions of the same library). We are working on switching to `micromamba` for isolated environment management on Colab, which will resolve these conflicts.
+    The Colab configuration (`colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `micromamba` into isolated environments, matching the cluster behavior. See [Google Colab](UserManual.md#google-colab) in the User Guide for details.
 
 ---
 

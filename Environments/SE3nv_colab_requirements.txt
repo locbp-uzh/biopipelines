@@ -1,6 +1,6 @@
-# RFdiffusion pip dependencies for Google Colab (Python 3.12+)
-# Only packages NOT already provided by Colab's base environment.
-# PyTorch, numpy, scipy, etc. are pre-installed in Colab.
+# RFdiffusion pip dependencies for Google Colab
+# PyTorch, numpy, scipy, etc. are pre-installed in Colab's base environment
+# but must be listed here for micromamba isolated environments.
 
 # RFdiffusion core dependencies
 hydra-core>=1.3.2
@@ -21,3 +21,5 @@ git+https://github.com/NVIDIA/dllogger.git
 biopython
 prody
 pyyaml
+pandas
+psutil

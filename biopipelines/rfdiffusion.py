@@ -161,6 +161,45 @@ pip install -e .
 
 echo "=== RFdiffusion installation complete ==="
 """
+        if env_manager == "micromamba":
+            skip = "" if force_reinstall else f"""# Check if already installed
+if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] && micromamba env list 2>/dev/null | grep -q "SE3nv"; then
+    echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing RFdiffusion (micromamba) ==="
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/RosettaCommons/RFdiffusion.git
+fi
+cd {repo_dir}
+
+# Download model weights
+mkdir -p models && cd models
+{wget_lines}
+cd ..
+
+# Create SE3nv environment with Python 3.9 (required by RFdiffusion)
+micromamba create -n SE3nv python=3.9 -y
+
+# Install PyTorch and core dependencies
+micromamba run -n SE3nv pip install torch torchvision torchaudio
+# Install remaining dependencies
+micromamba run -n SE3nv pip install -r {biopipelines}/Environments/SE3nv_pip_requirements.txt
+micromamba run -n SE3nv pip install pandas psutil tqdm
+# Install DGL from pre-built wheel
+micromamba run -n SE3nv pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
+
+# Install SE3Transformer and RFdiffusion
+cd env/SE3Transformer
+micromamba run -n SE3nv pip install --no-deps .
+cd ../..
+micromamba run -n SE3nv pip install -e .
+
+echo "=== RFdiffusion installation complete ==="
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] && {env_manager} env list 2>/dev/null | grep -q "SE3nv"; then
     echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."

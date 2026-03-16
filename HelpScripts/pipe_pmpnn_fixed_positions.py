@@ -235,13 +235,3 @@ with open(sele_csv_file,"w") as csv_file:
         
 print(f"Fixed positions written to: {fixed_jsonl_file}")
 print(f"Selections summary written to: {sele_csv_file}")
-        
-#Dictionary of fixed positions looks like this
-#{"design_0": {"A": [1, 2, 3, 7, 8, 9, 22, 25, 33], "B": []}, "design_1": {"A": [], "B": []}}
-#Input modes:
-# - table: Read fixed/designed from input table (e.g., from RFdiffusion or other tools)
-# - selection: Use FIXED and DESIGNED parameters directly
-# - plddt: Use pLDDT threshold to determine positions
-
-if pLDDT_thr < 100:    
-    cmd.quit() #MUST ALWAYS BE AT THE END OF THE SCRIPT
