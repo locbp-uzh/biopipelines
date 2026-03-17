@@ -37,7 +37,8 @@ from pathlib import Path
 
 # Import our native PDB parser
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom, STANDARD_RESIDUES, parse_pymol_ranges, format_pymol_ranges
+from biopipelines.pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom, STANDARD_RESIDUES
+from biopipelines.sele_utils import sele_to_list, list_to_sele
 from typing import List, Dict, Tuple
 
 # Import unified I/O utilities
@@ -98,22 +99,27 @@ def get_residue_atoms(atoms: List[Atom], residue_selection: str) -> List[Atom]:
     Returns:
         List of Atom objects for the selected residues
     """
-    # Parse selection to get list of residue numbers
-    selected_residues = set(sele_to_list(residue_selection))
+    # Parse selection to get list of (chain, resnum) tuples
+    selected_residues = sele_to_list(residue_selection)
 
     if not selected_residues:
         raise ValueError(f"Could not parse residue selection: {residue_selection}")
 
+    # Build lookup: chained entries match exact (chain, resnum), chainless match any chain
+    chained_set = set((c, r) for c, r in selected_residues if c)
+    chainless_nums = set(r for c, r in selected_residues if not c)
+
     # Select atoms from specified residues
     residue_atoms = []
     for atom in atoms:
-        if atom.res_name in STANDARD_RESIDUES and atom.res_num in selected_residues:
-            residue_atoms.append(atom)
+        if atom.res_name in STANDARD_RESIDUES:
+            if (atom.chain, atom.res_num) in chained_set or atom.res_num in chainless_nums:
+                residue_atoms.append(atom)
 
     if not residue_atoms:
         # Get all available residue numbers for error message
         available_residues = sorted(set(atom.res_num for atom in atoms if atom.res_name in STANDARD_RESIDUES))
-        raise ValueError(f"Could not find residues matching selection '{residue_selection}'. Available protein residues: {format_ligandmpnn_selection_from_list(available_residues)}")
+        raise ValueError(f"Could not find residues matching selection '{residue_selection}'. Available protein residues: {list_to_sele(available_residues)}")
 
     print(f"Found residues '{residue_selection}': {len(residue_atoms)} atoms")
     return residue_atoms
@@ -170,57 +176,21 @@ def is_placeholder_atom(atom: Atom) -> bool:
     return atom.x == 0.0 and atom.y == 0.0 and atom.z == 0.0
 
 
-def sele_to_list(sele_str: str) -> List[int]:
+
+def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict[str, str] = None) -> List[Tuple[str, int]]:
     """
-    Convert selection string to list of residue numbers.
-
-    Thin wrapper around :func:`pdb_parser.parse_pymol_ranges`.
-
-    Args:
-        sele_str: PyMOL-style selection (e.g., "10-20+30-40")
-
-    Returns:
-        Sorted list of unique residue numbers
-    """
-    if not sele_str or sele_str == "-" or pd.isna(sele_str):
-        return []
-
-    ranges = parse_pymol_ranges(str(sele_str))
-    residues = []
-    for start, end in ranges:
-        residues.extend(range(start, end + 1))
-    return sorted(set(residues))
-
-
-def format_ligandmpnn_selection_from_list(res_nums: List[int]) -> str:
-    """
-    Format residue number list as LigandMPNN selection string.
-
-    Delegates to :func:`pdb_parser.format_pymol_ranges`.
-
-    Args:
-        res_nums: List of residue numbers
-
-    Returns:
-        Selection string with ranges (e.g., "10-11+15")
-    """
-    return format_pymol_ranges(res_nums)
-
-
-def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict[str, str] = None) -> List[int]:
-    """
-    Resolve restriction specification to list of residue numbers.
+    Resolve restriction specification to list of (chain, resnum) tuples.
 
     Args:
         restrict_spec: Either:
                       - "" (empty): No restriction
                       - "TABLE_REFERENCE:path:column": Table reference
-                      - "10-20+30-40": Direct PyMOL selection
+                      - "10-20+30-40" or "A10-20+B30-40": Direct PyMOL selection
         structure_id: Structure ID from the DataStream (not derived from filename)
         id_map: ID mapping dictionary for matching structure IDs to table IDs
 
     Returns:
-        List of residue numbers to restrict to (empty list = no restriction)
+        List of (chain, resnum) tuples to restrict to (empty list = no restriction)
     """
     if not restrict_spec or restrict_spec == "":
         return []  # No restriction
@@ -236,7 +206,7 @@ def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict
         try:
             selection_str = lookup_table_value(table, structure_id, column_name, id_map=id_map)
             residues = sele_to_list(selection_str)
-            print(f"Restricting to {len(residues)} residues: {format_ligandmpnn_selection_from_list(residues)}")
+            print(f"Restricting to {len(residues)} residues: {list_to_sele(residues)}")
             return residues
         except KeyError as e:
             print(f"ERROR: No restriction table entry found for ID '{structure_id}'. {e}")
@@ -247,7 +217,7 @@ def resolve_restriction_spec(restrict_spec: str, structure_id: str, id_map: Dict
     else:
         return sele_to_list(restrict_spec)
 
-def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], distance_cutoff: float, restrict_to_residues: List[int] = None, exclude_reference_residues: List[int] = None) -> Tuple[List[str], List[str]]:
+def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], distance_cutoff: float, restrict_to_residues: List[Tuple[str, int]] = None, exclude_reference_residues: List[Tuple[str, int]] = None) -> Tuple[List[str], List[str]]:
     """
     Calculate distances from protein residues to reference atoms using native PDB parser.
 
@@ -255,13 +225,30 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
         atoms: List of all atoms from PDB file
         reference_atoms: List of reference atoms
         distance_cutoff: Distance cutoff in Angstroms
-        restrict_to_residues: Optional list of residue numbers to restrict search to
-        exclude_reference_residues: Optional list of reference residue numbers to exclude from "within"
+        restrict_to_residues: Optional list of (chain, resnum) tuples to restrict search to.
+                             Chain ``''`` matches any chain (backwards compatible).
+        exclude_reference_residues: Optional list of (chain, resnum) tuples to exclude from "within".
+                                   Chain ``''`` matches any chain.
 
     Returns:
         Tuple of (within_residues, beyond_residues) as lists of residue identifiers
     """
     protein_residues = get_protein_residues(atoms)
+
+    # Build efficient lookups for restriction and exclusion
+    if restrict_to_residues:
+        restrict_chained = set((c, r) for c, r in restrict_to_residues if c)
+        restrict_chainless = set(r for c, r in restrict_to_residues if not c)
+    else:
+        restrict_chained = set()
+        restrict_chainless = set()
+
+    if exclude_reference_residues:
+        exclude_chained = set((c, r) for c, r in exclude_reference_residues if c)
+        exclude_chainless = set(r for c, r in exclude_reference_residues if not c)
+    else:
+        exclude_chained = set()
+        exclude_chainless = set()
 
     within_residues = []
     beyond_residues = []
@@ -270,8 +257,8 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
         chain, res_num = res_key
 
         # If restriction is specified, skip residues not in restriction
-        if restrict_to_residues is not None and len(restrict_to_residues) > 0:
-            if res_num not in restrict_to_residues:
+        if restrict_to_residues:
+            if (chain, res_num) not in restrict_chained and res_num not in restrict_chainless:
                 continue  # Skip this residue - not in restriction set
 
         # Calculate minimum distance from any atom in this residue to any reference atom
@@ -292,8 +279,8 @@ def calculate_residue_distances(atoms: List[Atom], reference_atoms: List[Atom], 
         residue_id = f"{chain_id}{res_num}"
 
         if min_distance <= distance_cutoff:
-            # Exclude reference residues if requested
-            if exclude_reference_residues and res_num in exclude_reference_residues:
+            # Exclude reference residues if requested (chain-aware)
+            if exclude_reference_residues and ((chain, res_num) in exclude_chained or res_num in exclude_chainless):
                 beyond_residues.append(residue_id)
             else:
                 within_residues.append(residue_id)
@@ -450,7 +437,7 @@ def analyze_structure_distance(structure_id: str, pdb_file: str, reference_spec:
     # Resolve restriction using structure_id (not derived from filename)
     restrict_to_residues = resolve_restriction_spec(restrict_spec, structure_id, id_map)
     if restrict_to_residues:
-        print(f"Restricting to {len(restrict_to_residues)} residues: {format_ligandmpnn_selection_from_list(restrict_to_residues)}")
+        print(f"Restricting to {len(restrict_to_residues)} residues: {list_to_sele(restrict_to_residues)}")
 
     # Calculate distances with restriction
     within_residues, beyond_residues = calculate_residue_distances(

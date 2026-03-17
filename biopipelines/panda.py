@@ -878,13 +878,22 @@ fi
                 seen = set()
                 deduped_ids = []
                 deduped_files = []
-                pairs = zip(sdata["ids"], sdata["files"]) if sdata["files"] else ((sid, None) for sid in sdata["ids"])
-                for sid, sf in pairs:
-                    if sid not in seen:
-                        seen.add(sid)
-                        deduped_ids.append(sid)
-                        if sf is not None:
-                            deduped_files.append(sf)
+                is_template = (len(sdata["files"]) == 1 and '<id>' in sdata["files"][0])
+                if is_template:
+                    # Template files: dedup IDs only, keep template as-is
+                    for sid in sdata["ids"]:
+                        if sid not in seen:
+                            seen.add(sid)
+                            deduped_ids.append(sid)
+                    deduped_files = sdata["files"]
+                else:
+                    pairs = zip(sdata["ids"], sdata["files"]) if sdata["files"] else ((sid, None) for sid in sdata["ids"])
+                    for sid, sf in pairs:
+                        if sid not in seen:
+                            seen.add(sid)
+                            deduped_ids.append(sid)
+                            if sf is not None:
+                                deduped_files.append(sf)
                 sdata["ids"] = deduped_ids
                 sdata["files"] = deduped_files
 
@@ -918,10 +927,9 @@ fi
                         new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
                 else:
                     new_ids = data["ids"][:num_items]
-                    # Use remapped IDs + original extension for predicted file paths
                     new_files = []
-                    for new_id, f in zip(new_ids, data["files"][:num_items]):
-                        ext = os.path.splitext(f)[1]
+                    ext = os.path.splitext(data["files"][0])[1]
+                    for new_id in new_ids:
                         new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
 
                 # Preserve pool's map_table, pointing to the copy in output_folder

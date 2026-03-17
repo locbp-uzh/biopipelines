@@ -24,6 +24,31 @@ from pymol import cmd
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.sele_utils import sele_group_by_chain
+
+
+def _sele_to_pymol(obj_name: str, selection_str: str) -> str:
+    """Build a PyMOL selection string from a chain-aware selection.
+
+    Converts e.g. ``A1-117+A172-225`` into
+    ``obj_name and (chain A and resi 1-117+172-225)``.
+    Chainless input like ``1-50+60-80`` becomes
+    ``obj_name and resi 1-50+60-80``.
+    """
+    groups = sele_group_by_chain(selection_str)
+    if not groups:
+        return f"{obj_name} and resi {selection_str}"
+
+    chain_parts = []
+    for chain, resi_str in groups:
+        if chain:
+            chain_parts.append(f"(chain {chain} and resi {resi_str})")
+        else:
+            chain_parts.append(f"resi {resi_str}")
+
+    if len(chain_parts) == 1:
+        return f"{obj_name} and {chain_parts[0]}"
+    return f"{obj_name} and ({' or '.join(chain_parts)})"
 
 
 def resolve_atoms(atoms: str) -> Optional[str]:
@@ -66,8 +91,8 @@ def align_and_compute_rmsd(ref_obj: str, target_obj: str, selection: str,
         ref_sel = f"{ref_obj}"
         target_sel = f"{target_obj}"
     else:
-        ref_sel = f"{ref_obj} and resi {selection}"
-        target_sel = f"{target_obj} and resi {selection}"
+        ref_sel = _sele_to_pymol(ref_obj, selection)
+        target_sel = _sele_to_pymol(target_obj, selection)
 
     # Apply atom name filter
     atom_names = resolve_atoms(atoms)

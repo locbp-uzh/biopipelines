@@ -695,26 +695,28 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
 
 def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
                        output_folder: str, step_tool_name: str,
-                       operations: List[Dict[str, Any]]) -> None:
+                       operations: List[Dict[str, Any]],
+                       rename_map: Optional[Dict[str, str]] = None) -> None:
     """
-    Create missing.csv with IDs that were filtered out.
+    Create missing.csv with IDs that were filtered out or renamed.
 
     Args:
         original_ids: All original IDs
-        filtered_ids: IDs that passed filtering
+        filtered_ids: IDs that passed filtering (original IDs, before rename)
         output_folder: Output folder for missing.csv
         step_tool_name: Step and tool name (e.g. "005_Panda")
         operations: List of operation dicts from config
+        rename_map: Optional mapping from original ID to new renamed ID
     """
     all_ids = set(str(i) for i in original_ids)
     passed_ids = set(str(i) for i in filtered_ids)
-    missing_ids = list(all_ids - passed_ids)
+    truly_missing_ids = list(all_ids - passed_ids)
 
-    # Build cause from operations
+    # Build cause from operations for truly filtered-out IDs
     filter_exprs = [op['params']['expr'] for op in operations
                     if op.get('type') == 'filter' and 'params' in op and 'expr' in op['params']]
     if filter_exprs:
-        cause = "Filtered by: " + ", ".join(filter_exprs)
+        filter_cause = "Filtered by: " + ", ".join(filter_exprs)
     else:
         op_summaries = []
         for op in operations:
@@ -724,18 +726,30 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
                 op_summaries.append(f"{op_type}({n})")
             else:
                 op_summaries.append(op_type)
-        cause = "Removed by: " + ", ".join(op_summaries)
+        filter_cause = "Removed by: " + ", ".join(op_summaries)
 
-    if not missing_ids:
-        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
-    else:
-        missing_data = [{'id': mid, 'removed_by': step_tool_name, 'cause': cause}
-                        for mid in missing_ids]
+    missing_data = [{'id': mid, 'removed_by': step_tool_name, 'cause': filter_cause}
+                    for mid in truly_missing_ids]
+
+    # Add renamed IDs (survived filtering but got a new name)
+    if rename_map:
+        for orig_id in filtered_ids:
+            orig_str = str(orig_id)
+            if orig_str in rename_map:
+                missing_data.append({
+                    'id': orig_str,
+                    'removed_by': step_tool_name,
+                    'cause': f"Renamed to {rename_map[orig_str]}"
+                })
+
+    if missing_data:
         missing_df = pd.DataFrame(missing_data)
+    else:
+        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
 
     missing_csv = os.path.join(output_folder, "missing.csv")
     missing_df.to_csv(missing_csv, index=False)
-    print(f"Created missing.csv with {len(missing_ids)} filtered out IDs")
+    print(f"Created missing.csv with {len(missing_data)} entries")
 
 
 def filter_and_copy_pool_tables(
@@ -1046,8 +1060,9 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     if original_ids:
         output_dir = os.path.dirname(output_csv)
         step_tool_name = os.path.basename(output_dir)
-        create_missing_csv(original_ids, filtered_ids, output_dir,
-                           step_tool_name, operations)
+        create_missing_csv(original_ids, filtered_ids_for_lookup, output_dir,
+                           step_tool_name, operations,
+                           rename_map=original_to_new_id if original_to_new_id else None)
 
     print("\nPanda operations completed successfully!")
 

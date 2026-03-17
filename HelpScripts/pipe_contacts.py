@@ -28,7 +28,8 @@ from biopipelines.biopipelines_io import load_datastream, iterate_files
 from biopipelines.id_map_utils import map_table_ids_to_ids
 
 # Import PDB parser and selection utilities
-from biopipelines.pdb_parser import Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file, STANDARD_RESIDUES, parse_pymol_ranges
+from biopipelines.pdb_parser import Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file, STANDARD_RESIDUES
+from biopipelines.sele_utils import sele_to_list as _sele_to_list
 
 
 def parse_pdb_file(pdb_path: str) -> List[_PdbAtom]:
@@ -54,20 +55,17 @@ def parse_pdb_file(pdb_path: str) -> List[_PdbAtom]:
 Atom = _PdbAtom
 
 
-def parse_residue_selection(selection_str: str) -> List[int]:
+def parse_residue_selection(selection_str: str) -> List[Tuple[str, int]]:
     """
-    Parse residue selection string into list of residue numbers.
+    Parse residue selection string into list of (chain, resnum) tuples.
 
-    Delegates range parsing to :func:`pdb_parser.parse_pymol_ranges`.
+    Delegates to :func:`sele_utils.sele_to_list` which handles both
+    chain-aware (``A1-117+B10``) and chainless (``1-50+60``) formats.
     """
     if not selection_str or selection_str.lower() in ['all', 'none', 'null']:
         return []
 
-    ranges = parse_pymol_ranges(str(selection_str))
-    residues = []
-    for start, end in ranges:
-        residues.extend(range(start, end + 1))
-    return sorted(set(residues))
+    return _sele_to_list(str(selection_str))
 
 
 def get_protein_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
@@ -105,21 +103,32 @@ def get_ligand_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
     return [atom for atom in atoms if atom.res_name == ligand_name]
 
 
-def filter_atoms_by_selection(atoms: List[Atom], residue_numbers: List[int]) -> List[Atom]:
+def filter_atoms_by_selection(atoms: List[Atom], residue_tuples: List[Tuple[str, int]]) -> List[Atom]:
     """
-    Filter atoms to include only specified residue numbers.
+    Filter atoms to include only specified (chain, resnum) pairs.
 
     Args:
         atoms: List of atoms
-        residue_numbers: List of residue numbers to include
+        residue_tuples: List of (chain, resnum) tuples to include.
+            If chain is '' (chainless selection), matches any chain.
 
     Returns:
         Filtered list of atoms
     """
-    if not residue_numbers:  # Empty list means no filtering
+    if not residue_tuples:  # Empty list means no filtering
         return atoms
 
-    return [atom for atom in atoms if atom.res_num in residue_numbers]
+    # Build a lookup set; separate chainless entries (match any chain)
+    chained = set()
+    chainless_nums = set()
+    for chain, resnum in residue_tuples:
+        if chain:
+            chained.add((chain, resnum))
+        else:
+            chainless_nums.add(resnum)
+
+    return [atom for atom in atoms
+            if (atom.chain, atom.res_num) in chained or atom.res_num in chainless_nums]
 
 
 def calculate_distance(atom1: Atom, atom2: Atom) -> float:

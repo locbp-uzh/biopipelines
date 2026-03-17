@@ -64,7 +64,7 @@ def sele_to_list(s):
         Sorted list of (chain, resnum) tuples.  Chain is ``''`` for chainless input.
     """
     result = []
-    if not s or str(s) == "nan":
+    if not s or str(s) in ("nan", "-"):
         return result
 
     s = str(s)
