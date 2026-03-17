@@ -104,6 +104,54 @@ def sele_to_list(s):
     return sorted(result, key=lambda x: (x[0], x[1]))
 
 
+def sele_group_by_chain(s):
+    """Group a selection string by chain without expanding ranges.
+
+    Accepts chain-aware (``A1-117+B10-20``), chainless (``1-50+60-80``),
+    and legacy space-separated formats.
+
+    Returns:
+        List of (chain, resi_str) tuples where *resi_str* is a compact
+        ``+``-joined residue string (e.g. ``'1-117+172-225'``).
+        Chain is ``''`` for chainless input.
+
+    Examples:
+        'A1-117+A172-225'       -> [('A', '1-117+172-225')]
+        'A1-50+B10-20'          -> [('A', '1-50'), ('B', '10-20')]
+        '1-50+60-80'            -> [('', '1-50+60-80')]
+        'A1-117+A172-225+B10'   -> [('A', '1-117+172-225'), ('B', '10')]
+    """
+    if not s or str(s) == "nan":
+        return []
+
+    s = str(s)
+
+    if '+' in s:
+        parts = s.split('+')
+    else:
+        parts = s.split()
+
+    chain_order = []
+    by_chain = {}
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        chain = ''
+        body = part
+        if len(part) >= 2 and part[0].isalpha() and part[0].isupper() and part[1].isdigit():
+            chain = part[0]
+            body = part[1:]
+
+        if chain not in by_chain:
+            chain_order.append(chain)
+            by_chain[chain] = []
+        by_chain[chain].append(body)
+
+    return [(chain, "+".join(by_chain[chain])) for chain in chain_order]
+
+
 def list_to_sele(a):
     """Convert a list of residues to a selection string.
 

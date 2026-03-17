@@ -20,10 +20,14 @@ parser.add_argument('--structures-map', type=str, default=None, help='Path to st
 args = parser.parse_args()
 
 import os
+import sys
 import json
 import shutil
 import csv
 import pandas as pd
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.id_map_utils import get_mapped_ids
 
 # ----- Helper function to flatten nested confidence JSON -----
 def flatten_confidence(conf, parent_key=""):
@@ -179,21 +183,54 @@ for boltz_folder in sorted(boltz_results_folders):
         
         # Process MSA files (copy from msa subfolder to tool MSAs folder)
         msas_path = os.path.join(boltz_folder_path, "msa")
+        msa_target = os.path.join(msas_folder, f"{sequence_id}.csv")
+        msa_copied = False
         print(f"Looking for MSA folder: {msas_path}")
         if os.path.exists(msas_path):
             msa_source = os.path.join(msas_path, f"{config_id}_0.csv")
-            msa_target = os.path.join(msas_folder, f"{sequence_id}.csv")  # Use sequence_id for target filename
-            print(f"Looking for MSA file: {msa_source}")
-            if os.path.exists(msa_source):
+            if not os.path.exists(msa_source):
+                # Exact name not found — use ID matching against available files
+                id_to_file = {}
+                for f in os.listdir(msas_path):
+                    if f.endswith('.csv') or f.endswith('.a3m'):
+                        id_to_file[os.path.splitext(f)[0]] = f
+                match = get_mapped_ids([sequence_id], list(id_to_file.keys()), unique=True)
+                matched_id = match.get(sequence_id)
+                if matched_id:
+                    msa_source = os.path.join(msas_path, id_to_file[matched_id])
+                    print(f"Matched MSA via ID mapping: {id_to_file[matched_id]}")
+                else:
+                    msa_source = None
+                    print(f"No MSA match for {sequence_id} in msa/ folder")
+            if msa_source and os.path.exists(msa_source):
                 try:
+                    ext = os.path.splitext(msa_source)[1]
+                    msa_target = os.path.join(msas_folder, f"{sequence_id}{ext}")
                     shutil.copy2(msa_source, msa_target)
-                    print(f"Copied MSA: {config_id}_0.csv to {sequence_id}.csv")
+                    print(f"Copied MSA: {os.path.basename(msa_source)} to {sequence_id}{ext}")
+                    msa_copied = True
                 except Exception as e:
                     print(f"Error copying MSA file: {e}")
+
+        # Fall back to recycled MSAs already in the output MSAs folder
+        if not msa_copied and not os.path.exists(msa_target):
+            id_to_file = {}
+            for f in os.listdir(msas_folder):
+                if f.endswith('.csv') or f.endswith('.a3m'):
+                    id_to_file[os.path.splitext(f)[0]] = f
+            if id_to_file:
+                match = get_mapped_ids([sequence_id], list(id_to_file.keys()), unique=True)
+                matched_id = match.get(sequence_id)
+                if matched_id:
+                    src = os.path.join(msas_folder, id_to_file[matched_id])
+                    ext = os.path.splitext(src)[1]
+                    msa_target = os.path.join(msas_folder, f"{sequence_id}{ext}")
+                    shutil.copy2(src, msa_target)
+                    print(f"Copied recycled MSA: {id_to_file[matched_id]} to {sequence_id}{ext}")
+                else:
+                    print(f"No MSA found for {sequence_id}")
             else:
-                print(f"MSA file not found: {msa_source}")
-        else:
-            print(f"MSA folder not found: {msas_path}")
+                print(f"No MSA files available for {sequence_id}")
         
         # Initialize data dictionaries for this sequence
         confidence_data[sequence_id] = {}

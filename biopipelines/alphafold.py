@@ -66,14 +66,15 @@ echo "=== AlphaFold installation complete ==="
         if env_manager == "micromamba":
             skip = "" if force_reinstall else """# Check if already installed
 if /usr/bin/python3 -c "import colabfold" 2>/dev/null; then
-    echo "AlphaFold (ColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
+    echo "AlphaFold (ColabFold) already installed, skipping pip install. Use force_reinstall=True to reinstall."
+else
 """
+            skip_end = "" if force_reinstall else "fi\n"
             return f"""echo "=== Installing AlphaFold (ColabFold via micromamba) ==="
 {skip}# Install into Colab's base Python to reuse JAX/GPU stack
 /usr/bin/python3 -m pip install -q --no-warn-conflicts "colabfold[alphafold-minus-jax] @ git+https://github.com/sokrypton/ColabFold"
-# Fix TF crash (from official ColabFold notebook)
+{skip_end}# Fix TF crash (from official ColabFold notebook) — always run, even if pip install was skipped,
+# because a parallel session may have installed colabfold without applying this fix.
 rm -f /usr/local/lib/python3.*/dist-packages/tensorflow/core/kernels/libtfkernel_sobol_op.so
 
 echo "=== AlphaFold installation complete ==="

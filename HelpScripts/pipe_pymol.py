@@ -22,6 +22,7 @@ from typing import Dict, List, Any, Optional
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.id_patterns import expand_ids, contains_pattern, expand_file_pattern
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.sele_utils import sele_group_by_chain
 
 # CRITICAL: Set environment variables for headless PyMOL BEFORE any import
 # This prevents libGL.so.1 errors on headless cluster nodes
@@ -38,6 +39,37 @@ import pymol
 pymol.pymol_argv = ['pymol', '-cqp']
 pymol.finish_launching(['pymol', '-cqp'])
 from pymol import cmd
+
+
+def _sele_to_pymol(obj_name: str, selection_str: str) -> str:
+    """Build a PyMOL selection string from a chain-aware selection.
+
+    Converts e.g. ``A1-117+A172-225`` into
+    ``obj_name and (chain A and resi 1-117+172-225)``.
+    Chainless input like ``1-50+60-80`` becomes
+    ``obj_name and resi 1-50+60-80``.
+
+    Args:
+        obj_name: PyMOL object name
+        selection_str: Chain-aware or chainless selection string
+
+    Returns:
+        Full PyMOL selection expression
+    """
+    groups = sele_group_by_chain(selection_str)
+    if not groups:
+        return f"{obj_name} and resi {selection_str}"
+
+    chain_parts = []
+    for chain, resi_str in groups:
+        if chain:
+            chain_parts.append(f"(chain {chain} and resi {resi_str})")
+        else:
+            chain_parts.append(f"resi {resi_str}")
+
+    if len(chain_parts) == 1:
+        return f"{obj_name} and {chain_parts[0]}"
+    return f"{obj_name} and ({' or '.join(chain_parts)})"
 
 
 class PyMOLSessionBuilder:
@@ -306,12 +338,12 @@ class PyMOLSessionBuilder:
                 if selection_value is None:
                     print(f"  Skipping {struct_id} - no selection value")
                     continue
-                pymol_selection = f"{pymol_name} and resi {selection_value}"
+                pymol_selection = _sele_to_pymol(pymol_name, selection_value)
 
             try:
                 cmd.color(color, pymol_selection)
                 if id_to_selection:
-                    print(f"  Colored {pymol_name} resi {selection_value} -> {color}")
+                    print(f"  Colored {pymol_name} resi {selection_value} -> {color}.")
                 else:
                     print(f"  Colored {pymol_name} -> {color}")
             except Exception as e:
@@ -595,7 +627,7 @@ class PyMOLSessionBuilder:
         if id_to_selection and target_id:
             target_sel_value = self._resolve_id_to_value(target_id, id_to_selection)
             if target_sel_value:
-                target_sel = f"{target_name} and resi {target_sel_value}"
+                target_sel = _sele_to_pymol(target_name, target_sel_value)
             else:
                 target_sel = target_name
         else:
@@ -612,7 +644,7 @@ class PyMOLSessionBuilder:
             if id_to_selection:
                 sel_value = self._resolve_id_to_value(struct_id, id_to_selection)
                 if sel_value:
-                    mobile_sel = f"{pymol_name} and resi {sel_value}"
+                    mobile_sel = _sele_to_pymol(pymol_name, sel_value)
                 else:
                     mobile_sel = pymol_name
             else:
@@ -681,7 +713,7 @@ class PyMOLSessionBuilder:
             if id_to_selection:
                 sel_value = self._resolve_id_to_value(struct_id, id_to_selection)
                 if sel_value:
-                    pymol_selection = f"{pymol_name} and resi {sel_value}"
+                    pymol_selection = _sele_to_pymol(pymol_name, sel_value)
                 else:
                     pymol_selection = pymol_name
             else:
@@ -738,7 +770,7 @@ class PyMOLSessionBuilder:
             if id_to_selection:
                 sel_value = self._resolve_id_to_value(struct_id, id_to_selection)
                 if sel_value:
-                    pymol_selection = f"{pymol_name} and resi {sel_value}"
+                    pymol_selection = _sele_to_pymol(pymol_name, sel_value)
                 else:
                     pymol_selection = pymol_name
             else:

@@ -82,7 +82,7 @@ Run this cell at the top of your Colab notebook:
 # Cell 1: Install BioPipelines and micromamba
 !git clone https://github.com/locbp-uzh/biopipelines
 %cd biopipelines
-!pip install -e .
+!pip install -e ".[all]"
 !curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local bin/micromamba
 !micromamba create -f Environments/biopipelines.yaml -y
 ```

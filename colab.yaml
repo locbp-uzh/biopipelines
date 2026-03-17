@@ -102,6 +102,27 @@ environments:
   PyMOL: "ProteinEnv"
   Plot: "biopipelines"
 
+renderers:
+  streams:
+    _metadata: Renderers/streams.py
+    pdb: Renderers/structures.py
+    cif: Renderers/structures.py
+    "pdb|cif": Renderers/structures.py
+    png: Renderers/images.py
+    jpg: Renderers/images.py
+    jpeg: Renderers/images.py
+    svg: Renderers/images.py
+    gif: Renderers/images.py
+    bmp: Renderers/images.py
+    tiff: Renderers/images.py
+    webp: Renderers/images.py
+    plots: Renderers/plots.py
+    fasta: Renderers/fasta.py
+    fa: Renderers/fasta.py
+    _default: Renderers/streams.py
+  tables:
+    _default: Renderers/tables.py
+
 # Cluster / Site Configuration
 cluster:
   emails: {}
