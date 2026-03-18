@@ -76,6 +76,15 @@ def render(stream, output):
     <span style="display:inline-block;width:12px;height:12px;background:#EE831D;border-radius:2px;vertical-align:middle;"></span><span>Very low (&lt;50%)</span>
   </div>"""
 
+    btn = (
+        'style="padding: 3px 10px; font-size: 0.82em; cursor: pointer; '
+        'border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;"'
+    )
+    btn_active = (
+        'style="padding: 3px 10px; font-size: 0.82em; cursor: pointer; '
+        'border: 1px solid #888; border-radius: 4px; background: #ddeeff; font-weight: bold;"'
+    )
+
     return f"""
 <script src="https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"></script>
 <div style="margin-top: 12px;">
@@ -83,6 +92,20 @@ def render(stream, output):
 </div>
 <div id="{viewer_id}_container" style="position: relative; width: 800px;">
   <div id="{viewer_id}_viewer" style="width: 800px; height: 500px; position: relative;"></div>
+  <!-- Style toolbar -->
+  <div id="{viewer_id}_toolbar" style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 6px; font-family: monospace; flex-wrap: wrap;">
+    <span style="color: #888; font-size: 0.82em;">Style:</span>
+    <button id="{viewer_id}_btn_cartoon" onclick="{viewer_id}_setStyle('cartoon')" {btn_active}>Cartoon</button>
+    <button id="{viewer_id}_btn_stick" onclick="{viewer_id}_setStyle('stick')" {btn}>Sticks</button>
+    <button id="{viewer_id}_btn_sphere" onclick="{viewer_id}_setStyle('sphere')" {btn}>Spheres</button>
+    <button id="{viewer_id}_btn_surface" onclick="{viewer_id}_toggleSurface()" {btn}>Surface</button>
+    <span style="color: #ccc;">|</span>
+    <button id="{viewer_id}_btn_ligands" onclick="{viewer_id}_toggleLigands()" {btn_active}>Ligands</button>
+    <button id="{viewer_id}_btn_labels" onclick="{viewer_id}_toggleLabels()" {btn}>Labels</button>
+    <span style="color: #ccc;">|</span>
+    <button id="{viewer_id}_btn_spin" onclick="{viewer_id}_toggleSpin()" {btn}>Spin</button>
+  </div>
+  <!-- Navigation -->
   <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 6px; font-family: monospace;">
     <button id="{viewer_id}_prev" onclick="{viewer_id}_navigate(-1)"
             style="padding: 4px 14px; font-size: 1.1em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;">&#9664;</button>
@@ -103,6 +126,106 @@ def render(stream, output):
   var idx = 0;
   var viewer = null;
 
+  // State
+  var currentStyle = "cartoon";
+  var showSurface = false;
+  var showLigands = true;
+  var showLabels = false;
+  var spinning = false;
+
+  var btnNormal = "padding: 3px 10px; font-size: 0.82em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5; font-weight: normal;";
+  var btnActive = "padding: 3px 10px; font-size: 0.82em; cursor: pointer; border: 1px solid #888; border-radius: 4px; background: #ddeeff; font-weight: bold;";
+
+  function setBtn(name, active) {{
+    var el = document.getElementById("{viewer_id}_btn_" + name);
+    if (el) el.setAttribute("style", active ? btnActive : btnNormal);
+  }}
+
+  function getColor() {{
+    return colors[idx % colors.length];
+  }}
+
+  function plddtColorfunc(atom) {{
+    var b = atom.b;
+    var upper = plddtUpper;
+    if (b >= 0.9 * upper) return "#126DFF";
+    if (b >= 0.7 * upper) return "#0ECFF1";
+    if (b >= 0.5 * upper) return "#F6ED12";
+    return "#EE831D";
+  }}
+
+  function applyStyles() {{
+    if (!viewer) return;
+
+    // Protein style
+    var protSel = {{"hetflag": false}};
+    var hetSel = {{"hetflag": true, "resn": ["HOH"], "invert": true}};  // ligands = het minus water
+    var waterSel = {{"resn": ["HOH"]}};
+
+    // Clear all styles
+    viewer.setStyle({{}}, {{}});
+
+    // Protein representation
+    var protStyle = {{}};
+    if (currentStyle === "cartoon") {{
+      if (plddtUpper !== null) {{
+        protStyle = {{"cartoon": {{"colorfunc": plddtColorfunc}}}};
+      }} else {{
+        protStyle = {{"cartoon": {{"color": getColor()}}}};
+      }}
+    }} else if (currentStyle === "stick") {{
+      if (plddtUpper !== null) {{
+        protStyle = {{"stick": {{"colorfunc": plddtColorfunc}}}};
+      }} else {{
+        protStyle = {{"stick": {{"color": getColor()}}}};
+      }}
+    }} else if (currentStyle === "sphere") {{
+      if (plddtUpper !== null) {{
+        protStyle = {{"sphere": {{"colorfunc": plddtColorfunc}}}};
+      }} else {{
+        protStyle = {{"sphere": {{"color": getColor()}}}};
+      }}
+    }}
+    viewer.setStyle(protSel, protStyle);
+
+    // Ligands
+    if (showLigands) {{
+      viewer.setStyle(hetSel, {{"stick": {{"colorscheme": "default"}}}});
+    }}
+
+    // Water always hidden (too noisy)
+    viewer.setStyle(waterSel, {{}});
+
+    // Surface
+    viewer.removeAllSurfaces();
+    if (showSurface) {{
+      if (plddtUpper !== null) {{
+        viewer.addSurface($3Dmol.SurfaceType.VDW, {{"opacity": 0.7, "colorfunc": plddtColorfunc}}, protSel);
+      }} else {{
+        viewer.addSurface($3Dmol.SurfaceType.VDW, {{"opacity": 0.7, "color": getColor()}}, protSel);
+      }}
+    }}
+
+    // Residue labels
+    viewer.removeAllLabels();
+    if (showLabels) {{
+      var atoms = viewer.getModel().selectedAtoms({{"atom": "CA"}});
+      for (var a = 0; a < atoms.length; a++) {{
+        var at = atoms[a];
+        var lbl = at.resn + at.resi;
+        if (at.chain) lbl = at.chain + ":" + lbl;
+        viewer.addLabel(lbl, {{
+          position: at, fontSize: 10, fontColor: "black",
+          backgroundOpacity: 0.6, backgroundColor: "white",
+          borderColor: "#ccc", borderThickness: 0.5,
+          showBackground: true
+        }});
+      }}
+    }}
+
+    viewer.render();
+  }}
+
   function initViewer() {{
     if (typeof $3Dmol === "undefined") {{
       setTimeout(initViewer, 200);
@@ -119,22 +242,13 @@ def render(stream, output):
     if (idx < 0) idx = ids.length - 1;
     if (idx >= ids.length) idx = 0;
     viewer.removeAllModels();
+    viewer.removeAllSurfaces();
+    viewer.removeAllLabels();
     viewer.addModel(data[idx], fmt);
-    if (plddtUpper !== null) {{
-      var upper = plddtUpper;
-      viewer.setStyle({{}}, {{"cartoon": {{"colorfunc": function(atom) {{
-        var b = atom.b;
-        if (b >= 0.9 * upper) return "#126DFF";
-        if (b >= 0.7 * upper) return "#0ECFF1";
-        if (b >= 0.5 * upper) return "#F6ED12";
-        return "#EE831D";
-      }}}}}});
-    }} else {{
-      var color = colors[idx % colors.length];
-      viewer.setStyle({{}}, {{"cartoon": {{"color": color}}}});
-    }}
+    applyStyles();
     viewer.zoomTo();
     viewer.render();
+    // Update label
     var labelHtml;
     if (plddtUpper !== null) {{
       labelHtml = ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
@@ -146,6 +260,43 @@ def render(stream, output):
     }}
     document.getElementById("{viewer_id}_label").innerHTML = labelHtml;
   }}
+
+  window.{viewer_id}_setStyle = function(style) {{
+    currentStyle = style;
+    setBtn("cartoon", style === "cartoon");
+    setBtn("stick", style === "stick");
+    setBtn("sphere", style === "sphere");
+    applyStyles();
+    viewer.render();
+  }};
+
+  window.{viewer_id}_toggleSurface = function() {{
+    showSurface = !showSurface;
+    setBtn("surface", showSurface);
+    applyStyles();
+  }};
+
+  window.{viewer_id}_toggleLigands = function() {{
+    showLigands = !showLigands;
+    setBtn("ligands", showLigands);
+    applyStyles();
+  }};
+
+  window.{viewer_id}_toggleLabels = function() {{
+    showLabels = !showLabels;
+    setBtn("labels", showLabels);
+    applyStyles();
+  }};
+
+  window.{viewer_id}_toggleSpin = function() {{
+    spinning = !spinning;
+    setBtn("spin", spinning);
+    if (spinning) {{
+      viewer.spin("y", 1);
+    }} else {{
+      viewer.spin(false);
+    }}
+  }};
 
   window.{viewer_id}_navigate = function(delta) {{
     showStructure(idx + delta);
