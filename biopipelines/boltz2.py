@@ -714,7 +714,7 @@ fi
             "rendering_parameters": {
                 "structures": {
                     "color_by": "plddt",
-                    "plddt_upper": 1.0,
+                    "plddt_upper": 100,
                 }
             }
         }
