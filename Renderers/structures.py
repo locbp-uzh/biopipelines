@@ -157,10 +157,9 @@ def render(stream, output):
   function applyStyles() {{
     if (!viewer) return;
 
-    // Protein style
+    // Selectors
     var protSel = {{"hetflag": false}};
-    var hetSel = {{"hetflag": true, "resn": ["HOH"], "invert": true}};  // ligands = het minus water
-    var waterSel = {{"resn": ["HOH"]}};
+    var hetSel = {{"hetflag": true}};
 
     // Clear all styles
     viewer.setStyle({{}}, {{}});
@@ -188,13 +187,12 @@ def render(stream, output):
     }}
     viewer.setStyle(protSel, protStyle);
 
-    // Ligands
+    // Ligands (heteroatoms) — shown as sticks with default element colors
     if (showLigands) {{
       viewer.setStyle(hetSel, {{"stick": {{"colorscheme": "default"}}}});
+    }} else {{
+      viewer.setStyle(hetSel, {{}});
     }}
-
-    // Water always hidden (too noisy)
-    viewer.setStyle(waterSel, {{}});
 
     // Surface
     viewer.removeAllSurfaces();
