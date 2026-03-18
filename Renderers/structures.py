@@ -101,7 +101,6 @@ def render(stream, output):
     <button id="{viewer_id}_btn_surface" onclick="{viewer_id}_toggleSurface()" {btn}>Surface</button>
     <span style="color: #ccc;">|</span>
     <button id="{viewer_id}_btn_ligands" onclick="{viewer_id}_toggleLigands()" {btn_active}>Ligands: Element</button>
-    <button id="{viewer_id}_btn_labels" onclick="{viewer_id}_toggleLabels()" {btn}>Labels</button>
     <span style="color: #ccc;">|</span>
     <button id="{viewer_id}_btn_spin" onclick="{viewer_id}_toggleSpin()" {btn}>Spin</button>
   </div>
@@ -131,7 +130,6 @@ def render(stream, output):
   var showSurface = false;
   // Ligand display: "off", "element" (default CPK colors), "plddt" (pLDDT coloring)
   var ligandMode = "element";
-  var showLabels = false;
   var spinning = false;
 
   var btnNormal = "padding: 3px 10px; font-size: 0.82em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5; font-weight: normal;";
@@ -210,23 +208,6 @@ def render(stream, output):
       }}
     }}
 
-    // Residue labels
-    viewer.removeAllLabels();
-    if (showLabels) {{
-      var atoms = viewer.getModel().selectedAtoms({{"atom": "CA"}});
-      for (var a = 0; a < atoms.length; a++) {{
-        var at = atoms[a];
-        var lbl = at.resn + at.resi;
-        if (at.chain) lbl = at.chain + ":" + lbl;
-        viewer.addLabel(lbl, {{
-          position: at, fontSize: 10, fontColor: "black",
-          backgroundOpacity: 0.6, backgroundColor: "white",
-          borderColor: "#ccc", borderThickness: 0.5,
-          showBackground: true
-        }});
-      }}
-    }}
-
     viewer.render();
   }}
 
@@ -247,7 +228,6 @@ def render(stream, output):
     if (idx >= ids.length) idx = 0;
     viewer.removeAllModels();
     viewer.removeAllSurfaces();
-    viewer.removeAllLabels();
     viewer.addModel(data[idx], fmt);
     applyStyles();
     viewer.zoomTo();
@@ -306,12 +286,6 @@ def render(stream, output):
       ligandMode = (ligandMode === "off") ? "element" : "off";
     }}
     updateLigandBtn();
-    applyStyles();
-  }};
-
-  window.{viewer_id}_toggleLabels = function() {{
-    showLabels = !showLabels;
-    setBtn("labels", showLabels);
     applyStyles();
   }};
 
