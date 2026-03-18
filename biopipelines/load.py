@@ -581,6 +581,13 @@ echo "=== Load ready ==="
                     tables_dict[table_name] = table_info
         result["tables"] = tables_dict
 
+        # Pass through tool metadata (e.g. rendering_parameters)
+        metadata_keys = {k for k in output_structure
+                         if k not in reserved_keys
+                         and not self._is_datastream_dict(output_structure[k])}
+        for key in metadata_keys:
+            result[key] = output_structure[key]
+
         return result
 
     def generate_script(self, script_path: str) -> str:
