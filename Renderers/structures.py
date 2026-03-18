@@ -100,7 +100,7 @@ def render(stream, output):
     <button id="{viewer_id}_btn_sphere" onclick="{viewer_id}_setStyle('sphere')" {btn}>Spheres</button>
     <button id="{viewer_id}_btn_surface" onclick="{viewer_id}_toggleSurface()" {btn}>Surface</button>
     <span style="color: #ccc;">|</span>
-    <button id="{viewer_id}_btn_ligands" onclick="{viewer_id}_toggleLigands()" {btn_active}>Ligands</button>
+    <button id="{viewer_id}_btn_ligands" onclick="{viewer_id}_toggleLigands()" {btn_active}>Ligands: Element</button>
     <button id="{viewer_id}_btn_labels" onclick="{viewer_id}_toggleLabels()" {btn}>Labels</button>
     <span style="color: #ccc;">|</span>
     <button id="{viewer_id}_btn_spin" onclick="{viewer_id}_toggleSpin()" {btn}>Spin</button>
@@ -129,7 +129,8 @@ def render(stream, output):
   // State
   var currentStyle = "cartoon";
   var showSurface = false;
-  var showLigands = true;
+  // Ligand display: "off", "element" (default CPK colors), "plddt" (pLDDT coloring)
+  var ligandMode = "element";
   var showLabels = false;
   var spinning = false;
 
@@ -187,8 +188,13 @@ def render(stream, output):
     }}
     viewer.setStyle(protSel, protStyle);
 
-    // Ligands (heteroatoms) — shown as sticks with default element colors
-    if (showLigands) {{
+    // Ligands (heteroatoms)
+    if (ligandMode === "element") {{
+      viewer.setStyle(hetSel, {{"stick": {{"colorscheme": "default"}}}});
+    }} else if (ligandMode === "plddt" && plddtUpper !== null) {{
+      viewer.setStyle(hetSel, {{"stick": {{"colorfunc": plddtColorfunc}}}});
+    }} else if (ligandMode !== "off") {{
+      // plddt requested but not available — fall back to element colors
       viewer.setStyle(hetSel, {{"stick": {{"colorscheme": "default"}}}});
     }} else {{
       viewer.setStyle(hetSel, {{}});
@@ -274,9 +280,32 @@ def render(stream, output):
     applyStyles();
   }};
 
+  function updateLigandBtn() {{
+    var el = document.getElementById("{viewer_id}_btn_ligands");
+    if (!el) return;
+    if (ligandMode === "off") {{
+      el.setAttribute("style", btnNormal);
+      el.textContent = "Ligands: Off";
+    }} else if (ligandMode === "element") {{
+      el.setAttribute("style", btnActive);
+      el.textContent = "Ligands: Element";
+    }} else {{
+      el.setAttribute("style", btnActive);
+      el.textContent = "Ligands: pLDDT";
+    }}
+  }}
+
   window.{viewer_id}_toggleLigands = function() {{
-    showLigands = !showLigands;
-    setBtn("ligands", showLigands);
+    if (plddtUpper !== null) {{
+      // 3-state cycle: element → plddt → off → element ...
+      if (ligandMode === "element") ligandMode = "plddt";
+      else if (ligandMode === "plddt") ligandMode = "off";
+      else ligandMode = "element";
+    }} else {{
+      // 2-state toggle: element ↔ off
+      ligandMode = (ligandMode === "off") ? "element" : "off";
+    }}
+    updateLigandBtn();
     applyStyles();
   }};
 
