@@ -967,6 +967,13 @@ fi
                             count=info.info.count
                         )
 
+            # Propagate rendering_parameters from first pool that has them
+            for pool in self.pool_outputs:
+                rp = getattr(pool, 'rendering_parameters', None)
+                if rp:
+                    output_streams["rendering_parameters"] = rp
+                    break
+
             output_streams["tables"] = tables
             output_streams["output_folder"] = self.output_folder
             return output_streams
