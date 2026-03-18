@@ -696,7 +696,8 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
 def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
                        output_folder: str, step_tool_name: str,
                        operations: List[Dict[str, Any]],
-                       rename_map: Optional[Dict[str, str]] = None) -> None:
+                       rename_map: Optional[Dict[str, str]] = None,
+                       removed_by_op: Optional[Dict[str, str]] = None) -> None:
     """
     Create missing.csv with IDs that were filtered out or renamed.
 
@@ -707,29 +708,16 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
         step_tool_name: Step and tool name (e.g. "005_Panda")
         operations: List of operation dicts from config
         rename_map: Optional mapping from original ID to new renamed ID
+        removed_by_op: Optional per-ID cause mapping from execution tracking
     """
     all_ids = set(str(i) for i in original_ids)
     passed_ids = set(str(i) for i in filtered_ids)
     truly_missing_ids = list(all_ids - passed_ids)
 
-    # Build cause from operations for truly filtered-out IDs
-    filter_exprs = [op['params']['expr'] for op in operations
-                    if op.get('type') == 'filter' and 'params' in op and 'expr' in op['params']]
-    if filter_exprs:
-        filter_cause = "Filtered by: " + ", ".join(filter_exprs)
-    else:
-        op_summaries = []
-        for op in operations:
-            op_type = op.get('type', 'unknown')
-            if op_type in ('head', 'tail', 'sample') and 'params' in op:
-                n = op['params'].get('n', '?')
-                op_summaries.append(f"{op_type}({n})")
-            else:
-                op_summaries.append(op_type)
-        filter_cause = "Removed by: " + ", ".join(op_summaries)
-
-    missing_data = [{'id': mid, 'removed_by': step_tool_name, 'cause': filter_cause}
-                    for mid in truly_missing_ids]
+    missing_data = []
+    for mid in truly_missing_ids:
+        cause = removed_by_op.get(mid, "Unknown") if removed_by_op else "Unknown"
+        missing_data.append({'id': mid, 'removed_by': step_tool_name, 'cause': cause})
 
     # Add renamed IDs (survived filtering but got a new name)
     if rename_map:
@@ -950,11 +938,35 @@ def run_panda(config_data: Dict[str, Any]) -> None:
         if operation.get('type') == 'merge':
             operation.setdefault('params', {})['map_table_paths'] = map_table_paths
 
-    # Execute operations sequentially
+    # Execute operations sequentially, tracking which IDs are removed by each
+    removed_by_op = {}
     print("\nExecuting operations:")
     for i, operation in enumerate(operations):
         print(f"\n[{i+1}/{len(operations)}] {operation['type']}")
+
+        # Capture IDs before operation (only for single-df with 'id' column)
+        if isinstance(current, pd.DataFrame) and 'id' in current.columns:
+            ids_before = set(current['id'].astype(str).tolist())
+        else:
+            ids_before = None
+
         current = execute_operation(current, operation, is_multi_table)
+
+        # Record which IDs were dropped and by what
+        if ids_before is not None and isinstance(current, pd.DataFrame) and 'id' in current.columns:
+            ids_after = set(current['id'].astype(str).tolist())
+            dropped = ids_before - ids_after
+            if dropped:
+                op_type = operation['type']
+                if op_type == 'filter':
+                    cause = f"Filtered by: {operation.get('params', {}).get('expr', '?')}"
+                elif op_type in ('head', 'tail', 'sample'):
+                    n = operation.get('params', {}).get('n', '?')
+                    cause = f"Removed by: {op_type}({n})"
+                else:
+                    cause = f"Removed by: {op_type}"
+                for did in dropped:
+                    removed_by_op[did] = cause
 
         # After merge/concat, we have a single dataframe
         if operation['type'] in ('merge', 'concat'):
@@ -1062,7 +1074,8 @@ def run_panda(config_data: Dict[str, Any]) -> None:
         step_tool_name = os.path.basename(output_dir)
         create_missing_csv(original_ids, filtered_ids_for_lookup, output_dir,
                            step_tool_name, operations,
-                           rename_map=original_to_new_id if original_to_new_id else None)
+                           rename_map=original_to_new_id if original_to_new_id else None,
+                           removed_by_op=removed_by_op)
 
     print("\nPanda operations completed successfully!")
 

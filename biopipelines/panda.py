@@ -817,17 +817,19 @@ fi
         """
         Predict the number of output rows based on operations.
 
+        Returns the minimum n across all head/tail/sample operations,
+        since each one can only reduce the count further.
+
         Returns:
             Predicted count if determinable (e.g., head/tail/sample with n), None otherwise.
         """
+        counts = []
         for op in self.operations:
-            if op.type == "head":
-                return op.params.get("n")
-            elif op.type == "tail":
-                return op.params.get("n")
-            elif op.type == "sample":
-                return op.params.get("n")  # Only if n is specified, not frac
-        return None
+            if op.type in ("head", "tail", "sample"):
+                n = op.params.get("n")
+                if n is not None:
+                    counts.append(n)
+        return min(counts) if counts else None
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after transformation."""
@@ -903,41 +905,44 @@ fi
             # Build output streams
             output_streams = {}
             for stream_name, data in stream_data.items():
-                pool_count = len(data["ids"])
-                # Use predicted count if available, otherwise use pool count
-                num_items = min(predicted_count, pool_count) if predicted_count is not None else pool_count
-
-                # Value-based streams (no files): propagate as-is with original map_table
-                if not data["files"]:
-                    output_streams[stream_name] = DataStream(
-                        name=stream_name,
-                        ids=data["ids"][:num_items],
-                        files=[],
-                        map_table=data.get("map_table") or "",
-                        format=data["format"]
-                    )
-                    continue
-
-                if self.rename:
-                    # Predict renamed IDs and file paths based on predicted output count
-                    new_ids = [f"{self.rename}_{i+1}" for i in range(num_items)]
-                    new_files = []
-                    ext = os.path.splitext(data["files"][0])[1]
-                    for new_id in new_ids:
-                        new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
-                else:
-                    new_ids = data["ids"][:num_items]
-                    new_files = []
-                    ext = os.path.splitext(data["files"][0])[1]
-                    for new_id in new_ids:
-                        new_files.append(os.path.join(self.output_folder, f"{new_id}{ext}"))
-
                 # Preserve pool's map_table, pointing to the copy in output_folder
                 pool_map_table = data.get("map_table", "")
                 if pool_map_table:
                     map_table = os.path.join(self.output_folder, os.path.basename(pool_map_table))
                 else:
                     map_table = None
+
+                # Value-based streams (no files): propagate as-is with original map_table
+                if not data["files"]:
+                    if self.rename and predicted_count is not None:
+                        new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
+                    elif self.rename:
+                        new_ids = [f"{self.rename}_[<N>]"]
+                    else:
+                        new_ids = data["ids"]
+                    output_streams[stream_name] = DataStream(
+                        name=stream_name,
+                        ids=new_ids,
+                        files=[],
+                        map_table=data.get("map_table") or "",
+                        format=data["format"]
+                    )
+                    continue
+
+                ext = os.path.splitext(data["files"][0])[1]
+
+                if self.rename and predicted_count is not None:
+                    # Rename with known count: generate concrete IDs and file paths
+                    new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
+                    new_files = [os.path.join(self.output_folder, f"{nid}{ext}") for nid in new_ids]
+                elif self.rename:
+                    # Rename with unknown count: lazy pattern
+                    new_ids = [f"{self.rename}_[<N>]"]
+                    new_files = [os.path.join(self.output_folder, f"<id>{ext}")]
+                else:
+                    # No rename: copy pool IDs as-is, use template for files
+                    new_ids = data["ids"]
+                    new_files = [os.path.join(self.output_folder, f"<id>{ext}")]
 
                 output_streams[stream_name] = DataStream(
                     name=stream_name,
