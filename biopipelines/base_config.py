@@ -1451,7 +1451,9 @@ class StandardizedOutput:
 
         if self._is_colab():
             from google.colab import files as colab_files
-            print(f"Downloading: {os.path.basename(zip_path)}")
+            size_mb = os.path.getsize(zip_path) / (1024 * 1024)
+            print(f"Downloading: {os.path.basename(zip_path)} ({size_mb:.1f} MB)")
+            print("If no download starts, check that your browser allows popups from colab.research.google.com")
             colab_files.download(zip_path)
         else:
             print(f"Output zipped to: {zip_path}")

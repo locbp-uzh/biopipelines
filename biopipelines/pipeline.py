@@ -404,7 +404,7 @@ class Pipeline:
             )
 
         print(f"{'='*60}")
-        print(f"{tool_config.TOOL_NAME} completed successfully")
+        print(f"{tool_config.TOOL_NAME} completed")
         print(f"{'='*60}\n")
 
     def validate_pipeline(self, debug) -> bool:

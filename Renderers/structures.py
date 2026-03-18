@@ -12,7 +12,7 @@ def render(stream, output):
 
     max_structures = 50
     pdb_data = []
-    for struct_id, file_path in zip(stream.ids, stream.files):
+    for struct_id, file_path in zip(stream.ids_expanded, stream.files_expanded):
         if file_path and os.path.isfile(file_path):
             try:
                 with open(file_path, "r") as f:
