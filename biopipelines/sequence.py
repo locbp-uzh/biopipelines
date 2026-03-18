@@ -76,7 +76,7 @@ echo "=== Sequence ready ==="
                   - Contains only ACGU -> RNA
                   - Otherwise -> protein
             ids: Output identifier(s). Ignored when loading from a file or PDB code.
-                 If not provided for raw sequences, defaults to "seq_1", "seq_2", etc.
+                 If not provided for raw sequences, defaults to "seq1", "seq2", etc.
             **kwargs: Additional parameters
 
         Output:
@@ -174,7 +174,7 @@ echo "=== Sequence ready ==="
                     f"but sequences has {count} items"
                 )
         else:
-            self.custom_ids = [f"seq_{i + 1}" for i in range(count)]
+            self.custom_ids = [f"seq{i + 1}" for i in range(count)]
 
     # ------------------------------------------------------------------
     # Loaders
