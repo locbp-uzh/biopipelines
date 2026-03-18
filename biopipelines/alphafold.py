@@ -452,7 +452,13 @@ fi
             "structures": structures,
             "msas": msas,
             "tables": tables,
-            "output_folder": self.output_folder
+            "output_folder": self.output_folder,
+            "rendering_parameters": {
+                "structures": {
+                    "color_by": "plddt",
+                    "plddt_upper": 100,
+                }
+            }
         }
 
     def to_dict(self) -> Dict[str, Any]:

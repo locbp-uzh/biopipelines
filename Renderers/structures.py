@@ -54,6 +54,28 @@ def render(stream, output):
     ]
     colors_json = json.dumps(colors)
 
+    # Check for pLDDT coloring from rendering_parameters
+    plddt_upper = None
+    rendering_params = getattr(output, "rendering_parameters", None)
+    if rendering_params:
+        stream_params = rendering_params.get(stream.name, {})
+        if stream_params.get("color_by") == "plddt":
+            plddt_upper = stream_params.get("plddt_upper", 100)
+
+    plddt_upper_json = json.dumps(plddt_upper)
+
+    # pLDDT color legend (shown only when pLDDT coloring is active)
+    plddt_legend = ""
+    if plddt_upper is not None:
+        plddt_legend = f"""
+  <div id="{viewer_id}_legend" style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 4px; font-family: monospace; font-size: 0.85em;">
+    <span style="color: #888;">pLDDT:</span>
+    <span style="display:inline-block;width:12px;height:12px;background:#126DFF;border-radius:2px;vertical-align:middle;"></span><span>High (&ge;90%)</span>
+    <span style="display:inline-block;width:12px;height:12px;background:#0ECFF1;border-radius:2px;vertical-align:middle;"></span><span>Good (70-90%)</span>
+    <span style="display:inline-block;width:12px;height:12px;background:#F6ED12;border-radius:2px;vertical-align:middle;"></span><span>Low (50-70%)</span>
+    <span style="display:inline-block;width:12px;height:12px;background:#EE831D;border-radius:2px;vertical-align:middle;"></span><span>Very low (&lt;50%)</span>
+  </div>"""
+
     return f"""
 <script src="https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"></script>
 <div style="margin-top: 12px;">
@@ -67,7 +89,9 @@ def render(stream, output):
     <span id="{viewer_id}_label" style="min-width: 200px; text-align: center; font-size: 0.95em;"></span>
     <button id="{viewer_id}_next" onclick="{viewer_id}_navigate(1)"
             style="padding: 4px 14px; font-size: 1.1em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;">&#9654;</button>
-  </div>
+    <button id="{viewer_id}_dl" onclick="{viewer_id}_download()"
+            style="padding: 4px 10px; font-size: 0.85em; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5;" title="Download current structure">&#11015; .{fmt}</button>
+  </div>{plddt_legend}
 </div>
 <script>
 (function() {{
@@ -75,6 +99,7 @@ def render(stream, output):
   var data = {struct_data_json};
   var fmt = "{fmt}";
   var colors = {colors_json};
+  var plddtUpper = {plddt_upper_json};
   var idx = 0;
   var viewer = null;
 
@@ -95,18 +120,44 @@ def render(stream, output):
     if (idx >= ids.length) idx = 0;
     viewer.removeAllModels();
     viewer.addModel(data[idx], fmt);
-    var color = colors[idx % colors.length];
-    viewer.setStyle({{}}, {{"cartoon": {{"color": color}}}});
+    if (plddtUpper !== null) {{
+      var upper = plddtUpper;
+      viewer.setStyle({{}}, {{"cartoon": {{"colorfunc": function(atom) {{
+        var b = atom.b;
+        if (b >= 0.9 * upper) return "#126DFF";
+        if (b >= 0.7 * upper) return "#0ECFF1";
+        if (b >= 0.5 * upper) return "#F6ED12";
+        return "#EE831D";
+      }}}}}});
+    }} else {{
+      var color = colors[idx % colors.length];
+      viewer.setStyle({{}}, {{"cartoon": {{"color": color}}}});
+    }}
     viewer.zoomTo();
     viewer.render();
-    document.getElementById("{viewer_id}_label").innerHTML =
-      '<span style="display:inline-block;width:12px;height:12px;background:' + color +
-      ';border-radius:2px;vertical-align:middle;margin-right:6px;"></span>' +
-      ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
+    var labelHtml;
+    if (plddtUpper !== null) {{
+      labelHtml = ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
+    }} else {{
+      var color = colors[idx % colors.length];
+      labelHtml = '<span style="display:inline-block;width:12px;height:12px;background:' + color +
+        ';border-radius:2px;vertical-align:middle;margin-right:6px;"></span>' +
+        ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
+    }}
+    document.getElementById("{viewer_id}_label").innerHTML = labelHtml;
   }}
 
   window.{viewer_id}_navigate = function(delta) {{
     showStructure(idx + delta);
+  }};
+
+  window.{viewer_id}_download = function() {{
+    var blob = new Blob([data[idx]], {{type: "text/plain"}});
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = ids[idx] + "." + fmt;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }};
 
   initViewer();

@@ -424,6 +424,39 @@ echo "Using direct YAML configuration: {config_file_path}"
         if self.use_potentials:
             boltz_options += " --use_potentials"
 
+        # Retry wrapper for boltz predict (handles interrupted weight downloads)
+        retry_prefix = f"""BOLTZ_MAX_RETRIES=3
+run_boltz_predict() {{
+    local config="$1"
+    shift
+    for attempt in $(seq 1 $BOLTZ_MAX_RETRIES); do
+        echo "Boltz2 prediction attempt $attempt/$BOLTZ_MAX_RETRIES"
+        boltz predict "$config" "$@" 2>&1 | tee /tmp/boltz_predict_output.log
+        local exit_code=${{PIPESTATUS[0]}}
+        if [ $exit_code -eq 0 ]; then
+            return 0
+        fi
+        echo "WARNING: boltz predict failed (attempt $attempt/$BOLTZ_MAX_RETRIES)"
+        # Only retry if failure was due to incomplete weight download
+        if grep -q "ContentTooShortError\|retrieval incomplete" /tmp/boltz_predict_output.log 2>/dev/null; then
+            echo "Detected incomplete weight download - removing corrupt checkpoint files"
+            find {boltz_cache_folder} -name "*.ckpt" -delete 2>/dev/null
+            if [ $attempt -lt $BOLTZ_MAX_RETRIES ]; then
+                echo "Retrying in 10 seconds..."
+                sleep 10
+            fi
+        else
+            echo "ERROR: boltz predict failed for a non-download reason, not retrying"
+            return 1
+        fi
+    done
+    echo "ERROR: boltz predict failed after $BOLTZ_MAX_RETRIES attempts (incomplete downloads)"
+    return 1
+}}
+
+"""
+        script_content += retry_prefix
+
         # Run Boltz2 prediction
         if uses_unified_config:
             script_content += f"""
@@ -431,7 +464,7 @@ echo "Running Boltz2 prediction on individual config files"
 for config_file in {self.config_files_dir}/*.yaml; do
     if [ -f "$config_file" ]; then
         echo "Processing config: $config_file"
-        boltz predict "$config_file" {boltz_options}
+        run_boltz_predict "$config_file" {boltz_options}
     fi
 done
 
@@ -439,7 +472,7 @@ done
         else:
             script_content += f"""
 echo "Running Boltz2 prediction"
-boltz predict {config_file_path} {boltz_options}
+run_boltz_predict "{config_file_path}" {boltz_options}
 
 """
 
@@ -710,7 +743,13 @@ fi
             "compounds": compounds,
             "msas": msas,
             "tables": tables,
-            "output_folder": self.output_folder
+            "output_folder": self.output_folder,
+            "rendering_parameters": {
+                "structures": {
+                    "color_by": "plddt",
+                    "plddt_upper": 1.0,
+                }
+            }
         }
 
     def get_config_display(self) -> List[str]:

@@ -1422,6 +1422,41 @@ class StandardizedOutput:
         return f"StandardizedOutput({dict(self._data)})"
 
     @staticmethod
+    def _is_colab() -> bool:
+        """Check if currently running on Google Colab."""
+        try:
+            import google.colab  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+    def download(self):
+        """
+        Download the tool's output folder as a zip.
+        On Colab, triggers a browser download. Elsewhere, prints the path.
+        """
+        if not self.output_folder or not os.path.isdir(self.output_folder):
+            print("No output folder found.")
+            return
+
+        import zipfile
+        folder_name = os.path.basename(self.output_folder)
+        zip_path = os.path.join(os.path.dirname(self.output_folder), f"{folder_name}.zip")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(self.output_folder):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    arcname = os.path.relpath(fpath, self.output_folder)
+                    zf.write(fpath, arcname)
+
+        if self._is_colab():
+            from google.colab import files as colab_files
+            print(f"Downloading: {os.path.basename(zip_path)}")
+            colab_files.download(zip_path)
+        else:
+            print(f"Output zipped to: {zip_path}")
+
+    @staticmethod
     def _is_notebook() -> bool:
         """Check if currently running in a Jupyter/Colab notebook."""
         try:
