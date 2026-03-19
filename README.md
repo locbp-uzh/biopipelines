@@ -38,3 +38,45 @@ Full documentation is available at **[biopipelines.readthedocs.io](https://biopi
 - **[Tool Reference](Docs/ToolReference.md)**
 - **[Examples](ExamplePipelines/)**
 - **[Developer Manual](Docs/DeveloperManual.md)**
+
+## Tool Compatibility
+
+✅ Working · 🟡 Partial / caveats · ⏳ In progress / testing · ❌ Not supported
+
+| Category | Tool | Linux (SLURM / Jupyter) | Google Colab |
+|----------|------|:-----------------------:|:------------:|
+| **Utilities** | PDB | ✅ | ✅ |
+| | RCSB | ✅ | ✅ |
+| | Sequence | ✅ | ✅ |
+| | Ligand | ✅ | ✅ |
+| | CompoundLibrary | ✅ | ✅ |
+| | MMseqs2 | ⏳ Partial uniref30; will move to colabfold_search | ❌ Databases too large |
+| **Visualization** | PyMOL | ✅ | 🟡 Works, no inline display |
+| | Plot | ✅ | ✅ |
+| **Structure Generation** | RFdiffusion | ✅ | ✅ |
+| | RFdiffusionAllAtom | ✅ | ✅ |
+| | RFdiffusion3 | ✅ | ⏳ |
+| | BoltzGen | ✅ | 🟡 High compute time |
+| **Sequence Design** | ProteinMPNN | ✅ | ✅ |
+| | LigandMPNN | ✅ | ✅ |
+| | MutationComposer | ✅ | ✅ |
+| | Mutagenesis | ✅ | ✅ |
+| | Fuse | ✅ | ✅ |
+| | StitchSequences | ✅ | ✅ |
+| | DNAEncoder | ✅ | ✅ |
+| | RBSDesigner | ✅ | ✅ |
+| **Structure Prediction** | AlphaFold | ✅ | ✅ |
+| | Boltz2 | ✅ | ✅ |
+| | Gnina | ✅ | ⏳ |
+| **Analysis** | Distance | ✅ | ✅ |
+| | Angle | ✅ | ✅ |
+| | DistanceSelector | ✅ | ✅ |
+| | ConformationalChange | ✅ | ✅ |
+| | Contacts | ✅ | ✅ |
+| | PoseBusters | ✅ | ⏳ |
+| | PoseChange | ✅ | ✅ |
+| | CABSflex | ✅ | ⏳ |
+| **Statistics** | MutationProfiler | ✅ | ✅ |
+| | SequenceMetricCorrelation | ✅ | ⏳ |
+| | BayesianAdjuster | ✅ | ⏳ |
+| **Data Management** | Panda | ✅ | ✅ |
