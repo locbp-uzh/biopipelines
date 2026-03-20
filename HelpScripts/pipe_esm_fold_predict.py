@@ -82,7 +82,6 @@ def main():
     model = EsmForProteinFolding.from_pretrained(
         "facebook/esmfold_v1",
         low_cpu_mem_usage=True,
-        torch_dtype=torch.float16,
         device_map="auto",
     )
     model.eval()
