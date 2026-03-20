@@ -9,7 +9,7 @@ Non-exhaustive list of tools that could be included in BioPipelines, ordered alp
 | Tool | Category | Description | Priority |
 |------|----------|-------------|----------|
 | [AntiBMPNN](https://github.com/zeysun/AntiBMPNN) | Sequence Design | Antibody-specific inverse folding for CDR loop design | Medium |
-| [ADMET-AI](https://github.com/swansonk14/admet_ai) | Analysis | ML-based ADMET property prediction for compound libraries (41 endpoints) | High |
+| ~~[ADMET-AI](https://github.com/swansonk14/admet_ai)~~ | ~~Analysis~~ | ~~ML-based ADMET property prediction for compound libraries (41 endpoints)~~ | ~~Implemented~~ |
 | [AlphaFold3](https://github.com/google-deepmind/alphafold3) | Structure Prediction | Next-gen structure prediction for proteins, nucleic acids, ligands, and more | Medium |
 | [AMBER](https://ambermd.org/) | Analysis | AMBER force field relaxation and energy minimization | High |
 | [APBS](https://github.com/Electrostatics/apbs) | Analysis | Electrostatic surface potential calculations | Low |

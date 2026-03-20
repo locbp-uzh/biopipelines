@@ -312,6 +312,50 @@ plip.tables.summary        # per-ligand summary counts
 
 ---
 
+### ADMETAI
+
+Predicts 41 ADMET (Absorption, Distribution, Metabolism, Excretion, Toxicity) properties and 8 physicochemical properties for molecules from SMILES strings. Optionally compares predictions against DrugBank approved drugs via percentile ranks.
+
+**Environment**: `AdmetAIEnv` (cluster) / `biopipelines` (Colab)
+
+**Parameters**:
+- `compounds`: Union[DataStream, StandardizedOutput] (required) - Input compounds with SMILES in map_table
+- `drugbank`: bool = True - Generate DrugBank percentile comparison table
+
+**Tables**:
+- `predictions` (one row per compound):
+
+  | id | smiles | (41 ADMET + 8 physicochemical property columns) |
+  |----|--------|-------------------------------------------------|
+
+  Property columns are named by their TDC dataset names (e.g., `HIA_Hou`, `Caco2_Wang`, `CYP2D6_Veith`, `hERG`, `LD50_Zhu`, etc.).
+
+- `drugbank` (one row per compound, only if `drugbank=True`):
+
+  | id | smiles | (percentile columns for each property) |
+  |----|--------|----------------------------------------|
+
+**Example**:
+```python
+from biopipelines.ligand import Ligand
+from biopipelines.compound_library import CompoundLibrary
+from biopipelines.admet_ai import ADMETAI
+
+# From a single ligand
+aspirin = Ligand("aspirin")
+admet = ADMETAI(compounds=aspirin)
+
+# From a compound library
+library = CompoundLibrary({"core": "c1ccccc1", "R1": ["O", "N", "F"]})
+admet = ADMETAI(compounds=library, drugbank=True)
+
+# Access results
+admet.tables.predictions   # ADMET property predictions
+admet.tables.drugbank      # DrugBank percentile comparison
+```
+
+---
+
 ### PoseBusters
 
 Validates computationally generated molecule poses by checking bond lengths, bond angles, internal steric clashes, volume overlap with protein, and more. Supports `dock` mode (ligand + protein) and `redock` mode (+ reference ligand for RMSD comparison).

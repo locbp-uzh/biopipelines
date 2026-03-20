@@ -31,6 +31,7 @@ from .folders import FolderManager
 from .conformational_change import ConformationalChange
 from .contacts import Contacts
 from .plip import PLIP
+from .admet_ai import ADMETAI
 from .distance import Distance
 from .angle import Angle
 from .stitch_sequences import StitchSequences
@@ -99,6 +100,7 @@ __all__ = [
     'ConformationalChange',
     'Contacts',
     'PLIP',
+    'ADMETAI',
     'Distance',
     'Angle',
     'StitchSequences',
