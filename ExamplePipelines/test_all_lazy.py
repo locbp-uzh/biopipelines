@@ -14,6 +14,7 @@ Structure:
   - Sequence             : extract sequence from 3QRK
   - Mutagenesis          : multi-position saturation ("1+2") → lazy IDs
   - AlphaFold            : fold mutant sequences
+  - ESMFold              : fold mutant sequences (single-sequence, no MSA)
   - Boltz2 (apo)         : predict apo structures
   - Boltz2 (holo)        : predict protein-ligand complexes with imatinib
   - Gnina                : dock imatinib into Boltz2 structures
@@ -45,6 +46,7 @@ from biopipelines.pipeline import *
 
 from biopipelines.mutagenesis import Mutagenesis
 from biopipelines.alphafold import AlphaFold
+from biopipelines.esm_fold import ESMFold
 from biopipelines.boltz2 import Boltz2
 from biopipelines.gnina import Gnina
 from biopipelines.distance import Distance
@@ -98,6 +100,11 @@ with Pipeline(project="Debug",
     af = AlphaFold(
         proteins=sdm,
         num_recycle=4,
+    )
+
+    esmf = ESMFold(
+        proteins=sdm,
+        num_recycles=4,
     )
 
     boltz_apo = Boltz2(

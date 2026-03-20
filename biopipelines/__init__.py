@@ -19,6 +19,7 @@ from .rfdiffusion import RFdiffusion
 from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .protein_mpnn import ProteinMPNN
 from .alphafold import AlphaFold
+from .esm_fold import ESMFold
 from .ligand import Ligand
 from .sequence import Sequence
 from .ligand_mpnn import LigandMPNN
@@ -85,6 +86,7 @@ __all__ = [
     'RFDAA_PrepareLigand',
     'ProteinMPNN',
     'AlphaFold',
+    'ESMFold',
     'Ligand',
     'Sequence',
     'LigandMPNN',

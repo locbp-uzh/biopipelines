@@ -22,6 +22,7 @@ Structure:
   - DNAEncoder           : codon-optimize pmpnn sequences for E. coli
   - RBSDesigner          : design RBS for the codon-optimized sequences
   - AlphaFold            : fold pmpnn sequences (single_sequence mode, fast)
+  - ESMFold              : fold pmpnn sequences (single-sequence, no MSA)
   - Boltz2               : predict protein-ligand complex for lmpnn sequences
   - Gnina                : dock imatinib into the Boltz2-predicted structures
   - Distance             : measure Cl-to-residue distance in Boltz2 structures
@@ -58,6 +59,7 @@ from biopipelines.stitch_sequences import StitchSequences
 from biopipelines.dna_encoder import DNAEncoder
 from biopipelines.rbs_designer import RBSDesigner
 from biopipelines.alphafold import AlphaFold
+from biopipelines.esm_fold import ESMFold
 from biopipelines.boltz2 import Boltz2
 from biopipelines.gnina import Gnina
 from biopipelines.distance import Distance
@@ -188,6 +190,11 @@ with Pipeline(project="Debug",
     af = AlphaFold(
         proteins=pmpnn,
         num_recycle=4
+    )
+
+    esmf = ESMFold(
+        proteins=pmpnn,
+        num_recycles=4
     )
 
     boltz_apo = Boltz2(

@@ -71,6 +71,70 @@ af_fast = AlphaFold(
 
 ---
 
+### ESMFold
+
+Ultra-fast single-sequence protein structure prediction using Meta's ESMFold model. Leverages ESM-2 language model embeddings — no MSA generation required, making it significantly faster than AlphaFold2.
+
+**Resources**: GPU.
+
+**Environment**: `ESMFoldEnv` and `biopipelines`
+
+**Installation**:
+
+Cluster (requires `nvcc`):
+```bash
+mamba env create -f Environments/ESMFold.yaml
+mamba activate ESMFoldEnv
+pip install "fair-esm[esmfold]"
+pip install 'dllogger @ git+https://github.com/NVIDIA/dllogger.git'
+pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@4b41059694619831a7db195b7e0988fc4ff3a307'
+```
+
+Colab (uses HuggingFace Transformers, no compilation needed):
+```python
+ESMFold.install()  # installs transformers + accelerate
+```
+
+**Parameters**:
+- `proteins`: Union[DataStream, StandardizedOutput] (required) - Input protein sequences
+- `num_recycles`: int = 4 - Number of recycles (4 is the training default)
+- `chunk_size`: Optional[int] = None - Chunk size for axial attention to reduce memory (recommended: 128, 64, or 32 for long sequences)
+- `max_tokens_per_batch`: Optional[int] = None - Max tokens per GPU batch (0 = disable batching)
+- `cpu_offload`: bool = False - Offload parameters to CPU for longer sequences
+
+**Streams**: `structures`
+
+**Tables**:
+- `structures`:
+
+  | id | file |
+  |----|------|
+
+- `confidence`:
+
+  | id | structure | plddt |
+  |----|-----------|-------|
+
+**Example**:
+```python
+from biopipelines.esm_fold import ESMFold
+
+# Basic prediction
+esm = ESMFold(proteins=sequences)
+
+# Higher accuracy with more recycles
+esm = ESMFold(proteins=mpnn_output, num_recycles=8)
+
+# Memory-efficient for long sequences
+esm = ESMFold(
+    proteins=sequences,
+    chunk_size=128,
+    cpu_offload=True
+)
+```
+
+---
+
 ### Boltz2
 
 Predicts biomolecular complexes including proteins, nucleic acids, and small molecules. State-of-the-art model for protein-ligand and protein-protein complex prediction.

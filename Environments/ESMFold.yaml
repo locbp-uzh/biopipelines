@@ -1,0 +1,14 @@
+name: ESMFoldEnv
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.9
+  - pytorch::pytorch>=2.0
+  - pytorch::pytorch-cuda=11.8
+  - nvidia::cuda-nvcc
+  - pandas
+  - numpy
+  - scipy
+  - biopython

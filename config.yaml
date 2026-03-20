@@ -83,6 +83,7 @@ environments:
 
   # Structure prediction
   AlphaFold: "biopipelines"
+  ESMFold: "ESMFoldEnv"
   GhostFold: "ghostfold"
   Boltz2: "Boltz2Env"
   RF3: "modelforge"

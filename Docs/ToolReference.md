@@ -56,6 +56,7 @@ Design and manipulate sequences.
 Predict protein and complex structures, and dock ligands.
 
 - [AlphaFold](Tool/StructurePrediction.md#alphafold) - AlphaFold2 prediction
+- [ESMFold](Tool/StructurePrediction.md#esmfold) - Ultra-fast single-sequence structure prediction
 - [Boltz2](Tool/StructurePrediction.md#boltz2) - Biomolecular complex prediction
 - [Gnina](Tool/StructurePrediction.md#gnina) - Molecular docking with CNN scoring
 
