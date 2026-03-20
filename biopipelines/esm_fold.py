@@ -216,8 +216,8 @@ import pandas as pd
 df = pd.read_csv('{self.queries_csv}')
 with open('{self.queries_fasta}', 'w') as f:
     for _, row in df.iterrows():
-        f.write(f'>{{row[\"id\"]}}\\n{{row[\"sequence\"]}}\\n')
-print(f'Wrote {{len(df)}} sequences to FASTA')
+        f.write('>'+str(row['id'])+'\\n'+str(row['sequence'])+'\\n')
+print('Wrote '+str(len(df))+' sequences to FASTA')
 "
 
 """
