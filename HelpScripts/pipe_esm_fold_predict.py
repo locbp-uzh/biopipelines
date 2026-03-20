@@ -95,7 +95,7 @@ def main():
     if chunk_size is None:
         # Auto-detect: use chunk_size=64 for Colab T4 (16GB), None for larger GPUs
         if device == "cuda":
-            gpu_mem_gb = torch.cuda.get_device_properties(0).total_mem / 1e9
+            gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
             if gpu_mem_gb < 20:
                 chunk_size = 64
     if chunk_size is not None:
