@@ -73,7 +73,7 @@ if python -c "from transformers import EsmForProteinFolding" 2>/dev/null; then
 fi
 """
             return f"""echo "=== Installing ESMFold (HuggingFace Transformers) ==="
-{skip}pip install -q --upgrade transformers accelerate
+{skip}pip install --upgrade transformers accelerate
 
 echo "=== ESMFold installation complete ==="
 """
