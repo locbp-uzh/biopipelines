@@ -60,7 +60,7 @@ from biopipelines.stitch_sequences import StitchSequences
 from biopipelines.dna_encoder import DNAEncoder
 from biopipelines.rbs_designer import RBSDesigner
 from biopipelines.alphafold import AlphaFold
-from biopipelines.esm_fold import ESMFold
+from biopipelines.esmfold import ESMFold
 from biopipelines.boltz2 import Boltz2
 from biopipelines.gnina import Gnina
 from biopipelines.distance import Distance
