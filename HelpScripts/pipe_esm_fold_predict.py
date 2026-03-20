@@ -82,11 +82,11 @@ def main():
     model = EsmForProteinFolding.from_pretrained(
         "facebook/esmfold_v1",
         low_cpu_mem_usage=True,
-        device_map="auto",
     )
-    model.eval()
 
-    device = next(model.parameters()).device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = model.to(device)
+    model.eval()
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
 
