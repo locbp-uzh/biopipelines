@@ -274,6 +274,44 @@ contacts = Contacts(
 
 ---
 
+### PLIP
+
+Profiles non-covalent protein-ligand interactions using PLIP (Protein-Ligand Interaction Profiler). Automatically detects all binding sites and classifies interactions: hydrogen bonds, hydrophobic contacts, salt bridges, pi-stacking, pi-cation, halogen bonds, water bridges, and metal complexes.
+
+**Environment**: `PLIPEnv` (cluster) / `biopipelines` (Colab)
+
+**Note**: PLIP only supports PDB format. CIF-only input raises an error; mixed `pdb|cif` input warns that CIF files will be skipped.
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Input structures (PDB format)
+
+No ligand parameter is needed — PLIP auto-detects all binding sites.
+
+**Tables**:
+- `interactions` (one row per interaction):
+
+  | id | ligand_name | ligand_chain | interaction_type | protein_residue | protein_chain | protein_residue_number | distance |
+  |----|-------------|--------------|------------------|-----------------|---------------|------------------------|----------|
+
+- `summary` (one row per ligand per structure):
+
+  | id | ligand_name | ligand_chain | hydrophobic | hbond | water_bridge | salt_bridge | pi_stacking | pi_cation | halogen_bond | metal_complex | total_interactions |
+  |----|-------------|--------------|-------------|-------|--------------|-------------|-------------|-----------|--------------|---------------|--------------------|
+
+**Example**:
+```python
+from biopipelines.plip import PLIP
+
+# Profile all interactions in Boltz2 holo structures
+plip = PLIP(structures=boltz_holo)
+
+# Access results
+plip.tables.interactions   # detailed interactions
+plip.tables.summary        # per-ligand summary counts
+```
+
+---
+
 ### PoseBusters
 
 Validates computationally generated molecule poses by checking bond lengths, bond angles, internal steric clashes, volume overlap with protein, and more. Supports `dock` mode (ligand + protein) and `redock` mode (+ reference ligand for RMSD comparison).

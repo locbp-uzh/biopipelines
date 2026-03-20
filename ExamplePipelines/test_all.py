@@ -30,6 +30,7 @@ Structure:
   - DistanceSelector     : select residues within 5 Å of ligand
   - ConformationalChange : RMSD between RFdiffusion backbones and AlphaFold models
   - Contacts             : protein-ligand contacts in Boltz2 structures
+  - PLIP                 : protein-ligand interaction profiling in Boltz2 structures
   - PoseBusters          : validate Boltz2 ligand poses
   - PoseChange           : compare Gnina poses to crystal reference
   - CABSflex             : flexibility of a single input PDB (2 models)
@@ -67,6 +68,7 @@ from biopipelines.angle import Angle
 from biopipelines.distance_selector import DistanceSelector
 from biopipelines.conformational_change import ConformationalChange
 from biopipelines.contacts import Contacts
+from biopipelines.plip import PLIP
 from biopipelines.posebusters import PoseBusters
 from biopipelines.pose_change import PoseChange
 from biopipelines.cabsflex import CABSflex
@@ -253,6 +255,10 @@ with Pipeline(project="Debug",
         structures=boltz_holo,
         ligand="LIG",
         contact_threshold=5.0
+    )
+
+    plip = PLIP(
+        structures=boltz_holo,
     )
 
     pb = PoseBusters(

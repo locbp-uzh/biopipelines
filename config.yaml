@@ -101,6 +101,7 @@ environments:
   BayesianAdjuster: "MutationEnv"
   PoseBusters: "posebusters"
   Contacts: "ProteinEnv"
+  PLIP: "PLIPEnv"
   PoseChange: "ProteinEnv"
   SASA: "ProteinEnv"
 

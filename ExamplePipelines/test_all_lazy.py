@@ -25,6 +25,7 @@ Structure:
   - Mutagenesis (2nd)    : selection-based positions from DistanceSelector → lazy IDs
   - ConformationalChange : RMSD between PDB and AlphaFold models
   - Contacts             : protein-ligand contacts in Boltz2 structures
+  - PLIP                 : protein-ligand interaction profiling in Boltz2 structures
   - PoseBusters          : validate Boltz2 ligand poses
   - PoseChange           : compare Gnina poses to crystal reference
   - MutationProfiler     : profile mutations vs original sequence
@@ -55,6 +56,7 @@ from biopipelines.distance_selector import DistanceSelector
 from biopipelines.selection import Selection
 from biopipelines.conformational_change import ConformationalChange
 from biopipelines.contacts import Contacts
+from biopipelines.plip import PLIP
 from biopipelines.posebusters import PoseBusters
 from biopipelines.pose_change import PoseChange
 from biopipelines.mutation_profiler import MutationProfiler
@@ -167,6 +169,10 @@ with Pipeline(project="Debug",
         structures=boltz_holo,
         ligand="LIG",
         contact_threshold=5.0,
+    )
+
+    plip = PLIP(
+        structures=boltz_holo,
     )
 
     pb = PoseBusters(

@@ -30,6 +30,7 @@ from .extract_metrics import ExtractMetrics
 from .folders import FolderManager
 from .conformational_change import ConformationalChange
 from .contacts import Contacts
+from .plip import PLIP
 from .distance import Distance
 from .angle import Angle
 from .stitch_sequences import StitchSequences
@@ -97,6 +98,7 @@ __all__ = [
     'ExtractMetrics',
     'ConformationalChange',
     'Contacts',
+    'PLIP',
     'Distance',
     'Angle',
     'StitchSequences',

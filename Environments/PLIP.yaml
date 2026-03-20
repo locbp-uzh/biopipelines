@@ -1,0 +1,11 @@
+name: PLIPEnv
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.9
+  - openbabel
+  - pandas
+  - numpy
+  - lxml
+  - pip:
+    - plip
