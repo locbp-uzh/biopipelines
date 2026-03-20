@@ -79,14 +79,15 @@ def main():
     from transformers import AutoTokenizer, EsmForProteinFolding
 
     tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-    model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1", low_cpu_mem_usage=True)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
+    model = EsmForProteinFolding.from_pretrained(
+        "facebook/esmfold_v1",
+        low_cpu_mem_usage=True,
+        torch_dtype=torch.float16,
+        device_map="auto",
+    )
     model.eval()
 
-    # Memory optimizations
-    model.esm = model.esm.half()
+    device = next(model.parameters()).device
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
 
