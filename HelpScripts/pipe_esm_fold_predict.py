@@ -3,9 +3,10 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 """
-ESMFold prediction via HuggingFace Transformers API.
+ESMFold prediction via the official ESM library (sokrypton/ColabFold approach).
 
-Used for Colab/pip installations where the fair-esm CLI is not available.
+Used for Colab/pip installations. Downloads the ESMFold model weights directly
+and runs inference using model.infer() + model.output_to_pdb().
 Reads a FASTA file and writes one PDB per sequence to the output directory.
 """
 
@@ -13,6 +14,7 @@ import argparse
 import os
 import sys
 import torch
+import gc
 
 
 def parse_fasta(fasta_path):
@@ -38,32 +40,11 @@ def parse_fasta(fasta_path):
     return sequences
 
 
-def convert_outputs_to_pdb(output, sequence_length):
-    """Convert HuggingFace ESMFold output to PDB string."""
-    from transformers.models.esm.openfold_utils.protein import Protein, to_pdb
-    from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
-
-    final_atom_positions = atom14_to_atom37(output["positions"][-1], output)
-    final_atom_mask = output["atom37_atom_exists"]
-
-    # Build Protein object for PDB conversion
-    protein = Protein(
-        aatype=output["aatype"][0, :sequence_length].cpu().numpy(),
-        atom_positions=final_atom_positions[0, :sequence_length].cpu().numpy(),
-        atom_mask=final_atom_mask[0, :sequence_length].cpu().numpy(),
-        residue_index=(output["residue_index"][0, :sequence_length] + 1).cpu().numpy(),
-        b_factors=output["plddt"][0, :sequence_length, None].repeat(1, 37).cpu().numpy(),
-        chain_index=None,
-    )
-
-    return to_pdb(protein)
-
-
 def main():
-    parser = argparse.ArgumentParser(description='Run ESMFold prediction via HuggingFace Transformers')
+    parser = argparse.ArgumentParser(description='Run ESMFold prediction via official ESM library')
     parser.add_argument('--fasta', type=str, required=True, help='Input FASTA file')
     parser.add_argument('--output', type=str, required=True, help='Output directory for PDB files')
-    parser.add_argument('--num-recycles', type=int, default=4, help='Number of recycles')
+    parser.add_argument('--num-recycles', type=int, default=3, help='Number of recycles')
     parser.add_argument('--chunk-size', type=int, default=None, help='Chunk size for memory reduction')
     args = parser.parse_args()
 
@@ -75,35 +56,17 @@ def main():
         print("ERROR: No sequences found in FASTA file", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Loading ESMFold model from HuggingFace...")
-    from transformers import AutoTokenizer, EsmForProteinFolding
-
-    tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-    model = EsmForProteinFolding.from_pretrained(
-        "facebook/esmfold_v1",
-        low_cpu_mem_usage=True,
-    )
+    # Load model (downloaded during install step)
+    model_name = "esmfold.model"
+    print(f"Loading ESMFold model from {model_name}...")
+    model = torch.load(model_name, weights_only=False)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
-    model.eval()
+    model.eval().to(device).requires_grad_(False)
+
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
 
-    # Set chunk size for memory reduction
-    chunk_size = args.chunk_size
-    if chunk_size is None:
-        # Auto-detect: use chunk_size=64 for Colab T4 (16GB), None for larger GPUs
-        if device == "cuda":
-            gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-            if gpu_mem_gb < 20:
-                chunk_size = 64
-    if chunk_size is not None:
-        model.trunk.set_chunk_size(chunk_size)
-        print(f"Using chunk size: {chunk_size}")
-
-    # Set number of recycles
-    model.config.num_recycles = args.num_recycles
     print(f"Using {args.num_recycles} recycles")
 
     # Predict structures
@@ -113,21 +76,38 @@ def main():
     for seq_id, sequence in sequences:
         try:
             print(f"Predicting: {seq_id} ({len(sequence)} residues)")
-            tokenized = tokenizer([sequence], return_tensors="pt", add_special_tokens=False)["input_ids"].to(device)
+
+            # Set chunk size per sequence (optimized for T4 GPUs)
+            chunk_size = args.chunk_size
+            if chunk_size is None:
+                if len(sequence) > 700:
+                    chunk_size = 64
+                else:
+                    chunk_size = 128
+            model.set_chunk_size(chunk_size)
+
+            if device == "cuda":
+                torch.cuda.empty_cache()
 
             with torch.no_grad():
-                output = model(tokenized)
+                output = model.infer(sequence, num_recycles=args.num_recycles)
 
-            pdb_str = convert_outputs_to_pdb(output, len(sequence))
+            pdb_str = model.output_to_pdb(output)[0]
 
             output_path = os.path.join(args.output, f"{seq_id}.pdb")
             with open(output_path, 'w') as f:
                 f.write(pdb_str)
 
             # Report mean pLDDT
-            mean_plddt = output["plddt"][0, :len(sequence)].mean().item()
+            mean_plddt = output["plddt"][0, :, 1].mean().item()
             print(f"  -> {seq_id}.pdb (mean pLDDT: {mean_plddt:.1f})")
             completed += 1
+
+            # Free memory between predictions
+            del output
+            gc.collect()
+            if device == "cuda":
+                torch.cuda.empty_cache()
 
         except Exception as e:
             print(f"WARNING: {seq_id} failed: {e}", file=sys.stderr)

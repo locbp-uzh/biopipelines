@@ -65,15 +65,30 @@ class ESMFold(BaseConfig):
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         if env_manager in ("pip", "micromamba"):
-            # Colab: use HuggingFace transformers (no nvcc/OpenFold compilation needed)
+            # Colab: use official ESM library (ColabFold approach)
             skip = "" if force_reinstall else """# Check if already installed
-if python -c "from transformers import EsmForProteinFolding" 2>/dev/null; then
+if [ -f "esmfold.model" ] && python -c "import esm" 2>/dev/null; then
     echo "ESMFold already installed, skipping. Use force_reinstall=True to reinstall."
     exit 0
 fi
 """
-            return f"""echo "=== Installing ESMFold (HuggingFace Transformers) ==="
-{skip}pip install --upgrade transformers accelerate
+            return f"""echo "=== Installing ESMFold (official ESM library) ==="
+{skip}# Install dependencies
+pip install -q omegaconf pytorch_lightning biopython ml_collections einops py3Dmol modelcif
+pip install -q git+https://github.com/NVIDIA/dllogger.git
+pip install -q git+https://github.com/sokrypton/openfold.git
+pip install -q git+https://github.com/sokrypton/esm.git
+
+# Download ESMFold model weights
+if [ ! -f "esmfold.model" ]; then
+    echo "Downloading ESMFold model weights..."
+    apt-get install aria2 -qq 2>/dev/null || true
+    if command -v aria2c &>/dev/null; then
+        aria2c -q -x 16 https://colabfold.steineggerlab.workers.dev/esm/esmfold.model
+    else
+        wget -q https://colabfold.steineggerlab.workers.dev/esm/esmfold.model
+    fi
+fi
 
 echo "=== ESMFold installation complete ==="
 """
