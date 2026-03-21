@@ -74,19 +74,19 @@ fi
 """
             return f"""echo "=== Installing ESMFold (official ESM library) ==="
 {skip}# Install dependencies
-pip install -q omegaconf pytorch_lightning biopython ml_collections einops py3Dmol modelcif
-pip install -q git+https://github.com/NVIDIA/dllogger.git
-pip install -q git+https://github.com/sokrypton/openfold.git
-pip install -q git+https://github.com/sokrypton/esm.git
+pip install omegaconf pytorch_lightning biopython ml_collections einops py3Dmol modelcif
+pip install git+https://github.com/NVIDIA/dllogger.git
+pip install git+https://github.com/sokrypton/openfold.git
+pip install git+https://github.com/sokrypton/esm.git
 
 # Download ESMFold model weights
 if [ ! -f "esmfold.model" ]; then
     echo "Downloading ESMFold model weights..."
     apt-get install aria2 -qq 2>/dev/null || true
     if command -v aria2c &>/dev/null; then
-        aria2c -q -x 16 https://colabfold.steineggerlab.workers.dev/esm/esmfold.model
+        aria2c -x 16 https://colabfold.steineggerlab.workers.dev/esm/esmfold.model
     else
-        wget -q https://colabfold.steineggerlab.workers.dev/esm/esmfold.model
+        wget https://colabfold.steineggerlab.workers.dev/esm/esmfold.model
     fi
 fi
 
