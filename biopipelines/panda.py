@@ -924,7 +924,7 @@ fi
                         name=stream_name,
                         ids=new_ids,
                         files=[],
-                        map_table=data.get("map_table") or "",
+                        map_table=map_table or "",
                         format=data["format"]
                     )
                     continue
