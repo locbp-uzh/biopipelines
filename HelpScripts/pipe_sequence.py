@@ -41,16 +41,20 @@ def create_sequence_files(config_data: Dict[str, Any]) -> int:
     os.makedirs(output_folder, exist_ok=True)
 
     # Create CSV file
+    extra_columns = config_data.get('extra_columns', {})
     data = []
-    for seq_id, seq, seq_type in zip(custom_ids, sequences, types):
+    for i, (seq_id, seq, seq_type) in enumerate(zip(custom_ids, sequences, types)):
         # Clean sequence (remove whitespace)
         clean_seq = ''.join(seq.split())
-        data.append({
+        row = {
             'id': seq_id,
             'sequence': clean_seq,
             'type': seq_type,
             'length': len(clean_seq)
-        })
+        }
+        for col_name, col_values in extra_columns.items():
+            row[col_name] = col_values[i]
+        data.append(row)
 
     df = pd.DataFrame(data)
     df.to_csv(sequences_csv, index=False)

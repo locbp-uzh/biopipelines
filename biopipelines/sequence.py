@@ -91,6 +91,7 @@ echo "=== Sequence ready ==="
         self.from_excel = False
         self._excel_source_path = None
         self.source_csv_path = None
+        self.extra_columns = {}  # Extra columns from CSV/Excel source files
         # Pending filename: set when a bare filename is given that needs resolution
         # against the Sequences/ folder in configure_inputs
         self._pending_filename = None
@@ -269,6 +270,10 @@ echo "=== Sequence ready ==="
         self.custom_ids = df['id'].astype(str).tolist()
         self.sequences = df['sequence'].astype(str).tolist()
 
+        # Preserve extra columns from the source CSV
+        extra_cols = [c for c in df.columns if c not in ('id', 'sequence')]
+        self.extra_columns = {col: df[col].where(df[col].notna(), None).tolist() for col in extra_cols}
+
         for i, (seq_id, seq) in enumerate(zip(self.custom_ids, self.sequences)):
             if not seq or not seq.strip():
                 raise ValueError(f"Empty sequence for id '{seq_id}' at row {i}")
@@ -289,6 +294,10 @@ echo "=== Sequence ready ==="
 
         self.custom_ids = df['id'].astype(str).tolist()
         self.sequences = df['sequence'].astype(str).tolist()
+
+        # Preserve extra columns from the source file
+        extra_cols = [c for c in df.columns if c not in ('id', 'sequence')]
+        self.extra_columns = {col: df[col].where(df[col].notna(), None).tolist() for col in extra_cols}
 
         for i, (seq_id, seq) in enumerate(zip(self.custom_ids, self.sequences)):
             if not seq or not seq.strip():
@@ -409,7 +418,9 @@ echo "=== Sequence ready ==="
         # so that source_csv_path and map_table both point to a real CSV file.
         if self.from_excel:
             os.makedirs(self.output_folder, exist_ok=True)
-            df = pd.DataFrame({"id": self.custom_ids, "sequence": self.sequences})
+            data = {"id": self.custom_ids, "sequence": self.sequences}
+            data.update(self.extra_columns)
+            df = pd.DataFrame(data)
             df.to_csv(self.sequences_csv, index=False)
             self.source_csv_path = self.sequences_csv
             print(f"  Converted Excel to CSV: {self.sequences_csv}")
@@ -478,7 +489,8 @@ echo "=== Sequence ready ==="
             "types": self.detected_types,
             "output_folder": self.output_folder,
             "sequences_csv": self.sequences_csv,
-            "sequences_fasta": self.sequences_fasta
+            "sequences_fasta": self.sequences_fasta,
+            "extra_columns": self.extra_columns
         }
 
         with open(self.config_file, 'w') as f:
@@ -494,11 +506,12 @@ python "{self.sequence_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after sequence file creation."""
+        columns = ["id", "sequence", "type", "length"] + list(self.extra_columns.keys())
         tables = {
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
-                columns=["id", "sequence", "type", "length"],
+                columns=columns,
                 description="Sequence data with metadata",
                 count=len(self.sequences)
             )
@@ -542,7 +555,8 @@ python "{self.sequence_py}" --config "{self.config_file}"
                 "from_pdb_code": self.from_pdb_code,
                 "from_excel": self.from_excel,
                 "excel_source_path": self._excel_source_path,
-                "source_csv_path": self.source_csv_path
+                "source_csv_path": self.source_csv_path,
+                "extra_columns": self.extra_columns
             }
         })
         return base_dict
