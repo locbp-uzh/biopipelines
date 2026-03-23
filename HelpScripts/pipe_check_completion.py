@@ -501,6 +501,7 @@ def main():
             # Use WARNING status when success but filter warnings exist
             if filter_info.get('warnings'):
                 status = "WARNING"
+                details['missing_files'] = filter_info['warnings']
             else:
                 status = "COMPLETED"
 
