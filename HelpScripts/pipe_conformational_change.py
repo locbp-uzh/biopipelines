@@ -24,6 +24,7 @@ from pymol import cmd
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.id_map_utils import get_mapped_ids
 from biopipelines.sele_utils import sele_group_by_chain
 
 
@@ -158,43 +159,6 @@ def load_selection_from_table(table_path: str, column_name: str) -> Dict[str, st
     return selection_map
 
 
-def lookup_selection_with_base_id(structure_id: str, selection_map: Dict[str, str]) -> Optional[str]:
-    """
-    Look up selection for a structure ID, recursively stripping _N suffixes if not found.
-
-    This handles cases where target structures have IDs with additional suffixes
-    (e.g., RFD3_5_Test_007_1_1_1) but the selection table has base IDs
-    (e.g., RFD3_5_Test_007_1).
-
-    Args:
-        structure_id: Structure ID to look up (e.g., "RFD3_5_Test_007_1_1_1")
-        selection_map: Dictionary mapping IDs to selection strings
-
-    Returns:
-        Selection string if found, None otherwise
-    """
-    import re
-
-    # Try exact match first
-    if structure_id in selection_map:
-        return selection_map[structure_id]
-
-    # Recursively strip trailing _N suffixes and try again
-    current_id = structure_id
-    while True:
-        # Try to strip trailing _N suffix (where N is one or more digits)
-        match = re.match(r'^(.+)_\d+$', current_id)
-        if not match:
-            # No more suffixes to strip
-            break
-
-        current_id = match.group(1)
-        if current_id in selection_map:
-            print(f"  - Matched {structure_id} to base ID {current_id}")
-            return selection_map[current_id]
-
-    return None
-
 
 def analyze_conformational_change(ref_path: str, target_path: str, selection: str,
                                   alignment_method: str,
@@ -297,6 +261,22 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         column_name = selection_config['column_name']
         selection_map = load_selection_from_table(table_path, column_name)
 
+    # Pre-compute ID mappings using get_mapped_ids (handles +components, suffixes, siblings)
+    target_ids = list(target_ds.ids_expanded)
+    target_to_ref_id = get_mapped_ids(
+        source_ids=target_ids,
+        target_ids=list(reference_files_by_id.keys()),
+        unique=True
+    )
+    if selection_config['type'] not in ('all', 'fixed'):
+        target_to_sele_id = get_mapped_ids(
+            source_ids=target_ids,
+            target_ids=list(selection_map.keys()),
+            unique=True
+        )
+    else:
+        target_to_sele_id = None
+
     # Determine if reference is single or multiple
     use_single_reference = len(reference_ds.ids_expanded) == 1
     if use_single_reference:
@@ -322,9 +302,12 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         if use_single_reference:
             ref_path = single_ref_path
         else:
-            # Match by ID - reference and target should have same IDs
-            if target_id in reference_files_by_id:
-                ref_path = reference_files_by_id[target_id]
+            # Match by ID using pre-computed mapping (handles +components, suffixes)
+            matched_ref_id = target_to_ref_id.get(target_id)
+            if matched_ref_id is not None:
+                ref_path = reference_files_by_id[matched_ref_id]
+                if matched_ref_id != target_id:
+                    print(f"  - Matched target '{target_id}' to reference '{matched_ref_id}'")
             else:
                 print(f"Warning: No matching reference for target ID: {target_id}")
                 continue
@@ -338,8 +321,17 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         print(f"Target: {target_path}")
         print(f"ID: {target_id}")
 
-        # Get selection for this structure (with recursive base ID lookup)
-        selection = lookup_selection_with_base_id(target_id, selection_map)
+        # Get selection for this structure
+        if target_to_sele_id is not None:
+            matched_sele_id = target_to_sele_id.get(target_id)
+            if matched_sele_id is not None:
+                selection = selection_map[matched_sele_id]
+                if matched_sele_id != target_id:
+                    print(f"  - Matched selection ID: {target_id} -> {matched_sele_id}")
+            else:
+                selection = None
+        else:
+            selection = selection_map.get(target_id)
         if not selection:
             print(f"  - Warning: No selection found for structure ID: {target_id}")
             print(f"    Available IDs in selection map: {list(selection_map.keys())[:5]}...")

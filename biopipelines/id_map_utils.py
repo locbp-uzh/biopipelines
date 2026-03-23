@@ -193,9 +193,10 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     It starts with the original ID and progressively strips suffixes according to the
     id_map pattern, generating all intermediate IDs in priority order (most specific first).
 
-    For multi-axis combinatorics IDs (containing "+"), the function also expands each
-    "+" component as an additional candidate. This allows "prot1+lig1" to match against
-    tables containing either "prot1" or "lig1" without requiring provenance columns.
+    For multi-axis combinatorics IDs (containing "+"), the function generates all
+    contiguous sub-sequences of "+" components (from longest to shortest), plus
+    suffix-stripped variants of each. This allows "prot1+lig1+lig2" to match against
+    "prot1+lig1", "lig1+lig2", "prot1", "lig1", or "lig2".
 
     Args:
         structure_id: Structure ID (e.g., "RFDAA_Hit_Screen_007_1_1" or "prot1+lig1_2")
@@ -266,27 +267,33 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
 
     # Generate all intermediate IDs by progressively stripping suffixes
     candidates = [structure_id]
-    stripped = _strip_suffixes_recursive(structure_id, delimiter, has_s, literal_part)
-    candidates.extend(stripped)
 
-    # Expand multi-axis "+" components: for IDs containing "+", add each component
-    # and its suffix-stripped forms as additional candidates
     if MULTI_AXIS_SEPARATOR in structure_id:
-        seen = set(candidates)
-        expanded = []
-        for cand in candidates:
-            if MULTI_AXIS_SEPARATOR not in cand:
-                continue
-            for part in cand.split(MULTI_AXIS_SEPARATOR):
-                if part and part not in seen:
-                    expanded.append(part)
-                    seen.add(part)
-                    # Also strip suffixes from this component
-                    for sub in _strip_suffixes_recursive(part, delimiter, has_s, literal_part):
-                        if sub not in seen:
-                            expanded.append(sub)
-                            seen.add(sub)
-        candidates.extend(expanded)
+        # For multi-axis IDs, generate all contiguous sub-sequences of + components
+        # with suffix-stripped variants, ordered by decreasing length (more specific first)
+        parts = structure_id.split(MULTI_AXIS_SEPARATOR)
+        n = len(parts)
+        seen = {structure_id}
+
+        # Generate sub-sequences from longest to shortest
+        for length in range(n, 0, -1):
+            for start in range(n - length + 1):
+                sub_parts = parts[start:start + length]
+                sub_id = MULTI_AXIS_SEPARATOR.join(sub_parts)
+                if sub_id not in seen:
+                    candidates.append(sub_id)
+                    seen.add(sub_id)
+                # Suffix-strip the last component to generate variants
+                last = sub_parts[-1]
+                for stripped_last in _strip_suffixes_recursive(last, delimiter, has_s, literal_part):
+                    variant_parts = sub_parts[:-1] + [stripped_last]
+                    variant = MULTI_AXIS_SEPARATOR.join(variant_parts)
+                    if variant not in seen:
+                        candidates.append(variant)
+                        seen.add(variant)
+    else:
+        stripped = _strip_suffixes_recursive(structure_id, delimiter, has_s, literal_part)
+        candidates.extend(stripped)
 
     return candidates
 
