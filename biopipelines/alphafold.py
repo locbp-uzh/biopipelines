@@ -116,6 +116,7 @@ echo "=== AlphaFold installation complete ==="
     alphafold_msas_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py"))
     propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
     update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
+    unsanitize_ids_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_unsanitize_ids.py"))
 
     def __init__(self,
                  proteins: Union[DataStream, StandardizedOutput],
@@ -200,9 +201,10 @@ echo "=== AlphaFold installation complete ==="
         script_content += self._generate_script_prepare_sequences()
         script_content += self._generate_script_run_alphafold()
         script_content += self._generate_script_extract_best_rank()
-        script_content += self._generate_script_update_structures_map()
         script_content += self._generate_script_extract_confidence()
         script_content += self._generate_script_create_msas_table()
+        script_content += self._generate_script_unsanitize_ids()
+        script_content += self._generate_script_update_structures_map()
         script_content += self._generate_missing_table_propagation()
         script_content += self.generate_completion_check_footer()
 
@@ -349,6 +351,18 @@ python {self.alphafold_confidence_py} "{self.folding_folder}" "{self.output_fold
         """Generate script section to create MSAs CSV table."""
         return f"""echo "Creating MSAs table"
 python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self.msa_csv}"
+
+"""
+
+    def _generate_script_unsanitize_ids(self) -> str:
+        """Generate script section to restore original IDs after ColabFold sanitization."""
+        return f"""echo "Restoring original IDs (unsanitizing ColabFold output)"
+python {self.unsanitize_ids_py} \\
+    --predicted-ids "{self.structures_map}" \\
+    --rename-files "{self.output_folder}" pdb \\
+    --rename-files "{self.msas_folder}" a3m \\
+    --fix-csv "{self.confidence_csv}" \\
+    --fix-csv "{self.msa_csv}"
 
 """
 
