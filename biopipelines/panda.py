@@ -657,6 +657,13 @@ echo "=== Panda ready ==="
                             }
                 self.pool_table_maps.append(table_map)
 
+            # Collect upstream missing table paths for propagation
+            self.upstream_missing_paths = []
+            for pool in self.pool_outputs:
+                missing_path = self._get_upstream_missing_table_path(pool)
+                if missing_path:
+                    self.upstream_missing_paths.append(missing_path)
+
     def _resolve_table_path(self, table_input: Any) -> str:
         """
         Resolve table input to a CSV file path.
@@ -781,7 +788,8 @@ echo "=== Panda ready ==="
             "map_table_paths": getattr(self, 'map_table_paths', []),
             "rename": self.rename,
             "ignore_missing": self.ignore_missing,
-            "step_tool_name": step_tool_name
+            "step_tool_name": step_tool_name,
+            "upstream_missing_paths": getattr(self, 'upstream_missing_paths', [])
         }
 
         with open(self.config_file, 'w') as f:
@@ -915,9 +923,9 @@ fi
                 # Value-based streams (no files): propagate as-is with original map_table
                 if not data["files"]:
                     if self.rename and predicted_count is not None:
-                        new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
+                        new_ids = [f"{self.rename}{i+1}" for i in range(predicted_count)]
                     elif self.rename:
-                        new_ids = [f"{self.rename}_[<N>]"]
+                        new_ids = [f"{self.rename}[<N>]"]
                     else:
                         new_ids = data["ids"]
                     output_streams[stream_name] = DataStream(
@@ -933,11 +941,11 @@ fi
 
                 if self.rename and predicted_count is not None:
                     # Rename with known count: generate concrete IDs and file paths
-                    new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
+                    new_ids = [f"{self.rename}{i+1}" for i in range(predicted_count)]
                     new_files = [os.path.join(self.output_folder, f"{nid}{ext}") for nid in new_ids]
                 elif self.rename:
                     # Rename with unknown count: lazy pattern
-                    new_ids = [f"{self.rename}_[<N>]"]
+                    new_ids = [f"{self.rename}[<N>]"]
                     new_files = [os.path.join(self.output_folder, f"<id>{ext}")]
                 else:
                     # No rename: copy pool IDs as-is, use template for files

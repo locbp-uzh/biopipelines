@@ -740,6 +740,49 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
     print(f"Created missing.csv with {len(missing_data)} entries")
 
 
+def merge_upstream_missing(output_folder: str, upstream_missing_paths: List[str]) -> None:
+    """
+    Merge upstream missing tables into Panda's own missing.csv.
+
+    Reads each upstream missing CSV and concatenates with Panda's missing.csv,
+    deduplicating by id (Panda's own entries take priority).
+
+    Args:
+        output_folder: Panda's output folder containing missing.csv
+        upstream_missing_paths: List of paths to upstream missing CSVs
+    """
+    missing_csv = os.path.join(output_folder, "missing.csv")
+
+    # Load Panda's own missing entries
+    if os.path.exists(missing_csv):
+        panda_missing = pd.read_csv(missing_csv)
+    else:
+        panda_missing = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+
+    # Load and merge upstream missing tables
+    upstream_dfs = []
+    for path in upstream_missing_paths:
+        if os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                if not df.empty:
+                    upstream_dfs.append(df)
+                    print(f"  Merging {len(df)} upstream missing entries from {path}")
+            except Exception as e:
+                print(f"  Warning: Could not read upstream missing {path}: {e}")
+
+    if not upstream_dfs:
+        return
+
+    # Concatenate: upstream first, then Panda's own (so Panda's entries win on dedup)
+    all_dfs = upstream_dfs + [panda_missing]
+    merged = pd.concat(all_dfs, ignore_index=True)
+    merged = merged.drop_duplicates(subset=['id'], keep='last')
+
+    merged.to_csv(missing_csv, index=False)
+    print(f"  Merged missing.csv: {len(merged)} total entries")
+
+
 def filter_and_copy_pool_tables(
     result_df: pd.DataFrame,
     pool_table_maps: List[Dict[str, Dict[str, Any]]],
@@ -987,12 +1030,12 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     original_to_new_id = {}
     if rename and 'id' in result_df.columns:
         original_ids_ordered = result_df['id'].tolist()
-        new_ids = [f"{rename}_{i+1}" for i in range(len(result_df))]
+        new_ids = [f"{rename}{i+1}" for i in range(len(result_df))]
         original_to_new_id = dict(zip([str(x) for x in original_ids_ordered], new_ids))
         result_df = result_df.copy()
         result_df['original_id'] = result_df['id']
         result_df['id'] = new_ids
-        print(f"\nApplied rename: {rename}_1 to {rename}_{len(result_df)}")
+        print(f"\nApplied rename: {rename}1 to {rename}{len(result_df)}")
 
     # Create output directory
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
@@ -1076,6 +1119,13 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                            step_tool_name, operations,
                            rename_map=original_to_new_id if original_to_new_id else None,
                            removed_by_op=removed_by_op)
+
+    # Merge upstream missing tables (from pool sources)
+    upstream_missing_paths = config_data.get('upstream_missing_paths', [])
+    if upstream_missing_paths:
+        output_dir = os.path.dirname(output_csv)
+        print(f"\nMerging {len(upstream_missing_paths)} upstream missing table(s)")
+        merge_upstream_missing(output_dir, upstream_missing_paths)
 
     print("\nPanda operations completed successfully!")
 
