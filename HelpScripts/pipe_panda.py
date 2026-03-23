@@ -1030,12 +1030,12 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     original_to_new_id = {}
     if rename and 'id' in result_df.columns:
         original_ids_ordered = result_df['id'].tolist()
-        new_ids = [f"{rename}{i+1}" for i in range(len(result_df))]
+        new_ids = [f"{rename}_{i+1}" for i in range(len(result_df))]
         original_to_new_id = dict(zip([str(x) for x in original_ids_ordered], new_ids))
         result_df = result_df.copy()
         result_df['original_id'] = result_df['id']
         result_df['id'] = new_ids
-        print(f"\nApplied rename: {rename}1 to {rename}{len(result_df)}")
+        print(f"\nApplied rename: {rename}_1 to {rename}_{len(result_df)}")
 
     # Create output directory
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)

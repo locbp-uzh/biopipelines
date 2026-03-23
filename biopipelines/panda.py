@@ -923,9 +923,9 @@ fi
                 # Value-based streams (no files): propagate as-is with original map_table
                 if not data["files"]:
                     if self.rename and predicted_count is not None:
-                        new_ids = [f"{self.rename}{i+1}" for i in range(predicted_count)]
+                        new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
                     elif self.rename:
-                        new_ids = [f"{self.rename}[<N>]"]
+                        new_ids = [f"{self.rename}_[<N>]"]
                     else:
                         new_ids = data["ids"]
                     output_streams[stream_name] = DataStream(
@@ -941,11 +941,11 @@ fi
 
                 if self.rename and predicted_count is not None:
                     # Rename with known count: generate concrete IDs and file paths
-                    new_ids = [f"{self.rename}{i+1}" for i in range(predicted_count)]
+                    new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
                     new_files = [os.path.join(self.output_folder, f"{nid}{ext}") for nid in new_ids]
                 elif self.rename:
                     # Rename with unknown count: lazy pattern
-                    new_ids = [f"{self.rename}[<N>]"]
+                    new_ids = [f"{self.rename}_[<N>]"]
                     new_files = [os.path.join(self.output_folder, f"<id>{ext}")]
                 else:
                     # No rename: copy pool IDs as-is, use template for files
