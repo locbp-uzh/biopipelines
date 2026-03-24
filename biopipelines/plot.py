@@ -42,7 +42,7 @@ class Plot(BaseConfig):
     """
     Plot tool with declarative operation-based API for data visualization.
 
-    Uses a sequence of operations (Scatter, Histogram, Bar, Column) to create
+    Uses a sequence of operations (Scatter, Histogram, Bar, Column, Line) to create
     plots from CSV data. Supports multiple data sources for
     comparison and table column references for data access.
 
@@ -82,6 +82,22 @@ class Plot(BaseConfig):
         # HeatMap - pivot table
         Plot(
             Plot.HeatMap(data=analysis, x="model", y="condition", value="score", title="Model Performance")
+        )
+
+        # Line plot - evolution across iterations (multi-source: one line per table)
+        Plot(
+            Plot.Line(
+                data=[cycle0.tables.result, cycle1.tables.result, cycle2.tables.result],
+                x="iteration",
+                y="affinity",
+                labels=["best1", "best2", "best3"],
+                title="Affinity Evolution"
+            )
+        )
+
+        # Line plot - single source with color grouping
+        Plot(
+            Plot.Line(data=combined.tables.result, x="iteration", y="pLDDT", color="sequence")
         )
     """
 
@@ -358,6 +374,67 @@ echo "=== Plot ready ==="
                             x_name=x_name, y_name=y_name, cmap=cmap,
                             annotate=annotate, figsize=figsize, dpi=dpi)
 
+    @staticmethod
+    def Line(data: Union[List[Union[StandardizedOutput, TableInfo]], StandardizedOutput, TableInfo],
+             x: str,
+             y: str,
+             labels: List[str] = None,
+             color: str = None,
+             title: str = None,
+             xlabel: str = None,
+             ylabel: str = None,
+             x_name: str = None,
+             y_name: str = None,
+             figsize: Tuple[int, int] = (800, 600),
+             dpi: int = 100,
+             markers: bool = True,
+             linewidth: float = 1.5,
+             marker_size: float = 5,
+             x_tick_rotation: float = 0,
+             y_tick_rotation: float = 0,
+             grid: bool = True,
+             legend_loc: str = "upper right",
+             legend_outside: bool = False) -> PlotOperation:
+        """
+        Create line plot showing evolution of a metric over a shared axis.
+
+        Two modes:
+        1. Multi-source: data is a list of tables, one line per source
+        2. Single-source: data is one table, optionally split by color column
+
+        Args:
+            data: Data source(s). List for multi-source (one line per table),
+                  or single source for one line / color-split lines
+            x: Column name for X axis (shared across all sources)
+            y: Column name for Y axis values
+            labels: Labels for each data source in multi-source mode (for legend)
+            color: Column name for color grouping in single-source mode
+            title: Plot title (optional)
+            xlabel: X axis label (defaults to x_name or column name)
+            ylabel: Y axis label (defaults to y_name or column name)
+            x_name: Display name for X variable (alternative to xlabel)
+            y_name: Display name for Y variable (alternative to ylabel)
+            figsize: Figure size as (width, height) in pixels (default: (800, 600))
+            dpi: Resolution in dots per inch (default: 100)
+            markers: Show markers at data points (default: True)
+            linewidth: Line width (default: 1.5)
+            marker_size: Marker size (default: 5)
+            x_tick_rotation: Rotation angle for x-axis tick labels in degrees
+            y_tick_rotation: Rotation angle for y-axis tick labels in degrees
+            grid: Show grid lines (default True)
+            legend_loc: Legend location ("upper right", "upper left", etc.)
+            legend_outside: Place legend outside plot area to the right (default False)
+
+        Returns:
+            PlotOperation for line plot
+        """
+        return PlotOperation("line", data=data, x=x, y=y, labels=labels,
+                            color=color, title=title, xlabel=xlabel, ylabel=ylabel,
+                            x_name=x_name, y_name=y_name, figsize=figsize, dpi=dpi,
+                            markers=markers, linewidth=linewidth, marker_size=marker_size,
+                            x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                            grid=grid, legend_loc=legend_loc, legend_outside=legend_outside)
+
     # --- Instance methods ---
 
     def __init__(self, *args, **kwargs):
@@ -421,6 +498,9 @@ echo "=== Plot ready ==="
                 data = op.params.get("data")
                 if not isinstance(data, list) or len(data) < 1:
                     raise ValueError(f"Column operation {i} requires 'data' to be a list with at least one source")
+            elif op.op_type == "line":
+                if not op.params.get("x") or not op.params.get("y"):
+                    raise ValueError(f"Line operation {i} requires both 'x' and 'y' parameters")
             elif op.op_type == "heatmap":
                 # Either pivot mode (x, y, value) or correlation mode (columns)
                 has_pivot = op.params.get("x") and op.params.get("y") and op.params.get("value")

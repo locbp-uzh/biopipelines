@@ -6,7 +6,7 @@
 """
 Plot generation helper script for BioPipelines.
 
-Executes a sequence of plot operations (Scatter, Histogram, Bar, Column)
+Executes a sequence of plot operations (Scatter, Histogram, Bar, Column, Line)
 based on a JSON configuration file. Produces PNG figures
 using matplotlib and seaborn.
 """
@@ -714,6 +714,147 @@ class PlotBuilder:
             "data_sources": self._get_data_source_name(data_ref)
         })
 
+    def execute_line(self, op: Dict[str, Any], output_path: str):
+        """
+        Execute Line operation - create line plot for evolution/trend data.
+
+        Supports two modes:
+        1. Multi-source: data is a list, one line per source
+        2. Single-source: one table, optionally split by color column
+
+        Args:
+            op: Operation dict with data, x, y, labels, color, markers, etc.
+            output_path: Path to save the plot
+        """
+        data_ref = op.get("data")
+        x_col = op.get("x")
+        y_col = op.get("y")
+        labels = op.get("labels")
+        color_col = op.get("color")
+        title = op.get("title")
+        xlabel = self._resolve_label(op.get("xlabel"), op.get("x_name"), x_col)
+        ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col)
+        dpi = op.get("dpi", 100)
+        figsize_px = op.get("figsize", [800, 600])
+        figsize = (figsize_px[0] / dpi, figsize_px[1] / dpi)
+        markers = op.get("markers", True)
+        linewidth = op.get("linewidth", 1.5)
+        marker_size = op.get("marker_size", 5)
+        x_tick_rotation = op.get("x_tick_rotation", 0)
+        y_tick_rotation = op.get("y_tick_rotation", 0)
+        grid = op.get("grid", True)
+        legend_loc = op.get("legend_loc", "upper right")
+        legend_outside = op.get("legend_outside", False)
+
+        marker_style = 'o' if markers else None
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        multi_source = isinstance(data_ref, list)
+        source_names = []
+        export_parts = []
+
+        if multi_source:
+            # Multi-source mode: one line per data source
+            dataframes = []
+            for i, ref in enumerate(data_ref):
+                df = self._resolve_data_source(ref)
+                if x_col not in df.columns:
+                    raise ValueError(f"Column '{x_col}' not found in source {i}. Available: {list(df.columns)}")
+                if y_col not in df.columns:
+                    raise ValueError(f"Column '{y_col}' not found in source {i}. Available: {list(df.columns)}")
+                # Try numeric conversion for proper sorting
+                df = df.copy()
+                df[x_col] = pd.to_numeric(df[x_col], errors='ignore')
+                df = df.sort_values(x_col)
+                dataframes.append(df)
+                source_names.append(self._get_data_source_name(ref))
+
+            group_labels = labels if labels and len(labels) == len(dataframes) else source_names
+            n_lines = len(dataframes)
+            palette = plt.cm.tab10 if n_lines <= 10 else plt.cm.tab20
+            colors = palette(np.linspace(0, 1, min(n_lines, palette.N)))
+
+            for i, (df, label, color) in enumerate(zip(dataframes, group_labels, colors)):
+                ax.plot(df[x_col], df[y_col], label=label, color=color,
+                        marker=marker_style, linewidth=linewidth, markersize=marker_size,
+                        alpha=0.8)
+                part = df[[x_col, y_col]].copy()
+                part["source"] = label
+                export_parts.append(part)
+
+        else:
+            # Single-source mode
+            df = self._resolve_data_source(data_ref)
+            if x_col not in df.columns:
+                raise ValueError(f"Column '{x_col}' not found in data. Available: {list(df.columns)}")
+            if y_col not in df.columns:
+                raise ValueError(f"Column '{y_col}' not found in data. Available: {list(df.columns)}")
+
+            df = df.copy()
+            df[x_col] = pd.to_numeric(df[x_col], errors='ignore')
+            source_names.append(self._get_data_source_name(data_ref))
+
+            if color_col and color_col in df.columns:
+                # Split by color column
+                groups = df[color_col].unique()
+                n_lines = len(groups)
+                palette = plt.cm.tab10 if n_lines <= 10 else plt.cm.tab20
+                colors = palette(np.linspace(0, 1, min(n_lines, palette.N)))
+
+                for group, color in zip(groups, colors):
+                    subset = df[df[color_col] == group].sort_values(x_col)
+                    ax.plot(subset[x_col], subset[y_col], label=str(group), color=color,
+                            marker=marker_style, linewidth=linewidth, markersize=marker_size,
+                            alpha=0.8)
+
+                export_cols = [x_col, y_col, color_col]
+                export_parts.append(df[export_cols].sort_values([color_col, x_col]))
+            else:
+                # Single line
+                df = df.sort_values(x_col)
+                ax.plot(df[x_col], df[y_col], color='#1f77b4',
+                        marker=marker_style, linewidth=linewidth, markersize=marker_size,
+                        alpha=0.8)
+                export_parts.append(df[[x_col, y_col]])
+
+        # Legend (show when multiple lines)
+        has_legend = multi_source and len(dataframes) > 1
+        if not multi_source and color_col and color_col in df.columns:
+            has_legend = len(df[color_col].unique()) > 1
+
+        if has_legend:
+            if legend_outside:
+                ax.legend(fontsize=9, loc='center left', bbox_to_anchor=(1.02, 0.5), frameon=True)
+            else:
+                ax.legend(fontsize=9, loc=legend_loc)
+
+        self._apply_style(ax, title, xlabel, ylabel,
+                         x_tick_rotation=x_tick_rotation, y_tick_rotation=y_tick_rotation,
+                         grid=grid)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
+        plt.close()
+
+        print(f"  Created line plot: {output_path}")
+
+        # Export CSV
+        csv_path = os.path.splitext(output_path)[0] + ".csv"
+        export_df = pd.concat(export_parts, ignore_index=True)
+        export_df.to_csv(csv_path, index=False, na_rep="")
+        print(f"  Exported data: {csv_path}")
+
+        # Record metadata
+        self.metadata.append({
+            "filename": os.path.basename(output_path),
+            "type": "line",
+            "title": title or "",
+            "x_column": x_col,
+            "y_column": y_col,
+            "data_sources": "; ".join(source_names)
+        })
+
     def execute_operation(self, op: Dict[str, Any], output_path: str):
         """
         Execute a single operation.
@@ -732,6 +873,8 @@ class PlotBuilder:
             self.execute_bar(op, output_path)
         elif op_type == "column":
             self.execute_column(op, output_path)
+        elif op_type == "line":
+            self.execute_line(op, output_path)
         elif op_type == "heatmap":
             self.execute_heatmap(op, output_path)
         else:

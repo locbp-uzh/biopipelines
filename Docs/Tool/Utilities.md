@@ -573,6 +573,7 @@ Creates plots from CSV data.
 - `Histogram(data, x)` - Distribution histogram
 - `Bar(data, x, y)` - Bar chart
 - `Column(data, y, labels, style)` - Prism-style column plot
+- `Line(data, x, y, labels, color)` - Line plot for evolution/trends
 - `HeatMap(data, columns)` - Correlation heatmap
 
 **Column styles**: "column", "simple_bar", "scatter", "box", "floating_bar"
@@ -597,6 +598,16 @@ Plot(
         y="plddt",
         labels=["Cycle 0", "Cycle 1"],
         style="box"
+    )
+)
+
+Plot(
+    Plot.Line(
+        data=[best1.tables.result, best2.tables.result, best3.tables.result],
+        x="iteration",
+        y="affinity_probability_binary",
+        labels=["best1", "best2", "best3"],
+        title="Affinity Evolution"
     )
 )
 ```
