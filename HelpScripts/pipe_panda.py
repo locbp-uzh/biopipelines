@@ -1071,12 +1071,12 @@ def run_panda(config_data: Dict[str, Any]) -> None:
             filtered_ids_for_lookup = filtered_ids
 
     # Handle pool mode
-    if use_pool_mode and pool_file_maps:
+    if use_pool_mode:
         output_dir = os.path.dirname(output_csv)
 
-        # Extract files only if we have IDs to extract
+        # Extract files only if we have IDs to extract and file-based streams exist
         extracted = {}
-        if filtered_ids_for_lookup:
+        if filtered_ids_for_lookup and pool_file_maps and any(fm for fm in pool_file_maps):
             # Use multi-pool extraction if we have source_table column and multiple pools
             if len(pool_file_maps) > 1 and 'source_table' in result_df.columns:
                 extracted = extract_from_multiple_pools(
