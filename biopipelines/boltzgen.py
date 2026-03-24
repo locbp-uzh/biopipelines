@@ -396,6 +396,18 @@ echo "=== BoltzGen installation complete ==="
         if self.devices is not None and self.devices <= 0:
             raise ValueError("devices must be positive")
 
+        # Warn if analysis step will run with less than 64GB memory (OOM risk)
+        has_analysis = "analysis" in self.steps or not self.steps
+        if has_analysis:
+            mem_str = self.resources.get("memory", "")
+            if mem_str:
+                mem_gb = int(''.join(c for c in mem_str if c.isdigit()))
+                if "MB" in mem_str.upper():
+                    mem_gb = mem_gb // 1024
+                if mem_gb < 64:
+                    print(f'[Warning] BoltzGen "analysis" step may require >=64GB memory (currently {mem_str}). '
+                          f'Risk of OOM (SIGKILL). Consider increasing memory with pipeline.resources(memory="64GB").')
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input design specification and dependencies."""
         self.folders = pipeline_folders
