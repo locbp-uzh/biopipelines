@@ -6,7 +6,7 @@
 Plot tool with declarative operation-based API for data visualization.
 
 Creates PNG plots from CSV tables using a sequence of operations like
-Scatter, Histogram, Bar, Column. Supports multiple data sources for
+Scatter, Histogram, Bar, Column, Line. Supports multiple data sources for
 comparison and table column references for data access.
 """
 
@@ -442,7 +442,7 @@ echo "=== Plot ready ==="
         Initialize Plot tool with a sequence of plot operations.
 
         Args:
-            *args: Sequence of plot operations (Scatter, Histogram, Bar, Column)
+            *args: Sequence of plot operations (Scatter, Histogram, Bar, Column, Line)
             **kwargs: Additional configuration parameters
 
         Output:
@@ -465,7 +465,7 @@ echo "=== Plot ready ==="
 
             if data is not None:
                 if isinstance(data, list):
-                    # Column plot with multiple data sources
+                    # Column/Line plot with multiple data sources
                     for d in data:
                         if d not in self._data_sources:
                             self._data_sources.append(d)
