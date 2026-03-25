@@ -382,7 +382,7 @@ echo "=== Boltz2 installation complete ==="
 
         # Fix NVRTC builtins path for CUDA 13.0 (Colab compatibility)
         script_content += """# NVRTC builtins fix for CUDA 13.0
-CU13_LIB=$(python -c "import nvidia.cu13; import os; print(os.path.join(os.path.dirname(nvidia.cu13.__file__), 'lib'))" 2>/dev/null)
+CU13_LIB=$(find "$CONDA_PREFIX" -path "*/nvidia/cu13/lib" -type d 2>/dev/null | head -1)
 if [ -n "$CU13_LIB" ] && [ -d "$CU13_LIB" ]; then
     export LD_LIBRARY_PATH="$CU13_LIB:${LD_LIBRARY_PATH:-}"
     echo "Added $CU13_LIB to LD_LIBRARY_PATH for NVRTC compatibility"
