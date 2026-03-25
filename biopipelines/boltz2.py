@@ -64,19 +64,6 @@ fi
 {env_manager} activate Boltz2Env
 pip install boltz[cuda] -U
 
-# Fix NVRTC builtins for CUDA 13.0 (Colab compatibility)
-NVRTC_DIR=$(python -c "import nvidia.cuda_nvrtc; import os; print(os.path.dirname(nvidia.cuda_nvrtc.__file__))" 2>/dev/null)/lib
-CU13_DIR=$(python -c "import nvidia.cu13; import os; print(os.path.dirname(nvidia.cu13.__file__))" 2>/dev/null)/lib
-if [ -d "$CU13_DIR" ] && [ -d "$NVRTC_DIR" ]; then
-    for f in "$CU13_DIR"/libnvrtc*; do
-        base=$(basename "$f")
-        if [ ! -e "$NVRTC_DIR/$base" ]; then
-            ln -sf "$f" "$NVRTC_DIR/$base"
-            echo "Symlinked $base for NVRTC compatibility"
-        fi
-    done
-fi
-
 echo "=== Boltz2 installation complete ==="
 """
 
@@ -392,6 +379,16 @@ echo "=== Boltz2 installation complete ==="
         script_content += "# Boltz2 execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
+
+        # Fix NVRTC builtins path for CUDA 13.0 (Colab compatibility)
+        script_content += """# NVRTC builtins fix for CUDA 13.0
+CU13_LIB=$(python -c "import nvidia.cu13; import os; print(os.path.join(os.path.dirname(nvidia.cu13.__file__), 'lib'))" 2>/dev/null)
+if [ -n "$CU13_LIB" ] && [ -d "$CU13_LIB" ]; then
+    export LD_LIBRARY_PATH="$CU13_LIB:${LD_LIBRARY_PATH:-}"
+    echo "Added $CU13_LIB to LD_LIBRARY_PATH for NVRTC compatibility"
+fi
+
+"""
 
         # Create basic folder structure
         script_content += f"""# Create output folders
