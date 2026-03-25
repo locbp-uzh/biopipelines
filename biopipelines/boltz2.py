@@ -64,6 +64,19 @@ fi
 {env_manager} activate Boltz2Env
 pip install boltz[cuda] -U
 
+# Fix NVRTC builtins for CUDA 13.0 (Colab compatibility)
+NVRTC_DIR=$(python -c "import nvidia.cuda_nvrtc; import os; print(os.path.dirname(nvidia.cuda_nvrtc.__file__))" 2>/dev/null)/lib
+CU13_DIR=$(python -c "import nvidia.cu13; import os; print(os.path.dirname(nvidia.cu13.__file__))" 2>/dev/null)/lib
+if [ -d "$CU13_DIR" ] && [ -d "$NVRTC_DIR" ]; then
+    for f in "$CU13_DIR"/libnvrtc*; do
+        base=$(basename "$f")
+        if [ ! -e "$NVRTC_DIR/$base" ]; then
+            ln -sf "$f" "$NVRTC_DIR/$base"
+            echo "Symlinked $base for NVRTC compatibility"
+        fi
+    done
+fi
+
 echo "=== Boltz2 installation complete ==="
 """
 
