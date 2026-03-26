@@ -17,6 +17,7 @@ Input entities and utility tools.
 
 **Loading & MSA**:
 - [Load / LoadMultiple](Tool/Utilities.md#Load) - Load previous outputs
+- [MSA](Tool/Utilities.md#msa) - MSA format conversion (CSV/A3M)
 - [MMseqs2](Tool/Utilities.md#mmseqs2) - MSA generation
 
 **Visualization**:

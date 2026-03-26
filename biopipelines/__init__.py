@@ -40,6 +40,7 @@ from .pymol import PyMOL
 from .fuse import Fuse
 from .plot import Plot
 from .panda import Panda
+from .msa import MSA
 from .mmseqs2 import MMseqs2, MMseqs2Server
 from .remap import ReMap
 from .gnina import Gnina
@@ -107,6 +108,7 @@ __all__ = [
     'Fuse',
     'Plot',
     'Panda',
+    'MSA',
     'MMseqs2',
     'MMseqs2Server',
     'ReMap',

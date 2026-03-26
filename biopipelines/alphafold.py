@@ -17,12 +17,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
+    from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
+    from datastream_resolver import resolve_input_to_datastream
 
 
 class AlphaFold(BaseConfig):
@@ -117,9 +119,11 @@ echo "=== AlphaFold installation complete ==="
     propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
     update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
     unsanitize_ids_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_unsanitize_ids.py"))
+    msa_copy_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_msa_copy.py"))
 
     def __init__(self,
                  proteins: Union[DataStream, StandardizedOutput],
+                 msas: Optional[StandardizedOutput] = None,
                  num_relax: int = 0,
                  num_recycle: int = 3,
                  rand_seed: int = 0,
@@ -130,6 +134,10 @@ echo "=== AlphaFold installation complete ==="
         Args:
             proteins: Input protein sequences as DataStream or StandardizedOutput.
                       Use Sequence("MKTVRQ...") to create from raw sequence strings.
+            msas: Pre-computed MSAs as StandardizedOutput with msas stream in A3M format.
+                  When provided, these MSAs are copied into the Folding directory so
+                  ColabFold skips MSA generation for matching queries.
+                  Use MSA(source, convert="a3m") to convert from CSV if needed.
             num_relax: Number of best models to relax with AMBER
             num_recycle: Number of recycling iterations (default 3)
             rand_seed: Random seed for reproducible results (0 = random)
@@ -153,6 +161,13 @@ echo "=== AlphaFold installation complete ==="
         else:
             raise ValueError(f"proteins must be DataStream or StandardizedOutput, got {type(proteins)}")
 
+        # Pre-computed MSAs for recycling
+        self.msas_input = msas
+        if msas is not None:
+            self.msas_stream_input = resolve_input_to_datastream(msas, fallback_stream="msas")
+        else:
+            self.msas_stream_input = None
+
         # Store AlphaFold-specific parameters
         self.num_relax = num_relax
         self.num_recycle = num_recycle
@@ -164,6 +179,14 @@ echo "=== AlphaFold installation complete ==="
         """Validate AlphaFold-specific parameters."""
         if not self.sequences_stream or len(self.sequences_stream) == 0:
             raise ValueError("proteins parameter is required and must not be empty")
+
+        if self.msas_stream_input is not None:
+            fmt = self.msas_stream_input.format
+            if fmt != "a3m":
+                raise ValueError(
+                    f"AlphaFold requires MSAs in A3M format, got '{fmt}'. "
+                    f"Use MSA(source, convert=\"a3m\") to convert first."
+                )
 
         if self.num_relax < 0:
             raise ValueError("num_relax cannot be negative")
@@ -187,6 +210,9 @@ echo "=== AlphaFold installation complete ==="
             f"NUM RECYCLE: {self.num_recycle}"
         ])
 
+        if self.msas_stream_input is not None:
+            config_lines.append(f"PRE-COMPUTED MSAs: {len(self.msas_stream_input)} files ({self.msas_stream_input.format})")
+
         if self.rand_seed > 0:
             config_lines.append(f"RAND SEED: {self.rand_seed}")
 
@@ -199,6 +225,7 @@ echo "=== AlphaFold installation complete ==="
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += self._generate_script_prepare_sequences()
+        script_content += self._generate_msa_copy_section()
         script_content += self._generate_script_run_alphafold()
         script_content += self._generate_script_extract_best_rank()
         script_content += self._generate_script_extract_confidence()
@@ -234,6 +261,21 @@ else
     echo "This usually means the previous step failed to generate the expected output"
     exit 1
 fi
+
+"""
+
+    def _generate_msa_copy_section(self) -> str:
+        """Generate script section to copy pre-computed MSA files to Folding directory."""
+        if self.msas_input is None:
+            return ""
+
+        msa_table_path = self.msas_input.tables.msas.info.path
+
+        return f"""echo "Copying pre-computed MSA files to Folding directory"
+mkdir -p "{self.folding_folder}"
+python "{self.msa_copy_py}" \\
+    --msa-table "{msa_table_path}" \\
+    --output-folder "{self.folding_folder}"
 
 """
 
@@ -482,7 +524,8 @@ fi
             "af_params": {
                 "num_relax": self.num_relax,
                 "num_recycle": self.num_recycle,
-                "rand_seed": self.rand_seed
+                "rand_seed": self.rand_seed,
+                "msas": str(self.msas_input) if self.msas_input else None
             }
         })
         return base_dict

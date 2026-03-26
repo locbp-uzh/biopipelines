@@ -8,3 +8,4 @@ from biopipelines.ligand import Ligand
 from biopipelines.sequence import Sequence
 from biopipelines.compound_library import CompoundLibrary
 from biopipelines.table import Table
+from biopipelines.msa import MSA

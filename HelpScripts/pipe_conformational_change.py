@@ -269,11 +269,18 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
         unique=True
     )
     if selection_config['type'] not in ('all', 'fixed'):
-        target_to_sele_id = get_mapped_ids(
-            source_ids=target_ids,
-            target_ids=list(selection_map.keys()),
-            unique=True
-        )
+        if len(selection_map) == 1:
+            single_sele_id, single_sele_value = next(iter(selection_map.items()))
+            print(f"Using single selection for all structures: {single_sele_value}")
+            target_to_sele_id = None
+            for target_id in target_ids:
+                selection_map[target_id] = single_sele_value
+        else:
+            target_to_sele_id = get_mapped_ids(
+                source_ids=target_ids,
+                target_ids=list(selection_map.keys()),
+                unique=True
+            )
     else:
         target_to_sele_id = None
 

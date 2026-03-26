@@ -407,7 +407,42 @@ cycle10 = LoadMultiple("/path/to/job/", suffix="Cycle10")
 
 ---
 
-## MSA Generation
+## MSA Conversion & Generation
+
+### MSA
+
+Converts Multiple Sequence Alignment files between CSV (Boltz2 public server) and A3M (AlphaFold/ColabFold) formats. Enables MSA recycling between prediction tools.
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `msas`: StandardizedOutput - Tool output with an msas stream (e.g., from Boltz2, AlphaFold, MMseqs2)
+- `convert`: str - Target format: "a3m" or "csv" (required)
+
+**Streams**: `msas`
+
+**Tables**:
+- `msas`: | id | sequences.id | sequence | msa_file |
+
+**MSA Recycling Compatibility**:
+
+| Direction | Works? | Notes |
+|-----------|--------|-------|
+| Boltz2 → CSV → A3M → AlphaFold | No | AlphaFold/ColabFold ignores converted A3M files and re-queries the MMseqs2 server. The converted files lack the original sequence headers that ColabFold expects. |
+| AlphaFold → A3M → CSV → Boltz2 | Yes | A3M-to-CSV conversion works correctly. Boltz2 accepts the converted CSV MSAs for recycling. |
+
+**Examples**:
+
+```python
+from biopipelines.msa import MSA
+
+# Convert AlphaFold A3M MSAs to CSV for Boltz2 (supported)
+af2_result = AlphaFold(proteins=seq)
+csv_msas = MSA(af2_result, convert="csv")
+boltz = Boltz2(proteins=seq, ligands=lig, msas=csv_msas)
+```
+
+---
 
 ### MMseqs2
 
