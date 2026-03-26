@@ -1,7 +1,3 @@
-# Mirror the 'public' branch to GitHub as 'main'
-# Requires CI/CD variable GITHUB_PUSH_TOKEN (a GitHub PAT with repo scope)
-# Set in: GitLab > Settings > CI/CD > Variables (masked & protected)
-
 mirror-to-github:
   stage: deploy
   rules:
