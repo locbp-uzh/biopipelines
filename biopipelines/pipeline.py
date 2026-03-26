@@ -1130,7 +1130,10 @@ umask 002
         tool_info = []
         for tool_output in self.tool_outputs:
             label = f"{tool_output.execution_order:03d}_{tool_output.tool_type}"
-            std_output = tool_output.output
+            try:
+                std_output = tool_output.output
+            except Exception:
+                continue
 
             # Collect IDs from all non-empty streams (deduplicated, order-preserving)
             seen = set()
