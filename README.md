@@ -3,6 +3,46 @@
 [![Documentation](https://img.shields.io/badge/docs-readthedocs-blue)](https://biopipelines.readthedocs.io/en/latest/)
 [![Preprint](https://img.shields.io/badge/preprint-bioRxiv-B31B1B)](https://www.biorxiv.org/content/10.64898/2026.03.11.711024v1)
 
+## Repository Structure
+
+This repository is hosted on the lab's internal GitLab instance and is **not** the same as the public GitHub mirror.
+
+### Branches
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Internal lab branch — shared within the group; may contain work-in-progress tools and pipelines not yet ready for public release |
+| `public` | Stable, release-ready code — automatically mirrored to [GitHub](https://github.com/locbp-uzh/biopipelines) |
+| `<name>-main` | Personal development branch for a lab member (e.g. `gianluca-main`) |
+| `<name>-tool-<toolname>` | Isolated feature branch for a specific tool or component (e.g. `gianluca-tool-esmfold`) |
+| `release/<version>` | Short-lived branch for batching cherry-picks before a public release (e.g. `release/1.2.0`) — deleted after the merge request to `public` is accepted |
+
+### Workflow
+
+```
+<name>-tool-<feature>          # develop a new tool or larger feature in isolation
+        │
+        └──► <name>-main       # merge feature branch back when ready
+                │
+                └──► main      # squash and push when the work is stable enough to share internally
+                        │
+                        └──► public   # cherry-pick specific commits; open a merge request for review
+                                │
+                                └──► GitHub (automatic mirror)
+```
+
+### Guidelines
+
+- **Personal `<name>-main` branches** are the default place for day-to-day development. Commits can be messy here.
+- **Feature branches** (`<name>-tool-<toolname>`) should be used for larger, self-contained additions. Merge back into your personal branch when done.
+- **Merging to `main`**: squash your commits into one clean commit before pushing to `main`. Open a merge request, so that it will be properly evaluated for potential transfer to `public`. — `main` is for internal sharing, not gated releases.
+- **Promoting to `public`**: cherry-pick only the commits that are stable and ready for external users. Open a merge request so at least one other person reviews before the code lands on GitHub.
+  - If you have several features to release at once, create a `release/<version>` branch, cherry-pick onto it, and open a single merge request to `public`. Delete the release branch afterwards.
+- **Bug fixes** follow the same path: fix on `<name>-main`, squash to `main`, cherry-pick to `public` with a merge request.
+- `main` and `public` are intentionally kept separate — **not everything on `main` belongs in `public`**.
+
+---
+
 ## Overview
 
 A Python framework for automated computational protein design workflows that can run in Jupyter/Colab notebooks as well as on SLURM-based computing clusters. BioPipelines provides standardized interfaces to connect bioinformatics tools.
