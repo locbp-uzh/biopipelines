@@ -10,7 +10,7 @@ import os
 from typing import Dict, List, Any, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -18,7 +18,7 @@ try:
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -31,59 +31,23 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         repo_dir = folders.get("LigandMPNN", "")
         parent_dir = os.path.dirname(repo_dir)
-        if env_manager == "pip":
-            skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ]; then
-    echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing LigandMPNN (pip) ==="
-{skip}mkdir -p {parent_dir}
-cd {parent_dir}
-if [ ! -d "{repo_dir}" ]; then
-    git clone https://github.com/dauparas/LigandMPNN.git
-fi
-cd {repo_dir}
-bash get_model_params.sh "./model_params"
-
-pip install -r requirements.txt
-
-echo "=== LigandMPNN installation complete ==="
-"""
-        if env_manager == "micromamba":
-            skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ] && micromamba env list 2>/dev/null | grep -q "ligandmpnn_env"; then
-    echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing LigandMPNN (micromamba) ==="
-{skip}mkdir -p {parent_dir}
-cd {parent_dir}
-if [ ! -d "{repo_dir}" ]; then
-    git clone https://github.com/dauparas/LigandMPNN.git
-fi
-cd {repo_dir}
-bash get_model_params.sh "./model_params"
-
-micromamba create -n ligandmpnn_env python=3.11 -y
-micromamba run -n ligandmpnn_env pip install -r requirements.txt
-micromamba run -n ligandmpnn_env pip install "numpy<2" "pandas<2" "setuptools<70"
-
-echo "=== LigandMPNN installation complete ==="
-"""
+        biopipelines = folders.get("biopipelines", "")
+        env_check = cls._env_exists_check("ligandmpnn_env", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ] && {env_manager} env list 2>/dev/null | grep -q "ligandmpnn_env"; then
+if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ] && {env_check}; then
     echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("ligandmpnn_env", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("ligandmpnn_env", env_manager, biopipelines)
         return f"""echo "=== Installing LigandMPNN ==="
 {skip}mkdir -p {parent_dir}
 cd {parent_dir}
@@ -93,28 +57,40 @@ fi
 cd {repo_dir}
 bash get_model_params.sh "./model_params"
 
-{env_manager} create -n ligandmpnn_env python=3.11 -y
-{env_manager} activate ligandmpnn_env
-pip install -r requirements.txt
-pip install "numpy<2" "pandas<2"
+{remove_block}
+{env_block}
+# LigandMPNN's own pinned requirements (lives in the cloned repo)
+{env_manager} run -n ligandmpnn_env pip install -r {repo_dir}/requirements.txt
 
-echo "=== LigandMPNN installation complete ==="
+# Verify installation
+if [ -d "{repo_dir}/model_params" ] && {env_manager} run -n ligandmpnn_env python -c "import torch" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== LigandMPNN installation complete ==="
+else
+    echo "ERROR: LigandMPNN verification failed (model_params missing or torch not importable)"
+    exit 1
+fi
 """
 
-    # Lazy path descriptors
-    seqs_folder = Path(lambda self: os.path.join(self.output_folder, "seqs"))
-    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"queries.csv"))
-    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"queries.fasta"))
-    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
-    positions_json = Path(lambda self: os.path.join(self.output_folder, "lmpnn_positions.json"))
+    # Lazy path descriptors — same shape as ProteinMPNN on the new layout.
+    #   configuration/  — structures JSON, positions JSON.
+    #   execution/      — LigandMPNN CLI writes seqs/ here.
+    #   sequences/      — content-bearing stream (sequences.csv + .fasta).
+    #   tables/         — missing.
+    lmpnn_out_folder = Path(lambda self: self.execution_folder)
+    seqs_folder = Path(lambda self: self.execution_path("seqs"))
+    queries_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
+    structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
+    positions_json = Path(lambda self: self.configuration_path("lmpnn_positions.json"))
 
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
 
     # Helper script paths
-    fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
+    fa_to_csv_fasta_py = Path(lambda self: self.pipe_script_path("pipe_fa_to_csv_fasta.py"))
     lmpnn_folder = Path(lambda self: os.path.join(self.folders["data"], "LigandMPNN"))
-    runtime_positions_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_lmpnn_runtime_positions.py"))
-    resolve_positions_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "resolve_lmpnn_positions.py"))
+    runtime_positions_py = Path(lambda self: self.pipe_script_path("pipe_lmpnn_runtime_positions.py"))
+    resolve_positions_py = Path(lambda self: self.pipe_script_path("resolve_lmpnn_positions.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -128,6 +104,9 @@ echo "=== LigandMPNN installation complete ==="
                  num_batches: int = 1,
                  remove_duplicates: bool = True,
                  fill_gaps: str = "G",
+                 temperature: float = 0.0,
+                 bias_AA_per_residue: str = "",
+                 seed: int = 0,
                  **kwargs):
         """
         Initialize LigandMPNN configuration.
@@ -149,6 +128,13 @@ echo "=== LigandMPNN installation complete ==="
             remove_duplicates: Remove duplicate sequences from output (default True)
             fill_gaps: Amino acid to replace X (unknown/gap residues) with (default "G" for glycine).
                        Empty string means no filling (X is kept as-is).
+            temperature: Sampling temperature (upstream --temperature). 0.0 (default) leaves
+                       LigandMPNN at its built-in default.
+            bias_AA_per_residue: Path to a JSON file biasing per-position amino-acid logits
+                       (upstream --bias_AA_per_residue). Empty string disables. Format:
+                       {'A12': {'G': -0.3, 'C': -2.0}, ...}.
+            seed: Random seed for reproducible sampling (upstream --seed). 0 (default) lets
+                       LigandMPNN choose its own seed.
 
         Output:
             Streams: sequences (.csv), fasta (.fasta)
@@ -175,6 +161,9 @@ echo "=== LigandMPNN installation complete ==="
         self.num_batches = num_batches
         self.remove_duplicates = remove_duplicates
         self.fill_gaps = fill_gaps
+        self.temperature = temperature
+        self.bias_AA_per_residue = bias_AA_per_residue
+        self.seed = seed
 
         super().__init__(**kwargs)
 
@@ -195,10 +184,18 @@ echo "=== LigandMPNN installation complete ==="
         if self.design_within <= 0:
             raise ValueError("design_within must be positive")
 
+        if self.temperature < 0:
+            raise ValueError("temperature must be non-negative")
+
+        if self.seed < 0:
+            raise ValueError("seed must be non-negative")
+
         # Validate model name
         valid_models = ["v_32_005", "v_32_010", "v_32_020", "v_32_025"]
         if self.model not in valid_models:
             raise ValueError(f"model must be one of: {valid_models}")
+
+        _validate_freeform_string("ligand", self.ligand)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -222,7 +219,7 @@ echo "=== LigandMPNN installation complete ==="
     def generate_script(self, script_path: str) -> str:
         """Generate LigandMPNN execution script."""
 
-        # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
+        # Serialize DataStream to JSON file (proper way to pass ids + files to pipe_script)
         self.structures_stream.save_json(self.structures_json)
 
         script_content = "#!/bin/bash\n"
@@ -267,7 +264,16 @@ python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{i
         base_options += f' --batch_size {self.num_sequences}'
         base_options += f' --number_of_batches {self.num_batches}'
         base_options += f' --ligand_mpnn_cutoff_for_score "{self.design_within}"'
-        base_options += f' --out_folder "{self.output_folder}"'
+        base_options += f' --out_folder "{self.lmpnn_out_folder}"'
+
+        if self.temperature > 0:
+            base_options += f' --temperature {self.temperature}'
+
+        if self.bias_AA_per_residue:
+            base_options += f' --bias_AA_per_residue "{self.bias_AA_per_residue}"'
+
+        if self.seed > 0:
+            base_options += f' --seed {self.seed}'
 
         return f"""echo "Executing LigandMPNN commands..."
 cd {self.lmpnn_folder}
@@ -280,7 +286,7 @@ for struct_id in {Resolve.stream_ids(self.structures_json)}; do
     FIXED_OPTION=$(echo "$POSITIONS" | head -n1)
     REDESIGNED_OPTION=$(echo "$POSITIONS" | sed -n '2p')
 
-    eval python run.py {base_options} --pdb_path '"$PDB_FILE"' $FIXED_OPTION $REDESIGNED_OPTION
+    eval {self.container_prefix()}python run.py {base_options} --pdb_path '"$PDB_FILE"' $FIXED_OPTION $REDESIGNED_OPTION
 done
 
 """
@@ -343,15 +349,13 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 name="sequences",
                 path=self.queries_csv,
                 columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec", "gaps"],
-                description="LigandMPNN ligand-aware sequence generation results with binding scores",
-                count=len(sequence_ids)
+                description="LigandMPNN ligand-aware sequence generation results with binding scores"
             ),
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed (duplicates or upstream) with removal reason",
-                count="variable"
+                description="IDs removed (duplicates or upstream) with removal reason"
             )
         }
 
@@ -375,7 +379,10 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "design_within": self.design_within,
                 "chain": self.chain,
                 "model": self.model,
-                "remove_duplicates": self.remove_duplicates
+                "remove_duplicates": self.remove_duplicates,
+                "temperature": self.temperature,
+                "bias_AA_per_residue": self.bias_AA_per_residue,
+                "seed": self.seed,
             }
         })
         return base_dict

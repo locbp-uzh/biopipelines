@@ -16,13 +16,13 @@ import os
 from typing import Dict, List, Any, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -41,19 +41,21 @@ class SASA(BaseConfig):
     """
 
     TOOL_NAME = "SASA"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== SASA ==="
 echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== SASA ready ==="
 """
 
     # Lazy path descriptors
-    results_csv = Path(lambda self: os.path.join(self.output_folder, "sasa_analysis.csv"))
-    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
-    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_sasa.py"))
+    results_csv = Path(lambda self: self.table_path("sasa_analysis"))
+    structures_ds_json = Path(lambda self: self.configuration_path("structures.json"))
+    helper_script = Path(lambda self: self.pipe_script_path("pipe_sasa.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -96,6 +98,8 @@ echo "=== SASA ready ==="
         if self.dot_density < 1 or self.dot_density > 4:
             raise ValueError("dot_density must be between 1 and 4")
 
+        _validate_freeform_string("ligand", self.ligand)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
         self.folders = pipeline_folders
@@ -114,7 +118,7 @@ echo "=== SASA ready ==="
         """Generate SASA execution script."""
         import json
 
-        # Serialize structures DataStream to JSON for HelpScript to load
+        # Serialize structures DataStream to JSON for pipe_script to load
         self.structures_stream.save_json(self.structures_ds_json)
 
         script_content = "#!/bin/bash\n"
@@ -159,8 +163,7 @@ fi
                 name="sasa",
                 path=self.results_csv,
                 columns=["id", "structure", "sasa_ligand_alone", "sasa_ligand_complex", "delta_sasa"],
-                description="Solvent accessible surface area analysis",
-                count=len(self.structures_stream)
+                description="Solvent accessible surface area analysis"
             )
         }
 

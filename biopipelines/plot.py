@@ -102,18 +102,20 @@ class Plot(BaseConfig):
     """
 
     TOOL_NAME = "Plot"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Plot ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Plot ready ==="
 """
 
     # Lazy path descriptors
-    config_file = Path(lambda self: os.path.join(self.output_folder, "plot_config.json"))
-    metadata_csv = Path(lambda self: os.path.join(self.output_folder, "plot_metadata.csv"))
-    plot_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_plot.py"))
+    config_file = Path(lambda self: self.configuration_path("plot_config.json"))
+    metadata_csv = Path(lambda self: self.table_path("plot_metadata"))
+    plot_py = Path(lambda self: self.pipe_script_path("pipe_plot.py"))
 
     # --- Static methods for creating operations ---
 
@@ -612,8 +614,6 @@ echo "=== Plot ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate Plot execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# Plot execution script\n"
         script_content += self.generate_completion_check_header()
@@ -624,11 +624,16 @@ echo "=== Plot ready ==="
         return script_content
 
     def generate_script_run_plot(self) -> str:
-        """Generate the plot creation part of the script."""
+        """Generate the plot creation part of the script.
+
+        Each plot's PNG and its CSV sidecar live together in the plots/
+        stream folder. The cross-plot metadata table lives under tables/.
+        """
         config = {
             "operations": [self._serialize_operation(op) for op in self.operations],
-            "output_folder": self.output_folder,
-            "plot_filenames": [self._generate_plot_filename(op, i) for i, op in enumerate(self.operations)]
+            "output_folder": self.stream_folder("plots"),
+            "plot_filenames": [self._generate_plot_filename(op, i) for i, op in enumerate(self.operations)],
+            "tables_folder": self.tables_folder,
         }
 
         # Write config file at configuration time (not execution time)
@@ -644,13 +649,14 @@ python "{self.plot_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files."""
-        # Generate plot filenames
+        # Plot PNGs land in plots/ stream folder.
+        plots_dir = self.stream_folder("plots")
         plot_ids = []
         plot_files = []
         for i, op in enumerate(self.operations):
             plot_ids.append(f"plot_{i + 1}")
             filename = self._generate_plot_filename(op, i)
-            plot_files.append(os.path.join(self.output_folder, filename))
+            plot_files.append(os.path.join(plots_dir, filename))
 
         plots_stream = DataStream(
             name="plots",
@@ -664,23 +670,21 @@ python "{self.plot_py}" --config "{self.config_file}"
                 name="metadata",
                 path=self.metadata_csv,
                 columns=["filename", "type", "title", "x_column", "y_column", "data_sources"],
-                description="Summary of all generated plots",
-                count=len(self.operations)
+                description="Summary of all generated plots"
             )
         }
 
-        # Add a table entry for each plot's exported CSV data
+        # Add a table entry for each plot's exported CSV data. CSVs live
+        # next to their PNGs inside the plots/ stream folder so each plot
+        # is a self-contained <name>.png + <name>.csv pair.
         for i, op in enumerate(self.operations):
             png_filename = self._generate_plot_filename(op, i)
-            csv_filename = os.path.splitext(png_filename)[0] + ".csv"
-            csv_path = os.path.join(self.output_folder, csv_filename)
             table_name = os.path.splitext(png_filename)[0]
             tables[table_name] = TableInfo(
                 name=table_name,
-                path=csv_path,
+                path=self.stream_path("plots", f"{table_name}.csv"),
                 columns=[],
-                description=f"Data for plot: {op.params.get('title', op.op_type)}",
-                count="variable"
+                description=f"Data for plot: {op.params.get('title', op.op_type)}"
             )
 
         return {

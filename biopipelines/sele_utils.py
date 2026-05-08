@@ -11,7 +11,7 @@ Three formats coexist in the pipeline:
 * **Chainless**   – ``1-50+10``    (used by ProteinMPNN jsonl output, pLDDT paths)
 * **Legacy space-separated** – ``1-50 10``  (old tables, still accepted on input)
 
-All public functions live here so that HelpScripts can import them without
+All public functions live here so that pipe_scripts can import them without
 duplicating logic.
 """
 

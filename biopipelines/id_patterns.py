@@ -273,7 +273,7 @@ def expand_at(s: str, index: int) -> str:
     # Substitute
     result = s
     for m, slot_vals, si in zip(reversed(slots), reversed(slot_values), reversed(indices)):
-        result = result[:m.start()] + slot_vals[si] + result[m.end()]
+        result = result[:m.start()] + slot_vals[si] + result[m.end():]
     return result
 
 

@@ -9,6 +9,8 @@ Unified pipeline system for protein modeling workflows.
 Provides tool configurations, pipeline orchestration, and seamless integration.
 """
 
+__version__ = "1.1.1"
+
 from .pipeline import Pipeline, Bundle, Each
 from .base_config import BaseConfig, ToolOutput, IndexedTableContainer
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
@@ -43,8 +45,10 @@ from .panda import Panda
 from .msa import MSA
 from .mmseqs2 import MMseqs2, MMseqs2Server
 from .remap import ReMap
+from .mock import Mock
 from .gnina import Gnina
 from .posebusters import PoseBusters as PoseBustersTool
+from .admet_ai import ADMETAI
 from .converters import *
 from .entities import *
 
@@ -112,8 +116,10 @@ __all__ = [
     'MMseqs2',
     'MMseqs2Server',
     'ReMap',
+    'Mock',
     'Gnina',
     'PoseBustersTool',
+    'ADMETAI',
 
     # Utility functions
     'pdb_to_jsonl',

@@ -1,7 +1,45 @@
+stages:
+  - test
+  - deploy
+
+# Pytest matrix mirroring .github/workflows/tests.yml so the same
+# regressions get caught here BEFORE the mirror-to-github step exposes
+# them on the public repo.
+.pytest-template: &pytest-template
+  stage: test
+  image: python:${PYTHON_VERSION}-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install -e ".[test]"
+  script:
+    - pytest tests/ -v
+  rules:
+    # Run on every push to any branch, and on merge requests.
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+pytest:py310:
+  <<: *pytest-template
+  variables:
+    PYTHON_VERSION: "3.10"
+
+pytest:py311:
+  <<: *pytest-template
+  variables:
+    PYTHON_VERSION: "3.11"
+
+pytest:py312:
+  <<: *pytest-template
+  variables:
+    PYTHON_VERSION: "3.12"
+
 mirror-to-github:
   stage: deploy
   rules:
     - if: '$CI_COMMIT_BRANCH == "public"'
+  # Implicit dependency on the test stage: with `stages: [test, deploy]`,
+  # this job only runs after every job in `test` has succeeded for this
+  # pipeline. A red pytest -> no mirror push to GitHub.
   script:
     - git clone --branch public --single-branch "$CI_REPOSITORY_URL" repo
     - cd repo

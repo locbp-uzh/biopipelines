@@ -47,46 +47,46 @@ class RBSDesigner(BaseConfig):
     """
 
     TOOL_NAME = "RBSDesigner"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
-        if env_manager == "pip":
-            skip = "" if force_reinstall else """# Check if already installed
-if python -c "import RNA; import Bio" 2>/dev/null; then
-    echo "RBSDesigner deps already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing RBSDesigner (pip) ==="
-{skip}pip install ViennaRNA biopython
-
-echo "=== RBSDesigner installation complete ==="
-"""
+        env_check = cls._env_exists_check("rbs_designer", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_manager} env list 2>/dev/null | grep -q "rbs_designer"; then
+if {env_check}; then
     echo "RBSDesigner environment already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("rbs_designer", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("rbs_designer", env_manager, biopipelines)
         return f"""echo "=== Installing RBSDesigner ==="
 {skip}echo "Creating rbs_designer environment with ViennaRNA from bioconda..."
-{env_manager} env create -f {biopipelines}/Environments/rbs_designer.yaml -y
+{remove_block}
+{env_block}
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to create rbs_designer environment."
     echo "ViennaRNA requires the bioconda channel with flexible channel priority."
-    echo "Check {biopipelines}/Environments/rbs_designer.yaml for details."
     exit 1
 fi
 
-echo "=== RBSDesigner installation complete ==="
+# Verify installation
+if {env_manager} run -n rbs_designer python -c "import RNA" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== RBSDesigner installation complete ==="
+else
+    echo "ERROR: RBSDesigner verification failed (cannot import RNA / ViennaRNA bindings)"
+    exit 1
+fi
 """
 
     # Lazy path descriptors
-    rbs_csv = Path(lambda self: os.path.join(self.output_folder, "rbs.csv"))
-    info_txt = Path(lambda self: os.path.join(self.output_folder, "rbs_info.txt"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "rbs_designer_config.json"))
-    designer_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rbs_designer.py"))
+    rbs_csv = Path(lambda self: self.table_path("rbs"))
+    info_txt = Path(lambda self: os.path.join(self.extras_folder, "rbs_info.txt"))
+    config_file = Path(lambda self: self.configuration_path("rbs_designer_config.json"))
+    designer_py = Path(lambda self: self.pipe_script_path("pipe_rbs_designer.py"))
 
     def __init__(self,
                  sequences: Union[DataStream, StandardizedOutput],
@@ -188,8 +188,6 @@ echo "=== RBSDesigner installation complete ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to perform RBS design."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# RBSDesigner execution script\n"
         script_content += self.generate_completion_check_header()
@@ -246,8 +244,7 @@ python "{self.designer_py}" --config "{self.config_file}"
                     "min_achievable_dg", "spacing", "dg_mrna_rrna", "dg_start", "dg_spacing",
                     "dg_mrna", "dg_standby",
                 ],
-                description="RBS design results with thermodynamic parameters",
-                count=len(sequence_ids)
+                description="RBS design results with thermodynamic parameters"
             )
         }
 

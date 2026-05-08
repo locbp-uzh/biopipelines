@@ -11,9 +11,58 @@ validation, and integration with the pipeline system.
 
 import pandas as pd
 import os
+import re
 import json
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, Union, TypeVar, overload, Type
+
+
+_SAFE_FREEFORM_RE = re.compile(r'^[^"`$\\]*$')
+
+
+def _validate_freeform_string(field: str, value: Optional[str]) -> None:
+    """
+    Reject characters that would break double-quoted bash interpolation.
+
+    Call from a tool's validate_params() on any user-supplied string that is
+    later interpolated into a generated shell script (echo lines, CLI args,
+    filenames built from the value, etc.). Characters " ` $ \\ would either
+    terminate the surrounding quote context or trigger shell expansion.
+
+    Values that are legitimately shell-expression-shaped (e.g. Panda filter
+    expressions) must NOT use this helper — they need their own validator.
+    """
+    if value is None:
+        return
+    if not isinstance(value, str):
+        raise ValueError(
+            f"{field!r} must be a string, got {type(value).__name__}"
+        )
+    if not _SAFE_FREEFORM_RE.match(value):
+        raise ValueError(
+            f"{field!r}={value!r} contains one of \" ` $ \\ , which would "
+            "break the generated shell script. Please remove these characters."
+        )
+
+
+def _escape_for_double_quotes(value: str) -> str:
+    """Escape characters that retain special meaning inside a bash "..." context.
+
+    Use this for filesystem paths and other framework-generated strings that
+    are emitted into bash but would legitimately contain ``\\`` on Windows or
+    ``$`` in some environments. User-supplied free-form strings should still
+    go through ``_validate_freeform_string`` at construction time; this helper
+    is only for emission-time escaping.
+
+    Order matters: backslash must be escaped first so its replacement isn't
+    re-processed by the subsequent rules.
+    """
+    return (
+        value.replace("\\", "\\\\")
+             .replace('"', '\\"')
+             .replace("$", "\\$")
+             .replace("`", "\\`")
+    )
 
 try:
     from .config_manager import ConfigManager
@@ -41,10 +90,29 @@ class BaseConfig(ABC):
 
     # Tool-specific defaults (override in subclasses)
     TOOL_NAME = "base"
+    # Wrapper version. Bump in the subclass when the wrapper's external contract
+    # changes (CLI flag mapping, generated bash, validate_params, output streams).
+    # Independent of the upstream tool's version. The pre-commit hook enforces
+    # that this is bumped whenever the wrapper or its pipe scripts change.
+    TOOL_VERSION = "1.0"
 
     # Common path descriptors available to all tools
     pipeline_name = Path(lambda self: self._extract_pipeline_name())
     log_file = Path(lambda self: self._compute_log_file_path())
+
+    # Sub-layout inside each tool's output_folder. Tools should route their
+    # files through these descriptors instead of writing into output_folder
+    # directly:
+    #   configuration/ — config-time artifacts (input JSONs, .expected_outputs.json)
+    #   execution/     — execution-time artifacts (logs, raw model dumps)
+    #   tables/        — TableInfo CSVs and map_table CSVs
+    #   _extras/       — catch-all for anything that doesn't fit the above
+    # Per-stream folders live at <output_folder>/<stream_name>/ and are
+    # obtained via self.stream_folder(name).
+    configuration_folder = Path(lambda self: os.path.join(self.output_folder, "_configuration"))
+    execution_folder = Path(lambda self: os.path.join(self.output_folder, "_execution"))
+    tables_folder = Path(lambda self: os.path.join(self.output_folder, "tables"))
+    extras_folder = Path(lambda self: os.path.join(self.output_folder, "_extras"))
     
 
     @overload
@@ -78,6 +146,69 @@ class BaseConfig(ABC):
             Bash script content for installing this tool, or None if not defined.
         """
         return None
+
+    @staticmethod
+    def _env_exists_check(env_name: str, env_manager: str) -> str:
+        """Return a bash test expression that's true iff the env exists.
+
+        Probes by trying to launch python inside the env rather than parsing
+        ``env list`` output — the latter's column layout (leading whitespace,
+        active-env ``*`` prefix, name-vs-path columns) varies across mamba,
+        micromamba, and conda, and across hosts. The probe form is uniform.
+
+        Use as: ``if {check}; then ...`` or ``if ! {check}; then ...``.
+        """
+        return f'{env_manager} run -n {env_name} python -c "" >/dev/null 2>&1'
+
+    @classmethod
+    def _env_remove_block(cls, env_name: str, env_manager: str) -> str:
+        """Return bash that removes an existing env if present (idempotent).
+
+        Pair with ``_env_install_block`` under ``force_reinstall=True``: the
+        helper emits ``<env_manager> env create -f ...``, which fails when the
+        env already exists. Calling this beforehand makes the reinstall path
+        actually work. The existence guard avoids non-zero exit codes from
+        ``env remove`` on a non-existent env aborting the script under set -e.
+        """
+        check = cls._env_exists_check(env_name, env_manager)
+        return (
+            f'if {check}; then\n'
+            f'    echo "Removing existing {env_name} env for reinstall"\n'
+            f'    {env_manager} env remove -n {env_name} -y\n'
+            f'fi'
+        )
+
+    @staticmethod
+    def _env_install_block(env_name: str, env_manager: str, biopipelines: str) -> str:
+        """Return bash that creates an env from environments/<env>.<variant>.yaml
+        and (if present) installs environments/<env>.pip.<variant>.txt on top.
+
+        For both the conda YAML and the pip txt, falls back to the variant-less
+        filename (``<env>.yaml`` / ``<env>.pip.txt``) when the variant-specific
+        one is absent — envs that resolve identically across variants are
+        stored under a single file.
+
+        The variant is read from the active ConfigManager so each install script
+        only needs to call this helper with the env name.
+        """
+        variant = ConfigManager().get_variant()
+        env_dir = f"{biopipelines}/environments"
+        env_yaml_variant = f"{env_dir}/{env_name}.{variant}.yaml"
+        env_yaml_shared = f"{env_dir}/{env_name}.yaml"
+        pip_txt_variant = f"{env_dir}/{env_name}.pip.{variant}.txt"
+        pip_txt_shared = f"{env_dir}/{env_name}.pip.txt"
+        return (
+            f'if [ -f {env_yaml_variant} ]; then\n'
+            f'    {env_manager} env create -f {env_yaml_variant} -y\n'
+            f'else\n'
+            f'    {env_manager} env create -f {env_yaml_shared} -y\n'
+            f'fi\n'
+            f'if [ -f {pip_txt_variant} ]; then\n'
+            f'    {env_manager} run -n {env_name} pip install -r {pip_txt_variant}\n'
+            f'elif [ -f {pip_txt_shared} ]; then\n'
+            f'    {env_manager} run -n {env_name} pip install -r {pip_txt_shared}\n'
+            f'fi'
+        )
 
     @classmethod
     def install(cls, force_reinstall: bool = False, **kwargs):
@@ -224,6 +355,28 @@ class BaseConfig(ABC):
             # Single environment string
             self.environments = [env_config]
 
+    def uses_container(self) -> bool:
+        """True iff a container image is configured for this tool."""
+        folders = getattr(self, 'folders', {}) or {}
+        return f"container:{self.TOOL_NAME}" in folders
+
+    def container_prefix(self) -> str:
+        """Shell prefix that runs the next command inside this tool's container.
+
+        Returns '<executor> exec --nv -B <path1>,<path2>,... <image> ' when a
+        container is configured, else ''. Bind mounts come from the pipeline's
+        resolved folders so outputs and caches are visible inside the image.
+        Tools build commands as f"{self.container_prefix()}python foo.py ...".
+        """
+        if not self.uses_container():
+            return ""
+        folders = self.folders
+        image = folders[f"container:{self.TOOL_NAME}"]
+        binds = folders.get("__container_binds__") or []
+        executor = ConfigManager().get_container_executor()
+        bind_arg = f"-B {','.join(binds)} " if binds else ""
+        return f"{executor} exec --nv {bind_arg}{image} "
+
     def activate_environment(self, index: int = 0, name: Optional[str] = None) -> str:
         """
         Generate bash script snippet to activate an environment.
@@ -245,15 +398,18 @@ class BaseConfig(ABC):
 
         # Source resolve_stream_item.sh for runtime file resolution
         resolve_source = ""
-        helpscripts = getattr(self, 'folders', {}).get("HelpScripts", "")
-        if helpscripts:
-            resolve_sh = os.path.join(helpscripts, "resolve_stream_item.sh")
+        pipe_scripts = getattr(self, 'folders', {}).get("pipe_scripts", "")
+        if pipe_scripts:
+            resolve_sh = os.path.join(pipe_scripts, "resolve_stream_item.sh")
             resolve_source = f'source "{resolve_sh}"\n'
 
         # pip mode: no environment activation needed
         if config_manager.get_env_manager() == "pip":
             return f"# pip mode: no environment activation needed\n{resolve_source}\n"
 
+        # Container mode still activates a host env: the tool's configured env
+        # (or the biopipelines fallback from _load_environments) handles any
+        # host-side helper scripts that run outside container_prefix.
         if name is not None:
             env_name = name
         else:
@@ -304,6 +460,116 @@ echo "=============================="
                 if i > 0:
                     return folder_parts[i - 1]
         raise ValueError(f"Could not extract pipeline name from output folder: {self.output_folder}")
+
+    def stream_folder(self, name: str) -> str:
+        """Path to the subfolder that holds files for a declared output stream.
+
+        Tools should emit per-ID stream files (e.g. ``<id>.pdb``) into
+        ``self.stream_folder(stream_name)`` rather than directly into
+        ``self.output_folder``. The folder is not created here — the tool
+        (or its pipe script) is responsible for calling ``os.makedirs`` when
+        it actually writes files.
+        """
+        if not name or not isinstance(name, str):
+            raise ValueError(f"stream name must be a non-empty string, got {name!r}")
+        return os.path.join(self.output_folder, name)
+
+    def stream_path(self, name: str, *parts: str) -> str:
+        """Join ``parts`` under ``self.stream_folder(name)``.
+
+        Prefer this over ad-hoc ``os.path.join(self.stream_folder(name), ...)``
+        for files that live inside a stream folder (content tables, per-stream
+        artefacts like sequence logos).
+        """
+        return os.path.join(self.stream_folder(name), *parts)
+
+    def stream_map_path(self, name: str) -> str:
+        """Canonical path for a stream's ``map_table`` CSV.
+
+        The map_table is part of the stream, so it lives inside the stream
+        folder (next to the per-ID files), not under ``tables/``. Tables
+        folder is reserved for standalone ``TableInfo`` outputs that are
+        not tied to a specific stream (e.g. Boltz2's ``confidence.csv``).
+
+        For content-bearing streams whose map_table IS the content table
+        (Sequence, Ligand, CompoundLibrary), prefer
+        ``self.stream_path(name, f"{name}.csv")`` and point both the
+        ``DataStream.map_table`` and the ``TableInfo.path`` at it.
+        """
+        if not name or not isinstance(name, str):
+            raise ValueError(f"stream name must be a non-empty string, got {name!r}")
+        return self.stream_path(name, f"{name}_map.csv")
+
+    def table_path(self, name: str) -> str:
+        """Canonical path for a ``TableInfo`` CSV (``tables/<name>.csv``).
+
+        Prefer this over ad-hoc ``os.path.join(self.output_folder, ...)``
+        so the layout stays consistent across tools.
+        """
+        if not name or not isinstance(name, str):
+            raise ValueError(f"table name must be a non-empty string, got {name!r}")
+        return os.path.join(self.tables_folder, f"{name}.csv")
+
+    def configuration_path(self, *parts: str) -> str:
+        """Join ``parts`` under ``self.configuration_folder``.
+
+        Prefer this over ad-hoc ``os.path.join(self.configuration_folder, ...)``
+        for config-time artifacts (input JSONs/YAMLs, ``.expected_outputs.json``).
+        """
+        return os.path.join(self.configuration_folder, *parts)
+
+    def execution_path(self, *parts: str) -> str:
+        """Join ``parts`` under ``self.execution_folder``.
+
+        Prefer this over ad-hoc ``os.path.join(self.execution_folder, ...)``
+        for execution-time artifacts (raw model dumps, per-run working dirs).
+        """
+        return os.path.join(self.execution_folder, *parts)
+
+    def extras_path(self, *parts: str) -> str:
+        """Join ``parts`` under ``self.extras_folder``.
+
+        Prefer this over ad-hoc ``os.path.join(self.extras_folder, ...)``
+        for ancillary files (session dumps, debug aids) that don't fit under
+        configuration/, execution/, tables/, or a stream folder.
+        """
+        return os.path.join(self.extras_folder, *parts)
+
+    def pipe_script_path(self, *parts: str) -> str:
+        """Join ``parts`` under the repo's ``pipe_scripts/`` directory.
+
+        Prefer this over ad-hoc ``os.path.join(self.folders["pipe_scripts"], ...)``
+        for resolving the path of a runtime helper (``pipe_*.py``).
+        """
+        return os.path.join(self.folders["pipe_scripts"], *parts)
+
+    def _materialize_output_layout(self, output_files: Dict[str, Any]) -> None:
+        """Create the full sub-layout under ``output_folder`` at config time.
+
+        Called by the pipeline once the tool's ``get_output_files()`` has
+        returned, so tool authors never need to ``mkdir`` anything — the
+        four canonical sub-dirs (``configuration/``, ``execution/``,
+        ``tables/``, ``_extras/``) plus one folder per declared stream are
+        materialized in a single pass. Idempotent.
+
+        Streams are identified by duck-typing (``.map_table`` attribute),
+        same rule used by ``get_id_provenance``.
+        """
+        if not self.output_folder:
+            return
+        canonical = (self.configuration_folder, self.execution_folder,
+                     self.tables_folder, self.extras_folder)
+        for folder in canonical:
+            os.makedirs(folder, exist_ok=True)
+
+        if not isinstance(output_files, dict):
+            return
+        reserved = {"tables", "output_folder", "filter_metadata", "streams"}
+        for name, value in output_files.items():
+            if name in reserved:
+                continue
+            if hasattr(value, "map_table"):  # DataStream duck-type
+                os.makedirs(self.stream_folder(name), exist_ok=True)
 
     def _compute_log_file_path(self) -> str:
         """
@@ -619,7 +885,7 @@ fi
             expected_outputs_json = json.dumps(json_safe_outputs).replace('"', '\\"')
         
         pipe_check_completion = os.path.join(
-            self.folders.get("HelpScripts", "HelpScripts"),
+            self.folders.get("pipe_scripts", "pipe_scripts"),
             "pipe_check_completion.py"
         )
 
@@ -630,6 +896,9 @@ fi
             "tool_class": self.__class__.__name__,
             "output_structure": json_safe_outputs,
         }
+        # .expected_outputs.json is a top-level status/manifest file; it
+        # stays at the tool-folder root alongside .log so users and Load()
+        # can find it with a single ls.
         expected_outputs_file = os.path.join(self.output_folder, ".expected_outputs.json")
         os.makedirs(self.output_folder, exist_ok=True)
         with open(expected_outputs_file, 'w') as f:
@@ -695,6 +964,10 @@ class _Installer(BaseConfig):
 
     TOOL_NAME = "install"  # Overridden dynamically in __init__
 
+    # Sentinel file each install script must touch on success. Surfaces as
+    # a tracked output so the missing-check reports COMPLETED vs FAILED.
+    install_success_file = Path(lambda self: self.execution_path("install.success"))
+
     def __init__(self, parent_tool_cls: type, force_reinstall: bool = False,
                  install_kwargs: Dict[str, Any] = None, **kwargs):
         self._parent_tool_cls = parent_tool_cls
@@ -724,45 +997,62 @@ class _Installer(BaseConfig):
         script += f"# Installation: {self._parent_tool_name}\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()
+        # Each _install_script must touch "$INSTALL_SUCCESS" only after a
+        # successful verification (e.g. an import). The missing-check then
+        # reports COMPLETED only when the file exists.
+        script += f'export INSTALL_SUCCESS="{self.install_success_file}"\n'
+        script += f'rm -f "$INSTALL_SUCCESS"\n'
+        # Run the install body in a subshell so any ``exit`` inside it
+        # (e.g. the "already installed" early return) only exits the
+        # subshell. The footer below always runs and writes COMPLETED or
+        # FAILED based on whether $INSTALL_SUCCESS was touched.
+        script += "(\n"
         script += install_commands + "\n"
+        script += ")\n"
         script += self.generate_completion_check_footer()
         return script
 
     def get_output_files(self):
         return {
-            "tables": {},
+            "tables": {
+                "install_success": TableInfo(
+                    name="install_success",
+                    path=self.install_success_file,
+                    columns=[],
+                    description="Sentinel file touched by the install script on successful verification.",
+                )
+            },
             "output_folder": self.output_folder
         }
 
 
 class TableMetadata:
-    """Holds table metadata (name, path, columns, description, count)."""
+    """Holds table metadata (name, path, columns, description)."""
 
     def __init__(self, name: str, path: str, columns: List[str] = None,
-                 description: str = "", count: int = 0):
+                 description: str = ""):
         self.name = name
         self.path = path
         self.columns = columns or []
         self.description = description
-        self.count = count
 
     def __repr__(self) -> str:
-        return f"TableMetadata(name='{self.name}', path='{self.path}', columns={self.columns}, count={self.count})"
+        return f"TableMetadata(name='{self.name}', path='{self.path}', columns={self.columns})"
 
 
 class TableInfo:
     """Information about a table including name, path, and expected columns.
 
     Metadata is accessed via the .info property:
-        table.info.path, table.info.columns, table.info.count, etc.
+        table.info.path, table.info.columns, etc.
 
     All other attribute access returns TableReference objects:
         table.fixed -> TableReference(path, "fixed")
     """
 
     def __init__(self, name: str, path: str, columns: List[str] = None,
-                 description: str = "", count: int = 0):
-        self._info = TableMetadata(name, path, columns, description, count)
+                 description: str = ""):
+        self._info = TableMetadata(name, path, columns, description)
 
         # Set column attributes for IDE autocompletion
         for column in self._info.columns:
@@ -770,7 +1060,7 @@ class TableInfo:
 
     @property
     def info(self) -> TableMetadata:
-        """Access table metadata (name, path, columns, description, count)."""
+        """Access table metadata (name, path, columns, description)."""
         return self._info
 
     def _create_column_reference(self, column_name: str):
@@ -788,7 +1078,7 @@ class TableInfo:
         return f"${self._info.name}"
 
     def __repr__(self) -> str:
-        return f"TableInfo(name='{self._info.name}', path='{self._info.path}', columns={self._info.columns}, count={self._info.count})"
+        return f"TableInfo(name='{self._info.name}', path='{self._info.path}', columns={self._info.columns})"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert TableInfo to dictionary for JSON serialization."""
@@ -797,7 +1087,6 @@ class TableInfo:
             "path": self._info.path,
             "columns": self._info.columns.copy() if self._info.columns else [],
             "description": self._info.description,
-            "count": self._info.count
         }
 
 
@@ -830,14 +1119,13 @@ class IndexedTableContainer:
         self.description = description
         self._entries: Dict[str, TableInfo] = {}
 
-    def add(self, entry_id: str, path: str, count: int = 0) -> 'IndexedTableContainer':
+    def add(self, entry_id: str, path: str) -> 'IndexedTableContainer':
         """Add a per-ID table entry. Returns self for chaining."""
         self._entries[entry_id] = TableInfo(
             name=f"{self.name}_{entry_id}",
             path=path,
             columns=self.columns.copy(),
             description=f"{self.description} ({entry_id})",
-            count=count
         )
         return self
 
@@ -906,7 +1194,6 @@ class IndexedTableContainer:
                 path=info_dict.get("path", ""),
                 columns=info_dict.get("columns", []),
                 description=info_dict.get("description", ""),
-                count=info_dict.get("count", 0)
             )
         return container
 
@@ -1119,7 +1406,6 @@ class StandardizedOutput:
                             path=info.get('path', ''),
                             columns=columns,
                             description=info.get('description', ''),
-                            count=info.get('count', 0)
                         )
                 elif isinstance(info, TableInfo):
                     table_infos[name] = info
@@ -1142,8 +1428,42 @@ class StandardizedOutput:
             return TableContainer({})
     
     def __getitem__(self, key: str):
-        """Dictionary-style access: output['structures']"""
-        return self._data.get(key, [])
+        """
+        ID-based selection: output["CP1"] returns a new StandardizedOutput
+        containing only that ID across all streams.
+        """
+        from .datastream import DataStream
+
+        streams = [
+            (name, ds) for name, ds in self.streams.items()
+            if isinstance(ds, DataStream) and len(ds) > 0
+        ]
+
+        if not streams:
+            raise KeyError(f"No non-empty streams to select ID '{key}' from")
+
+        reference_name, reference_ds = streams[0]
+        try:
+            idx = list(reference_ds.ids).index(key)
+        except ValueError:
+            raise KeyError(
+                f"ID '{key}' not found in stream '{reference_name}'. "
+                f"Available IDs: {list(reference_ds.ids)}"
+            )
+
+        single_data = {}
+        for name, ds in streams:
+            has_template = len(ds.files) == 1 and '<id>' in ds.files[0]
+            single_data[name] = DataStream(
+                name=ds.name,
+                ids=[ds.ids[idx]],
+                files=ds.files if has_template else ([ds.files[idx]] if len(ds.files) > idx else []),
+                map_table=ds.map_table,
+                format=ds.format
+            )
+        single_data["output_folder"] = self.output_folder
+        single_data["tables"] = self._data.get("tables", [])
+        return StandardizedOutput(single_data)
     
     def __iter__(self):
         """
@@ -1357,7 +1677,6 @@ class StandardizedOutput:
                 lines.append(f"    path: '{make_relative_path(t_meta.path) if t_meta.path else ''}'")
                 lines.append(f"    columns: {', '.join(t_meta.columns) if t_meta.columns else ''}")
                 lines.append(f"    description: {t_meta.description}")
-                lines.append(f"    count: {t_meta.count}")
                 if t_meta.path and os.path.exists(t_meta.path):
                     try:
                         table_df = pd.read_csv(t_meta.path)
@@ -1516,6 +1835,8 @@ class StandardizedOutput:
 .bp-table .bp-ellipsis td { color: #888; font-style: italic; text-align: center; }
 .bp-section { margin-top: 8px; font-family: monospace; }
 .bp-section-title { font-weight: bold; margin-bottom: 4px; }
+.bp-table-toggle summary { cursor: pointer; font-family: monospace; color: #555; margin-bottom: 4px; }
+.bp-table-toggle[open] + .bp-table-collapsed { display: none; }
 </style>"""
 
     def _repr_html_(self) -> Optional[str]:

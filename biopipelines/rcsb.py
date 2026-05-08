@@ -319,6 +319,7 @@ class RCSB(BaseConfig):
     """
 
     TOOL_NAME = "RCSB"
+    TOOL_VERSION = "1.0"
 
     SEARCH_API_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
     GRAPHQL_URL = "https://data.rcsb.org/graphql"
@@ -334,18 +335,21 @@ class RCSB(BaseConfig):
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== RCSB ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== RCSB ready ==="
 """
 
-    # Lazy path descriptors
-    structures_csv = Path(lambda self: os.path.join(self.output_folder, "structures.csv"))
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
-    failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing_structures.csv"))
-    search_results_csv = Path(lambda self: os.path.join(self.output_folder, "search_results.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
-    pdb_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pdb.py"))
+    # Lazy path descriptors — same layout rules as PDB: each content-bearing
+    # stream's CSV lives inside the stream folder; standalone TableInfos
+    # (failed, missing, search_results) live under tables/.
+    structures_csv = Path(lambda self: self.stream_path("structures", "structures.csv"))
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    compounds_csv = Path(lambda self: self.stream_path("compounds", "compounds.csv"))
+    failed_csv = Path(lambda self: self.table_path("failed"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    search_results_csv = Path(lambda self: self.table_path("search_results"))
+    config_file = Path(lambda self: self.configuration_path("fetch_config.json"))
+    pdb_py = Path(lambda self: self.pipe_script_path("pipe_pdb.py"))
 
     # --- Static methods for creating query objects ---
 
@@ -582,7 +586,7 @@ echo "=== RCSB ready ==="
                  convert: Optional[str] = None,
                  ids: Optional[Union[str, List[str]]] = None,
                  remove_waters: bool = True,
-                 chain: str = "longest",
+                 chain: str = "auto",
                  fetch_compounds: bool = True,
                  logical_operator: str = "and",
                  **kwargs):
@@ -603,7 +607,10 @@ echo "=== RCSB ready ==="
                      The structures DataStream format will be "pdb|cif" when None.
             ids: Optional custom IDs. If None, uses PDB IDs from search results.
             remove_waters: Whether to remove water molecules (default: True)
-            chain: Which chain to extract sequence from - "longest" (default) or chain letter
+            chain: Which chain to extract sequence from. "auto" (default) emits one
+                <id>,<sequence> row per input — the longest entity returned by RCSB FASTA.
+                "all" emits one <id>_<chain_letter>,<sequence> row per chain. Specify a
+                chain letter (e.g. "A", "B") to select that single chain.
             logical_operator: How to combine multiple queries - "and" (default) or "or"
             **kwargs: Additional parameters
 
@@ -999,8 +1006,6 @@ echo "=== RCSB ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate RCSB execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# RCSB search + download execution script\n"
         script_content += self.generate_completion_check_header()
@@ -1012,7 +1017,7 @@ echo "=== RCSB ready ==="
 
     def _generate_script_body(self) -> str:
         """Generate the download execution part of the script."""
-        repo_pdbs_folder = self.folders['PDBs']
+        repo_pdbs_folder = self.folders['pdbs']
 
         # Build config for pipe_pdb.py
         config_data = {
@@ -1024,7 +1029,7 @@ echo "=== RCSB ready ==="
             "biological_assembly": False,
             "remove_waters": self.remove_waters,
             "chain": self.chain,
-            "output_folder": self.output_folder,
+            "output_folder": self.stream_folder("structures"),
             "structures_table": self.structures_csv,
             "sequences_table": self.sequences_csv,
             "failed_table": self.failed_csv,
@@ -1054,7 +1059,8 @@ python "{self.pdb_py}" --config "{self.config_file}"
     def _write_search_results_csv(self):
         """Write search_results.csv combining search scores and entry metadata."""
         import csv
-        os.makedirs(self.output_folder, exist_ok=True)
+        # tables/ auto-created by the pipeline; this is just a safety net.
+        os.makedirs(os.path.dirname(self.search_results_csv), exist_ok=True)
 
         columns = [
             "id", "pdb_id", "result_id", "score",
@@ -1093,15 +1099,16 @@ python "{self.pdb_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after search and download."""
+        structures_dir = self.stream_folder("structures")
         if self.convert is not None:
             extension = ".pdb" if self.convert == "pdb" else ".cif"
-            structure_files = [os.path.join(self.output_folder, f"{oid}{extension}")
+            structure_files = [os.path.join(structures_dir, f"{oid}{extension}")
                               for oid in self.output_ids]
             stream_format = self.convert
         else:
             # No conversion: RCSB downloads PDB if available, CIF as fallback.
             # Extension is only known at runtime, so use wildcards.
-            structure_files = [os.path.join(self.output_folder, f"{oid}.*")
+            structure_files = [os.path.join(structures_dir, f"{oid}.*")
                               for oid in self.output_ids]
             stream_format = "pdb|cif"
 
@@ -1110,22 +1117,19 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 name="structures",
                 path=self.structures_csv,
                 columns=["id", "pdb_id", "file_path", "format", "file_size", "source"],
-                description="Successfully fetched structure files from RCSB search",
-                count=len(self.pdb_ids)
+                description="Successfully fetched structure files from RCSB search"
             ),
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "sequence"],
-                description="Protein sequences extracted from structures",
-                count=len(self.pdb_ids)
+                description="Protein sequences extracted from structures"
             ),
             "compounds": TableInfo(
                 name="compounds",
                 path=self.compounds_csv,
                 columns=["id", "code", "format", "smiles", "ccd"],
-                description="Ligands extracted from PDB structures",
-                count="variable"
+                description="Ligands extracted from PDB structures"
             ),
             "search_results": TableInfo(
                 name="search_results",
@@ -1136,22 +1140,19 @@ python "{self.pdb_py}" --config "{self.config_file}"
                          "protein_entity_count", "residue_count",
                          "citation_title", "citation_journal", "citation_year",
                          "citation_authors", "release_date", "deposit_date"],
-                description="RCSB search results with scores and entry metadata",
-                count=len(self.pdb_ids)
+                description="RCSB search results with scores and entry metadata"
             ),
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
                 columns=["pdb_id", "error_message", "source", "attempted_path"],
-                description="Structures that could not be downloaded",
-                count="variable"
+                description="Structures that could not be downloaded"
             ),
             "failed": TableInfo(
                 name="failed",
                 path=self.failed_csv,
                 columns=["pdb_id", "error_message", "source", "attempted_path"],
-                description="Failed structure fetches with error details",
-                count="variable"
+                description="Failed structure fetches with error details"
             )
         }
 

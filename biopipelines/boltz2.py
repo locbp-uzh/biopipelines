@@ -14,7 +14,7 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
@@ -22,7 +22,7 @@ try:
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
@@ -38,70 +38,81 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        if env_manager == "pip":
-            skip = "" if force_reinstall else """# Check if already installed
-if python -c "import boltz" 2>/dev/null; then
-    echo "Boltz2 already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing Boltz2 (pip) ==="
-{skip}pip install boltz -U
-
-echo "=== Boltz2 installation complete ==="
-"""
+        biopipelines = folders.get("biopipelines", "")
+        env_check = cls._env_exists_check("Boltz2Env", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_manager} env list 2>/dev/null | grep -q "Boltz2Env"; then
+if {env_check}; then
     echo "Boltz2 already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("Boltz2Env", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("Boltz2Env", env_manager, biopipelines)
         return f"""echo "=== Installing Boltz2 ==="
-{skip}{env_manager} create -n Boltz2Env python=3.11 -y
-{env_manager} activate Boltz2Env
-pip install boltz[cuda] -U
+{skip}{remove_block}
+{env_block}
 
-echo "=== Boltz2 installation complete ==="
+# Verify installation
+if {env_manager} run -n Boltz2Env python -c "import boltz" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== Boltz2 installation complete ==="
+else
+    echo "ERROR: Boltz2 verification failed (cannot import boltz)"
+    exit 1
+fi
 """
 
-    # Path descriptors - lazy evaluation after output_folder is set
-    apo_config_folder = Path(lambda self: os.path.join(self.output_folder, "ApoConfig"))
-    bound_config_folder = Path(lambda self: os.path.join(self.output_folder, "BoundConfig"))
-    library_folder = Path(lambda self: os.path.join(self.output_folder, "Library"))
-    apo_prediction_folder = Path(lambda self: os.path.join(self.output_folder, "ApoPredictions"))
-    bound_prediction_folder = Path(lambda self: os.path.join(self.output_folder, "BoundPredictions"))
-    msa_cache_folder = Path(lambda self: os.path.join(self.output_folder, "MSAs"))
-    config_files_dir = Path(lambda self: os.path.join(self.output_folder, "config_files"))
+    # Path descriptors - lazy evaluation after output_folder is set.
+    #
+    # New layout:
+    #   configuration/  — input YAMLs for boltz predict, combinatorics JSON,
+    #                     sequence_ids.csv, the ligands-from-SMILES helper CSV.
+    #   execution/      — raw boltz_results_* dumps go here.
+    #   structures/     — predicted PDB/CIF + structures_map.csv.
+    #   sequences/      — content-bearing stream CSV (sequences.csv acts as map).
+    #   msas/           — MSA files (.csv or .a3m) + msas_map.csv.
+    #   tables/         — standalone TableInfo CSVs: confidence, affinity, missing.
+    #   _extras/        — scores_info.txt and other ancillary dumps.
+    config_files_dir = Path(lambda self: self.configuration_path("config_files"))
 
-    # Configuration files
-    base_config_file = Path(lambda self: os.path.join(self.output_folder, "base_config.txt"))
-    bound_config_file = Path(lambda self: os.path.join(self.bound_config_folder, "bound_config.yaml"))
-    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.get_effective_job_name() or 'prediction'}_queries.csv"))
-    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self.get_effective_job_name() or 'prediction'}_queries.fasta"))
-    expanded_library_csv = Path(lambda self: os.path.join(self.output_folder, "expanded_smiles_library.csv"))
-    fasta_files_list_file = Path(lambda self: os.path.join(self.output_folder, ".input_fasta_files.txt"))
-    sequence_ids_file = Path(lambda self: os.path.join(self.output_folder, "sequence_ids.csv"))
-    structures_map_csv = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
+    # Configuration-time artifacts
+    queries_csv = Path(lambda self: self.configuration_path(f"{self.get_effective_job_name() or 'prediction'}_queries.csv"))
+    queries_fasta = Path(lambda self: self.configuration_path(f"{self.get_effective_job_name() or 'prediction'}_queries.fasta"))
+    expanded_library_csv = Path(lambda self: self.configuration_path("expanded_smiles_library.csv"))
+    fasta_files_list_file = Path(lambda self: self.configuration_path(".input_fasta_files.txt"))
+    sequence_ids_file = Path(lambda self: self.configuration_path("sequence_ids.csv"))
+    combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
+    ligands_csv = Path(lambda self: self.configuration_path("ligands.csv"))
 
-    # Output files
-    library_scores_csv = Path(lambda self: os.path.join(self.library_folder, "library_scores.csv"))
-    config_txt_file = Path(lambda self: os.path.join(self.output_folder, f"{self.get_effective_job_name() or 'prediction'}_config.txt"))
-    results_zip = Path(lambda self: os.path.join(self.output_folder, f"{self.get_effective_job_name() or 'prediction'}.zip"))
-    confidence_csv = Path(lambda self: os.path.join(self.output_folder, "confidence_scores.csv"))
-    affinity_csv = Path(lambda self: os.path.join(self.output_folder, "affinity_scores.csv"))
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    msas_csv = Path(lambda self: os.path.join(self.output_folder, "msas.csv"))
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
-    ligands_csv = Path(lambda self: os.path.join(self.output_folder, "ligands.csv"))
+    # Raw boltz dumps
+    prediction_folder = Path(lambda self: self.execution_folder)
+    msa_cache_folder = Path(lambda self: self.stream_folder("msas"))
+
+    # Stream maps (lineage)
+    structures_map_csv = Path(lambda self: self.stream_map_path("structures"))
+    msas_csv = Path(lambda self: self.stream_map_path("msas"))
+
+    # Content-bearing stream (sequences.csv IS the content table)
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+
+    # Standalone TableInfo CSVs
+    confidence_csv = Path(lambda self: self.table_path("confidence"))
+    affinity_csv = Path(lambda self: self.table_path("affinity"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+
+    # Extras (informational)
+    scores_info_file = Path(lambda self: os.path.join(self.extras_folder, "scores_info.txt"))
 
     # Helper script paths
-    boltz_config_unified_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_config_unified.py"))
-    boltz_postprocessing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_postprocessing.py"))
-    boltz_msa_copy_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_msa_copy.py"))
-    propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
+    boltz_config_unified_py = Path(lambda self: self.pipe_script_path("pipe_boltz_config_unified.py"))
+    boltz_postprocessing_py = Path(lambda self: self.pipe_script_path("pipe_boltz_postprocessing.py"))
+    boltz_msa_copy_py = Path(lambda self: self.pipe_script_path("pipe_boltz_msa_copy.py"))
+    propagate_missing_py = Path(lambda self: self.pipe_script_path("pipe_propagate_missing.py"))
 
     def __init__(self,
                  # Primary input parameters
@@ -136,6 +147,10 @@ echo "=== Boltz2 installation complete ==="
                  covalent_linkage: Optional[Dict[str, Any]] = None,
                  # Contact constraint parameters
                  contacts: Optional[List[Dict[str, Any]]] = None,
+                 # Disulfide bond constraints
+                 disulfide_bonds: Optional[List[Dict[str, Any]]] = None,
+                 # Metal coordination bond constraints
+                 metal_coord: Optional[List[Dict[str, Any]]] = None,
                  **kwargs):
         """
         Initialize Boltz2 configuration.
@@ -168,6 +183,12 @@ echo "=== Boltz2 installation complete ==="
                       optional max_distance (4-20A, default 6.0), optional force (bool).
                       Tokens are [chain_id, residue_index] for proteins or
                       [chain_id, atom_name] for ligands (e.g. ["B", "C1"]).
+            disulfide_bonds: List of cysteine-cysteine bond constraints. Each entry is a
+                      dict with token1=[chain, residue] and token2=[chain, residue]. Atom
+                      names default to SG/SG and are filled in automatically.
+            metal_coord: List of metal-coordination bond constraints. Each entry is a dict
+                      with atom1=[chain, residue, atom] and atom2=[chain, residue, atom]
+                      (the ligand_residue defaults to 1 for single-residue metal entities).
             **kwargs: Additional parameters
 
         Output:
@@ -244,6 +265,8 @@ echo "=== Boltz2 installation complete ==="
         self.glycosylation = glycosylation
         self.covalent_linkage = covalent_linkage
         self.contacts = contacts
+        self.disulfide_bonds = disulfide_bonds
+        self.metal_coord = metal_coord
 
         super().__init__(**kwargs)
 
@@ -272,6 +295,9 @@ echo "=== Boltz2 installation complete ==="
         if self.msa_server not in ["public", "local"]:
             raise ValueError("msa_server must be 'public' or 'local'")
 
+        _validate_freeform_string("template", self.template)
+        _validate_freeform_string("config", self.config)
+
         if self.recycling_steps is not None and (not isinstance(self.recycling_steps, int) or self.recycling_steps < 1):
             raise ValueError("recycling_steps must be a positive integer")
 
@@ -294,6 +320,32 @@ echo "=== Boltz2 installation complete ==="
                     md = contact['max_distance']
                     if not isinstance(md, (int, float)) or md < 4 or md > 20:
                         raise ValueError(f"contacts[{i}]['max_distance'] must be a number between 4 and 20")
+
+        if self.disulfide_bonds is not None:
+            if not isinstance(self.disulfide_bonds, list):
+                raise ValueError("disulfide_bonds must be a list of dicts")
+            for i, bond in enumerate(self.disulfide_bonds):
+                if not isinstance(bond, dict):
+                    raise ValueError(f"disulfide_bonds[{i}] must be a dict")
+                for key in ('token1', 'token2'):
+                    if key not in bond:
+                        raise ValueError(f"disulfide_bonds[{i}] missing required field '{key}'")
+                    token = bond[key]
+                    if not isinstance(token, list) or len(token) != 2:
+                        raise ValueError(f"disulfide_bonds[{i}]['{key}'] must be [chain, residue]")
+
+        if self.metal_coord is not None:
+            if not isinstance(self.metal_coord, list):
+                raise ValueError("metal_coord must be a list of dicts")
+            for i, entry in enumerate(self.metal_coord):
+                if not isinstance(entry, dict):
+                    raise ValueError(f"metal_coord[{i}] must be a dict")
+                for key in ('atom1', 'atom2'):
+                    if key not in entry:
+                        raise ValueError(f"metal_coord[{i}] missing required field '{key}'")
+                    atom = entry[key]
+                    if not isinstance(atom, list) or len(atom) != 3:
+                        raise ValueError(f"metal_coord[{i}]['{key}'] must be [chain, residue, atom]")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files."""
@@ -318,7 +370,7 @@ echo "=== Boltz2 installation complete ==="
 
     def _write_combinatorics_config(self) -> str:
         """Write combinatorics config file at configuration time."""
-        config_path = os.path.join(self.output_folder, "combinatorics_config.json")
+        config_path = self.combinatorics_config_file
         generate_combinatorics_config(config_path, **self._build_combinatorics_kwargs())
         return config_path
 
@@ -351,6 +403,14 @@ echo "=== Boltz2 installation complete ==="
         if self.contacts:
             contacts_json = json.dumps(self.contacts)
             extra_params.append(f"--contacts '{contacts_json}'")
+
+        if self.disulfide_bonds:
+            disulfide_json = json.dumps(self.disulfide_bonds)
+            extra_params.append(f"--disulfide-bonds '{disulfide_json}'")
+
+        if self.metal_coord:
+            metal_json = json.dumps(self.metal_coord)
+            extra_params.append(f"--metal-coord '{metal_json}'")
 
         return " ".join(extra_params)
 
@@ -390,26 +450,21 @@ fi
 
 """
 
-        # Create basic folder structure
-        script_content += f"""# Create output folders
-mkdir -p {os.path.join(self.output_folder, "predictions")}
-mkdir -p {self.msa_cache_folder}
-
-"""
+        # execution/, configuration/, and stream folders are auto-created
+        # by the pipeline. msas/ gets populated at runtime below.
 
         # Handle MSA recycling if provided
         if self.msas:
             script_content += self._generate_msa_recycling_section()
 
-        # Write combinatorics config
+        # Write combinatorics config (into configuration/)
         combinatorics_config_path = self._write_combinatorics_config()
 
         effective_job_name = self.get_effective_job_name() or "prediction"
-        config_file_path = os.path.join(self.output_folder, f"{effective_job_name}.yaml")
+        config_file_path = self.configuration_path(f"{effective_job_name}.yaml")
 
         if self.config:
-            # Direct YAML configuration - write at configuration time
-            os.makedirs(self.output_folder, exist_ok=True)
+            # Direct YAML configuration — write at configuration time.
             with open(config_file_path, 'w') as f:
                 f.write(self.config)
             script_content += f"""
@@ -422,8 +477,9 @@ echo "Using direct YAML configuration: {config_file_path}"
             script_content += self._generate_unified_config_section(combinatorics_config_path, effective_job_name)
             uses_unified_config = True
 
-        # Build Boltz2 options
-        boltz_options = f"--cache {boltz_cache_folder} --out_dir {self.output_folder}{msa_option} --output_format {self.output_format}"
+        # Build Boltz2 options — boltz writes boltz_results_* under
+        # execution_folder (raw model dumps).
+        boltz_options = f"--cache {boltz_cache_folder} --out_dir {self.execution_folder}{msa_option} --output_format {self.output_format}"
 
         if self.recycling_steps is not None:
             boltz_options += f" --recycling_steps {self.recycling_steps}"
@@ -434,22 +490,15 @@ echo "Using direct YAML configuration: {config_file_path}"
         if self.use_potentials:
             boltz_options += " --use_potentials"
 
-        # Run Boltz2 prediction
-        if uses_unified_config:
-            script_content += f"""
-echo "Running Boltz2 prediction on individual config files"
-for config_file in {self.config_files_dir}/*.yaml; do
-    if [ -f "$config_file" ]; then
-        echo "Processing config: $config_file"
-        boltz predict "$config_file" {boltz_options}
-    fi
-done
-
-"""
-        else:
-            script_content += f"""
+        # Run Boltz2 prediction (wrapped in container_prefix when configured).
+        # boltz predict accepts a directory and iterates its .yaml/.fasta
+        # files in a single process, avoiding the per-file startup cost of
+        # a bash loop.
+        cp = self.container_prefix()
+        predict_input = self.config_files_dir if uses_unified_config else config_file_path
+        script_content += f"""
 echo "Running Boltz2 prediction"
-boltz predict {config_file_path} {boltz_options}
+{cp}boltz predict {predict_input} {boltz_options}
 
 """
 
@@ -471,10 +520,10 @@ echo "Generating Boltz2 configurations using unified config generator"
 mkdir -p {self.config_files_dir}
 
 """
-        # Generate ligands CSV if using direct SMILES string - write at configuration time
+        # Generate ligands CSV if using direct SMILES string — config-time write.
+        # configuration/ is already created by the pipeline.
         if self.ligands_smiles:
             ligand_id = config_name if config_name != "prediction" else "ligand"
-            os.makedirs(os.path.dirname(self.ligands_csv), exist_ok=True)
             with open(self.ligands_csv, 'w') as f:
                 f.write("id,format,smiles,ccd\n")
                 f.write(f"{ligand_id},smiles,{self.ligands_smiles},\n")
@@ -487,6 +536,7 @@ mkdir -p {self.config_files_dir}
             f'python {self.boltz_config_unified_py}',
             f'--combinatorics-config "{combinatorics_config_path}"',
             f'--output-dir "{self.config_files_dir}"',
+            f'--sequence-ids "{self.sequence_ids_file}"',
         ]
 
         msa_table_flag = self._get_msa_table_flag()
@@ -533,10 +583,26 @@ python {self.boltz_msa_copy_py} \\
         return ""
 
     def _generate_postprocess_section(self) -> str:
-        """Generate script section for post-processing."""
+        """Generate script section for post-processing.
+
+        Boltz writes raw ``boltz_results_*`` dumps into execution/. The post-
+        processing script copies/renames structures into structures/, MSAs
+        into msas/, and writes the standalone confidence/affinity tables
+        into tables/. Each destination is passed explicitly so the script
+        doesn't have to know the layout convention.
+        """
+        structures_dir = self.stream_folder("structures")
         return f"""
 echo "Post-processing Boltz2 results"
-python {self.boltz_postprocessing_py} {self.output_folder} {self.output_folder} {self.sequence_ids_file} --structures-map {self.structures_map_csv}
+python {self.boltz_postprocessing_py} {self.execution_folder} {self.output_folder} {self.sequence_ids_file} \\
+    --structures-map {self.structures_map_csv} \\
+    --structures-folder "{structures_dir}" \\
+    --msas-folder "{self.msa_cache_folder}" \\
+    --confidence-csv "{self.confidence_csv}" \\
+    --affinity-csv "{self.affinity_csv}" \\
+    --sequences-csv "{self.sequences_csv}" \\
+    --msas-csv "{self.msas_csv}" \\
+    --scores-info "{self.scores_info_file}"
 
 if [ $? -ne 0 ]; then
     echo "Error: Post-processing failed"
@@ -563,13 +629,14 @@ echo "Post-processing completed"
         upstream_folder = os.path.dirname(upstream_missing_path)
 
         return f"""
-# Propagate missing table from upstream tools
+# Propagate missing table from upstream tools — writes to tables/missing.csv.
 echo "Checking for upstream missing sequences..."
 if [ -f "{upstream_missing_path}" ]; then
     echo "Found upstream missing.csv - propagating to current tool"
     python {self.propagate_missing_py} \\
         --upstream-folders "{upstream_folder}" \\
-        --output-folder "{self.output_folder}"
+        --output-folder "{self.output_folder}" \\
+        --missing-csv "{self.missing_csv}"
 else
     echo "No upstream missing.csv found - creating empty missing.csv"
     echo "id,removed_by,cause" > "{self.missing_csv}"
@@ -594,9 +661,9 @@ fi
         """Get expected output files after Boltz2 execution."""
         predicted_ids, provenance = self._predict_sequence_ids_with_provenance()
 
-        # Structure files
+        # Structure files land inside the structures/ stream folder.
         structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
-        structure_files = [os.path.join(self.output_folder, f"<id>{structure_ext}")]
+        structure_files = [self.stream_path("structures", f"<id>{structure_ext}")]
 
         # Create structures DataStream
         create_map_table(self.structures_map_csv, predicted_ids, files=structure_files, provenance=provenance)
@@ -609,9 +676,9 @@ fi
             format=self.output_format
         )
 
-        # MSA files
+        # MSA files — msa_cache_folder is the msas/ stream folder.
         msa_ext = ".csv" if self.msa_server == "public" else ".a3m"
-        msa_files = [os.path.join(self.msa_cache_folder, f"<id>{msa_ext}")]
+        msa_files = [self.stream_path("msas", f"<id>{msa_ext}")]
 
         msas = DataStream(
             name="msas",
@@ -653,29 +720,25 @@ fi
                 name="structures",
                 path=self.structures_map_csv,
                 columns=["id", "file"],
-                description="Boltz2 predicted structures",
-                count=len(predicted_ids)
+                description="Boltz2 predicted structures"
             ),
             "confidence": TableInfo(
                 name="confidence",
                 path=self.confidence_csv,
                 columns=["id", "input_file", "confidence_score", "ptm", "iptm", "complex_plddt", "complex_iplddt"],
-                description="Boltz2 confidence scores",
-                count=len(predicted_ids)
+                description="Boltz2 confidence scores"
             ),
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "sequence"],
-                description="Input protein sequences",
-                count=len(predicted_ids)
+                description="Input protein sequences"
             ),
             "msas": TableInfo(
                 name="msas",
                 path=self.msas_csv,
                 columns=["id", "sequences.id", "sequence", "msa_file"],
-                description="MSA files for recycling",
-                count=len(predicted_ids)
+                description="MSA files for recycling"
             )
         }
 
@@ -684,8 +747,7 @@ fi
                 name="affinity",
                 path=self.affinity_csv,
                 columns=["id", "input_file", "affinity_pred_value", "affinity_probability_binary"],
-                description="Boltz2 affinity predictions",
-                count=len(predicted_ids)
+                description="Boltz2 affinity predictions"
             )
 
         if self.ligands_stream or self.ligands_smiles:
@@ -693,8 +755,7 @@ fi
                 name="compounds",
                 path=self.ligands_csv if self.ligands_smiles else (self.ligands_stream.map_table if self.ligands_stream else ""),
                 columns=["id", "format", "smiles", "ccd"],
-                description="Ligand compounds",
-                count=len(compounds.ids) if compounds else 0
+                description="Ligand compounds"
             )
 
         # Check for upstream missing table
@@ -710,8 +771,7 @@ fi
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed by upstream tools with removal reason",
-                count="variable"
+                description="IDs removed by upstream tools with removal reason"
             )
 
         return {
@@ -778,6 +838,12 @@ fi
         if self.contacts:
             config_lines.append(f"Contact constraints: {len(self.contacts)}")
 
+        if self.disulfide_bonds:
+            config_lines.append(f"Disulfide bonds: {len(self.disulfide_bonds)}")
+
+        if self.metal_coord:
+            config_lines.append(f"Metal coordination bonds: {len(self.metal_coord)}")
+
         return config_lines
 
     def to_dict(self) -> Dict[str, Any]:
@@ -808,7 +874,9 @@ fi
                 "pocket_force": self.pocket_force,
                 "glycosylation": self.glycosylation,
                 "covalent_linkage": self.covalent_linkage,
-                "contacts": self.contacts
+                "contacts": self.contacts,
+                "disulfide_bonds": self.disulfide_bonds,
+                "metal_coord": self.metal_coord,
             }
         })
         return base_dict

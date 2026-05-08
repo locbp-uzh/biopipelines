@@ -47,7 +47,7 @@ Matching priority order (when using get_mapped_ids with unique=True):
 """
 
 import re
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 
 def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
@@ -298,6 +298,41 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     return candidates
 
 
+# Per-process cache of provenance lookup tables, keyed by map_table CSV
+# path. Each entry maps `source_id` (string) to its list of provenance
+# identity values pulled from `<stream>.id` columns. Built lazily once
+# per CSV in _get_provenance_ids; the underlying CSV is itself cached
+# in biopipelines.biopipelines_io._table_cache, so an existing entry
+# stays valid as long as that DataFrame is still cached.
+_provenance_lookup_cache: Dict[str, Dict[str, List[str]]] = {}
+
+
+def _build_provenance_lookup(df) -> Dict[str, List[str]]:
+    """Build {source_id -> [provenance ids]} from a map_table DataFrame.
+
+    Provenance columns are any '<stream>.id' columns other than 'id'
+    itself. Each row's id column maps to the list of non-empty,
+    non-self provenance values across those columns.
+    """
+    lookup: Dict[str, List[str]] = {}
+    if "id" not in df.columns:
+        return lookup
+    prov_cols = [c for c in df.columns if c.endswith(".id") and c != "id"]
+    if not prov_cols:
+        return lookup
+    ids = [str(v) for v in df["id"].tolist()]
+    cols = {c: [str(v) for v in df[c].tolist()] for c in prov_cols}
+    for i, sid in enumerate(ids):
+        prov: List[str] = []
+        for c in prov_cols:
+            val = cols[c][i]
+            if val and val != sid and val != "nan":
+                prov.append(val)
+        if prov:
+            lookup[sid] = prov
+    return lookup
+
+
 def _get_provenance_ids(source_id, map_table_paths):
     """
     Get all provenance identity values for a source_id from map_tables.
@@ -318,30 +353,31 @@ def _get_provenance_ids(source_id, map_table_paths):
     from biopipelines.biopipelines_io import _table_cache
     import pandas as pd
     import os
-    provenance_ids = []
+    provenance_ids: List[str] = []
     for path in map_table_paths:
         if not path or not os.path.exists(path):
             continue
-        if path in _table_cache:
-            df = _table_cache[path]
-        else:
-            try:
-                df = pd.read_csv(path)
-                _table_cache[path] = df
-            except Exception:
-                continue
-        if "id" not in df.columns:
-            continue
-        row = df[df["id"].astype(str) == source_id]
-        if row.empty:
-            continue
-        row = row.iloc[0]
-        for col in df.columns:
-            if col.endswith(".id") and col != "id":
-                val = str(row[col])
-                if val and val != source_id and val != "nan":
-                    provenance_ids.append(val)
-    return provenance_ids
+        # Build / reuse the per-source-id lookup index for this CSV.
+        if path not in _provenance_lookup_cache:
+            if path in _table_cache:
+                df = _table_cache[path]
+            else:
+                try:
+                    df = pd.read_csv(path)
+                    _table_cache[path] = df
+                except Exception:
+                    continue
+            _provenance_lookup_cache[path] = _build_provenance_lookup(df)
+        lookup = _provenance_lookup_cache[path]
+        provenance_ids.extend(lookup.get(source_id, ()))
+    # Deduplicate while preserving order (a few CSVs may carry the same id).
+    seen = set()
+    deduped: List[str] = []
+    for pid in provenance_ids:
+        if pid not in seen:
+            seen.add(pid)
+            deduped.append(pid)
+    return deduped
 
 
 def get_mapped_ids(
@@ -419,10 +455,24 @@ def get_mapped_ids(
     target_set = set(target_ids)
     result = {}
 
-    # Pre-compute base forms for all targets (for sibling matching)
+    # Pre-compute base forms for all targets (for sibling matching).
     target_bases_cache = {}
     for target_id in target_ids:
         target_bases_cache[target_id] = map_table_ids_to_ids(target_id, id_map)
+
+    # Inverted index: for every base id (any element of any target's
+    # suffix-base list), record the targets that share it together with
+    # the position of `base` inside that target's base list (= distance,
+    # most-specific-first ordering preserved).
+    #
+    # This collapses the previous O(N_targets) scan inside each
+    # per-source-id iteration into a single dict lookup. Insertion order
+    # of target_ids is preserved per base, matching the historical
+    # tie-break (first-encountered wins).
+    base_to_targets: Dict[str, List[Tuple[str, int]]] = {}
+    for target_id in target_ids:
+        for distance, base in enumerate(target_bases_cache[target_id]):
+            base_to_targets.setdefault(base, []).append((target_id, distance))
 
     for source_id in source_ids:
         # Priority 1: Exact match
@@ -430,13 +480,14 @@ def get_mapped_ids(
             if unique:
                 result[source_id] = source_id
             else:
-                # Collect exact match + all other matches
+                # Collect exact match + all other targets whose base list
+                # contains the source id.
                 matches = [source_id]
-                for target_id in target_ids:
-                    if target_id == source_id:
-                        continue
-                    if source_id in target_bases_cache[target_id]:
-                        matches.append(target_id)
+                seen_match = {source_id}
+                for tid, _dist in base_to_targets.get(source_id, ()):
+                    if tid not in seen_match:
+                        matches.append(tid)
+                        seen_match.add(tid)
                 result[source_id] = matches
             continue
 
@@ -463,12 +514,9 @@ def get_mapped_ids(
         found = False
         for cand_id in candidate_ids:
             # 3a: Target is a "child" of candidate (target = cand_id + suffix)
-            child_matches = []
-            for target_id in target_ids:
-                target_bases = target_bases_cache[target_id]
-                if cand_id in target_bases:
-                    distance = target_bases.index(cand_id)
-                    child_matches.append((target_id, distance))
+            # base_to_targets gives us all targets whose suffix-base list
+            # contains cand_id, paired with the distance to it.
+            child_matches = list(base_to_targets.get(cand_id, ()))
 
             if child_matches:
                 child_matches.sort(key=lambda x: x[1])
@@ -499,22 +547,19 @@ def get_mapped_ids(
             continue
 
         # Priority 4: Sibling match for each candidate id
+        # For each base reachable from cand_id, base_to_targets gives us
+        # the targets that share it together with their target-side
+        # distance — no per-target scan required.
         sibling_matches = []
         for cand_id in candidate_ids:
             cand_bases = map_table_ids_to_ids(cand_id, id_map)
-            cand_bases_set = set(cand_bases)
-            for target_id in target_ids:
-                target_bases = target_bases_cache[target_id]
-                # Find common ancestors
-                common = cand_bases_set & set(target_bases)
-                if common:
-                    # Find the most specific common ancestor (closest to both)
-                    for common_base in common:
-                        source_dist = cand_bases.index(common_base)
-                        target_dist = target_bases.index(common_base)
-                        # Combined distance: prefer matches where both are close to ancestor
-                        combined_dist = source_dist + target_dist
-                        sibling_matches.append((target_id, combined_dist, source_dist))
+            for source_dist, common_base in enumerate(cand_bases):
+                shared = base_to_targets.get(common_base)
+                if not shared:
+                    continue
+                for target_id, target_dist in shared:
+                    combined_dist = source_dist + target_dist
+                    sibling_matches.append((target_id, combined_dist, source_dist))
 
         if sibling_matches:
             # Sort by combined distance, then by source distance

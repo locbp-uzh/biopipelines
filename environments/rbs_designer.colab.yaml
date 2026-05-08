@@ -1,0 +1,10 @@
+name: rbs_designer
+channels:
+  - bioconda
+  - conda-forge
+channel_priority: flexible
+dependencies:
+  - python>=3.10,<3.13
+  - viennarna
+  - pandas
+  - numpy

@@ -1,0 +1,6 @@
+# Caps applied on top of LigandMPNN's own requirements.txt (installed from
+# the cloned repo by the install script). setuptools<70 is needed under
+# micromamba to avoid a pkg_resources incompatibility.
+numpy<2
+pandas<2
+setuptools<70

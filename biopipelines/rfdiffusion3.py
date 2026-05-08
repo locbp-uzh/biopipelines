@@ -16,14 +16,14 @@ import re
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from biopipelines_io import Resolve
@@ -122,60 +122,72 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         repo_dir = folders.get("RFdiffusion3", "")
-        if env_manager == "pip":
-            skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ] && python -c "import foundry" 2>/dev/null; then
+        biopipelines = folders.get("biopipelines", "")
+        env_check = cls._env_exists_check("foundry", env_manager)
+        skip = "" if force_reinstall else f"""# Check if already fully installed (env + non-empty checkpoint dir)
+if {env_check} && [ -d "{repo_dir}" ] && [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ]; then
     echo "RFdiffusion3 already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-            return f"""echo "=== Installing RFdiffusion3 (pip) ==="
-{skip}pip install "rc-foundry[all]"
-
-# Download model weights
-mkdir -p {repo_dir}
-foundry install rfd3 --checkpoint-dir {repo_dir}
-
-echo "=== RFdiffusion3 installation complete ==="
-"""
-        skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ] && {env_manager} env list 2>/dev/null | grep -q "foundry"; then
-    echo "RFdiffusion3 already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
+        remove_block = cls._env_remove_block("foundry", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("foundry", env_manager, biopipelines)
         return f"""echo "=== Installing RFdiffusion3 (foundry) ==="
-{skip}{env_manager} create -n foundry python=3.12 -y
-{env_manager} activate foundry
-pip install "rc-foundry[all]"
+{skip}{remove_block}
+# Create foundry env (skip if it already exists)
+if ! {env_check}; then
+    {env_block}
+else
+    echo "foundry environment already exists, skipping creation."
+fi
 
-# Download model weights
+# Download model weights (skip if checkpoint dir already populated)
 mkdir -p {repo_dir}
-foundry install rfd3 --checkpoint-dir {repo_dir}
+if [ -z "$(ls -A "{repo_dir}" 2>/dev/null)" ]; then
+    {env_manager} run -n foundry foundry install rfd3 --checkpoint-dir {repo_dir}
+else
+    echo "Checkpoint dir {repo_dir} already populated, skipping weight download."
+fi
 
-echo "=== RFdiffusion3 installation complete ==="
+# Verify installation
+if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {env_manager} run -n foundry python -c "import foundry" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== RFdiffusion3 installation complete ==="
+else
+    echo "ERROR: RFdiffusion3 verification failed (checkpoints missing or foundry not importable)"
+    exit 1
+fi
 """
 
-    # Lazy path descriptors
-    json_file = Path(lambda self: os.path.join(self.output_folder, f"{self._get_prefix()}_rfd3_input.json"))
-    main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_results.csv"))
-    metrics_csv = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_metrics.csv"))
-    specifications_csv = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_specifications.csv"))
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion3_sequences.csv"))
-    raw_output_folder = Path(lambda self: os.path.join(self.output_folder, "raw_output"))
+    # Lazy path descriptors — routed through the canonical sub-layout:
+    #   configuration/  — input JSONs (tool config, input DataStreams)
+    #   execution/      — raw_output/ goes here (foundry CIF.gz dumps)
+    #   structures/     — <id>.pdb + structures_map.csv
+    #   sequences/      — sequences.csv (content-bearing stream: map == content)
+    #   tables/         — standalone TableInfo CSVs (main, metrics, specs)
+    json_file = Path(lambda self: self.configuration_path(f"{self._get_prefix()}_rfd3_input.json"))
+    main_table = Path(lambda self: self.table_path("structures"))
+    metrics_csv = Path(lambda self: self.table_path("metrics"))
+    specifications_csv = Path(lambda self: self.table_path("specifications"))
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    # Foundry dumps CIF.gz files directly into execution/ — that's what the
+    # folder is for (raw model dumps). No extra subfolder needed.
+    raw_output_folder = Path(lambda self: self.execution_folder)
     rfd_log_file = Path(lambda self: os.path.join(
         os.path.dirname(self.output_folder), "Logs",
         f"{os.path.basename(self.output_folder).split('_')[0] if '_' in os.path.basename(self.output_folder) else '000'}_RFdiffusion3.log"
     ))
     checkpoint_dir = Path(lambda self: self.folders["RFdiffusion3"])
-    table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_table.py"))
-    postprocess_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion3_postprocess.py"))
-    pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
-    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
+    table_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion3_table.py"))
+    postprocess_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion3_postprocess.py"))
+    pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
+    update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
 
     def __init__(self,
                  contig: str = "",
@@ -300,6 +312,12 @@ echo "=== RFdiffusion3 installation complete ==="
         # Validate num_designs
         if self.num_designs <= 0:
             raise ValueError("num_designs must be positive")
+
+        _validate_freeform_string("contig", self.contig)
+        _validate_freeform_string("ligand_code", self.ligand_code)
+        _validate_freeform_string("prefix", self.prefix)
+        if isinstance(self.length, str):
+            _validate_freeform_string("length", self.length)
 
         # Validate JSON config if provided
         if self.json_config:
@@ -510,8 +528,8 @@ echo "=== RFdiffusion3 installation complete ==="
         """Generate bash section that creates JSON input file."""
         json_config = self._build_json_config()
 
-        # Write JSON config file at configuration time (not execution time)
-        os.makedirs(self.output_folder, exist_ok=True)
+        # Write JSON config file at configuration time (not execution time).
+        # configuration_folder is auto-created by the pipeline.
         with open(self.json_file, 'w') as f:
             json.dump(json_config, f, indent=2)
 
@@ -535,10 +553,9 @@ jq --arg path "$INPUT_PDB" '(.[] | select(.input == "__RESOLVE_INPUT_PDB__")).in
         return f"""echo "Starting RFdiffusion3"
 echo "JSON config: {self.json_file}"
 echo "Output folder: {self.output_folder}"
-echo "Raw output folder: {self.raw_output_folder}"
+echo "Raw (CIF.gz) output folder: {self.raw_output_folder}"
 
-# Create raw output directory
-mkdir -p "{self.raw_output_folder}"
+# execution/ folder already created by the pipeline's layout step.
 
 # Set checkpoint directory
 export FOUNDRY_CHECKPOINT_DIRS="{self.checkpoint_dir}"
@@ -556,7 +573,7 @@ python -c "import torch; import torchvision" 2>/dev/null || true
 # Run RFdiffusion3 (outputs CIF.gz format to raw folder)
 # n_batches: number of designs to generate (default: 1)
 # diffusion_batch_size: number of models per design (default: 8)
-rfd3 design \\
+{self.container_prefix()}rfd3 design \\
     out_dir="{self.raw_output_folder}" \\
     inputs="{self.json_file}" \\
     global_prefix="{prefix}" \\
@@ -572,12 +589,14 @@ rfd3 design \\
         Runs in biopipelines environment (has BioPython, pandas).
         """
         prefix = self._get_prefix()
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Post-processing RFdiffusion3 outputs"
 
-# Process CIF.gz files: decompress, convert to PDB, extract metrics and sequences
+# Process CIF.gz files: decompress, convert to PDB, extract metrics and sequences.
+# --output_folder is the PDB destination (structures/ stream folder).
 mamba run -n biopipelines python "{self.postprocess_py_file}" \\
     --raw_folder "{self.raw_output_folder}" \\
-    --output_folder "{self.output_folder}" \\
+    --output_folder "{structures_dir}" \\
     --prefix "{prefix}" \\
     --num_designs {self.num_designs} \\
     --num_models {self.num_models} \\
@@ -634,9 +653,10 @@ python "{self.table_py_file}" \\
 
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to update structures_map.csv with actual runtime output files."""
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        structures_map = self.stream_map_path("structures")
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Updating structures map with actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{self.output_folder}"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"
 
 """
 
@@ -666,7 +686,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             structure_ids = [f"{prefix}_d<{d_start}..{d_end}>_m<{m_start}..{m_end}>"]
         else:
             structure_ids = [f"{prefix}_<{d_start}..{d_end}>"]
-        file_template = [os.path.join(self.output_folder, "<id>.pdb")]
+        file_template = [self.stream_path("structures", "<id>.pdb")]
 
         total_structures = self.num_designs * self.num_models
 
@@ -675,8 +695,9 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         if self.pdb_input_id:
             provenance = {"structures": [self.pdb_input_id] * total_structures}
 
-        # Create map_table for structures (expands patterns internally)
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        # Create map_table — lives inside the structures/ stream folder.
+        # create_map_table handles makedirs for the target path.
+        structures_map = self.stream_map_path("structures")
         create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
@@ -693,8 +714,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 name="structures",
                 path=self.main_table,
                 columns=["id", "design", "model", "pdb", "fixed", "designed", "contig", "length", "time", "status"],
-                description="RFdiffusion3 structure generation results with fixed/designed regions",
-                count=total_structures
+                description="RFdiffusion3 structure generation results with fixed/designed regions"
             ),
             "metrics": TableInfo(
                 name="metrics",
@@ -707,8 +727,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                     "num_ss_elements", "radius_of_gyration", "alanine_content",
                     "glycine_content", "num_residues"
                 ],
-                description="RFdiffusion3 quality metrics extracted from JSON outputs",
-                count=total_structures
+                description="RFdiffusion3 quality metrics extracted from JSON outputs"
             ),
             "specifications": TableInfo(
                 name="specifications",
@@ -717,15 +736,13 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                     "id", "design", "model", "sampled_contig", "num_tokens_in", "num_residues_in",
                     "num_chains", "num_atoms", "num_residues"
                 ],
-                description="RFdiffusion3 design specifications and statistics",
-                count=total_structures
+                description="RFdiffusion3 design specifications and statistics"
             ),
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "source_id", "source_pdb", "chain", "sequence", "length"],
-                description="RFdiffusion3 designed protein sequences extracted from PDB",
-                count=total_structures
+                description="RFdiffusion3 designed protein sequences extracted from PDB"
             )
         }
 

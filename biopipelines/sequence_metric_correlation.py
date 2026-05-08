@@ -14,13 +14,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -47,22 +47,24 @@ class SequenceMetricCorrelation(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "SequenceMetricCorrelation"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== SequenceMetricCorrelation ==="
 echo "Requires MutationEnv (installed with MutationProfiler.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== SequenceMetricCorrelation ready ==="
 """
 
     # Lazy path descriptors
-    correlation_1d_csv = Path(lambda self: os.path.join(self.output_folder, "correlation_1d.csv"))
-    correlation_2d_csv = Path(lambda self: os.path.join(self.output_folder, "correlation_2d.csv"))
-    logo_svg = Path(lambda self: os.path.join(self.output_folder, "correlation_logo.svg"))
-    logo_png = Path(lambda self: os.path.join(self.output_folder, "correlation_logo.png"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "analysis_config.json"))
-    correlation_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_sequence_metric_correlation.py"))
+    correlation_1d_csv = Path(lambda self: self.table_path("correlation_1d"))
+    correlation_2d_csv = Path(lambda self: self.table_path("correlation_2d"))
+    logo_svg = Path(lambda self: self.stream_path("images", "correlation_logo.svg"))
+    logo_png = Path(lambda self: self.stream_path("images", "correlation_logo.png"))
+    config_file = Path(lambda self: self.configuration_path("analysis_config.json"))
+    correlation_py = Path(lambda self: self.pipe_script_path("pipe_sequence_metric_correlation.py"))
 
     def __init__(self,
                  mutants: Union[DataStream, StandardizedOutput, TableInfo, str,
@@ -117,6 +119,9 @@ echo "=== SequenceMetricCorrelation ready ==="
         # Validate same number of mutants and data inputs
         if len(self.mutants_input) != len(self.data_input):
             raise ValueError(f"Number of mutants ({len(self.mutants_input)}) must match number of data inputs ({len(self.data_input)})")
+
+        _validate_freeform_string("metric", self.metric)
+        _validate_freeform_string("positions", self.positions)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sequences and metrics."""
@@ -184,8 +189,6 @@ echo "=== SequenceMetricCorrelation ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate SequenceMetricCorrelation execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# SequenceMetricCorrelation execution script\n"
         script_content += self.generate_completion_check_header()
@@ -231,15 +234,13 @@ python "{self.correlation_py}" --config "{self.config_file}"
                 name="correlation_1d",
                 path=self.correlation_1d_csv,
                 columns=["position", "wt_aa", "correlation", "mean_mutated", "mean_wt", "var_mutated", "var_wt", "n_mutated", "n_wt"],
-                description="1D correlation signal c(i) for position i",
-                count=0
+                description="1D correlation signal c(i) for position i"
             ),
             "correlation_2d": TableInfo(
                 name="correlation_2d",
                 path=self.correlation_2d_csv,
                 columns=aa_columns,
-                description="2D correlation signal c(i,aa) for each position and amino acid",
-                count=0
+                description="2D correlation signal c(i,aa) for each position and amino acid"
             )
         }
 

@@ -4,33 +4,43 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "biopipelines"
-version = "1.1.1"
+dynamic = ["version"]
 description = "Automated pipeline framework for protein modeling workflows"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "pandas",
-    "numpy",
+    "pandas>=2.2",
+    "numpy>=1.26",
     "pyyaml>=6.0",
-    "requests",
-    "biopython",
-    "ipykernel",
-    "py3Dmol",
-    "openpyxl"
+    "requests>=2.31",
+    "biopython>=1.84",
+    "py3Dmol>=2.4",
+    "openpyxl>=3.1",
+    "rdkit>=2024.03",
+    "prompt_toolkit>=3",
+    "ruamel.yaml>=0.17"
 ]
 
 [project.optional-dependencies]
-chem = ["rdkit"]
-all = ["rdkit"]
+test = ["pytest>=7"]
+all = ["pytest>=7"]
 
 [project.scripts]
 bp-submit = "biopipelines.cli:submit"
-bp-run = "biopipelines.cli:run"
 bp-config = "biopipelines.cli:config"
-bp-otf = "biopipelines.cli:otf"
+bp-run = "biopipelines.cli:run"
 biopipelines-submit = "biopipelines.cli:submit"
-biopipelines-run = "biopipelines.cli:run"
 biopipelines-config = "biopipelines.cli:config"
-biopipelines-otf = "biopipelines.cli:otf"
+biopipelines-run = "biopipelines.cli:run"
 
 [tool.setuptools.packages.find]
 include = ["biopipelines*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "biopipelines.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -m 'not tool_parameters'"
+markers = [
+    "tool_parameters: opt-in suite that drives every wrapped public-repo tool with a minimal pipeline and asserts each kwarg lands in the emitted artifacts. GPU-bound, so excluded by default; run with 'pytest tests/tool_parameters -m tool_parameters -v'.",
+]

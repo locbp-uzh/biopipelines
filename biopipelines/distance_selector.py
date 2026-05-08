@@ -13,14 +13,14 @@ import os
 from typing import Dict, List, Any, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
     from .biopipelines_io import TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
     from biopipelines_io import TableReference
@@ -35,18 +35,20 @@ class DistanceSelector(BaseConfig):
     """
 
     TOOL_NAME = "DistanceSelector"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== DistanceSelector ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== DistanceSelector ready ==="
 """
 
     # Lazy path descriptors
-    selections_csv = Path(lambda self: os.path.join(self.output_folder, "selections.csv"))
-    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
-    distance_selector_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_distance_selector.py"))
+    selections_csv = Path(lambda self: self.table_path("selections"))
+    structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
+    distance_selector_py = Path(lambda self: self.pipe_script_path("pipe_distance_selector.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -55,7 +57,6 @@ echo "=== DistanceSelector ready ==="
                  reference: str = "ligand",
                  residues: str = "",
                  restrict_to: Union[str, tuple, None] = None,
-                 id_map: Dict[str, str] = {"*": "*_<S>"},
                  include_reference: bool = True,
                  **kwargs):
         """
@@ -74,11 +75,6 @@ echo "=== DistanceSelector ready ==="
                         - Table reference tuple: (table, "column")
                         - Direct selection string: "10-20+30-40"
                         - None: Consider all protein residues (default)
-            id_map: ID mapping pattern for matching structure IDs to table IDs (default: {"*": "*_<S>"})
-                   - Used when table IDs don't match structure IDs
-                   - Example: structure ID "rifampicin_1_2" maps to table ID "rifampicin_1"
-                   - Pattern {"*": "*_<S>"} strips last "_segment" from structure ID
-                   - Set to {"*": "*"} for no mapping (1:1 ID match)
             include_reference: Whether to include reference residues in "within" selection (default: True)
                              - True: "within" includes reference + nearby residues
                              - False: "within" includes only nearby residues (excludes reference itself)
@@ -103,7 +99,6 @@ echo "=== DistanceSelector ready ==="
         self.reference = reference
         self.residues = residues
         self.restrict_to_selection = restrict_to
-        self.id_map = id_map
         self.include_reference = include_reference
 
         # Initialize base class
@@ -133,6 +128,9 @@ echo "=== DistanceSelector ready ==="
         if self.restrict_to_selection is not None:
             if not isinstance(self.restrict_to_selection, (str, TableReference)):
                 raise ValueError("restrict_to_selection must be a string, TableReference, or None")
+
+        _validate_freeform_string("ligand", self.ligand)
+        _validate_freeform_string("residues", self.residues)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -176,7 +174,7 @@ echo "=== DistanceSelector ready ==="
         """
         import json
 
-        # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
+        # Serialize DataStream to JSON file (proper way to pass ids + files to pipe_script)
         self.structures_stream.save_json(self.structures_json)
 
         # Determine reference specification
@@ -193,9 +191,6 @@ echo "=== DistanceSelector ready ==="
 
         restrict_echo = f'echo "Restricting to selection: {restrict_spec}"' if restrict_spec else ""
 
-        # Serialize id_map as JSON string for passing to script
-        id_map_json = json.dumps(self.id_map)
-
         # Convert include_reference to string for bash
         include_reference_str = "true" if self.include_reference else "false"
 
@@ -210,7 +205,7 @@ echo "Include reference: {self.include_reference}"
 {restrict_echo}
 
 # Run distance analysis
-python {self.distance_selector_py} "{self.structures_json}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" '{id_map_json}' {include_reference_str}
+python {self.distance_selector_py} "{self.structures_json}" "{reference_spec}" {self.distance} "{restrict_spec}" "{self.selections_csv}" {include_reference_str}
 
 echo "Distance analysis completed"
 echo "Selections saved to: {self.selections_csv}"
@@ -233,8 +228,7 @@ echo "Selections saved to: {self.selections_csv}"
                 name="selections",
                 path=self.selections_csv,
                 columns=["id", "pdb", "within", "beyond", "distance_cutoff", "reference_ligand"],
-                description="PyMOL-formatted residue selections based on distance to ligand",
-                count=len(self.structures_stream)
+                description="PyMOL-formatted residue selections based on distance to ligand"
             )
         }
 

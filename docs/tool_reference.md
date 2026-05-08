@@ -1,0 +1,105 @@
+# BioPipelines Tool Reference
+
+Complete tool reference organized by category.
+
+For a single flat list of every public-API tool (with category and source-file
+mapping), see [tool_index.md](tool_index.md).
+
+---
+
+## [Utilities](Tool/Utilities.md)
+
+Input entities and utility tools.
+
+**Basic Input Types**:
+- [PDB](Tool/Utilities.md#pdb) - Fetch protein structures
+- [RCSB](Tool/Utilities.md#rcsb) - Search RCSB PDB and download structures
+- [Sequence](Tool/Utilities.md#sequence) - Create sequences from strings
+- [Ligand](Tool/Utilities.md#ligand) - Fetch small molecules
+- [CompoundLibrary](Tool/Utilities.md#compoundlibrary) - Create compound collections
+
+**Loading & MSA**:
+- [Load / LoadMultiple](Tool/Utilities.md#Load) - Load previous outputs
+- [MSA](Tool/Utilities.md#msa) - MSA format conversion (CSV/A3M)
+- [MMseqs2](Tool/Utilities.md#mmseqs2) - MSA generation
+
+**Visualization**:
+- [PyMOL](Tool/Utilities.md#pymol) - Session creation
+- [Plot](Tool/Utilities.md#plot) - plots
+
+---
+
+## [Structure Generation](Tool/StructureGeneration.md)
+
+Generate novel protein structures.
+
+- [RFdiffusion](Tool/StructureGeneration.md#rfdiffusion) - Backbone generation
+- [RFdiffusionAllAtom](Tool/StructureGeneration.md#rfdiffusionallatom) - All-atom with ligands
+- [RFdiffusion3](Tool/StructureGeneration.md#rfdiffusion3) - Third-generation design
+- [BoltzGen](Tool/StructureGeneration.md#boltzgen) - End-to-end binder design
+
+---
+
+## [Sequence Design](Tool/SequenceDesign.md)
+
+Design and manipulate sequences.
+
+- [ProteinMPNN](Tool/SequenceDesign.md#proteinmpnn) - Sequence design for backbones
+- [LigandMPNN](Tool/SequenceDesign.md#ligandmpnn) - Ligand-aware sequence design
+- [MutationComposer](Tool/SequenceDesign.md#mutationcomposer) - Combinatorial mutants
+- [Mutagenesis](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic substitutions
+- [Fuse](Tool/SequenceDesign.md#fuse) - Fusion proteins with linkers
+- [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Sequence combinations
+- [DNAEncoder](Tool/SequenceDesign.md#dnaencoder) - Codon optimization
+- [RBSDesigner](Tool/SequenceDesign.md#rbsdesigner) - Ribosome binding site design
+
+---
+
+## [Structure Prediction](Tool/StructurePrediction.md)
+
+Predict protein and complex structures, and dock ligands.
+
+- [AlphaFold](Tool/StructurePrediction.md#alphafold) - AlphaFold2 prediction
+- [Boltz2](Tool/StructurePrediction.md#boltz2) - Biomolecular complex prediction
+- [Gnina](Tool/StructurePrediction.md#gnina) - Molecular docking with CNN scoring
+
+---
+
+## [Analysis](Tool/Analysis.md)
+
+Analyze structures and interactions.
+
+- [Distance](Tool/Analysis.md#distance) - Distance measurements
+- [Angle](Tool/Analysis.md#angle) - Bond, torsional, and vector-vector angles
+- [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
+- [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
+- [Contacts](Tool/Analysis.md#contacts) - Contact analysis
+- [PoseBusters](Tool/Analysis.md#posebusters) - Pose validation (bond lengths, clashes, etc.)
+- [PoseChange](Tool/Analysis.md#posechange) - Ligand pose comparison (to be unified with ConformationalChange)
+- [CABSflex](Tool/Analysis.md#cabsflex) - Fast protein flexibility simulation
+- [SASA](Tool/Analysis.md#sasa) - Solvent-accessible surface area
+- [ADMETAI](Tool/Analysis.md#admetai) - ADMET endpoint predictions for compound libraries
+
+---
+
+## [Statistics](Tool/Statistics.md)
+
+Mutation analysis and frequency optimization.
+
+- [MutationProfiler](Tool/Statistics.md#mutationprofiler) - Mutation patterns
+- [SequenceMetricCorrelation](Tool/Statistics.md#sequencemetriccorrelation) - Mutation-metric correlations
+- [BayesianAdjuster](Tool/Statistics.md#bayesianadjuster) - Correlation-based frequency adjustment
+
+---
+
+## [Data Management](Tool/DataManagement.md)
+
+Filter, transform, and manipulate tables.
+
+- [Table](Tool/DataManagement.md#table) - Direct table construction from values or files
+- [Panda](Tool/DataManagement.md#panda) - Unified table transformations (filter, sort, merge, concat, rank, ...)
+- [Pool](Tool/DataManagement.md#pool) - Gather N parallel-run StandardizedOutputs into one (use with `with Parallel():`)
+- [ReMap](Tool/DataManagement.md#remap) - Rename IDs across streams and tables
+- [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric extraction for Prism
+- [Selection](Tool/DataManagement.md#selection) - Selection string manipulation
+

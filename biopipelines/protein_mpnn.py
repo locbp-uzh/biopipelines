@@ -10,7 +10,7 @@ import os
 from typing import Dict, List, Any, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -18,7 +18,7 @@ try:
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -31,6 +31,7 @@ class ProteinMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ProteinMPNN"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
@@ -42,13 +43,21 @@ class ProteinMPNN(BaseConfig):
 
         repo_dir = folders.get("ProteinMPNN", "")
         parent_dir = os.path.dirname(repo_dir)
+        biopipelines = folders.get("biopipelines", "")
 
         pmpnn_env = ConfigManager().get_environment("ProteinMPNN") or "mlfold"
         rfd_env   = ConfigManager().get_environment("RFdiffusion")
 
+        # Skip when the repo exists AND `import torch` works inside the
+        # configured env. The env must be present too — when ProteinMPNN
+        # is the first tool to bring up a shared SE3nv, neither side has
+        # created it yet.
+        # The torch import probe is the load-bearing check (env + package).
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ]; then
+if [ -d "{repo_dir}" ] \\
+   && {env_manager} run -n {pmpnn_env} python -c "import torch" >/dev/null 2>&1; then
     echo "ProteinMPNN already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
@@ -58,55 +67,86 @@ if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/dauparas/ProteinMPNN.git
 fi"""
 
-        if env_manager == "pip":
-            # Notebook / Colab: just install PyTorch if not already present
-            return f"""echo "=== Installing ProteinMPNN (pip) ==="
-{skip}{clone_block}
-
-# Install PyTorch (skip if already importable)
-python -c "import torch" 2>/dev/null || pip install torch torchvision torchaudio || echo "WARNING: torch install failed, skipping"
-
-echo "=== ProteinMPNN installation complete ==="
-"""
-
         if rfd_env and pmpnn_env == rfd_env:
-            # Same conda/mamba environment as RFdiffusion — nothing extra needed
+            # Same conda/mamba environment as RFdiffusion: ProteinMPNN
+            # only needs PyTorch in there. If the env doesn't exist yet
+            # (e.g. user runs ProteinMPNN.install() before RFdiffusion's),
+            # create it from the BioPipelines spec; if it already exists
+            # (RFdiffusion got there first), reuse it as-is. Either way the
+            # repo gets cloned and the verification below confirms torch.
+            env_block = cls._env_install_block(pmpnn_env, env_manager, biopipelines)
+            shared_env_check = cls._env_exists_check(pmpnn_env, env_manager)
             return f"""echo "=== Installing ProteinMPNN ==="
 {skip}{clone_block}
 
-echo "ProteinMPNN shares the '{pmpnn_env}' environment with RFdiffusion — no separate environment needed."
-echo "If RFdiffusion.install() has not been run yet, run it first to create the '{pmpnn_env}' environment."
+# Bring up the shared '{pmpnn_env}' env if RFdiffusion hasn't already done so.
+if {shared_env_check}; then
+    echo "Shared env '{pmpnn_env}' already exists — reusing it."
+else
+    echo "Shared env '{pmpnn_env}' missing — creating it from the BioPipelines spec."
+    {env_block}
+    if [ $? -ne 0 ]; then
+        echo "ERROR: could not create shared env '{pmpnn_env}'."
+        exit 1
+    fi
+fi
 
-echo "=== ProteinMPNN installation complete ==="
+# Verify installation (repo cloned + torch importable in the shared env)
+if [ -f "{repo_dir}/protein_mpnn_run.py" ] \\
+   && {env_manager} run -n {pmpnn_env} python -c "import torch" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== ProteinMPNN installation complete ==="
+else
+    echo "ERROR: ProteinMPNN verification failed (script missing or torch not importable)"
+    exit 1
+fi
 """
 
         # Dedicated environment — create it and install PyTorch
+        remove_block = cls._env_remove_block(pmpnn_env, env_manager) if force_reinstall else ""
         return f"""echo "=== Installing ProteinMPNN ==="
 {skip}{clone_block}
 
+{remove_block}
 # Create dedicated ProteinMPNN environment
 {env_manager} create --name {pmpnn_env} -y || echo "WARNING: environment '{pmpnn_env}' may already exist, continuing"
 {env_manager} run -n {pmpnn_env} conda install pytorch torchvision torchaudio cudatoolkit={cudatoolkit} -c pytorch -y || echo "WARNING: PyTorch install failed, skipping"
 
-echo "=== ProteinMPNN installation complete ==="
+# Verify installation
+if [ -f "{repo_dir}/protein_mpnn_run.py" ] && {env_manager} run -n {pmpnn_env} python -c "import torch" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== ProteinMPNN installation complete ==="
+else
+    echo "ERROR: ProteinMPNN verification failed (script missing or torch not importable)"
+    exit 1
+fi
 """
 
-    # Lazy path descriptors
-    parsed_pdbs_jsonl = Path(lambda self: os.path.join(self.output_folder, "parsed_pdbs.jsonl"))
-    fixed_jsonl = Path(lambda self: os.path.join(self.output_folder, "fixed_pos.jsonl"))
-    sele_csv = Path(lambda self: os.path.join(self.output_folder, "fixed_designed.csv"))
-    seqs_folder = Path(lambda self: os.path.join(self.output_folder, "seqs"))
-    main_table = Path(lambda self: os.path.join(self.output_folder, "proteinmpnn_results.csv"))
-    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"queries.csv"))
-    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"queries.fasta"))
-    structures_json = Path(lambda self: os.path.join(self.output_folder, ".input_structures.json"))
+    # Lazy path descriptors — routed through the canonical sub-layout.
+    #   configuration/  — parsed_pdbs.jsonl, fixed_pos.jsonl, fixed_designed.csv,
+    #                     .input_structures.json (all config-time inputs).
+    #   execution/      — raw ProteinMPNN output; includes seqs/ (.fa files).
+    #   sequences/      — content-bearing stream: sequences.csv IS the content
+    #                     + map_table; sequences.fasta is its FASTA twin.
+    #   tables/         — standalone TableInfo CSVs (missing, proteinmpnn_results).
+    parsed_pdbs_jsonl = Path(lambda self: self.configuration_path("parsed_pdbs.jsonl"))
+    fixed_jsonl = Path(lambda self: self.configuration_path("fixed_pos.jsonl"))
+    sele_csv = Path(lambda self: self.configuration_path("fixed_designed.csv"))
+    # ProteinMPNN's CLI creates seqs/<id>.fa inside --out_folder.
+    # Point --out_folder at execution/ so the raw .fa dumps live there.
+    pmpnn_out_folder = Path(lambda self: self.execution_folder)
+    seqs_folder = Path(lambda self: self.execution_path("seqs"))
+    main_table = Path(lambda self: self.table_path("proteinmpnn_results"))
+    queries_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
+    structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
 
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
 
     # Helper scripts
-    fixed_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_fixed_positions.py"))
-    table_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pmpnn_table.py"))
-    fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
+    fixed_py = Path(lambda self: self.pipe_script_path("pipe_pmpnn_fixed_positions.py"))
+    table_py = Path(lambda self: self.pipe_script_path("pipe_pmpnn_table.py"))
+    fa_to_csv_fasta_py = Path(lambda self: self.pipe_script_path("pipe_fa_to_csv_fasta.py"))
 
     # ProteinMPNN installation scripts
     parse_py = Path(lambda self: os.path.join(self.folders["ProteinMPNN"], "helper_scripts", "parse_multiple_chains.py"))
@@ -123,6 +163,10 @@ echo "=== ProteinMPNN installation complete ==="
                  soluble_model: bool = True,
                  remove_duplicates: bool = True,
                  fill_gaps: str = "G",
+                 bias_AA_jsonl: str = "",
+                 omit_AA_jsonl: str = "",
+                 seed: int = 0,
+                 ca_noise_std: float = 0.0,
                  **kwargs):
         """
         Initialize ProteinMPNN configuration.
@@ -143,6 +187,14 @@ echo "=== ProteinMPNN installation complete ==="
             remove_duplicates: Remove duplicate sequences from output (default True)
             fill_gaps: Amino acid to replace X (unknown/gap residues) with (default "G" for glycine).
                        Empty string means no filling (X is kept as-is).
+            bias_AA_jsonl: Path to a JSONL file biasing per-position amino-acid logits
+                       (upstream --bias_AA_jsonl). Empty string disables.
+            ca_noise_std: Backbone Cα Gaussian noise standard deviation injected during
+                       inference (upstream --backbone_noise). 0.0 disables (default).
+            omit_AA_jsonl: Path to a JSONL file omitting specific amino acids per position
+                       (upstream --omit_AA_jsonl). Empty string disables.
+            seed: Random seed for reproducible sampling (upstream --seed). 0 (default) lets
+                       ProteinMPNN choose its own seed.
 
         Output:
             Streams: sequences (.csv), fasta (.fasta)
@@ -168,6 +220,10 @@ echo "=== ProteinMPNN installation complete ==="
         self.soluble_model = soluble_model
         self.remove_duplicates = remove_duplicates
         self.fill_gaps = fill_gaps
+        self.bias_AA_jsonl = bias_AA_jsonl
+        self.omit_AA_jsonl = omit_AA_jsonl
+        self.seed = seed
+        self.ca_noise_std = ca_noise_std
 
         super().__init__(**kwargs)
 
@@ -182,9 +238,22 @@ echo "=== ProteinMPNN installation complete ==="
         if self.sampling_temp <= 0:
             raise ValueError("sampling_temp must be positive")
 
+        if self.ca_noise_std < 0:
+            raise ValueError("ca_noise_std must be non-negative")
+
+        if self.seed < 0:
+            raise ValueError("seed must be non-negative")
+
         valid_models = ["v_48_002", "v_48_010", "v_48_020", "v_48_030"]
         if self.model_name not in valid_models:
             raise ValueError(f"model_name must be one of: {valid_models}")
+
+        _validate_freeform_string("chain", self.chain)
+        _validate_freeform_string("fill_gaps", self.fill_gaps)
+        if isinstance(self.fixed, str):
+            _validate_freeform_string("fixed", self.fixed)
+        if isinstance(self.redesigned, str):
+            _validate_freeform_string("redesigned", self.redesigned)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -219,7 +288,7 @@ echo "=== ProteinMPNN installation complete ==="
     def _generate_script_prepare_inputs(self) -> str:
         """Generate the input preparation part of the script."""
 
-        # Serialize DataStream to JSON file (proper way to pass ids + files to HelpScript)
+        # Serialize DataStream to JSON file (proper way to pass ids + files to pipe_script)
         self.structures_stream.save_json(self.structures_json)
 
         fixed_param = self.fixed if self.fixed else "-"
@@ -243,7 +312,14 @@ python {self.parse_py} --input_path $INPUT_DIR --output_path {self.parsed_pdbs_j
 """
 
     def _generate_script_run_proteinmpnn(self) -> str:
-        """Generate the ProteinMPNN execution part of the script."""
+        """Generate the ProteinMPNN execution part of the script.
+
+        Iterates per-PDB so a structure that triggers a Python exception inside
+        protein_mpnn_run.py (e.g. an unexpected chain in tied_featurize) does
+        not abort the rest of the batch. Each iteration filters the merged
+        parsed_pdbs.jsonl and fixed_pos.jsonl down to a single entry, runs the
+        model, and on failure records the id + error in missing.csv.
+        """
         pmpnn_options = f"--num_seq_per_target {self.num_sequences}"
         pmpnn_options += f" --sampling_temp {self.sampling_temp}"
         pmpnn_options += f" --model_name {self.model_name}"
@@ -251,11 +327,77 @@ python {self.parse_py} --input_path $INPUT_DIR --output_path {self.parsed_pdbs_j
         if self.soluble_model:
             pmpnn_options += " --use_soluble_model"
 
-        return f"""echo "Running model"
+        if self.bias_AA_jsonl:
+            pmpnn_options += f" --bias_AA_jsonl {self.bias_AA_jsonl}"
+
+        if self.omit_AA_jsonl:
+            pmpnn_options += f" --omit_AA_jsonl {self.omit_AA_jsonl}"
+
+        if self.seed > 0:
+            pmpnn_options += f" --seed {self.seed}"
+
+        if self.ca_noise_std > 0:
+            pmpnn_options += f" --backbone_noise {self.ca_noise_std}"
+
+        per_pdb_dir = os.path.join(self.execution_folder, "per_pdb")
+
+        return f"""echo "Running model (per-PDB loop)"
 echo "Options: {pmpnn_options}"
 echo "Output folder: {self.output_folder}"
+echo "ProteinMPNN --out_folder (execution/): {self.pmpnn_out_folder}"
 
-python {self.pmpnn_py} --jsonl_path {self.parsed_pdbs_jsonl} --fixed_positions_jsonl {self.fixed_jsonl} --out_folder {self.output_folder} {pmpnn_options}
+mkdir -p "{per_pdb_dir}"
+# Seed missing.csv header now so partial failures still produce a readable file.
+if [ ! -f "{self.missing_csv}" ]; then
+    echo "id,removed_by,cause" > "{self.missing_csv}"
+fi
+
+for struct_id in {Resolve.stream_ids(self.structures_json)}; do
+    SUBSET_JSONL="{per_pdb_dir}/${{struct_id}}.jsonl"
+    SUBSET_FIXED="{per_pdb_dir}/${{struct_id}}_fixed.jsonl"
+    SUBSET_LOG="{per_pdb_dir}/${{struct_id}}.log"
+
+    python -c "
+import json, sys
+sid = sys.argv[1]
+with open(sys.argv[2]) as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        rec = json.loads(line)
+        if rec.get('name') == sid:
+            with open(sys.argv[3], 'w') as out:
+                out.write(json.dumps(rec) + '\\n')
+            break
+    else:
+        sys.exit(2)
+with open(sys.argv[4]) as f:
+    full_fixed = json.loads(f.read())
+sub = {{sid: full_fixed[sid]}} if sid in full_fixed else {{}}
+with open(sys.argv[5], 'w') as out:
+    out.write(json.dumps(sub))
+" "$struct_id" "{self.parsed_pdbs_jsonl}" "$SUBSET_JSONL" "{self.fixed_jsonl}" "$SUBSET_FIXED"
+
+    if [ ! -s "$SUBSET_JSONL" ]; then
+        echo "  [skip] $struct_id: not found in parsed_pdbs.jsonl"
+        echo "${{struct_id}},ProteinMPNN,not_in_parsed_pdbs" >> "{self.missing_csv}"
+        continue
+    fi
+
+    echo "  [run]  $struct_id"
+    set +e
+    {self.container_prefix()}python {self.pmpnn_py} --jsonl_path "$SUBSET_JSONL" --fixed_positions_jsonl "$SUBSET_FIXED" --out_folder {self.pmpnn_out_folder} {pmpnn_options} > "$SUBSET_LOG" 2>&1
+    rc=$?
+    set -e
+    if [ $rc -ne 0 ]; then
+        # Capture last non-empty line of the log as the cause; sanitize commas.
+        CAUSE=$(grep -vE '^\\s*$' "$SUBSET_LOG" | tail -n1 | tr ',\\n' ' ')
+        echo "  [fail] $struct_id (exit $rc): $CAUSE"
+        echo "${{struct_id}},ProteinMPNN,\\"$CAUSE\\"" >> "{self.missing_csv}"
+        cat "$SUBSET_LOG"
+    fi
+done
 
 """
 
@@ -281,7 +423,9 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after ProteinMPNN execution."""
-        # Expected FASTA files - one per input structure (keep compact/lazy patterns)
+        # Raw ProteinMPNN .fa files land in execution/seqs/ (one per input
+        # structure). These aren't a first-class pipeline stream — they're
+        # an intermediate format the post-processing step reads.
         fasta_ids = self.structures_stream.ids
         fasta_files = [os.path.join(self.seqs_folder, "<id>.fa")]
 
@@ -292,7 +436,8 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             input_stream_name="structures"
         )
 
-        # Sequences stream - CSV-based with individual sequence IDs
+        # Content-bearing sequences stream: queries_csv lives under
+        # sequences/ and doubles as the map_table.
         sequences = DataStream(
             name="sequences",
             ids=sequence_ids,
@@ -301,7 +446,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             format="csv"
         )
 
-        # Fasta stream - file-based with structure IDs (one .fa file per structure)
+        # Fasta stream — points at the raw execution/seqs/<id>.fa dumps.
         fasta = DataStream(
             name="fasta",
             ids=fasta_ids,
@@ -318,15 +463,13 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 name="sequences",
                 path=self.queries_csv,
                 columns=["id", "structures.id", "source_pdb", "sequence", "score", "seq_recovery", "gaps"],
-                description="ProteinMPNN sequence results",
-                count=len(sequence_ids)
+                description="ProteinMPNN sequence results"
             ),
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed (duplicates or upstream) with removal reason",
-                count="variable"
+                description="IDs removed (duplicates or upstream) with removal reason"
             )
         }
 
@@ -349,7 +492,11 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "sampling_temp": self.sampling_temp,
                 "model_name": self.model_name,
                 "soluble_model": self.soluble_model,
-                "remove_duplicates": self.remove_duplicates
+                "remove_duplicates": self.remove_duplicates,
+                "bias_AA_jsonl": self.bias_AA_jsonl,
+                "omit_AA_jsonl": self.omit_AA_jsonl,
+                "seed": self.seed,
+                "ca_noise_std": self.ca_noise_std,
             }
         })
         return base_dict

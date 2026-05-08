@@ -51,33 +51,33 @@ A Python framework for automated computational protein design workflows that can
 
 | Notebook | Link | Description | Tools |
 |----------|------|-------------|-------|
-| **Inverse Folding** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/ExamplePipelines/notebooks/ubiquitin_results.ipynb) | Inverse folding of ubiquitin, AlphaFold2 refolding, RMSD/pLDDT filter, codon optimisation for *E. coli* | ProteinMPNN · AlphaFold · DNAEncoder |
-| **Kinase LID Redesign** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/ExamplePipelines/notebooks/kinase_LID_redesign_results.ipynb) | De novo backbone design of the adenylate kinase LID domain, filtered by RMSD on the fixed scaffold | RFdiffusion · ProteinMPNN · AlphaFold · ConformationalChange |
-| **FRET Biosensor Design** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/ExamplePipelines/notebooks/FRET_results.ipynb) | Linker length optimisation for a Ca²⁺-responsive EBFP–CaM–EYFP FRET sensor | Fuse · Boltz2 · Distance · Panda · Plot |
-| **Compound Library Screening** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/ExamplePipelines/notebooks/compound_screening_results.ipynb) | SAR screening of a compound library against a protein–DNA complex; affinities plotted by substituent | Boltz2 · CompoundLibrary · Panda · Plot |
-| **Iterative Binding Optimization** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/ExamplePipelines/notebooks/iterative_binding_optimization_results.ipynb) | 5-cycle directed evolution loop to improve ligand binding affinity via LigandMPNN + Boltz2 | Boltz2 · LigandMPNN · DistanceSelector · MutationProfiler · MutationComposer |
-| **Boltz2 Showcase** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/ExamplePipelines/notebooks/boltz2_results.ipynb) | All Boltz2 input modes: sequences, PDB, ligands, DNA, glycosylation, covalent linkages, Bundle/Each combinatorics | Boltz2 · CompoundLibrary · Bundle · Each |
+| **Inverse Folding** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/ubiquitin_results.ipynb) | Inverse folding of ubiquitin, AlphaFold2 refolding, RMSD/pLDDT filter, codon optimisation for *E. coli* | ProteinMPNN · AlphaFold · DNAEncoder |
+| **Kinase LID Redesign** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/kinase_LID_redesign_results.ipynb) | De novo backbone design of the adenylate kinase LID domain, filtered by RMSD on the fixed scaffold | RFdiffusion · ProteinMPNN · AlphaFold · ConformationalChange |
+| **FRET Biosensor Design** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/FRET_results.ipynb) | Linker length optimisation for a Ca²⁺-responsive EBFP–CaM–EYFP FRET sensor | Fuse · Boltz2 · Distance · Panda · Plot |
+| **Compound Library Screening** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/compound_screening_results.ipynb) | SAR screening of a compound library against a protein–DNA complex; affinities plotted by substituent | Boltz2 · CompoundLibrary · Panda · Plot |
+| **Iterative Binding Optimization** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/iterative_binding_optimization_results.ipynb) | 5-cycle directed evolution loop to improve ligand binding affinity via LigandMPNN + Boltz2 | Boltz2 · LigandMPNN · DistanceSelector · MutationProfiler · MutationComposer |
+| **Boltz2 Showcase** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/boltz2_results.ipynb) | All Boltz2 input modes: sequences, PDB, ligands, DNA, glycosylation, covalent linkages, Bundle/Each combinatorics | Boltz2 · CompoundLibrary · Bundle · Each |
 
 ## Example: Inverse Folding Pipeline
 
 <p align="center">
-  <img src="Docs/images/figure1_ubiquitin_pipeline.png" alt="Ubiquitin inverse folding pipeline: PDB → ProteinMPNN → AlphaFold + DNAEncoder" width="800">
+  <img src="docs/images/figure1_ubiquitin_pipeline.png" alt="Ubiquitin inverse folding pipeline: PDB → ProteinMPNN → AlphaFold + DNAEncoder" width="800">
 </p>
 
 ## Example: Compound Library Screening with Boltz2
 
 <p align="center">
-  <img src="Docs/images/figure3_boltz2_compound_screening.png" alt="Boltz2 compound library screening with protein-DNA-ligand co-folding" width="800">
+  <img src="docs/images/figure3_boltz2_compound_screening.png" alt="Boltz2 compound library screening with protein-DNA-ligand co-folding" width="800">
 </p>
 
 ## Documentation
 
 Full documentation is available at **[biopipelines.readthedocs.io](https://biopipelines.readthedocs.io/en/latest/)**.
 
-- **[User Manual](Docs/UserManual.md)**
-- **[Tool Reference](Docs/ToolReference.md)**
-- **[Examples](ExamplePipelines/)**
-- **[Developer Manual](Docs/DeveloperManual.md)**
+- **[User Manual](docs/UserManual.md)**
+- **[Tool Reference](docs/ToolReference.md)**
+- **[Examples](example_pipelines/)**
+- **[Developer Manual](docs/DeveloperManual.md)**
 
 ## Tool Compatibility
 
@@ -119,4 +119,32 @@ Full documentation is available at **[biopipelines.readthedocs.io](https://biopi
 | **Statistics** | MutationProfiler | ✅ | ✅ |
 | | SequenceMetricCorrelation | ✅ | ⏳ |
 | | BayesianAdjuster | ✅ | ⏳ |
+
+## Testing
+
+Run the automated test suite with:
+
+```bash
+pip install -e ".[test]"
+pytest tests/
+```
+
+The suite covers the pure-logic modules that don't depend on GPU or external
+model weights — ID pattern expansion (`id_patterns`), combinatorics
+(`Bundle`/`Each`, ID prediction, provenance), `DataStream` indexing / slicing
+/ iteration, `StandardizedOutput` ID-based selection, and a smoke test that
+verifies `Pipeline(...).save()` emits a valid bash script for a minimal
+`Sequence`-only pipeline.
+
+Running the actual ML tools (RFdiffusion, AlphaFold, Boltz, ProteinMPNN,
+LigandMPNN, BoltzGen, CABSflex, …) requires GPUs and model weights and is
+out of scope for CI; those paths are exercised by the example scripts in
+`example_pipelines/`.
+
+CI runs the suite on every push and pull request against Python 3.10, 3.11,
+and 3.12 via `.github/workflows/tests.yml`.
+
+Every test run writes a per-test summary to `tests/test_results.csv` and
+`tests/test_results.xlsx` (module, class, test name, outcome, duration),
+with a `summary` sheet aggregating pass/fail/skip counts.
 | **Data Management** | Panda | ✅ | ✅ |

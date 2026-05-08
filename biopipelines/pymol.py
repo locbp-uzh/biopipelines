@@ -61,35 +61,37 @@ class PyMOL(BaseConfig):
     """
 
     TOOL_NAME = "PyMOL"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
-        if env_manager == "pip":
-            skip = "" if force_reinstall else """# Check if already installed
-if python -c "import pymol" 2>/dev/null; then
-    echo "PyMOL already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing PyMOL (pip) ==="
-{skip}pip install pymol-open-source
-
-echo "=== PyMOL installation complete ==="
-"""
+        env_check = cls._env_exists_check("ProteinEnv", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_manager} env list 2>/dev/null | grep -q "ProteinEnv"; then
+if {env_check}; then
     echo "PyMOL (ProteinEnv) already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("ProteinEnv", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("ProteinEnv", env_manager, biopipelines)
         return f"""echo "=== Installing PyMOL (ProteinEnv) ==="
-{skip}{env_manager} env create -f {biopipelines}/Environments/ProteinEnv.yaml
+{skip}{remove_block}
+{env_block}
 if [ $? -ne 0 ]; then
     echo "ERROR: ProteinEnv creation failed."
     exit 1
 fi
-echo "=== PyMOL (ProteinEnv) installation complete ==="
+
+# Verify installation
+if {env_manager} run -n ProteinEnv python -c "import pymol" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== PyMOL (ProteinEnv) installation complete ==="
+else
+    echo "ERROR: PyMOL verification failed (cannot import pymol)"
+    exit 1
+fi
 """
 
     def _repr_notebook_html(self, output) -> str:
@@ -121,16 +123,17 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
 
         # Load structures renderer
         repo_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-        renderer_path = _os.path.join(repo_root, "Renderers", "structures.py")
+        renderer_path = _os.path.join(repo_root, "renderers", "structures.py")
         spec = importlib.util.spec_from_file_location("renderer", renderer_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod.render(combined, output)
 
-    # Lazy path descriptors
-    config_file = Path(lambda self: os.path.join(self.output_folder, "pymol_config.json"))
-    session_file = Path(lambda self: os.path.join(self.output_folder, f"{self.session_name}.pse"))
-    pymol_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pymol.py"))
+    # Lazy path descriptors — session file is the tool's primary binary
+    # artefact; put it in _extras/ since it's not a typed stream or table.
+    config_file = Path(lambda self: self.configuration_path("pymol_config.json"))
+    session_file = Path(lambda self: os.path.join(self.extras_folder, f"{self.session_name}.pse"))
+    pymol_py = Path(lambda self: self.pipe_script_path("pipe_pymol.py"))
 
     # --- Static methods for creating operations ---
 
@@ -169,6 +172,25 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
             PyMOLOperation for loading structures
         """
         return PyMOLOperation("load", structures=structures)
+
+    @staticmethod
+    def LoadStates(structures: Union[StandardizedOutput, DataStream],
+                   name: str = "states") -> PyMOLOperation:
+        """
+        Load all structures as states of a single PyMOL object.
+
+        Creates a multi-state object where each structure becomes a separate
+        state. This allows scrubbing through structures in PyMOL's movie
+        player without needing external video tools like ffmpeg.
+
+        Args:
+            structures: Tool output containing structures to load as states
+            name: Name for the multi-state PyMOL object (default: "states")
+
+        Returns:
+            PyMOLOperation for loading structures as states
+        """
+        return PyMOLOperation("load_states", structures=structures, name=name)
 
     @staticmethod
     def Color(color: str,
@@ -531,6 +553,11 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                 if structures is not None:
                     self._structure_sources.append(structures)
 
+            elif op.op_type == "load_states":
+                structures = op.params.get("structures")
+                if structures is not None:
+                    self._structure_sources.append(structures)
+
             elif op.op_type in ("color", "coloraf", "show", "hide", "render"):
                 structures = op.params.get("structures")
                 if structures is not None and structures not in self._structure_sources:
@@ -596,7 +623,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                 result[key] = None
             elif isinstance(value, DataStream):
                 # Save DataStream to JSON file; store path in config
-                ds_json_path = os.path.join(self.output_folder, f"op{op_index}_{key}.json")
+                ds_json_path = self.configuration_path(f"op{op_index}_{key}.json")
                 value.save_json(ds_json_path)
                 result[key] = {
                     "type": "datastream",
@@ -607,7 +634,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                 # Extract structures DataStream and save to JSON file
                 structures_data = value.streams.structures
                 if isinstance(structures_data, DataStream):
-                    ds_json_path = os.path.join(self.output_folder, f"op{op_index}_{key}.json")
+                    ds_json_path = self.configuration_path(f"op{op_index}_{key}.json")
                     structures_data.save_json(ds_json_path)
                     result[key] = {
                         "type": "datastream",
@@ -638,7 +665,7 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
                 # ToolOutput or similar - check for DataStream in structures
                 structures_attr = getattr(value, 'structures', None)
                 if isinstance(structures_attr, DataStream):
-                    ds_json_path = os.path.join(self.output_folder, f"op{op_index}_{key}.json")
+                    ds_json_path = self.configuration_path(f"op{op_index}_{key}.json")
                     structures_attr.save_json(ds_json_path)
                     result[key] = {
                         "type": "datastream",
@@ -658,8 +685,6 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate PyMOL execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# PyMOL execution script\n"
         script_content += self.generate_completion_check_header()
@@ -671,14 +696,17 @@ echo "=== PyMOL (ProteinEnv) installation complete ==="
 
     def generate_script_run_pymol(self) -> str:
         """Generate the PyMOL session creation part of the script."""
+        # Pass explicit destinations so pipe_pymol writes the session file
+        # to _extras/ and render PNGs to the renders/ stream folder.
         config = {
             "operations": [self._serialize_operation(op, i) for i, op in enumerate(self.operations)],
             "session_name": self.session_name,
-            "output_folder": self.output_folder
+            "output_folder": self.stream_folder("renders"),
+            "renders_folder": self.stream_folder("renders"),
+            "session_file": self.session_file,
         }
 
         # Write config file at configuration time (not execution time)
-        os.makedirs(self.output_folder, exist_ok=True)
         with open(self.config_file, 'w') as f:
             json.dump(config, f, indent=2)
 
@@ -691,16 +719,18 @@ python "{self.pymol_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files including PNG renders as DataStream."""
-        # Predict PNG files from Render and RenderEach operations
+        # Predict PNG files from Render and RenderEach operations. Renders
+        # land inside the renders/ stream folder.
         render_ids = []
         render_files = []
+        renders_dir = self.stream_folder("renders")
 
         for op in self.operations:
             if op.op_type == "render":
                 # Single render - predict the output filename
                 filename = op.params.get("filename", "render.png")
                 if not os.path.isabs(filename):
-                    filename = os.path.join(self.output_folder, filename)
+                    filename = os.path.join(renders_dir, filename)
                 # Use filename without extension as ID
                 render_id = os.path.splitext(os.path.basename(filename))[0]
                 render_ids.append(render_id)
@@ -719,17 +749,15 @@ python "{self.pymol_py}" --config "{self.config_file}"
                         if isinstance(structures_ds, DataStream):
                             structure_ids = list(structures_ds.ids)
 
-                    # RenderEach saves to renders/<id>.png
-                    renders_folder = os.path.join(self.output_folder, "renders")
                     for struct_id in structure_ids:
                         render_ids.append(struct_id)
-                        render_files.append(os.path.join(renders_folder, f"{struct_id}.png"))
+                        render_files.append(os.path.join(renders_dir, f"{struct_id}.png"))
 
             elif op.op_type == "png":
                 # Direct PNG operation
                 filename = op.params.get("filename", "render.png")
                 if not os.path.isabs(filename):
-                    filename = os.path.join(self.output_folder, filename)
+                    filename = os.path.join(renders_dir, filename)
                 render_id = os.path.splitext(os.path.basename(filename))[0]
                 render_ids.append(render_id)
                 render_files.append(filename)

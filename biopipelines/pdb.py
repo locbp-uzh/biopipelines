@@ -5,21 +5,21 @@
 """
 PDB tool for fetching protein structures from local folders or RCSB PDB.
 
-Fetches structures with priority-based lookup: local_folder -> PDBs/ -> RCSB download.
-Downloads are saved both in PDBs/ folder and tool output folder for reuse.
+Fetches structures with priority-based lookup: local_folder -> pdbs/ -> RCSB download.
+Downloads are saved both in pdbs/ folder and tool output folder for reuse.
 """
 
 import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -40,8 +40,8 @@ class PDB(BaseConfig):
     """
     Pipeline tool for fetching protein structures from local folders or RCSB PDB.
 
-    Implements priority-based lookup: checks local_folder (if provided), then PDBs/
-    folder, then downloads from RCSB. Downloaded structures are saved to both PDBs/
+    Implements priority-based lookup: checks local_folder (if provided), then pdbs/
+    folder, then downloads from RCSB. Downloaded structures are saved to both pdbs/
     folder (for reuse) and tool output folder.
 
     Supports operations that are applied to structures after loading, similar to
@@ -66,21 +66,26 @@ class PDB(BaseConfig):
     """
 
     TOOL_NAME = "PDB"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== PDB ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== PDB ready ==="
 """
 
-    # Lazy path descriptors
-    structures_csv = Path(lambda self: os.path.join(self.output_folder, "structures.csv"))
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
-    failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
-    pdb_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pdb.py"))
+    # Lazy path descriptors — all three declared streams (structures,
+    # sequences, compounds) are content-bearing: their map_table CSV IS
+    # the content. Each lives inside its own stream folder; the "failed"
+    # table is a standalone TableInfo under tables/.
+    structures_csv = Path(lambda self: self.stream_path("structures", "structures.csv"))
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    compounds_csv = Path(lambda self: self.stream_path("compounds", "compounds.csv"))
+    failed_csv = Path(lambda self: self.table_path("failed"))
+    config_file = Path(lambda self: self.configuration_path("fetch_config.json"))
+    pdb_py = Path(lambda self: self.pipe_script_path("pipe_pdb.py"))
 
     # --- Static methods for creating operations ---
 
@@ -107,14 +112,15 @@ echo "=== PDB ready ==="
     # --- Instance methods ---
 
     def __init__(self,
-                 pdbs: Union[str, List[str], 'StandardizedOutput', 'DataStream'],
+                 pdbs: Union[str, List[str], Dict[str, str], 'StandardizedOutput', 'DataStream'],
                  *args,
                  ids: Optional[Union[str, List[str]]] = None,
                  convert: Optional[str] = None,
                  local_folder: Optional[str] = None,
                  biological_assembly: bool = False,
                  remove_waters: bool = True,
-                 chain: str = "longest",
+                 chain: Union[str, List[str]] = "auto",
+                 split_chains: bool = False,
                  fetch_compounds: bool = True,
                  **kwargs):
         """
@@ -124,26 +130,51 @@ echo "=== PDB ready ==="
             pdbs: PDB ID(s) to fetch, a folder path containing PDB files,
                   or a StandardizedOutput/DataStream from an upstream tool.
                   Can be single string, list of strings (e.g. "4ufc" or ["4ufc","1abc"]),
+                  a dictionary mapping IDs to PDB codes (e.g. {"POI": "4ufc", "POI2": "1abc"}),
                   a folder path (absolute or relative to PDBs folder),
                   or a tool output whose structures will be used at execution time.
             *args: Operations to apply after loading (e.g., PDB.Rename("LIG", ":L:"))
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
+                 Ignored when pdbs is a dictionary (ids come from dict keys).
             convert: Target format to convert structures to - "pdb", "cif", or None (default).
                      When None, no conversion is performed: structures are kept in whatever
                      format they are found locally or downloaded as from RCSB.
                      The structures DataStream format will be "pdb|cif" when None.
-            local_folder: Custom local folder to check first (before PDBs/). Default: None
+            local_folder: Custom local folder to check first (before pdbs/). Default: None
             biological_assembly: Whether to download biological assembly from RCSB (default: False)
             remove_waters: Whether to remove water molecules from structures (default: True)
-            chain: Which chain to extract the sequence from. "longest" (default) picks
-                the longest chain. Specify a chain letter (e.g. "A", "B") to select that chain.
+            chain: Which chain(s) to extract the sequence from. Note that
+                only an explicit single chain letter filters the structure
+                file on disk; every other form leaves all chains intact in
+                the .pdb/.cif and only affects the sequences stream.
+                * "auto" (default) — structure file unchanged (all chains
+                  kept on disk). Sequences stream emits one <id>,<sequence>
+                  row per input, carrying the longest chain.
+                * "all" — structure file unchanged. Sequences stream emits
+                  one <id>_<chain_letter>,<sequence> row per chain present
+                  in the structure (sequence pulled from RCSB FASTA when
+                  the input is a PDB code, otherwise from the structure
+                  file). No aggregate longest row.
+                * List[str], e.g. ["A","C"] — structure file unchanged.
+                  Sequences stream emits one <id>_<chain_letter>,<sequence>
+                  row per listed chain. Cardinality is known at config
+                  time (literal IDs).
+                * Single chain letter "A"/"B"/... — structure file on
+                  disk is filtered down to just that chain. Sequences
+                  stream emits a single <id>,<sequence_for_that_chain>
+                  row.
+            split_chains: When True (and chain is "all" or a list), also split
+                the structure file into one .pdb (or .cif) per chain letter at
+                <output>/<custom_id>_<letter>.<ext>. The structures stream
+                IDs become <custom_id>_<letter>. Mutually exclusive with the
+                single-chain forms ("auto" / explicit chain letter).
             **kwargs: Additional parameters
 
         Fetch Priority:
             For each PDB ID, searches in order:
             1. local_folder (if parameter provided)
-            2. ./PDBs/ folder in repository
-            3. Download from RCSB PDB (saved to both PDBs/ and output folder)
+            2. ./pdbs/ folder in repository
+            3. Download from RCSB PDB (saved to both pdbs/ and output folder)
 
         Output:
             Streams: structures (.pdb/.cif), sequences (.csv), compounds (.csv)
@@ -160,6 +191,15 @@ echo "=== PDB ready ==="
                 self.operations.append(arg)
             else:
                 raise ValueError(f"Unexpected positional argument: {arg}. Expected PDBOperation (e.g., PDB.Rename(...))")
+
+        # Dict input: {id: pdb_code} -> extract ids from keys, pdb codes from values
+        if isinstance(pdbs, dict):
+            if ids is not None:
+                print("  Warning: 'ids' parameter ignored when pdbs is a dictionary (using dict keys)")
+            if not pdbs:
+                raise ValueError("Must provide at least one PDB ID")
+            ids = list(pdbs.keys())
+            pdbs = list(pdbs.values())
 
         # Handle StandardizedOutput / DataStream input from upstream tools
         self.from_upstream = False
@@ -206,16 +246,40 @@ echo "=== PDB ready ==="
             self.local_folder = None
         self.biological_assembly = biological_assembly
         self.remove_waters = remove_waters
-        self.chain = chain
+        # Chain may be one of:
+        #   - "auto" (default longest-only)
+        #   - "all"  (one row per chain in the structure)
+        #   - "A"/"B"/... (single explicit chain letter)
+        #   - List[str] of explicit chain letters (subset of "all")
+        if isinstance(chain, list):
+            if not chain:
+                raise ValueError("chain list cannot be empty")
+            if not all(isinstance(c, str) and c for c in chain):
+                raise ValueError("chain list must contain non-empty strings")
+            self.chain = list(chain)
+        else:
+            self.chain = chain
+        self.split_chains = split_chains
         self.fetch_compounds = fetch_compounds
+
+        chain_is_multi = isinstance(self.chain, list) or self.chain == "all"
+        if self.split_chains and not chain_is_multi:
+            raise ValueError("split_chains=True requires chain=\"all\" or chain=[...]")
 
         # Validate convert
         if self.convert is not None and self.convert not in ["pdb", "cif"]:
             raise ValueError(f"Invalid convert: {self.convert}. Must be 'pdb', 'cif', or None")
 
+        if isinstance(self.chain, list):
+            for c in self.chain:
+                _validate_freeform_string("chain", c)
+        else:
+            _validate_freeform_string("chain", self.chain)
+        _validate_freeform_string("local_folder", self.local_folder)
+
         # Note: PDB ID format validation is skipped at init time because:
         # 1. local_folder may contain custom-named files
-        # 2. PDBs/ folder may contain custom-named files
+        # 2. pdbs/ folder may contain custom-named files
         # 3. Runtime script will validate RCSB format only if download is needed
 
         # Initialize base class
@@ -314,7 +378,7 @@ echo "=== PDB ready ==="
 
         # Check if folder needs resolution relative to PDBs
         if hasattr(self, 'folder_needs_resolution') and self.folder_needs_resolution:
-            repo_pdbs_folder = pipeline_folders.get('PDBs', '')
+            repo_pdbs_folder = pipeline_folders.get('pdbs', '')
             candidate_path = os.path.join(repo_pdbs_folder, self.folder_source)
 
             if os.path.isdir(candidate_path):
@@ -338,7 +402,7 @@ echo "=== PDB ready ==="
                 raise ValueError(f"Folder '{self.folder_source}' not found (tried absolute, relative, and relative to PDBs folder)")
 
         # Check which files exist locally and which will need to be downloaded
-        repo_pdbs_folder = pipeline_folders.get('PDBs', '')
+        repo_pdbs_folder = pipeline_folders.get('pdbs', '')
         self.found_locally = []
         self.needs_download = []
         # Track which formats are present locally (only relevant when convert=None)
@@ -348,37 +412,44 @@ echo "=== PDB ready ==="
             found = False
             local_path = None
 
-            if self.convert is not None:
-                # Specific convert target: prefer that extension locally (may convert if only other found)
-                extensions_to_try = [".pdb" if self.convert == "pdb" else ".cif", ".cif" if self.convert == "pdb" else ".pdb"]
-            else:
-                # No conversion: accept both, pdb first then cif
-                extensions_to_try = [".pdb", ".cif"]
+            # Check if pdb_id is already an absolute path to an existing file
+            if os.path.isabs(pdb_id) and os.path.isfile(pdb_id):
+                self.found_locally.append((pdb_id, pdb_id))
+                local_path = pdb_id
+                found = True
 
-            for extension in extensions_to_try:
-                # Check folder_source first if it was set (from folder loading)
-                if not found and hasattr(self, 'folder_source') and self.folder_source:
-                    local_path = os.path.join(self.folder_source, f"{pdb_id}{extension}")
-                    if os.path.exists(local_path):
-                        self.found_locally.append((pdb_id, local_path))
-                        found = True
+            if not found:
+                if self.convert is not None:
+                    # Specific convert target: prefer that extension locally (may convert if only other found)
+                    extensions_to_try = [".pdb" if self.convert == "pdb" else ".cif", ".cif" if self.convert == "pdb" else ".pdb"]
+                else:
+                    # No conversion: accept both, pdb first then cif
+                    extensions_to_try = [".pdb", ".cif"]
 
-                # Check local_folder if specified
-                if not found and self.local_folder:
-                    local_path = os.path.join(self.local_folder, f"{pdb_id}{extension}")
-                    if os.path.exists(local_path):
-                        self.found_locally.append((pdb_id, local_path))
-                        found = True
+                for extension in extensions_to_try:
+                    # Check folder_source first if it was set (from folder loading)
+                    if not found and hasattr(self, 'folder_source') and self.folder_source:
+                        local_path = os.path.join(self.folder_source, f"{pdb_id}{extension}")
+                        if os.path.exists(local_path):
+                            self.found_locally.append((pdb_id, local_path))
+                            found = True
 
-                # Check PDBs/ folder
-                if not found and repo_pdbs_folder:
-                    local_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{extension}")
-                    if os.path.exists(local_path):
-                        self.found_locally.append((pdb_id, local_path))
-                        found = True
+                    # Check local_folder if specified
+                    if not found and self.local_folder:
+                        local_path = os.path.join(self.local_folder, f"{pdb_id}{extension}")
+                        if os.path.exists(local_path):
+                            self.found_locally.append((pdb_id, local_path))
+                            found = True
 
-                if found:
-                    break
+                    # Check pdbs/ folder
+                    if not found and repo_pdbs_folder:
+                        local_path = os.path.join(repo_pdbs_folder, f"{pdb_id}{extension}")
+                        if os.path.exists(local_path):
+                            self.found_locally.append((pdb_id, local_path))
+                            found = True
+
+                    if found:
+                        break
 
             if found and self.convert is None and local_path:
                 fmt = "cif" if local_path.endswith(".cif") else "pdb"
@@ -539,10 +610,11 @@ echo "=== PDB ready ==="
             f"PDB_IDS: {', '.join(self.pdb_ids)} ({len(self.pdb_ids)} structures)",
             f"CUSTOM_IDS: {', '.join(self.custom_ids)}",
             f"CONVERT: {convert_display}",
-            f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses PDBs/)'}",
+            f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses pdbs/)'}",
             f"BIOLOGICAL_ASSEMBLY: {self.biological_assembly}",
             f"REMOVE_WATERS: {self.remove_waters}",
-            f"CHAIN: {self.chain}"
+            f"CHAIN: {','.join(self.chain) if isinstance(self.chain, list) else self.chain}",
+            f"SPLIT_CHAINS: {self.split_chains}"
         ])
 
         # Add operations if any
@@ -565,8 +637,7 @@ echo "=== PDB ready ==="
     
     def generate_script(self, script_path: str) -> str:
         """Generate PDB execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
+        # Layout sub-dirs already created by the pipeline.
         script_content = "#!/bin/bash\n"
         script_content += "# PDB execution script\n"
         script_content += self.generate_completion_check_header()
@@ -581,12 +652,14 @@ echo "=== PDB ready ==="
         import json
 
         # Get PDBs folder path from folder manager
-        repo_pdbs_folder = self.folders['PDBs']
+        repo_pdbs_folder = self.folders['pdbs']
 
         # If folder_source is set (from folder loading), use it as local_folder for the runtime script
         effective_local_folder = getattr(self, 'folder_source', None) or self.local_folder
 
-        # When convert is None, pipe_pdb.py keeps whatever format is found locally or downloaded
+        # When convert is None, pipe_pdb.py keeps whatever format is found locally or downloaded.
+        # New layout: PDBs land inside the structures/ stream folder;
+        # each table CSV has its own canonical home.
         config_data = {
             "pdb_ids": self.pdb_ids,
             "custom_ids": self.custom_ids,
@@ -596,7 +669,8 @@ echo "=== PDB ready ==="
             "biological_assembly": self.biological_assembly,
             "remove_waters": self.remove_waters,
             "chain": self.chain,
-            "output_folder": self.output_folder,
+            "split_chains": self.split_chains,
+            "output_folder": self.stream_folder("structures"),
             "structures_table": self.structures_csv,
             "sequences_table": self.sequences_csv,
             "failed_table": self.failed_csv,
@@ -619,7 +693,7 @@ echo "=== PDB ready ==="
 echo "Convert: {convert_display}"
 echo "PDB IDs: {', '.join(self.pdb_ids)}"
 echo "Custom IDs: {', '.join(self.custom_ids)}"
-echo "Priority: {'local_folder -> ' if self.local_folder else ''}PDBs/ -> RCSB download"
+echo "Priority: {'local_folder -> ' if self.local_folder else ''}pdbs/ -> RCSB download"
 echo "Output folder: {self.output_folder}"
 
 python "{self.pdb_py}" --config "{self.config_file}"
@@ -628,11 +702,10 @@ python "{self.pdb_py}" --config "{self.config_file}"
     
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after structure fetching."""
+        structures_dir = self.stream_folder("structures")
         # When convert is set, output will always be that format; otherwise it can be either
         if self.convert is not None:
             extension = ".pdb" if self.convert == "pdb" else ".cif"
-            structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
-                              for custom_id in self.custom_ids]
             stream_format = self.convert
         else:
             # No conversion: predict extension where possible
@@ -652,52 +725,81 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 extension = ".*"
                 stream_format = "pdb|cif"
 
-            structure_files = [os.path.join(self.output_folder, f"{custom_id}{extension}")
-                              for custom_id in self.custom_ids]
+        if self.split_chains:
+            if isinstance(self.chain, list):
+                # Explicit chain list -> deterministic per-chain ids.
+                structure_id_patterns = [f"{cid}_{ch}"
+                                         for cid in self.custom_ids
+                                         for ch in self.chain]
+                structure_files = [os.path.join(structures_dir, f"<id>{extension}")]
+            else:
+                # chain="all" -> chain letters resolved at runtime against
+                # the parsed structure; declare a lazy id pattern with an
+                # <id> file template.
+                structure_id_patterns = [f"{cid}[_<chain>]" for cid in self.custom_ids]
+                structure_files = [os.path.join(structures_dir, f"<id>{extension}")]
+        else:
+            structure_id_patterns = list(self.custom_ids)
+            structure_files = [os.path.join(structures_dir, f"{cid}{extension}")
+                               for cid in self.custom_ids]
 
         tables = {
             "structures": TableInfo(
                 name="structures",
                 path=self.structures_csv,
                 columns=["id", "pdb_id", "file_path", "format", "file_size", "source"],
-                description="Successfully fetched structure files",
-                count=len(self.pdb_ids)
+                description="Successfully fetched structure files"
             ),
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "sequence"],
-                description="Protein sequences extracted from structures",
-                count=len(self.pdb_ids)
+                description="Protein sequences extracted from structures"
             ),
             "compounds": TableInfo(
                 name="compounds",
                 path=self.compounds_csv,
                 columns=["id", "code", "format", "smiles", "ccd"],
-                description="Ligands extracted from PDB structures (SMILES from RCSB)",
-                count="variable"
+                description="Ligands extracted from PDB structures (SMILES from RCSB)"
             ),
             "failed": TableInfo(
                 name="failed",
                 path=self.failed_csv,
                 columns=["pdb_id", "error_message", "source", "attempted_path"],
-                description="Failed structure fetches with error details",
-                count="variable"
+                description="Failed structure fetches with error details"
             )
         }
 
         # Create DataStreams
         structures = DataStream(
             name="structures",
-            ids=self.custom_ids.copy(),
+            ids=structure_id_patterns,
             files=structure_files,
             map_table=self.structures_csv,
             format=stream_format
         )
 
+        # Sequences stream cardinality follows the chain parameter:
+        #   "auto" / explicit chain letter -> exactly one row per input id
+        #                                     (literal IDs).
+        #   List[str]                      -> one row per (input id, chain
+        #                                     letter) pair, count known at
+        #                                     config time -> literal IDs.
+        #   "all"                          -> one row per chain in the
+        #                                     structure, count resolved at
+        #                                     runtime via the RCSB FASTA
+        #                                     fetch -> lazy IDs.
+        if isinstance(self.chain, list):
+            sequence_id_patterns = [f"{cid}_{ch}"
+                                    for cid in self.custom_ids
+                                    for ch in self.chain]
+        elif self.chain == "all":
+            sequence_id_patterns = [f"{cid}[_<chain>]" for cid in self.custom_ids]
+        else:
+            sequence_id_patterns = list(self.custom_ids)
         sequences = DataStream(
             name="sequences",
-            ids=self.custom_ids.copy(),
+            ids=sequence_id_patterns,
             files=[self.sequences_csv],
             map_table=self.sequences_csv,
             format="csv"
@@ -733,6 +835,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 "biological_assembly": self.biological_assembly,
                 "remove_waters": self.remove_waters,
                 "chain": self.chain,
+                "split_chains": self.split_chains,
                 "operations": [op.to_dict() for op in self.operations]
             }
         })

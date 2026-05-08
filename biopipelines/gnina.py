@@ -25,7 +25,7 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .config_manager import ConfigManager
@@ -33,7 +33,7 @@ try:
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from config_manager import ConfigManager
@@ -71,6 +71,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -97,6 +98,7 @@ class Gnina(BaseConfig):
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -f "{binary}" ]; then
     echo "GNINA already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
@@ -107,22 +109,33 @@ wget https://github.com/gnina/gnina/releases/download/v1.3.2/gnina.1.3.2
 chmod +x gnina.1.3.2
 ln -sf gnina.1.3.2 gnina
 
-echo "=== GNINA installation complete ==="
+# Verify installation
+if [ -x "{binary}" ]; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== GNINA installation complete ==="
+else
+    echo "ERROR: GNINA verification failed (binary missing or not executable)"
+    exit 1
+fi
 """
 
-    # Lazy path descriptors
+    # Lazy path descriptors — canonical sub-layout.
+    #   configuration/  — gnina_config.json + input DataStream JSONs.
+    #   execution/      — prepared_proteins/, conformers/, docking/ (scratch).
+    #   structures/     — best-pose PDBs + structures_map.csv.
+    #   tables/         — docking_results, docking_summary, missing.
     gnina_binary = Path(lambda self: os.path.join(self.folders["Gnina"], "gnina"))
-    helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_gnina.py"))
-    docking_results_csv = Path(lambda self: os.path.join(self.output_folder, "docking_results.csv"))
-    docking_summary_csv = Path(lambda self: os.path.join(self.output_folder, "docking_summary.csv"))
-    config_json = Path(lambda self: os.path.join(self.output_folder, "gnina_config.json"))
-    structures_json = Path(lambda self: os.path.join(self.output_folder, "structures_ds.json"))
-    compounds_json = Path(lambda self: os.path.join(self.output_folder, "compounds_ds.json"))
-    structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
-    autobox_ds_json = Path(lambda self: os.path.join(self.output_folder, "autobox_ligand_ds.json"))
-    propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
-    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
+    helper_py = Path(lambda self: self.pipe_script_path("pipe_gnina.py"))
+    docking_results_csv = Path(lambda self: self.table_path("docking_results"))
+    docking_summary_csv = Path(lambda self: self.table_path("docking_summary"))
+    config_json = Path(lambda self: self.configuration_path("gnina_config.json"))
+    structures_json = Path(lambda self: self.configuration_path("structures_ds.json"))
+    compounds_json = Path(lambda self: self.configuration_path("compounds_ds.json"))
+    structures_map = Path(lambda self: self.stream_map_path("structures"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    autobox_ds_json = Path(lambda self: self.configuration_path("autobox_ligand_ds.json"))
+    propagate_missing_py = Path(lambda self: self.pipe_script_path("pipe_propagate_missing.py"))
+    update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -131,9 +144,9 @@ echo "=== GNINA installation complete ==="
                  center: Optional[str] = None,
                  size: Union[float, str, None] = None,
                  autobox_add: float = 4.0,
-                 exhaustiveness: int = 32,
+                 exhaustiveness: int = 8,
                  num_modes: int = 9,
-                 num_runs: int = 5,
+                 num_runs: int = 1,
                  seed: int = 42,
                  cnn_scoring: str = "rescore",
                  generate_conformers: bool = False,
@@ -166,11 +179,13 @@ echo "=== GNINA installation complete ==="
                 (default 4.0). Only used when autobox_ligand is set or
                 auto-detected.
             exhaustiveness: Search exhaustiveness — higher values explore more
-                conformational space but take longer (default 32).
-            num_modes: Number of docked poses output per GNINA run (default 9).
+                conformational space but take longer (default 8, matching the
+                upstream GNINA CLI default).
+            num_modes: Number of docked poses output per GNINA run (default 9,
+                matching the upstream GNINA CLI default).
             num_runs: Number of independent docking runs per conformer with
                 incremented seeds. More runs improve pose consistency statistics
-                (default 5).
+                (default 1).
             seed: Base random seed. Each run uses seed + run_index (default 42).
             cnn_scoring: CNN scoring mode. Options: "rescore" (re-score Vina poses
                 with CNN, default), "refinement" (optimize with CNN), "none"
@@ -347,9 +362,12 @@ echo "=== GNINA installation complete ==="
         return config_lines
 
     def _write_config_json(self):
-        """Write configuration and DataStreams to JSON files at pipeline time."""
-        os.makedirs(self.output_folder, exist_ok=True)
+        """Write configuration and DataStreams to JSON files at pipeline time.
 
+        Scratch folders (prepared_proteins/, conformers/, docking/) all go
+        under execution/; best-pose PDBs land in the structures/ stream
+        folder via the explicit best_poses_dir key.
+        """
         self.structures_stream.save_json(self.structures_json)
         self.compounds_stream.save_json(self.compounds_json)
 
@@ -367,7 +385,8 @@ echo "=== GNINA installation complete ==="
         upstream_missing = self._get_upstream_missing_table_path(self.structures_input)
 
         config = {
-            "output_folder": self.output_folder,
+            "output_folder": self.execution_folder,
+            "best_poses_dir": self.stream_folder("structures"),
             "gnina_binary": self.gnina_binary,
             "structures_json": self.structures_json,
             "compounds_json": self.compounds_json,
@@ -394,17 +413,30 @@ echo "=== GNINA installation complete ==="
         with open(self.config_json, 'w') as f:
             json.dump(config, f, indent=2)
 
-    def _get_gnina_modules(self) -> List[str]:
-        """Get CUDA modules for GNINA from the gnina section of config.yaml."""
+    def _get_gnina_overrides(self) -> Dict[str, Any]:
+        """Read the per-tool overrides for GNINA from the active config.
+
+        Lives at ``tool_overrides.gnina`` in the YAML — sites that need
+        to pin CUDA modules or set LD_LIBRARY_PATH for GNINA fill in
+        this block. Returns an empty dict when not configured (other
+        sites don't need either knob).
+        """
         config_manager = ConfigManager()
-        gnina_config = config_manager._config.get('gnina', {})
-        return gnina_config.get('modules', [])
+        overrides = config_manager._config.get('tool_overrides', {}) or {}
+        return overrides.get('gnina', {}) or {}
+
+    def _get_gnina_modules(self) -> List[str]:
+        """CUDA modules to load before invoking gnina (tool_overrides.gnina.modules)."""
+        modules = self._get_gnina_overrides().get('modules', []) or []
+        for i, mod in enumerate(modules):
+            _validate_freeform_string(f"tool_overrides.gnina.modules[{i}]", mod)
+        return modules
 
     def _get_gnina_ld_library_path(self) -> str:
-        """Get LD_LIBRARY_PATH for GNINA from the gnina section of config.yaml."""
-        config_manager = ConfigManager()
-        gnina_config = config_manager._config.get('gnina', {})
-        return gnina_config.get('ld_library_path', '')
+        """LD_LIBRARY_PATH to prepend (tool_overrides.gnina.ld_library_path)."""
+        ld_path = self._get_gnina_overrides().get('ld_library_path', '') or ''
+        _validate_freeform_string("tool_overrides.gnina.ld_library_path", ld_path)
+        return ld_path
 
     def generate_script(self, script_path: str) -> str:
         """Generate GNINA execution script."""
@@ -433,9 +465,9 @@ echo "=== GNINA installation complete ==="
 
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to update structures_map.csv with actual runtime output files."""
-        best_poses_dir = os.path.join(self.output_folder, "best_poses")
+        best_poses_dir = self.stream_folder("structures")
         return f"""echo "Updating structures map with actual output files"
-python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{self.output_folder}" --best-poses-dir "{best_poses_dir}"
+python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{self.execution_folder}" --best-poses-dir "{best_poses_dir}"
 
 """
 
@@ -449,13 +481,14 @@ python {self.update_map_py} --structures-map "{self.structures_map}" --output-fo
         upstream_folder = os.path.dirname(upstream_missing_path)
 
         return f"""
-# Propagate missing table from upstream tools
+# Propagate missing table from upstream tools — writes to tables/missing.csv.
 echo "Checking for upstream missing structures..."
 if [ -f "{upstream_missing_path}" ]; then
     echo "Found upstream missing.csv - propagating to current tool"
     python {self.propagate_missing_py} \\
         --upstream-folders "{upstream_folder}" \\
-        --output-folder "{self.output_folder}"
+        --output-folder "{self.output_folder}" \\
+        --missing-csv "{self.missing_csv}"
 else
     echo "No upstream missing.csv found - creating empty missing.csv"
     echo "id,removed_by,cause" > "{self.missing_csv}"
@@ -499,8 +532,7 @@ python {self.helper_py} {self.config_json}
                 path=self.docking_results_csv,
                 columns=["id", "structures.id", "compounds.id", "conformer_id",
                          "run", "pose", "vina_score", "cnn_score", "cnn_affinity"],
-                description="All accepted docked poses with Vina and CNN scores",
-                count=0
+                description="All accepted docked poses with Vina and CNN scores"
             ),
             "docking_summary": TableInfo(
                 name="docking_summary",
@@ -510,8 +542,7 @@ python {self.helper_py} {self.config_json}
                          "mean_cnn_affinity", "std_cnn_affinity",
                          "pose_consistency", "conformer_energy",
                          "pseudo_binding_energy", "best_pose_file"],
-                description="Per-conformer aggregated docking statistics across runs",
-                count=0
+                description="Per-conformer aggregated docking statistics across runs"
             ),
         }
 
@@ -520,11 +551,10 @@ python {self.helper_py} {self.config_json}
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed by upstream tools with removal reason",
-                count="variable"
+                description="IDs removed by upstream tools with removal reason"
             )
 
-        best_poses_dir = os.path.join(self.output_folder, "best_poses")
+        best_poses_dir = self.stream_folder("structures")
         protein_ids = list(self.structures_stream.ids)
         ligand_ids = list(self.compounds_stream.ids)
 

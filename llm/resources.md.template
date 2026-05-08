@@ -1,0 +1,45 @@
+# Cluster resources
+
+> Copy this file to `llm/resources.md` and fill it in by probing your
+> cluster (see `llm/pipelines.md` → "Probing the cluster"). The live file is
+> gitignored so each user keeps their own. Refresh every few months or
+> whenever the site reorganises partitions / GPU pools.
+
+**Site:** <e.g. UZH S3IT>
+**Last probed:** <YYYY-MM-DD>
+**SLURM scheduler:** <e.g. backfill, default time = ?>
+
+## Partitions
+
+| Partition | Max time | GPU types | Notes                            |
+| --------- | -------- | --------- | -------------------------------- |
+| <name>    | <h>      | <types>   | <e.g. default; busy 18:00–02:00> |
+
+## GPU types available
+
+| Class     | Count | Memory | Typical use                           |
+| --------- | ----- | ------ | ------------------------------------- |
+| `any`     |       |        | small / short jobs                    |
+| `<a100>`  |       |        |                                       |
+
+## Walltime policy
+
+- Backfill granularity: <e.g. 24 h on S3IT — asking for 6 h vs 24 h yields the same queue position>
+- Charging model: <walltime-based / job-count-based / none>
+- Recommended default `Resources(time=...)`: <value> — and **why**: <reason>
+- Hard upper bound (per partition / QoS): <value>
+
+## QoS / fair-share notes
+
+<e.g. priority decay, per-user concurrent job limits, account names to use>
+
+## Storage
+
+| Path                                  | Purpose                          | Quota |
+| ------------------------------------- | -------------------------------- | ----- |
+| `~/`                                  | code, small artefacts            |       |
+| `/shares/<group>/<user>/BioPipelines/` | pipeline outputs                |       |
+
+## Gotchas
+
+<free text — anything that bit you. example: "MSAs from `/scratch` evaporate after 14 days, copy to `/shares` if you need them long-term">

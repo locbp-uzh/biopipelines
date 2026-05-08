@@ -38,22 +38,26 @@ class Sequence(BaseConfig):
     """
 
     TOOL_NAME = "Sequence"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Sequence ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Sequence ready ==="
 """
 
     # Lazy path descriptors
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    sequences_fasta = Path(lambda self: os.path.join(self.output_folder, "sequences.fasta"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "sequence_config.json"))
-    sequence_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_sequence.py"))
+    # Content-bearing sequences stream: sequences.csv IS the content+map;
+    # sequences.fasta is its FASTA twin. Both live in sequences/.
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    sequences_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
+    config_file = Path(lambda self: self.configuration_path("sequence_config.json"))
+    sequence_py = Path(lambda self: self.pipe_script_path("pipe_sequence.py"))
 
     def __init__(self,
-                 seq: Union[str, List[str]],
+                 seq: Union[str, List[str], Dict[str, str]],
                  type: str = "auto",
                  ids: Optional[Union[str, List[str]]] = None,
                  **kwargs):
@@ -64,10 +68,12 @@ echo "=== Sequence ready ==="
             seq: Sequence input. Can be:
                  - Single sequence string: "MKTVRQERLKSIVRILERSKEPVSGAQ"
                  - Multiple sequences: ["MKTVRQ...", "AETGFT..."]
+                 - Dictionary mapping IDs to sequences: {"seq1": "MKTVRQ...", "seq2": "AETGFT..."}
+                   Equivalent to Sequence(list(values), ids=list(keys))
                  - Path to CSV file with 'id' and 'sequence' columns
-                   (absolute, relative, or filename inside the Sequences/ folder)
+                   (absolute, relative, or filename inside the sequences/ folder)
                  - Path to a FASTA file (.fasta or .fa)
-                   (absolute, relative, or filename inside the Sequences/ folder)
+                   (absolute, relative, or filename inside the sequences/ folder)
                  - 4-character RCSB PDB code: "4EQ7"
                    Fetches all protein chains from the RCSB FASTA API.
             type: Sequence type - "auto", "protein", "dna", or "rna".
@@ -77,6 +83,7 @@ echo "=== Sequence ready ==="
                   - Otherwise -> protein
             ids: Output identifier(s). Ignored when loading from a file or PDB code.
                  If not provided for raw sequences, defaults to "seq1", "seq2", etc.
+                 Ignored when seq is a dictionary (ids come from dict keys).
             **kwargs: Additional parameters
 
         Output:
@@ -93,14 +100,23 @@ echo "=== Sequence ready ==="
         self.source_csv_path = None
         self.extra_columns = {}  # Extra columns from CSV/Excel source files
         # Pending filename: set when a bare filename is given that needs resolution
-        # against the Sequences/ folder in configure_inputs
+        # against the sequences/ folder in configure_inputs
         self._pending_filename = None
+
+        # Dict input: {id: sequence} -> extract ids from keys, sequences from values
+        if isinstance(seq, dict):
+            if ids is not None:
+                print("  Warning: 'ids' parameter ignored when seq is a dictionary (using dict keys)")
+            if not seq:
+                raise ValueError("Must provide at least one sequence")
+            ids = list(seq.keys())
+            seq = list(seq.values())
 
         if isinstance(seq, str):
             # --- RCSB PDB code ---
             if self._is_pdb_code(seq):
                 self._load_from_pdb_code(seq, ids)
-            # --- CSV/FASTA path or filename (may need Sequences/ resolution) ---
+            # --- CSV/FASTA path or filename (may need sequences/ resolution) ---
             elif self._has_sequence_extension(seq):
                 if os.path.isfile(seq):
                     # Exists as given — load immediately
@@ -114,7 +130,7 @@ echo "=== Sequence ready ==="
                     else:
                         self._load_from_fasta(seq)
                 else:
-                    # Defer to configure_inputs to try joining with Sequences/ folder
+                    # Defer to configure_inputs to try joining with sequences/ folder
                     self._pending_filename = seq
                     self.sequences = []
                     self.custom_ids = []
@@ -214,7 +230,11 @@ echo "=== Sequence ready ==="
                     f"{len(self.sequences)} chain(s) for {pdb_id}"
                 )
         else:
-            self.custom_ids = [header for header, _ in chains]
+            if len(chains) == 1:
+                # Single chain — use the PDB code as ID (no chain suffix)
+                self.custom_ids = [pdb_id]
+            else:
+                self.custom_ids = [header for header, _ in chains]
 
         self.from_pdb_code = True
         print(f"  Loaded {len(self.sequences)} chain(s) from RCSB {pdb_id}: "
@@ -238,9 +258,19 @@ echo "=== Sequence ready ==="
                     seq = "".join(current_seq_parts)
                     if seq:
                         chains.append((current_id, seq))
-                # Use first token (e.g. "4EQ7_1|Chain A" -> "4EQ7_1")
-                header = line[1:].split("|")[0].strip()
-                current_id = header
+                # Parse RCSB FASTA header: ">6U32_1|Chains A, B|..." or ">6U32_1|Chain A|..."
+                # Extract PDB code and chain letter(s)
+                parts = line[1:].split("|")
+                entity_token = parts[0].strip()  # e.g. "6U32_1"
+                pdb_part = entity_token.rsplit("_", 1)[0]  # e.g. "6U32"
+                # Extract chain letters from second field if available
+                if len(parts) > 1:
+                    chain_field = parts[1].strip()  # e.g. "Chain A" or "Chains A, B"
+                    chain_str = chain_field.replace("Chains", "").replace("Chain", "").strip()
+                    chain_letters = [c.strip() for c in chain_str.split(",")]
+                    current_id = f"{pdb_part}_{''.join(chain_letters)}"
+                else:
+                    current_id = entity_token
                 current_seq_parts = []
             else:
                 current_seq_parts.append(line)
@@ -389,9 +419,9 @@ echo "=== Sequence ready ==="
         """Configure input parameters."""
         self.folders = pipeline_folders
 
-        # Resolve a pending path against the Sequences/ folder
+        # Resolve a pending path against the sequences/ folder
         if self._pending_filename:
-            sequences_folder = pipeline_folders.get("Sequences", "")
+            sequences_folder = pipeline_folders.get("sequences", "")
             candidate = os.path.join(sequences_folder, self._pending_filename)
             if not os.path.isfile(candidate):
                 raise FileNotFoundError(
@@ -416,8 +446,10 @@ echo "=== Sequence ready ==="
 
         # For Excel inputs: write the converted CSV to sequences_csv (the lazy path)
         # so that source_csv_path and map_table both point to a real CSV file.
+        # This runs in configure_inputs — before the pipeline's layout step —
+        # so we have to mkdir the stream folder ourselves here.
         if self.from_excel:
-            os.makedirs(self.output_folder, exist_ok=True)
+            os.makedirs(self.stream_folder("sequences"), exist_ok=True)
             data = {"id": self.custom_ids, "sequence": self.sequences}
             data.update(self.extra_columns)
             df = pd.DataFrame(data)
@@ -442,7 +474,7 @@ echo "=== Sequence ready ==="
         elif (self.from_csv or self.from_fasta) and self.source_csv_path:
             config_lines.append(f"SOURCE: {self.source_csv_path}")
         elif self._pending_filename:
-            config_lines.append(f"SOURCE: {self._pending_filename} (Sequences/ folder)")
+            config_lines.append(f"SOURCE: {self._pending_filename} (sequences/ folder)")
 
         config_lines.extend([
             f"IDS: {', '.join(self.custom_ids[:5])}{'...' if len(self.custom_ids) > 5 else ''} ({len(self.custom_ids)} sequences)",
@@ -468,8 +500,6 @@ echo "=== Sequence ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to create sequence files."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# Sequence creation script\n"
         script_content += self.generate_completion_check_header()
@@ -487,7 +517,7 @@ echo "=== Sequence ready ==="
             "custom_ids": self.custom_ids,
             "sequences": self.sequences,
             "types": self.detected_types,
-            "output_folder": self.output_folder,
+            "output_folder": self.stream_folder("sequences"),
             "sequences_csv": self.sequences_csv,
             "sequences_fasta": self.sequences_fasta,
             "extra_columns": self.extra_columns
@@ -512,8 +542,7 @@ python "{self.sequence_py}" --config "{self.config_file}"
                 name="sequences",
                 path=self.sequences_csv,
                 columns=columns,
-                description="Sequence data with metadata",
-                count=len(self.sequences)
+                description="Sequence data with metadata"
             )
         }
 

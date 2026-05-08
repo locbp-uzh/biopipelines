@@ -16,13 +16,13 @@ import itertools
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -55,26 +55,32 @@ class CompoundLibrary(BaseConfig):
     """
 
     TOOL_NAME = "CompoundLibrary"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== CompoundLibrary ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== CompoundLibrary ready ==="
 """
 
     # Lazy path descriptors
-    compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
-    compound_properties_csv = Path(lambda self: os.path.join(self.output_folder, "compound_properties.csv"))
-    summary_file = Path(lambda self: os.path.join(self.output_folder, "summary.txt"))
-    library_dict_json = Path(lambda self: os.path.join(self.output_folder, "library_dict.json"))
-    images_folder = Path(lambda self: os.path.join(self.output_folder, "images") if self.generate_images else None)
-    compound_images_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_compound_images.py"))
-    covalent_folder = Path(lambda self: os.path.join(self.output_folder, "covalent_library") if self.covalent else None)
-    covalent_compounds_csv = Path(lambda self: os.path.join(self.output_folder, "covalent_library", "compounds.csv") if self.covalent else None)
-    compound_expansion_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_compound_library.py"))
-    smiles_properties_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_smiles_properties.py"))
-    covalent_generation_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_compound_library.py"))
+    # Lazy path descriptors — compounds is content-bearing, images is a
+    # separate stream. The covalent library is a tool-internal sub-dir
+    # that lives under execution/ (scratch). summary.txt + library_dict.json
+    # are config/summary files in _configuration/ and _extras/ respectively.
+    compounds_csv = Path(lambda self: self.stream_path("compounds", "compounds.csv"))
+    compound_properties_csv = Path(lambda self: self.table_path("compound_properties"))
+    summary_file = Path(lambda self: os.path.join(self.extras_folder, "summary.txt"))
+    library_dict_json = Path(lambda self: self.configuration_path("library_dict.json"))
+    images_folder = Path(lambda self: self.stream_folder("images") if self.generate_images else None)
+    compound_images_py = Path(lambda self: self.pipe_script_path("pipe_compound_images.py"))
+    covalent_folder = Path(lambda self: self.execution_path("covalent_library") if self.covalent else None)
+    covalent_compounds_csv = Path(lambda self: self.execution_path("covalent_library", "compounds.csv") if self.covalent else None)
+    compound_expansion_py = Path(lambda self: self.pipe_script_path("pipe_compound_library.py"))
+    smiles_properties_py = Path(lambda self: self.pipe_script_path("pipe_smiles_properties.py"))
+    covalent_generation_py = Path(lambda self: self.pipe_script_path("pipe_compound_library.py"))
 
     def __init__(self,
                  library: Union[str, Dict[str, Union[str, List[str]]]],
@@ -148,6 +154,10 @@ echo "=== CompoundLibrary ready ==="
                 raise ValueError("library file must have .csv or .cdxml extension")
         else:
             raise ValueError("library must be a dictionary or CSV file path")
+
+        _validate_freeform_string("primary_key", self.primary_key)
+        if isinstance(self.library, str):
+            _validate_freeform_string("library", self.library)
 
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
@@ -1044,11 +1054,7 @@ print(f'Generated compound library: {{len(expanded_compounds)}} compounds')
         script_content += self.activate_environment()
         script_content += "echo \"Processing compound library\"\n"
 
-        # Create output directories
-        script_content += f"""
-# Create output directories
-mkdir -p "{self.output_folder}"
-"""
+        # output_folder + stream sub-dirs auto-created by the pipeline.
         if self.covalent:
             script_content += f'mkdir -p "{self.covalent_folder}"\n'
 
@@ -1059,9 +1065,8 @@ echo "Loading compound library from CSV: {os.path.basename(self.library_csv)}"
 cp "{self.library_csv}" "{self.compounds_csv}"
 """
         elif self.library_csv or self.library_dict or self.library_cdxml:
-            # Generate from pre-expanded compounds (dict, CDXML, or expanded CSV)
-            os.makedirs(self.output_folder, exist_ok=True)
-
+            # Generate from pre-expanded compounds (dict, CDXML, or expanded CSV).
+            # configuration/ + compounds/ already created by the pipeline.
             if self.library_dict:
                 with open(self.library_dict_json, 'w') as f:
                     json.dump(self.library_dict, f, indent=2)
@@ -1071,7 +1076,7 @@ cp "{self.library_csv}" "{self.compounds_csv}"
             else:
                 source_label = f"CSV ({os.path.basename(self.library_csv)})"
 
-            compounds_data_json = os.path.join(self.output_folder, "compounds_data.json")
+            compounds_data_json = self.configuration_path("compounds_data.json")
             with open(compounds_data_json, 'w') as f:
                 json.dump({'expanded_compounds': self.expanded_compounds, 'compound_ids': self.compound_ids}, f, indent=2)
 
@@ -1164,8 +1169,7 @@ print(f'Output: {self.compounds_csv}')
             name="compounds",
             path=self.compounds_csv,
             columns=columns,
-            description="Generated compound library with SMILES and metadata",
-            count=len(self.expanded_compounds) if self.expanded_compounds else 0
+            description="Generated compound library with SMILES and metadata"
         )
 
         if self.covalent and self.covalent_compounds_csv:

@@ -13,7 +13,7 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
     from .biopipelines_io import TableReference
@@ -21,7 +21,7 @@ try:
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
     from biopipelines_io import TableReference
@@ -38,12 +38,14 @@ class Mutagenesis(BaseConfig):
     """
 
     TOOL_NAME = "Mutagenesis"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Mutagenesis (Mutagenesis) ==="
 echo "Requires MutationEnv (installed with MutationProfiler.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== Mutagenesis ready ==="
 """
 
@@ -60,10 +62,12 @@ echo "=== Mutagenesis ready ==="
         "negative": "DE"
     }
 
-    # Lazy path descriptors
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
-    mutagenesis_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutagenesis.py"))
+    # Lazy path descriptors — content-bearing sequences stream lives in
+    # sequences/ (sequences.csv IS the content + map_table); standalone
+    # missing table lives in tables/.
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    mutagenesis_helper_py = Path(lambda self: self.pipe_script_path("pipe_mutagenesis.py"))
 
     def __init__(self,
                  original: Union[DataStream, StandardizedOutput],
@@ -182,6 +186,9 @@ echo "=== Mutagenesis ready ==="
         if self.position is None and self.selection is None:
             raise ValueError("position must be provided")
 
+        if isinstance(self.position, str):
+            _validate_freeform_string("position", self.position)
+
         # Validate fixed position
         if isinstance(self.position, int) and self.position <= 0:
             raise ValueError("Position must be positive (1-indexed)")
@@ -266,26 +273,19 @@ echo "Generated sequences saved to: {self.sequences_csv}"
         if self.exclude:
             amino_acids = ''.join(aa for aa in amino_acids if aa not in self.exclude)
 
-        # Multiply by number of input sequences
-        num_input = len(self.sequences_stream)
-        num_mutants_per_input = len(amino_acids)
-
         if self.selection:
             # Selection mode: positions vary per row — use lazy bracket pattern
             aa_list = ' '.join(amino_acids)
             bracket_suffix = f"[_<N><{aa_list}>]"
             sequence_ids = [f"{pid}{bracket_suffix}" for pid in self.sequences_stream.ids]
-            num_mutants = "variable"
         elif isinstance(self.position, str) and ('+' in self.position or '-' in self.position):
             # Multi-position string (e.g., "141+143+145-149") — use lazy bracket pattern
             aa_list = ' '.join(amino_acids)
             bracket_suffix = f"[_<N><{aa_list}>]"
             sequence_ids = [f"{pid}{bracket_suffix}" for pid in self.sequences_stream.ids]
-            num_mutants = "variable"
         else:
             # Single fixed position (int or single-position string)
             pos = self.position if isinstance(self.position, int) else int(self.position)
-            num_mutants = num_mutants_per_input * num_input
             # Generate sequence IDs using pattern composition
             suffixes = [f"{pos}{aa}" for aa in amino_acids]
             suffix_pattern = f"<{' '.join(suffixes)}>"
@@ -301,8 +301,7 @@ echo "Generated sequences saved to: {self.sequences_csv}"
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "original.id", "sequence", "mutations", "mutation_positions", "original_aa", "new_aa"],
-                description=f"mutants at {position_desc} using {self.mode} mode",
-                count=num_mutants
+                description=f"mutants at {position_desc} using {self.mode} mode"
             )
         }
 
@@ -312,8 +311,7 @@ echo "Generated sequences saved to: {self.sequences_csv}"
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed (original amino acid excluded from mutagenesis)",
-                count=1
+                description="IDs removed (original amino acid excluded from mutagenesis)"
             )
 
         # Create sequences DataStream (id-value stream, files empty)

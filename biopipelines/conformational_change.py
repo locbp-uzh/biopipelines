@@ -13,14 +13,14 @@ import os
 from typing import Dict, List, Any, Optional, Tuple, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
     from .biopipelines_io import TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
     from biopipelines_io import TableReference
@@ -44,21 +44,23 @@ class ConformationalChange(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "ConformationalChange"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== ConformationalChange ==="
 echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== ConformationalChange ready ==="
 """
 
     # Lazy path descriptors
-    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "conformational_change_analysis.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "conformational_change_config.json"))
-    reference_ds_json = Path(lambda self: os.path.join(self.output_folder, "reference_structures.json"))
-    target_ds_json = Path(lambda self: os.path.join(self.output_folder, "target_structures.json"))
-    analysis_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_conformational_change.py"))
+    analysis_csv = Path(lambda self: self.table_path("conformational_change_analysis"))
+    config_file = Path(lambda self: self.configuration_path("conformational_change_config.json"))
+    reference_ds_json = Path(lambda self: self.configuration_path("reference_structures.json"))
+    target_ds_json = Path(lambda self: self.configuration_path("target_structures.json"))
+    analysis_py = Path(lambda self: self.pipe_script_path("pipe_conformational_change.py"))
 
     def __init__(self,
                  reference_structures: Union[DataStream, StandardizedOutput],
@@ -133,6 +135,10 @@ echo "=== ConformationalChange ready ==="
         if self.alignment_method not in ["align", "super", "cealign"]:
             raise ValueError(f"Alignment method must be 'align', 'super', or 'cealign', got: {self.alignment_method}")
 
+        if isinstance(self.selection_spec, str):
+            _validate_freeform_string("selection", self.selection_spec)
+        _validate_freeform_string("atoms", self.atoms)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
         self.folders = pipeline_folders
@@ -161,8 +167,6 @@ echo "=== ConformationalChange ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate conformational change analysis execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# ConformationalChange execution script\n"
         script_content += self.generate_completion_check_header()
@@ -176,7 +180,7 @@ echo "=== ConformationalChange ready ==="
         """Generate the conformational change analysis part of the script."""
         import json
 
-        # Serialize DataStreams to JSON for HelpScript to load
+        # Serialize DataStreams to JSON for pipe_script to load
         self.reference_stream.save_json(self.reference_ds_json)
         self.target_stream.save_json(self.target_ds_json)
 
@@ -219,8 +223,7 @@ python "{self.analysis_py}" --config "{self.config_file}"
                 path=self.analysis_csv,
                 columns=["id", "reference_structure", "target_structure", "selection",
                         "num_aligned_atoms", "RMSD"],
-                description="Conformational change analysis between reference and target structures",
-                count=len(self.target_stream)
+                description="Conformational change analysis between reference and target structures"
             )
         }
 

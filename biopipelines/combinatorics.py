@@ -12,7 +12,7 @@ Design:
 - Each: Iterate over elements (cartesian product axis) - DEFAULT behavior
 - Bundle: Group elements together as one entity
 - configuration time: Generate a combinatorics config file describing groupings
-- execution time: HelpScript reads config and generates appropriate configs
+- execution time: pipe_script reads config and generates appropriate configs
 
 Example usage:
     outputA = Tool1()  # a1, a2
@@ -30,6 +30,7 @@ Example usage:
 
 import os
 import json
+import warnings
 from dataclasses import dataclass, field, asdict
 from typing import List, Any, Union, Optional, Dict, Tuple
 
@@ -84,7 +85,7 @@ class AxisConfig:
 class CombinatoricsConfig:
     """
     Configuration describing how multiple input axes should be combined.
-    This gets written to a JSON file for HelpScript consumption.
+    This gets written to a JSON file for pipe_script consumption.
 
     Generic design: supports any number of named axes.
     """
@@ -313,13 +314,18 @@ def generate_combinatorics_config(
 
     config = CombinatoricsConfig(axes=axes)
 
-    # Compute and store predicted IDs and provenance
+    # Compute and store predicted IDs and provenance.
+    # Non-critical: pipe script can still re-compute at execution time.
     try:
         predicted_ids, provenance = predict_output_ids_with_provenance(**named_inputs)
         config.predicted_ids = predicted_ids
         config.provenance = provenance
-    except Exception:
-        pass  # Non-critical: pipe script can still re-compute
+    except (ValueError, KeyError, TypeError, FileNotFoundError) as e:
+        warnings.warn(
+            f"generate_combinatorics_config: could not pre-compute predicted IDs "
+            f"for {output_path} ({type(e).__name__}: {e}). "
+            f"IDs will be re-computed at execution time."
+        )
 
     config.save(output_path)
     return config

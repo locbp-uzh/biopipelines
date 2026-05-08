@@ -1,0 +1,9 @@
+name: MutationEnv
+channels:
+  - conda-forge
+dependencies:
+  - seaborn
+  - matplotlib
+  - pandas
+  - logomaker
+  - scipy

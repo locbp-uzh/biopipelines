@@ -43,20 +43,22 @@ class DNAEncoder(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "DNAEncoder"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== DNAEncoder ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== DNAEncoder ready ==="
 """
 
     # Lazy path descriptors
-    dna_csv = Path(lambda self: os.path.join(self.output_folder, "dna.csv"))
-    dna_excel = Path(lambda self: os.path.join(self.output_folder, "dna_sequences.xlsx"))
-    info_txt = Path(lambda self: os.path.join(self.output_folder, "dna_info.txt"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "dna_encoder_config.json"))
-    encoder_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_dna_encoder.py"))
+    dna_csv = Path(lambda self: self.table_path("dna"))
+    dna_excel = Path(lambda self: os.path.join(self.extras_folder, "dna_sequences.xlsx"))
+    info_txt = Path(lambda self: os.path.join(self.extras_folder, "dna_info.txt"))
+    config_file = Path(lambda self: self.configuration_path("dna_encoder_config.json"))
+    encoder_py = Path(lambda self: self.pipe_script_path("pipe_dna_encoder.py"))
 
     def __init__(self,
                  sequences: Union[DataStream, StandardizedOutput],
@@ -128,8 +130,6 @@ echo "=== DNAEncoder ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to perform DNA encoding."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# DNAEncoder execution script\n"
         script_content += self.generate_completion_check_header()
@@ -181,8 +181,7 @@ python "{self.encoder_py}" --config "{self.config_file}"
                 name="dna",
                 path=self.dna_csv,
                 columns=["id", "protein_sequence", "dna_sequence", "organism", "method"],
-                description="DNA sequences with thresholded weighted codon optimization",
-                count=len(sequence_ids)
+                description="DNA sequences with thresholded weighted codon optimization"
             )
         }
 

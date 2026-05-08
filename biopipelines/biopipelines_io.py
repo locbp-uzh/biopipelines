@@ -774,6 +774,36 @@ def clear_table_cache() -> None:
 # source IDs in external tables.
 
 
+# Per-process cache of {id -> [provenance_id, ...]} per map_table CSV.
+# Mirrors id_map_utils._provenance_lookup_cache; rebuilt lazily once per
+# CSV the first time resolve_id_by_provenance hits that path. Keeps
+# cross-source lookups O(1) instead of O(rows) per call.
+_provenance_index_cache: Dict[str, Dict[str, List[str]]] = {}
+
+
+def _build_provenance_index(df: pd.DataFrame) -> Dict[str, List[str]]:
+    """Build {id -> [provenance values from <stream>.id columns]} from a
+    map_table DataFrame. NaN cells are dropped via explicit string
+    coercion."""
+    index: Dict[str, List[str]] = {}
+    if "id" not in df.columns:
+        return index
+    prov_cols = [c for c in df.columns if c.endswith(".id") and c != "id"]
+    if not prov_cols:
+        return index
+    ids = [str(v) for v in df["id"].tolist()]
+    cols = {c: [str(v) for v in df[c].tolist()] for c in prov_cols}
+    for i, sid in enumerate(ids):
+        provs: List[str] = []
+        for c in prov_cols:
+            val = cols[c][i]
+            if val and val != "nan":
+                provs.append(val)
+        if provs:
+            index[sid] = provs
+    return index
+
+
 def resolve_id_by_provenance(
     item_id: str,
     target_ids: set,
@@ -805,31 +835,23 @@ def resolve_id_by_provenance(
         if not map_table_path or not os.path.exists(map_table_path):
             continue
 
-        # Use table cache
-        if map_table_path in _table_cache:
-            df = _table_cache[map_table_path]
-        else:
-            try:
-                df = pd.read_csv(map_table_path)
-                _table_cache[map_table_path] = df
-            except Exception:
-                continue
+        # Build / reuse the per-id provenance index for this CSV.
+        if map_table_path not in _provenance_index_cache:
+            if map_table_path in _table_cache:
+                df = _table_cache[map_table_path]
+            else:
+                try:
+                    df = pd.read_csv(map_table_path)
+                    _table_cache[map_table_path] = df
+                except Exception:
+                    continue
+            _provenance_index_cache[map_table_path] = _build_provenance_index(df)
 
-        if "id" not in df.columns:
+        provs = _provenance_index_cache[map_table_path].get(item_id)
+        if not provs:
             continue
 
-        # Find the row for this item_id
-        row = df[df["id"].astype(str) == item_id]
-        if row.empty:
-            continue
-
-        row = row.iloc[0]
-
-        # Check provenance columns (columns ending in '.id' like 'structures.id')
-        provenance_cols = [col for col in df.columns if col.endswith(".id") and col != "id"]
-
-        for prov_col in provenance_cols:
-            source_id = str(row[prov_col])
+        for source_id in provs:
             if source_id in target_ids:
                 return source_id
 
@@ -883,7 +905,7 @@ class Resolve:
             index: If provided, return only the ID at this position (0-based).
         """
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "..", "HelpScripts", "resolve_stream_ids.py")
+                              "..", "pipe_scripts", "resolve_stream_ids.py")
         if index is not None:
             n = index + 1  # head -n is 1-based
             return f'$(python "{script}" "{ds_json}" | head -n{n} | tail -n1)'
@@ -908,7 +930,7 @@ class Resolve:
         from .config_manager import ConfigManager
         mgr = ConfigManager().get_env_manager()
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        script = os.path.join(script_dir, "..", "HelpScripts", "resolve_table_column.py")
+        script = os.path.join(script_dir, "..", "pipe_scripts", "resolve_table_column.py")
         if mgr == "pip":
             return f'$(python "{script}" "{reference}" "{item_id}")'
         return f'$({mgr} run -n {env_name} --no-banner python "{script}" "{reference}" "{item_id}")'

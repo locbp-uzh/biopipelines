@@ -1,0 +1,363 @@
+# Source of truth for biopipelines tool wrapper versions.
+#
+# Each entry maps a tool class to:
+#   - files: wrapper module + pipe scripts whose changes count as
+#     "wrapper changes" for version-bump purposes. The pre-commit hook
+#     (scripts/check_tool_version_bumps.py) refuses any commit that
+#     modifies one of these files without bumping `current` (and
+#     mentioning the tool under [unreleased] in CHANGELOG.md).
+#   - current: the wrapper's TOOL_VERSION value (must match the literal
+#     in the wrapper's class body).
+#   - history: append-only list of {version, date, note} entries.
+#
+# Bump rules of thumb:
+#   - patch (1.0 -> 1.1): bug fix, refactor that doesn't change CLI
+#     mapping / generated bash / output streams.
+#   - minor (1.x -> 2.0): change to validate_params, generated bash,
+#     stream contract, or new user-facing parameters.
+#   - major: backwards-incompatible (renamed parameters, removed
+#     outputs).
+#
+# Pipe scripts under pipe_scripts/ that are shared infrastructure
+# (pipe_check_completion.py, pipe_filter_execution.py, etc.) are
+# intentionally NOT mapped to any tool — their changes are framework
+# changes and should be reflected in biopipelines.__version__ + the
+# Framework section of CHANGELOG.md instead.
+
+AlphaFold:
+  files:
+    - biopipelines/alphafold.py
+    - pipe_scripts/pipe_alphafold_confidence.py
+    - pipe_scripts/pipe_alphafold_msas.py
+  current: "1.0"
+  history: []
+
+Angle:
+  files:
+    - biopipelines/angle.py
+    - pipe_scripts/pipe_angle.py
+  current: "1.0"
+  history: []
+
+BayesianAdjuster:
+  files:
+    - biopipelines/bayesian_adjuster.py
+    - pipe_scripts/pipe_bayesian_adjuster.py
+  current: "1.0"
+  history: []
+
+Boltz2:
+  files:
+    - biopipelines/boltz2.py
+    - pipe_scripts/pipe_boltz_config_unified.py
+    - pipe_scripts/pipe_boltz_direct_sequence_config.py
+    - pipe_scripts/pipe_boltz_msa_copy.py
+    - pipe_scripts/pipe_boltz_postprocessing.py
+    - pipe_scripts/pipe_boltz_results.py
+  current: "1.0"
+  history: []
+
+BoltzGen:
+  files:
+    - biopipelines/boltzgen.py
+    - pipe_scripts/pipe_boltzgen.py
+    - pipe_scripts/pipe_boltzgen_config.py
+  current: "1.0"
+  history: []
+
+BoltzGenImport:
+  files:
+    - biopipelines/boltzgen.py
+    - pipe_scripts/pipe_boltzgen_import.py
+  current: "1.0"
+  history: []
+
+BoltzGenMerge:
+  files:
+    - biopipelines/boltzgen.py
+    - pipe_scripts/pipe_boltzgen_merge.py
+  current: "1.0"
+  history: []
+
+CABSflex:
+  files:
+    - biopipelines/cabsflex.py
+    - pipe_scripts/pipe_cabsflex.py
+  current: "1.0"
+  history: []
+
+CompoundLibrary:
+  files:
+    - biopipelines/compound_library.py
+    - pipe_scripts/pipe_compound_library.py
+    - pipe_scripts/pipe_compound_images.py
+    - pipe_scripts/pipe_smiles_library.py
+    - pipe_scripts/pipe_smiles_properties.py
+  current: "1.0"
+  history: []
+
+ConformationalChange:
+  files:
+    - biopipelines/conformational_change.py
+    - pipe_scripts/pipe_conformational_change.py
+  current: "1.0"
+  history: []
+
+Contacts:
+  files:
+    - biopipelines/contacts.py
+    - pipe_scripts/pipe_contacts.py
+  current: "1.0"
+  history: []
+
+Distance:
+  files:
+    - biopipelines/distance.py
+    - pipe_scripts/pipe_distance.py
+  current: "1.0"
+  history: []
+
+DistanceSelector:
+  files:
+    - biopipelines/distance_selector.py
+    - pipe_scripts/pipe_distance_selector.py
+  current: "1.0"
+  history: []
+
+DNAEncoder:
+  files:
+    - biopipelines/dna_encoder.py
+    - pipe_scripts/pipe_dna_encoder.py
+  current: "1.0"
+  history: []
+
+ExtractMetrics:
+  files:
+    - biopipelines/extract_metrics.py
+    - pipe_scripts/pipe_extract_metrics.py
+  current: "1.0"
+  history: []
+
+Fuse:
+  files:
+    - biopipelines/fuse.py
+    - pipe_scripts/pipe_fuse_queries.py
+  current: "1.0"
+  history: []
+
+Gnina:
+  files:
+    - biopipelines/gnina.py
+    - pipe_scripts/pipe_gnina.py
+  current: "1.0"
+  history: []
+
+Ligand:
+  files:
+    - biopipelines/ligand.py
+    - pipe_scripts/pipe_ligand.py
+  current: "1.0"
+  history: []
+
+LigandMPNN:
+  files:
+    - biopipelines/ligand_mpnn.py
+    - pipe_scripts/pipe_lmpnn_runtime_positions.py
+    - pipe_scripts/resolve_lmpnn_positions.py
+  current: "1.0"
+  history: []
+
+Load:
+  files:
+    - biopipelines/load.py
+  current: "1.0"
+  history: []
+
+MMseqs2:
+  files:
+    - biopipelines/mmseqs2.py
+    - pipe_scripts/pipe_mmseqs2_sequences.py
+    - pipe_scripts/mmseqs2_client.sh
+  current: "1.0"
+  history: []
+
+MMseqs2Server:
+  files:
+    - biopipelines/mmseqs2.py
+    - pipe_scripts/mmseqs2_server_gpu.sh
+  current: "1.0"
+  history: []
+
+Mock:
+  files:
+    - biopipelines/mock.py
+    - pipe_scripts/pipe_mock.py
+  current: "1.0"
+  history: []
+
+MSA:
+  files:
+    - biopipelines/msa.py
+    - pipe_scripts/pipe_msa.py
+  current: "1.0"
+  history: []
+
+Mutagenesis:
+  files:
+    - biopipelines/mutagenesis.py
+    - pipe_scripts/pipe_mutagenesis.py
+  current: "1.0"
+  history: []
+
+MutationComposer:
+  files:
+    - biopipelines/mutation_composer.py
+    - pipe_scripts/pipe_mutation_composer.py
+  current: "1.0"
+  history: []
+
+MutationProfiler:
+  files:
+    - biopipelines/mutation_profiler.py
+    - pipe_scripts/pipe_mutation_profiler.py
+  current: "1.0"
+  history: []
+
+Panda:
+  files:
+    - biopipelines/panda.py
+    - pipe_scripts/pipe_panda.py
+  current: "1.0"
+  history: []
+
+PDB:
+  files:
+    - biopipelines/pdb.py
+    - pipe_scripts/pipe_pdb.py
+  current: "1.0"
+  history: []
+
+Plot:
+  files:
+    - biopipelines/plot.py
+    - pipe_scripts/pipe_plot.py
+  current: "1.0"
+  history: []
+
+PoseBusters:
+  files:
+    - biopipelines/posebusters.py
+    - pipe_scripts/pipe_posebusters.py
+  current: "1.0"
+  history: []
+
+PoseChange:
+  files:
+    - biopipelines/pose_change.py
+    - pipe_scripts/pipe_pose_change.py
+  current: "1.0"
+  history: []
+
+ProteinMPNN:
+  files:
+    - biopipelines/protein_mpnn.py
+    - pipe_scripts/pipe_pmpnn_fixed_positions.py
+    - pipe_scripts/pipe_pmpnn_table.py
+  current: "1.0"
+  history: []
+
+PyMOL:
+  files:
+    - biopipelines/pymol.py
+    - pipe_scripts/pipe_pymol.py
+  current: "1.0"
+  history: []
+
+RBSDesigner:
+  files:
+    - biopipelines/rbs_designer.py
+    - pipe_scripts/pipe_rbs_designer.py
+  current: "1.0"
+  history: []
+
+RCSB:
+  files:
+    - biopipelines/rcsb.py
+  current: "1.0"
+  history: []
+
+ReMap:
+  files:
+    - biopipelines/remap.py
+    - pipe_scripts/pipe_remap.py
+  current: "1.0"
+  history: []
+
+RFDAA_PrepareLigand:
+  files:
+    - biopipelines/rfdiffusion_allatom.py
+    - pipe_scripts/pipe_rfdaa_prepare_ligand.py
+  current: "1.0"
+  history: []
+
+RFdiffusion:
+  files:
+    - biopipelines/rfdiffusion.py
+    - pipe_scripts/pipe_rfdiffusion_table.py
+  current: "1.0"
+  history: []
+
+RFdiffusion3:
+  files:
+    - biopipelines/rfdiffusion3.py
+    - pipe_scripts/pipe_rfdiffusion3_postprocess.py
+    - pipe_scripts/pipe_rfdiffusion3_table.py
+  current: "1.0"
+  history: []
+
+RFdiffusionAllAtom:
+  files:
+    - biopipelines/rfdiffusion_allatom.py
+  current: "1.0"
+  history: []
+
+SASA:
+  files:
+    - biopipelines/sasa.py
+    - pipe_scripts/pipe_sasa.py
+  current: "1.0"
+  history: []
+
+Selection:
+  files:
+    - biopipelines/selection.py
+    - pipe_scripts/pipe_selection.py
+  current: "1.0"
+  history: []
+
+Sequence:
+  files:
+    - biopipelines/sequence.py
+    - pipe_scripts/pipe_sequence.py
+  current: "1.0"
+  history: []
+
+SequenceMetricCorrelation:
+  files:
+    - biopipelines/sequence_metric_correlation.py
+    - pipe_scripts/pipe_sequence_metric_correlation.py
+  current: "1.0"
+  history: []
+
+StitchSequences:
+  files:
+    - biopipelines/stitch_sequences.py
+    - pipe_scripts/pipe_stitch_sequences.py
+  current: "1.0"
+  history: []
+
+Table:
+  files:
+    - biopipelines/table.py
+  current: "1.0"
+  history: []

@@ -14,13 +14,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -44,20 +44,22 @@ class Contacts(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Contacts"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Contacts ==="
 echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== Contacts ready ==="
 """
 
     # Lazy path descriptors
-    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "contacts.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "protein_ligand_config.json"))
-    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
-    contacts_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_contacts.py"))
+    analysis_csv = Path(lambda self: self.table_path("contacts"))
+    config_file = Path(lambda self: self.configuration_path("protein_ligand_config.json"))
+    structures_ds_json = Path(lambda self: self.configuration_path("structures.json"))
+    contacts_py = Path(lambda self: self.pipe_script_path("pipe_contacts.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -65,7 +67,6 @@ echo "=== Contacts ready ==="
                  ligand: str = None,
                  contact_threshold: float = 5.0,
                  contact_metric_name: str = None,
-                 id_map: Dict[str, str] = {"*": "*_<S>"},
                  **kwargs):
         """
         Initialize protein-ligand contact analysis tool.
@@ -78,7 +79,6 @@ echo "=== Contacts ready ==="
             ligand: Ligand residue name (3-letter code, e.g., 'LIG', 'ATP', 'GDP')
             contact_threshold: Distance threshold for counting contacts (default: 5.0 Å)
             contact_metric_name: Custom name for contact count column (default: "contacts")
-            id_map: ID mapping pattern for matching structure IDs to table IDs
             **kwargs: Additional parameters
 
         Output:
@@ -98,7 +98,6 @@ echo "=== Contacts ready ==="
         self.ligand_name = ligand
         self.contact_threshold = contact_threshold
         self.custom_contact_metric_name = contact_metric_name
-        self.id_map = id_map
 
         super().__init__(**kwargs)
 
@@ -119,6 +118,10 @@ echo "=== Contacts ready ==="
 
         if not isinstance(self.contact_threshold, (int, float)) or self.contact_threshold <= 0:
             raise ValueError("Contact threshold must be a positive number")
+
+        _validate_freeform_string("ligand", self.ligand_name)
+        _validate_freeform_string("contact_metric_name", self.custom_contact_metric_name)
+        _validate_freeform_string("selections", self.protein_selections)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -142,8 +145,6 @@ echo "=== Contacts ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate Contacts execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# Contacts execution script\n"
         script_content += self.generate_completion_check_header()
@@ -157,7 +158,7 @@ echo "=== Contacts ready ==="
         """Generate the protein-ligand contact analysis part of the script."""
         import json
 
-        # Serialize structures DataStream to JSON for HelpScript to load
+        # Serialize structures DataStream to JSON for pipe_script to load
         self.structures_stream.save_json(self.structures_ds_json)
 
         # Handle protein selections input
@@ -172,7 +173,6 @@ echo "=== Contacts ready ==="
             "ligand_name": self.ligand_name,
             "contact_threshold": self.contact_threshold,
             "contact_metric_name": self.get_contact_metric_name(),
-            "id_map": self.id_map,
             "output_csv": self.analysis_csv
         }
 
@@ -199,8 +199,7 @@ python "{self.contacts_py}" --config "{self.config_file}"
                 columns=["id", "source_structure", "selections", "ligand",
                         self.get_contact_metric_name(), "min_distance", "max_distance",
                         "mean_distance", "sum_distances_sqrt_normalized"],
-                description=f"Protein-ligand contact analysis: {self.ligand_name} contacts with selected protein regions",
-                count=len(self.structures_stream)
+                description=f"Protein-ligand contact analysis: {self.ligand_name} contacts with selected protein regions"
             )
         }
 

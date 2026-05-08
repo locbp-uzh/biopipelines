@@ -98,20 +98,31 @@ class Panda(BaseConfig):
     """
 
     TOOL_NAME = "Panda"
+    TOOL_VERSION = "1.0"
+
+    # Internal column name used to track which input table a row came from
+    # when concat runs over multiple inputs. Auto-added before the operation
+    # chain starts and stripped from the final result by pipe_panda. Tools
+    # that need to reference it during the chain (groupby, etc.) should use
+    # this constant.
+    SOURCE = "bp_panda_source"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Panda ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Panda ready ==="
 """
 
-    # Path descriptors
-    output_csv = Path(lambda self: os.path.join(self.output_folder, f"{self._get_output_name()}.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "panda_config.json"))
-    panda_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_panda.py"))
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    # Path descriptors — result table lives in tables/ (standalone output);
+    # config JSON in configuration/. In pool mode the per-stream files and
+    # their map_tables land inside their respective stream folders.
+    output_csv = Path(lambda self: self.table_path(self._get_output_name()))
+    config_file = Path(lambda self: self.configuration_path("panda_config.json"))
+    panda_py = Path(lambda self: self.pipe_script_path("pipe_panda.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
 
     # ========== Static methods for creating operations ==========
 
@@ -363,25 +374,37 @@ echo "=== Panda ready ==="
         })
 
     @staticmethod
-    def concat(fill: Optional[str] = "", add_source: bool = True) -> Operation:
+    def concat(fill: Optional[str] = "") -> Operation:
         """
         Concatenate multiple tables vertically (like SQL UNION).
 
         This operation stacks rows from multiple tables.
         Requires multi-table input (tables parameter instead of table).
 
+        Source tracking is implicit: when there are >1 input tables and the
+        operation chain contains a concat, every row is tagged with its
+        origin table index in the internal ``Panda.SOURCE`` column for the
+        duration of the chain. The column is stripped from the final result
+        before it is written. To reference it inside the chain (e.g. for a
+        groupby), use ``Panda.SOURCE`` as the column name.
+
         Args:
             fill: Value to fill missing columns (None = remove non-common columns)
-            add_source: Add a "source_table" column indicating origin
 
         Returns:
             Operation to concatenate tables
 
         Example:
-            Panda.concat(fill="")
-            Panda.concat(fill=0, add_source=False)
+            Panda.concat()
+            Panda.concat(fill=0)
+            # Best per source: groupby Panda.SOURCE then take the head.
+            Panda(tables=[a, b, c], operations=[
+                Panda.concat(),
+                Panda.sort("score", ascending=False),
+                Panda.groupby(Panda.SOURCE, {"id": "first", "score": "first"}),
+            ])
         """
-        return Operation(type="concat", params={"fill": fill, "add_source": add_source})
+        return Operation(type="concat", params={"fill": fill})
 
     @staticmethod
     def groupby(by: Union[str, List[str]], agg: Dict[str, str]) -> Operation:
@@ -449,7 +472,7 @@ echo "=== Panda ready ==="
         })
 
     @staticmethod
-    def average_by_source(source_col: str = "source_table") -> Operation:
+    def average_by_source(source_col: Optional[str] = None) -> Operation:
         """
         Average all numeric columns per source table (replaces AverageByTable).
 
@@ -458,7 +481,9 @@ echo "=== Panda ready ==="
         in the output.
 
         Args:
-            source_col: Column name identifying the source table (default: "source_table")
+            source_col: Column name identifying the source table. Defaults to
+                       Panda.SOURCE — the implicit column auto-added when
+                       concat runs over multiple inputs.
 
         Returns:
             Operation to average by source
@@ -468,7 +493,7 @@ echo "=== Panda ready ==="
             Panda(
                 tables=[cycle0.tables.merged, cycle1.tables.merged, cycle2.tables.merged],
                 operations=[
-                    Panda.concat(add_source=True),
+                    Panda.concat(),
                     Panda.average_by_source()
                 ]
             )
@@ -495,8 +520,9 @@ echo "=== Panda ready ==="
             operations: List of operations to apply sequentially
             pool: Tool output(s) for pool mode - structures matching filtered IDs will be copied.
                   Can be a single pool or a list of pools matching `tables` for multi-pool selection.
-                  When using multiple pools with concat(add_source=True), files are copied from
-                  the pool corresponding to each row's source_table index.
+                  When using multiple pools with concat in the operation chain,
+                  files are copied from the pool corresponding to each row's
+                  origin (tracked implicitly via Panda.SOURCE).
             rename: If provided, output IDs will be renamed to {rename}_1, {rename}_2, etc.
                     Useful after sorting to get ranked IDs (e.g., rename="best" -> best_1, best_2, ...)
             ignore_missing: If True (default), skip missing pool files with a warning instead
@@ -638,8 +664,7 @@ echo "=== Panda ready ==="
                     for stream_name in pool.streams.keys():
                         stream = pool.streams.get(stream_name)
                         if stream and len(stream) > 0 and len(stream.files) > 0:
-                            json_path = os.path.join(
-                                self.output_folder,
+                            json_path = self.configuration_path(
                                 f"pool_{pool_idx}_{stream_name}_ds.json"
                             )
                             stream.save_json(json_path)
@@ -744,10 +769,9 @@ echo "=== Panda ready ==="
                 prefix = op.params.get("prefix", "rank_")
                 by = op.params.get("by", "")
                 columns.append(f"{prefix}{by}")
-            elif op.type == "concat":
-                if op.params.get("add_source", True):
-                    if "source_table" not in columns:
-                        columns.append("source_table")
+            # Note: concat injects Panda.SOURCE into the working frame for
+            # the rest of the chain, but pipe_panda strips it from the
+            # final result, so it's not part of the output column schema.
 
         return columns if columns else ["id"]
 
@@ -773,10 +797,50 @@ echo "=== Panda ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate Panda execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
+        # configuration/, tables/, stream sub-dirs all auto-created by the pipeline.
 
         # Create config file
         step_tool_name = os.path.basename(self.output_folder)
+
+        # In pool mode, compute per-stream map_table targets so pipe_panda
+        # can emit `<stream>_map.csv` with `<stream>.id` (upstream ID)
+        # provenance columns. Also collect per-stream destination folders
+        # so extracted files land in the correct stream folder rather than
+        # flat under output_folder.
+        stream_map_targets = []
+        stream_folders_map = {}
+        pool_table_targets = {}
+        if self.use_pool_mode:
+            try:
+                out = self.get_output_files()
+                from .datastream import DataStream as _DS
+                for name, spec in out.items():
+                    if isinstance(spec, _DS):
+                        # Always record the stream folder so extracted files
+                        # land in their proper home, even for streams that
+                        # don't carry a dedicated map_table.
+                        stream_folders_map[name] = self.stream_folder(name)
+                        if spec.map_table:
+                            stream_map_targets.append({
+                                "stream_name": name,
+                                "map_table": spec.map_table,
+                                "file_template": (spec.files[0]
+                                                  if spec.files else ""),
+                            })
+                # Propagated pool tables now live under our tables/; map
+                # source basenames to their new canonical destinations so
+                # pipe_panda copies them into the right place.
+                # TableInfo's ``__getattr__`` masks ``.path`` with a
+                # TableReference for column access, so go through ``.info.path``.
+                from .base_config import TableInfo as _TI
+                for table_name, info in out.get("tables", {}).items():
+                    if isinstance(info, _TI):
+                        pool_table_targets[table_name] = info.info.path
+            except Exception:
+                stream_map_targets = []
+                stream_folders_map = {}
+                pool_table_targets = {}
+
         config_data = {
             "input_csvs": self.input_csv_paths,
             "operations": [op.to_dict() for op in self.operations],
@@ -789,7 +853,11 @@ echo "=== Panda ready ==="
             "rename": self.rename,
             "ignore_missing": self.ignore_missing,
             "step_tool_name": step_tool_name,
-            "upstream_missing_paths": getattr(self, 'upstream_missing_paths', [])
+            "upstream_missing_paths": getattr(self, 'upstream_missing_paths', []),
+            "stream_map_targets": stream_map_targets,
+            "stream_folders": stream_folders_map,
+            "pool_table_targets": pool_table_targets,
+            "missing_csv": self.missing_csv,
         }
 
         with open(self.config_file, 'w') as f:
@@ -848,15 +916,13 @@ fi
                 name="result",
                 path=self.output_csv,
                 columns=expected_columns,
-                description=f"Transformed table with operations: {', '.join(op.type for op in self.operations)}",
-                count="variable"
+                description=f"Transformed table with operations: {', '.join(op.type for op in self.operations)}"
             ),
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed by this tool with removal reason",
-                count="variable"
+                description="IDs removed by this tool with removal reason"
             )
         }
 
@@ -875,21 +941,53 @@ fi
                             stream_data[stream_name] = {
                                 "ids": [],
                                 "files": [],
-                                "format": stream.format,
+                                # Track each pool's format separately so we can
+                                # merge them into a "a|b" union format below
+                                # when pools disagree (e.g. one produces .pdb,
+                                # another .cif). Mirrors pdb.py/rcsb.py.
+                                "formats": [],
                                 "map_table": stream.map_table or ""
                             }
                         stream_data[stream_name]["ids"].extend(list(stream.ids))
+                        for f in (stream.format or "").split("|"):
+                            f = f.strip()
+                            if f and f not in stream_data[stream_name]["formats"]:
+                                stream_data[stream_name]["formats"].append(f)
                         # Only collect files for file-based streams
                         if stream.is_file_based():
                             stream_data[stream_name]["files"].extend(stream.files)
+
+            # Collapse the per-pool formats into a single "a|b" string —
+            # downstream code reads sdata["format"] as before.
+            for sdata in stream_data.values():
+                fmts = sdata.pop("formats", [])
+                sdata["format"] = "|".join(fmts) if fmts else ""
 
             # Deduplicate IDs across pools (first occurrence wins)
             for sdata in stream_data.values():
                 seen = set()
                 deduped_ids = []
                 deduped_files = []
-                is_template = (len(sdata["files"]) == 1 and '<id>' in sdata["files"][0])
+                # A stream is template-shaped if every collected files entry
+                # carries an <id> placeholder. With one pool that's a single
+                # element; with N pools contributing different extensions
+                # (e.g. <id>.pdb + <id>.cif) it's N elements that all
+                # template-expand. Either way: dedup IDs only, collapse the
+                # files list to a single canonical template (with .* when
+                # extensions disagree, mirroring pdb.py:716-718).
+                files_list = sdata["files"]
+                is_template = bool(files_list) and all('<id>' in f for f in files_list)
                 if is_template:
+                    exts = {os.path.splitext(f)[1] for f in files_list}
+                    if len(exts) == 1:
+                        canonical_template = files_list[0]
+                    else:
+                        # Mixed extensions across pools — use wildcard.
+                        # All templates share the same dirname/<id> stem,
+                        # so take dirname(files_list[0]) for the prefix.
+                        template_dir = os.path.dirname(files_list[0])
+                        canonical_template = os.path.join(template_dir, "<id>.*")
+                    sdata["files"] = [canonical_template]
                     # Template files: dedup IDs only, keep template as-is
                     for sid in sdata["ids"]:
                         if sid not in seen:
@@ -910,13 +1008,19 @@ fi
             # Check if head/tail/sample limits the output count
             predicted_count = self._get_predicted_output_count()
 
-            # Build output streams
+            # Build output streams — per-stream files + map_tables land in
+            # their own stream folder; standalone tables (carried forward
+            # from the first pool) go under tables/.
             output_streams = {}
             for stream_name, data in stream_data.items():
-                # Preserve pool's map_table, pointing to the copy in output_folder
+                stream_dir = self.stream_folder(stream_name)
+                # The content-bearing map_table convention: if the pool's
+                # map_table is named like a content file (e.g. sequences.csv),
+                # keep its filename; otherwise emit <stream>_map.csv.
                 pool_map_table = data.get("map_table", "")
                 if pool_map_table:
-                    map_table = os.path.join(self.output_folder, os.path.basename(pool_map_table))
+                    map_basename = os.path.basename(pool_map_table)
+                    map_table = os.path.join(stream_dir, map_basename)
                 else:
                     map_table = None
 
@@ -942,15 +1046,15 @@ fi
                 if self.rename and predicted_count is not None:
                     # Rename with known count: generate concrete IDs and file paths
                     new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
-                    new_files = [os.path.join(self.output_folder, f"{nid}{ext}") for nid in new_ids]
+                    new_files = [os.path.join(stream_dir, f"{nid}{ext}") for nid in new_ids]
                 elif self.rename:
                     # Rename with unknown count: lazy pattern
                     new_ids = [f"{self.rename}_[<N>]"]
-                    new_files = [os.path.join(self.output_folder, f"<id>{ext}")]
+                    new_files = [os.path.join(stream_dir, f"<id>{ext}")]
                 else:
                     # No rename: copy pool IDs as-is, use template for files
                     new_ids = data["ids"]
-                    new_files = [os.path.join(self.output_folder, f"<id>{ext}")]
+                    new_files = [os.path.join(stream_dir, f"<id>{ext}")]
 
                 output_streams[stream_name] = DataStream(
                     name=stream_name,
@@ -961,18 +1065,28 @@ fi
                 )
 
 
-            # Include tables from first pool (they typically have same schema)
+            # Include tables from first pool (they typically have same schema).
+            # When a table's name matches a declared stream whose map_table
+            # IS the content table (Sequence.sequences, Ligand.compounds, …),
+            # route the propagated copy to the stream folder so the pool
+            # copy lands at the same path as the stream's map_table — one
+            # file, one source of truth. Otherwise, standalone TableInfos
+            # live under tables/.
             first_pool = self.pool_outputs[0]
             if hasattr(first_pool, 'tables') and hasattr(first_pool.tables, '_tables'):
                 for name, info in first_pool.tables._tables.items():
                     if name not in tables:  # Don't overwrite our result table
-                        filename = os.path.basename(info.info.path)
+                        # Is this table the content-bearing map of a stream?
+                        stream = output_streams.get(name)
+                        if stream is not None and getattr(stream, "map_table", None):
+                            dest_path = stream.map_table
+                        else:
+                            dest_path = self.table_path(name)
                         tables[name] = TableInfo(
                             name=name,
-                            path=os.path.join(self.output_folder, filename),
+                            path=dest_path,
                             columns=info.info.columns,
                             description=info.info.description,
-                            count=info.info.count
                         )
 
             # Propagate rendering_parameters from first pool that has them

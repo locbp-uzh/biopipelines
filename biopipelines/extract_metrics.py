@@ -41,17 +41,19 @@ class ExtractMetrics(BaseConfig):
     """
 
     TOOL_NAME = "ExtractMetrics"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== ExtractMetrics ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== ExtractMetrics ready ==="
 """
 
     # Lazy path descriptors
-    config_file = Path(lambda self: os.path.join(self.output_folder, "extract_metrics_config.json"))
-    extract_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_extract_metrics.py"))
+    config_file = Path(lambda self: self.configuration_path("extract_metrics_config.json"))
+    extract_py = Path(lambda self: self.pipe_script_path("pipe_extract_metrics.py"))
 
     def __init__(self,
                  tables: List[Union[str, TableInfo]],
@@ -132,8 +134,6 @@ echo "=== ExtractMetrics ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to extract metrics from tables."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# ExtractMetrics execution script\n"
         script_content += self.generate_completion_check_header()
@@ -176,8 +176,7 @@ python "{self.extract_py}" --config "{self.config_file}"
                 name=metric,
                 path=csv_path,
                 columns=self.table_names,
-                description=f"Extracted '{metric}' values from all tables",
-                count=None
+                description=f"Extracted '{metric}' values from all tables"
             )
 
         return {

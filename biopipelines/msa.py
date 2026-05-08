@@ -44,19 +44,22 @@ class MSA(BaseConfig):
     """
 
     TOOL_NAME = "MSA"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MSA ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== MSA ready ==="
 """
 
-    # Lazy path descriptors
-    output_msas_folder = Path(lambda self: os.path.join(self.output_folder, "MSAs"))
-    output_msas_csv = Path(lambda self: os.path.join(self.output_folder, "msas.csv"))
-    config_json = Path(lambda self: os.path.join(self.output_folder, "msa_config.json"))
-    msa_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_msa.py"))
+    # Lazy path descriptors — MSA files live inside the msas/ stream folder
+    # alongside their co-located map_table.
+    output_msas_folder = Path(lambda self: self.stream_folder("msas"))
+    output_msas_csv = Path(lambda self: self.stream_map_path("msas"))
+    config_json = Path(lambda self: self.configuration_path("msa_config.json"))
+    msa_py = Path(lambda self: self.pipe_script_path("pipe_msa.py"))
 
     def __init__(self,
                  msas: StandardizedOutput,
@@ -112,8 +115,6 @@ echo "=== MSA ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate MSA conversion script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         config_data = {
             "input_msa_table": self.input_msa_table,
             "convert": self.convert,
@@ -159,8 +160,7 @@ python "{self.msa_py}" --config "{self.config_json}"
                 name="msas",
                 path=self.output_msas_csv,
                 columns=["id", "sequences.id", "sequence", "msa_file"],
-                description="Converted MSA files",
-                count=len(sequence_ids)
+                description="Converted MSA files"
             )
         }
 

@@ -49,7 +49,7 @@ class FolderManager:
         Args:
             project: Name of the folder (used for output folders)
             job: Name of the specific job (a unique numeric id NNN will be appended to it) (used for output folders)
-            local_output: If True, write output to ./tests/ (current working
+            local_output: If True, write output to ./outputs/ (current working
                         directory) instead of the config-configured path.
         """
         self._folders: Dict[str, str] = {}
@@ -71,7 +71,7 @@ class FolderManager:
 
         # Override biopipelines_output for local output mode
         if local_output:
-            self._folders["biopipelines_output"] = os.path.join(os.getcwd(), "tests")
+            self._folders["biopipelines_output"] = os.path.join(os.getcwd(), "outputs")
 
         # Setup runtime paths (project, output, runtime, logs)
         self._setup_runtime_paths(project, job)
@@ -152,7 +152,7 @@ class FolderManager:
         self._folders["project"] = os.path.join(self._folders["biopipelines_output"], project)
 
         # Create necessary directories
-        folders_to_create = ["biopipelines_output", "PDBs", "Ligands", "Sequences", "Tables"]
+        folders_to_create = ["biopipelines_output", "pdbs", "ligands", "sequences", "tables"]
         if not self._local_output:
             folders_to_create.append("user")
         for folder_key in folders_to_create:
@@ -196,6 +196,33 @@ class FolderManager:
             Dictionary mapping tool names to resolved container paths
         """
         return self._containers.copy()
+
+    def get_container_binds(self) -> list:
+        """Resolved filesystem paths to bind-mount into containers.
+
+        Pulls the raw (unresolved) values from the config sections listed by
+        ConfigManager.get_container_bind_sections(), resolves any placeholders
+        against already-resolved folders, and returns a deduplicated list
+        preserving insertion order. Runtime-only keys (username, cwd) and
+        anything that doesn't resolve to an existing directory path are skipped.
+        """
+        config_manager = ConfigManager()
+        folder_config = config_manager.get_folder_config()
+        sections = config_manager.get_container_bind_sections()
+
+        seen = set()
+        binds = []
+        for section_name in sections:
+            section = folder_config.get(section_name, {}) or {}
+            for key in section.keys():
+                if key not in self._folders:
+                    continue
+                path = self._folders[key]
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                binds.append(path)
+        return binds
 
     def unique_name(directory: str, root: str, ext: str = "", w: int = 3, full_path: bool = False) -> str:
         """

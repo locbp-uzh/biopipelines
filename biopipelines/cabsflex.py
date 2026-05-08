@@ -17,14 +17,14 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .combinatorics import generate_multiplied_ids_pattern
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from combinatorics import generate_multiplied_ids_pattern
@@ -44,47 +44,49 @@ class CABSflex(BaseConfig):
     """
 
     TOOL_NAME = "CABSflex"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        if env_manager == "pip":
-            skip = "" if force_reinstall else """# Check if already installed
-if python -c "import CABS" 2>/dev/null; then
-    echo "CABS-Flex already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing CABS-Flex (pip) ==="
-{skip}echo "WARNING: MODELLER requires a license key."
-echo "Get one at https://salilab.org/modeller/registration.html"
-echo "Then set: export KEY_MODELLER=your_key"
-pip install -q modeller cabs dssp
-
-echo "=== CABS-Flex installation complete ==="
-"""
+        biopipelines = folders.get("biopipelines", "")
         skip = "" if force_reinstall else """# Check if already installed
 if conda list -n CABSflex cabs 2>/dev/null | grep -q cabs; then
     echo "CABS-Flex already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("CABSflex", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("CABSflex", env_manager, biopipelines)
         return f"""echo "=== Installing CABS-Flex ==="
 {skip}echo "WARNING: MODELLER requires a license key."
 echo "Get one at https://salilab.org/modeller/registration.html"
 echo "Then set: export KEY_MODELLER=your_key"
-{env_manager} create -y -n CABSflex python=2.7
-{env_manager} install -y -n CABSflex -c salilab modeller dssp
-{env_manager} install -y -n CABSflex -c lcbio cabs
+{remove_block}
+{env_block}
 
-echo "=== CABS-Flex installation complete ==="
+# Verify installation
+if {env_manager} run -n CABSflex python -c "import CABS" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== CABS-Flex installation complete ==="
+else
+    echo "ERROR: CABS-Flex verification failed (cannot import CABS)"
+    exit 1
+fi
 """
 
-    # Lazy path descriptors
-    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
-    structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
-    rmsf_all_csv = Path(lambda self: os.path.join(self.output_folder, "rmsf_all.csv"))
-    rmsf_map = Path(lambda self: os.path.join(self.output_folder, "rmsf_map.csv"))
-    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_cabsflex.py"))
+    # Lazy path descriptors — canonical layout.
+    #   configuration/ — structures input DataStream JSON.
+    #   execution/     — per-structure work dirs + log files (scratch).
+    #   structures/    — ensemble PDB models + structures_map.
+    #   images/        — SVG plots.
+    #   rmsf/          — per-residue CSVs + rmsf_map.
+    #   tables/        — rmsf_all (merged).
+    structures_ds_json = Path(lambda self: self.configuration_path("structures.json"))
+    structures_map = Path(lambda self: self.stream_map_path("structures"))
+    rmsf_all_csv = Path(lambda self: self.table_path("rmsf_all"))
+    rmsf_map = Path(lambda self: self.stream_map_path("rmsf"))
+    helper_script = Path(lambda self: self.pipe_script_path("pipe_cabsflex.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -185,6 +187,11 @@ echo "=== CABS-Flex installation complete ==="
         if self.max_parallel < 1:
             raise ValueError(f"max_parallel must be >= 1, got: {self.max_parallel}")
 
+        _validate_freeform_string("temperature", self.temperature)
+        _validate_freeform_string("flexibility", self.flexibility)
+        _validate_freeform_string("weighted_fit", self.weighted_fit)
+        _validate_freeform_string("pdb_output", self.pdb_output)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
         self.folders = pipeline_folders
@@ -267,13 +274,14 @@ echo "=== CABS-Flex installation complete ==="
             cabsflex_cmds += "PIDS=()\nFAILED=0\n"
 
         for sid, sfile in zip(self.structures_stream.ids_expanded, self.structures_stream.files_expanded):
-            work_dir = os.path.join(self.output_folder, sid)
-            cmd = f'CABSflex -i "{sfile}" -w "{work_dir}"'
+            # Per-structure scratch dir + log live under execution/.
+            work_dir = self.execution_path(sid)
+            cmd = f'{self.container_prefix()}CABSflex -i "{sfile}" -w "{work_dir}"'
             if flags_str:
                 cmd += f" {flags_str}"
 
             if run_parallel:
-                log_file = os.path.join(self.output_folder, f"{sid}.log")
+                log_file = self.execution_path(f"{sid}.log")
                 cabsflex_cmds += f"""
 # Wait if we've reached the concurrency limit
 while [ "${{#PIDS[@]}}" -ge {self.max_parallel} ]; do
@@ -339,10 +347,14 @@ echo "=== CABSflex runs complete, starting post-processing ==="
 
 python "{self.helper_script}" \\
     --structures "{self.structures_ds_json}" \\
-    --output_dir "{self.output_folder}" \\
+    --output_dir "{self.execution_folder}" \\
     --rmsf_all_csv "{self.rmsf_all_csv}" \\
     --structures_map "{self.structures_map}" \\
-    --num_models {self.num_models}
+    --num_models {self.num_models} \\
+    --work_root "{self.execution_folder}" \\
+    --structures_dir "{self.stream_folder('structures')}" \\
+    --images_dir "{self.stream_folder('images')}" \\
+    --rmsf_dir "{self.stream_folder('rmsf')}"
 
 if [ $? -eq 0 ]; then
     echo "CABS-Flex completed successfully"
@@ -363,7 +375,7 @@ fi
 
         create_map_table(
             self.structures_map, structure_ids,
-            files=[os.path.join(self.output_folder, "<id>.pdb")],
+            files=[self.stream_path("structures", "<id>.pdb")],
             parent_ids=self.structures_stream.ids,
             suffix_pattern=suffix_pattern,
             input_stream_name="structures"
@@ -372,7 +384,7 @@ fi
         structures = DataStream(
             name="structures",
             ids=structure_ids,
-            files=[os.path.join(self.output_folder, "<id>.pdb")],
+            files=[self.stream_path("structures", "<id>.pdb")],
             map_table=self.structures_map,
             format="pdb"
         )
@@ -385,7 +397,7 @@ fi
         for input_id in input_ids:
             for svg_name in svg_names:
                 img_id = f"{input_id}_{svg_name.replace('.svg', '')}"
-                img_file = os.path.join(self.output_folder, f"{input_id}_{svg_name}")
+                img_file = self.stream_path("images", f"{input_id}_{svg_name}")
                 image_ids.append(img_id)
                 image_files.append(img_file)
 
@@ -398,7 +410,7 @@ fi
 
         # --- Output RMSF stream: one CSV per input structure ---
         rmsf_columns = ["id", "chain", "resi", "rmsf"]
-        rmsf_files = [os.path.join(self.output_folder, "<id>_RMSF.csv")]
+        rmsf_files = [self.stream_path("rmsf", "<id>_RMSF.csv")]
         create_map_table(self.rmsf_map, list(input_ids), files=rmsf_files)
         rmsf_stream = DataStream(
             name="rmsf",
@@ -414,15 +426,13 @@ fi
                 name="structures",
                 path=self.structures_map,
                 columns=["id", "file", "structures.id"],
-                description="CABS-Flex ensemble model structures",
-                count=len(structure_ids)
+                description="CABS-Flex ensemble model structures"
             ),
             "rmsf_all": TableInfo(
                 name="rmsf_all",
                 path=self.rmsf_all_csv,
                 columns=rmsf_columns,
-                description="Per-residue RMSF from all input structures (merged)",
-                count="variable"
+                description="Per-residue RMSF from all input structures (merged)"
             )
         }
 

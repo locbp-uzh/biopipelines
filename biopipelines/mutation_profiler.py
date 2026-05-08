@@ -14,13 +14,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -44,46 +44,48 @@ class MutationProfiler(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationProfiler"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        if env_manager == "pip":
-            skip = "" if force_reinstall else """# Check if already installed
-if python -c "import seaborn; import logomaker" 2>/dev/null; then
-    echo "MutationEnv deps already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing MutationEnv deps (pip) ==="
-{skip}pip install seaborn matplotlib pandas logomaker scipy
-
-echo "=== MutationEnv installation complete ==="
-"""
+        biopipelines = folders.get("biopipelines", "")
+        env_check = cls._env_exists_check("MutationEnv", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_manager} env list 2>/dev/null | grep -q "MutationEnv"; then
+if {env_check}; then
     echo "MutationEnv already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("MutationEnv", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("MutationEnv", env_manager, biopipelines)
         return f"""echo "=== Installing MutationEnv ==="
-{skip}{env_manager} create -n MutationEnv seaborn matplotlib pandas logomaker scipy -y
+{skip}{remove_block}
+{env_block}
 
-echo "=== MutationEnv installation complete ==="
+# Verify installation
+if {env_manager} run -n MutationEnv python -c "import torch" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== MutationEnv installation complete ==="
+else
+    echo "ERROR: MutationEnv verification failed (cannot import torch)"
+    exit 1
+fi
 """
 
     # Lazy path descriptors
-    profile_csv = Path(lambda self: os.path.join(self.output_folder, "profile.csv"))
-    mutations_csv = Path(lambda self: os.path.join(self.output_folder, "mutations.csv"))
-    absolute_freq_csv = Path(lambda self: os.path.join(self.output_folder, "absolute_frequencies.csv"))
-    relative_freq_csv = Path(lambda self: os.path.join(self.output_folder, "relative_frequencies.csv"))
-    sequence_logo_relative_svg = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_relative_frequencies.svg"))
-    sequence_logo_relative_png = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_relative_frequencies.png"))
-    sequence_logo_absolute_svg = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_absolute_frequencies.svg"))
-    sequence_logo_absolute_png = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_absolute_frequencies.png"))
-    sequence_logo_counts_svg = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_counts.svg"))
-    sequence_logo_counts_png = Path(lambda self: os.path.join(self.output_folder, "sequence_logo_counts.png"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "mutation_profiler_config.json"))
-    profiler_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutation_profiler.py"))
+    profile_csv = Path(lambda self: self.table_path("profile"))
+    mutations_csv = Path(lambda self: self.table_path("mutations"))
+    absolute_freq_csv = Path(lambda self: self.table_path("absolute_frequencies"))
+    relative_freq_csv = Path(lambda self: self.table_path("relative_frequencies"))
+    sequence_logo_relative_svg = Path(lambda self: self.stream_path("plots", "sequence_logo_relative_frequencies.svg"))
+    sequence_logo_relative_png = Path(lambda self: self.stream_path("plots", "sequence_logo_relative_frequencies.png"))
+    sequence_logo_absolute_svg = Path(lambda self: self.stream_path("plots", "sequence_logo_absolute_frequencies.svg"))
+    sequence_logo_absolute_png = Path(lambda self: self.stream_path("plots", "sequence_logo_absolute_frequencies.png"))
+    sequence_logo_counts_svg = Path(lambda self: self.stream_path("plots", "sequence_logo_counts.svg"))
+    sequence_logo_counts_png = Path(lambda self: self.stream_path("plots", "sequence_logo_counts.png"))
+    config_file = Path(lambda self: self.configuration_path("mutation_profiler_config.json"))
+    profiler_py = Path(lambda self: self.pipe_script_path("pipe_mutation_profiler.py"))
 
     VALID_COLOR_PALETTES = ("okabe-ito", "standard")
 
@@ -148,6 +150,8 @@ echo "=== MutationEnv installation complete ==="
         if not self.mutants_stream or len(self.mutants_stream) == 0:
             raise ValueError("mutants sequences cannot be empty")
 
+        _validate_freeform_string("positions", self.positions)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sequences."""
         self.folders = pipeline_folders
@@ -168,8 +172,6 @@ echo "=== MutationEnv installation complete ==="
     
     def generate_script(self, script_path: str) -> str:
         """Generate MutationProfiler execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# MutationProfiler execution script\n"
         script_content += self.generate_completion_check_header()
@@ -222,29 +224,25 @@ python "{self.profiler_py}" --config "{self.config_file}"
                 name="profile",
                 path=self.profile_csv,
                 columns=["position", "original", "count", "frequency"],
-                description="Position-wise mutation statistics",
-                count=0
+                description="Position-wise mutation statistics"
             ),
             "mutations": TableInfo(
                 name="mutations",
                 path=self.mutations_csv,
                 columns=aa_columns,
-                description="Raw amino acid mutation counts per position",
-                count=0
+                description="Raw amino acid mutation counts per position"
             ),
             "absolute_frequencies": TableInfo(
                 name="absolute_frequencies",
                 path=self.absolute_freq_csv,
                 columns=aa_columns,
-                description="Absolute amino acid frequencies per position (mutation_count/total_sequences)",
-                count=0
+                description="Absolute amino acid frequencies per position (mutation_count/total_sequences)"
             ),
             "relative_frequencies": TableInfo(
                 name="relative_frequencies",
                 path=self.relative_freq_csv,
                 columns=aa_columns,
-                description="Relative amino acid frequencies per position (mutation_count/mutations_at_position)",
-                count=0
+                description="Relative amino acid frequencies per position (mutation_count/mutations_at_position)"
             )
         }
 

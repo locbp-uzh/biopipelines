@@ -1,0 +1,20 @@
+# Pre-commit hooks for biopipelines.
+#
+# Install once per clone:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run on demand:
+#   pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      - id: tool-version-bumps
+        name: enforce TOOL_VERSION bumps for wrapper changes
+        entry: python versions/check_tool_edits.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+        additional_dependencies: []

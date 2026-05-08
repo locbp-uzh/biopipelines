@@ -1,0 +1,56 @@
+# SLURM-flavoured local-run config for tests that need the framework's
+# batch / DAG / SLURM-script-generation paths active. No actual sbatch is
+# invoked — the tests call pipeline.save() and inspect the generated
+# slurm_batch*.sh / pipeline_batch*.sh artifacts.
+#
+# Differs from config.local.yaml only in the machine.scheduler field.
+
+
+# SLURM scheduler so the framework emits slurm_batch*.sh files and the
+# Resources()-required-before-tools rule is exercised.
+machine:
+  emails: {}
+  env_manager:
+    name: "pip"
+    init: []
+  scheduler:
+    name: "slurm"
+    init: []
+    modules: []
+  container_executor: "none"
+folders:
+  base:
+    home: "."
+    data: "."
+    scratch: "."
+    biopipelines: "<cwd>"
+    biopipelines_output: "./outputs"
+
+  infrastructure:
+    pipe_scripts: "<biopipelines>/pipe_scripts"
+    pdbs: "<biopipelines>/pdbs"
+    ligands: "<biopipelines>/ligands"
+    sequences: "<biopipelines>/sequences"
+    tables: "<biopipelines>/tables"
+    cache: "./cache"
+    containers: "./containers"
+
+  repositories:
+    ProteinMPNN: "<biopipelines>/_stub_repos/ProteinMPNN"
+    LigandMPNN: "<biopipelines>/_stub_repos/LigandMPNN"
+    Boltz2: "<biopipelines>/_stub_repos/boltz"
+    RFdiffusion: "<biopipelines>/_stub_repos/RFdiffusion"
+    RFdiffusionAllAtom: "<biopipelines>/_stub_repos/rf_diffusion_all_atom"
+    RFdiffusion3: "<biopipelines>/_stub_repos/RFdiffusion3"
+    AlphaFold: "<biopipelines>/_stub_repos/AlphaFold"
+    BoltzGen: "<biopipelines>/_stub_repos/boltzgen"
+    Gnina: "<biopipelines>/_stub_repos/gnina"
+    CABSflex: "<biopipelines>/_stub_repos/CABSflex"
+    PoseBusters: "<biopipelines>/_stub_repos/posebusters"
+    PyMOL: "<biopipelines>/_stub_repos/pymol"
+    MMseqs2: "<biopipelines>/_stub_repos/mmseqs2"
+    RBSDesigner: "<biopipelines>/_stub_repos/RBSDesigner"
+    DNAEncoder: "<biopipelines>/_stub_repos/DNAEncoder"
+  cache:
+    BoltzCache: "./cache/boltz"
+  server: {}

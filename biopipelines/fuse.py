@@ -19,13 +19,13 @@ from typing import Dict, List, Any, Union
 from itertools import product
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -51,19 +51,23 @@ class Fuse(BaseConfig):
     """
 
     TOOL_NAME = "Fuse"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Fuse ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Fuse ready ==="
 """
 
-    # Lazy path descriptors
-    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self._get_job_base()}_queries.csv"))
-    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self._get_job_base()}_queries.fasta"))
-    fuse_config_json = Path(lambda self: os.path.join(self.output_folder, "fuse_config.json"))
-    fuse_queries_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fuse_queries.py"))
+    # Lazy path descriptors — queries_csv is the content-bearing map_table
+    # for the sequences stream, so it lives in sequences/. The matching
+    # FASTA file sits alongside it.
+    queries_csv = Path(lambda self: self.stream_path("sequences", f"{self._get_job_base()}_queries.csv"))
+    queries_fasta = Path(lambda self: self.stream_path("sequences", f"{self._get_job_base()}_queries.fasta"))
+    fuse_config_json = Path(lambda self: self.configuration_path("fuse_config.json"))
+    fuse_queries_py = Path(lambda self: self.pipe_script_path("pipe_fuse_queries.py"))
 
     def __init__(self,
                  sequences: List[Union[DataStream, StandardizedOutput]],
@@ -79,8 +83,15 @@ echo "=== Fuse ready ==="
                       Each slot can contain multiple IDs — the output is the
                       cartesian product of all slot options × linker lengths.
             name: Job name for output files
-            linker: Linker sequence to use (will be truncated to specified lengths)
-            linker_lengths: List of length ranges for each junction (e.g., ["1-6", "1-6"])
+            linker: Base linker sequence unit. Repeated as needed and sliced to
+                    the requested length (e.g. "GGS" with length 7 → "GGSGGSG").
+            linker_lengths: List of length ranges for each junction, one per pair of
+                            adjacent slots. Each entry is a string spec (e.g. "1-6")
+                            or None for no linker at that junction.
+                            None (default, no list) means no linkers at all — slots
+                            are concatenated directly and no L columns are produced.
+                            A list with None entries (e.g. [None, "1-6"]) still
+                            produces L columns (empty for None junctions).
             **kwargs: Additional parameters
 
         Output:
@@ -99,17 +110,15 @@ echo "=== Fuse ready ==="
         self.name = name
         self.linker = linker
 
-        # Set default linker_lengths based on number of slots if not provided
+        # linker_lengths=None means no linkers at all (direct concatenation, no L columns)
+        # A list with per-junction entries: str spec = linker, None = no linker at that junction
         if linker_lengths is None:
-            expected_junctions = len(self.input_slots) - 1
-            self.linker_lengths = ["1-6"] * expected_junctions
+            self.linker_lengths = None
         else:
             self.linker_lengths = linker_lengths
-
-        # Validate linker_lengths matches slot count
-        expected_junctions = len(self.input_slots) - 1
-        if len(self.linker_lengths) != expected_junctions:
-            raise ValueError(f"linker_lengths must have {expected_junctions} entries for {len(self.input_slots)} slots")
+            expected_junctions = len(self.input_slots) - 1
+            if len(self.linker_lengths) != expected_junctions:
+                raise ValueError(f"linker_lengths must have {expected_junctions} entries for {len(self.input_slots)} slots")
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -204,16 +213,24 @@ echo "=== Fuse ready ==="
         slot_id_lists = [slot["ids"] for slot in self.input_slots]
 
         # Get per-junction linker length options as strings
-        junction_length_lists = []
-        for spec in self.linker_lengths:
-            lengths = self._parse_length_spec(spec)
-            junction_length_lists.append([str(l) for l in lengths])
+        # None entries (no linker at that junction) produce no axis
+        junction_length_lists = []  # parallel to linker_lengths; None = no axis
+        if self.linker_lengths is not None:
+            for spec in self.linker_lengths:
+                if spec is None:
+                    junction_length_lists.append(None)
+                else:
+                    lengths = self._parse_length_spec(spec)
+                    junction_length_lists.append([str(l) for l in lengths])
 
-        # Build cartesian product axes: [slot0_ids, junction0_lengths, slot1_ids, junction1_lengths, slot2_ids]
+        # Build cartesian product axes
+        # Only junctions with actual length specs add an axis
         axes = []
+        slot_combo_indices = []
         for i, slot_ids in enumerate(slot_id_lists):
+            slot_combo_indices.append(len(axes))
             axes.append(slot_ids)
-            if i < len(junction_length_lists):
+            if i < len(junction_length_lists) and junction_length_lists[i] is not None:
                 axes.append(junction_length_lists[i])
 
         # Generate all combinations
@@ -221,13 +238,11 @@ echo "=== Fuse ready ==="
         provenance = {f"sequences_{i+1}": [] for i in range(len(self.input_slots))}
 
         for combo in product(*axes):
-            # combo alternates: (slot0_id, junc0_len, slot1_id, junc1_len, slot2_id, ...)
-            seq_id = "_".join(str(part) for part in combo)
+            seq_id = "+".join(str(part) for part in combo)
             sequence_ids.append(seq_id)
 
-            # Track provenance — slot IDs are at even indices (0, 2, 4, ...)
             for slot_idx in range(len(self.input_slots)):
-                combo_idx = slot_idx * 2  # Slots are at 0, 2, 4, ...
+                combo_idx = slot_combo_indices[slot_idx]
                 provenance[f"sequences_{slot_idx+1}"].append(combo[combo_idx])
 
         return sequence_ids, provenance
@@ -240,16 +255,25 @@ echo "=== Fuse ready ==="
         if len(self.input_slots) < 2:
             raise ValueError("Fuse requires at least 2 sequence slots")
 
-        if not self.linker:
-            raise ValueError("linker sequence is required")
-
-        if not self.linker_lengths:
-            raise ValueError("linker_lengths is required")
+        has_any_linker = (self.linker_lengths is not None and
+                          any(spec is not None for spec in self.linker_lengths))
+        if has_any_linker and not self.linker:
+            raise ValueError("linker sequence is required when linker_lengths contains length specs")
 
         # Validate linker_lengths format (basic check)
-        for length_spec in self.linker_lengths:
-            if not isinstance(length_spec, str) or not any(c in length_spec for c in '0123456789'):
-                raise ValueError(f"Invalid linker_lengths format: {length_spec}")
+        if self.linker_lengths is not None:
+            for length_spec in self.linker_lengths:
+                if length_spec is None:
+                    continue
+                if not isinstance(length_spec, str) or not any(c in length_spec for c in '0123456789'):
+                    raise ValueError(f"Invalid linker_lengths format: {length_spec}")
+
+        _validate_freeform_string("name", self.name)
+        _validate_freeform_string("linker", self.linker)
+        if self.linker_lengths:
+            for i, s in enumerate(self.linker_lengths):
+                if s is not None:
+                    _validate_freeform_string(f"linker_lengths[{i}]", s)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sequences."""
@@ -260,11 +284,13 @@ echo "=== Fuse ready ==="
         config_lines = super().get_config_display()
 
         slot_summary = ", ".join(f"{len(s['ids'])} seqs" for s in self.input_slots)
-        config_lines.extend([
-            f"SLOTS: {len(self.input_slots)} ({slot_summary})",
-            f"LINKER: {self.linker[:20]}{'...' if len(self.linker) > 20 else ''}",
-            f"LINKER_LENGTHS: {', '.join(self.linker_lengths)}"
-        ])
+        config_lines.append(f"SLOTS: {len(self.input_slots)} ({slot_summary})")
+        if self.linker_lengths is not None and any(s is not None for s in self.linker_lengths):
+            config_lines.append(f"LINKER: {self.linker[:20]}{'...' if len(self.linker) > 20 else ''}")
+            lengths_display = ", ".join(s if s is not None else "none" for s in self.linker_lengths)
+            config_lines.append(f"LINKER_LENGTHS: {lengths_display}")
+        else:
+            config_lines.append("LINKER: none (direct concatenation)")
 
         return config_lines
 
@@ -284,7 +310,7 @@ echo "=== Fuse ready ==="
             "output_fasta": self.queries_fasta
         }
 
-        os.makedirs(self.output_folder, exist_ok=True)
+        # configuration/ + sequences/ already created by the pipeline.
         with open(self.fuse_config_json, 'w') as f:
             json.dump(config_data, f, indent=2)
 
@@ -292,10 +318,14 @@ echo "=== Fuse ready ==="
         script_content += "# Fuse execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
+        if self.linker_lengths is not None and any(s is not None for s in self.linker_lengths):
+            lengths_str = ", ".join(s if s is not None else "none" for s in self.linker_lengths)
+            linker_info = f"Linker: {self.linker}\\nLinker lengths: {lengths_str}"
+        else:
+            linker_info = "Linker: none (direct concatenation)"
         script_content += f"""echo "Generating fusion sequence combinations"
 echo "Slots: {len(self.input_slots)}"
-echo "Linker: {self.linker}"
-echo "Linker lengths: {', '.join(self.linker_lengths)}"
+echo "{linker_info}"
 
 # Call fuse_queries.py with JSON config
 python {self.fuse_queries_py} --config "{self.fuse_config_json}"
@@ -335,12 +365,13 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
         sequence_ids, provenance = self._predict_sequence_ids()
 
         # Build position column names dynamically based on number of slots
-        # For n slots: S1, L1, S2, L2, ..., S(n-1), L(n-1), Sn
+        # With linker_lengths list: S1, L1, S2, L2, ..., Sn (L columns present even if individual junctions are None)
+        # Without linker_lengths (None): S1, S2, ..., Sn
         num_slots = len(self.input_slots)
         position_columns = []
         for i in range(1, num_slots + 1):
             position_columns.append(f"S{i}")
-            if i < num_slots:
+            if self.linker_lengths is not None and i < num_slots:
                 position_columns.append(f"L{i}")
 
         # Build provenance column names
@@ -352,8 +383,7 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
                 name="sequences",
                 path=self.queries_csv,
                 columns=["id", "sequence", "lengths"] + provenance_columns + position_columns,
-                description="Fusion sequences with provenance and sequence/linker positions",
-                count=len(sequence_ids)
+                description="Fusion sequences with provenance and sequence/linker positions"
             )
         }
 

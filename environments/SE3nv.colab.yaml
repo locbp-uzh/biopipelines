@@ -1,0 +1,11 @@
+# SE3nv - colab/micromamba variant.
+# Conda layer is intentionally minimal: just Python 3.9 (required by RFdiffusion).
+# All other dependencies (PyTorch, DGL, SE3Transformer, RFdiffusion deps) come
+# from the SE3nv.pip.colab.txt requirements file plus the install script's
+# explicit DGL wheel install.
+name: SE3nv
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip

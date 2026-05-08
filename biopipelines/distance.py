@@ -15,13 +15,13 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -40,19 +40,21 @@ class Distance(BaseConfig):
     """
 
     TOOL_NAME = "Distance"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Distance ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Distance ready ==="
 """
 
     # Lazy path descriptors
-    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "analysis.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "distance_config.json"))
-    structures_ds_json = Path(lambda self: os.path.join(self.output_folder, "structures.json"))
-    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_distance.py"))
+    analysis_csv = Path(lambda self: self.table_path("analysis"))
+    config_file = Path(lambda self: self.configuration_path("distance_config.json"))
+    structures_ds_json = Path(lambda self: self.configuration_path("structures.json"))
+    helper_script = Path(lambda self: self.pipe_script_path("pipe_distance.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -153,6 +155,18 @@ echo "=== Distance ready ==="
         if self.atom_selection is None and self.residue_selection is None:
             raise ValueError("At least one of atom or residue must be specified")
 
+        _validate_freeform_string("metric_name", self.custom_metric_name)
+        if isinstance(self.atom_selection, str):
+            _validate_freeform_string("atom", self.atom_selection)
+        elif isinstance(self.atom_selection, list):
+            for i, a in enumerate(self.atom_selection):
+                _validate_freeform_string(f"atom[{i}]", a)
+        if isinstance(self.residue_selection, str):
+            _validate_freeform_string("residue", self.residue_selection)
+        elif isinstance(self.residue_selection, list):
+            for i, r in enumerate(self.residue_selection):
+                _validate_freeform_string(f"residue[{i}]", r)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
         self.folders = pipeline_folders
@@ -200,9 +214,7 @@ echo "=== Distance ready ==="
     def _generate_script_run_distance_analysis(self) -> str:
         """Generate the distance analysis execution part of the script."""
         # Write config file at configuration time
-        os.makedirs(self.output_folder, exist_ok=True)
-
-        # Serialize structures DataStream to JSON for HelpScript to load
+        # Serialize structures DataStream to JSON for pipe_script to load
         self.structures_stream.save_json(self.structures_ds_json)
 
         # Create config data
@@ -245,8 +257,7 @@ fi
                 name="distances",
                 path=self.analysis_csv,
                 columns=["id", "source_structure", self.get_metric_name(), "unit"],
-                description=f"Distance analysis ({self.unit}): {self.atom_selection} to {self.residue_selection}",
-                count=len(self.structures_stream)
+                description=f"Distance analysis ({self.unit}): {self.atom_selection} to {self.residue_selection}"
             )
         }
 

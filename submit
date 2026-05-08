@@ -15,42 +15,221 @@
 
 # Get the directory where submit script is located (biopipelines root)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-CONFIG_FILE="$SCRIPT_DIR/config.yaml"
-# Read cluster config from config.yaml (before Python is available)
-# env_manager: "mamba" or "conda"
-ENV_MANAGER=$(grep '^\s*env_manager:' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*env_manager:\s*["'\'']\{0,1\}\([a-zA-Z]*\)["'\'']\{0,1\}.*/\1/' | tr -d '[:space:]')
-if [ -z "$ENV_MANAGER" ]; then
-    echo "ERROR: env_manager not found in config.yaml (cluster section)"
-    echo "Please add 'env_manager: mamba' (or conda) under 'cluster:' in $CONFIG_FILE"
+# Locate config file. The submit script targets the cluster variant by default;
+# users on a different machine variant should set BIOPIPELINES_CONFIG_VARIANT.
+CONFIG_VARIANT="${BIOPIPELINES_CONFIG_VARIANT:-cluster}"
+CONFIG_FILE="$SCRIPT_DIR/config.${CONFIG_VARIANT}.yaml"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: config file not found: $CONFIG_FILE"
+    echo "Set BIOPIPELINES_CONFIG_VARIANT=<variant> if you use a non-default config name."
+    exit 1
+fi
+# Read machine config (before Python is available).
+#
+# The schema has machine.env_manager and machine.scheduler as nested
+# blocks (`{name, init, [modules]}`). We extract:
+#   * env_manager.name      -> $ENV_MANAGER
+#   * env_manager.init       -> sourced verbatim into this shell
+#   * scheduler.init         -> sourced verbatim into this shell
+#                               (typically: source /etc/profile.d/lmod.sh
+#                               so `module` is available below)
+#   * scheduler.modules      -> $SLURM_MODULES, passed to `module load`
+#
+# Each helper awk extracts a `name:` key inside a parent block, or a
+# bash-string list under an `init:` / `modules:` key inside that block.
+
+# Decide once whether we have python3 + PyYAML available. If yes, use it
+# for all YAML reads (robust against any valid YAML layout). Otherwise
+# fall back to awk-based extractors that tolerate variable indentation.
+#
+# We resolve absolute paths for python3 and awk NOW, before any
+# scheduler.init / module load can mutate PATH. On HPC sites that ship
+# miniforge as a module, loading it shadows the system python3 with a
+# base env that may not have PyYAML — using the resolved path keeps
+# every read on the same interpreter we validated at startup. Even
+# though all reads now happen up front, the absolute path is cheap
+# insurance against future reorderings.
+_PYTHON3=$(command -v python3 2>/dev/null || true)
+_AWK=$(command -v awk 2>/dev/null || true)
+if [ -n "$_PYTHON3" ] && "$_PYTHON3" -c 'import yaml' >/dev/null 2>&1; then
+    _YAML_BACKEND=python
+elif [ -n "$_AWK" ]; then
+    _YAML_BACKEND=awk
+else
+    echo "ERROR: cannot parse $CONFIG_FILE — need either python3 with PyYAML or awk on PATH."
     exit 1
 fi
 
-# slurm_modules: read as space-separated list (empty list means no modules to load)
-SLURM_MODULES=$(awk '/^\s*slurm_modules:/{found=1; next} found && /^\s*-/{gsub(/^\s*-\s*/, ""); gsub(/"/, ""); printf "%s ", $0; next} found && /^\S/{exit}' "$CONFIG_FILE" 2>/dev/null | xargs)
+# Extract a scalar `name:` value under `machine.<parent>.name`. Strips quotes.
+# When the python backend is chosen, errors propagate (not redirected) so
+# malformed YAML or schema mismatches surface immediately instead of
+# returning empty and breaking the bootstrap downstream.
+_yaml_name_in() {
+    local parent="$1"
+    if [ "$_YAML_BACKEND" = "python" ]; then
+        "$_PYTHON3" -c "
+import sys, yaml
+with open('$CONFIG_FILE') as f:
+    d = yaml.safe_load(f) or {}
+v = (((d.get('machine') or {}).get('$parent') or {}).get('name'))
+if v is not None:
+    print(v)
+"
+        return
+    fi
+    "$_AWK" -v parent="$parent" '
+        /^machine:/ { in_machine = 1; next }
+        in_machine && $0 ~ "^[[:space:]]+" parent ":" { in_parent = 1; next }
+        in_parent && /^[[:space:]]+name:/ {
+            sub(/^[[:space:]]+name:[[:space:]]*/, "")
+            gsub(/["'\'']/, "")
+            sub(/[[:space:]]*$/, "")
+            print
+            exit
+        }
+        in_parent && /^[[:space:]]{0,2}[^ ]/ { exit }
+    ' "$CONFIG_FILE"
+}
 
-# Load modules (skip if empty)
+# Extract a list of strings under `machine.<parent>.<key>`. One value per
+# line of stdout, with surrounding quotes stripped.
+_yaml_list_in() {
+    local parent="$1"
+    local key="$2"
+    if [ "$_YAML_BACKEND" = "python" ]; then
+        "$_PYTHON3" -c "
+import sys, yaml
+with open('$CONFIG_FILE') as f:
+    d = yaml.safe_load(f) or {}
+xs = (((d.get('machine') or {}).get('$parent') or {}).get('$key')) or []
+for x in xs:
+    print(x)
+"
+        return
+    fi
+    "$_AWK" -v parent="$parent" -v key="$key" '
+        function indent_of(s,    i) {
+            for (i = 1; i <= length(s); i++) {
+                if (substr(s, i, 1) != " ") return i - 1
+            }
+            return length(s)
+        }
+        function flush(   s) {
+            if (have == 0) return
+            s = buf
+            # Strip surrounding double or single quotes if any.
+            if (substr(s, 1, 1) == "\"" && substr(s, length(s), 1) == "\"") {
+                s = substr(s, 2, length(s) - 2)
+            } else if (substr(s, 1, 1) == "'\''" && substr(s, length(s), 1) == "'\''") {
+                s = substr(s, 2, length(s) - 2)
+            }
+            print s
+            buf = ""
+            have = 0
+        }
+        /^machine:/ { in_machine = 1; next }
+        in_machine && $0 ~ "^[[:space:]]+" parent ":" { in_parent = 1; next }
+        in_parent && $0 ~ "^[[:space:]]+" key ":" {
+            in_list = 1
+            list_indent = -1
+            next
+        }
+        # Skip blank lines and comment lines anywhere inside the list.
+        in_list && /^[[:space:]]*$/ { next }
+        in_list && /^[[:space:]]*#/ { next }
+        # New list item.
+        in_list && /^[[:space:]]+- / {
+            this_indent = indent_of($0)
+            if (list_indent < 0) list_indent = this_indent
+            # A "- " at less indent than our list ends this list.
+            if (this_indent < list_indent) { flush(); exit }
+            flush()
+            sub(/^[[:space:]]*-[[:space:]]*/, "")
+            buf = $0
+            have = 1
+            next
+        }
+        # Anything else inside the list: either a wrapped-scalar
+        # continuation (indent > list_indent) or end-of-list.
+        in_list {
+            this_indent = indent_of($0)
+            if (have && list_indent >= 0 && this_indent > list_indent) {
+                sub(/^[[:space:]]+/, "")
+                sub(/[[:space:]]+$/, "")
+                buf = buf " " $0
+                next
+            }
+            flush()
+            exit
+        }
+        END { flush() }
+    ' "$CONFIG_FILE"
+}
+
+# Read every YAML value we need up front, before any eval / module load
+# runs. Sourcing scheduler.init or `module load`-ing miniforge can shadow
+# the system python3/awk on PATH (e.g. miniforge's base env without
+# PyYAML), which would silently break later reads. By doing all parsing
+# now, the bootstrap is immune to whatever the user's init does to PATH.
+ENV_MANAGER=$(_yaml_name_in env_manager)
+SCHEDULER_INIT=$(_yaml_list_in scheduler init)
+SLURM_MODULES=$(_yaml_list_in scheduler modules | xargs)
+ENV_MANAGER_INIT=$(_yaml_list_in env_manager init)
+
+if [ -z "$ENV_MANAGER" ]; then
+    echo "ERROR: machine.env_manager.name not found in $CONFIG_FILE"
+    echo "Please add the dict-form env_manager block under 'machine:'."
+    exit 1
+fi
+
+# Source the scheduler.init lines first so `module` (and any other host
+# primitives the user named) are on PATH before we try `module load`.
+if [ -n "$SCHEDULER_INIT" ]; then
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        eval "$line"
+    done <<< "$SCHEDULER_INIT"
+fi
+
+# Load SLURM modules from scheduler.modules. If modules are configured
+# but `module` isn't on PATH after scheduler.init, abort with a useful
+# message — otherwise the next failure ("mamba: command not found",
+# etc.) is opaque and hard to trace back to a missing lmod source.
 if [ -n "$SLURM_MODULES" ]; then
+    if ! command -v module >/dev/null 2>&1 && ! type module >/dev/null 2>&1; then
+        echo "ERROR: 'module' command not found, but machine.scheduler.modules is non-empty."
+        echo "Check machine.scheduler.init in $CONFIG_FILE — it should source"
+        echo "the host's lmod profile (e.g. /etc/profile.d/lmod.sh) before submit"
+        echo "tries to load modules."
+        exit 1
+    fi
     module load $SLURM_MODULES
 fi
 
-# Initialize environment manager for current shell session
-if [ "$ENV_MANAGER" = "conda" ]; then
-    eval "$(conda shell.bash hook)"
-else
-    eval "$($ENV_MANAGER shell hook --shell bash)"
+# Source the env-manager init lines (typically the shell-hook eval).
+if [ -n "$ENV_MANAGER_INIT" ]; then
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        eval "$line"
+    done <<< "$ENV_MANAGER_INIT"
 fi
 
 set -e  # Exit on any error
 
-# Check if biopipelines env exists
-if $ENV_MANAGER env list | grep -qw "biopipelines"; then
+# Check if biopipelines env exists. The pip env_manager has no shared
+# `env list` / `activate` concept — assume the user's current python
+# already has biopipelines installed (e.g. inside a venv they activated
+# manually) and skip the check.
+if [ "$ENV_MANAGER" = "pip" ]; then
+    echo "Using pip env_manager — assuming biopipelines is importable in the current python."
+elif $ENV_MANAGER env list | grep -qw "biopipelines"; then
     echo "Activating biopipelines environment..."
     $ENV_MANAGER activate biopipelines
 else
     echo "ERROR: biopipelines environment not found."
     echo ""
-    echo "Please install it first (see Docs/UserManual.md):"
-    echo "  $ENV_MANAGER env create -f Environments/biopipelines.yaml"
+    echo "Please install it first (see docs/UserManual.md):"
+    echo "  $ENV_MANAGER env create -f environments/biopipelines.yaml"
     echo "  $ENV_MANAGER activate biopipelines"
     echo "  pip install -e ."
     exit 1
@@ -73,7 +252,7 @@ usage() {
     echo "  $0 pipeline.py                               # Run pipeline.py"
     echo "  $0 -v pipeline.py                            # Run with full output"
     echo "  $0 pipeline.ipynb                             # Run from notebook"
-    echo "  $0 ExamplePipelines/ligandmpnn_boltz2.py    # Run specific pipeline"
+    echo "  $0 example_pipelines/ligandmpnn_boltz2.py    # Run specific pipeline"
     echo ""
 }
 
@@ -176,23 +355,43 @@ run_pipeline_and_submit() {
             #echo ""
 
             local job_count=0
-            local last_job_id=""
+            # Per-batch job-id map: batch number (zero-padded 3-digit) -> SLURM job id.
+            # Populated as each batch is submitted; consulted to substitute every
+            # <JOBID_BATCH_NNN> placeholder remaining in the next batch's script.
+            # Batches emit in numeric order (sort -V above) and parents always have
+            # lower numbers than their children, so the map is always populated for
+            # any placeholder we need to substitute.
+            declare -A batch_job_id
 
             for batch_file in $batch_files; do
                 job_count=$((job_count + 1))
 
-                # Replace <JOBID> placeholder with previous job ID
-                if [ -n "$last_job_id" ]; then
-                    echo "Updating $batch_file with dependency on job $last_job_id"
-                    sed -i "s/<JOBID>/$last_job_id/g" "$batch_file"
-                    # Verify replacement worked
-                    if grep -q "<JOBID>" "$batch_file"; then
-                        echo "Warning: Failed to replace <JOBID> placeholder in $batch_file"
+                # Extract batch number for job naming
+                local batch_num=$(basename "$batch_file" | grep -o '[0-9]\+')
+                local batch_key=$(printf "%03d" "$batch_num")
+
+                # Replace every <JOBID_BATCH_NNN> placeholder remaining in this batch
+                # script with the captured id for batch NNN. One sed pass per
+                # distinct placeholder; loop until none remain to handle multi-parent
+                # dependency strings.
+                local pending_placeholders
+                pending_placeholders=$(grep -o "<JOBID_BATCH_[0-9][0-9][0-9]>" "$batch_file" 2>/dev/null | sort -u)
+                if [ -n "$pending_placeholders" ]; then
+                    while IFS= read -r placeholder; do
+                        local ph_key=$(echo "$placeholder" | grep -o "[0-9][0-9][0-9]")
+                        local ph_jobid="${batch_job_id[$ph_key]}"
+                        if [ -z "$ph_jobid" ]; then
+                            echo "✗ Batch $batch_num references batch $ph_key but its job id was never captured"
+                            return 1
+                        fi
+                        echo "  Resolving $placeholder -> $ph_jobid"
+                        sed -i "s/$placeholder/$ph_jobid/g" "$batch_file"
+                    done <<< "$pending_placeholders"
+                    if grep -q "<JOBID_BATCH_" "$batch_file"; then
+                        echo "Warning: Failed to replace some <JOBID_BATCH_NNN> placeholders in $batch_file"
                     fi
                 fi
 
-                # Extract batch number for job naming
-                local batch_num=$(basename "$batch_file" | grep -o '[0-9]\+')
                 local job_name="${pipeline_name}_batch${batch_num}"
                 local output_path="$runtime_dir/job_batch${batch_num}.out"
 
@@ -200,8 +399,10 @@ run_pipeline_and_submit() {
                 echo "Submitting batch $batch_num..."
                 echo "  Job name: $job_name"
                 echo "  Output: $output_path"
-                if [ -n "$last_job_id" ]; then
-                    echo "  Dependency: afterok:$last_job_id"
+                local resolved_dep
+                resolved_dep=$(grep -o "afterok:[0-9:]*" "$batch_file" | head -1)
+                if [ -n "$resolved_dep" ]; then
+                    echo "  Dependency: $resolved_dep"
                 fi
 
                 local submit_output=$(sbatch --parsable --job-name="$job_name" --output="$output_path" "$batch_file" 2>&1)
@@ -209,8 +410,8 @@ run_pipeline_and_submit() {
 
                 # Check for both exit code and error messages in output
                 if [ $submit_exit -eq 0 ] && ! echo "$submit_output" | grep -qi "error\|invalid\|failed"; then
-                    last_job_id="$submit_output"
-                    echo "✓ Batch $batch_num submitted: Job ID $last_job_id"
+                    batch_job_id[$batch_key]="$submit_output"
+                    echo "✓ Batch $batch_num submitted: Job ID $submit_output"
                     total_jobs_submitted=$((total_jobs_submitted + 1))
                 else
                     echo "✗ Failed to submit batch $batch_num"

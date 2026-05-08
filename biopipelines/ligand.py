@@ -8,7 +8,7 @@ Ligand tool for fetching small molecule ligands from RCSB PDB, PubChem, or SMILE
 Downloads SDF files and converts them to PDB format with proper atom numbering.
 Supports lookup by CCD code (RCSB), compound name, CID, or CAS number (PubChem).
 Also supports direct SMILES input for custom molecules.
-Fetches ligands with priority-based lookup: local_folder -> Ligands/ -> RCSB/PubChem download.
+Fetches ligands with priority-based lookup: local_folder -> ligands/ -> RCSB/PubChem download.
 """
 
 import os
@@ -16,13 +16,13 @@ import re
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -33,35 +33,40 @@ class Ligand(BaseConfig):
 
     Downloads SDF files and converts to PDB format with proper atom numbering.
     Implements priority-based lookup: checks local_folder (if provided), then
-    Ligands/ folder, then downloads from RCSB or PubChem based on lookup type.
+    ligands/ folder, then downloads from RCSB or PubChem based on lookup type.
     Also supports direct SMILES input for custom molecules.
     """
 
     TOOL_NAME = "Ligand"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Ligand ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Ligand ready ==="
 """
 
     # Lazy path descriptors
-    compounds_csv = Path(lambda self: os.path.join(self.output_folder, "compounds.csv"))
-    failed_csv = Path(lambda self: os.path.join(self.output_folder, "failed_downloads.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "fetch_config.json"))
-    images_folder = Path(lambda self: os.path.join(self.output_folder, "images") if self.generate_images else None)
-    compound_images_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_compound_images.py"))
-    ligand_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_ligand.py"))
+    # Lazy path descriptors — compounds is a content-bearing stream (its
+    # compounds.csv is also the TableInfo content). The physical compound
+    # files (.sdf / .pdb) also live inside compounds/.
+    compounds_csv = Path(lambda self: self.stream_path("compounds", "compounds.csv"))
+    failed_csv = Path(lambda self: self.table_path("failed"))
+    config_file = Path(lambda self: self.configuration_path("fetch_config.json"))
+    images_folder = Path(lambda self: self.stream_folder("images") if self.generate_images else None)
+    compound_images_py = Path(lambda self: self.pipe_script_path("pipe_compound_images.py"))
+    ligand_py = Path(lambda self: self.pipe_script_path("pipe_ligand.py"))
 
     def __init__(self,
-                 lookup: Optional[Union[str, List[str]]] = None,
+                 lookup: Optional[Union[str, List[str], Dict[str, str]]] = None,
                  ids: Optional[Union[str, List[str]]] = None,
                  codes: Optional[Union[str, List[str]]] = None,
                  source: Optional[str] = None,
                  local_folder: Optional[str] = None,
                  output_format: str = "pdb",
-                 smiles: Optional[Union[str, List[str]]] = None,
+                 smiles: Optional[Union[str, List[str], Dict[str, str]]] = None,
                  generate_images: bool = False,
                  **kwargs):
         """
@@ -75,17 +80,22 @@ echo "=== Ligand ready ==="
                     - PubChem name: "aspirin", "caffeine"
                     - Path to a .txt file: one SMILES per line
                     - Path to a .cdxml file: ChemDraw molecules
+                    - Dictionary mapping IDs to lookup values: {"lig1": "ATP", "lig2": "GDP"}
+                      Equivalent to Ligand(lookup=list(values), ids=list(keys))
                     Can be None if using smiles instead.
             ids: Output identifier(s) for filenames (e.g., "my_ligand" -> my_ligand.pdb).
                  If not provided, defaults to lookup values (for lookup), "smilesN" (for smiles),
                  or names/indices from CDXML (for cdxml).
+                 Ignored when lookup or smiles is a dictionary (ids come from dict keys).
             codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
                    If not provided, defaults to lookup[:3].upper() (for lookup) or "LIG" (for smiles/cdxml).
             source: Force source ("rcsb" or "pubchem"). If None, auto-detects.
                     Ignored when using smiles or cdxml.
-            local_folder: Custom local folder to check first (before Ligands/). Default: None
+            local_folder: Custom local folder to check first (before ligands/). Default: None
             output_format: Output format - "pdb" or "cif". Default: "pdb"
             smiles: SMILES string(s) for direct molecule input. Bypasses lookup entirely.
+                    Can also be a dictionary mapping IDs to SMILES: {"lig1": "CCO", "lig2": "CC"}
+                    Equivalent to Ligand(smiles=list(values), ids=list(keys))
             generate_images: Generate PNG images for each ligand using RDKit. Default: False
             **kwargs: Additional parameters
 
@@ -95,6 +105,32 @@ echo "=== Ligand ready ==="
                 compounds: id | format | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path
                 failed: lookup | error_message | source | attempted_path
         """
+        # Dict input for smiles: {id: smiles_string} -> extract ids and smiles
+        _dict_ids = None
+        if isinstance(smiles, dict):
+            if ids is not None:
+                print("  Warning: 'ids' parameter ignored when smiles is a dictionary (using dict keys)")
+            if not smiles:
+                raise ValueError("smiles dictionary cannot be empty")
+            _dict_ids = list(smiles.keys())
+            smiles = list(smiles.values())
+
+        # Dict input for lookup: {id: lookup_value} -> extract ids and lookups
+        if isinstance(lookup, dict):
+            if ids is not None and _dict_ids is None:
+                print("  Warning: 'ids' parameter ignored when lookup is a dictionary (using dict keys)")
+            if not lookup:
+                raise ValueError("lookup dictionary cannot be empty")
+            if _dict_ids is not None:
+                # Both smiles and lookup are dicts - combine ids
+                _dict_ids = list(lookup.keys()) + _dict_ids
+            else:
+                _dict_ids = list(lookup.keys())
+            lookup = list(lookup.values())
+
+        if _dict_ids is not None:
+            ids = _dict_ids
+
         # Handle smiles input
         if smiles is not None:
             if isinstance(smiles, str):
@@ -342,13 +378,18 @@ echo "=== Ligand ready ==="
             if not code:
                 raise ValueError("Residue code cannot be empty")
 
+        _validate_freeform_string("source", self.source)
+        _validate_freeform_string("local_folder", self.local_folder)
+        for i, code in enumerate(self.residue_codes):
+            _validate_freeform_string(f"codes[{i}]", code)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters and check for local files."""
         self.folders = pipeline_folders
 
 
         # Check which files exist locally and which will need to be downloaded
-        repo_ligands_folder = pipeline_folders.get('Ligands', '')
+        repo_ligands_folder = pipeline_folders.get('ligands', '')
         self.found_locally = []
         self.needs_download = []
 
@@ -365,7 +406,7 @@ echo "=== Ligand ready ==="
                     found = True
                     print(f"  Found ligand {lookup} locally: {local_path}")
 
-            # Check Ligands/ folder
+            # Check ligands/ folder
             if not found and repo_ligands_folder:
                 local_path = os.path.join(repo_ligands_folder, f"{lookup}.pdb")
                 if os.path.exists(local_path):
@@ -401,7 +442,7 @@ echo "=== Ligand ready ==="
         if self.lookup_values:
             config_lines.append(f"LOOKUP: {', '.join(self.lookup_values)}")
             config_lines.append(f"SOURCE: {self.source if self.source else 'auto-detect'}")
-            config_lines.append(f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses Ligands/)'}")
+            config_lines.append(f"LOCAL_FOLDER: {self.local_folder if self.local_folder else 'None (uses ligands/)'}")
 
         if self.file_smiles_ids:
             for file_path, file_ids in self.file_smiles_ids:
@@ -420,8 +461,7 @@ echo "=== Ligand ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to fetch ligands from local folders or RCSB/PubChem."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
+        # Layout sub-dirs already created by the pipeline.
         script_content = "#!/bin/bash\n"
         script_content += "# Ligand execution script\n"
         script_content += self.generate_completion_check_header()
@@ -435,7 +475,7 @@ echo "=== Ligand ready ==="
         """Generate the ligand fetching part of the script."""
         import json
 
-        repo_ligands_folder = self.folders['Ligands']
+        repo_ligands_folder = self.folders['ligands']
 
         config_data = {
             "custom_ids": self.custom_ids,
@@ -446,7 +486,7 @@ echo "=== Ligand ready ==="
             "local_folder": self.local_folder,
             "output_format": self.output_format,
             "repo_ligands_folder": repo_ligands_folder,
-            "output_folder": self.output_folder,
+            "output_folder": self.stream_folder("compounds"),
             "compounds_table": self.compounds_csv,
             "failed_table": self.failed_csv
         }
@@ -478,27 +518,26 @@ python "{self.ligand_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after ligand fetching."""
-        # Generate structure file paths using custom IDs
+        # Per-ligand structure files live inside the compounds/ stream folder
+        # (same place as compounds.csv — they're physical artefacts of the
+        # same stream, not a separate structures stream).
         ext = self.output_format  # "pdb" or "cif"
-        structure_files = [os.path.join(self.output_folder, f"{custom_id}.{ext}")
+        compounds_dir = self.stream_folder("compounds")
+        structure_files = [os.path.join(compounds_dir, f"{custom_id}.{ext}")
                           for custom_id in self.custom_ids]
-
-        total_count = len(self.lookup_values) + len(self.smiles_values)
 
         tables = {
             "compounds": TableInfo(
                 name="compounds",
                 path=self.compounds_csv,
                 columns=["id", "format", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"],
-                description="Successfully fetched/generated ligand files with metadata",
-                count=total_count
+                description="Successfully fetched/generated ligand files with metadata"
             ),
             "failed": TableInfo(
                 name="failed",
                 path=self.failed_csv,
                 columns=["lookup", "error_message", "source", "attempted_path"],
-                description="Failed ligand fetches with error details",
-                count="variable"
+                description="Failed ligand fetches with error details"
             )
         }
 

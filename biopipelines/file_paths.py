@@ -15,8 +15,13 @@ class Path:
 
     Example:
         class MyTool(BaseConfig):
-            main_table = Path(lambda self: os.path.join(self.output_folder, "results.csv"))
-            helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_my_script.py"))
+            # Route artefacts through the canonical layout helpers on
+            # BaseConfig — never use ``self.output_folder`` directly.
+            main_table = Path(lambda self: self.table_path("results"))
+            input_json = Path(lambda self: self.configuration_path("input.json"))
+            raw_dump = Path(lambda self: self.execution_path("model_out"))
+            structures_map = Path(lambda self: self.stream_map_path("structures"))
+            helper_script = Path(lambda self: self.pipe_script_path("pipe_my_script.py"))
     """
 
     def __init__(self, compute_fn):

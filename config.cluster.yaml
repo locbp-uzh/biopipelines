@@ -1,0 +1,199 @@
+machine:
+  # Unix username used for variant auto-detection. If the current user
+  # (getpass.getuser()) matches this value, the loader picks this variant
+  # without needing Pipeline(config="cluster"). Leave empty to opt out.
+  username: "gquarg"
+
+  # Email mapping: Unix username -> notification email
+  # Used by SLURM submissions with email="auto"
+  # Add your username and email here for automatic SLURM notifications
+  emails:
+    gquarg: "gianluca.quargnali@chem.uzh.ch"
+
+  # Environment manager. `name` selects "mamba", "conda", "micromamba",
+  # or "pip". `init` is a list of raw bash lines emitted before any
+  # per-tool `<mgr> activate <env>` call — typically the manager's shell
+  # hook so `mamba activate` works in non-interactive shells. The user
+  # supplies these verbatim; the framework no longer derives them from
+  # the manager name (this lets you override for non-standard installs).
+  # Use `init: []` for managers like pip that need no shell hook.
+  env_manager:
+    name: "mamba"
+    init:
+    - 'eval "$(mamba shell hook --shell bash)"'
+
+  # Scheduler. `name` selects "slurm", "colab", or "none". `init` is a
+  # list of raw bash lines emitted at the very top of every batch script,
+  # before any GPU setup, module load, or per-tool activation — use it
+  # to bring host primitives into scope (e.g. source the lmod profile so
+  # `module` is available in non-login SLURM shells). `modules` is the
+  # list of environment modules to `module load` in batch scripts (only
+  # meaningful when name="slurm" and the cluster uses lmod / Tcl modules).
+  scheduler:
+    name: "slurm"
+    init:
+      # Source the host's lmod profile so `module` is on PATH AND so the
+      # site-specific MODULEPATH additions (z01_lmodenv.sh on UZH S3IT)
+      # are visible to module load. /etc/profile.d/lmod.sh alone is not
+      # enough because the site usually carries MODULEPATH in a separate
+      # z*_*.sh fragment loaded *after* lmod.sh in alphabetical order.
+    - 'for f in /etc/profile.d/lmod.sh /etc/profile.d/z*_lmodenv.sh; do [ -f "$f"
+      ] && source "$f"; done'
+    modules:
+    - "miniforge3"
+    - "apptainer"
+
+  # Container executor: "apptainer" or "singularity" or "none"
+  # Used for tools that run inside containers (e.g., RFdiffusionAllAtom)
+  container_executor: "apptainer"
+
+# GNINA-specific runtime configuration
+# CUDA modules and library paths needed for GNINA's CNN scoring.
+# Adjust these to match your HPC environment.
+folders:
+  # Base paths (resolved first)
+  # Runtime placeholders: <username>, <cwd>
+  # - <username>: actual username (e.g., gquarg)
+  # - <cwd>: current working directory
+  base:
+    home: "/home/<username>"
+    data: "<home>/data"
+    scratch: "/scratch/<username>"
+    group: "/shares/locbp.chem.uzh"
+    user: "<group>/<username>"
+    biopipelines: "<cwd>"
+    biopipelines_output: "<user>/BioPipelines"
+
+  # Infrastructure paths
+  infrastructure:
+    pipe_scripts: "<biopipelines>/pipe_scripts"
+    pdbs: "<biopipelines>/pdbs"
+    ligands: "<biopipelines>/ligands"
+    sequences: "<biopipelines>/sequences"
+    tables: "<biopipelines>/tables"
+    cache: "<group>/cache"
+    containers: "<group>/containers"
+
+  # Installation files
+  repositories:
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RFdiffusion3: "<data>/rfdiffusion3"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    LigandMPNN: "<data>/LigandMPNN"
+    AlphaFold: "<data>/localcolabfold"
+
+    Boltz: "<data>/boltz"
+    BoltzGen: "<data>/boltzgen"
+    GhostFold: "<data>/ghostfold"
+    MMseqs2: "<data>/mmseqs"
+    ModelForge: "<data>/modelforge"
+    Gnina: "<data>/gnina"
+
+  # Cache paths (shared on group storage)
+  cache:
+    BoltzCache: "<cache>/Boltz"
+    BoltzGenCache: "<cache>/BoltzGen"
+    ColabFoldDatabases: "<group>/models/colabfold_databases"
+    MMseqs2Databases: "<group>/models/mmseqs2_databases/gpu"
+
+  # Server paths
+  server:
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
+
+# Default Environments
+# Each tool can have a default conda environment specified here
+# If no specific model is used, the default is biopipelines containing pyyaml and pandas (it is automatically created when submitting via submit)
+# If the tool itsef manages the change to an environment (e.g. when it needs more than one environment), set it to null
+environments:
+  # Structure generation
+  RFdiffusion: "SE3nv"
+  RFdiffusionAllAtom: "SE3nv"
+  RFdiffusion3: "foundry"
+  BoltzGen: "boltzgen"
+  BoltzGenMerge: "boltzgen"
+  BoltzGenImport: "boltzgen"
+
+  # Sequence design
+  ProteinMPNN: "SE3nv"
+  LigandMPNN: "ligandmpnn_env"
+  MutationComposer: "MutationEnv"
+  Mutagenesis: "MutationEnv"
+  Fuse: "biopipelines"
+  StitchSequences: "biopipelines"
+  DNAEncoder: "biopipelines"
+  RBSDesigner: "rbs_designer"
+
+  # Structure prediction
+  AlphaFold: "biopipelines"
+  Boltz2: "Boltz2Env"
+  RF3: "modelforge"
+
+  # Flexibility
+  CABSflex: "CABSflex"
+
+  # Analysis
+  Gnina: "biopipelines"
+  Distance: "biopipelines"
+  DistanceSelector: "biopipelines"
+  ConformationalChange: "ProteinEnv"
+  MutationProfiler: "MutationEnv"
+  SequenceMetricCorrelation: "MutationEnv"
+  BayesianAdjuster: "MutationEnv"
+  PoseBusters: "posebusters"
+  Contacts: "ProteinEnv"
+  PoseChange: "ProteinEnv"
+  SASA: "ProteinEnv"
+  ADMETAI: "admet_ai"
+
+  # Data management
+  Panda: "biopipelines"
+  ExtractMetrics: "biopipelines"
+  Selection: "ProteinEnv"
+
+  # Utilities
+  Load: "biopipelines"
+  MMseqs2: "biopipelines"
+  MMseqs2Server: "biopipelines"
+  CompoundLibrary: "biopipelines"
+  PDB: "biopipelines"
+  Ligand: "biopipelines"
+  Sequence: "biopipelines"
+  PyMOL: "ProteinEnv"
+  Plot: "biopipelines"
+
+# Containers
+# Singularity/Apptainer container images for tools that use containerized execution
+# When a container is configured for a tool, it will be used instead of the conda environment
+containers:
+tool_overrides:
+  gnina:
+    modules:
+    - "cuda/12.6.3"
+    - "cudnn/9.8.0.87-12"
+    ld_library_path: "/apps/u24/opt/x86_64_v3/cuda-12.6.3-ok2c7hqa5kefkh3iyolgxrajfpepvh6h/targets/x86_64-linux/lib"
+
+# renderers
+# Controls how tool outputs are displayed in Jupyter notebooks.
+# Maps stream formats (or stream names) to renderer scripts in the renderers/ folder.
+# Lookup order: stream name first, then format, then _default.
+renderers:
+  streams:
+    _metadata: renderers/streams.py
+    pdb: renderers/structures.py
+    cif: renderers/structures.py
+    "pdb|cif": renderers/structures.py
+    png: renderers/images.py
+    jpg: renderers/images.py
+    jpeg: renderers/images.py
+    svg: renderers/images.py
+    gif: renderers/images.py
+    bmp: renderers/images.py
+    tiff: renderers/images.py
+    webp: renderers/images.py
+    plots: renderers/plots.py
+    fasta: renderers/fasta.py
+    fa: renderers/fasta.py
+    _default: renderers/streams.py
+  tables:
+    _default: renderers/tables.py

@@ -14,14 +14,14 @@ import os
 from typing import Dict, List, Any, Union, Optional
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
     from biopipelines_io import Resolve
@@ -42,21 +42,23 @@ class PoseChange(BaseConfig):
     """
 
     TOOL_NAME = "PoseChange"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== PoseChange ==="
 echo "Requires ProteinEnv (installed with PyMOL.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== PoseChange ready ==="
 """
 
     # Lazy path descriptors
-    analysis_csv = Path(lambda self: os.path.join(self.output_folder, "pose_analysis.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "pose_config.json"))
-    samples_ds_json = Path(lambda self: os.path.join(self.output_folder, "samples_structures.json"))
-    reference_ds_json = Path(lambda self: os.path.join(self.output_folder, "reference_structure.json"))
-    pose_change_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_pose_change.py"))
+    analysis_csv = Path(lambda self: self.table_path("pose_analysis"))
+    config_file = Path(lambda self: self.configuration_path("pose_config.json"))
+    samples_ds_json = Path(lambda self: self.configuration_path("samples_structures.json"))
+    reference_ds_json = Path(lambda self: self.configuration_path("reference_structure.json"))
+    pose_change_py = Path(lambda self: self.pipe_script_path("pipe_pose_change.py"))
 
     def __init__(self,
                  reference_structure: Union[DataStream, StandardizedOutput],
@@ -131,6 +133,9 @@ echo "=== PoseChange ready ==="
         if self.sample_ligand and (len(self.sample_ligand) < 1 or len(self.sample_ligand) > 3):
             raise ValueError(f"sample_ligand must be 1-3 characters, got '{self.sample_ligand}'")
 
+        _validate_freeform_string("reference_ligand", self.reference_ligand)
+        _validate_freeform_string("sample_ligand", self.sample_ligand)
+
         if not self.reference_alignment:
             raise ValueError("reference_alignment cannot be empty")
 
@@ -159,8 +164,6 @@ echo "=== PoseChange ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate PoseChange execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# PoseChange execution script\n"
         script_content += self.generate_completion_check_header()
@@ -234,8 +237,7 @@ python "{self.pose_change_py}" --config "{self.config_file}"
                 name="changes",
                 path=self.analysis_csv,
                 columns=columns,
-                description=f"Ligand pose distance analysis comparing {self.sample_ligand} poses to reference",
-                count=len(self.samples_stream)
+                description=f"Ligand pose distance analysis comparing {self.sample_ligand} poses to reference"
             )
         }
 

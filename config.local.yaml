@@ -1,0 +1,51 @@
+# BioPipelines Configuration — Local / laptop variant
+# Loaded as `config.local.yaml`. Selected explicitly via
+# `Pipeline(config="local")`, or auto-detected when the current Unix user
+# matches `machine.username` below.
+#
+# This variant targets a developer laptop: no SLURM, no GPU mappings, no
+# container executor, no env-manager activation (pip mode means the
+# generated bash emits empty shell-hook / activate lines, so pipeline.sh
+# runs on any host with python on PATH).
+#
+# Placeholders such as <biopipelines>, <biopipelines_output> are resolved
+# by FolderManager against folders.base entries below.
+
+
+# Machine / Site Configuration — no SLURM, no GPU mappings, no env manager
+# activation (pip mode means the generated bash emits empty shell-hook /
+# activate lines, so pipeline.sh runs on any host with python on PATH).
+machine:
+  # Set this to your laptop's Unix username to have the loader auto-detect
+  # this variant when you run on your own machine. Leave empty to force
+  # explicit selection via Pipeline(config="local").
+  username: ""
+  emails: {}
+  env_manager:
+    name: "pip"
+    init: []
+  scheduler:
+    name: "none"
+    init: []
+    modules: []
+  container_executor: "none"
+folders:
+  base:
+    home: "."
+    data: "."
+    scratch: "."
+    biopipelines: "<cwd>"
+    biopipelines_output: "./outputs"
+
+  infrastructure:
+    pipe_scripts: "<biopipelines>/pipe_scripts"
+    pdbs: "<biopipelines>/pdbs"
+    ligands: "<biopipelines>/ligands"
+    sequences: "<biopipelines>/sequences"
+    tables: "<biopipelines>/tables"
+    cache: "./cache"
+    containers: "./containers"
+
+  repositories: {}
+  cache: {}
+  server: {}

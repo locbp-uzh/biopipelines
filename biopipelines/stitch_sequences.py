@@ -51,25 +51,27 @@ class StitchSequences(BaseConfig):
     """
 
     TOOL_NAME = "StitchSequences"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== StitchSequences ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== StitchSequences ready ==="
 """
 
-    # Lazy path descriptors
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "stitch_config.json"))
-    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_stitch_sequences.py"))
+    # Lazy path descriptors — sequences is content-bearing; missing is
+    # a standalone TableInfo; config JSON lives in configuration/.
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    config_file = Path(lambda self: self.configuration_path("stitch_config.json"))
+    helper_script = Path(lambda self: self.pipe_script_path("pipe_stitch_sequences.py"))
 
     def __init__(self,
                  template: Union[str, DataStream, StandardizedOutput],
                  substitutions: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
                  indels: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None,
-                 id_map: Dict[str, str] = {"*": "*_<S>"},
                  remove_duplicates: bool = True,
                  **kwargs):
         """
@@ -88,7 +90,6 @@ echo "=== StitchSequences ready ==="
                 For example, "6-7+9-10": "GP" replaces both segments 6-7 and 9-10 with "GP".
                 - Keys: Position strings like "50-55" or "6-7+9-10+17-18"
                 - Values: List of raw sequences (each segment replaced with full sequence)
-            id_map: ID mapping pattern for matching table IDs to sequence IDs
             remove_duplicates: Remove duplicate sequences from output (default True)
             **kwargs: Additional parameters
 
@@ -120,7 +121,6 @@ echo "=== StitchSequences ready ==="
         self.template = template
         self.substitutions = substitutions or {}
         self.indels = indels or {}
-        self.id_map = id_map
         self.remove_duplicates = remove_duplicates
 
         # Resolve template to DataStream if needed
@@ -344,8 +344,7 @@ echo "=== StitchSequences ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate StitchSequences execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
+        # configuration/, sequences/, tables/ already created by the pipeline.
         step_tool_name = os.path.basename(self.output_folder)
 
         # Collect upstream missing tables from all input sources
@@ -372,7 +371,6 @@ echo "=== StitchSequences ready ==="
             "template": self.template_info,
             "substitutions": self.substitution_infos,
             "indels": self.indel_infos,
-            "id_map": self.id_map,
             "remove_duplicates": self.remove_duplicates,
             "output_csv": self.sequences_csv,
             "missing_csv": self.missing_csv,
@@ -427,15 +425,13 @@ fi
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "sequence"],
-                description="Stitched sequences with segment substitutions",
-                count=len(predicted_ids)
+                description="Stitched sequences with segment substitutions"
             ),
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed (duplicates or upstream) with removal reason",
-                count="variable"
+                description="IDs removed (duplicates or upstream) with removal reason"
             )
         }
 
@@ -517,14 +513,14 @@ fi
             # Find matching IDs from each substitution source using get_mapped_ids
             sub_matched = []
             for sub_ids in sub_ids_list:
-                matches = get_mapped_ids([template_id], sub_ids, self.id_map, unique=False)
+                matches = get_mapped_ids([template_id], sub_ids, unique=False)
                 matched = matches.get(template_id, [])
                 sub_matched.append(matched)
 
             # Find matching IDs from each indel source using get_mapped_ids
             indel_matched = []
             for indel_ids in indel_ids_list:
-                matches = get_mapped_ids([template_id], indel_ids, self.id_map, unique=False)
+                matches = get_mapped_ids([template_id], indel_ids, unique=False)
                 matched = matches.get(template_id, [])
                 indel_matched.append(matched)
 
@@ -596,7 +592,6 @@ fi
                 "template": template_summary,
                 "substitutions": substitutions_summary,
                 "indels": indels_summary,
-                "id_map": self.id_map,
                 "remove_duplicates": self.remove_duplicates
             }
         })

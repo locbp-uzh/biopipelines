@@ -14,13 +14,13 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -33,32 +33,33 @@ class MMseqs2(BaseConfig):
 
     ARCHITECTURE NOTE: MMseqs2 is an exception to the standard BioPipelines pattern.
     Unlike other tools that generate bash scripts and call pipe_<tool>.py at execution time,
-    MMseqs2 calls existing bash scripts from HelpScripts (mmseqs2_client.sh) and helper
+    MMseqs2 calls existing bash scripts from pipe_scripts (mmseqs2_client.sh) and helper
     python scripts (pipe_mmseqs2_sequences.py) directly. This is necessary because MMseqs2
     requires interaction with pre-existing server infrastructure rather than generating
     new computational workflows.
     """
 
     TOOL_NAME = "MMseqs2"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MMseqs2 ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== MMseqs2 ready ==="
 """
 
-    # Lazy path descriptors
-    output_msa_csv = Path(lambda self: os.path.join(self.output_folder, "msas.csv"))
-    client_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_client.sh"))
-    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mmseqs2_sequences.py"))
+    # Lazy path descriptors — MSA CSV is the msas stream map_table.
+    output_msa_csv = Path(lambda self: self.stream_map_path("msas"))
+    client_script = Path(lambda self: self.pipe_script_path("mmseqs2_client.sh"))
+    helper_script = Path(lambda self: self.pipe_script_path("pipe_mmseqs2_sequences.py"))
     input_sequences_csv = Path(lambda self: self._get_input_sequences_path())
 
     def __init__(self, sequences: Union[str, List[str], DataStream, StandardizedOutput],
                  output_format: str = "csv",
                  timeout: int = 3600,
                  mask: Union[str, tuple] = "",
-                 id_map: Dict[str, str] = None,
                  **kwargs):
         """
         Initialize MMseqs2 configuration.
@@ -71,10 +72,6 @@ echo "=== MMseqs2 ready ==="
                   - String format: "10-20+30-40" (PyMOL selection style)
                   - Tuple format: (TableInfo, "column_name") for per-sequence masking
                   - Empty string: no masking (default)
-            id_map: ID mapping pattern for matching sequence IDs to table IDs (default: {"*": "*_<S>"})
-                  - Used when mask table IDs don't match sequence IDs
-                  - Example: sequence ID "rifampicin_1_2" maps to table ID "rifampicin_1"
-                  - Pattern {"*": "*_<S>"} strips last "_segment" from sequence ID
             **kwargs: Additional parameters
 
         Output:
@@ -82,9 +79,6 @@ echo "=== MMseqs2 ready ==="
             Tables:
                 msas: id | sequences.id | sequence | msa_file
         """
-        if id_map is None:
-            id_map = {"*": "*_<S>"}
-
         # Resolve sequences input
         self.sequences_source_file: Optional[str] = None
         self.sequences_stream: Optional[DataStream] = None
@@ -107,7 +101,6 @@ echo "=== MMseqs2 ready ==="
         self.output_format = output_format
         self.timeout = timeout
         self.mask_positions = mask
-        self.id_map = id_map
 
         super().__init__(**kwargs)
 
@@ -115,7 +108,8 @@ echo "=== MMseqs2 ready ==="
         """Get path to input sequences CSV file."""
         if self.sequences_source_file:
             return self.sequences_source_file
-        return os.path.join(self.output_folder, "input_sequences.csv")
+        # Raw-sequences path: place the synthesized CSV under configuration/.
+        return self.configuration_path("input_sequences.csv")
 
     def validate_params(self):
         """Validate MMseqs2-specific parameters."""
@@ -127,6 +121,9 @@ echo "=== MMseqs2 ready ==="
 
         if self.timeout <= 0:
             raise ValueError("timeout must be positive")
+
+        if isinstance(self.mask_positions, str):
+            _validate_freeform_string("mask", self.mask_positions)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files and dependencies."""
@@ -143,7 +140,9 @@ echo "=== MMseqs2 ready ==="
                 for i, seq in enumerate(self.raw_sequences):
                     sequences_data.append({"id": f"{self.pipeline_name}_{i+1}", "sequence": seq})
 
-            os.makedirs(self.output_folder, exist_ok=True)
+            # This runs in configure_inputs (before pipeline's layout step),
+            # so mkdir the config folder explicitly here.
+            os.makedirs(self.configuration_folder, exist_ok=True)
             df = pd.DataFrame(sequences_data)
             df.to_csv(self.input_sequences_csv, index=False)
 
@@ -160,8 +159,6 @@ echo "=== MMseqs2 ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate MMseqs2 execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# MMseqs2 client script\n"
         script_content += self.generate_completion_check_header()
@@ -177,7 +174,7 @@ echo "=== MMseqs2 ready ==="
 
         NOTE: MMseqs2 is an exception to the standard architecture pattern.
         Unlike other tools that generate bash scripts and call pipe_<tool>.py,
-        MMseqs2 calls existing bash scripts from HelpScripts (mmseqs2_client.sh)
+        MMseqs2 calls existing bash scripts from pipe_scripts (mmseqs2_client.sh)
         and helper python scripts (pipe_mmseqs2_sequences.py) directly.
         This is because MMseqs2 requires interaction with pre-existing server
         infrastructure rather than generating new computational workflows.
@@ -208,11 +205,9 @@ echo "MMseqs2 processing completed"
         if not self.mask_positions:
             return ""
 
-        id_map_json = json.dumps(self.id_map).replace('"', '\\"')
-
         # Handle TableReference format: table.column_name
         if hasattr(self.mask_positions, 'path') and hasattr(self.mask_positions, 'column'):
-            return f' \\\n    --mask_table "{self.mask_positions.path}" \\\n    --mask_column "{self.mask_positions.column}" \\\n    --id_map "{id_map_json}"'
+            return f' \\\n    --mask_table "{self.mask_positions.path}" \\\n    --mask_column "{self.mask_positions.column}"'
 
         # Handle string format: direct selection like "10-20+30-40"
         elif isinstance(self.mask_positions, str):
@@ -260,8 +255,7 @@ echo "MMseqs2 processing completed"
                 name="msas",
                 path=self.output_msa_csv,
                 columns=["id", "sequences.id", "sequence", "msa_file"],
-                description="MSA files for sequence alignment",
-                count=len(sequence_ids)
+                description="MSA files for sequence alignment"
             )
         }
 
@@ -279,8 +273,7 @@ echo "MMseqs2 processing completed"
                 "sequences_source": self.sequences_source_file if self.sequences_source_file else "raw_input",
                 "output_format": self.output_format,
                 "timeout": self.timeout,
-                "mask_positions": str(self.mask_positions) if self.mask_positions else None,
-                "id_map": self.id_map
+                "mask_positions": str(self.mask_positions) if self.mask_positions else None
             }
         })
         return base_dict
@@ -295,23 +288,25 @@ class MMseqs2Server(BaseConfig):
 
     ARCHITECTURE NOTE: MMseqs2Server is an exception to the standard BioPipelines pattern.
     Unlike other tools that generate bash scripts and call pipe_<tool>.py at execution time,
-    MMseqs2Server calls existing bash scripts from HelpScripts (mmseqs2_server_cpu.sh,
+    MMseqs2Server calls existing bash scripts from pipe_scripts (mmseqs2_server_cpu.sh,
     mmseqs2_server_gpu.sh) directly. This is necessary because MMseqs2Server manages
     pre-existing server infrastructure rather than generating new computational workflows.
     """
 
     TOOL_NAME = "MMseqs2Server"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MMseqs2Server ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== MMseqs2Server ready ==="
 """
 
     # Lazy path descriptors
-    cpu_server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_server_cpu.sh"))
-    gpu_server_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "mmseqs2_server_gpu.sh"))
+    cpu_server_script = Path(lambda self: self.pipe_script_path("mmseqs2_server_cpu.sh"))
+    gpu_server_script = Path(lambda self: self.pipe_script_path("mmseqs2_server_gpu.sh"))
     shared_server_folder = Path(lambda self: self.folders.get("MMseqs2Server", ""))
 
     def __init__(self, mode: str = "cpu",
@@ -398,8 +393,6 @@ echo "=== MMseqs2Server ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate MMseqs2Server execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += f"# MMseqs2Server {self.mode.upper()} script\n"
         script_content += self.generate_completion_check_header()
@@ -415,7 +408,7 @@ echo "=== MMseqs2Server ready ==="
 
         NOTE: MMseqs2Server is an exception to the standard architecture pattern.
         Unlike other tools that generate bash scripts and call pipe_<tool>.py,
-        MMseqs2Server calls existing bash scripts from HelpScripts directly.
+        MMseqs2Server calls existing bash scripts from pipe_scripts directly.
         This is because MMseqs2Server manages pre-existing server infrastructure
         rather than generating new computational workflows.
         """
@@ -425,7 +418,7 @@ echo "=== MMseqs2Server ready ==="
             return self._generate_cpu_server_script()
 
     def _generate_cpu_server_script(self) -> str:
-        """Generate CPU server script by calling existing HelpScripts bash script."""
+        """Generate CPU server script by calling existing pipe_scripts bash script."""
         env_vars = []
         if self.threads:
             env_vars.append(f"export OMP_NUM_THREADS={self.threads}")
@@ -453,14 +446,14 @@ echo "Pipeline log folder: {self.output_folder}"
 # Set environment variables for server script
 {env_setup}
 
-# Call existing CPU server script from HelpScripts
+# Call existing CPU server script from pipe_scripts
 echo "Executing MMseqs2 CPU server script..."
 bash {self.cpu_server_script}
 
 """
 
     def _generate_gpu_server_script(self) -> str:
-        """Generate GPU server script by calling existing HelpScripts bash script."""
+        """Generate GPU server script by calling existing pipe_scripts bash script."""
         env_vars = []
         if self.threads:
             env_vars.append(f"export OMP_NUM_THREADS={self.threads}")
@@ -503,7 +496,7 @@ nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv,noheade
 # Set environment variables for server script
 {env_setup}
 
-# Call existing GPU server script from HelpScripts
+# Call existing GPU server script from pipe_scripts
 echo "Executing MMseqs2 GPU server script..."
 bash {self.gpu_server_script}
 

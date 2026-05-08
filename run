@@ -4,248 +4,190 @@
 # This software is freely available for use, modification, and redistribution.
 
 #
-# Local Execution Script for BioPipelines
+# On-the-fly Runner Script for BioPipelines
 #
-# This script runs a BioPipelines pipeline locally (without SLURM),
-# executing the generated bash scripts directly.
+# Activates the biopipelines environment (same bootstrap as ./submit),
+# exports BIOPIPELINES_OTF=1 so Pipeline(...) treats this as on-the-fly,
+# and runs `python <pipeline>` so each tool's bash script executes
+# inline. No SLURM.
 #
 # Usage:
 #     ./run <pipeline_script>
 #
 
-# Get the directory where this script is located (biopipelines root)
+# Get the directory where run script is located (biopipelines root)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-CONFIG_FILE="$SCRIPT_DIR/config.yaml"
-# Read env_manager from config.yaml
-ENV_MANAGER=$(grep '^\s*env_manager:' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*env_manager:\s*["'\'']\{0,1\}\([a-zA-Z]*\)["'\'']\{0,1\}.*/\1/' | tr -d '[:space:]')
-if [ -z "$ENV_MANAGER" ]; then
-    echo "ERROR: env_manager not found in config.yaml (cluster section)"
-    echo "Please add 'env_manager: mamba' (or conda) under 'cluster:' in $CONFIG_FILE"
+CONFIG_VARIANT="${BIOPIPELINES_CONFIG_VARIANT:-local}"
+CONFIG_FILE="$SCRIPT_DIR/config.${CONFIG_VARIANT}.yaml"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: config file not found: $CONFIG_FILE"
+    echo "Set BIOPIPELINES_CONFIG_VARIANT=<variant> if you use a non-default config name."
     exit 1
 fi
 
-# Initialize environment manager
-if command -v $ENV_MANAGER &> /dev/null; then
-    if [ "$ENV_MANAGER" = "conda" ]; then
-        eval "$(conda shell.bash hook)"
-    else
-        eval "$($ENV_MANAGER shell hook --shell bash)"
-    fi
-elif command -v conda &> /dev/null; then
-    echo "Warning: $ENV_MANAGER not found, falling back to conda"
-    ENV_MANAGER="conda"
-    eval "$(conda shell.bash hook)"
+_PYTHON3=$(command -v python3 2>/dev/null || true)
+_AWK=$(command -v awk 2>/dev/null || true)
+if [ -n "$_PYTHON3" ] && "$_PYTHON3" -c 'import yaml' >/dev/null 2>&1; then
+    _YAML_BACKEND=python
+elif [ -n "$_AWK" ]; then
+    _YAML_BACKEND=awk
 else
-    echo "ERROR: Neither $ENV_MANAGER nor conda found in PATH"
-    echo "Please install miniforge/mambaforge or conda first"
+    echo "ERROR: cannot parse $CONFIG_FILE — need either python3 with PyYAML or awk on PATH."
     exit 1
 fi
 
-set -e  # Exit on any error
+_yaml_name_in() {
+    local parent="$1"
+    if [ "$_YAML_BACKEND" = "python" ]; then
+        "$_PYTHON3" -c "
+import sys, yaml
+with open('$CONFIG_FILE') as f:
+    d = yaml.safe_load(f) or {}
+v = (((d.get('machine') or {}).get('$parent') or {}).get('name'))
+if v is not None:
+    print(v)
+"
+        return
+    fi
+    "$_AWK" -v parent="$parent" '
+        /^machine:/ { in_machine = 1; next }
+        in_machine && $0 ~ "^[[:space:]]+" parent ":" { in_parent = 1; next }
+        in_parent && /^[[:space:]]+name:/ {
+            sub(/^[[:space:]]+name:[[:space:]]*/, "")
+            gsub(/["'\'']/, "")
+            sub(/[[:space:]]*$/, "")
+            print
+            exit
+        }
+        in_parent && /^[[:space:]]{0,2}[^ ]/ { exit }
+    ' "$CONFIG_FILE"
+}
 
-# Check if biopipelines env exists
-if $ENV_MANAGER env list 2>/dev/null | grep -qw "biopipelines"; then
+_yaml_list_in() {
+    local parent="$1"
+    local key="$2"
+    if [ "$_YAML_BACKEND" = "python" ]; then
+        "$_PYTHON3" -c "
+import sys, yaml
+with open('$CONFIG_FILE') as f:
+    d = yaml.safe_load(f) or {}
+xs = (((d.get('machine') or {}).get('$parent') or {}).get('$key')) or []
+for x in xs:
+    print(x)
+"
+        return
+    fi
+    "$_AWK" -v parent="$parent" -v key="$key" '
+        function indent_of(s,    i) {
+            for (i = 1; i <= length(s); i++) {
+                if (substr(s, i, 1) != " ") return i - 1
+            }
+            return length(s)
+        }
+        function flush(   s) {
+            if (have == 0) return
+            s = buf
+            if (substr(s, 1, 1) == "\"" && substr(s, length(s), 1) == "\"") {
+                s = substr(s, 2, length(s) - 2)
+            } else if (substr(s, 1, 1) == "'\''" && substr(s, length(s), 1) == "'\''") {
+                s = substr(s, 2, length(s) - 2)
+            }
+            print s
+            buf = ""
+            have = 0
+        }
+        /^machine:/ { in_machine = 1; next }
+        in_machine && $0 ~ "^[[:space:]]+" parent ":" { in_parent = 1; next }
+        in_parent && $0 ~ "^[[:space:]]+" key ":" {
+            in_list = 1
+            list_indent = -1
+            next
+        }
+        in_list && /^[[:space:]]*$/ { next }
+        in_list && /^[[:space:]]*#/ { next }
+        in_list && /^[[:space:]]+- / {
+            this_indent = indent_of($0)
+            if (list_indent < 0) list_indent = this_indent
+            if (this_indent < list_indent) { flush(); exit }
+            flush()
+            sub(/^[[:space:]]*-[[:space:]]*/, "")
+            buf = $0
+            have = 1
+            next
+        }
+        in_list {
+            this_indent = indent_of($0)
+            if (have && list_indent >= 0 && this_indent > list_indent) {
+                sub(/^[[:space:]]+/, "")
+                sub(/[[:space:]]+$/, "")
+                buf = buf " " $0
+                next
+            }
+            flush()
+            exit
+        }
+        END { flush() }
+    ' "$CONFIG_FILE"
+}
+
+ENV_MANAGER=$(_yaml_name_in env_manager)
+SCHEDULER_INIT=$(_yaml_list_in scheduler init)
+ENV_MANAGER_INIT=$(_yaml_list_in env_manager init)
+
+if [ -z "$ENV_MANAGER" ]; then
+    echo "ERROR: machine.env_manager.name not found in $CONFIG_FILE"
+    exit 1
+fi
+
+if [ -n "$SCHEDULER_INIT" ]; then
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        eval "$line"
+    done <<< "$SCHEDULER_INIT"
+fi
+
+if [ -n "$ENV_MANAGER_INIT" ]; then
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        eval "$line"
+    done <<< "$ENV_MANAGER_INIT"
+fi
+
+set -e
+
+if [ "$ENV_MANAGER" = "pip" ]; then
+    echo "Using pip env_manager — assuming biopipelines is importable in the current python."
+elif $ENV_MANAGER env list | grep -qw "biopipelines"; then
     echo "Activating biopipelines environment..."
     $ENV_MANAGER activate biopipelines
 else
     echo "ERROR: biopipelines environment not found."
-    echo ""
-    echo "Please install it first (see Docs/UserManual.md):"
-    echo "  $ENV_MANAGER env create -f Environments/biopipelines.yaml"
-    echo "  $ENV_MANAGER activate biopipelines"
-    echo "  pip install -e ."
+    echo "Install it first: $ENV_MANAGER env create -f environments/biopipelines.yaml"
     exit 1
 fi
-echo ""
 
-# Function to print usage
 usage() {
-    echo "Usage: $0 [-v|--verbose] <pipeline_script>"
+    echo "Usage: $0 <pipeline_script>"
     echo ""
-    echo "Run a BioPipelines pipeline locally (without SLURM)"
-    echo ""
-    echo "Options:"
-    echo "  -v, --verbose    Show full pipeline generation output"
+    echo "Run a BioPipelines pipeline on-the-fly (no SLURM submission)."
+    echo "Each tool's bash script is executed inline as the tool is added."
     echo ""
     echo "Arguments:"
-    echo "  pipeline_script  Path to pipeline script (.py or .ipynb)"
-    echo ""
-    echo "Examples:"
-    echo "  $0 pipeline.py"
-    echo "  $0 -v pipeline.py                            # Run with full output"
-    echo "  $0 pipeline.ipynb                             # Run from notebook"
-    echo "  $0 ExamplePipelines/boltz2.py"
-    echo ""
+    echo "  pipeline_script  Path to pipeline script (.py)"
 }
 
-# Function to run pipeline and execute locally
-run_pipeline_locally() {
-    local pipeline_script="$1"
-    local verbose="$2"
+if [ "$#" -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    usage
+    exit 0
+fi
 
-    echo "Generating pipeline: $pipeline_script"
+pipeline_script="$1"
+if [ ! -f "$pipeline_script" ]; then
+    echo "Error: Pipeline script not found: $pipeline_script"
+    exit 1
+fi
 
-    # Run the pipeline Python script to generate bash scripts
-    local pipeline_output=$(python "$pipeline_script" 2>&1)
-    local exit_code=$?
-
-    if [ "$verbose" = "1" ]; then
-        echo ""
-        echo "$pipeline_output"
-    else
-        # Even in non-verbose mode, show full tracebacks and error context
-        local error_output=$(echo "$pipeline_output" | awk '
-            /^Traceback \(most recent call last\)/ { capture=1 }
-            capture { print }
-            !capture && /^[A-Za-z]*[Ee]rror:|^[A-Za-z]*[Ee]xception:/ { print }
-        ')
-        if [ -n "$error_output" ]; then
-            echo ""
-            echo "$error_output"
-        fi
-    fi
-    echo ""
-
-    if [ $exit_code -ne 0 ]; then
-        echo "Pipeline generation failed with exit code $exit_code"
-        if [ "$verbose" != "1" ]; then
-            echo "Re-run with -v to see full output"
-        fi
-        return 1
-    fi
-
-    # Extract ALL runtime directories from pipeline output
-    local runtime_dirs=$(echo "$pipeline_output" | grep -o '/[^ ]*/RunTime' | sort -u)
-
-    if [ -z "$runtime_dirs" ]; then
-        echo "No runtime directories found in pipeline output"
-        return 1
-    fi
-
-    echo ""
-    echo "Found $(echo "$runtime_dirs" | wc -l) pipeline(s) to execute locally"
-    echo "=========================================="
-    echo ""
-
-    local total_pipelines_run=0
-
-    # Process each runtime directory
-    while IFS= read -r runtime_dir; do
-        if [ -z "$runtime_dir" ] || [ ! -d "$runtime_dir" ]; then
-            continue
-        fi
-
-        local pipeline_name=$(basename "$(dirname "$runtime_dir")")
-        echo "Processing pipeline: $pipeline_name"
-        echo "Runtime directory: $runtime_dir"
-        echo ""
-
-        # Check for batch files (multi-batch pipeline)
-        local batch_files=$(ls "$runtime_dir"/pipeline_batch*.sh 2>/dev/null | sort -V)
-
-        if [ -n "$batch_files" ]; then
-            # Multi-batch pipeline - execute sequentially
-            echo "Detected multi-batch pipeline"
-            echo "Executing batches sequentially..."
-            echo "------------------------------------------"
-            echo ""
-
-            local batch_count=0
-            for batch_file in $batch_files; do
-                batch_count=$((batch_count + 1))
-                local batch_num=$(basename "$batch_file" | grep -o '[0-9]\+')
-                echo "Executing batch $batch_num..."
-                echo "  Script: $batch_file"
-
-                bash "$batch_file"
-                local batch_exit=$?
-
-                if [ $batch_exit -eq 0 ]; then
-                    echo "Batch $batch_num completed successfully"
-                else
-                    echo "Batch $batch_num failed with exit code $batch_exit"
-                    return 1
-                fi
-                echo ""
-            done
-
-            echo "Pipeline $pipeline_name: $batch_count batch(es) executed"
-            total_pipelines_run=$((total_pipelines_run + 1))
-        else
-            # Single batch pipeline - look for pipeline.sh
-            local pipeline_sh="$runtime_dir/pipeline.sh"
-            if [ -f "$pipeline_sh" ]; then
-                echo "Detected single-batch pipeline"
-                echo "Executing pipeline..."
-                echo "------------------------------------------"
-                echo ""
-
-                bash "$pipeline_sh"
-                local run_exit=$?
-
-                if [ $run_exit -eq 0 ]; then
-                    echo "Pipeline completed successfully"
-                else
-                    echo "Pipeline failed with exit code $run_exit"
-                    return 1
-                fi
-
-                total_pipelines_run=$((total_pipelines_run + 1))
-            else
-                echo "Warning: No pipeline script found in $runtime_dir"
-            fi
-        fi
-        echo ""
-    done <<< "$runtime_dirs"
-
-    echo "=========================================="
-    echo "All pipelines executed. Total: $total_pipelines_run"
-}
-
-# Main execution
-main() {
-    local verbose=0
-    local pipeline_script=""
-
-    echo "BioPipelines Local Execution Script"
-    echo "===================================="
-    echo ""
-
-    # Parse arguments
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            -h|--help)
-                usage
-                return 0
-                ;;
-            -v|--verbose)
-                verbose=1
-                shift
-                ;;
-            *)
-                pipeline_script="$1"
-                shift
-                ;;
-        esac
-    done
-
-    # Require a pipeline script argument
-    if [ -z "$pipeline_script" ]; then
-        echo "Error: No pipeline script specified"
-        echo ""
-        usage
-        return 1
-    fi
-
-    # Check if pipeline script exists
-    if [ ! -f "$pipeline_script" ]; then
-        echo "Error: Pipeline script not found: $pipeline_script"
-        return 1
-    fi
-
-    # Run the pipeline locally
-    run_pipeline_locally "$pipeline_script" "$verbose"
-}
-
-# Run main function with all arguments
-main "$@"
+export BIOPIPELINES_OTF=1
+echo "Running on-the-fly: $pipeline_script"
+echo "=========================================="
+python "$pipeline_script"

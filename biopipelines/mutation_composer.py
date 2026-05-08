@@ -40,20 +40,22 @@ class MutationComposer(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationComposer"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== MutationComposer ==="
 echo "Requires MutationEnv (installed with MutationProfiler.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== MutationComposer ready ==="
 """
 
     # Lazy path descriptors
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
-    sequences_fasta = Path(lambda self: os.path.join(self.output_folder, "sequences.fasta"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "mutation_composer_config.json"))
-    composer_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_mutation_composer.py"))
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    sequences_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
+    config_file = Path(lambda self: self.configuration_path("mutation_composer_config.json"))
+    composer_py = Path(lambda self: self.pipe_script_path("pipe_mutation_composer.py"))
 
     def __init__(self,
                  frequencies: Union[List[Union[StandardizedOutput, TableInfo, str]],
@@ -185,8 +187,6 @@ echo "=== MutationComposer ready ==="
     
     def generate_script(self, script_path: str) -> str:
         """Generate MutationComposer execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# MutationComposer execution script\n"
         script_content += self.generate_completion_check_header()
@@ -257,8 +257,7 @@ python "{self.composer_py}" --config "{self.config_file}"
                 name="sequences",
                 path=self.sequences_csv,
                 columns=["id", "sequence", "mutations", "mutation_positions"],
-                description=f"Generated sequences using {self.mode} mode",
-                count=self.num_sequences
+                description=f"Generated sequences using {self.mode} mode"
             )
         }
 

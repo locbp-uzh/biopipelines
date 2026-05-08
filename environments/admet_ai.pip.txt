@@ -1,0 +1,4 @@
+admet-ai
+# setuptools<81 needed: chemprop 1.6.1 -> hyperopt 0.2.7 imports pkg_resources,
+# which setuptools removed in 81+.
+setuptools<81

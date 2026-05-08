@@ -4,7 +4,7 @@ site_url: https://biopipelines.readthedocs.io/
 repo_url: https://github.com/locbp-uzh/biopipelines
 repo_name: locbp-uzh/biopipelines
 
-docs_dir: Docs
+docs_dir: docs
 
 theme:
   name: material
@@ -55,15 +55,15 @@ plugins:
 
 nav:
   - Home: index.md
-  - User Guide: UserManual.md
+  - User Guide: user_manual.md
   - Tool Reference:
-      - Overview: ToolReference.md
-      - Utilities & Inputs: Tool/Utilities.md
-      - Structure Generation: Tool/StructureGeneration.md
-      - Sequence Design: Tool/SequenceDesign.md
-      - Structure Prediction: Tool/StructurePrediction.md
-      - Analysis: Tool/Analysis.md
-      - Statistics: Tool/Statistics.md
-      - Data Management: Tool/DataManagement.md
+      - Overview: tool_reference.md
+      - Utilities & Inputs: tool/utilities.md
+      - Structure Generation: tool/structure_generation.md
+      - Sequence Design: tool/sequence_design.md
+      - Structure Prediction: tool/structure_prediction.md
+      - Analysis: tool/analysis.md
+      - Statistics: tool/statistics.md
+      - Data Management: tool/data_management.md
   - Examples: examples.md
-  - Developer Guide: DeveloperManual.md
+  - Developer Guide: developer_manual.md

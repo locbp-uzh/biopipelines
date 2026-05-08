@@ -54,17 +54,21 @@ class ReMap(BaseConfig):
     """
 
     TOOL_NAME = "ReMap"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== ReMap ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== ReMap ready ==="
 """
 
     # Lazy path descriptors
-    remap_config_json = Path(lambda self: os.path.join(self.output_folder, "remap_config.json"))
-    remap_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_remap.py"))
+    # Config JSON lives in configuration/; per-stream files and map_tables
+    # land in their own stream folders; standalone remapped tables go to tables/.
+    remap_config_json = Path(lambda self: self.configuration_path("remap_config.json"))
+    remap_py = Path(lambda self: self.pipe_script_path("pipe_remap.py"))
 
     def __init__(self,
                  source: StandardizedOutput,
@@ -535,15 +539,35 @@ echo "=== ReMap ready ==="
         return config_lines
 
     def generate_script(self, script_path: str) -> str:
-        """Generate bash script for ReMap execution."""
+        """Generate bash script for ReMap execution.
+
+        Inject explicit per-stream / per-table destinations into the config
+        so pipe_remap.py can write each artefact into its canonical home
+        without needing to know about the layout rules.
+        """
+        # Annotate each stream with its dedicated folder + map path.
+        streams_cfg = []
+        for s in self.source_streams:
+            entry = dict(s)
+            entry["target_folder"] = self.stream_folder(s["name"])
+            entry["target_map_table"] = self.stream_map_path(s["name"])
+            streams_cfg.append(entry)
+
+        # Annotate each standalone table with its canonical destination.
+        tables_cfg = []
+        for t in self.source_tables:
+            entry = dict(t)
+            entry["target_path"] = self.table_path(t["name"])
+            tables_cfg.append(entry)
+
         config = {
             "id_mapping": self.id_mapping,
             "output_folder": self.output_folder,
-            "streams": self.source_streams,
-            "tables": self.source_tables,
+            "streams": streams_cfg,
+            "tables": tables_cfg,
         }
 
-        os.makedirs(self.output_folder, exist_ok=True)
+        # configuration/ already created by the pipeline.
         with open(self.remap_config_json, 'w') as f:
             json.dump(config, f, indent=2)
 
@@ -579,23 +603,24 @@ echo "=== ReMap ready ==="
             else:
                 new_ids = [self.id_mapping.get(oid, oid) for oid in old_ids]
 
-            # Build new file paths
+            # Build new file paths — everything lands in this stream's folder.
+            stream_dir = self.stream_folder(stream_info["name"])
             new_files = []
             if old_files and len(old_files) == len(old_ids):
                 # One file per ID: create new paths
                 for new_id, old_file in zip(new_ids, old_files):
                     ext = os.path.splitext(old_file)[1]
-                    new_file = os.path.join(self.output_folder, f"{new_id}{ext}")
+                    new_file = os.path.join(stream_dir, f"{new_id}{ext}")
                     new_files.append(new_file)
             elif old_files and len(old_files) == 1:
                 # Single shared file (e.g., sequences CSV): will be rewritten
-                new_files = [os.path.join(self.output_folder,
+                new_files = [os.path.join(stream_dir,
                              os.path.basename(old_files[0]))]
             else:
                 new_files = []
 
-            # Create map_table for this stream
-            map_table_path = os.path.join(self.output_folder, f"{stream_info['name']}_map.csv")
+            # Create map_table for this stream (co-located with its files).
+            map_table_path = self.stream_map_path(stream_info["name"])
 
             # Build provenance: trace new IDs back to old IDs
             provenance = {stream_key: old_ids}
@@ -615,11 +640,11 @@ echo "=== ReMap ready ==="
                 format=fmt,
             )
 
-        # Build remapped tables
+        # Build remapped tables (standalone TableInfos under tables/).
         tables = {}
         for table_info in self.source_tables:
             table_name = table_info["name"]
-            new_table_path = os.path.join(self.output_folder, f"{table_name}.csv")
+            new_table_path = self.table_path(table_name)
             tables[table_name] = {
                 "path": new_table_path,
                 "columns": table_info.get("columns", []),

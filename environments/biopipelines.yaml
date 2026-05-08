@@ -1,0 +1,21 @@
+# BioPipelines base environment
+name: biopipelines
+channels:
+  - conda-forge
+channel_priority: strict
+
+dependencies:
+  - python>=3.10,<3.13
+  - pandas>=2.2
+  - numpy>=1.26
+  - pyyaml>=6.0
+  - yaml>=0.2.5
+  - requests>=2.31
+  - biopython>=1.84
+  - rdkit>=2024.03
+  - openbabel>=3.1
+  - openpyxl>=3.1
+  - py3dmol>=2.4
+  - prompt_toolkit>=3
+  - ruamel.yaml>=0.17
+

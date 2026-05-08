@@ -14,12 +14,18 @@ import pandas as pd
 from typing import Dict, List, Any, Optional
 
 try:
-    from .base_config import BaseConfig, TableInfo
+    from .base_config import (
+        BaseConfig, TableInfo,
+        _validate_freeform_string, _escape_for_double_quotes,
+    )
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, TableInfo
+    from base_config import (
+        BaseConfig, TableInfo,
+        _validate_freeform_string, _escape_for_double_quotes,
+    )
     from datastream import DataStream
 
 
@@ -48,11 +54,13 @@ class Table(BaseConfig):
     """
 
     TOOL_NAME = "Table"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Table ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Table ready ==="
 """
 
@@ -66,23 +74,35 @@ echo "=== Table ready ==="
 
         Args:
             path: Path to existing CSV or Excel (.xlsx/.xls) file.
+                  Can be absolute, relative to the current directory, or a
+                  filename inside the pipeline's tables/ folder.
                   Excel files are converted to CSV internally.
             name: Name for the table (default: "data")
             description: Description of the table contents
             **kwargs: Additional parameters
         """
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Table file not found: {path}")
-
         ext = os.path.splitext(path)[1].lower()
         if ext not in ('.csv', '.xlsx', '.xls'):
             raise ValueError(f"Table only accepts CSV or Excel files (.csv, .xlsx, .xls). Got: '{path}'")
 
-        abs_path = os.path.abspath(path)
         self.table_name = name
         self.table_description = description
+        self._pending_filename = None
 
-        # Read the file; convert Excel to CSV when needed
+        if os.path.isfile(path):
+            self._load_from_path(os.path.abspath(path))
+        else:
+            # Defer to configure_inputs to try joining with the tables/ folder
+            self._pending_filename = path
+            self.table_path = path
+            self.table_columns = []
+            self.table_count = 0
+
+        super().__init__(**kwargs)
+
+    def _load_from_path(self, abs_path: str):
+        """Load the table from an absolute path; convert Excel to CSV if needed."""
+        ext = os.path.splitext(abs_path)[1].lower()
         if ext in ('.xlsx', '.xls'):
             df = pd.read_excel(abs_path)
             csv_path = os.path.splitext(abs_path)[0] + '.csv'
@@ -98,16 +118,33 @@ echo "=== Table ready ==="
 
         print(f"  Loaded table '{self.table_name}' with {self.table_count} rows and {len(self.table_columns)} columns")
 
-        super().__init__(**kwargs)
-
     def validate_params(self):
         """Validate Table parameters."""
-        if not os.path.exists(self.table_path):
+        # Pending-filename tables are validated after configure_inputs resolves them
+        if not self._pending_filename and not os.path.exists(self.table_path):
             raise FileNotFoundError(f"Table file not found: {self.table_path}")
+
+        _validate_freeform_string("name", self.table_name)
+        _validate_freeform_string("description", self.table_description)
+        # table_path is a filesystem path, not a user-supplied free-form
+        # string; Windows paths legitimately contain backslashes. We escape
+        # it at bash-emission time instead of rejecting it outright.
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters."""
         self.folders = pipeline_folders
+
+        # Resolve a pending path against the tables/ folder
+        if self._pending_filename:
+            tables_folder = pipeline_folders.get("tables", "")
+            candidate = os.path.join(tables_folder, self._pending_filename)
+            if not os.path.isfile(candidate):
+                raise FileNotFoundError(
+                    f"Table file not found: '{self._pending_filename}'. "
+                    f"Tried as-is and as '{candidate}'."
+                )
+            self._load_from_path(os.path.abspath(candidate))
+            self._pending_filename = None
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -122,10 +159,14 @@ echo "=== Table ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate script - Table is a no-op since file already exists."""
+        # Escape the filesystem path before interpolating into the echo
+        # line (Windows paths contain backslashes that would otherwise be
+        # interpreted as bash escape sequences).
+        safe_path = _escape_for_double_quotes(self.table_path)
         script_content = "#!/bin/bash\n"
         script_content += "# Table entity - no execution needed (file already exists)\n"
         script_content += self.generate_completion_check_header()
-        script_content += f'echo "Table \'{self.table_name}\' already exists at: {self.table_path}"\n'
+        script_content += f'echo "Table \'{self.table_name}\' already exists at: {safe_path}"\n'
         script_content += f'echo "Columns: {", ".join(self.table_columns)}"\n'
         script_content += f'echo "Rows: {self.table_count}"\n'
         script_content += self.generate_completion_check_footer()
@@ -139,7 +180,6 @@ echo "=== Table ready ==="
                 path=self.table_path,
                 columns=self.table_columns,
                 description=self.table_description,
-                count=self.table_count
             )
         }
 
@@ -156,7 +196,6 @@ echo "=== Table ready ==="
                 "path": self.table_path,
                 "name": self.table_name,
                 "columns": self.table_columns,
-                "count": self.table_count,
                 "description": self.table_description
             }
         })

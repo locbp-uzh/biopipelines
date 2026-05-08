@@ -46,11 +46,13 @@ class Load(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Load"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== Load ==="
 echo "Uses biopipelines environment (no additional installation needed)."
+touch "$INSTALL_SUCCESS"
 echo "=== Load ready ==="
 """
 
@@ -107,7 +109,7 @@ echo "=== Load ready ==="
             self.dependencies.append(self.filter_input.config)
 
         # Initialize folders to prevent AttributeError during script generation
-        self.folders = {"HelpScripts": "HelpScripts"}  # Will be updated in configure_inputs
+        self.folders = {"pipe_scripts": "pipe_scripts"}  # Will be updated in configure_inputs
 
     def _load_and_validate_result(self):
         """Load and validate the result file, rebasing paths if the folder was moved."""
@@ -431,14 +433,17 @@ echo "=== Load ready ==="
             filtered_structure[stream_name]['files'] = filtered_files
             print(f"  - Filtered {stream_name}: {len(filtered_ids)}/{len(ids)}")
 
-        # Update tables paths to point to Load's output folder and update counts
+        # Update tables paths to point to Load's own tables/ folder and
+        # refresh counts. The source CSV stays in the upstream tool's
+        # folder; Load just retargets the metadata so downstream consumers
+        # read from a clean, locally-owned file after filtering.
         if 'tables' in filtered_structure:
             for ds_name, ds_info in filtered_structure['tables'].items():
                 if isinstance(ds_info, dict):
                     if 'path' in ds_info:
                         original_path = ds_info['path']
                         if isinstance(original_path, str) and original_path.endswith('.csv'):
-                            ds_info['path'] = os.path.join(self.output_folder, f"{ds_name}.csv")
+                            ds_info['path'] = self.table_path(ds_name)
                     if 'count' in ds_info and isinstance(ds_info['count'], int):
                         ds_info['count'] = len(self.filtered_ids)
 
@@ -575,7 +580,6 @@ echo "=== Load ready ==="
                         path=table_info['path'],
                         columns=table_info.get('columns', []),
                         description=table_info.get('description', ''),
-                        count=table_info.get('count', 0)
                     )
                 elif isinstance(table_info, TableInfo):
                     tables_dict[table_name] = table_info
@@ -651,7 +655,7 @@ fi"""
                 "output_folder": self.output_folder
             }
 
-            filter_config_path = os.path.join(self.output_folder, "filter_config.json")
+            filter_config_path = self.configuration_path("filter_config.json")
             with open(filter_config_path, 'w') as f:
                 json.dump(filter_config, f, indent=2)
 
@@ -663,7 +667,7 @@ echo "Filter: {self.filter_input if isinstance(self.filter_input, str) else 'Too
 echo "Filtered IDs: {len(self.filtered_ids)} items"
 echo "Output folder: {self.output_folder}"
 
-python "{os.path.join(self.folders.get('HelpScripts', 'HelpScripts'), 'pipe_load_output_filter.py')}" \\
+python "{os.path.join(self.folders.get('pipe_scripts', 'pipe_scripts'), 'pipe_load_output_filter.py')}" \\
   --config "{filter_config_path}"
 
 if [ $? -ne 0 ]; then
@@ -827,7 +831,7 @@ def LoadMultiple(path: str,
         match = tool_folder_pattern.match(entry)
         if not match:
             continue
-        # Check that .expected_outputs.json exists
+        # Check that .expected_outputs.json exists at the tool-folder root.
         expected_json = os.path.join(entry_path, ".expected_outputs.json")
         if not os.path.exists(expected_json):
             continue

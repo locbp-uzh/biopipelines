@@ -24,13 +24,13 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
 
@@ -54,28 +54,30 @@ class BayesianAdjuster(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BayesianAdjuster"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== BayesianAdjuster ==="
 echo "Requires MutationEnv (installed with MutationProfiler.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== BayesianAdjuster ready ==="
 """
 
     # Lazy path descriptors
-    adjusted_probs_csv = Path(lambda self: os.path.join(self.output_folder, "adjusted_probabilities.csv"))
-    absolute_probs_csv = Path(lambda self: os.path.join(self.output_folder, "absolute_probabilities.csv"))
-    relative_probs_csv = Path(lambda self: os.path.join(self.output_folder, "relative_probabilities.csv"))
-    adjustment_log_csv = Path(lambda self: os.path.join(self.output_folder, "adjustment_log.csv"))
-    adjusted_logo_svg = Path(lambda self: os.path.join(self.output_folder, "adjusted_probabilities_logo.svg"))
-    adjusted_logo_png = Path(lambda self: os.path.join(self.output_folder, "adjusted_probabilities_logo.png"))
-    absolute_logo_svg = Path(lambda self: os.path.join(self.output_folder, "absolute_probabilities_logo.svg"))
-    absolute_logo_png = Path(lambda self: os.path.join(self.output_folder, "absolute_probabilities_logo.png"))
-    relative_logo_svg = Path(lambda self: os.path.join(self.output_folder, "relative_probabilities_logo.svg"))
-    relative_logo_png = Path(lambda self: os.path.join(self.output_folder, "relative_probabilities_logo.png"))
-    config_file = Path(lambda self: os.path.join(self.output_folder, "adjustment_config.json"))
-    adjuster_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_bayesian_adjuster.py"))
+    adjusted_probs_csv = Path(lambda self: self.table_path("adjusted_probabilities"))
+    absolute_probs_csv = Path(lambda self: self.table_path("absolute_probabilities"))
+    relative_probs_csv = Path(lambda self: self.table_path("relative_probabilities"))
+    adjustment_log_csv = Path(lambda self: self.table_path("adjustment_log"))
+    adjusted_logo_svg = Path(lambda self: self.stream_path("images", "adjusted_probabilities_logo.svg"))
+    adjusted_logo_png = Path(lambda self: self.stream_path("images", "adjusted_probabilities_logo.png"))
+    absolute_logo_svg = Path(lambda self: self.stream_path("images", "absolute_probabilities_logo.svg"))
+    absolute_logo_png = Path(lambda self: self.stream_path("images", "absolute_probabilities_logo.png"))
+    relative_logo_svg = Path(lambda self: self.stream_path("images", "relative_probabilities_logo.svg"))
+    relative_logo_png = Path(lambda self: self.stream_path("images", "relative_probabilities_logo.png"))
+    config_file = Path(lambda self: self.configuration_path("adjustment_config.json"))
+    adjuster_py = Path(lambda self: self.pipe_script_path("pipe_bayesian_adjuster.py"))
 
     def __init__(self,
                  frequencies: Union[TableInfo, str],
@@ -152,6 +154,8 @@ echo "=== BayesianAdjuster ready ==="
         if self.pseudocount < 0:
             raise ValueError(f"pseudocount must be non-negative, got: {self.pseudocount}")
 
+        _validate_freeform_string("positions", self.positions)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input tables."""
         self.folders = pipeline_folders
@@ -178,8 +182,6 @@ echo "=== BayesianAdjuster ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate Bayesian adjustment execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
         script_content = "#!/bin/bash\n"
         script_content += "# BayesianAdjuster execution script\n"
         script_content += self.generate_completion_check_header()
@@ -236,29 +238,25 @@ python "{self.adjuster_py}" --config "{self.config_file}"
                 name="adjusted_probabilities",
                 path=self.adjusted_probs_csv,
                 columns=aa_columns,
-                description="Raw Bayesian-adjusted probabilities before normalization",
-                count=0
+                description="Raw Bayesian-adjusted probabilities before normalization"
             ),
             "absolute_probabilities": TableInfo(
                 name="absolute_probabilities",
                 path=self.absolute_probs_csv,
                 columns=aa_columns,
-                description="Normalized absolute probabilities (comparable to MutationProfiler absolute_frequencies)",
-                count=0
+                description="Normalized absolute probabilities (comparable to MutationProfiler absolute_frequencies)"
             ),
             "relative_probabilities": TableInfo(
                 name="relative_probabilities",
                 path=self.relative_probs_csv,
                 columns=aa_columns,
-                description="Normalized relative probabilities (comparable to MutationProfiler relative_frequencies)",
-                count=0
+                description="Normalized relative probabilities (comparable to MutationProfiler relative_frequencies)"
             ),
             "adjustment_log": TableInfo(
                 name="adjustment_log",
                 path=self.adjustment_log_csv,
                 columns=["position", "wt_aa", "aa", "prior_freq", "correlation", "adjusted_prob", "change"],
-                description="Log of Bayesian adjustments for debugging",
-                count=0
+                description="Log of Bayesian adjustments for debugging"
             )
         }
 

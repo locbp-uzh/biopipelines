@@ -1,0 +1,10 @@
+name: CABSflex
+channels:
+  - salilab
+  - lcbio
+  - conda-forge
+dependencies:
+  - python=2.7
+  - modeller
+  - dssp
+  - cabs

@@ -14,14 +14,14 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from biopipelines_io import Resolve
@@ -63,6 +63,7 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
+    TOOL_VERSION = "1.0"
 
     # Mapping of weight name -> (url_hash, filename)
     WEIGHTS = {
@@ -95,13 +96,11 @@ class RFdiffusion(BaseConfig):
 
         Clones the RFdiffusion repository, downloads the requested model
         checkpoints, and creates (or reuses) the SE3nv conda/mamba environment.
-        In pip mode (e.g. Google Colab) the environment creation step is skipped
-        and dependencies are installed directly.
 
         Args:
             folders: Resolved pipeline folder paths (must contain "RFdiffusion"
                      and "biopipelines" keys).
-            env_manager: "mamba", "conda", or "pip".
+            env_manager: "mamba", "conda", or "micromamba".
             force_reinstall: If True, skip the already-installed early-exit check.
             weights: List of checkpoint names to download. Defaults to
                      DEFAULT_WEIGHTS (["Base", "Complex_base"]).
@@ -125,90 +124,29 @@ class RFdiffusion(BaseConfig):
             for w in weights
         )
 
-        if env_manager == "pip":
-            skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
-    echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing RFdiffusion (pip) ==="
-{skip}mkdir -p {parent_dir}
-cd {parent_dir}
-if [ ! -d "{repo_dir}" ]; then
-    git clone https://github.com/RosettaCommons/RFdiffusion.git
-fi
-cd {repo_dir}
-
-# Download model weights
-mkdir -p models && cd models
-{wget_lines}
-cd ..
-
-# Install dependencies via pip (Colab-specific, Python 3.12 compatible)
-pip install -r {biopipelines}/Environments/SE3nv_colab_requirements.txt
-# Install DGL from pre-built wheel (torch-2.4 / CUDA 12.4)
-pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
-
-# Install SE3Transformer and RFdiffusion
-# Skip SE3Transformer's own requirements.txt (has hydra/wandb/pathtools
-# which are incompatible with Python 3.12); dependencies already covered
-# by SE3nv_colab_requirements.txt above
-cd env/SE3Transformer
-pip install --no-deps .
-cd ../..
-pip install -e .
-
-echo "=== RFdiffusion installation complete ==="
-"""
-        if env_manager == "micromamba":
-            skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] && micromamba env list 2>/dev/null | grep -q "SE3nv"; then
-    echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing RFdiffusion (micromamba) ==="
-{skip}mkdir -p {parent_dir}
-cd {parent_dir}
-if [ ! -d "{repo_dir}" ]; then
-    git clone https://github.com/RosettaCommons/RFdiffusion.git
-fi
-cd {repo_dir}
-
-# Download model weights
-mkdir -p models && cd models
-{wget_lines}
-cd ..
-
-# Create SE3nv environment with Python 3.9 (required by RFdiffusion)
-micromamba create -n SE3nv python=3.9 -y
-
-# Install PyTorch and core dependencies
-micromamba run -n SE3nv pip install torch torchvision torchaudio
-# Install remaining dependencies
-micromamba run -n SE3nv pip install -r {biopipelines}/Environments/SE3nv_pip_requirements.txt
-micromamba run -n SE3nv pip install pandas psutil tqdm
-# Install DGL from pre-built wheel
-micromamba run -n SE3nv pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
-
-# Install SE3Transformer and RFdiffusion
-cd env/SE3Transformer
-micromamba run -n SE3nv pip install --no-deps .
-cd ../..
-micromamba run -n SE3nv pip install -e .
-
-echo "=== RFdiffusion installation complete ==="
-"""
+        # Skip only when the env exists AND `import rfdiffusion` actually
+        # works inside it. Just the env name being present is not enough:
+        # ProteinMPNN.install() may have created a leaner SE3nv (PyTorch
+        # only) before us, in which case we must layer DGL, SE3Transformer,
+        # and the rfdiffusion package on top instead of skipping.
+        # The import probe is the load-bearing check (env + package); add the
+        # weights-file test on top so we don't skip when checkpoints are missing.
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] && {env_manager} env list 2>/dev/null | grep -q "SE3nv"; then
+if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] \\
+   && {env_manager} run -n SE3nv python -c "import rfdiffusion" >/dev/null 2>&1; then
     echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("SE3nv", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("SE3nv", env_manager, biopipelines)
         return f"""echo "=== Installing RFdiffusion ==="
-{skip}cd {parent_dir}
-git clone https://github.com/RosettaCommons/RFdiffusion.git
+{skip}mkdir -p {parent_dir}
+cd {parent_dir}
+if [ ! -d "{repo_dir}" ]; then
+    git clone https://github.com/RosettaCommons/RFdiffusion.git
+fi
 cd {repo_dir}
 
 # Download model weights
@@ -216,46 +154,57 @@ mkdir -p models && cd models
 {wget_lines}
 cd ..
 
-# Create SE3nv environment
-# Try BioPipelines SE3nv.yaml first (includes additional packages for the pipeline)
-echo "Creating SE3nv environment from BioPipelines specification..."
-{env_manager} env create -f {biopipelines}/Environments/SE3nv.yaml
+# Create SE3nv environment from BioPipelines specification
+{remove_block}
+{env_block}
 if [ $? -ne 0 ]; then
-    echo "WARNING: BioPipelines SE3nv.yaml failed. Trying official RFdiffusion environment..."
+    echo "WARNING: BioPipelines SE3nv env creation failed. Trying official RFdiffusion environment..."
     {env_manager} env create -f env/SE3nv.yml
     if [ $? -ne 0 ]; then
         echo "ERROR: SE3nv environment creation failed with both methods."
         echo "This is likely a CUDA version mismatch for your system."
-        echo "Options:"
-        echo "  1. Edit {biopipelines}/Environments/SE3nv.yaml to match your CUDA version"
-        echo "  2. Edit RFdiffusion/env/SE3nv.yml following https://github.com/RosettaCommons/RFdiffusion"
         exit 1
     fi
 fi
-{env_manager} activate SE3nv
-pip install -r {biopipelines}/Environments/SE3nv_pip_requirements.txt
 
-# Install SE3Transformer and RFdiffusion
+# Install DGL from pre-built wheel (special --find-links syntax)
+{env_manager} run -n SE3nv pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
+
+# Install SE3Transformer and RFdiffusion (editable)
 cd env/SE3Transformer
-pip install --no-cache-dir -r requirements.txt
-python setup.py install
+{env_manager} run -n SE3nv pip install --no-deps .
 cd ../..
-pip install -e .
+{env_manager} run -n SE3nv pip install -e .
 
-echo "=== RFdiffusion installation complete ==="
+# Verify installation
+if {env_manager} run -n SE3nv python -c "import rfdiffusion" >/dev/null 2>&1 || [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== RFdiffusion installation complete ==="
+else
+    echo "ERROR: RFdiffusion verification failed"
+    exit 1
+fi
 """
 
     # Lazy path descriptors
-    main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusion_results.csv"))
-    table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
+    #   main_table        — TableInfo CSV describing each design's provenance
+    #                       (fixed/designed regions, pLDDT). Lives under tables/.
+    #   table_py_file     — pipe script that builds main_table from .trb files.
+    #   inference_py_file — RFdiffusion's own CLI entry point.
+    #   pdb_ds_json       — serialized input DataStream (config-time artifact).
+    #   update_map_py     — pipe script that rewrites structures_map.csv to
+    #                       match actual files on disk after the run.
+    main_table = Path(lambda self: self.table_path("structures"))
+    table_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_table.py"))
     inference_py_file = Path(lambda self: os.path.join(self.folders["RFdiffusion"], "scripts", "run_inference.py"))
-    pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
-    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
+    pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
+    update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
 
     def __init__(self,
                  contigs: str,
                  pdb: Optional[Union[DataStream, StandardizedOutput]] = None,
                  inpaint: str = "",
+                 inpaint_str: str = "",
                  num_designs: int = 1,
                  active_site: bool = False,
                  steps: int = 50,
@@ -281,6 +230,12 @@ echo "=== RFdiffusion installation complete ==="
                      (same chain+range format as contigs). When set, the
                      InpaintSeq checkpoint is used automatically — ensure it
                      was downloaded at install time.
+            inpaint_str: Residues whose secondary structure should be masked
+                     during diffusion (same chain+range format as contigs).
+                     Wired to upstream ``contigmap.inpaint_str``. Empty string
+                     disables (default). The overall length stays governed by
+                     the ``contigs`` argument (use a range like ``"50-100"``
+                     to control it).
             num_designs: Number of independent backbone designs to generate.
             active_site: If True, use the ActiveSite checkpoint instead of
                          Base. Intended for scaffolding very small functional
@@ -317,6 +272,7 @@ echo "=== RFdiffusion installation complete ==="
 
         self.contigs = contigs
         self.inpaint = inpaint
+        self.inpaint_str = inpaint_str
         self.num_designs = num_designs
         self.active_site = active_site
         self.steps = steps
@@ -340,6 +296,10 @@ echo "=== RFdiffusion installation complete ==="
         if self.partial_steps < 0:
             raise ValueError("partial_steps cannot be negative")
 
+        _validate_freeform_string("contigs", self.contigs)
+        _validate_freeform_string("inpaint", self.inpaint)
+        _validate_freeform_string("inpaint_str", self.inpaint_str)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files."""
         self.folders = pipeline_folders
@@ -358,6 +318,8 @@ echo "=== RFdiffusion installation complete ==="
             config_lines.append(f"PDB: {self.pdb_input_id}")
         if self.inpaint:
             config_lines.append(f"INPAINT: {self.inpaint}")
+        if self.inpaint_str:
+            config_lines.append(f"INPAINT_STR: {self.inpaint_str}")
         if self.partial_steps > 0:
             config_lines.append(f"PARTIAL STEPS: {self.partial_steps}")
         if self.reproducible:
@@ -367,7 +329,9 @@ echo "=== RFdiffusion installation complete ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate RFdiffusion execution script."""
-        # Serialize input DataStream to JSON for runtime file resolution
+        # Serialize input DataStream to JSON for runtime file resolution.
+        # The configuration/ folder was already created by the pipeline
+        # after get_output_files() returned.
         if self.pdb_stream:
             self.pdb_stream.save_json(self.pdb_ds_json)
 
@@ -398,11 +362,18 @@ INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$INPUT_PDB_ID')}
         if self.inpaint:
             rfd_options += f" 'contigmap.inpaint_seq=[{self.inpaint}]'"
 
+        if self.inpaint_str:
+            rfd_options += f" 'contigmap.inpaint_str=[{self.inpaint_str}]'"
+
         if self.pdb_stream:
             rfd_options += " inference.input_pdb=$INPUT_PDB"
 
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
-        prefix = os.path.join(self.output_folder, output_name)
+        # RFdiffusion writes <prefix>_<N>.pdb / .trb at inference time. Route
+        # these into the 'structures' stream folder (created on demand by
+        # RFdiffusion's own os.makedirs chain).
+        structures_dir = self.stream_folder("structures")
+        prefix = os.path.join(structures_dir, output_name)
         rfd_options += f" inference.output_prefix={prefix}"
         rfd_options += f" inference.num_designs={self.num_designs}"
         rfd_options += f" inference.deterministic={self.reproducible}"
@@ -422,23 +393,27 @@ echo "Options: {rfd_options}"
 echo "Output folder: {self.output_folder}"
 
 cd {self.folders["RFdiffusion"]}
-python {self.inference_py_file} {rfd_options}
+{self.container_prefix()}python {self.inference_py_file} {rfd_options}
 
 """
 
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
+        # pipe_rfdiffusion_table.py reads .pdb + .trb files from its first
+        # positional arg; those now live in the structures/ stream folder.
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Creating results table"
-python {self.table_py_file} "{self.output_folder}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+python {self.table_py_file} "{structures_dir}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
 
 """
 
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to update structures_map.csv with actual runtime output files."""
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        structures_map = self.stream_map_path("structures")
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Updating structures map with actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{self.output_folder}"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"
 
 """
 
@@ -447,11 +422,12 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         # Use PDB input ID as base when available, otherwise pipeline name
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
 
-        # Pattern-based IDs
+        # Pattern-based IDs — PDBs land under <output_folder>/structures/
         start = self.design_startnum
         end = self.design_startnum + self.num_designs - 1
         structure_ids = [f"{output_name}_<{start}..{end}>"]
-        file_template = [os.path.join(self.output_folder, "<id>.pdb")]
+        structures_dir = self.stream_folder("structures")
+        file_template = [os.path.join(structures_dir, "<id>.pdb")]
 
         # Build provenance if PDB input is available
         provenance = None
@@ -460,8 +436,10 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             n = id_patterns.count_ids(structure_ids)
             provenance = {"structures": [self.pdb_input_id] * n}
 
-        # Create map_table for structures (expands patterns internally)
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        # Create map_table for structures (expands patterns internally).
+        # It lives inside the stream folder, alongside the PDBs it describes.
+        # create_map_table() handles the makedirs for the target path.
+        structures_map = self.stream_map_path("structures")
         create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
@@ -477,8 +455,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 name="structures",
                 path=self.main_table,
                 columns=["id", "pdb", "fixed", "designed", "source_fixed", "plddt_mean", "status"],
-                description="RFdiffusion structure generation results",
-                count=self.num_designs
+                description="RFdiffusion structure generation results"
             )
         }
 
@@ -496,6 +473,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 "pdb_input_id": self.pdb_input_id,
                 "contigs": self.contigs,
                 "inpaint": self.inpaint,
+                "inpaint_str": self.inpaint_str,
                 "num_designs": self.num_designs,
                 "active_site": self.active_site,
                 "steps": self.steps,

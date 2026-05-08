@@ -43,47 +43,52 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        try:
+            from .config_manager import ConfigManager
+        except ImportError:
+            from config_manager import ConfigManager
+        scheduler = ConfigManager().get_scheduler()
+
         repo_dir = folders.get("AlphaFold", "")
         parent_dir = os.path.dirname(repo_dir)
-        if env_manager == "pip":
-            skip = "" if force_reinstall else """# Check if already installed
-if python -c "import colabfold" 2>/dev/null; then
-    echo "AlphaFold (ColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing AlphaFold (ColabFold via pip) ==="
-{skip}# Install from git main branch: the PyPI release pins pandas<2.0 which has no
-# pre-built wheel for Python 3.12 and fails to build from source on Colab.
-# alphafold-minus-jax skips reinstalling JAX, which Colab already provides.
-pip install -q --no-warn-conflicts "colabfold[alphafold-minus-jax] @ git+https://github.com/sokrypton/ColabFold"
-# Fix TF crash (as from official ColabFold notebook)
-rm -f /usr/local/lib/python3.*/dist-packages/tensorflow/core/kernels/libtfkernel_sobol_op.so
-
-echo "=== AlphaFold installation complete ==="
-"""
-        if env_manager == "micromamba":
+        if scheduler == "colab":
             skip = "" if force_reinstall else """# Check if already installed
 if /usr/bin/python3 -c "import colabfold" 2>/dev/null; then
     echo "AlphaFold (ColabFold) already installed, skipping pip install. Use force_reinstall=True to reinstall."
 else
 """
             skip_end = "" if force_reinstall else "fi\n"
-            return f"""echo "=== Installing AlphaFold (ColabFold via micromamba) ==="
+            return f"""echo "=== Installing AlphaFold (ColabFold on Colab) ==="
 {skip}# Install into Colab's base Python to reuse JAX/GPU stack
 /usr/bin/python3 -m pip install -q --no-warn-conflicts "colabfold[alphafold-minus-jax] @ git+https://github.com/sokrypton/ColabFold"
-{skip_end}# Fix TF crash (from official ColabFold notebook) — always run, even if pip install was skipped,
-# because a parallel session may have installed colabfold without applying this fix.
-rm -f /usr/local/lib/python3.*/dist-packages/tensorflow/core/kernels/libtfkernel_sobol_op.so
+{skip_end}# Fix TF crashes (from the official ColabFold notebook) — always run,
+# even if pip install was skipped, because a parallel session may have
+# installed colabfold without applying these fixes.
+#   * libtfkernel_sobol_op.so — older Sobol-op crash on TF import.
+#   * tensorflow/lite/python/*/*.so — newer C-extension symbol mismatch
+#     in tflite (e.g. _pywrap_tensorflow_lite_metrics_wrapper.so) hit
+#     when ColabFold falls back to `import tensorflow` after failing to
+#     find the optional `tpu_info` module on regular GPU runtimes.
+rm -f /usr/local/lib/python3.*/dist-packages/tensorflow/core/kernels/libtfkernel_sobol_op.so \\
+      /usr/local/lib/python3.*/dist-packages/tensorflow/lite/python/*/*.so
 
-echo "=== AlphaFold installation complete ==="
+# Verify installation
+if /usr/bin/python3 -c "import colabfold" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== AlphaFold installation complete ==="
+else
+    echo "ERROR: AlphaFold verification failed (cannot import colabfold)"
+    exit 1
+fi
 """
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ]; then
     echo "AlphaFold (LocalColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
@@ -98,28 +103,40 @@ sed -i 's/conda install/{env_manager} install/g' install_colabfold_linux.sh
 bash install_colabfold_linux.sh
 rm install_colabfold_linux.sh
 
-echo "=== AlphaFold installation complete ==="
+# Verify installation
+if [ -d "{repo_dir}" ] && [ -x "{repo_dir}/colabfold-conda/bin/colabfold_batch" ]; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== AlphaFold installation complete ==="
+else
+    echo "ERROR: AlphaFold verification failed (colabfold_batch not found)"
+    exit 1
+fi
 """
 
-    # Lazy path descriptors
-    queries_csv = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.csv"))
-    queries_fasta = Path(lambda self: os.path.join(self.output_folder, f"{self.pipeline_name}_queries.fasta"))
-    confidence_csv = Path(lambda self: os.path.join(self.output_folder, "confidence.csv"))
-    folding_folder = Path(lambda self: os.path.join(self.output_folder, "Folding"))
-    msas_folder = Path(lambda self: os.path.join(self.output_folder, "MSAs"))
-    msa_csv = Path(lambda self: os.path.join(self.output_folder, "msas.csv"))
-    structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
-    missing_csv = Path(lambda self: os.path.join(self.output_folder, "missing.csv"))
+    # Lazy path descriptors — routed through the canonical sub-layout.
+    #   configuration/  — queries CSV/FASTA passed to colabfold_batch.
+    #   execution/      — raw ColabFold Folding dumps.
+    #   structures/     — best-rank PDBs + structures_map.csv.
+    #   msas/           — per-ID .a3m files + msas_map.csv.
+    #   tables/         — confidence, missing.
+    queries_csv = Path(lambda self: self.configuration_path(f"{self.pipeline_name}_queries.csv"))
+    queries_fasta = Path(lambda self: self.configuration_path(f"{self.pipeline_name}_queries.fasta"))
+    confidence_csv = Path(lambda self: self.table_path("confidence"))
+    folding_folder = Path(lambda self: self.execution_folder)
+    msas_folder = Path(lambda self: self.stream_folder("msas"))
+    msa_csv = Path(lambda self: self.stream_map_path("msas"))
+    structures_map = Path(lambda self: self.stream_map_path("structures"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
 
     # Helper script paths
     colabfold_batch = Path(lambda self: os.path.join(self.folders["AlphaFold"], "colabfold-conda/bin/colabfold_batch"))
-    fa_to_csv_fasta_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_fa_to_csv_fasta.py"))
-    alphafold_confidence_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_confidence.py"))
-    alphafold_msas_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_alphafold_msas.py"))
-    propagate_missing_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_propagate_missing.py"))
-    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
-    unsanitize_ids_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_unsanitize_ids.py"))
-    msa_copy_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltz_msa_copy.py"))
+    fa_to_csv_fasta_py = Path(lambda self: self.pipe_script_path("pipe_fa_to_csv_fasta.py"))
+    alphafold_confidence_py = Path(lambda self: self.pipe_script_path("pipe_alphafold_confidence.py"))
+    alphafold_msas_py = Path(lambda self: self.pipe_script_path("pipe_alphafold_msas.py"))
+    propagate_missing_py = Path(lambda self: self.pipe_script_path("pipe_propagate_missing.py"))
+    update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
+    unsanitize_ids_py = Path(lambda self: self.pipe_script_path("pipe_unsanitize_ids.py"))
+    msa_copy_py = Path(lambda self: self.pipe_script_path("pipe_boltz_msa_copy.py"))
 
     def __init__(self,
                  proteins: Union[DataStream, StandardizedOutput],
@@ -271,8 +288,7 @@ fi
 
         msa_table_path = self.msas_input.tables.msas.info.path
 
-        return f"""echo "Copying pre-computed MSA files to Folding directory"
-mkdir -p "{self.folding_folder}"
+        return f"""echo "Copying pre-computed MSA files to Folding (execution) directory"
 python "{self.msa_copy_py}" \\
     --msa-table "{msa_table_path}" \\
     --output-folder "{self.folding_folder}"
@@ -282,7 +298,9 @@ python "{self.msa_copy_py}" \\
     def _generate_script_run_alphafold(self) -> str:
         """Generate the AlphaFold execution part of the script."""
         from .config_manager import ConfigManager
-        env_manager = ConfigManager().get_env_manager()
+        cm = ConfigManager()
+        scheduler = cm.get_scheduler()
+        env_manager = cm.get_env_manager()
 
         # Build AlphaFold options
         af_options = ""
@@ -294,40 +312,45 @@ python "{self.msa_copy_py}" \\
             af_options += f" --random-seed {self.rand_seed}"
 
         # Determine colabfold_batch command
-        if env_manager == "micromamba":
-            # Run in a clean subshell without micromamba env to avoid interference
-            # with Colab's JAX/GPU/tensorflow stack
+        if scheduler == "colab":
+            # Colab: colabfold installed into system python; run via /usr/local/bin
             colabfold_cmd = "/usr/local/bin/colabfold_batch"
         elif env_manager == "pip":
+            # Pure pip mode (no conda/mamba at all): rely on PATH
             colabfold_cmd = "colabfold_batch"
         else:
             # Cluster: absolute path to LocalColabFold binary
             colabfold_cmd = str(self.colabfold_batch)
 
-        if env_manager == "micromamba":
+        if scheduler == "colab":
+            # Run in a clean subshell without conda env vars to avoid interference
+            # with Colab's JAX/GPU/tensorflow stack
             run_colabfold = f"""(unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL; PATH="/usr/local/bin:/usr/bin:/bin:$PATH" {colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options})"""
         else:
-            run_colabfold = f"""{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}"""
+            run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}"""
 
         return f"""echo "Running AlphaFold2/ColabFold"
 echo "Options: {af_options}"
 echo "Output folder: {self.output_folder}"
+echo "Folding (raw) folder: {self.folding_folder}"
 
-# Create Folding subfolder for raw ColabFold outputs
-mkdir -p "{self.folding_folder}"
-
+# execution/ auto-created by the pipeline.
 # Run ColabFold batch
 {run_colabfold}
 
 """
 
     def _generate_script_extract_best_rank(self) -> str:
-        """Generate script to extract best rank structures."""
-        msa_section = f"""
-# Create MSAs subfolder
-mkdir -p "{self.msas_folder}"
+        """Generate script to extract best rank structures.
 
-# Copy MSA files to MSAs subfolder
+        ColabFold dumps everything into execution/ (folding_folder). We
+        relocate the best-rank PDB for each sequence into structures/ and
+        copy any .a3m MSAs into msas/. Both destinations are pre-created
+        by the pipeline layout step.
+        """
+        structures_dir = self.stream_folder("structures")
+        msa_section = f"""
+# Copy MSA files to msas/ stream folder
 echo "Extracting MSA files"
 for msa_file in *.a3m; do
     if [ -f "$msa_file" ]; then
@@ -337,21 +360,20 @@ for msa_file in *.a3m; do
 done
 """
 
-        return f"""echo "Extracting best structures from Folding subfolder"
+        return f"""echo "Extracting best structures from Folding (execution) subfolder"
 # AlphaFold creates files like:
 # - sequenceid_unrelaxed_rank_001_alphafold2_ptm_model_N_seed_SSS.pdb
 # - sequenceid_relaxed_rank_001_alphafold2_ptm_model_N_seed_SSS.pdb
 # - sequenceid.a3m (MSA file, not generated in single_sequence mode)
-# We want to copy the best ones to main directory as: sequenceid.pdb
+# We route best-rank PDBs into structures/ and MSAs into msas/.
 
 cd "{self.folding_folder}"
 
 # Handle relaxed format (preferred if both exist)
 for file in *_relaxed_rank_001_*.pdb; do
     if [ -f "$file" ]; then
-        # Extract sequence ID (everything before _relaxed_rank_001)
         base=$(echo "$file" | sed 's/_relaxed_rank_001_.*/.pdb/')
-        cp "$file" "{self.output_folder}/$base"
+        cp "$file" "{structures_dir}/$base"
         echo "Extracted: $file -> $base"
     fi
 done
@@ -359,11 +381,9 @@ done
 # Handle unrelaxed format (only if relaxed doesn't exist)
 for file in *_unrelaxed_rank_001_*.pdb; do
     if [ -f "$file" ]; then
-        # Extract sequence ID (everything before _unrelaxed_rank_001)
         base=$(echo "$file" | sed 's/_unrelaxed_rank_001_.*/.pdb/')
-        # Only copy if the relaxed version doesn't already exist
-        if [ ! -f "{self.output_folder}/$base" ]; then
-            cp "$file" "{self.output_folder}/$base"
+        if [ ! -f "{structures_dir}/$base" ]; then
+            cp "$file" "{structures_dir}/$base"
             echo "Extracted: $file -> $base"
         else
             echo "Skipped $file (relaxed version already exists as $base)"
@@ -377,15 +397,17 @@ cd - > /dev/null
 
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to update structures_map.csv with actual runtime output files."""
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Updating structures map with actual output files"
-python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{self.output_folder}"
+python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{structures_dir}"
 
 """
 
     def _generate_script_extract_confidence(self) -> str:
         """Generate script section to extract confidence metrics from JSON files."""
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Extracting confidence metrics from JSON files"
-python {self.alphafold_confidence_py} "{self.folding_folder}" "{self.output_folder}" "{self.confidence_csv}"
+python {self.alphafold_confidence_py} "{self.folding_folder}" "{structures_dir}" "{self.confidence_csv}"
 
 """
 
@@ -398,10 +420,11 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
 
     def _generate_script_unsanitize_ids(self) -> str:
         """Generate script section to restore original IDs after ColabFold sanitization."""
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Restoring original IDs (unsanitizing ColabFold output)"
 python {self.unsanitize_ids_py} \\
     --predicted-ids "{self.structures_map}" \\
-    --rename-files "{self.output_folder}" pdb \\
+    --rename-files "{structures_dir}" pdb \\
     --rename-files "{self.msas_folder}" a3m \\
     --fix-csv "{self.confidence_csv}" \\
     --fix-csv "{self.msa_csv}"
@@ -421,13 +444,14 @@ python {self.unsanitize_ids_py} \\
         upstream_folder = os.path.dirname(upstream_missing_path)
 
         return f"""
-# Propagate missing table from upstream tools
+# Propagate missing table from upstream tools — writes to tables/missing.csv.
 echo "Checking for upstream missing sequences..."
 if [ -f "{upstream_missing_path}" ]; then
     echo "Found upstream missing.csv - propagating to current tool"
     python {self.propagate_missing_py} \\
         --upstream-folders "{upstream_folder}" \\
-        --output-folder "{self.output_folder}"
+        --output-folder "{self.output_folder}" \\
+        --missing-csv "{self.missing_csv}"
 else
     echo "No upstream missing.csv found - creating empty missing.csv"
     echo "id,removed_by,cause" > "{self.missing_csv}"
@@ -440,8 +464,8 @@ fi
         # Use sequence IDs from input to predict structure files
         sequence_ids = list(self.sequences_stream.ids)
 
-        # Generate structure file paths
-        structure_files = [os.path.join(self.output_folder, "<id>.pdb")]
+        # Structure files land in structures/; map_table co-locates there.
+        structure_files = [self.stream_path("structures", "<id>.pdb")]
 
         # Create map_table for structures
         create_map_table(self.structures_map, sequence_ids, files=structure_files)
@@ -471,22 +495,19 @@ fi
                 name="structures",
                 path=self.structures_map,
                 columns=["id", "file"],
-                description="AlphaFold predicted structures",
-                count=len(sequence_ids)
+                description="AlphaFold predicted structures"
             ),
             "confidence": TableInfo(
                 name="confidence",
                 path=self.confidence_csv,
                 columns=["id", "structure", "plddt", "max_pae", "ptm"],
-                description="AlphaFold confidence metrics extracted from best rank models",
-                count=len(sequence_ids)
+                description="AlphaFold confidence metrics extracted from best rank models"
             ),
             "msas": TableInfo(
                 name="msas",
                 path=self.msa_csv,
                 columns=["id", "sequences.id", "sequence", "msa_file"],
-                description="MSA files for sequence recycling between predictions",
-                count=len(msa_files)
+                description="MSA files for sequence recycling between predictions"
             )
         }
 
@@ -500,8 +521,7 @@ fi
                 name="missing",
                 path=self.missing_csv,
                 columns=["id", "removed_by", "cause"],
-                description="IDs removed by upstream tools with removal reason",
-                count="variable"
+                description="IDs removed by upstream tools with removal reason"
             )
 
         return {

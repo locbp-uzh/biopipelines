@@ -1,0 +1,21 @@
+# BioPipelines ProteinEnv - lightweight environment for analysis and visualization
+# Contains PyMOL, pandas, numpy, scipy, biopython, rdkit, openbabel
+# No PyTorch or CUDA — for deep learning tools, use SE3nv instead
+name: ProteinEnv
+channels:
+  - schrodinger
+  - conda-forge
+channel_priority: strict
+
+dependencies:
+  - python>=3.10,<3.13
+  - pymol-open-source
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - biopython
+  - rdkit
+  - openbabel
+  - requests
+  - pyyaml

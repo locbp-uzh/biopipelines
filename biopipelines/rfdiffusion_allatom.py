@@ -13,18 +13,16 @@ import os
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
-    from .config_manager import ConfigManager
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream, create_map_table
-    from config_manager import ConfigManager
     from biopipelines_io import Resolve
 
 
@@ -37,6 +35,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -45,35 +44,14 @@ class RFdiffusionAllAtom(BaseConfig):
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] && [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ]; then
     echo "RFdiffusion-AllAtom already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        if env_manager == "pip":
-            return f"""echo "=== Installing RFdiffusion-AllAtom (pip) ==="
-{skip}mkdir -p {parent_dir}
-cd {parent_dir}
-if [ ! -d "{repo_dir}" ]; then
-    git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git
-fi
-cd {repo_dir}
-
-# Download model weights
-wget -nc http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt
-
-# Initialize git submodules
-git submodule init
-git submodule update
-
-#additional dependencies
-pip install icecream openbabel-wheel assertpy
-
-echo "=== RFdiffusion-AllAtom installation complete ==="
-echo "Requires RFdiffusion.install() for SE3nv dependencies (pip mode)"
-"""
-        if env_manager == "micromamba":
-            return f"""echo "=== Installing RFdiffusion-AllAtom (micromamba) ==="
+        env_check = cls._env_exists_check("SE3nv", env_manager)
+        return f"""echo "=== Installing RFdiffusion-AllAtom ==="
 # SE3nv environment must exist — run RFdiffusion.install() first
-if ! micromamba env list 2>/dev/null | grep -q "SE3nv"; then
+if ! {env_check}; then
     echo "ERROR: SE3nv environment not found. Run RFdiffusion.install() before RFdiffusionAllAtom.install()."
     exit 1
 fi
@@ -91,41 +69,28 @@ wget -nc http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_wei
 git submodule init
 git submodule update
 
-# Additional dependencies into SE3nv environment
-micromamba run -n SE3nv pip install icecream openbabel-wheel assertpy
+# Additional dependencies into the shared SE3nv environment
+{env_manager} run -n SE3nv pip install icecream openbabel-wheel assertpy
 
-echo "=== RFdiffusion-AllAtom installation complete ==="
-"""
-        return f"""echo "=== Installing RFdiffusion-AllAtom ==="
-{skip}cd {parent_dir}
-git clone https://github.com/baker-laboratory/rf_diffusion_all_atom.git
-cd {repo_dir}
-
-# Download container (for container mode, see config.yaml containers section)
-wget http://files.ipd.uw.edu/pub/RF-All-Atom/containers/rf_se3_diffusion.sif
-
-# Download model weights
-wget http://files.ipd.uw.edu/pub/RF-All-Atom/weights/RFDiffusionAA_paper_weights.pt
-
-# Initialize git submodules
-git submodule init
-git submodule update
-
-echo "=== RFdiffusion-AllAtom installation complete ==="
-echo "Container mode: configure containers.RFdiffusionAllAtom in config.yaml"
-echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv environment"
+# Verify installation
+if [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ]; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== RFdiffusion-AllAtom installation complete ==="
+    echo "Container mode: configure containers.RFdiffusionAllAtom in config.yaml"
+else
+    echo "ERROR: RFdiffusion-AllAtom verification failed (weights missing)"
+    exit 1
+fi
 """
 
     # Lazy path descriptors
-    main_table = Path(lambda self: os.path.join(self.output_folder, "rfdiffusionAA_results.csv"))
+    #   main_table — standalone TableInfo CSV (tables/structures.csv).
+    #   pdb_ds_json — config-time input DataStream serialization.
+    main_table = Path(lambda self: self.table_path("structures"))
     inference_py_file = Path(lambda self: "run_inference.py")
-    table_py_file = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdiffusion_table.py"))
-    pdb_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_structures.json"))
-    update_map_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_update_structures_map.py"))
-
-    def _use_container(self) -> bool:
-        """Check if container mode is configured for this tool."""
-        return f"container:{self.TOOL_NAME}" in self.folders
+    table_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_table.py"))
+    pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
+    update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
 
     def __init__(self,
                  ligand: str,
@@ -252,6 +217,15 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         if self.num_recycles < 1:
             raise ValueError("num_recycles must be at least 1")
 
+        _validate_freeform_string("ligand", self.ligand)
+        _validate_freeform_string("contigs", self.contigs)
+        _validate_freeform_string("inpaint", self.inpaint)
+        _validate_freeform_string("inpaint_str", self.inpaint_str)
+        _validate_freeform_string("inpaint_seq", self.inpaint_seq)
+        _validate_freeform_string("guiding_potentials", self.guiding_potentials)
+        for i, res in enumerate(self.ppi_hotspot_residues):
+            _validate_freeform_string(f"ppi_hotspot_residues[{i}]", res)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files."""
         self.folders = pipeline_folders
@@ -260,7 +234,7 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         """Get RFdiffusion-AllAtom configuration display lines."""
         config_lines = super().get_config_display()
 
-        mode = "container" if self._use_container() else "environment (SE3nv)"
+        mode = "container" if self.uses_container() else "environment (SE3nv)"
         config_lines.extend([
             f"MODE: {mode}",
             f"CONTIGS: {self.contigs}",
@@ -299,9 +273,8 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
 
     def generate_script(self, script_path: str) -> str:
         """Generate RFdiffusion-AllAtom execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
-        # Serialize input DataStream to JSON for runtime file resolution
+        # Serialize input DataStream to JSON for runtime file resolution.
+        # configuration/ is auto-created by the pipeline.
         if self.pdb_stream:
             self.pdb_stream.save_json(self.pdb_ds_json)
 
@@ -311,14 +284,12 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
         # e3nn 0.3.3 uses torch.load() without weights_only=False,
         # which fails on PyTorch 2.6+ where the default flipped to True
         script_content += "export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1\n" 
-        if self._use_container():
-            # Container mode: no conda env needed for inference,
-            # but activate biopipelines for the table creation helper script
-            script_content += self._generate_script_run_rfdiffusion()
-            script_content += self.activate_environment(name="biopipelines")
-        else:
-            script_content += self.activate_environment()
-            script_content += self._generate_script_run_rfdiffusion()
+        # activate_environment() activates the tool's configured env on the
+        # host (SE3nv by default, or biopipelines fallback). Inference runs
+        # under container_prefix when a container is set; host-side helpers
+        # below run under the activated env either way.
+        script_content += self.activate_environment()
+        script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
         script_content += self.generate_completion_check_footer()
@@ -341,7 +312,8 @@ echo "Environment mode (SE3nv): requires RFdiffusion.install() for the SE3nv env
 
         aa_args.append(f"inference.num_designs={self.num_designs}")
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
-        aa_args.append(f"inference.output_prefix={os.path.join(self.output_folder, output_name)}")
+        # Route PDB outputs into the structures/ stream folder.
+        aa_args.append(f"inference.output_prefix={self.stream_path('structures', output_name)}")
         aa_args.append(f"inference.design_startnum={self.design_startnum}")
 
         if self.ligand:
@@ -396,42 +368,34 @@ INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$INPUT_PDB_ID')}
         aa_args = self._build_inference_args()
         args_str = ' '.join(aa_args)
         repo_dir = self.folders["RFdiffusionAllAtom"]
+        mode = "container" if self.uses_container() else "environment"
 
-        if self._use_container():
-            container_path = self.folders[f"container:{self.TOOL_NAME}"]
-            container_exec = ConfigManager().get_container_executor()
-            return f"""{resolve_snippet}echo "Starting RFdiffusion-AllAtom (container mode)"
-echo "Container: {container_path}"
+        return f"""{resolve_snippet}echo "Starting RFdiffusion-AllAtom ({mode} mode)"
 echo "Arguments: {args_str}"
 echo "Output folder: {self.output_folder}"
 
 cd {repo_dir}
-{container_exec} run --nv {container_path} -u {self.inference_py_file} {args_str}
-
-"""
-        else:
-            return f"""{resolve_snippet}echo "Starting RFdiffusion-AllAtom (environment mode)"
-echo "Arguments: {args_str}"
-echo "Output folder: {self.output_folder}"
-
-cd {repo_dir}
-python {self.inference_py_file} {args_str}
+{self.container_prefix()}python {self.inference_py_file} {args_str}
 
 """
 
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
         output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
+        # pipe_rfdiffusion_table.py scans the given folder for .pdb + .trb
+        # files; those live in the structures/ stream folder.
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Creating results table"
-python {self.table_py_file} "{self.output_folder}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+python {self.table_py_file} "{structures_dir}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
 
 """
 
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to update structures_map.csv with actual runtime output files."""
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        structures_map = self.stream_map_path("structures")
+        structures_dir = self.stream_folder("structures")
         return f"""echo "Updating structures map with actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{self.output_folder}"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"
 
 """
 
@@ -442,7 +406,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         start = self.design_startnum
         end = self.design_startnum + self.num_designs - 1
         structure_ids = [f"{output_name}_<{start}..{end}>"]
-        file_template = [os.path.join(self.output_folder, "<id>.pdb")]
+        file_template = [self.stream_path("structures", "<id>.pdb")]
 
         # Build provenance if PDB input is available
         provenance = None
@@ -451,8 +415,8 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             n = id_patterns.count_ids(structure_ids)
             provenance = {"structures": [self.pdb_input_id] * n}
 
-        # Create map_table for structures (expands patterns internally)
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        # Create map_table — co-located with the PDBs it describes.
+        structures_map = self.stream_map_path("structures")
         create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
@@ -468,8 +432,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 name="structures",
                 path=self.main_table,
                 columns=["id", "pdb", "fixed", "designed", "source_fixed", "plddt_mean", "status"],
-                description="RFdiffusion-AllAtom structure generation results with fixed/designed regions",
-                count=self.num_designs
+                description="RFdiffusion-AllAtom structure generation results with fixed/designed regions"
             )
         }
 
@@ -518,12 +481,16 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
+    TOOL_VERSION = "1.0"
 
     # Lazy path descriptors
-    prepared_pdb = Path(lambda self: os.path.join(self.output_folder, "prepared_ligand.pdb"))
-    structures_csv = Path(lambda self: os.path.join(self.output_folder, "structures.csv"))
-    helper_script = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_rfdaa_prepare_ligand.py"))
-    ligand_ds_json = Path(lambda self: os.path.join(self.output_folder, "input_ligand.json"))
+    #   prepared_pdb    — the single output PDB, lives in structures/.
+    #   structures_csv  — standalone TableInfo (tables/structures.csv).
+    #   ligand_ds_json  — config-time input DataStream serialization.
+    prepared_pdb = Path(lambda self: self.stream_path("structures", "prepared_ligand.pdb"))
+    structures_csv = Path(lambda self: self.table_path("structures"))
+    helper_script = Path(lambda self: self.pipe_script_path("pipe_rfdaa_prepare_ligand.py"))
+    ligand_ds_json = Path(lambda self: self.configuration_path("input_ligand.json"))
 
     def __init__(self,
                  ligand: Union[DataStream, StandardizedOutput],
@@ -568,9 +535,7 @@ class RFDAA_PrepareLigand(BaseConfig):
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to combine ligand with dummy peptide."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
-        # Serialize input DataStream to JSON for runtime file resolution
+        # configuration/ + structures/ folders auto-created by the pipeline.
         self.ligand_stream.save_json(self.ligand_ds_json)
 
         script_content = "#!/bin/bash\n"
@@ -588,7 +553,7 @@ python "{self.helper_script}" \\
   --ligand_pdb "$LIGAND_FILE" \\
   --output_pdb "{self.prepared_pdb}" \\
   --output_csv "{self.structures_csv}" \\
-  --pdbs_folder "{self.folders['PDBs']}"
+  --pdbs_folder "{self.folders['pdbs']}"
 
 if [ $? -eq 0 ]; then
     echo "Successfully prepared ligand structure"
@@ -607,7 +572,7 @@ fi
         structure_ids = ["prepared_ligand"]
         structure_files = [self.prepared_pdb]
 
-        structures_map = os.path.join(self.output_folder, "structures_map.csv")
+        structures_map = self.stream_map_path("structures")
         create_map_table(structures_map, structure_ids, files=structure_files)
 
         structures = DataStream(
@@ -623,8 +588,7 @@ fi
                 name="structures",
                 path=self.structures_csv,
                 columns=["id", "file_path"],
-                description="Prepared ligand structure with dummy peptide",
-                count=1
+                description="Prepared ligand structure with dummy peptide"
             )
         }
 

@@ -14,14 +14,14 @@ import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from biopipelines_io import Resolve
@@ -46,53 +46,70 @@ class BoltzGen(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BoltzGen"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        if env_manager == "pip":
-            skip = "" if force_reinstall else """# Check if already installed
-if python -c "import boltzgen" 2>/dev/null; then
-    echo "BoltzGen already installed, skipping. Use force_reinstall=True to reinstall."
-    exit 0
-fi
-"""
-            return f"""echo "=== Installing BoltzGen (pip) ==="
-{skip}pip install boltzgen
-
-echo "=== BoltzGen installation complete ==="
-"""
+        biopipelines = folders.get("biopipelines", "")
+        env_check = cls._env_exists_check("boltzgen", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_manager} env list 2>/dev/null | grep -q "boltzgen"; then
+if {env_check}; then
     echo "BoltzGen already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        remove_block = cls._env_remove_block("boltzgen", env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block("boltzgen", env_manager, biopipelines)
         return f"""echo "=== Installing BoltzGen ==="
-{skip}{env_manager} create -n boltzgen python=3.11 -y
-{env_manager} activate boltzgen
-pip install boltzgen
+{skip}{remove_block}
+{env_block}
 
-echo "=== BoltzGen installation complete ==="
+# Verify installation
+if {env_manager} run -n boltzgen python -c "import boltzgen" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== BoltzGen installation complete ==="
+else
+    echo "ERROR: BoltzGen verification failed (cannot import boltzgen)"
+    exit 1
+fi
 """
 
     # Lazy path descriptors for output files
-    design_spec_yaml_file = Path(lambda self: os.path.join(self.output_folder, "design_spec.yaml"))
-    config_folder = Path(lambda self: os.path.join(self.output_folder, "config"))
-    intermediate_designs_folder = Path(lambda self: os.path.join(self.output_folder, "intermediate_designs"))
-    intermediate_inverse_folded_folder = Path(lambda self: os.path.join(self.output_folder, "intermediate_designs_inverse_folded"))
-    final_ranked_folder = Path(lambda self: os.path.join(self.output_folder, "final_ranked_designs"))
+    # BoltzGen already produces a structured tree (intermediate_designs/,
+    # intermediate_designs_inverse_folded/, final_ranked_designs/, config/,
+    # design_spec.cif, steps.yaml) so we point its --output directly at the
+    # step's output_folder and surface those native folders as named streams
+    # — no `_execution/<step>/` wrapper. Slug uniqueness (BoltzGen's CLI
+    # derives per-source design IDs from `_slugify_run_tag(basename(--output))`,
+    # see boltzgen.cli.boltzgen) is preserved because the step folder
+    # basename is already globally unique within a pipeline (e.g.
+    # "002_BoltzGen_batch01"). Framework-owned artefacts still land in the
+    # canonical slots (`_configuration/`, `_execution/`, `tables/`, `_extras/`).
+    boltzgen_run_folder = Path(lambda self: self.output_folder)
+    design_spec_yaml_file = Path(lambda self: self.configuration_path("design_spec.yaml"))
+    config_folder = Path(lambda self: os.path.join(self.boltzgen_run_folder, "config"))
+    intermediate_designs_folder = Path(lambda self: self.stream_folder("intermediate_designs"))
+    intermediate_inverse_folded_folder = Path(lambda self: self.stream_folder("intermediate_designs_inverse_folded"))
+    final_ranked_folder = Path(lambda self: self.stream_folder("final_ranked_designs"))
     all_designs_metrics_csv = Path(lambda self: os.path.join(self.final_ranked_folder, "all_designs_metrics.csv"))
     final_designs_metrics_csv = Path(lambda self: os.path.join(self.final_ranked_folder, f"final_designs_metrics_{self.budget}.csv"))
     aggregate_metrics_csv = Path(lambda self: os.path.join(self.intermediate_inverse_folded_folder, "aggregate_metrics_analyze.csv"))
     per_target_metrics_csv = Path(lambda self: os.path.join(self.intermediate_inverse_folded_folder, "per_target_metrics_analyze.csv"))
     results_overview_pdf = Path(lambda self: os.path.join(self.final_ranked_folder, "results_overview.pdf"))
-    structures_map = Path(lambda self: os.path.join(self.output_folder, "structures_map.csv"))
-    sequences_csv = Path(lambda self: os.path.join(self.output_folder, "sequences.csv"))
+    # Map tables for streams whose folder is one of BoltzGen's native folders:
+    # they live directly inside the stream folder (= the BoltzGen folder),
+    # next to BoltzGen's own files.
+    final_ranked_map = Path(lambda self: self.stream_map_path("final_ranked_designs"))
+    refolded_structures_map = Path(lambda self: self.stream_map_path("intermediate_designs_inverse_folded"))
+    # Content-bearing sequences stream: sequences.csv IS the content table
+    # and the map_table simultaneously. Lives inside the stream folder.
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
 
     # Helper script paths
-    boltzgen_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen.py"))
-    boltzgen_config_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_config.py"))
-    target_ds_json = Path(lambda self: os.path.join(self.output_folder, "target_structure.json"))
+    boltzgen_helper_py = Path(lambda self: self.pipe_script_path("pipe_boltzgen.py"))
+    boltzgen_config_py = Path(lambda self: self.pipe_script_path("pipe_boltzgen_config.py"))
+    target_ds_json = Path(lambda self: self.configuration_path("target_structure.json"))
 
     def __init__(self,
                  # Design specification - Option 1: Manual YAML/dict
@@ -185,7 +202,7 @@ echo "=== BoltzGen installation complete ==="
             **kwargs: Additional parameters passed to BaseConfig
 
         Output:
-            Streams: filtered_ranked_structures (.cif), sequences (.csv), refolded_structures (.cif)
+            Streams: final_ranked_designs (.cif), sequences (.csv), intermediate_designs_inverse_folded (.cif)
             Tables:
                 aggregate_metrics: id | file_name | designed_sequence | num_prot_tokens | native_rmsd | design_ptm | design_iptm | affinity_pred_value | ...
                 all_designs_metrics: id | final_rank | designed_sequence | affinity_probability_binary1 | design_to_target_iptm | filter_rmsd | ...
@@ -396,6 +413,23 @@ echo "=== BoltzGen installation complete ==="
         if self.devices is not None and self.devices <= 0:
             raise ValueError("devices must be positive")
 
+        _validate_freeform_string("ligand_code", self.ligand_code)
+        _validate_freeform_string("binding_region", self.binding_region)
+        _validate_freeform_string("cache_dir", self.cache_dir)
+        if isinstance(self.design_spec, str):
+            _validate_freeform_string("design_spec", self.design_spec)
+        if isinstance(self.binder_spec, str):
+            _validate_freeform_string("binder_spec", self.binder_spec)
+        if self.additional_filters:
+            for i, f in enumerate(self.additional_filters):
+                _validate_freeform_string(f"additional_filters[{i}]", f)
+        if self.design_checkpoints:
+            for i, c in enumerate(self.design_checkpoints):
+                _validate_freeform_string(f"design_checkpoints[{i}]", c)
+        if self.steps:
+            for i, s in enumerate(self.steps):
+                _validate_freeform_string(f"steps[{i}]", s)
+
         # Warn if analysis step will run with less than 64GB memory (OOM risk)
         has_analysis = "analysis" in self.steps or not self.steps
         if has_analysis:
@@ -412,8 +446,14 @@ echo "=== BoltzGen installation complete ==="
         """Configure input design specification and dependencies."""
         self.folders = pipeline_folders
 
-        # Handle reuse mode - override output_folder with reuse path
+        # Handle reuse mode - override output_folder with reuse path.
+        # Reuse runs (e.g. analysis-only, filtering-only) write their
+        # results back into the upstream folder, so this step's own folder
+        # would be left empty. Drop a README pointer there so users can
+        # navigate to the actual outputs.
         if self.spec_mode == "reuse" and self.reuse_path:
+            original_folder = self.output_folder
+            self._write_reuse_pointer_readme(original_folder, self.reuse_path)
             self.output_folder = self.reuse_path
 
         # Use BoltzGenCache folder if user didn't specify custom cache_dir
@@ -434,6 +474,30 @@ echo "=== BoltzGen installation complete ==="
                     raise ValueError(f"Design specification file not found: {self.design_spec}")
 
                 self.design_spec = spec_path
+
+    def _write_reuse_pointer_readme(self, step_folder: str, reuse_path: str) -> None:
+        """Drop a README in this step's (otherwise-empty) folder pointing
+        users at the upstream output folder where the reuse run actually
+        writes its results.
+        """
+        if not step_folder:
+            return
+        try:
+            os.makedirs(step_folder, exist_ok=True)
+            steps_line = ", ".join(self.steps) if self.steps else "(default — all steps)"
+            readme = (
+                f"# {os.path.basename(step_folder)}\n\n"
+                f"This step ran `BoltzGen(reuse=...)` and only added results "
+                f"(steps: {steps_line}) to the upstream BoltzGen output folder.\n\n"
+                f"**Outputs are in:**\n\n    {reuse_path}\n\n"
+                f"Browse that folder to find `final_ranked_designs/`, "
+                f"`intermediate_designs_inverse_folded/`, etc.\n"
+            )
+            with open(os.path.join(step_folder, "README.md"), "w") as f:
+                f.write(readme)
+        except OSError:
+            # Non-fatal: the step still works without the pointer.
+            pass
 
     def get_config_display(self) -> List[str]:
         """Get BoltzGen configuration display lines."""
@@ -569,9 +633,9 @@ echo "=== BoltzGen installation complete ==="
         Returns:
             Script content as string
         """
-        # Create output directories
-        os.makedirs(self.output_folder, exist_ok=True)
-        os.makedirs(self.config_folder, exist_ok=True)
+        # configuration/, execution/ auto-created by the pipeline. The
+        # BoltzGen-internal config/ subfolder is created on demand by the
+        # CLI; we don't pre-create it.
 
         # Serialize target DataStream to JSON for runtime file resolution
         if self.target_stream:
@@ -592,14 +656,24 @@ echo "=== BoltzGen installation complete ==="
 
         # Build postprocessing section
         if has_filtering:
+            # Route BoltzGen-facing artefacts into the canonical slots:
+            #   structures.csv → tables/structures.csv
+            #   sequences.csv  → sequences/sequences.csv (content-bearing stream)
+            #   final_structures.txt → _extras/
+            structures_table = self.table_path("structures")
+            sequences_csv = self.sequences_csv
+            structures_list = os.path.join(self.extras_folder, "final_structures.txt")
             postprocessing_section = f"""
 # Run postprocessing to extract sequences and validate outputs
 echo "Running BoltzGen postprocessing..."
 python "{self.boltzgen_helper_py}" \\
-  --output_folder "{self.output_folder}" \\
+  --output_folder "{self.boltzgen_run_folder}" \\
   --budget {self.budget} \\
   --extract_sequences \\
-  --validate
+  --validate \\
+  --sequences-csv "{sequences_csv}" \\
+  --structures-csv "{structures_table}" \\
+  --structures-list "{structures_list}"
 
 if [ $? -eq 0 ]; then
     echo "Postprocessing completed successfully"
@@ -746,11 +820,13 @@ fi
 
     def _build_boltzgen_command(self) -> str:
         """Build the boltzgen run command with all arguments."""
-        # Base command
+        # Base command (container_prefix is a no-op when no container is set)
         cmd_parts = [
-            "boltzgen run",
+            f"{self.container_prefix()}boltzgen run",
             f'"{self.design_spec_yaml_file}"',
-            f'--output "{self.output_folder}"',
+            # BoltzGen writes its tree directly into the step folder; the
+            # step's basename is unique across parallel runs.
+            f'--output "{self.boltzgen_run_folder}"',
             f'--protocol {self.protocol}',
             f'--num_designs {self.num_designs}',
             f'--budget {self.budget}'
@@ -868,8 +944,7 @@ fi
                     "design_to_target_iptm", "min_design_to_target_pae", "min_interaction_pae",
                     "affinity_pred_value", "affinity_probability_binary1"
                 ],
-                description="Aggregate metrics for all designs from analysis step",
-                count=None
+                description="Aggregate metrics for all designs from analysis step"
             )
             tables["per_target_metrics"] = TableInfo(
                 name="per_target_metrics",
@@ -885,8 +960,7 @@ fi
                     "design_ptm", "design_iptm", "design_to_target_iptm", "min_design_to_target_pae",
                     "affinity_pred_value", "affinity_probability_binary1"
                 ],
-                description="Per-target metrics from analysis step",
-                count=None
+                description="Per-target metrics from analysis step"
             )
 
         # Filtering step outputs
@@ -894,20 +968,23 @@ fi
             # Final designs folder
             final_designs_folder = os.path.join(self.final_ranked_folder, f"final_{self.budget}_designs")
 
-            # Generate structure IDs and paths
-            # BoltzGen filtering outputs files named rank0001_<original_design_id>.cif
-            # The exact design ID suffix is only known at execution time, so file paths use glob '*'
-            structure_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
-            structure_files = [os.path.join(final_designs_folder, f"rank{i:04d}_*.cif") for i in range(1, self.budget + 1)]
+            # BoltzGen filter zero-pads rank to len(str(budget)) digits (see
+            # boltzgen/task/filter/filter.py: `num_digits = len(str(len(self.df)))`),
+            # so a budget of 10 yields rank01..rank10, 100 yields rank001..rank100, etc.
+            # Match that padding here so the expected-output validator finds the files.
+            rank_digits = max(1, len(str(self.budget)))
+            structure_ids = [f"rank{i:0{rank_digits}d}" for i in range(1, self.budget + 1)]
+            structure_files = [os.path.join(final_designs_folder, f"rank{i:0{rank_digits}d}_*.cif") for i in range(1, self.budget + 1)]
 
-            # Create map_table for structures
-            create_map_table(self.structures_map, structure_ids, files=structure_files)
+            # Map table lives inside the stream folder (= final_ranked_designs/),
+            # which is also BoltzGen's native output folder for filtered ranks.
+            create_map_table(self.final_ranked_map, structure_ids, files=structure_files)
 
             structures = DataStream(
-                name="filtered_ranked_structures",
+                name="final_ranked_designs",
                 ids=structure_ids,
                 files=structure_files,
-                map_table=self.structures_map,
+                map_table=self.final_ranked_map,
                 format="cif"
             )
 
@@ -923,8 +1000,7 @@ fi
                     "design_largest_hydrophobic_patch_refolded", "design_chain_hydrophobicity",
                     "design_hydrophobicity", "loop", "helix", "sheet", "file_name"
                 ],
-                description="Metrics for all designs considered by filtering",
-                count=None
+                description="Metrics for all designs considered by filtering"
             )
 
             # Final designs metrics
@@ -939,27 +1015,25 @@ fi
                     "design_largest_hydrophobic_patch_refolded", "design_chain_hydrophobicity",
                     "design_hydrophobicity", "loop", "helix", "sheet", "file_name"
                 ],
-                description=f"Metrics for top {self.budget} designs after filtering",
-                count=self.budget
+                description=f"Metrics for top {self.budget} designs after filtering"
             )
 
         # Folding step outputs (only if filtering not present)
         elif has_folding:
-            # Structures in refold_cif folder
+            # Structures in refold_cif folder under the inverse-folded stream.
             refold_cif_folder = os.path.join(self.intermediate_inverse_folded_folder, "refold_cif")
 
             # Generate structure IDs and paths
             structure_ids = [f"design_spec_{i}" for i in range(self.num_designs)]
             structure_files = [os.path.join(refold_cif_folder, f"design_spec_{i}.cif") for i in range(self.num_designs)]
 
-            # Create map_table for structures
-            create_map_table(self.structures_map, structure_ids, files=structure_files)
+            create_map_table(self.refolded_structures_map, structure_ids, files=structure_files)
 
             structures = DataStream(
-                name="refolded_structures",
+                name="intermediate_designs_inverse_folded",
                 ids=structure_ids,
                 files=structure_files,
-                map_table=self.structures_map,
+                map_table=self.refolded_structures_map,
                 format="cif"
             )
         else:
@@ -969,7 +1043,8 @@ fi
         # sequences.csv (id, sequence) is written by pipe_boltzgen.py and serves
         # directly as the map_table. Only available when filtering runs.
         if has_filtering:
-            sequence_ids = [f"rank{i:04d}" for i in range(1, self.budget + 1)]
+            seq_rank_digits = max(1, len(str(self.budget)))
+            sequence_ids = [f"rank{i:0{seq_rank_digits}d}" for i in range(1, self.budget + 1)]
             sequences = DataStream(
                 name="sequences",
                 ids=sequence_ids,
@@ -1049,17 +1124,22 @@ class BoltzGenMerge(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenMerge"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         return """echo "=== BoltzGenMerge ==="
 echo "Requires boltzgen environment (installed with BoltzGen.install())"
 echo "No additional installation needed."
+touch "$INSTALL_SUCCESS"
 echo "=== BoltzGenMerge ready ==="
 """
 
     # Lazy path descriptors
-    merge_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_merge.py"))
+    merge_helper_py = Path(lambda self: self.pipe_script_path("pipe_boltzgen_merge.py"))
+    # Merge writes its tree directly into the step folder, mirroring the
+    # flattened BoltzGen layout (no `_execution/<step>/` wrapper).
+    boltzgen_run_folder = Path(lambda self: self.output_folder)
 
     def __init__(self,
                  sources: List[Union[DataStream, StandardizedOutput, str]] = None,
@@ -1098,6 +1178,7 @@ echo "=== BoltzGenMerge ready ==="
         """Validate BoltzGenMerge parameters."""
         if not self.sources or len(self.sources) < 2:
             raise ValueError("BoltzGenMerge requires at least 2 source directories to merge")
+        _validate_freeform_string("id_template", self.id_template)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sources."""
@@ -1120,14 +1201,16 @@ echo "=== BoltzGenMerge ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate BoltzGenMerge execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
-        # Build source paths string
+        # Each source is a BoltzGen step folder containing
+        # intermediate_designs[_inverse_folded]/ directly under it
+        # (flattened layout). The helper script handles both the new and
+        # legacy on-disk shapes.
         sources_str = ' '.join(f'"{p}"' for p in self.source_paths)
 
         # Use first source for design_spec.yaml copy
         first_source = self.source_paths[0]
-        design_spec_dest = os.path.join(self.output_folder, "design_spec.yaml")
+        design_spec_dest = self.configuration_path("design_spec.yaml")
+        merge_output = self.boltzgen_run_folder
 
         script_content = "#!/bin/bash\n"
         script_content += "# BoltzGenMerge execution script\n"
@@ -1139,13 +1222,13 @@ echo "=== BoltzGenMerge ready ==="
             script_content += f"""
 echo "Merging BoltzGen outputs with ID renaming"
 echo "Sources: {len(self.source_paths)} directories"
-echo "Output: {self.output_folder}"
+echo "Output: {merge_output}"
 echo "ID template: {self.id_template}"
 
 # Run custom merge with ID renaming
 python "{self.merge_helper_py}" \\
     --sources {sources_str} \\
-    --output "{self.output_folder}" \\
+    --output "{merge_output}" \\
     --id_template "{self.id_template}"
 
 if [ $? -eq 0 ]; then
@@ -1155,24 +1238,24 @@ else
     exit 1
 fi
 
-# Copy design_spec.yaml from first source for reuse compatibility
-if [ -f "{first_source}/design_spec.yaml" ]; then
-    cp "{first_source}/design_spec.yaml" "{design_spec_dest}"
-    echo "Copied design_spec.yaml from first source"
-else
-    echo "Warning: No design_spec.yaml found in first source directory"
-fi
+# Copy design_spec.yaml from first source for reuse compatibility.
+cp "{first_source}/_configuration/design_spec.yaml" "{design_spec_dest}"
+echo "Copied design_spec.yaml from {first_source}/_configuration/design_spec.yaml"
 
 """
         else:
-            # Use standard boltzgen merge command
+            # Use standard boltzgen merge command. The CLI looks for
+            # `intermediate_designs[_inverse_folded]/` directly under each
+            # source and derives a per-source tag from the source's
+            # basename (_slugify_run_tag in boltzgen.cli). Sources are step
+            # folders under the flattened layout — pass them straight through.
             script_content += f"""
 echo "Merging BoltzGen outputs"
 echo "Sources: {', '.join(os.path.basename(p) for p in self.source_paths)}"
-echo "Output: {self.output_folder}"
+echo "Output: {merge_output}"
 
 # Run BoltzGen merge
-boltzgen merge {sources_str} --output "{self.output_folder}"
+{self.container_prefix()}boltzgen merge {sources_str} --output "{merge_output}"
 
 if [ $? -eq 0 ]; then
     echo "BoltzGenMerge completed successfully"
@@ -1181,13 +1264,9 @@ else
     exit 1
 fi
 
-# Copy design_spec.yaml from first source for reuse compatibility
-if [ -f "{first_source}/design_spec.yaml" ]; then
-    cp "{first_source}/design_spec.yaml" "{design_spec_dest}"
-    echo "Copied design_spec.yaml from first source"
-else
-    echo "Warning: No design_spec.yaml found in first source directory"
-fi
+# Copy design_spec.yaml from first source for reuse compatibility.
+cp "{first_source}/_configuration/design_spec.yaml" "{design_spec_dest}"
+echo "Copied design_spec.yaml from {first_source}/_configuration/design_spec.yaml"
 
 """
         script_content += self.generate_completion_check_footer()
@@ -1243,6 +1322,7 @@ class BoltzGenImport(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenImport"
+    TOOL_VERSION = "1.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -1253,7 +1333,12 @@ echo "=== BoltzGenImport ready ==="
 """
 
     # Lazy path descriptors
-    import_helper_py = Path(lambda self: os.path.join(self.folders["HelpScripts"], "pipe_boltzgen_import.py"))
+    import_helper_py = Path(lambda self: self.pipe_script_path("pipe_boltzgen_import.py"))
+    # Imported tree is written directly into the step folder, mirroring the
+    # flattened BoltzGen layout so a downstream BoltzGen(reuse=imported)
+    # finds intermediate_designs/, intermediate_designs_inverse_folded/ etc.
+    # at the canonical paths.
+    boltzgen_run_folder = Path(lambda self: self.output_folder)
 
     def __init__(self,
                  designs: Union[DataStream, StandardizedOutput] = None,
@@ -1264,7 +1349,6 @@ echo "=== BoltzGenImport ready ==="
                  protocol: str = "protein-small_molecule",
                  ligand_chain: str = "B",
                  protein_chain: str = "A",
-                 id_map: Dict[str, str] = None,
                  ligand_name: str = "LIG1",
                  num_designs: int = None,
                  **kwargs):
@@ -1286,10 +1370,6 @@ echo "=== BoltzGenImport ready ==="
                      Used when running minimal design step to generate molecule pickle.
             ligand_chain: Chain ID for ligand in output (default: "B")
             protein_chain: Chain ID for protein in output (default: "A")
-            id_map: ID mapping pattern for matching structure IDs to sequence IDs.
-                   Default {"*": "*_<S>"} handles recursive suffix stripping:
-                   - Structure "design_1" matches sequence "design_1_1", "design_1_1_1", etc.
-                   - Set to {"*": "*"} for exact ID matching.
             ligand_name: Residue name for ligand in output (default: "LIG1").
                         BoltzGen expects ligands to match pattern ^LIG\\d+ (e.g., LIG1, LIG2).
             num_designs: Number of designs being imported (auto-detected if None).
@@ -1300,15 +1380,10 @@ echo "=== BoltzGenImport ready ==="
             Streams: (none)
             Tables: (none) — imports external designs into BoltzGen format
         """
-        # Set default for id_map
-        if id_map is None:
-            id_map = {"*": "*_<S>"}
-
         self.binder_spec = binder_spec
         self.protocol = protocol
         self.ligand_chain = ligand_chain
         self.protein_chain = protein_chain
-        self.id_map = id_map
         self.ligand_name = ligand_name
         self.num_designs = num_designs
 
@@ -1398,6 +1473,12 @@ echo "=== BoltzGenImport ready ==="
         if self.binder_spec is None:
             raise ValueError("binder_spec is required for design_spec generation")
 
+        _validate_freeform_string("ligand_name", self.ligand_name)
+        _validate_freeform_string("ligand_chain", self.ligand_chain)
+        _validate_freeform_string("protein_chain", self.protein_chain)
+        if isinstance(self.binder_spec, str):
+            _validate_freeform_string("binder_spec", self.binder_spec)
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input sources."""
         self.folders = pipeline_folders
@@ -1426,14 +1507,13 @@ echo "=== BoltzGenImport ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate BoltzGenImport execution script."""
-        os.makedirs(self.output_folder, exist_ok=True)
-
-        # Create subdirectories
-        intermediate_designs = os.path.join(self.output_folder, "intermediate_designs")
-        intermediate_inverse_folded = os.path.join(
-            self.output_folder, "intermediate_designs_inverse_folded"
-        )
-        config_dir = os.path.join(self.output_folder, "config")
+        # BoltzGen's internal tree (intermediate_designs/, config/, etc.)
+        # is written directly under the step folder so a downstream
+        # BoltzGen(reuse=imported) finds the canonical layout.
+        import_root = self.boltzgen_run_folder
+        intermediate_designs = os.path.join(import_root, "intermediate_designs")
+        intermediate_inverse_folded = os.path.join(import_root, "intermediate_designs_inverse_folded")
+        config_dir = os.path.join(import_root, "config")
 
         os.makedirs(intermediate_designs, exist_ok=True)
         os.makedirs(config_dir, exist_ok=True)
@@ -1443,14 +1523,14 @@ echo "=== BoltzGenImport ready ==="
         # Parse binder spec
         binder_min, binder_max = self._parse_binder_spec()
 
-        # Build structures list file
-        structures_list_file = os.path.join(self.output_folder, ".input_structures.txt")
+        # Build structures list file — config-time artefact.
+        structures_list_file = self.configuration_path(".input_structures.txt")
         with open(structures_list_file, 'w') as f:
             for struct in self.design_structures:
                 f.write(f"{struct}\n")
 
-        # Write steps.yaml
-        steps_yaml_file = os.path.join(self.output_folder, "steps.yaml")
+        # Write steps.yaml into configuration/ (it's a config-time artefact).
+        steps_yaml_file = self.configuration_path("steps.yaml")
         if self.mode == "design":
             steps_content = """steps:
 - name: design
@@ -1466,20 +1546,17 @@ echo "=== BoltzGenImport ready ==="
         with open(steps_yaml_file, 'w') as f:
             f.write(steps_content)
 
-        # Serialize id_map as JSON string for passing to script
-        id_map_json = json.dumps(self.id_map)
-
-        # Build command arguments
+        # Build command arguments — import helper writes its BoltzGen-style
+        # tree into execution/ just like the design tool.
         cmd_args = [
             f'--structures "{structures_list_file}"',
-            f'--output "{self.output_folder}"',
+            f'--output "{import_root}"',
             f'--mode {self.mode}',
             f'--protein-chain {self.protein_chain}',
             f'--ligand-chain {self.ligand_chain}',
             f'--binder-min {binder_min}',
             f'--binder-max {binder_max}',
             f'--ligand-name {self.ligand_name}',
-            f"--id-map '{id_map_json}'",
         ]
 
         if self.sequences_csv:
@@ -1496,11 +1573,13 @@ echo "=== BoltzGenImport ready ==="
         else:
             molecules_target_dir = os.path.join(intermediate_designs, "molecules_out_dir")
 
-        # Build molecule generation command if ligand is provided
+        # Build molecule generation command if ligand is provided.
+        # Temp dir lives under execution/ (scratch for boltzgen design step);
+        # design_spec.yaml is a config-time artefact.
         molecule_gen_section = ""
         if self.ligand_compounds_csv:
-            temp_design_dir = os.path.join(self.output_folder, ".temp_molecule_gen")
-            design_spec_yaml = os.path.join(self.output_folder, "design_spec.yaml")
+            temp_design_dir = self.execution_path(".temp_molecule_gen")
+            design_spec_yaml = self.configuration_path("design_spec.yaml")
             molecule_gen_section = f'''
 # Step 1: Generate design_spec.yaml for molecule generation
 echo "Generating design_spec.yaml for molecule pickle generation..."
@@ -1524,7 +1603,7 @@ TEMP_MOL_DIR="{temp_design_dir}"
 mkdir -p "$TEMP_MOL_DIR"
 
 # Run BoltzGen with 1 design to generate the molecule pickle
-boltzgen run "{design_spec_yaml}" \\
+{self.container_prefix()}boltzgen run "{design_spec_yaml}" \\
     --output "$TEMP_MOL_DIR" \\
     --protocol {self.protocol} \\
     --num_designs 1 \\
@@ -1559,7 +1638,7 @@ echo "Molecule pickle generation complete (temp files preserved in $TEMP_MOL_DIR
 echo "Importing structures into BoltzGen format"
 echo "Mode: {self.mode}"
 echo "Input structures: {len(self.design_structures)} files"
-echo "Output: {self.output_folder}"
+echo "Output (execution/): {import_root}"
 echo "Binder spec: {binder_min}-{binder_max}"
 {"echo 'Sequences CSV: " + self.sequences_csv + "'" if self.sequences_csv else ""}
 {"echo 'Ligand CSV: " + self.ligand_compounds_csv + "'" if self.ligand_compounds_csv else ""}
@@ -1601,7 +1680,6 @@ fi
         config_lines.append(f"BINDER SPEC: {self.binder_spec}")
         config_lines.append(f"CHAINS: protein={self.protein_chain}, ligand={self.ligand_chain}")
         config_lines.append(f"LIGAND NAME: {self.ligand_name}")
-        config_lines.append(f"ID MAP: {self.id_map}")
         if self.sequences_csv:
             config_lines.append(f"SEQUENCES CSV: {os.path.basename(self.sequences_csv)}")
         if self.ligand_compounds_csv:

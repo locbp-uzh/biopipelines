@@ -36,6 +36,33 @@ except ImportError:
     from combinatorics import Bundle, Each
     from entities import *
 
+import re as _re
+
+_IDENTIFIER_RE = _re.compile(r"^[A-Za-z0-9._\-]+$")
+
+
+def _validate_identifier(field: str, value: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field!r} must be a non-empty string, got {value!r}")
+    if not _IDENTIFIER_RE.match(value):
+        raise ValueError(
+            f"{field!r}={value!r} contains characters outside [A-Za-z0-9._-]. "
+            "This value is interpolated into generated shell scripts and file "
+            "paths; restrict it to ASCII letters, digits, '.', '_', '-'."
+        )
+    if value in (".", "..") or value.startswith("-"):
+        raise ValueError(
+            f"{field!r}={value!r} is not allowed: must not be '.' or '..' "
+            "(path traversal) and must not start with '-' (would be parsed "
+            "as a flag by sbatch and other tools)."
+        )
+
+
+# Re-export the shared helper so existing pipeline.py callers keep working.
+# The canonical definition lives in base_config alongside _validate_freeform_string.
+from .base_config import _escape_for_double_quotes  # noqa: F401
+
+
 # Module-level context variable to track active pipeline for auto-registration
 _active_pipeline: contextvars.ContextVar[Optional['Pipeline']] = contextvars.ContextVar('_active_pipeline', default=None)
 
@@ -47,7 +74,7 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, project: str, job: str, description: str="Description missing", on_the_fly: Optional[bool]=None, local_output: Optional[bool]=None):
+    def __init__(self, project: str, job: str, description: str="Description missing", on_the_fly: Optional[bool]=None, local_output: Optional[bool]=None, config: Optional[str]=None, debug: bool=False):
         """
         Initialize a new pipeline instance.
 
@@ -60,15 +87,33 @@ class Pipeline:
                         with plain Python. Skips SLURM submission on exit.
                         If None (default), auto-detects: True when running in a Jupyter
                         notebook (.ipynb), False otherwise.
-            local_output: If True, write output to ./tests/ (current working
+            local_output: If True, write output to ./outputs/ (current working
                         directory) instead of the config-defined path.
                         If None (default), follows on_the_fly.
+            config: Config variant name (e.g. "cluster", "colab", or any user-defined
+                        site name matching `config.<variant>.yaml`). If None (default),
+                        auto-detects: "colab" when running inside Google Colab,
+                        otherwise "cluster". Must be set before any folders or
+                        environments are resolved.
+            debug: If True, save() prints per-tool outputs and the pipeline emits
+                        a runtime snapshot under ``<output>/_debug_capture/``
+                        (mamba env exports, pip freeze, system info) when
+                        ``BIOPIPELINES_DEBUG=1`` is set in the script. Defaults
+                        to False.
         """
         if ' ' in job: job=job.replace(' ','_') #It will create issues at runtime otherwise
+
+        _validate_identifier("project", project)
+        _validate_identifier("job", job)
+
+        # Apply config variant before any ConfigManager-dependent code runs
+        # (FolderManager, environment loading, etc. all read through ConfigManager).
+        ConfigManager(variant=config)
 
         self.project = project
         self.job = job
         self.description = description
+        self.debug = bool(debug)
 
         if on_the_fly is None:
             if os.environ.get("BIOPIPELINES_OTF") == "1":
@@ -86,6 +131,8 @@ class Pipeline:
         # Include resolved container paths as container:<ToolName> keys
         for tool_name, container_path in self.folder_manager.get_containers().items():
             self.folders[f"container:{tool_name}"] = container_path
+        # Expose bind mounts for container prefix construction
+        self.folders["__container_binds__"] = self.folder_manager.get_container_binds()
         
         # Tool management
         self.tools = []
@@ -104,6 +151,19 @@ class Pipeline:
         self.batch_resources = []  # List of resource dicts, one per batch
         self.batch_start_indices = []  # Tool indices where each batch starts
         self.current_batch = -1  # Current batch index (-1 means no Resources() called yet)
+        # Per-batch parent indices for the dependency DAG. batch_parents[i]
+        # is the list of batch indices that batch i depends on (afterok).
+        # The chain default is [i-1] for i>0 and [] for i=0; the Parallel
+        # context manager populates this with multi-parent or shared-parent
+        # values to express fan-out / fan-in.
+        self.batch_parents = []  # type: List[List[int]]
+
+        # Parallel-block state. Set by `with Parallel():`; consumed by the
+        # next Resources() call inside (sibling-with-shared-parent) and the
+        # next Resources() call after the block exits (fan-in).
+        self._parallel_anchor = None         # type: Optional[int]
+        self._parallel_siblings = []         # type: List[int]
+        self._pending_post_parents = None    # type: Optional[List[int]]
 
         # External job dependencies
         self.external_dependencies = []  # List of external SLURM job IDs to depend on
@@ -264,6 +324,11 @@ class Pipeline:
         # Immediately populate expected outputs using pure path construction
         try:
             expected_outputs = tool_config.get_output_files()
+            # Materialize the full sub-layout (configuration/, execution/,
+            # tables/, _extras/, and one folder per declared stream) so
+            # tool authors never need to mkdir anything themselves. Runs
+            # once per tool at config time; idempotent.
+            tool_config._materialize_output_layout(expected_outputs)
             tool_output.update_outputs(expected_outputs)
         except Exception as e:
             # If get_output_files fails, tool may need dependencies resolved first
@@ -288,16 +353,30 @@ class Pipeline:
         Returns:
             ToolOutput object for the registered tool
         """
-        # Ensure Resources() has been called before adding tools
-        # In on_the_fly mode, auto-initialize resources if not set
+        # Ensure Resources() has been called before adding tools.
+        # Resource specs (gpu/memory/time/cpus) are only meaningful for
+        # schedulers that consume them (SLURM). In on-the-fly mode, or when
+        # the active config uses a non-SLURM scheduler (colab / none), we
+        # auto-initialize an empty resource batch so users don't have to
+        # type Resources() for local or Colab runs.
         if self.current_batch == -1:
-            if self.on_the_fly:
+            scheduler = ConfigManager().get_scheduler()
+            if self.on_the_fly or scheduler != "slurm":
                 self.resources()
             else:
                 raise RuntimeError(
                     "Resources() must be called before adding tools. "
                     "Use: with Pipeline(...): Resources(...); tool = Tool(...)"
                 )
+
+        # If a Parallel() block has just exited, the next tool addition
+        # implicitly opens a new fan-in batch. Inherit the most-recent batch
+        # resources (per user spec: "default to the resources of the
+        # previous one"). _pending_post_parents is consumed inside
+        # self.resources() so the new batch's parents are the siblings
+        # rather than the chain default.
+        if self._pending_post_parents is not None:
+            self.resources()  # inherits from self.batch_resources[-1]
 
         # Merge current batch resources with tool resources
         current_resources = self.batch_resources[self.current_batch]
@@ -328,9 +407,12 @@ class Pipeline:
         # Create and configure output object
         tool_output = ToolOutput(tool_config)
 
-        # Populate expected outputs
+        # Populate expected outputs and materialize the on-disk sub-layout
+        # (canonical sub-dirs + one folder per declared stream). Tools
+        # never need to mkdir anything themselves.
         try:
             expected_outputs = tool_config.get_output_files()
+            tool_config._materialize_output_layout(expected_outputs)
             tool_output.update_outputs(expected_outputs)
         except Exception as e:
             print(f"Warning: Could not immediately populate outputs for {tool_config.TOOL_NAME}: {e}")
@@ -379,7 +461,7 @@ class Pipeline:
         print(f"{'='*60}")
 
         # Execute the script, streaming output in real-time
-        tool_folder_log_path = os.path.join(tool_config.output_folder, ".log")
+        tool_folder_log_path = os.path.join(tool_config.output_folder, "_log")
         with open(log_path, 'w') as log_file, open(tool_folder_log_path, 'w') as tool_folder_log:
             process = subprocess.Popen(
                 ['bash', tool_script_path],
@@ -407,19 +489,23 @@ class Pipeline:
         print(f"{tool_config.TOOL_NAME} completed")
         print(f"{'='*60}\n")
 
-    def validate_pipeline(self, debug) -> bool:
+    def validate_pipeline(self) -> bool:
         """
         Validate entire pipeline for consistency and compatibility.
-        
+
+        Only runs the deeper dependency / fan-out checks when the pipeline was
+        constructed with ``debug=True``; in normal (non-debug) usage we just
+        confirm the pipeline is non-empty.
+
         Returns:
             True if pipeline is valid
-            
+
         Raises:
             ValueError: If pipeline has issues
         """
         if not self.tools:
             raise ValueError("Pipeline is empty")
-        if not debug: return
+        if not self.debug: return
         
         # Check tool dependencies
         for i, tool in enumerate(self.tools):
@@ -433,39 +519,47 @@ class Pipeline:
 
         return True
     
-    def save(self, debug=False) -> str:
+    def save(self) -> str:
         """
         Generate and save pipeline execution script.
-        
+
+        Set ``debug=True`` on the ``Pipeline(...)`` constructor to print per-tool
+        outputs here and to embed the runtime debug-capture block in the
+        generated bash.
+
         Returns:
             Path to generated pipeline script
         """
         if not self.tools:
             raise ValueError("Cannot save empty pipeline")
-        
-        if debug:
+
+        if self.debug:
             # Print tool outputs with execution order
             for i, tool_output in enumerate(self.tool_outputs, 1):
                 print("="*30+f"{i}.{tool_output.config.TOOL_NAME}"+"="*30)
                 print(tool_output.output)
-            
+
             print("="*30+"Pipeline"+"="*30)
-        self.validate_pipeline(debug)
-        
+        self.validate_pipeline()
+
         # Generate pipeline script
         script_path = os.path.join(
-            self.folders["runtime"], 
+            self.folders["runtime"],
             "pipeline.sh"
         )
-        
+
         script_content = self._generate_pipeline_script()
         with open(script_path, 'w') as f:
             f.write(script_content)
         os.chmod(script_path, 0o755)
-        
+
         self.pipeline_script = script_path
         self.scripts_generated = True
-        
+
+        # Snapshot active config + per-tool inventory for forensic reproducibility
+        if self.debug:
+            self._write_debug_capture_python_artifacts()
+
         # Export tool outputs for potential reuse with Load
         self._export_tool_outputs()
 
@@ -515,7 +609,7 @@ class Pipeline:
         config_lines = [
             f'echo "Pipeline: {self.project}"',
             f'echo "Job name: {self.job}"',
-            f'echo "Description: {self.description}"',
+            f'echo "Description: {_escape_for_double_quotes(self.description)}"',
             'echo'
         ]
         
@@ -541,6 +635,9 @@ class Pipeline:
         os.chmod(config_script, 0o755)
         
         # Build main pipeline script
+        cfg = ConfigManager()
+        scheduler_init_lines = cfg.get_scheduler_init()
+        module_load = cfg.get_module_load_line()
         script_lines = [
             "#!/bin/bash",
             f"# Generated pipeline: {self.project}",
@@ -548,9 +645,38 @@ class Pipeline:
             "",
             "umask 002  # Make all files group-writable by default",
             "",
-            "# Initialize environment manager",
-            ConfigManager().get_shell_hook_command(),
-            "",
+        ]
+        if scheduler_init_lines:
+            # Initialise the host's shell environment (sourcing lmod's
+            # profile, etc.) so 'module' and any other host primitives
+            # exist when this script is executed standalone (i.e. outside
+            # the slurm.sh wrapper, which would have done it itself).
+            script_lines.append("# Scheduler init (machine.scheduler.init)")
+            script_lines.extend(scheduler_init_lines)
+            script_lines.append("")
+        if module_load:
+            # Needed when pipeline.sh is executed directly (outside the
+            # slurm.sh wrapper) on hosts where mamba/conda are behind an
+            # environment-module system (e.g. S3IT's miniforge3 module).
+            script_lines += [
+                "# Load cluster modules that expose the env manager on PATH",
+                module_load,
+                "",
+            ]
+        shell_hook = cfg.get_shell_hook_command()
+        if shell_hook:
+            script_lines += [
+                "# Initialize environment manager (machine.env_manager.init)",
+                shell_hook,
+                "",
+            ]
+
+        if self.debug:
+            script_lines.append('export BIOPIPELINES_DEBUG=1')
+            script_lines.append(self._generate_debug_capture_block())
+            script_lines.append("")
+
+        script_lines += [
             "echo Configuration",
             f"{config_script} | tee {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
             "echo"
@@ -590,7 +716,7 @@ class Pipeline:
                 log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.log")
             else:
                 log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}.log")
-            tool_folder_log = os.path.join(tool.output_folder, ".log")
+            tool_folder_log = os.path.join(tool.output_folder, "_log")
             script_lines.extend([
                 f"echo {tool.TOOL_NAME}",
                 f"{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}",
@@ -606,7 +732,183 @@ class Pipeline:
         ])
         
         return "\n".join(script_lines)
-    
+
+    def _iter_pipeline_envs(self):
+        """Unique environment names referenced by tools in this pipeline.
+
+        Order is first-seen across self.tools so the export block is
+        deterministic and easy to diff between runs.
+        """
+        seen = set()
+        ordered = []
+        for tool in self.tools:
+            for env in getattr(tool, "environments", []) or []:
+                if env and env not in seen:
+                    seen.add(env)
+                    ordered.append(env)
+        return ordered
+
+    def _iter_pipeline_containers(self):
+        """List of (tool_name, image_path) for tools that use a container."""
+        result = []
+        for tool in self.tools:
+            try:
+                if tool.uses_container():
+                    image = self.folders.get(f"container:{tool.TOOL_NAME}", "")
+                    result.append((tool.TOOL_NAME, image))
+            except Exception:
+                continue
+        return result
+
+    def _generate_debug_capture_block(self) -> str:
+        """Bash that snapshots the runtime onto disk under <output>/_debug_capture/.
+
+        Runs on the node that executes the pipeline script (login when
+        on_the_fly, compute under SLURM), so the captured GPU/driver/scheduler
+        info reflects the actual execution context. Each command is wrapped
+        so missing binaries (no nvidia-smi on a CPU node, no sinfo off SLURM,
+        etc.) write a stub instead of failing the run.
+        """
+        cm = ConfigManager()
+        env_manager = cm.get_env_manager()
+        scheduler = cm.get_scheduler()
+        try:
+            container_executor = cm.get_container_executor()
+        except Exception:
+            container_executor = ""
+
+        capture_root = os.path.join(self.folders["output"], "_debug_capture")
+        envs_dir = os.path.join(capture_root, "environments")
+        sys_dir = os.path.join(capture_root, "system")
+
+        envs = self._iter_pipeline_envs()
+        containers = self._iter_pipeline_containers()
+
+        lines = [
+            '# === BioPipelines debug capture ===',
+            'if [ "$BIOPIPELINES_DEBUG" = "1" ]; then',
+            f'  mkdir -p "{envs_dir}" "{sys_dir}"',
+            f'  echo "Capturing runtime environment to {capture_root}"',
+            '',
+            '  # System info (best-effort: missing binaries write a stub)',
+            f'  ( uname -a ) > "{sys_dir}/uname.txt" 2>&1 || echo "uname not available" > "{sys_dir}/uname.txt"',
+            f'  ( command -v nvidia-smi >/dev/null && nvidia-smi ) > "{sys_dir}/nvidia-smi.txt" 2>&1 || echo "nvidia-smi not available" > "{sys_dir}/nvidia-smi.txt"',
+            f'  ( {env_manager} --version ) > "{sys_dir}/env_manager.txt" 2>&1 || echo "{env_manager} not available" > "{sys_dir}/env_manager.txt"',
+        ]
+
+        if scheduler == "slurm":
+            lines.append(f'  ( command -v sinfo >/dev/null && sinfo -V ) > "{sys_dir}/scheduler.txt" 2>&1 || echo "sinfo not available" > "{sys_dir}/scheduler.txt"')
+        else:
+            lines.append(f'  echo "scheduler={scheduler}" > "{sys_dir}/scheduler.txt"')
+
+        if containers and container_executor:
+            lines.append(f'  ( {container_executor} --version ) > "{sys_dir}/containers.txt" 2>&1 || echo "{container_executor} not available" > "{sys_dir}/containers.txt"')
+        else:
+            lines.append(f'  echo "no containers configured for any tool in this pipeline" > "{sys_dir}/containers.txt"')
+
+        lines.append('')
+        lines.append('  # Per-environment exports (one section per unique env across tools)')
+
+        if env_manager == "pip":
+            lines.append(f'  ( pip freeze ) > "{envs_dir}/pip.txt" 2>&1 || echo "pip not available" > "{envs_dir}/pip.txt"')
+        else:
+            for env in envs:
+                env_yaml = f'{envs_dir}/{env}.yaml'
+                env_pip = f'{envs_dir}/{env}.pip.txt'
+                lines.append(f'  ( {env_manager} env export --no-builds -n {env} ) > "{env_yaml}" 2>&1 || echo "env export failed for {env}" > "{env_yaml}"')
+                lines.append(f'  ( {env_manager} run -n {env} pip freeze ) > "{env_pip}" 2>&1 || echo "pip freeze failed for {env}" > "{env_pip}"')
+
+        lines.append('  echo "Debug capture complete."')
+        lines.append('fi')
+        lines.append('# === end debug capture ===')
+        return "\n".join(lines)
+
+    def _write_debug_capture_python_artifacts(self):
+        """Write Python-side debug artifacts at save() time.
+
+        The bash block captures runtime state on the execution node; this
+        writes the static, configuration-time artifacts (active config copy,
+        per-tool inventory) immediately so they exist even if the pipeline
+        is never actually executed.
+        """
+        capture_root = os.path.join(self.folders["output"], "_debug_capture")
+        os.makedirs(capture_root, exist_ok=True)
+
+        cm = ConfigManager()
+        variant = cm.get_variant()
+
+        # Snapshot the active config file
+        try:
+            src = cm._get_config_path()
+            dst = os.path.join(capture_root, f"config.{variant}.yaml")
+            shutil.copy2(src, dst)
+        except Exception as e:
+            with open(os.path.join(capture_root, "config_snapshot_error.txt"), "w") as f:
+                f.write(f"Could not copy active config: {e}\n")
+
+        # Per-tool inventory
+        try:
+            scheduler = cm.get_scheduler()
+        except Exception:
+            scheduler = "unknown"
+        try:
+            container_executor = cm.get_container_executor()
+        except Exception:
+            container_executor = ""
+
+        tools_inventory = []
+        for tool in self.tools:
+            entry = {
+                "tool_name": getattr(tool, "TOOL_NAME", tool.__class__.__name__),
+                "tool_version": getattr(tool, "TOOL_VERSION", None),
+                "class": tool.__class__.__name__,
+                "environments": list(getattr(tool, "environments", []) or []),
+                "container_image": "",
+            }
+            try:
+                if tool.uses_container():
+                    entry["container_image"] = self.folders.get(
+                        f"container:{tool.TOOL_NAME}", ""
+                    )
+            except Exception:
+                pass
+            tools_inventory.append(entry)
+
+        try:
+            from . import __version__ as _bp_version
+        except Exception:
+            _bp_version = "unknown"
+
+        inventory = {
+            "project": self.project,
+            "job": self.job,
+            "variant": variant,
+            "biopipelines_version": _bp_version,
+            "env_manager": cm.get_env_manager() if hasattr(cm, "get_env_manager") else "",
+            "scheduler": scheduler,
+            "container_executor": container_executor,
+            "tools": tools_inventory,
+        }
+        with open(os.path.join(capture_root, "tools.json"), "w") as f:
+            json.dump(inventory, f, indent=2)
+
+        # README
+        readme = (
+            "BioPipelines debug capture\n"
+            "==========================\n"
+            "Static artifacts written at save() time when Pipeline(debug=True):\n"
+            "  - config.<variant>.yaml: copy of the active config file\n"
+            "  - tools.json: biopipelines version, per-tool wrapper version,\n"
+            "    environments, container images, scheduler\n"
+            "Runtime artifacts written by the pipeline script when executed:\n"
+            "  - environments/<env>.yaml + <env>.pip.txt: env exports per unique env\n"
+            "  - system/{uname,nvidia-smi,env_manager,scheduler,containers}.txt\n"
+            "Captures runtime state on the executing node (login if on_the_fly,\n"
+            "compute under SLURM); not guaranteed to reinstall elsewhere.\n"
+        )
+        with open(os.path.join(capture_root, "README.txt"), "w") as f:
+            f.write(readme)
+
     def slurm(self, email: str = "auto"):
         """
         Generate SLURM job submission script(s).
@@ -640,7 +942,7 @@ class Pipeline:
                 print(f"Auto-detected email: {email} (user: {current_user})")
             else:
                 print(f"Warning: No email mapping found for user '{current_user}'. Disabling email notifications.")
-                print(f"Add your username to the 'cluster.emails' section in config.yaml.")
+                print(f"Add your username to the 'machine.emails' section in your config file.")
                 email = ""
 
         email_line = "" if email == "" else f"""
@@ -718,7 +1020,9 @@ echo "GPU Type: $gpu_type"
         gpu_setup = self._generate_gpu_setup(resources["gpu"])
         additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
         dependency_line = self._generate_dependency_line(self.external_dependencies)
-        module_load = ConfigManager().get_module_load_line()
+        cm = ConfigManager()
+        scheduler_init = cm.get_scheduler_init_block()
+        module_load = cm.get_module_load_line()
 
         slurm_content = f"""#!/usr/bin/bash
 {gpu_line}
@@ -730,6 +1034,9 @@ echo "GPU Type: $gpu_type"
 
 # Make all files group-writable by default
 umask 002
+# Scheduler init (machine.scheduler.init): runs first so 'module' and
+# any other host-level shell primitives are available before module load.
+{scheduler_init}
 {gpu_setup}
 {module_load}
 
@@ -755,8 +1062,10 @@ umask 002
         print(f"sbatch --job-name=\"{formatted_job_name}\" --output {output_path} {slurm_path}")
 
     def _generate_multi_batch_slurm(self, email_line, num_batches):
-        """Generate multiple SLURM scripts for multi-batch pipeline with <JOBID> placeholders."""
-        module_load = ConfigManager().get_module_load_line()
+        """Generate multiple SLURM scripts for multi-batch pipeline with <JOBID_BATCH_NNN> placeholders (one per parent in the dependency DAG)."""
+        cm = ConfigManager()
+        scheduler_init = cm.get_scheduler_init_block()
+        module_load = cm.get_module_load_line()
 
         # Determine batch ranges
         batch_ranges = []
@@ -780,10 +1089,18 @@ umask 002
             gpu_setup = self._generate_gpu_setup(resources["gpu"])
             additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
 
-            # Add dependency line for batch 2+ (internal) and batch 1 (external)
-            if batch_idx > 0:
-                dependency_line = "\n#SBATCH --dependency=afterok:<JOBID>"
-            elif self.external_dependencies:
+            # Add dependency line for batch 2+ (internal DAG) and batch 1 (external).
+            # Internal: emit one <JOBID_BATCH_NNN> placeholder per parent batch,
+            # joined with `:` for the SLURM afterok list. The submit script
+            # captures every batch's job id keyed by its 1-based number and
+            # substitutes each placeholder when the dependent batch is
+            # submitted (parents always have lower numbers, so they are
+            # already in the captured map by the time we substitute).
+            parents = self.batch_parents[batch_idx] if batch_idx < len(self.batch_parents) else []
+            if parents:
+                placeholders = [f"<JOBID_BATCH_{p + 1:03d}>" for p in parents]
+                dependency_line = "\n#SBATCH --dependency=afterok:" + ":".join(placeholders)
+            elif batch_idx == 0 and self.external_dependencies:
                 dependency_line = self._generate_dependency_line(self.external_dependencies)
             else:
                 dependency_line = ""
@@ -798,6 +1115,9 @@ umask 002
 
 # Make all files group-writable by default
 umask 002
+# Scheduler init (machine.scheduler.init): runs first so 'module' and
+# any other host-level shell primitives are available before module load.
+{scheduler_init}
 {gpu_setup}
 {module_load}
 
@@ -821,7 +1141,7 @@ umask 002
             res = self.batch_resources[batch_idx]
             print(f"Batch {batch_idx + 1}: Tools {start_idx + 1}-{end_idx} ({', '.join(t.TOOL_NAME for t in batch_tools)}) | GPU: {res['gpu']}, Mem: {res['memory']}, Time: {res['time']}")
         print("="*30+"Manual Submission"+"="*30)
-        print("# Submit batches manually (replace <JOBID> with previous job ID):")
+        print("# Submit batches manually (replace each <JOBID_BATCH_NNN> placeholder with the captured job ID for batch NNN):")
         for batch_idx in range(num_batches):
             print(f"sbatch {os.path.join(self.folders['runtime'], f'slurm_batch{batch_idx + 1}.sh')}")
         print("="*30+"Automatic Submission"+"="*30)
@@ -837,7 +1157,7 @@ umask 002
             f'echo "Pipeline: {self.project}"',
             f'echo "Job: {self.job}"',
             f'echo "Batch: {batch_idx + 1}"',
-            f'echo "Description: {self.description}"',
+            f'echo "Description: {_escape_for_double_quotes(self.description)}"',
             'echo',
             f'echo "Tools in this batch: {len(batch_tools)}"',
             'echo'
@@ -861,6 +1181,9 @@ umask 002
         os.chmod(config_script, 0o755)
 
         # Build batch pipeline script
+        cfg = ConfigManager()
+        scheduler_init_lines = cfg.get_scheduler_init()
+        module_load = cfg.get_module_load_line()
         script_lines = [
             "#!/bin/bash",
             f"# Generated pipeline batch {batch_idx + 1}: {self.project}",
@@ -868,9 +1191,31 @@ umask 002
             "",
             "umask 002  # Make all files group-writable by default",
             "",
-            "# Initialize environment manager",
-            ConfigManager().get_shell_hook_command(),
-            "",
+        ]
+        if scheduler_init_lines:
+            script_lines.append("# Scheduler init (machine.scheduler.init)")
+            script_lines.extend(scheduler_init_lines)
+            script_lines.append("")
+        if module_load:
+            script_lines += [
+                "# Load cluster modules that expose the env manager on PATH",
+                module_load,
+                "",
+            ]
+        shell_hook = cfg.get_shell_hook_command()
+        if shell_hook:
+            script_lines += [
+                "# Initialize environment manager (machine.env_manager.init)",
+                shell_hook,
+                "",
+            ]
+
+        if self.debug and batch_idx == 0:
+            script_lines.append('export BIOPIPELINES_DEBUG=1')
+            script_lines.append(self._generate_debug_capture_block())
+            script_lines.append("")
+
+        script_lines += [
             "echo Configuration",
             f"{config_script} | tee -a {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
             "echo"
@@ -885,8 +1230,9 @@ umask 002
             else:
                 tool_script_path = os.path.join(self.folders["runtime"], f"{i:03d}_{tool.TOOL_NAME}.sh")
                 log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}.log")
+            tool_folder_log = os.path.join(tool.output_folder, "_log")
 
-            script_lines.extend([f"echo {tool.TOOL_NAME}", f"{tool_script_path} 2>&1 | tee {log_file}", "echo"])
+            script_lines.extend([f"echo {tool.TOOL_NAME}", f"{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}", "echo"])
 
         # Final steps
         script_lines.extend(["echo", f"echo Batch {batch_idx + 1} done"])
@@ -910,7 +1256,7 @@ umask 002
             job_ids = [job_ids]
         self.external_dependencies.extend(job_ids)
 
-    def resources(self, gpu: str = None, memory: str = None, time: str = None, **slurm_options):
+    def resources(self, gpu: str = None, memory: str = None, time: str = None, cpus: int = None, **slurm_options):
         """
         Configure computational resources and start a new batch.
 
@@ -928,8 +1274,9 @@ umask 002
             memory: RAM allocation (e.g., "16GB", "32GB", "64GB")
                 - None: Inherits from previous batch (or "15GB" if first batch)
             time: Wall time limit in HH:MM:SS format (e.g., "24:00:00", "48:00:00")
+            cpus: CPUs per task → #SBATCH --cpus-per-task=<cpus>.
+                - None: Inherits from previous batch (omitted on first batch)
             **slurm_options: Additional SLURM parameters. Examples:
-                - cpus=32 → #SBATCH --cpus-per-task=32
                 - nodes=1 → #SBATCH --nodes=1
                 - ntasks_per_node=1 → #SBATCH --ntasks-per-node=1
                 - partition="gpu" → #SBATCH --partition=gpu
@@ -960,6 +1307,28 @@ umask 002
         self.current_batch += 1
         self.batch_start_indices.append(len(self.tools))
 
+        # Determine the new batch's parents in the dependency DAG. Three
+        # cases, in priority order:
+        #   1. fan-in pending from a Parallel block that just exited:
+        #      consume _pending_post_parents and clear it.
+        #   2. inside a Parallel block: parent is the anchor (the batch
+        #      that was current when the block was entered). Record this
+        #      sibling for later fan-in.
+        #   3. chain default: parent is the previous batch ([] for batch 0).
+        if self._pending_post_parents is not None:
+            new_parents = list(self._pending_post_parents)
+            self._pending_post_parents = None
+        elif self._parallel_anchor is not None:
+            new_parents = [self._parallel_anchor] if self._parallel_anchor >= 0 else []
+            self._parallel_siblings.append(self.current_batch)
+        else:
+            new_parents = [self.current_batch - 1] if self.current_batch > 0 else []
+        self.batch_parents.append(new_parents)
+
+        # Fold first-class cpus into slurm_options (it maps to --cpus-per-task)
+        if cpus is not None:
+            slurm_options = {**slurm_options, "cpus": cpus}
+
         # Determine resources for this batch
         if self.current_batch == 0:
             # First batch: use provided values or defaults
@@ -972,11 +1341,16 @@ umask 002
         else:
             # Subsequent batches: inherit from previous if not specified
             prev_res = self.batch_resources[self.current_batch - 1]
+            prev_opts = prev_res.get("slurm_options", {})
+            if slurm_options:
+                merged_opts = {**prev_opts, **slurm_options}
+            else:
+                merged_opts = prev_opts
             batch_res = {
                 "gpu": gpu if gpu is not None else prev_res["gpu"],
                 "memory": memory if memory is not None else prev_res["memory"],
                 "time": time if time is not None else prev_res["time"],
-                "slurm_options": slurm_options if slurm_options else prev_res.get("slurm_options", {})
+                "slurm_options": merged_opts
             }
 
         self.batch_resources.append(batch_res)
@@ -1135,15 +1509,29 @@ umask 002
             except Exception:
                 continue
 
-            # Collect IDs from all non-empty streams (deduplicated, order-preserving)
+            # Collect IDs from all non-empty streams (deduplicated, order-preserving).
+            # Prefer the runtime map_table's id column when it exists, since it
+            # reflects actual produced IDs (expanded patterns + `missing` drops
+            # applied). Fall back to the config-time stream ids list otherwise.
             seen = set()
             ids = []
             for name, stream in std_output.streams.items():
-                if hasattr(stream, 'ids'):
-                    for sid in stream.ids:
-                        if sid not in seen:
-                            seen.add(sid)
-                            ids.append(sid)
+                stream_ids = None
+                map_path = getattr(stream, "map_table", None)
+                if map_path and os.path.exists(map_path):
+                    try:
+                        with open(map_path, newline="") as mf:
+                            reader = csv.DictReader(mf)
+                            if reader.fieldnames and "id" in reader.fieldnames:
+                                stream_ids = [str(r["id"]) for r in reader]
+                    except Exception:
+                        stream_ids = None
+                if stream_ids is None and hasattr(stream, "ids"):
+                    stream_ids = list(stream.ids)
+                for sid in stream_ids or []:
+                    if sid not in seen:
+                        seen.add(sid)
+                        ids.append(sid)
             if not ids:
                 continue
 
@@ -1298,38 +1686,56 @@ umask 002
                 row = _trace_backward(last_connected_idx, output_id, path_spec)
                 all_rows.append(row)
 
-        # Rows for IDs that were filtered out mid-pipeline
-        # Only consider connected tools for filtering logic
+        # Rows for IDs that were filtered out mid-pipeline.
+        # An ID is *truly* filtered only if the next connected tool neither
+        # carries it in its own ids nor references it as a parent in any
+        # provenance axis. Fan-out ancestors (e.g. "s1" whose children
+        # "s1_1","s1_2" propagated downstream) must NOT be flagged as
+        # filtered — they're reachable via provenance.
         connected_ids_ever = set()
         for idx, (_, ids, _) in enumerate(tool_info):
             if idx not in disconnected_tool_indices:
                 connected_ids_ever.update(ids)
-        filtered_ids = list(connected_ids_ever - set(last_connected_ids))
 
-        if filtered_ids:
-            # Map each filtered ID to the last connected tool index where it appeared
-            filtered_id_last_tool = {}
-            for fid in filtered_ids:
-                for idx in range(last_connected_idx, -1, -1):
-                    if idx in disconnected_tool_indices:
-                        continue
-                    if fid in tool_info[idx][1]:
-                        filtered_id_last_tool[fid] = idx
-                        break
+        def _is_referenced_as_parent(child_tool_idx, candidate_id):
+            """True if candidate_id appears as a parent in any provenance map
+            of tool_info[child_tool_idx]."""
+            if child_tool_idx >= len(tool_info):
+                return False
+            _, _, prov = tool_info[child_tool_idx]
+            for axis_map in (prov or {}).values():
+                if candidate_id in axis_map.values():
+                    return True
+            return False
 
-            for path_spec in paths:
-                for fid in filtered_ids:
-                    last_idx = filtered_id_last_tool.get(fid)
-                    if last_idx is None:
-                        continue
-                    row = _trace_backward(last_idx, fid, path_spec)
-                    # Mark the next connected tool that filtered this ID
-                    next_connected = last_idx + 1
-                    while next_connected in disconnected_tool_indices:
-                        next_connected += 1
-                    if next_connected < len(tool_info):
-                        row[tool_info[next_connected][0]] = "-"
-                    all_rows.append(row)
+        filtered_ids = []
+        for fid in connected_ids_ever - set(last_connected_ids):
+            # Find the last connected tool whose ids contain fid.
+            last_with_fid = None
+            for idx in range(last_connected_idx, -1, -1):
+                if idx in disconnected_tool_indices:
+                    continue
+                if fid in tool_info[idx][1]:
+                    last_with_fid = idx
+                    break
+            if last_with_fid is None:
+                continue
+            # Look at the NEXT connected tool. If it references fid as a
+            # parent in its provenance, fid is a fan-out ancestor, not a
+            # filtered ID — skip.
+            next_idx = last_with_fid + 1
+            while next_idx in disconnected_tool_indices:
+                next_idx += 1
+            if next_idx < len(tool_info) and _is_referenced_as_parent(next_idx, fid):
+                continue
+            filtered_ids.append((fid, last_with_fid, next_idx))
+
+        for path_spec in paths:
+            for fid, last_idx, next_connected in filtered_ids:
+                row = _trace_backward(last_idx, fid, path_spec)
+                if next_connected < len(tool_info):
+                    row[tool_info[next_connected][0]] = "-"
+                all_rows.append(row)
 
         # 5. Remove duplicate rows and rows that are strict subsets
         # (a row is a subset if every non-blank cell matches another row that
@@ -1428,10 +1834,11 @@ def Resources(**kwargs):
         gpu: GPU memory ("T4", "L4", "V100", "A100", "H100", "H200", "16GB", "24GB", "32GB", "80GB", "96GB", "32GB|80GB|96GB", "!L4", "gpu", "high-memory", None))
         memory: System RAM (e.g., "16GB", "32GB")
         time: Wall time limit (e.g., "24:00:00", "2:00:00", "1-00:00:00")
+        cpus: CPUs per SLURM task (maps to --cpus-per-task)
 
     Example:
         with Pipeline("Test", "Job", "Description"):
-            Resources(gpu="32GB", memory="16GB", time="24:00:00")
+            Resources(gpu="32GB", memory="16GB", time="24:00:00", cpus=8)
             tool1 = SomeTool(...)
 
     Raises:
@@ -1538,4 +1945,80 @@ def Dependencies(job_ids: Union[str, List[str]]):
             "Dependencies() must be called within a Pipeline context. "
             "Use: with Pipeline(...): Dependencies(...)"
         )
+    if pipeline._parallel_anchor is not None:
+        raise RuntimeError(
+            "Dependencies() cannot be called inside a `with Parallel():` "
+            "block. The block's structural rules already determine "
+            "intra-block (sibling-with-shared-parent) and post-block "
+            "(fan-in) dependencies; an explicit Dependencies() call would "
+            "be ambiguous. Move the Dependencies() call outside the block."
+        )
     pipeline.set_dependencies(job_ids)
+
+
+class Parallel:
+    """Context manager that runs the batches inside it as parallel siblings.
+
+    Use it to express a fan-out / fan-in pattern. Every Resources() call
+    inside the block opens a SLURM batch whose only dependency is the
+    batch that was current immediately before the block (the "anchor"),
+    so the sibling batches run in parallel rather than chained. The first
+    Resources() call after the block exits opens a fan-in batch that
+    waits for all siblings to finish. If the block sits at the top of the
+    pipeline (no batch before it), the siblings simply have no upstream
+    dependency.
+
+    Each iteration MUST call Resources() to open its own sibling batch.
+    Tools (including entity tools used as kwargs, e.g. Ligand("LIG")
+    inside BoltzGen(ligand=Ligand("LIG"), ...)) then land in that batch.
+
+    Example
+    -------
+    Run RFdiffusion 10 times in parallel and gather the outputs with Pool::
+
+        with Pipeline(...):
+            Resources(...)
+            PreLoopTool(...)                  # batch 1
+            runs = []
+            with Parallel():
+                for i in range(10):
+                    Resources(gpu="A100")     # batches 2..11, all depend on batch 1
+                    runs.append(RFdiffusion(...))
+            Resources(...)                    # batch 12, depends on batches 2..11
+            combined = Pool(runs=runs)        # 100 dense ids + pool.path
+
+    Notes
+    -----
+    * Dependencies() inside the block raises — the structural rules
+      already determine all dependencies.
+    * Nesting Parallel() blocks is not supported in this version.
+    """
+
+    def __enter__(self):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is None:
+            raise RuntimeError(
+                "Parallel() must be used within a Pipeline context. "
+                "Use: with Pipeline(...): with Parallel(): ..."
+            )
+        if pipeline._parallel_anchor is not None:
+            raise RuntimeError(
+                "Nested Parallel() blocks are not supported."
+            )
+        pipeline._parallel_anchor = pipeline.current_batch
+        pipeline._parallel_siblings = []
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is None:
+            return False
+        siblings = list(pipeline._parallel_siblings)
+        pipeline._parallel_anchor = None
+        pipeline._parallel_siblings = []
+        # Empty block: no siblings opened. Fall back to chain default
+        # (the next batch will depend on whatever was current before the
+        # block, which is exactly the chain default behaviour).
+        if siblings:
+            pipeline._pending_post_parents = siblings
+        return False  # don't suppress exceptions
