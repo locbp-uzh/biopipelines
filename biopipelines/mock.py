@@ -260,10 +260,10 @@ echo "=== Mock ready ==="
 
         The default implementation reads `{axis}.id` columns from the
         stream map_tables — but with `map_table_strategy="runtime"` those
-        files don't exist until the pipeline actually runs. The lineage
-        writer runs at `pipeline.save()` time (config time), so we build
-        the same {axis: {child_id: parent_id}} shape from `self.provenance`
-        (upstream axes) + the children fan-out (when present).
+        files don't exist until the pipeline actually runs. When this is
+        called at config time we build the same {axis: {child_id: parent_id}}
+        shape from `self.provenance` (upstream axes) + the children fan-out
+        (when present).
 
         After execution, runtime map_tables carry the ground-truth IDs
         (expanded patterns, dropped `missing` rows, etc.), so we defer to
@@ -309,7 +309,7 @@ echo "=== Mock ready ==="
                 if axis in result:
                     continue
                 # parent_ids == output_ids in passthrough; still useful for
-                # the lineage tracer since axis names link tools.
+                # downstream provenance resolution since axis names link tools.
                 result[axis] = {oid: oid for oid in self.output_ids}
 
         return result

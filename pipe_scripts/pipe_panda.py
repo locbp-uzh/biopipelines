@@ -1168,9 +1168,9 @@ def run_panda(config_data: Dict[str, Any]) -> None:
             )
             print(f"Copied {len(copied_tables)} tables")
 
-        # Attach `<stream>.id` provenance for each output stream so the
-        # pipeline's lineage CSV can link renamed pool IDs back to their
-        # upstream parents (e.g. Panda_1 -> a).
+        # Attach `<stream>.id` provenance for each output stream so
+        # downstream tools can link renamed pool IDs back to their upstream
+        # parents (e.g. Panda_1 -> a) via the map_table provenance columns.
         #
         # Two cases depending on whether a content table was already
         # written at `map_path` by filter_and_copy_pool_tables above:
@@ -1180,7 +1180,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
         #       leave every other column (including `pool.id`) untouched.
         #       Do not add a `file` column.
         #   (b) No content table yet (pure per-ID file streams like
-        #       structures.pdb). Write a lineage-only CSV with the
+        #       structures.pdb). Write a provenance-only CSV with the
         #       canonical `id, file, <stream>.id` schema.
         stream_map_targets = config_data.get('stream_map_targets', [])
         if stream_map_targets and not result_df.empty and 'id' in result_df.columns:
@@ -1226,7 +1226,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                     existing.to_csv(map_path, index=False)
                     print(f"Augmented content table with {axis_col}: {map_path}")
                 else:
-                    # (b) No content table — write a pure lineage map_table.
+                    # (b) No content table — write a provenance-only map_table.
                     rows_out = []
                     for out_id, parent in parent_by_id.items():
                         file_val = (file_template.replace('<id>', out_id)
