@@ -248,16 +248,6 @@ class PlotBuilder:
 
         ax.hist(values, bins=bins, color='#1f77b4', edgecolor='white', alpha=0.8)
 
-        # Add statistics annotation
-        mean_val = values.mean()
-        std_val = values.std()
-        ax.axvline(mean_val, color='#d62728', linestyle='--', linewidth=1.5, label=f'Mean: {mean_val:.2f}')
-
-        stats_text = f'n={len(values)}\nmean={mean_val:.2f}\nstd={std_val:.2f}'
-        ax.text(0.95, 0.95, stats_text, transform=ax.transAxes, fontsize=9,
-                verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
         self._apply_style(ax, title, xlabel, ylabel, grid=True)
 
         plt.tight_layout()
@@ -548,12 +538,6 @@ class PlotBuilder:
             ax.set_xticks(x_positions)
             ax.set_xticklabels(group_labels)
 
-            # Add sample size annotations (not for floating_bar)
-            for i, df in enumerate(dataframes):
-                n = len(df[y_col].dropna())
-                ax.text(x_positions[i], ax.get_ylim()[0] - 0.05 * (ax.get_ylim()[1] - ax.get_ylim()[0]),
-                       f'n={n}', ha='center', fontsize=8, color='gray')
-
         self._apply_style(ax, title,
                          xlabel if style != "floating_bar" else None,
                          ylabel if style != "floating_bar" else None,
@@ -625,6 +609,7 @@ class PlotBuilder:
         ylabel = self._resolve_label(op.get("ylabel"), op.get("y_name"), y_col or "")
         cmap = op.get("cmap", "viridis")
         annotate = op.get("annotate", True)
+        bare = op.get("bare", False)
         dpi = op.get("dpi", 100)
         figsize_px = op.get("figsize", [1000, 800])
         figsize = (figsize_px[0] / dpi, figsize_px[1] / dpi)
@@ -699,16 +684,44 @@ class PlotBuilder:
             norm = BoundaryNorm(bounds, discrete_cmap.N)
             im = ax.imshow(matrix_data, cmap=discrete_cmap, norm=norm,
                            aspect='auto')
-            cbar = plt.colorbar(im, ax=ax, ticks=np.arange(n_cats))
-            cbar.ax.set_yticklabels(categories, fontsize=9)
-            cbar.set_label(value_col, fontsize=10)
+            if not bare:
+                cbar = plt.colorbar(im, ax=ax, ticks=np.arange(n_cats))
+                cbar.ax.set_yticklabels(categories, fontsize=9)
+                cbar.set_label(value_col, fontsize=10)
         else:
             im = ax.imshow(matrix_data, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax)
-            cbar = plt.colorbar(im, ax=ax)
+            if not bare:
+                cbar = plt.colorbar(im, ax=ax)
+                if columns:
+                    cbar.set_label('Correlation', fontsize=10)
+                elif value_col:
+                    cbar.set_label(value_col, fontsize=10)
+
+        if bare:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
+            plt.close()
+            print(f"  Created heatmap: {output_path}")
+            csv_path = self._plot_data_csv_path(output_path)
             if columns:
-                cbar.set_label('Correlation', fontsize=10)
-            elif value_col:
-                cbar.set_label(value_col, fontsize=10)
+                corr_matrix.to_csv(csv_path, na_rep="")
+            else:
+                pivot_df.to_csv(csv_path, na_rep="")
+            print(f"  Exported data: {csv_path}")
+            mode = "correlation" if columns else "pivot"
+            self.metadata.append({
+                "filename": os.path.basename(output_path),
+                "type": f"heatmap ({mode})",
+                "title": title or "",
+                "x_column": x_col or ", ".join(columns or []),
+                "y_column": y_col or ", ".join(columns or []),
+                "data_sources": self._get_data_source_name(data_ref)
+            })
+            return
 
         # Set ticks and labels, thinning when there are too many
         max_ticks = 30

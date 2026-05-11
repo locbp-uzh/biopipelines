@@ -336,6 +336,7 @@ echo "=== Plot ready ==="
                 y_name: str = None,
                 cmap: str = "viridis",
                 annotate: bool = True,
+                bare: bool = False,
                 figsize: Tuple[int, int] = (1000, 800),
                 dpi: int = 100) -> PlotOperation:
         """
@@ -374,7 +375,7 @@ echo "=== Plot ready ==="
         return PlotOperation("heatmap", data=data, x=x, y=y, value=value,
                             columns=columns, title=title, xlabel=xlabel, ylabel=ylabel,
                             x_name=x_name, y_name=y_name, cmap=cmap,
-                            annotate=annotate, figsize=figsize, dpi=dpi)
+                            annotate=annotate, bare=bare, figsize=figsize, dpi=dpi)
 
     @staticmethod
     def Line(data: Union[List[Union[StandardizedOutput, TableInfo]], StandardizedOutput, TableInfo],
