@@ -44,4 +44,4 @@ mirror-to-github:
     - git clone --branch public --single-branch "$CI_REPOSITORY_URL" repo
     - cd repo
     - git remote add github https://x-access-token:${GITHUB_PUSH_TOKEN}@github.com/locbp-uzh/biopipelines.git
-    - git push github public:main
+    - git push github public:pre-release
