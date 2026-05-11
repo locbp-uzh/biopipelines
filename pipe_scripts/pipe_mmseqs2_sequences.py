@@ -458,7 +458,7 @@ def main():
 
     if args.mask_table and args.mask_column:
         # Per-sequence masking from table: lookup_table_value handles ID matching
-        # via pdb/id columns and the shared lineage CSV (Strategy 4).
+        # via pdb/id columns, id_map suffix stripping, and {stream}.id provenance.
         try:
             mask_df = pd.read_csv(args.mask_table)
             log(f"Loaded mask table from {args.mask_table}")

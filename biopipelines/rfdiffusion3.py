@@ -18,14 +18,14 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
     from biopipelines_io import Resolve
 
 
@@ -652,11 +652,14 @@ python "{self.table_py_file}" \\
         return script_content
 
     def _generate_script_update_structures_map(self) -> str:
-        """Generate script to update structures_map.csv with actual runtime output files."""
+        """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        return f"""echo "Updating structures map with actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"
+        # All designs/models share the same parent PDB (if a PDB input was given).
+        prov_arg = (f' --set-provenance "structures.id={self.pdb_input_id}"'
+                    if self.pdb_input_id else "")
+        return f"""echo "Writing structures map from actual output files"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
 
 """
 
@@ -688,17 +691,10 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             structure_ids = [f"{prefix}_<{d_start}..{d_end}>"]
         file_template = [self.stream_path("structures", "<id>.pdb")]
 
-        total_structures = self.num_designs * self.num_models
-
-        # Build provenance if PDB input is available
-        provenance = None
-        if self.pdb_input_id:
-            provenance = {"structures": [self.pdb_input_id] * total_structures}
-
-        # Create map_table — lives inside the structures/ stream folder.
-        # create_map_table handles makedirs for the target path.
+        # The per-design map_table is written at runtime by
+        # _generate_script_update_structures_map(); here we only declare the
+        # stream and its map_table path.
         structures_map = self.stream_map_path("structures")
-        create_map_table(structures_map, structure_ids, files=file_template, provenance=provenance)
 
         structures = DataStream(
             name="structures",

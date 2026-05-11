@@ -1,7 +1,7 @@
-"""Provenance / history-tree tests driven by the Mock tool.
+"""Provenance tests driven by the Mock tool.
 
-Exercises multi-hop lineage propagation through chained Mock stages and
-Mock→Panda→Mock cycles. The guarantees checked here are:
+Exercises multi-hop parent→child provenance propagation through chained Mock
+stages and Mock→Panda→Mock cycles. The guarantees checked here are:
 
 - An immediate Mock(source=upstream) run emits the upstream axis in
   ``{axis}.id`` columns of its runtime map_table.
@@ -16,6 +16,9 @@ Mock→Panda→Mock cycles. The guarantees checked here are:
   runtime map_table reflects that.
 - Lazy ``children`` + ``produce`` still carry upstream provenance through
   the runtime-expanded rows.
+- A Panda step in pool mode that auto-renames IDs (sort/head/tail/sample)
+  writes a ``<stream>_map.csv`` with a ``<stream>.id`` provenance column
+  linking each renamed ID back to its original.
 
 All tests drive the *real* Mock script (``pipe_scripts/pipe_mock.py``) via
 ``Pipeline.save()`` and then execute the generated ``pipeline.sh`` /
@@ -24,7 +27,6 @@ validated end-to-end, not just the config-time plan.
 """
 
 import csv
-import json
 import os
 import subprocess
 import sys
@@ -54,163 +56,10 @@ def _read_map(path):
         return list(csv.DictReader(f))
 
 
-def _read_lineage(output_folder):
-    """Read the pipeline's .lineage.csv from its output folder (one level
-    above a tool's own output folder)."""
-    lineage = os.path.join(output_folder, ".lineage.csv")
-    with open(lineage, newline="") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-    return rows[0], rows[1:]  # header, data_rows
-
-
-# ── lineage plotting (columns = tools, nodes = IDs, arrows = lineage) ────────
-
-_PLOTS_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "outputs", "lineage_plots"
-)
-
-
-def _plot_lineage(output_folder, title, png_name):
-    """Render .lineage.csv as a PNG with columns per tool and arrows
-    linking each row's consecutive non-empty cells.
-
-    A '-' cell is drawn as a red "dropped" marker; every other cell is a
-    node labeled by its ID. Duplicate IDs in the same tool column collapse
-    to a single node. The image lands in tests/outputs/lineage_plots/.
-    """
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except Exception:
-        return None
-
-    header, rows = _read_lineage(output_folder)
-    if not rows:
-        return None
-
-    # Column positions (x), per-column node ordering (y).
-    col_x = {label: i for i, label in enumerate(header)}
-    col_nodes = {label: [] for label in header}  # preserves insertion order
-    col_node_y = {label: {} for label in header}
-
-    def _register(label, node_id):
-        if node_id not in col_node_y[label]:
-            col_node_y[label][node_id] = len(col_nodes[label])
-            col_nodes[label].append(node_id)
-
-    # First pass: register nodes.
-    for row in rows:
-        for label, cell in zip(header, row):
-            if cell:
-                _register(label, cell)
-
-    # Second pass: edges between consecutive non-empty cells in each row.
-    edges = []  # list of ((label_a, id_a), (label_b, id_b), dropped_flag)
-    for row in rows:
-        prev = None
-        for label, cell in zip(header, row):
-            if not cell:
-                continue
-            if prev is None:
-                prev = (label, cell)
-                continue
-            dropped = (cell == "-")
-            edges.append((prev, (label, cell), dropped))
-            if not dropped:
-                prev = (label, cell)
-
-    # Widen the per-column x-spacing so long labels don't overlap across
-    # columns and arrows have room to breathe. Node x-positions are scaled
-    # by `col_spacing`; arrow gaps are expressed in the same data units.
-    max_label_len = max(
-        (len(str(nid)) for nids in col_nodes.values() for nid in nids),
-        default=1,
-    )
-    col_spacing = max(2.0, 0.18 * max_label_len + 1.2)
-
-    max_rows = max((len(v) for v in col_nodes.values()), default=1)
-    fig_w = max(5, col_spacing * len(header) + 1)
-    fig_h = max(2.5, 0.6 * max_rows + 1.5)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.set_title(title, fontsize=11)
-    ax.set_xlim(-col_spacing * 0.5, col_spacing * (len(header) - 0.5))
-    ax.set_ylim(-max_rows - 0.5, 1.4)
-    ax.axis("off")
-
-    # Column headers.
-    for label, x in col_x.items():
-        ax.text(x * col_spacing, 0.8, label, ha="center", va="center",
-                fontsize=10, fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="#eef",
-                          edgecolor="#557"))
-
-    # Node geometry: half-width grows with label length so the arrow-end
-    # offset clears even long IDs; half-height is fixed.
-    def _node_xy(label, node_id):
-        return col_x[label] * col_spacing, -col_node_y[label][node_id]
-
-    def _node_halfwidth(node_id):
-        # Roughly matches the rendered box width (fontsize 9, pad 0.25).
-        return 0.05 * max(1, len(str(node_id))) + 0.18
-
-    for label in header:
-        for node_id in col_nodes[label]:
-            x, y = _node_xy(label, node_id)
-            is_drop = (node_id == "-")
-            ax.text(
-                x, y, node_id, ha="center", va="center", fontsize=9,
-                bbox=dict(
-                    boxstyle="round,pad=0.25",
-                    facecolor=("#fdd" if is_drop else "#efe"),
-                    edgecolor=("#c33" if is_drop else "#484"),
-                ),
-            )
-
-    # Draw arrows: start/end offset by each node's half-width so the arrow
-    # terminates at the box edge rather than piercing through it.
-    for (la, ia), (lb, ib), dropped in edges:
-        xa, ya = _node_xy(la, ia)
-        xb, yb = _node_xy(lb, ib)
-        gap_a = _node_halfwidth(ia) + 0.05
-        gap_b = _node_halfwidth(ib) + 0.05
-        color = "#c33" if dropped else "#666"
-        ax.annotate(
-            "", xy=(xb - gap_b, yb), xytext=(xa + gap_a, ya),
-            arrowprops=dict(
-                arrowstyle="->", color=color, lw=1.4,
-                connectionstyle="arc3,rad=0.05",
-            ),
-        )
-
-    os.makedirs(_PLOTS_DIR, exist_ok=True)
-    png_path = os.path.join(_PLOTS_DIR, png_name)
-    fig.tight_layout()
-    fig.savefig(png_path, dpi=140, bbox_inches="tight")
-    plt.close(fig)
-    return png_path
-
-
-@pytest.fixture
-def plot_lineage(request):
-    """Factory: render the current pipeline's lineage.csv to a PNG named
-    after the test. Call inside a test AFTER the lineage CSV has been
-    written (and, for post-exec variants, after regeneration)."""
-    def _plot(output_folder, suffix=""):
-        safe = request.node.name.replace("/", "_").replace("::", "_")
-        if suffix:
-            safe = f"{safe}__{suffix}"
-        return _plot_lineage(output_folder, request.node.name + (
-            f" ({suffix})" if suffix else ""
-        ), f"{safe}.png")
-    return _plot
-
-
 # ── single-hop: Mock(source=m1) carries the upstream axis through ────────────
 
 def test_provenance_single_hop_passthrough(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
+    local_config, isolated_cwd, new_pipeline, record_case,
 ):
     """m1 → m2(source=m1.streams.structures) — m2's map_table must carry a
     ``structures.id`` column matching the upstream IDs (no fan-out)."""
@@ -242,13 +91,12 @@ def test_provenance_single_hop_passthrough(
     )
     assert ids == ["s1", "s2", "s3"]
     assert prov == ["s1", "s2", "s3"]
-    plot_lineage(os.path.dirname(m1.output_folder))
 
 
 # ── two-hop: children fan-out preserves upstream axis + adds parent col ──────
 
 def test_provenance_multi_hop_children_fanout(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
+    local_config, isolated_cwd, new_pipeline, record_case,
 ):
     """m1 → m2(source=m1, children=<1..2>) — m2's map_table must have
     BOTH ``structures.id`` (original parent axis) AND ``designs.parent``
@@ -295,13 +143,12 @@ def test_provenance_multi_hop_children_fanout(
     assert parent_prov == ["s1", "s1", "s2", "s2"]
     assert "structures.id" in cols
     assert "designs.parent" in cols
-    plot_lineage(os.path.dirname(m1.output_folder))
 
 
 # ── multi-axis input + downstream fan-out: full history tree ────────────────
 
 def test_provenance_multi_axis_then_children(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
+    local_config, isolated_cwd, new_pipeline, record_case,
 ):  # noqa: E501
     """Each(a) × Each(b) → m3(children=<1..2>) — every descendant row must
     carry the full (a,b) history plus the immediate parent label."""
@@ -371,13 +218,12 @@ def test_provenance_multi_axis_then_children(
     # The fan-out column mirrors `pairs.id` when the single axis and the
     # parent coincide. This is an explicit guarantee (not incidental).
     assert fan_parent == fan_pairs
-    plot_lineage(os.path.dirname(a.output_folder))
 
 
 # ── lazy children + produce: provenance carried through runtime expansion ───
 
 def test_provenance_lazy_children_carries_upstream(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
+    local_config, isolated_cwd, new_pipeline, record_case,
 ):
     """m1 → m2(source=m1, children='[_<N><A V>]', produce=[...]) — the
     runtime-expanded rows must still carry the upstream axis provenance."""
@@ -416,13 +262,12 @@ def test_provenance_lazy_children_carries_upstream(
     assert ids == ["prot_0_1A", "prot_0_1V", "prot_1_1A", "prot_1_1V"]
     assert axis_prov == ["prot_0", "prot_0", "prot_1", "prot_1"]
     assert parent_prov == axis_prov
-    plot_lineage(os.path.dirname(m1.output_folder))
 
 
 # ── missing ids drop from provenance too ────────────────────────────────────
 
 def test_provenance_missing_drops_parent_and_children(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
+    local_config, isolated_cwd, new_pipeline, record_case,
 ):
     """If a parent is listed in `missing`, all its descendants drop from the
     map_table — and the remaining provenance values still index correctly."""
@@ -459,16 +304,12 @@ def test_provenance_missing_drops_parent_and_children(
     )
     assert ids == ["s1_1", "s1_2", "s3_1", "s3_2"]
     assert prov == ["s1", "s1", "s3", "s3"]
-    plot_lineage(os.path.dirname(m1.output_folder), "pre-regen")
-    pipeline._generate_id_lineage_csv()
-    plot_lineage(os.path.dirname(m1.output_folder), "post-exec")
 
 
-# ── Mock → Panda → Mock cycle (history tree through a filter) ───────────────
+# ── Mock → Panda → Mock cycle (provenance through a filter) ─────────────────
 
 def test_provenance_through_panda_filter_cycle(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Mock scores → Panda filter → downstream Mock.
 
@@ -518,12 +359,10 @@ def test_provenance_through_panda_filter_cycle(
     )
     assert ids == ["s1", "s2", "s3"]
     assert extra_cols == []
-    plot_lineage(os.path.dirname(scored.output_folder))
 
 
 def test_provenance_cartesian_into_panda_pool(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Each(a) × Each(b) → Mock(cartesian+scores) → Panda(pool=cross) — a
     multi-axis upstream still saves sequences.id / compounds.id columns in
@@ -566,13 +405,12 @@ def test_provenance_cartesian_into_panda_pool(
     )
     assert seq == ["a1", "a1", "a2", "a2"]
     assert cmp == ["b1", "b2", "b1", "b2"]
-    plot_lineage(os.path.dirname(a.output_folder))
 
 
 # ── three-hop: provenance chains through two children fan-outs ──────────────
 
 def test_provenance_three_hop_chained_fanouts(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
+    local_config, isolated_cwd, new_pipeline, record_case,
 ):
     """m1 → m2(children=<1..2>) → m3(children=<A B>). The deepest node must
     list its *immediate* upstream (m2 output IDs) in ``designs.id`` — i.e.
@@ -618,151 +456,17 @@ def test_provenance_three_hop_chained_fanouts(
     assert ids == ["s1_1_A", "s1_1_B", "s1_2_A", "s1_2_B"]
     assert designs_prov == ["s1_1", "s1_1", "s1_2", "s1_2"]
     assert parent_prov == designs_prov
-    plot_lineage(os.path.dirname(m1.output_folder))
-
-
-# ── post-execution lineage: dropped IDs must vanish ──────────────────────────
-
-def _regenerate_lineage(pipeline):
-    """Rerun the lineage writer against the already-materialized map_tables."""
-    pipeline._generate_id_lineage_csv()
-
-
-def test_lineage_before_and_after_execution_missing_drops(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
-):
-    """m1 → m2(children=<1..2>, missing=['s2']).
-
-    Before execution (config time), the lineage CSV shows s2 as a parent
-    because `missing` is only applied at runtime. After executing the pipe
-    scripts and regenerating the lineage, the runtime map_tables show only
-    the surviving IDs, so s2's branch must disappear from the lineage."""
-    from biopipelines.mock import Mock
-
-    pipeline = new_pipeline("prov_lineage_runtime_missing")
-    with pipeline:
-        m1 = Mock(
-            ids=["s1", "s2", "s3"],
-            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
-        )
-        m2 = Mock(
-            source=m1.streams.structures,
-            children="<1..2>",
-            missing=["s2"],
-            streams={"designs": {"format": "pdb", "file": "<id>.pdb"}},
-        )
-        pipeline.save()
-
-    # Before: config-time lineage still lists s2 (missing not yet applied).
-    output_root = os.path.dirname(m1.output_folder)
-    header, pre_rows = _read_lineage(output_root)
-    pre_ids_m1 = sorted({r[0] for r in pre_rows if r[0]})
-    plot_lineage(output_root, "pre-exec")
-
-    # Execute both Mock stages to materialize the runtime map_tables.
-    _run_pipe_mock(os.path.join(m1.output_folder, "_configuration", "mock_config.json"))
-    _run_pipe_mock(os.path.join(m2.output_folder, "_configuration", "mock_config.json"))
-
-    # Regenerate lineage from the now-present runtime map_tables.
-    _regenerate_lineage(pipeline)
-    plot_lineage(output_root, "post-exec")
-
-    _, post_rows = _read_lineage(output_root)
-    post_pairs = [(r[0], r[1]) for r in post_rows]
-    # IDs surviving to m2's output (filter out the dash-marker rows).
-    post_m2_survivors = sorted({r[1] for r in post_rows
-                                if r[1] and r[1] != "-"})
-    # Filtered rows: ID present in m1 column with '-' in m2 column.
-    filtered_rows = [(r[0], r[1]) for r in post_rows if r[1] == "-"]
-
-    record_case(
-        input="m1→m2(missing=['s2']); lineage before vs after execution",
-        expected=(
-            ["s1", "s2", "s3"],                        # pre: all three
-            ["s1_1", "s1_2", "s3_1", "s3_2"],          # post: s2's kids gone
-            [("s2", "-")],                             # s2 marked filtered
-        ),
-        actual=(
-            sorted({r[0] for r in pre_rows if r[0]}),
-            post_m2_survivors,
-            filtered_rows,
-        ),
-    )
-    # Pre-execution: all three parents present.
-    assert pre_ids_m1 == ["s1", "s2", "s3"]
-    # Post-execution: s2 appears only as a filtered row (m2 dropped its kids).
-    assert ("s2", "-") in post_pairs
-    assert ("s2", "s2_1") not in post_pairs
-    assert ("s2", "s2_2") not in post_pairs
-    # Surviving children are correctly paired back to their parents.
-    assert post_m2_survivors == ["s1_1", "s1_2", "s3_1", "s3_2"]
-    assert ("s1", "s1_1") in post_pairs and ("s1", "s1_2") in post_pairs
-    assert ("s3", "s3_1") in post_pairs and ("s3", "s3_2") in post_pairs
-
-
-def test_lineage_after_execution_expands_compact_patterns(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
-):
-    """Before execution the lineage shows compact IDs like 's1_<1..2>'; after
-    execution it must list the concrete runtime IDs ('s1_1', 's1_2')."""
-    from biopipelines.mock import Mock
-
-    pipeline = new_pipeline("prov_lineage_runtime_expand")
-    with pipeline:
-        m1 = Mock(
-            ids=["s1", "s2"],
-            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
-        )
-        m2 = Mock(
-            source=m1.streams.structures,
-            children="<1..2>",
-            streams={"designs": {"format": "pdb", "file": "<id>.pdb"}},
-        )
-        pipeline.save()
-
-    output_root = os.path.dirname(m1.output_folder)
-    _, pre_rows = _read_lineage(output_root)
-    pre_m2 = sorted({r[1] for r in pre_rows if r[1]})
-    plot_lineage(output_root, "pre-exec")
-
-    _run_pipe_mock(os.path.join(m1.output_folder, "_configuration", "mock_config.json"))
-    _run_pipe_mock(os.path.join(m2.output_folder, "_configuration", "mock_config.json"))
-    _regenerate_lineage(pipeline)
-    plot_lineage(output_root, "post-exec")
-
-    _, post_rows = _read_lineage(output_root)
-    post_m2 = sorted({r[1] for r in post_rows if r[1]})
-    post_pairs = sorted((r[0], r[1]) for r in post_rows)
-
-    record_case(
-        input="compact vs runtime-expanded lineage IDs",
-        expected=(
-            ["s1_<1..2>", "s2_<1..2>"],
-            ["s1_1", "s1_2", "s2_1", "s2_2"],
-        ),
-        actual=(pre_m2, post_m2),
-    )
-    assert pre_m2 == ["s1_<1..2>", "s2_<1..2>"]
-    assert post_m2 == ["s1_1", "s1_2", "s2_1", "s2_2"]
-    assert post_pairs == [
-        ("s1", "s1_1"), ("s1", "s1_2"),
-        ("s2", "s2_1"), ("s2", "s2_2"),
-    ]
 
 
 # ── cycle tests: Mock → Panda → Mock (filter-driven cycle) ──────────────────
 
 def test_cycle_mock_panda_mock(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
-    """Full Mock → Panda(filter, pool) → Mock cycle.
-
-    The downstream Mock consumes Panda's pool-mode output stream. The
-    config-time lineage PNG should show all three columns (source Mock,
-    Panda, downstream Mock) wired left-to-right. No runtime execution —
-    Panda's filter isn't actually run — but the pipeline script and
-    lineage wiring are checked."""
+    """Full Mock → Panda(filter, pool) → Mock cycle: the generated script
+    wires all three tools and Panda's pool output feeds the downstream Mock
+    (fan-out via children). No runtime execution — Panda's filter isn't run
+    — but the pipeline script and the config-time stream wiring are checked."""
     from biopipelines.mock import Mock
     from biopipelines.panda import Panda
 
@@ -787,29 +491,23 @@ def test_cycle_mock_panda_mock(
 
     assert_valid_script(script_path, "Mock", "Panda", "cycle_mock_panda_mock")
 
-    header, rows = _read_lineage(os.path.dirname(upstream.output_folder))
+    # Filter alone doesn't rename, so the pool stream forwards the upstream IDs.
+    pool_ids = list(filtered.streams.structures.ids)
     record_case(
         input="Mock → Panda(filter, pool) → Mock(<1..2>)",
-        expected=3,
-        actual=len(header),
+        expected=["s1", "s2", "s3", "s4"],
+        actual=pool_ids,
     )
-    # Three tool columns in lineage (source Mock, Panda, downstream Mock).
-    assert len(header) == 3
-    # Every source-Mock ID appears in column 0 of some row.
-    col0 = {r[0] for r in rows if r[0]}
-    assert {"s1", "s2", "s3", "s4"}.issubset(col0)
-    plot_lineage(os.path.dirname(upstream.output_folder))
+    assert pool_ids == ["s1", "s2", "s3", "s4"]
 
 
 def test_cycle_two_panda_cycles_chained(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Two chained filter cycles: Mock → Panda1 → Mock2 → Panda2 → Mock3.
 
     Simulates an iterative-refinement loop where each cycle filters the
-    surviving IDs and fans out new children. Validates the lineage PNG can
-    render a 5-tool chain and that the script wires them all."""
+    surviving IDs and fans out new children. Validates the 5-tool chain wires."""
     from biopipelines.mock import Mock
     from biopipelines.panda import Panda
 
@@ -836,7 +534,7 @@ def test_cycle_two_panda_cycles_chained(
             operations=[Panda.filter("score >= 0.5")],
             pool=m1,
         )
-        Mock(
+        m2 = Mock(
             source=p2.streams.structures,
             children="<A B>",
             streams={"variants": {"format": "pdb", "file": "<id>.pdb"}},
@@ -847,80 +545,30 @@ def test_cycle_two_panda_cycles_chained(
         script_path, "Mock", "Panda", "cycle_double_panda",
     )
 
-    header, _ = _read_lineage(os.path.dirname(m0.output_folder))
+    # P1 (filter-only) forwards m0's IDs; m1 fans those out by <1..2> (kept as
+    # a compact template at config time); P2 (filter-only) forwards them; m2
+    # fans by <A B>. Spot-check the chain wired the pool streams through.
+    p2_ids = list(p2.streams.structures.ids)
+    m2_ids = list(m2.streams.variants.ids)
     record_case(
         input="M0 → P1 → M1(<1..2>) → P2 → M2(<A B>)",
-        expected=5,
-        actual=len(header),
+        expected=(["a_<1..2>", "b_<1..2>", "c_<1..2>", "d_<1..2>"], 4),
+        actual=(p2_ids, len(m2_ids)),
     )
-    assert len(header) == 5
-    plot_lineage(os.path.dirname(m0.output_folder))
-
-
-def test_cycle_panda_filter_then_fanout_executes(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
-):
-    """Cycle where Mock upstream + Mock downstream are actually executed.
-
-    Panda itself is not executed (no pandas assumption); we only need the
-    upstream and downstream Mock runtime map_tables to exist so the
-    post-execution lineage renders with concrete IDs on both ends."""
-    from biopipelines.mock import Mock
-    from biopipelines.panda import Panda
-
-    pipeline = new_pipeline("cycle_exec_mocks")
-    with pipeline:
-        upstream = Mock(
-            ids=["s1", "s2"],
-            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
-            tables={"scores": {"columns": ["score"], "fill": {"score": 0.7}}},
-        )
-        filtered = Panda(
-            tables=upstream.tables.scores,
-            operations=[Panda.filter("score >= 0.5")],
-            pool=upstream,
-        )
-        downstream = Mock(
-            source=filtered.streams.structures,
-            children="<1..2>",
-            streams={"refined": {"format": "pdb", "file": "<id>.pdb"}},
-        )
-        pipeline.save()
-
-    output_root = os.path.dirname(upstream.output_folder)
-    plot_lineage(output_root, "pre-exec")
-
-    # Run upstream and downstream Mocks (Panda's filter is not executed).
-    _run_pipe_mock(os.path.join(upstream.output_folder, "_configuration", "mock_config.json"))
-    _run_pipe_mock(os.path.join(downstream.output_folder, "_configuration", "mock_config.json"))
-    _regenerate_lineage(pipeline)
-    plot_lineage(output_root, "post-exec")
-
-    _, post_rows = _read_lineage(output_root)
-    # After execution, downstream Mock's runtime map_table gives concrete
-    # fan-out IDs in its column — either the last or next-to-last
-    # depending on whether Panda's column sits in between.
-    all_ids = {cell for r in post_rows for cell in r if cell and cell != "-"}
-    record_case(
-        input="Mock→Panda→Mock cycle, exec upstream+downstream Mocks",
-        expected="{s1_1,s1_2,s2_1,s2_2} ⊂ lineage",
-        actual=sorted(all_ids),
-    )
-    assert {"s1_1", "s1_2", "s2_1", "s2_2"}.issubset(all_ids)
+    assert p2_ids == ["a_<1..2>", "b_<1..2>", "c_<1..2>", "d_<1..2>"]
+    assert len(m2_ids) == 4  # one <A B>-fanned template per surviving parent
 
 
 # ── cycles with head / tail / sort / filter (rename path) ───────────────────
 
 def test_cycle_sort_head_renames_pool_ids(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Mock → Panda(sort+head, pool) → Mock.
 
     sort/head/tail/sample trigger Panda's auto-rename path, so the pool's
-    downstream IDs become "Panda_<N>_1", "Panda_<N>_2", ... The lineage
-    must still chain through, and the downstream Mock consumes the
-    renamed IDs as its parent axis."""
+    downstream IDs become "Panda_<N>_1", "Panda_<N>_2", ... and the
+    downstream Mock consumes the renamed IDs as its parent axis."""
     from biopipelines.mock import Mock
     from biopipelines.panda import Panda
 
@@ -959,17 +607,14 @@ def test_cycle_sort_head_renames_pool_ids(
     # head(3) fixes the output count, so the pool stream lists 3 renamed IDs.
     assert len(ranked_ids) == 3
     assert all("_" in rid for rid in ranked_ids)
-    plot_lineage(os.path.dirname(upstream.output_folder))
 
 
 def test_cycle_tail_then_fanout(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Mock → Panda(sort+tail(2)) → Mock(<A B>).
 
-    tail also triggers rename; this exercises the low-score / bottom-N
-    cycle path and checks the lineage renders the full chain."""
+    tail also triggers rename; this exercises the low-score / bottom-N cycle."""
     from biopipelines.mock import Mock
     from biopipelines.panda import Panda
 
@@ -1004,18 +649,15 @@ def test_cycle_tail_then_fanout(
         actual=len(ranked_ids),
     )
     assert len(ranked_ids) == 2
-    plot_lineage(os.path.dirname(m0.output_folder))
 
 
 def test_cycle_filter_sort_head_combined(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Mock → Panda(filter + sort + head) → Mock.
 
     Combines all three ops in one Panda step. Filter alone wouldn't trigger
-    rename; sort+head does, so the output IDs are renamed. The downstream
-    Mock's parent axis is the Panda-renamed IDs."""
+    rename; sort+head does, so the output IDs are renamed."""
     from biopipelines.mock import Mock
     from biopipelines.panda import Panda
 
@@ -1051,18 +693,15 @@ def test_cycle_filter_sort_head_combined(
         actual=len(picked_ids),
     )
     assert len(picked_ids) == 4
-    plot_lineage(os.path.dirname(m0.output_folder))
 
 
 def test_cycle_filter_only_preserves_original_ids(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Mock → Panda(filter, pool) → Mock.
 
     Filter alone does NOT trigger rename, so the pool output carries the
-    original upstream IDs. The downstream Mock's parent axis therefore
-    shows the surviving upstream IDs directly in the lineage."""
+    original upstream IDs."""
     from biopipelines.mock import Mock
     from biopipelines.panda import Panda
 
@@ -1095,12 +734,10 @@ def test_cycle_filter_only_preserves_original_ids(
     )
     # No rename, so Panda's pool output mirrors the upstream IDs at config time.
     assert kept_ids == ["keep1", "keep2", "drop1"]
-    plot_lineage(os.path.dirname(m0.output_folder))
 
 
 def test_cycle_sample_renames_with_lazy_count(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
-    plot_lineage,
 ):
     """Mock → Panda(sample(n=2)) → Mock.
 
@@ -1137,22 +774,18 @@ def test_cycle_sample_renames_with_lazy_count(
         actual=len(sampled_ids),
     )
     assert len(sampled_ids) == 2
-    plot_lineage(os.path.dirname(m0.output_folder))
 
 
-# ── post-exec lineage: Panda rename links back to upstream IDs ──────────────
+# ── Panda pool-mode rename writes a {stream}.id provenance map_table ─────────
 
-def test_cycle_sort_head_post_exec_lineage_links_rename(
-    local_config, isolated_cwd, new_pipeline, record_case, plot_lineage,
+def test_cycle_sort_head_panda_writes_stream_provenance(
+    local_config, isolated_cwd, new_pipeline, record_case,
 ):
-    """After executing Mock → Panda(sort+head) → Mock, the regenerated
-    lineage must link each renamed Panda_N back to its original upstream ID.
-
-    This is what fails without a runtime-written `<stream>_map.csv` in
-    Panda's pool mode: the result table carries `original_id`, but the
-    pipeline's lineage regeneration reads only stream map_tables, so the
-    rename map is invisible. pipe_panda now writes `<stream>_map.csv`
-    with the `<stream>.id` provenance column at runtime."""
+    """After executing Mock → Panda(sort+head, pool), pipe_panda must write a
+    ``<stream>_map.csv`` carrying a ``<stream>.id`` provenance column that
+    links each renamed ``Panda_N`` back to its original upstream ID — this is
+    how downstream tools (and Remap) resolve renamed pool IDs across the
+    tool boundary."""
     from biopipelines.mock import Mock
     from biopipelines.panda import Panda
 
@@ -1171,38 +804,21 @@ def test_cycle_sort_head_post_exec_lineage_links_rename(
         )
         pipeline.save()
 
-    output_root = os.path.dirname(upstream.output_folder)
-    plot_lineage(output_root, "pre-exec")
-
     _run_pipe_mock(os.path.join(upstream.output_folder, "_configuration", "mock_config.json"))
     _run_pipe_panda(os.path.join(ranked.output_folder, "_configuration", "panda_config.json"))
 
-    # Confirm pipe_panda wrote the stream map_table with the provenance col.
+    # pipe_panda wrote the stream map_table with the provenance column.
     map_path = ranked.streams.s.map_table
     assert os.path.exists(map_path), f"Panda did not write {map_path}"
     rows = _read_map(map_path)
     panda_to_original = {r["id"]: r["s.id"] for r in rows}
 
-    # Regenerate lineage from runtime map_tables.
-    pipeline._generate_id_lineage_csv()
-    plot_lineage(output_root, "post-exec")
-
-    _, post_rows = _read_lineage(output_root)
-    post_pairs = {(r[0], r[1]) for r in post_rows}
-
     record_case(
-        input="Mock → Panda(sort+head, pool) → post-exec lineage",
-        expected=("Panda_1 ← original upstream ID", "lineage pair present"),
-        actual=(panda_to_original, sorted(post_pairs)),
+        input="Mock → Panda(sort+head, pool) → runtime stream map_table",
+        expected=("Panda_1/Panda_2 → one of a/b/c/d"),
+        actual=panda_to_original,
     )
-    # The two Panda-renamed IDs must each link to a concrete upstream ID
-    # (one of a/b/c/d). With score=0.9 uniformly, pandas picks the first
-    # two by sort stability, so "a" and "b" survive.
+    # The two Panda-renamed IDs must each link to a concrete upstream ID.
+    # With score=0.9 uniformly, pandas picks the first two by sort stability.
     assert set(panda_to_original.keys()) == {"Panda_1", "Panda_2"}
     assert set(panda_to_original.values()).issubset({"a", "b", "c", "d"})
-    # Lineage rows connect upstream Mock column to Panda column.
-    for upstream_id, panda_id in panda_to_original.items():
-        # post_pairs is (mock_id, panda_id) — ordered by column.
-        assert (panda_id, upstream_id) in post_pairs, (
-            f"Expected lineage pair ({panda_id}, {upstream_id}) in {post_pairs}"
-        )

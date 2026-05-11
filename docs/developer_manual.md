@@ -1063,7 +1063,7 @@ What the suite covers:
 | `test_combinatorics.py`       | `Bundle` / `Each` axis resolution, `predict_output_ids_with_provenance`, `{alias}.id` provenance columns, `AxisConfig` / `CombinatoricsConfig` round-trip.                             |
 | `test_pipeline_generation.py` | End-to-end `Pipeline.save()` emitting a runnable `pipeline.sh`, expected-outputs JSON, ToolOutputs metadata; full bash execution of a 3-Mock chain on POSIX hosts.                     |
 | `test_mock.py`                | Every documented Mock pattern: explicit / source IDs, `Bundle` / `Each`, deterministic + lazy `children` with `produce`, `map_table_strategy`, `missing`, table `fill`, multi-stream. |
-| `test_provenance.py`          | Multi-hop lineage through chained Mocks and Mock → Panda → Mock cycles; config-time vs runtime lineage; `<stream>.id` / `<stream>.parent` provenance columns.                          |
+| `test_provenance.py`          | Multi-hop parent→child provenance through chained Mocks and Mock → Panda → Mock cycles; `<stream>.id` / `<stream>.parent` provenance columns on the materialized `<stream>_map.csv` files. |
 | `test_folders.py`             | Filesystem-layout prediction and folder resolution.                                                                                                                                    |
 | `test_remap.py`               | ID remapping rules.                                                                                                                                                                    |
 | `test_panda.py`               | Table transformations, filter/sort/head/tail/sample rename paths.                                                                                                                      |
@@ -1078,7 +1078,7 @@ This makes it the right tool for testing framework plumbing end-to-end:
 
 - It exercises the same code paths a real tool does: config serialization to `mock_config.json`, script emission with `generate_completion_check_header`, activation, and the runtime reading of its own config.
 - Tests can compose it arbitrarily (Mock → Mock, Mock → Panda → Mock, multi-axis `Each(a) × Each(b)` into a fan-out Mock) without any external dependency.
-- Because the runtime is deterministic and cheap (~3 s for the whole suite), provenance, lineage, and ID-expansion invariants can be asserted against real materialized `<stream>_map.csv` files rather than against mocked-in-memory state.
+- Because the runtime is deterministic and cheap (~3 s for the whole suite), provenance and ID-expansion invariants can be asserted against real materialized `<stream>_map.csv` files rather than against mocked-in-memory state.
 
 When adding a framework-level feature (a new ID pattern, a new provenance column, a new cycle pattern), prefer writing the test against Mock rather than against a real tool. Only reach for a real tool when the behavior under test is specific to that tool's payload script.
 

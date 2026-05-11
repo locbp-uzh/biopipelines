@@ -140,8 +140,8 @@ def _strip_suffixes_recursive(
 
     Returns a tuple of progressively stripped IDs (NOT including start_id itself).
 
-    Pure function of its arguments; memoized because it is called millions of
-    times on a tiny set of distinct ids during lineage-CSV generation.
+    Pure function of its arguments; memoized because it is called many times on
+    a small set of distinct ids during cross-tool ID matching.
     """
     results = []
     current_id = start_id
@@ -232,10 +232,10 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     if not id_map or "*" not in id_map:
         return [structure_id]
     # Delegate to a memoized core keyed on (id, pattern). map_table_ids_to_ids
-    # is a pure function and is called millions of times on a tiny set of
-    # distinct ids during lineage tracing — caching turns the lineage CSV
-    # generation from O(N^2) string work into O(N). Return a copy so callers
-    # that mutate the result (e.g. .extend) don't corrupt the cache entry.
+    # is a pure function and is called many times on a small set of distinct ids
+    # during cross-tool ID matching; caching keeps repeated merges cheap. Return
+    # a copy so callers that mutate the result (e.g. .extend) don't corrupt the
+    # cache entry.
     return list(_map_table_ids_to_ids_cached(structure_id, id_map["*"]))
 
 
@@ -405,10 +405,11 @@ def _build_target_index(target_ids: Tuple[str, ...], pattern_str: str):
         first-encountered target wins).
 
     Memoized on (target_ids, pattern) so that repeated calls against the
-    same target list — e.g. one per output id in lineage-CSV generation —
-    build the index once instead of once per call. The returned structures
-    must be treated as read-only by callers (get_mapped_ids only reads them
-    or copies before mutating).
+    same target list — e.g. resolving many source ids against one tool's
+    output, or many per-merge lookups in a campaign — build the index once
+    instead of once per call. The returned structures must be treated as
+    read-only by callers (get_mapped_ids only reads them or copies before
+    mutating).
     """
     id_map = {"*": pattern_str}
     target_set = set(target_ids)
@@ -498,9 +499,8 @@ def get_mapped_ids(
 
     # Build (or reuse) the target-side index. This is keyed only on the
     # target id list and the pattern, so callers that invoke get_mapped_ids
-    # many times against the *same* target list (notably the lineage-CSV
-    # tracer, which calls it once per output id per tool) pay the O(N)
-    # index build only once instead of O(N) times.
+    # many times against the *same* target list pay the O(N) index build only
+    # once instead of once per call.
     target_set, target_bases_cache, base_to_targets = _build_target_index(
         tuple(target_ids), id_map.get("*", "*_<S>")
     )

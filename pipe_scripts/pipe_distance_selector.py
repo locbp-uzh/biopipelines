@@ -194,8 +194,9 @@ def resolve_restriction_spec(restrict_spec: str, structure_id: str) -> List[Tupl
         return []  # No restriction
 
     # Handle table reference using pipe_biopipelines_io.
-    # lookup_table_value auto-resolves ID matching via pdb/id columns and
-    # the shared lineage CSV (Strategy 4), so no explicit id_map is needed.
+    # lookup_table_value auto-resolves ID matching via pdb/id columns, id_map
+    # suffix stripping, and {stream}.id provenance columns, so no explicit
+    # id_map is needed.
     if restrict_spec.startswith("TABLE_REFERENCE:"):
         try:
             table, column_name = load_table(restrict_spec)

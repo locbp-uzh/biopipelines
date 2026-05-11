@@ -16,7 +16,7 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
     from .combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
     from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
@@ -24,7 +24,7 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
     from combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
     from datastream_resolver import resolve_input_to_datastream
 
@@ -659,14 +659,14 @@ fi
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after Boltz2 execution."""
-        predicted_ids, provenance = self._predict_sequence_ids_with_provenance()
+        predicted_ids, _provenance = self._predict_sequence_ids_with_provenance()
 
         # Structure files land inside the structures/ stream folder.
+        # The per-design map_table (with {stream}.id provenance) is written at
+        # runtime by pipe_boltz_postprocessing.py from the combinatorics config;
+        # here we only declare the stream and its map_table path.
         structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
         structure_files = [self.stream_path("structures", f"<id>{structure_ext}")]
-
-        # Create structures DataStream
-        create_map_table(self.structures_map_csv, predicted_ids, files=structure_files, provenance=provenance)
 
         structures = DataStream(
             name="structures",

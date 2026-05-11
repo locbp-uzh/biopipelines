@@ -16,14 +16,14 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
     from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
     from datastream_resolver import resolve_input_to_datastream
 
 
@@ -419,11 +419,16 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
 """
 
     def _generate_script_unsanitize_ids(self) -> str:
-        """Generate script section to restore original IDs after ColabFold sanitization."""
+        """Generate script section to restore original IDs after ColabFold sanitization.
+
+        The expected ids come from the runtime queries CSV (written by
+        _generate_script_prepare_sequences), not from a config-time map_table —
+        the structures_map.csv is written later, from the actual PDBs.
+        """
         structures_dir = self.stream_folder("structures")
         return f"""echo "Restoring original IDs (unsanitizing ColabFold output)"
 python {self.unsanitize_ids_py} \\
-    --predicted-ids "{self.structures_map}" \\
+    --predicted-ids "{self.queries_csv}" \\
     --rename-files "{structures_dir}" pdb \\
     --rename-files "{self.msas_folder}" a3m \\
     --fix-csv "{self.confidence_csv}" \\
@@ -465,10 +470,10 @@ fi
         sequence_ids = list(self.sequences_stream.ids)
 
         # Structure files land in structures/; map_table co-locates there.
+        # The per-design map_table is written at runtime by
+        # _generate_script_update_structures_map() from the actual PDBs; here
+        # we only declare the stream and its map_table path.
         structure_files = [self.stream_path("structures", "<id>.pdb")]
-
-        # Create map_table for structures
-        create_map_table(self.structures_map, sequence_ids, files=structure_files)
 
         structures = DataStream(
             name="structures",
