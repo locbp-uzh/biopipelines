@@ -47,6 +47,7 @@ Matching priority order (when using get_mapped_ids with unique=True):
 """
 
 import re
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple, Union
 
 
@@ -127,16 +128,20 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
         raise ValueError(f"Invalid ID map pattern '{pattern_str}': {e}")
 
 
+@lru_cache(maxsize=200_000)
 def _strip_suffixes_recursive(
     start_id: str,
     delimiter: str,
     has_s: bool,
     literal_part: str,
-) -> List[str]:
+) -> Tuple[str, ...]:
     """
     Recursively strip suffixes from an ID according to the pattern parameters.
 
-    Returns list of progressively stripped IDs (NOT including start_id itself).
+    Returns a tuple of progressively stripped IDs (NOT including start_id itself).
+
+    Pure function of its arguments; memoized because it is called millions of
+    times on a tiny set of distinct ids during lineage-CSV generation.
     """
     results = []
     current_id = start_id
@@ -178,7 +183,7 @@ def _strip_suffixes_recursive(
         if not results or current_id != results[-1]:
             results.append(current_id)
 
-    return results
+    return tuple(results)
 
 
 # Separator used for multi-axis combinatorics IDs (e.g., "prot1+lig1")
@@ -226,29 +231,36 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
     """
     if not id_map or "*" not in id_map:
         return [structure_id]
+    # Delegate to a memoized core keyed on (id, pattern). map_table_ids_to_ids
+    # is a pure function and is called millions of times on a tiny set of
+    # distinct ids during lineage tracing — caching turns the lineage CSV
+    # generation from O(N^2) string work into O(N). Return a copy so callers
+    # that mutate the result (e.g. .extend) don't corrupt the cache entry.
+    return list(_map_table_ids_to_ids_cached(structure_id, id_map["*"]))
 
-    pattern_str = id_map["*"]
 
+@lru_cache(maxsize=200_000)
+def _map_table_ids_to_ids_cached(structure_id: str, pattern_str: str) -> Tuple[str, ...]:
     # Check if pattern is just "*" (identity mapping)
     if pattern_str == "*":
-        return [structure_id]
+        return (structure_id,)
 
     # Verify pattern starts with "*"
     if not pattern_str.startswith("*"):
-        return [structure_id]
+        return (structure_id,)
 
     # Extract the suffix pattern
     suffix_pattern = pattern_str[1:]  # Remove leading "*"
 
     if not suffix_pattern:
-        return [structure_id]
+        return (structure_id,)
 
     # Determine placeholder type: <S> (any segment) or <N> (digits only)
     has_s = '<S>' in suffix_pattern
     has_n = '<N>' in suffix_pattern
 
     if not has_s and not has_n:
-        return [structure_id]
+        return (structure_id,)
 
     # Find the position of the placeholder
     placeholder = '<S>' if has_s else '<N>'
@@ -256,7 +268,7 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
 
     # Extract delimiter
     if p_pos == 0:
-        return [structure_id]  # Pattern like "*<N>" doesn't make sense
+        return (structure_id,)  # Pattern like "*<N>" doesn't make sense
 
     delimiter = suffix_pattern[p_pos - 1]
     literal_with_delim = suffix_pattern[:p_pos - 1] if p_pos > 1 else ""
@@ -295,7 +307,7 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
         stripped = _strip_suffixes_recursive(structure_id, delimiter, has_s, literal_part)
         candidates.extend(stripped)
 
-    return candidates
+    return tuple(candidates)
 
 
 # Per-process cache of provenance lookup tables, keyed by map_table CSV
@@ -380,6 +392,36 @@ def _get_provenance_ids(source_id, map_table_paths):
     return deduped
 
 
+@lru_cache(maxsize=4096)
+def _build_target_index(target_ids: Tuple[str, ...], pattern_str: str):
+    """Build the target-side lookup structures used by get_mapped_ids.
+
+    Returns ``(target_set, target_bases_cache, base_to_targets)`` where:
+      * ``target_set`` — set of target ids (for exact / membership checks).
+      * ``target_bases_cache`` — {target_id: tuple of its suffix-base ids,
+        most-specific first} (for sibling matching).
+      * ``base_to_targets`` — inverted index {base_id: [(target_id, distance), …]}
+        with insertion order preserved per base (historical tie-break:
+        first-encountered target wins).
+
+    Memoized on (target_ids, pattern) so that repeated calls against the
+    same target list — e.g. one per output id in lineage-CSV generation —
+    build the index once instead of once per call. The returned structures
+    must be treated as read-only by callers (get_mapped_ids only reads them
+    or copies before mutating).
+    """
+    id_map = {"*": pattern_str}
+    target_set = set(target_ids)
+    target_bases_cache: Dict[str, Tuple[str, ...]] = {}
+    base_to_targets: Dict[str, List[Tuple[str, int]]] = {}
+    for target_id in target_ids:
+        bases = tuple(map_table_ids_to_ids(target_id, id_map))
+        target_bases_cache[target_id] = bases
+        for distance, base in enumerate(bases):
+            base_to_targets.setdefault(base, []).append((target_id, distance))
+    return target_set, target_bases_cache, base_to_targets
+
+
 def get_mapped_ids(
     source_ids: List[str],
     target_ids: List[str],
@@ -452,27 +494,16 @@ def get_mapped_ids(
     if id_map is None:
         id_map = {"*": "*_<S>"}
 
-    target_set = set(target_ids)
     result = {}
 
-    # Pre-compute base forms for all targets (for sibling matching).
-    target_bases_cache = {}
-    for target_id in target_ids:
-        target_bases_cache[target_id] = map_table_ids_to_ids(target_id, id_map)
-
-    # Inverted index: for every base id (any element of any target's
-    # suffix-base list), record the targets that share it together with
-    # the position of `base` inside that target's base list (= distance,
-    # most-specific-first ordering preserved).
-    #
-    # This collapses the previous O(N_targets) scan inside each
-    # per-source-id iteration into a single dict lookup. Insertion order
-    # of target_ids is preserved per base, matching the historical
-    # tie-break (first-encountered wins).
-    base_to_targets: Dict[str, List[Tuple[str, int]]] = {}
-    for target_id in target_ids:
-        for distance, base in enumerate(target_bases_cache[target_id]):
-            base_to_targets.setdefault(base, []).append((target_id, distance))
+    # Build (or reuse) the target-side index. This is keyed only on the
+    # target id list and the pattern, so callers that invoke get_mapped_ids
+    # many times against the *same* target list (notably the lineage-CSV
+    # tracer, which calls it once per output id per tool) pay the O(N)
+    # index build only once instead of O(N) times.
+    target_set, target_bases_cache, base_to_targets = _build_target_index(
+        tuple(target_ids), id_map.get("*", "*_<S>")
+    )
 
     for source_id in source_ids:
         # Priority 1: Exact match
