@@ -21,6 +21,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .combinatorics import generate_multiplied_ids_pattern
+    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -28,6 +29,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from combinatorics import generate_multiplied_ids_pattern
+    from biopipelines_io import Resolve
 
 
 class CABSflex(BaseConfig):
@@ -264,63 +266,51 @@ fi
 
         flags_str = " ".join(flags)
 
-        # Generate commands for each structure (runs under Py2.7 CABSflex env)
+        # Iterate at runtime via Resolve.stream_ids (works for lazy streams).
+        # The parallel-vs-serial decision uses the deterministic-prefix count
+        # as a heuristic — lazy streams may expand to more at runtime, but
+        # that only causes serial fallback in the rare prefix-of-1 case.
         n_structures = len(self.structures_stream)
         run_parallel = self.max_parallel > 1 and n_structures > 1
 
-        cabsflex_cmds = ""
+        container_prefix = self.container_prefix()
+        execution_folder = self.execution_folder
+
         if run_parallel:
-            cabsflex_cmds += f'\necho "Running {n_structures} structures in parallel (max {self.max_parallel} concurrent)"\n'
-            cabsflex_cmds += "PIDS=()\nFAILED=0\n"
+            cabsflex_cmds = f"""
+echo "Running structures in parallel (max {self.max_parallel} concurrent)"
+PIDS=()
+FAILED=0
+for struct_id in {Resolve.stream_ids(self.structures_ds_json)}; do
+    STRUCT_FILE={Resolve.stream_item(self.structures_ds_json, "$struct_id")}
+    WORK_DIR="{execution_folder}/$struct_id"
+    LOG_FILE="{execution_folder}/$struct_id.log"
 
-        for sid, sfile in zip(self.structures_stream.ids_expanded, self.structures_stream.files_expanded):
-            # Per-structure scratch dir + log live under execution/.
-            work_dir = self.execution_path(sid)
-            cmd = f'{self.container_prefix()}CABSflex -i "{sfile}" -w "{work_dir}"'
-            if flags_str:
-                cmd += f" {flags_str}"
-
-            if run_parallel:
-                log_file = self.execution_path(f"{sid}.log")
-                cabsflex_cmds += f"""
-# Wait if we've reached the concurrency limit
-while [ "${{#PIDS[@]}}" -ge {self.max_parallel} ]; do
-    # Wait for any one job to finish, then remove completed PIDs
-    NEW_PIDS=()
-    for PID in "${{PIDS[@]}}"; do
-        if kill -0 "$PID" 2>/dev/null; then
-            NEW_PIDS+=("$PID")
-        else
-            wait "$PID" || FAILED=$((FAILED + 1))
+    # Wait if we've reached the concurrency limit
+    while [ "${{#PIDS[@]}}" -ge {self.max_parallel} ]; do
+        NEW_PIDS=()
+        for PID in "${{PIDS[@]}}"; do
+            if kill -0 "$PID" 2>/dev/null; then
+                NEW_PIDS+=("$PID")
+            else
+                wait "$PID" || FAILED=$((FAILED + 1))
+            fi
+        done
+        PIDS=("${{NEW_PIDS[@]}}")
+        if [ "${{#PIDS[@]}}" -ge {self.max_parallel} ]; then
+            sleep 1
         fi
     done
-    PIDS=("${{NEW_PIDS[@]}}")
-    if [ "${{#PIDS[@]}}" -ge {self.max_parallel} ]; then
-        sleep 1
-    fi
+    mkdir -p "$WORK_DIR"
+    (
+        echo "=== Processing $struct_id ==="
+        {container_prefix}CABSflex -i "$STRUCT_FILE" -w "$WORK_DIR" {flags_str}
+    ) > "$LOG_FILE" 2>&1 &
+    PIDS+=($!)
 done
-mkdir -p "{work_dir}"
-(
-    echo "=== Processing {sid} ==="
-    {cmd}
-) > "{log_file}" 2>&1 &
-PIDS+=($!)
-"""
-            else:
-                cabsflex_cmds += f"""
-echo "=== Processing {sid} ==="
-mkdir -p "{work_dir}"
-{cmd}
-if [ $? -ne 0 ]; then
-    echo "Error: CABS-Flex failed for {sid}"
-    exit 1
-fi
-"""
 
-        if run_parallel:
-            cabsflex_cmds += """
 # Wait for remaining jobs
-for PID in "${PIDS[@]}"; do
+for PID in "${{PIDS[@]}}"; do
     wait "$PID" || FAILED=$((FAILED + 1))
 done
 
@@ -328,6 +318,21 @@ if [ "$FAILED" -ne 0 ]; then
     echo "Error: $FAILED CABS-Flex job(s) failed"
     exit 1
 fi
+"""
+        else:
+            cabsflex_cmds = f"""
+for struct_id in {Resolve.stream_ids(self.structures_ds_json)}; do
+    STRUCT_FILE={Resolve.stream_item(self.structures_ds_json, "$struct_id")}
+    WORK_DIR="{execution_folder}/$struct_id"
+
+    echo "=== Processing $struct_id ==="
+    mkdir -p "$WORK_DIR"
+    {container_prefix}CABSflex -i "$STRUCT_FILE" -w "$WORK_DIR" {flags_str}
+    if [ $? -ne 0 ]; then
+        echo "Error: CABS-Flex failed for $struct_id"
+        exit 1
+    fi
+done
 """
 
         # Post-processing runs under biopipelines (Python 3)

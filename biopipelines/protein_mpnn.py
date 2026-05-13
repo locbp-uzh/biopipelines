@@ -294,14 +294,12 @@ fi
         fixed_param = self.fixed if self.fixed else "-"
         designed_param = self.redesigned if self.redesigned else "-"
 
-        # Resolve input directory at runtime via Python one-liner
-        return f"""INPUT_DIR=$(python -c "
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(sys.argv[1]), '..'))
-from biopipelines.biopipelines_io import load_datastream, iterate_files
-ds = load_datastream(sys.argv[1])
-print(os.path.dirname(next(iterate_files(ds))[1]))
-" "{self.structures_json}")
+        # parse_multiple_chains.py wants a folder, not a file list — pick the
+        # first expanded ID's file and take its dirname. The index=0 form is
+        # the lazy-safe variant documented in developer_manual.md.
+        return f"""FIRST_ID={Resolve.stream_ids(self.structures_json, index=0)}
+FIRST_FILE={Resolve.stream_item(self.structures_json, "$FIRST_ID")}
+INPUT_DIR=$(dirname "$FIRST_FILE")
 
 echo "Determining fixed positions"
 python {self.fixed_py} "{self.structures_json}" "{fixed_param}" "{designed_param}" "{self.chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
