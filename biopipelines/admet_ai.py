@@ -70,7 +70,7 @@ fi
 # Verify installation — instantiating ADMETModel downloads the bundled
 # Chemprop-RDKit weights, so a successful import + construction is the
 # right verification (and pre-warms the model cache for the first run).
-if {env_manager} run -n admet_ai python -c "from admet_ai import ADMETModel; ADMETModel()" >/dev/null 2>&1; then
+if MPLBACKEND=agg {env_manager} run -n admet_ai python -c "from admet_ai import ADMETModel; ADMETModel()" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ADMET-AI installation complete ==="
 else

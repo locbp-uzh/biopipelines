@@ -16,6 +16,13 @@ import sys
 import json
 import argparse
 
+# Drop any inherited MPLBACKEND before matplotlib is imported transitively
+# (admet_ai -> chemfunc -> matplotlib.pyplot). Colab leaks
+# 'module://matplotlib_inline.backend_inline' into child processes, which the
+# admet_ai env doesn't have the matplotlib_inline shim for, so matplotlib's
+# import crashes. 'agg' is headless and always available.
+os.environ["MPLBACKEND"] = "agg"
+
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
