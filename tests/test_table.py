@@ -141,20 +141,24 @@ def test_table_loads_excel_and_converts_to_csv(
         t = Table(str(xlsx_path))
         pipeline.save()
 
+    # Inside a Pipeline context Table(...) returns a StandardizedOutput,
+    # so reach into the .tables.data TableInfo for the converted path.
+    info = t.tables.data.info
+    converted_csv = info.path
+    columns = list(info.columns) if info.columns else []
     # The CSV lives inside the tool's tables/ folder (per 18d4bce), not
     # alongside scores.xlsx. The input file is never touched.
-    converted_csv = t.table_path
     record_case(input="Table('scores.xlsx') inside Pipeline",
-                expected=(True, ".csv", ["id", "score"], 2),
+                expected=(True, ".csv", ["id", "score"]),
                 actual=(os.path.exists(converted_csv),
                         os.path.splitext(converted_csv)[1],
-                        list(t.table_columns), t.table_count))
+                        columns))
     assert os.path.exists(converted_csv)
     assert converted_csv.endswith(".csv")
     assert "tables" in converted_csv.split(os.sep)
     # The original input dir does NOT receive a sibling .csv.
     assert not os.path.exists(str(xlsx_path).replace(".xlsx", ".csv"))
-    assert t.table_columns == ["id", "score"]
+    assert columns == ["id", "score"]
 
 
 # ── validation errors ───────────────────────────────────────────────────────
