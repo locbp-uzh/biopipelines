@@ -122,10 +122,13 @@ def test_table_column_reference_string(
 
 # ── Excel loading + conversion ───────────────────────────────────────────────
 
-def test_table_loads_excel_and_converts_to_csv(isolated_cwd, record_case):
-    """Excel (.xlsx) is converted to a sibling .csv; table_path points to the CSV.
-
-    openpyxl is a core dependency — this test runs unconditionally.
+def test_table_loads_excel_and_converts_to_csv(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Excel (.xlsx) is converted into the tool's tables/ folder, not next to
+    the input file. The conversion runs at ``configure_inputs`` time, so the
+    Table must be inside a Pipeline. openpyxl is a core dependency — this
+    test runs unconditionally.
     """
     from biopipelines.table import Table
 
@@ -133,14 +136,24 @@ def test_table_loads_excel_and_converts_to_csv(isolated_cwd, record_case):
     df = pd.DataFrame({"id": ["a", "b"], "score": [0.9, 0.8]})
     df.to_excel(xlsx_path, index=False)
 
-    t = Table(str(xlsx_path))
-    csv_sibling = str(xlsx_path).replace(".xlsx", ".csv")
-    record_case(input="Table('scores.xlsx')",
-                expected=(True, ["id", "score"], 2),
-                actual=(os.path.exists(csv_sibling),
+    pipeline = new_pipeline("table_xlsx_convert")
+    with pipeline:
+        t = Table(str(xlsx_path))
+        pipeline.save()
+
+    # The CSV lives inside the tool's tables/ folder (per 18d4bce), not
+    # alongside scores.xlsx. The input file is never touched.
+    converted_csv = t.table_path
+    record_case(input="Table('scores.xlsx') inside Pipeline",
+                expected=(True, ".csv", ["id", "score"], 2),
+                actual=(os.path.exists(converted_csv),
+                        os.path.splitext(converted_csv)[1],
                         list(t.table_columns), t.table_count))
-    assert os.path.exists(csv_sibling)
-    assert t.table_path == csv_sibling
+    assert os.path.exists(converted_csv)
+    assert converted_csv.endswith(".csv")
+    assert "tables" in converted_csv.split(os.sep)
+    # The original input dir does NOT receive a sibling .csv.
+    assert not os.path.exists(str(xlsx_path).replace(".xlsx", ".csv"))
     assert t.table_columns == ["id", "score"]
 
 

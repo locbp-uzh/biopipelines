@@ -42,6 +42,8 @@ def test_chain_default_two_batches_depends_on_one(
         Resources()
         Mock(ids=["b"], streams={"out": {"format": "pdb", "file": "<id>.pdb"}})
         pipeline.save()
+        # slurm_batch*.sh are emitted by .slurm(), not .save().
+        pipeline.slurm()
 
     assert pipeline.batch_parents == [[], [0]]
 
@@ -75,6 +77,8 @@ def test_parallel_block_opens_sibling_batches(
         Resources()
         Mock(ids=["post"], streams={"out": {"format": "pdb", "file": "<id>.pdb"}})
         pipeline.save()
+        # slurm_batch*.sh are emitted by .slurm(), not .save().
+        pipeline.slurm()
 
     # Batches: 0 = pre, 1 = sibling 1, 2 = sibling 2, 3 = post.
     # Parents: [], [0], [0], [1, 2].
