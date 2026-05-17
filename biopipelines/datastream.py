@@ -69,7 +69,7 @@ class DataStream:
 
     name: str = ""
     ids: List[str] = field(default_factory=list)
-    files: List[str] = field(default_factory=list)
+    files: Union[str, List[str]] = field(default_factory=list)
     map_table: str = ""
     format: str = "pdb"
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -82,10 +82,14 @@ class DataStream:
 
     def __post_init__(self):
         """Validate DataStream after initialization."""
+        # Shared-file form: files is a non-empty str — no length check, the
+        # one path covers all ids by design.
+        if self.is_shared_file:
+            return
         # Skip validation when patterns or <id> template are present
         if self.has_patterns() or self._has_file_template():
             return
-        # Validation rules for files:
+        # Validation rules for files (list form):
         # - Empty files list: valid (value-based, data in map_table)
         # - Single file: valid (one file contains all records, e.g., CSV)
         # - Multiple files: must match number of ids (one file per record)
@@ -110,8 +114,20 @@ class DataStream:
         """True if any ID contains [...] bracket segments (runtime-dependent)."""
         return any(id_patterns.is_lazy(s) for s in self.ids)
 
+    @property
+    def is_shared_file(self) -> bool:
+        """True if files is a single shared artifact (str) covering all ids.
+
+        Shared-file streams own one file (e.g. a multi-record FASTA) whose
+        rows correspond to the stream's ids. Distinct from per-ID file
+        lists and from value-based streams (empty files).
+        """
+        return isinstance(self.files, str) and bool(self.files)
+
     def _has_file_template(self) -> bool:
         """True if files list uses <id> template substitution."""
+        if isinstance(self.files, str):
+            return False
         return len(self.files) == 1 and '<id>' in self.files[0]
 
     @property
@@ -137,9 +153,16 @@ class DataStream:
 
     @property
     def files_expanded(self) -> List[str]:
-        """Lazily expand file patterns using expanded IDs."""
+        """Lazily expand file patterns using expanded IDs.
+
+        For shared-file streams (files is a single str path), returns
+        [self.files] — length 1, not duplicated per id. Consumers that
+        zip files with ids must check is_shared_file first.
+        """
         if self._files_expanded is None:
-            if not self.files:
+            if self.is_shared_file:
+                self._files_expanded = [self.files]
+            elif not self.files:
                 self._files_expanded = []
             elif self._has_file_template():
                 template = self.files[0]
@@ -176,10 +199,25 @@ class DataStream:
         containing the corresponding file (for file-based streams) or empty
         (for value-based streams, where values are read via map_table).
 
+        For shared-file streams, each yielded sub-stream keeps `files` as
+        the shared `str` path — every sub-stream points at the same file.
+
         Yields:
             Single-item DataStream for each item
         """
         expanded_ids = self.ids_expanded
+        if self.is_shared_file:
+            for item_id in expanded_ids:
+                yield DataStream(
+                    name=self.name,
+                    ids=[item_id],
+                    files=self.files,
+                    map_table=self.map_table,
+                    format=self.format,
+                    _runtime_mode=self._runtime_mode
+                )
+            return
+
         expanded_files = self.files_expanded
         if expanded_files:
             for item_id, item_file in zip(expanded_ids, expanded_files):
@@ -207,10 +245,16 @@ class DataStream:
 
         For integer index: returns single-item DataStream.
         For slice: returns new DataStream with sliced items.
+
+        Shared-file streams (files is str) preserve the str form on both
+        slice and integer access — the shared artifact is shared.
         """
         if isinstance(index, slice):
             sliced_ids = self.ids_expanded[index]
-            sliced_files = self.files_expanded[index] if self.files_expanded else []
+            if self.is_shared_file:
+                sliced_files = self.files
+            else:
+                sliced_files = self.files_expanded[index] if self.files_expanded else []
             return DataStream(
                 name=self.name,
                 ids=sliced_ids,
@@ -229,6 +273,16 @@ class DataStream:
             item_id = id_patterns.expand_at(self.ids[0], index)
         else:
             item_id = self.ids_expanded[index]
+
+        if self.is_shared_file:
+            return DataStream(
+                name=self.name,
+                ids=[item_id],
+                files=self.files,
+                map_table=self.map_table,
+                format=self.format,
+                _runtime_mode=self._runtime_mode
+            )
 
         if self.files_expanded:
             return DataStream(
@@ -271,6 +325,8 @@ class DataStream:
         """
         Get file path for a specific ID.
 
+        For shared-file streams every id maps to the same shared path.
+
         Args:
             item_id: The item identifier
 
@@ -278,6 +334,8 @@ class DataStream:
             File path if found, None otherwise
         """
         expanded_ids = self.ids_expanded
+        if self.is_shared_file:
+            return self.files if item_id in expanded_ids else None
         expanded_files = self.files_expanded
         if item_id in expanded_ids and expanded_files:
             idx = expanded_ids.index(item_id)
@@ -307,11 +365,28 @@ class DataStream:
         Create a new DataStream containing only specified IDs.
 
         Triggers expansion (unavoidable — must check each ID).
+
+        For shared-file streams the shared path is preserved as-is; the
+        caller is responsible for slicing the underlying file (see
+        ``biopipelines.stream_slicers``) if the content must match.
         """
         if isinstance(keep_ids, list):
             keep_ids = set(keep_ids)
 
         expanded_ids = self.ids_expanded
+
+        if self.is_shared_file:
+            new_ids = [i for i in expanded_ids if i in keep_ids]
+            return DataStream(
+                name=self.name,
+                ids=new_ids,
+                files=self.files,
+                map_table=self.map_table,
+                format=self.format,
+                metadata={**self.metadata, '_filtered': True, '_original_count': len(self)},
+                _runtime_mode=self._runtime_mode
+            )
+
         expanded_files = self.files_expanded
 
         new_ids = []
@@ -337,12 +412,14 @@ class DataStream:
         """
         Convert to dictionary for serialization.
 
-        Stores pattern-based ids/files (compact representation).
+        Stores pattern-based ids/files (compact representation). The
+        ``files`` field is serialized in whatever shape it was set —
+        list for per-id or templated, str for shared-file streams.
         """
         return {
             'name': self.name,
             'ids': self.ids.copy(),
-            'files': self.files.copy(),
+            'files': self.files if isinstance(self.files, str) else self.files.copy(),
             'map_table': self.map_table,
             'format': self.format,
             'metadata': self.metadata.copy()
@@ -354,11 +431,11 @@ class DataStream:
         Patterns stay compact; pipe scripts load at runtime via load_datastream().
         """
         import json
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         data = {
             'name': self.name,
             'ids': self.ids.copy(),
-            'files': self.files.copy(),
+            'files': self.files if isinstance(self.files, str) else self.files.copy(),
             'map_table': self.map_table,
             'format': self.format,
             'metadata': self.metadata.copy()
@@ -402,10 +479,14 @@ class DataStream:
 
     def __repr__(self) -> str:
         """Detailed string representation."""
+        if self.is_shared_file:
+            files_repr = "1(shared)"
+        else:
+            files_repr = str(len(self.files))
         return (
             f"DataStream(name='{self.name}', format='{self.format}', "
             f"items={len(self)}, "
-            f"files={len(self.files)}, "
+            f"files={files_repr}, "
             f"map_table={'set' if self.map_table else 'unset'})"
         )
 
@@ -430,7 +511,7 @@ class DataStream:
 def create_map_table(
     output_path: str,
     ids: List[str],
-    files: Optional[List[str]] = None,
+    files: Optional[Union[str, List[str]]] = None,
     values: Optional[List[str]] = None,
     additional_columns: Optional[Dict[str, List[Any]]] = None,
     provenance: Optional[Dict[str, List[str]]] = None,
@@ -467,8 +548,13 @@ def create_map_table(
     else:
         expanded_ids = ids
 
-    # Expand file template if needed
-    if files and len(files) == 1 and '<id>' in files[0]:
+    # Expand file template if needed.
+    # Shared-file form: a single str path covers all ids — replicate it
+    # into the map_table so every row carries the same path (one shared
+    # artifact, len(ids) rows).
+    if isinstance(files, str) and files:
+        expanded_files = [files] * len(expanded_ids)
+    elif files and len(files) == 1 and '<id>' in files[0]:
         template = files[0]
         expanded_files = [id_patterns.expand_file_pattern(template, eid) for eid in expanded_ids]
     elif files and any(id_patterns.is_lazy(s) for s in files):
@@ -555,7 +641,7 @@ def create_map_table(
     df = pd.DataFrame(data)
 
     # Ensure parent directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     df.to_csv(output_path, index=False)
     return output_path

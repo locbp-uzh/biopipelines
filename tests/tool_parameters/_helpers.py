@@ -56,7 +56,7 @@ def read_all_emitted_artifacts(script_path: str) -> str:
     # The run root is the parent of RunTime/.
     run_root = Path(script_path).resolve().parent.parent
     if run_root.exists():
-        for cfg in run_root.rglob("configuration/*"):
+        for cfg in run_root.rglob("_configuration/*"):
             if cfg.is_file() and cfg.suffix.lower() in (".json", ".yaml", ".yml", ".csv", ".jsonl", ".a3m", ".txt"):
                 try:
                     parts.append(cfg.read_text(encoding="utf-8", errors="replace"))

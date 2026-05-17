@@ -63,12 +63,15 @@ fi
 {skip}{remove_block}
 {env_block}
 
-# Verify installation
-if {env_manager} run -n MutationEnv python -c "import torch" >/dev/null 2>&1; then
+# Verify installation. logomaker is the heaviest dep declared in
+# MutationEnv.yaml and is actually imported by pipe_mutation_profiler.py;
+# the previous `import torch` check failed on fresh envs (e.g. Colab) since
+# torch is not part of MutationEnv and isn't used by the profiler.
+if {env_manager} run -n MutationEnv python -c "import logomaker" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== MutationEnv installation complete ==="
 else
-    echo "ERROR: MutationEnv verification failed (cannot import torch)"
+    echo "ERROR: MutationEnv verification failed (cannot import logomaker)"
     exit 1
 fi
 """

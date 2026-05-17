@@ -9,7 +9,10 @@ import pytest
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RESULTS_DIR = Path(__file__).resolve().parent
+# Write results to tests/_results/ (gitignored). Previously written into
+# tests/ directly, where the .csv/.xlsx ended up tracked and every run
+# dirtied the working tree.
+RESULTS_DIR = Path(__file__).resolve().parent / "_results"
 RESULTS_CSV = RESULTS_DIR / "test_results.csv"
 RESULTS_XLSX = RESULTS_DIR / "test_results.xlsx"
 

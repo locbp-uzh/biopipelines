@@ -143,6 +143,26 @@ echo "=== Pool ready ==="
                         f"{other_formats.get(name)!r} but input #1 has {fmt!r}."
                     )
 
+        # Validate that every run uses the same storage shape (shared-file
+        # vs per-id) for a given stream. Mixed shapes can't be combined
+        # coherently — slice+merge requires shared sources on every side,
+        # and per-id copy requires per-id sources. Catch the mismatch here
+        # rather than silently dropping the odd-one-out at pipe_pool time.
+        for name in first_streams:
+            shapes = [
+                bool(getattr(r.streams.get(name), "is_shared_file", False))
+                for r in self.runs
+                if r.streams.get(name) is not None
+            ]
+            if len(set(shapes)) > 1:
+                shared_idxs = [i for i, s in enumerate(shapes, start=1) if s]
+                perid_idxs = [i for i, s in enumerate(shapes, start=1) if not s]
+                raise ValueError(
+                    f"Pool stream '{name}' has mixed storage across runs: "
+                    f"shared-file in runs {shared_idxs}, per-id in runs "
+                    f"{perid_idxs}. All runs must agree."
+                )
+
         # Cache per-stream / per-table info for use in get_output_files.
         self._shared_streams = sorted(first_streams)
         self._shared_tables = sorted(first_tables)
@@ -204,13 +224,17 @@ echo "=== Pool ready ==="
             run_streams: List[Dict[str, Any]] = []
             for name in self._shared_streams:
                 ds = r.streams.get(name)
+                # Preserve shared-file form (str) — wrapping a path string in
+                # list() would shatter it into a list of characters.
+                files_payload = ds.files if ds.is_shared_file else list(ds.files)
                 run_streams.append({
                     "name": ds.name,
                     "stream_key": name,
                     "format": ds.format,
                     "ids": list(ds.ids),
-                    "files": list(ds.files),
+                    "files": files_payload,
                     "map_table": ds.map_table,
+                    "is_shared_file": bool(ds.is_shared_file),
                 })
             run_tables: List[Dict[str, Any]] = []
             for name in self._shared_tables:
@@ -284,6 +308,15 @@ echo "=== Pool ready ==="
             stream_dir = self.stream_folder(name)
             map_path = self.stream_map_path(name)
 
+            # Shared-file streams: every run owns one artifact. We slice each
+            # run (with the per-run rename to composite ids) and merge them
+            # at execution time; here we just predict the combined path.
+            any_shared = any(
+                getattr(r.streams.get(name), "is_shared_file", False)
+                for r in self.runs
+                if r.streams.get(name) is not None
+            )
+
             new_ids: List[str] = []
             new_files: List[str] = []
             pool_paths: List[int] = []
@@ -297,7 +330,13 @@ echo "=== Pool ready ==="
             for pool_idx, r in enumerate(self.runs, start=1):
                 ds = r.streams.get(name)
                 orig_ids = list(ds.ids_expanded) if hasattr(ds, "ids_expanded") and ds.ids_expanded else list(ds.ids)
-                orig_files = list(ds.files_expanded) if hasattr(ds, "files_expanded") and ds.files_expanded else list(ds.files)
+                # Shared-file streams: files_expanded would return a single-path
+                # list but len != len(orig_ids), and we don't want it threaded
+                # through the per-id append branch below anyway. Skip files here.
+                if getattr(ds, "is_shared_file", False):
+                    orig_files = []
+                else:
+                    orig_files = list(ds.files_expanded) if hasattr(ds, "files_expanded") and ds.files_expanded else list(ds.files)
                 for j, oid in enumerate(orig_ids):
                     if recount and not any_lazy:
                         composite = f"{self.recount_prefix}_{len(new_ids) + 1}"
@@ -361,9 +400,22 @@ echo "=== Pool ready ==="
                 bool(r.streams.get(name).files) for r in self.runs
                 if r.streams.get(name) is not None
             )
-            stream_files: List[str]
             ids_for_stream = lazy_pattern_ids if (recount and any_lazy) else new_ids
-            if ids_for_stream and any_input_has_files:
+            # Shared-file streams: emit a single combined artifact under the
+            # stream folder. Pick the first run's basename as canonical; pipe
+            # pool slices each run with rename + merges into this path.
+            if any_shared:
+                first_shared = next(
+                    (r.streams.get(name).files for r in self.runs
+                     if r.streams.get(name) is not None
+                     and getattr(r.streams.get(name), "is_shared_file", False)),
+                    None,
+                )
+                if first_shared:
+                    stream_files = os.path.join(stream_dir, os.path.basename(first_shared))
+                else:
+                    stream_files = []
+            elif ids_for_stream and any_input_has_files:
                 stream_files = [os.path.join(stream_dir, "<id>.*")]
             else:
                 stream_files = []

@@ -87,9 +87,14 @@ DataStream(
 
 DataStream attributes:
 - `ids` — List of identifiers (may contain compact patterns)
-- `files` — List of file paths (may be empty for value-based formats)
+- `files` — Either a list of file paths or a single string path. Three forms:
+  - empty list `[]` — value-based stream; content lives in `map_table`
+  - list `["<id>.pdb"]` or `["a.pdb", "b.pdb", ...]` — per-ID files (template or explicit)
+  - string `"path/to/shared.fasta"` — *shared-file* form: a single artifact (e.g. multi-record FASTA) covering all ids. `is_shared_file` returns True.
 - `map_table` — CSV with additional metadata
 - `format` — Data format (pdb, cif, fasta, csv, smiles, etc.)
+
+**Shared-file streams and slicers.** When a tool (e.g. Panda) filters a shared-file stream down to a subset of ids, the underlying artifact must also be sliced — copying the whole file would leak stale records past the filter. Format-aware slicers live in `biopipelines/stream_slicers.py` keyed by stream `format`. Built-in slicers cover `fasta`/`fa` and `csv`. To add another format, decorate a function with `@register("sdf")` (or the relevant format key) — Panda picks it up automatically. No silent fallback to "copy whole file": an unregistered format raises `ValueError`.
 
 **TableInfo** (`base_config.py`) — Metadata for CSV outputs:
 ```python

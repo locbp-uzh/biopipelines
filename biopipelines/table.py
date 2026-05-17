@@ -88,6 +88,10 @@ echo "=== Table ready ==="
         self.table_name = name
         self.table_description = description
         self._pending_filename = None
+        # When the source is Excel, defer the CSV write until configure_inputs
+        # (when tables_folder exists) so we never mutate the user's input dir.
+        self._pending_excel_df = None
+        self._excel_source_path = None
 
         if os.path.isfile(path):
             self._load_from_path(os.path.abspath(path))
@@ -101,14 +105,15 @@ echo "=== Table ready ==="
         super().__init__(**kwargs)
 
     def _load_from_path(self, abs_path: str):
-        """Load the table from an absolute path; convert Excel to CSV if needed."""
+        """Load the table from an absolute path; defer Excel-to-CSV until configure_inputs."""
         ext = os.path.splitext(abs_path)[1].lower()
         if ext in ('.xlsx', '.xls'):
             df = pd.read_excel(abs_path)
-            csv_path = os.path.splitext(abs_path)[0] + '.csv'
-            df.to_csv(csv_path, index=False)
-            self.table_path = csv_path
-            print(f"  Converted Excel to CSV: {csv_path}")
+            self._pending_excel_df = df
+            self._excel_source_path = abs_path
+            # table_path will be assigned in configure_inputs once tables_folder
+            # is known; provisional value lets get_config_display run pre-config.
+            self.table_path = abs_path
         else:
             df = pd.read_csv(abs_path)
             self.table_path = abs_path
@@ -145,6 +150,17 @@ echo "=== Table ready ==="
                 )
             self._load_from_path(os.path.abspath(candidate))
             self._pending_filename = None
+
+        # For Excel inputs: materialize the CSV inside the pipeline's tables/
+        # folder so we don't write next to the user's input file.
+        if self._pending_excel_df is not None:
+            os.makedirs(self.tables_folder, exist_ok=True)
+            base = os.path.splitext(os.path.basename(self._excel_source_path))[0]
+            csv_path = os.path.join(self.tables_folder, f"{base}.csv")
+            self._pending_excel_df.to_csv(csv_path, index=False)
+            self.table_path = csv_path
+            self._pending_excel_df = None
+            print(f"  Converted Excel to CSV: {csv_path}")
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""

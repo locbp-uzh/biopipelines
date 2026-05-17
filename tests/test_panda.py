@@ -658,3 +658,86 @@ def test_panda_pool_content_and_stream_map_coexist(
         f"sequences.csv is a lineage stub, not a content table: cols={cols}"
     )
     assert not is_lineage_schema
+
+
+def test_panda_pool_chained_rename_preserves_full_lineage(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Mock(ENT) -> Panda(rename) -> Panda(rename): the final stream
+    map_table must carry the full generation chain on the structures
+    stream, with the immediate parent in `structures.id` and the older
+    generation shifted to `structures.-1.id`.
+
+    Without the shift, the second Panda would overwrite the
+    `structures.id` written by the first, and the link from Panda_2 back
+    to ENT would be lost — breaking get_mapped_ids fallback through
+    provenance.
+    """
+    from biopipelines.mock import Mock
+    from biopipelines.panda import Panda
+
+    pipeline = new_pipeline("panda_chain_lineage")
+    with pipeline:
+        m = Mock(
+            ids=["ENT"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            tables={"scores": {"columns": ["score"], "fill": {"score": 0.9}}},
+        )
+        p1 = Panda(
+            tables=m.tables.scores,
+            operations=[Panda.head(1)],
+            pool=m,
+            rename="PandaCycle1",
+        )
+        p2 = Panda(
+            tables=p1.tables.result,
+            operations=[Panda.head(1)],
+            pool=p1,
+            rename="PandaCycle2",
+        )
+        pipeline.save()
+
+    _run_pipe("mock", os.path.join(m.output_folder, "_configuration", "mock_config.json"),
+              config_flag=False)
+    _run_pipe("panda", os.path.join(p1.output_folder, "_configuration", "panda_config.json"))
+    _run_pipe("panda", os.path.join(p2.output_folder, "_configuration", "panda_config.json"))
+
+    final_map = p2.streams.structures.map_table
+    assert os.path.exists(final_map), f"final stream map_table missing: {final_map}"
+    rows = _read_csv_rows(final_map)
+    cols = set(rows[0].keys()) if rows else set()
+
+    # Expect: id=PandaCycle2_1,
+    #         structures.id    -> immediate parent (from p1)
+    #         structures.-1.id -> grandparent (ENT)
+    immediate = {r["id"]: r["structures.id"] for r in rows}
+    older = {r["id"]: r.get("structures.-1.id", "") for r in rows}
+
+    record_case(
+        input="Mock(ENT) -> PandaCycle1(rename) -> PandaCycle2(rename)",
+        expected=({"id", "file", "structures.id", "structures.-1.id"},
+                  "non-empty parent + ENT grandparent"),
+        actual=(cols, (set(immediate.values()), set(older.values()))),
+    )
+    assert "structures.id" in cols, f"missing structures.id in {cols}"
+    assert "structures.-1.id" in cols, (
+        f"missing shifted structures.-1.id in {cols} — shift was not applied"
+    )
+    # Every row's grandparent should be the original Mock id.
+    assert set(older.values()) == {"ENT"}, (
+        f"shifted column should hold ENT, got {set(older.values())}"
+    )
+    from biopipelines.id_map_utils import get_mapped_ids
+    assert get_mapped_ids(
+        list(immediate.keys()),
+        ["ENT"],
+        unique=True,
+        map_table_paths=[final_map],
+    ) == {next(iter(immediate.keys())): "ENT"}
+
+    # Immediate parent should be from the first Panda step (not ENT, not the row's own id).
+    for rid, parent in immediate.items():
+        assert parent != rid, f"immediate parent equals self for {rid}"
+        assert parent != "ENT", (
+            f"immediate parent is grandparent (shift failed) for {rid}"
+        )

@@ -41,6 +41,62 @@ def test_num_sequences(local_config, isolated_cwd, new_pipeline):
     assert_kwarg_emitted(content, "num_sequences", 7, flag="--num_seq_per_target 7")
 
 
+def test_fasta_stream_is_shared_per_sequence(local_config, isolated_cwd, new_pipeline):
+    """ProteinMPNN exposes postprocessed FASTA as one shared file with
+    per-sequence record IDs, not raw per-parent execution FASTA dumps."""
+    from biopipelines.mock import Mock
+    from biopipelines.protein_mpnn import ProteinMPNN
+
+    pipeline = new_pipeline("pmpnn_fasta_shape")
+    with pipeline:
+        m = Mock(
+            ids=["4LCD"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            map_table_strategy="config",
+        )
+        pmpnn = ProteinMPNN(structures=m.streams.structures, num_sequences=2)
+        pipeline.save()
+
+    fasta = pmpnn.streams.fasta
+    assert fasta.is_shared_file
+    assert list(fasta.ids) == ["4LCD_<1..2>"]
+    assert list(fasta.ids_expanded) == ["4LCD_1", "4LCD_2"]
+    assert isinstance(fasta.files, str)
+    assert fasta.files.endswith("sequences.fasta")
+    assert fasta.map_table.endswith("sequences.csv")
+
+
+def test_panda_pool_predicts_one_sliced_fasta_for_protein_mpnn(
+    local_config, isolated_cwd, new_pipeline,
+):
+    """Panda(pool=ProteinMPNN) should preserve shared-file FASTA shape so
+    runtime slicing writes the same artifact that completion expects."""
+    from biopipelines.mock import Mock
+    from biopipelines.protein_mpnn import ProteinMPNN
+    from biopipelines.panda import Panda
+
+    pipeline = new_pipeline("pmpnn_panda_fasta_shape")
+    with pipeline:
+        m = Mock(
+            ids=["4LCD"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            map_table_strategy="config",
+        )
+        pmpnn = ProteinMPNN(structures=m.streams.structures, num_sequences=2)
+        pan = Panda(
+            tables=pmpnn.tables.sequences,
+            operations=[Panda.filter("score < 1")],
+            pool=pmpnn,
+        )
+        pipeline.save()
+
+    assert pan.streams.fasta.is_shared_file
+    assert isinstance(pan.streams.fasta.files, str)
+    assert pan.streams.fasta.files.endswith("sequences.fasta")
+    assert list(pan.streams.fasta.ids) == ["4LCD_<1..2>"]
+    assert list(pan.streams.fasta.ids_expanded) == ["4LCD_1", "4LCD_2"]
+
+
 def test_sampling_temp(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, sampling_temp=0.42)
     assert_kwarg_emitted(content, "sampling_temp", 0.42, flag="--sampling_temp 0.42")

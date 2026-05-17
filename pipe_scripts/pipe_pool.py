@@ -26,7 +26,8 @@ import os
 import platform
 import shutil
 import sys
-from typing import Optional
+import tempfile
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -89,6 +90,109 @@ def _renumber_ids(df: pd.DataFrame, pool_idx: int,
     return df
 
 
+def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
+                          recount_prefix: Optional[str] = None) -> None:
+    """Slice each run's shared artifact (renaming to composite ids) and
+    merge the parts into one combined artifact. Writes the consolidated
+    map_table with one row per composite id, all pointing at the merged
+    file path.
+    """
+    import sys as _sys
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _sys.path.insert(0, _os.path.dirname(_here))
+    from biopipelines.stream_slicers import get_slicer, get_merger
+
+    stream_dir = out_spec["stream_dir"]
+    out_map = out_spec["map_table"]
+    fmt = out_spec.get("format", "")
+
+    parts = []
+    rows = []
+    counter = 0
+    tmp_root = tempfile.mkdtemp(prefix="pool_shared_")
+    for pool_idx, run_streams in enumerate(runs_streams, start=1):
+        match = next(
+            (s for s in run_streams if s["stream_key"] == stream_key), None
+        )
+        if match is None:
+            continue
+        src = match["files"]
+        # Defensive: tolerate runs whose payload predates the is_shared_file
+        # flag — if files came as a 1-element list with a real path, treat
+        # it as shared too.
+        if isinstance(src, list):
+            if len(src) == 1 and isinstance(src[0], str):
+                src = src[0]
+            else:
+                continue
+        if not src or not os.path.exists(src):
+            print(f"  Skip shared stream '{stream_key}' run #{pool_idx}: missing {src}")
+            continue
+
+        ids = list(match["ids"])
+        # Build composite ids + rename map for this run.
+        rename: Dict[str, str] = {}
+        run_composites: List[str] = []
+        for oid in ids:
+            if recount_prefix is not None:
+                counter += 1
+                composite = f"{recount_prefix}_{counter}"
+            else:
+                composite = f"{oid}_{pool_idx}"
+            rename[oid] = composite
+            run_composites.append(composite)
+
+        slicer = get_slicer(fmt)
+        part = os.path.join(tmp_root, f"pool{pool_idx}_{os.path.basename(src)}")
+        slicer(src, part, ids, rename_map=rename)
+        parts.append(part)
+
+        # Map rows: one per composite id, file = merged dest (set after merge)
+        for oid, composite in zip(ids, run_composites):
+            row = {"id": composite, "value": "", "pool.path": pool_idx}
+            if recount_prefix is not None:
+                row["original.id"] = oid
+            rows.append(row)
+
+    # Merge all parts into the canonical dest under stream folder.
+    if parts:
+        canonical_basename = os.path.basename(
+            next(
+                (
+                    s["files"] if isinstance(s["files"], str) else s["files"][0]
+                    for run_streams in runs_streams for s in run_streams
+                    if s.get("stream_key") == stream_key
+                    and s.get("files")
+                ),
+                "shared",
+            )
+        )
+        dest = os.path.join(stream_dir, canonical_basename)
+        merger = get_merger(fmt)
+        merger(parts, dest)
+        for row in rows:
+            row["file"] = dest
+    else:
+        dest = ""
+        for row in rows:
+            row["file"] = ""
+
+    out_df = pd.DataFrame(rows)
+    # Reorder so 'file' sits next to 'id' (matches the per-id _gather_stream
+    # convention).
+    if "file" in out_df.columns:
+        cols = ["id", "file", "value", "pool.path"]
+        if "original.id" in out_df.columns:
+            cols.append("original.id")
+        existing = [c for c in cols if c in out_df.columns]
+        out_df = out_df[existing + [c for c in out_df.columns if c not in existing]]
+
+    os.makedirs(os.path.dirname(out_map), exist_ok=True)
+    out_df.to_csv(out_map, index=False)
+    print(f"  Wrote shared stream '{stream_key}' map: {out_map} ({len(out_df)} rows -> {dest})")
+
+
 def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
                    recount_prefix: Optional[str] = None) -> None:
     """Copy / symlink per-run files into the gather folder and write the
@@ -99,10 +203,26 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
     original id is preserved in an ``original.id`` column, and ``<axis>.id``
     provenance columns are NOT renumbered (their values still refer to
     upstream entities in their own namespace).
+
+    Shared-file streams (each run owns one artifact, e.g. a multi-record
+    FASTA) take a different path: each run is sliced with its per-run
+    rename map, then the parts are merged into a single combined artifact
+    under the stream folder. The map_table is written with one row per
+    composite id, all pointing at the merged file.
     """
     stream_dir = out_spec["stream_dir"]
     out_map = out_spec["map_table"]
+    fmt = out_spec.get("format", "")
     os.makedirs(stream_dir, exist_ok=True)
+
+    # Shared-file fast path: dispatch to slicer + merger and write the map.
+    any_shared = any(
+        isinstance(s, dict) and s.get("stream_key") == stream_key and s.get("is_shared_file")
+        for run_streams in runs_streams for s in run_streams
+    )
+    if any_shared:
+        _gather_shared_stream(stream_key, runs_streams, out_spec, recount_prefix)
+        return
 
     rows = []
     counter = 0  # only used when recount_prefix is set
@@ -153,6 +273,14 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
             # Skip wildcards (e.g. 'p.*' from a config-time file template
             # that was never resolved into a concrete extension).
             if src_file and (src_file.endswith(".*") or "*" in os.path.basename(src_file)):
+                src_file = ""
+            # Skip sources that don't exist on disk. The row still gets
+            # appended below with an empty file column so the id is
+            # preserved in the map_table, but we never claim a dest_file
+            # that was never created. This matches the wildcard-skip
+            # convention immediately above.
+            if src_file and not os.path.exists(src_file):
+                print(f"  Warning: source missing for id {oid!r}, dropping file from map: {src_file}")
                 src_file = ""
             ext = os.path.splitext(src_file)[1] if src_file else ""
             dest_file = (

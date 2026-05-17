@@ -18,7 +18,7 @@ import json
 import shutil
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 # Import unified I/O utilities for runtime DataStream expansion
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -539,6 +539,10 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
 def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str]) -> Dict[str, Dict[str, str]]:
     """Build {stream_name: {id: file_path}} from saved DataStream JSONs.
 
+    Per-id and templated streams populate the inner {id: file_path} dict.
+    Shared-file streams (one artifact for the whole stream) are excluded
+    here — call ``build_shared_streams_from_stream_jsons`` to discover them.
+
     Args:
         stream_jsons: {stream_name: json_path} from config
 
@@ -548,10 +552,35 @@ def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str]) -> Dict[str, 
     file_map = {}
     for stream_name, json_path in stream_jsons.items():
         ds = load_datastream(json_path)
+        if ds.is_shared_file:
+            continue
         file_map[stream_name] = {}
         for sid, fpath in iterate_files(ds):
             file_map[stream_name][sid] = fpath
     return file_map
+
+
+def build_shared_streams_from_stream_jsons(stream_jsons: Dict[str, str]) -> Dict[str, Dict[str, str]]:
+    """Build {stream_name: {"src": path, "format": fmt}} for shared-file streams.
+
+    Shared-file streams own a single artifact (e.g. a multi-record FASTA)
+    that must be sliced — not copied per id — when only a subset of ids
+    survives filtering. This function discovers those streams from the
+    saved DataStream JSONs so the extractor can dispatch the format-aware
+    slicer once per stream.
+
+    Args:
+        stream_jsons: {stream_name: json_path} from config
+
+    Returns:
+        Dict mapping stream_name to {"src": absolute source path, "format": stream format}.
+    """
+    shared = {}
+    for stream_name, json_path in stream_jsons.items():
+        ds = load_datastream(json_path)
+        if ds.is_shared_file:
+            shared[stream_name] = {"src": ds.files, "format": ds.format}
+    return shared
 
 
 def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str,
@@ -559,7 +588,8 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                                         rename_map: Optional[Dict[str, str]] = None,
                                         file_map: Optional[Dict[str, Dict[str, str]]] = None,
                                         ignore_missing: bool = False,
-                                        stream_folders: Optional[Dict[str, str]] = None) -> Dict[str, List[str]]:
+                                        stream_folders: Optional[Dict[str, str]] = None,
+                                        shared_map: Optional[Dict[str, Dict[str, str]]] = None) -> Dict[str, List[str]]:
     """
     Extract data from a single pool for filtered IDs.
 
@@ -570,6 +600,12 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
         rename_map: Optional mapping from original ID to new ID for renaming output files
         file_map: Optional mapping {stream_name: {id: file_path}} for direct file lookup
         ignore_missing: If True, skip missing files with a warning instead of failing
+        shared_map: Optional mapping {stream_name: {"src": path, "format": fmt}}
+            for shared-file streams. Each gets sliced once via the
+            format-specific function in biopipelines.stream_slicers, then
+            written to its stream folder. Filtered IDs after rename_map
+            are passed to the slicer (no rename support for shared files —
+            the shared artifact's record IDs are the original ones).
 
     Returns:
         Dictionary mapping stream name to list of extracted file paths
@@ -581,6 +617,35 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
     print(f"\nPool mode: Extracting data for {len(filtered_ids)} filtered IDs from {pool_folder}")
     if rename_map:
         print(f"Renaming files according to rename map")
+
+    # Shared-file streams: slice once per stream (not per id). If rename_map
+    # is set, the slicer rewrites record IDs so the FASTA/CSV agrees with
+    # the downstream stream's ids.
+    if shared_map:
+        from biopipelines.stream_slicers import get_slicer
+        # rename_map keys are *original* IDs (lookup); values are new IDs.
+        # The slicer only renames IDs in `filtered_ids` (which are the
+        # original IDs at this layer), so pass it through directly.
+        slicer_rename = rename_map or None
+        for stream_name, info in shared_map.items():
+            src = info["src"]
+            fmt = info["format"]
+            if not os.path.exists(src):
+                if ignore_missing:
+                    print(f"  Warning: Missing shared file for {stream_name}: {src} (skipped)")
+                    extracted_files[stream_name] = []
+                    continue
+                raise FileNotFoundError(
+                    f"Shared file not found for {stream_name}: {src}. "
+                    f"Use ignore_missing=True to skip."
+                )
+            dest_folder = (stream_folders or {}).get(stream_name, output_folder)
+            os.makedirs(dest_folder, exist_ok=True)
+            dest = os.path.join(dest_folder, os.path.basename(src))
+            slicer = get_slicer(fmt)
+            slicer(src, dest, filtered_ids, rename_map=slicer_rename)
+            extracted_files[stream_name] = [dest]
+            print(f"Sliced {stream_name} ({fmt}): {src} -> {dest} (kept {len(filtered_ids)} ids)")
 
     if file_map:
         # Use file map - iterate over all streams dynamically
@@ -620,8 +685,8 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                 shutil.copy2(source, dest)
                 extracted_files[stream_name].append(dest)
                 print(f"Extracted {stream_name}: {source} -> {dest}")
-    else:
-        raise ValueError("file_map is required for pool extraction")
+    elif not shared_map:
+        raise ValueError("file_map or shared_map is required for pool extraction")
 
     return extracted_files
 
@@ -631,7 +696,8 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
                                  rename_map: Optional[Dict[str, str]] = None,
                                  file_maps: Optional[List[Dict[str, Dict[str, str]]]] = None,
                                  ignore_missing: bool = False,
-                                 stream_folders: Optional[Dict[str, str]] = None) -> Dict[str, List[str]]:
+                                 stream_folders: Optional[Dict[str, str]] = None,
+                                 shared_maps: Optional[List[Dict[str, Dict[str, str]]]] = None) -> Dict[str, List[str]]:
     """
     Extract data from multiple pools based on the implicit PANDA_SOURCE column.
 
@@ -646,12 +712,16 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
         rename_map: Optional mapping from original ID to new ID
         file_maps: List of file maps, one per pool: [{stream_name: {id: file_path}}]
         ignore_missing: If True, skip missing files with a warning instead of failing
+        shared_maps: List of shared-file maps, one per pool:
+            [{stream_name: {"src": path, "format": fmt}}]. Each shared stream
+            is sliced using the IDs present in result_df for the matching
+            PANDA_SOURCE.
 
     Returns:
         Dictionary mapping stream name to list of extracted file paths
     """
-    if not file_maps:
-        raise ValueError("file_maps is required for multi-pool extraction")
+    if not file_maps and not shared_maps:
+        raise ValueError("file_maps or shared_maps is required for multi-pool extraction")
 
     if PANDA_SOURCE not in result_df.columns:
         raise ValueError(f"{PANDA_SOURCE} column required for multi-pool extraction")
@@ -660,12 +730,76 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
 
     print(f"\nMulti-pool mode: Extracting data from {len(pool_folders)} pools")
 
-    # Collect all stream names from all file maps
+    # Collect all stream names from all file maps and shared maps
     all_stream_names = set()
-    for fm in file_maps:
+    for fm in (file_maps or []):
         all_stream_names.update(fm.keys())
+    for sm in (shared_maps or []):
+        all_stream_names.update(sm.keys())
 
     extracted_files = {name: [] for name in all_stream_names}
+
+    # Shared-file streams across multiple pools: slice each pool into a temp
+    # file, then merge them into a single canonical artifact under the
+    # stream folder. This keeps the "shared-file means one artifact" rule
+    # intact across PANDA_SOURCE values — without merging, pools with the
+    # same basename overwrote each other.
+    if shared_maps:
+        import tempfile
+        from biopipelines.stream_slicers import get_slicer, get_merger
+        # Group (id, rename_target) by source pool, preserving order.
+        ids_by_source: Dict[int, List[str]] = {}
+        rename_by_source: Dict[int, Dict[str, str]] = {}
+        for _, row in result_df.iterrows():
+            lookup_id = str(row.get('original_id', row.get('id', '')))
+            out_id = str(row.get('id', lookup_id))
+            src_idx = int(row.get(PANDA_SOURCE, 0))
+            ids_by_source.setdefault(src_idx, []).append(lookup_id)
+            if rename_map and lookup_id != out_id:
+                rename_by_source.setdefault(src_idx, {})[lookup_id] = out_id
+
+        # Collect per-stream merge inputs across pools.
+        stream_parts: Dict[str, List[str]] = {}
+        stream_fmts: Dict[str, str] = {}
+        stream_dests: Dict[str, str] = {}
+        tmp_root = tempfile.mkdtemp(prefix="panda_shared_")
+        for src_idx, sm in enumerate(shared_maps):
+            kept = ids_by_source.get(src_idx, [])
+            if not kept:
+                continue
+            rmap = rename_by_source.get(src_idx) or None
+            for stream_name, info in sm.items():
+                src = info["src"]
+                fmt = info["format"]
+                if not os.path.exists(src):
+                    if ignore_missing:
+                        print(f"  Warning: Missing shared file for {stream_name} (pool {src_idx}): {src} (skipped)")
+                        continue
+                    raise FileNotFoundError(
+                        f"Shared file not found for {stream_name} (pool {src_idx}): {src}. "
+                        f"Use ignore_missing=True to skip."
+                    )
+                slicer = get_slicer(fmt)
+                part = os.path.join(tmp_root, f"pool{src_idx}_{stream_name}_{os.path.basename(src)}")
+                slicer(src, part, kept, rename_map=rmap)
+                stream_parts.setdefault(stream_name, []).append(part)
+                stream_fmts[stream_name] = fmt
+                if stream_name not in stream_dests:
+                    dest_folder = (stream_folders or {}).get(stream_name, output_folder)
+                    os.makedirs(dest_folder, exist_ok=True)
+                    stream_dests[stream_name] = os.path.join(dest_folder, os.path.basename(src))
+                print(f"Sliced {stream_name} ({fmt}) from pool {src_idx}: {src} -> {part} (kept {len(kept)} ids)")
+
+        for stream_name, parts in stream_parts.items():
+            fmt = stream_fmts[stream_name]
+            dest = stream_dests[stream_name]
+            merger = get_merger(fmt)
+            merger(parts, dest)
+            extracted_files[stream_name] = [dest]
+            print(f"Merged {stream_name} ({fmt}): {len(parts)} parts -> {dest}")
+
+    if not file_maps:
+        return extracted_files
 
     for _, row in result_df.iterrows():
         # Use original_id for lookup if available (when rename was applied),
@@ -718,6 +852,125 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
             print(f"Extracted {stream_name} from pool {source_idx}: {lookup_id} -> {dest}")
 
     return extracted_files
+
+
+def shift_provenance_columns(df: pd.DataFrame, stream_name: str) -> pd.DataFrame:
+    """Shift `<stream>.-N.id` provenance columns one generation further back.
+
+    Chained Panda steps each contribute one generation of provenance under
+    the same stream alias. Without shifting, every step would overwrite the
+    previous `<stream>.id`, erasing the chain ENT -> Panda_1 -> Panda_2.
+
+    The generation tag uses a negative integer (`.-1`, `.-2`, ...) so the
+    column name reads as "one step back, two steps back". Negative integers
+    cannot collide with Bundle's `<stream>.0.id` / `<stream>.1.id` / ...
+    (see combinatorics.py), which use non-negative integers to label
+    bundled members of an axis.
+
+    Renaming, from oldest generation outward:
+
+        <stream>.-N.id  -> <stream>.-(N+1).id
+        <stream>.-2.id  -> <stream>.-3.id
+        <stream>.-1.id  -> <stream>.-2.id
+        <stream>.id     -> <stream>.-1.id
+
+    Returns a dataframe with the columns renamed. `<stream>.id` no longer
+    appears in the result (it was renamed to `<stream>.-1.id`); the caller
+    writes a fresh `<stream>.id` afterwards.
+    """
+    base = f"{stream_name}.id"
+    prefix = f"{stream_name}.-"
+    suffix = ".id"
+
+    numbered: List[Tuple[int, str]] = []
+    for col in df.columns:
+        if not (col.startswith(prefix) and col.endswith(suffix)):
+            continue
+        middle = col[len(prefix):-len(suffix)]
+        if middle.isdigit():
+            numbered.append((int(middle), col))
+
+    # Rename from oldest generation downward to avoid collisions.
+    numbered.sort(reverse=True)
+    rename_map: Dict[str, str] = {}
+    for gen, col in numbered:
+        rename_map[col] = f"{prefix}{gen + 1}{suffix}"
+    if base in df.columns:
+        rename_map[base] = f"{prefix}1{suffix}"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+    return df
+
+
+def order_stream_provenance_columns(df: pd.DataFrame, stream_name: str) -> List[str]:
+    """Return same-stream provenance columns in nearest-to-oldest order."""
+    axis_col = f"{stream_name}.id"
+    gen_cols = [axis_col] if axis_col in df.columns else []
+    prev_prefix = f"{stream_name}.-"
+    prev_numbered = []
+    for col in df.columns:
+        if col.startswith(prev_prefix) and col.endswith(".id"):
+            mid = col[len(prev_prefix):-len(".id")]
+            if mid.isdigit():
+                prev_numbered.append((int(mid), col))
+    prev_numbered.sort()
+    gen_cols.extend(col for _, col in prev_numbered)
+    return gen_cols
+
+
+def load_upstream_provenance_row(
+    pool_stream_jsons: List[Dict[str, str]],
+    stream_name: str,
+    source_idx: int,
+    lookup_id: str,
+) -> Dict[str, Any]:
+    """Load provenance columns for one upstream stream row, if available."""
+    if source_idx >= len(pool_stream_jsons):
+        return {}
+    stream_json = pool_stream_jsons[source_idx].get(stream_name)
+    if not stream_json:
+        return {}
+
+    try:
+        ds = load_datastream(stream_json)
+    except Exception:
+        return {}
+
+    if not ds.map_table or not os.path.exists(ds.map_table):
+        return {}
+
+    try:
+        map_df = pd.read_csv(
+            ds.map_table,
+            keep_default_na=False,
+            na_values=['NA', 'N/A', '#N/A'],
+        )
+    except Exception:
+        return {}
+
+    if "id" not in map_df.columns:
+        return {}
+
+    ids = map_df["id"].astype(str).tolist()
+    matching = map_df[map_df["id"].astype(str) == lookup_id]
+    if matching.empty:
+        matched = get_mapped_ids(
+            [lookup_id],
+            ids,
+            unique=True,
+            map_table_paths=[ds.map_table],
+        ).get(lookup_id)
+        if matched:
+            matching = map_df[map_df["id"].astype(str) == matched]
+    if matching.empty:
+        return {}
+
+    row = matching.iloc[0].to_dict()
+    return {
+        col: row[col]
+        for col in map_df.columns
+        if col != "id" and col.endswith(".id")
+    }
 
 
 def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
@@ -962,8 +1215,10 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     pool_stream_jsons = config_data.get('pool_stream_jsons', [])
     # Build file maps at runtime by expanding DataStream patterns
     pool_file_maps = []
+    pool_shared_maps = []
     for stream_jsons in pool_stream_jsons:
         pool_file_maps.append(build_file_map_from_stream_jsons(stream_jsons))
+        pool_shared_maps.append(build_shared_streams_from_stream_jsons(stream_jsons))
     pool_table_maps = config_data.get('pool_table_maps', [])
     map_table_paths = config_data.get('map_table_paths', [])
     rename = config_data.get('rename')
@@ -1128,7 +1383,9 @@ def run_panda(config_data: Dict[str, Any]) -> None:
         # Extract files only if we have IDs to extract and file-based streams exist
         stream_folders = config_data.get("stream_folders") or {}
         extracted = {}
-        if filtered_ids_for_lookup and pool_file_maps and any(fm for fm in pool_file_maps):
+        has_per_id = pool_file_maps and any(fm for fm in pool_file_maps)
+        has_shared = pool_shared_maps and any(sm for sm in pool_shared_maps)
+        if filtered_ids_for_lookup and (has_per_id or has_shared):
             # Use multi-pool extraction if we have the implicit PANDA_SOURCE
             # column (auto-tagged when concat ran over multiple inputs) and
             # multiple pools.
@@ -1139,6 +1396,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                     file_maps=pool_file_maps,
                     ignore_missing=ignore_missing,
                     stream_folders=stream_folders,
+                    shared_maps=pool_shared_maps,
                 )
             else:
                 # Single pool mode - use first pool
@@ -1148,6 +1406,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                     file_map=pool_file_maps[0] if pool_file_maps else None,
                     ignore_missing=ignore_missing,
                     stream_folders=stream_folders,
+                    shared_map=pool_shared_maps[0] if pool_shared_maps else None,
                 )
 
         print(f"\nPool mode summary:")
@@ -1213,35 +1472,85 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                             f"cannot attach {axis_col} provenance"
                         )
                         continue
+                    # Preserve older generations: shift any existing
+                    # <stream>.id / <stream>.-N.id one step back before
+                    # writing the new immediate-parent column. Without
+                    # this, chained Panda steps would overwrite the
+                    # previous parent and lose the chain.
+                    existing = shift_provenance_columns(existing, stream_name)
                     existing[axis_col] = existing['id'].astype(str).map(
                         parent_by_id
                     ).fillna(existing['id'].astype(str))
-                    # Place `<stream>.id` right after `id` for readability,
-                    # leave every other column (including `pool.id`) where
-                    # it was.
-                    cols = [c for c in existing.columns if c != axis_col]
-                    id_pos = cols.index('id')
-                    new_order = cols[:id_pos + 1] + [axis_col] + cols[id_pos + 1:]
+                    # Place generation columns immediately after `id` in
+                    # generation order — `id, <stream>.id, <stream>.-1.id,
+                    # <stream>.-2.id, ...` — then everything else (including
+                    # `pool.id`) in its original position.
+                    gen_cols = order_stream_provenance_columns(
+                        existing, stream_name
+                    )
+                    other_cols = [c for c in existing.columns if c not in gen_cols]
+                    id_pos = other_cols.index('id')
+                    new_order = (
+                        other_cols[:id_pos + 1]
+                        + gen_cols
+                        + other_cols[id_pos + 1:]
+                    )
                     existing = existing[new_order]
                     existing.to_csv(map_path, index=False)
                     print(f"Augmented content table with {axis_col}: {map_path}")
                 else:
                     # (b) No content table — write a provenance-only map_table.
                     rows_out = []
-                    for out_id, parent in parent_by_id.items():
+                    has_source_table = PANDA_SOURCE in result_df.columns
+                    for _, r in result_df.iterrows():
+                        out_id = str(r['id'])
+                        parent = parent_by_id[out_id]
+                        lookup_id = (
+                            str(r['original_id']) if has_original else out_id
+                        )
+                        source_idx = int(r.get(PANDA_SOURCE, 0)) if has_source_table else 0
                         file_val = (file_template.replace('<id>', out_id)
                                     if '<id>' in file_template else file_template)
-                        rows_out.append({
+                        row = {
                             'id': out_id,
                             'file': file_val,
-                            axis_col: parent,
-                        })
-                    with open(map_path, 'w', newline='') as mf:
-                        writer = csv.DictWriter(
-                            mf, fieldnames=['id', 'file', axis_col]
+                        }
+                        row.update(load_upstream_provenance_row(
+                            pool_stream_jsons,
+                            stream_name,
+                            source_idx,
+                            lookup_id,
+                        ))
+                        rows_out.append(row)
+
+                    out_df = pd.DataFrame(rows_out)
+                    if not out_df.empty:
+                        out_df = shift_provenance_columns(out_df, stream_name)
+                        out_df[axis_col] = out_df['id'].astype(str).map(
+                            parent_by_id
+                        ).fillna(out_df['id'].astype(str))
+
+                        gen_cols = order_stream_provenance_columns(
+                            out_df, stream_name
                         )
+                        other_cols = [c for c in out_df.columns if c not in gen_cols]
+                        id_pos = other_cols.index('id')
+                        new_order = (
+                            other_cols[:id_pos + 1]
+                            + gen_cols
+                            + other_cols[id_pos + 1:]
+                        )
+                        out_df = out_df[new_order]
+
+                    with open(map_path, 'w', newline='') as mf:
+                        fieldnames = (
+                            list(out_df.columns)
+                            if not out_df.empty
+                            else ['id', 'file', axis_col]
+                        )
+                        writer = csv.DictWriter(mf, fieldnames=fieldnames)
                         writer.writeheader()
-                        writer.writerows(rows_out)
+                        writer.writerows(out_df.to_dict('records'))
                     print(f"Wrote stream map_table: {map_path}")
 
     # Create missing.csv

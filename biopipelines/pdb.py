@@ -192,6 +192,10 @@ echo "=== PDB ready ==="
             else:
                 raise ValueError(f"Unexpected positional argument: {arg}. Expected PDBOperation (e.g., PDB.Rename(...))")
 
+        # Collected at RCSB-lookup time; initialize up front so any code path
+        # that appends (e.g. _check_ligands_in_rcsb) cannot hit AttributeError.
+        self.predicted_compound_ids = []
+
         # Dict input: {id: pdb_code} -> extract ids from keys, pdb codes from values
         if isinstance(pdbs, dict):
             if ids is not None:
@@ -473,10 +477,11 @@ echo "=== PDB ready ==="
                     # Custom file, not an RCSB ID
                     print(f"  Found {pdb_id} locally: {local_path}")
             else:
-                # Not found locally - check if valid RCSB ID
+                # Not found locally - check if valid RCSB ID.
+                # wwPDB Format 3.3: 4 chars, first is a digit, rest alphanumeric.
                 rcsb_id = pdb_id.upper()
-                if len(rcsb_id) != 4 or not rcsb_id.isalnum():
-                    raise ValueError(f"PDB '{pdb_id}' not found locally and is not a valid RCSB PDB ID (must be 4 alphanumeric characters)")
+                if len(rcsb_id) != 4 or not rcsb_id.isalnum() or not rcsb_id[0].isdigit():
+                    raise ValueError(f"PDB '{pdb_id}' not found locally and is not a valid RCSB PDB ID (must be 4 characters, first a digit, rest alphanumeric)")
 
                 # Check if exists on RCSB
                 has_ligands = self._check_rcsb_exists(rcsb_id, custom_id)
@@ -486,9 +491,6 @@ echo "=== PDB ready ==="
                     print(f"  {pdb_id} not found locally, will download from RCSB (contains ligands)")
                 else:
                     print(f"  {pdb_id} not found locally, will download from RCSB")
-
-        # Query RCSB API to get ligand information for all structures
-        self._fetch_ligand_info_from_rcsb()
 
     def _check_ligands_in_rcsb(self, rcsb_id: str, custom_id: str = None) -> tuple:
         """
@@ -512,35 +514,36 @@ echo "=== PDB ready ==="
             response.raise_for_status()
 
             data = response.json()
-
-            # Check for ligands
-            if 'rcsb_entry_info' in data:
-                entry_info = data['rcsb_entry_info']
-                if 'nonpolymer_bound_components' in entry_info:
-                    ligands = entry_info['nonpolymer_bound_components']
-                    # Filter out common solvents/ions/crystallization agents
-                    common_solvents = {
-                        'HOH', 'WAT', 'H2O',  # Water
-                        'NA', 'CL', 'CA', 'MG', 'K', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',  # Common ions
-                        'SO4', 'PO4', 'NO3',  # Anions
-                        'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',  # Glycols and PEGs
-                        'ACT', 'ACE', 'ACY',  # Acetate
-                        'PYR', 'PYO',  # Pyruvate
-                        'DMS', 'DMSO', 'BME', 'MPD', 'TRS', 'EPE'  # Common solvents
-                    }
-                    real_ligands = [lig for lig in ligands if lig not in common_solvents]
-
-                    # Store predicted compound IDs if custom_id provided
-                    if custom_id and real_ligands:
-                        for ligand_code in real_ligands:
-                            self.predicted_compound_ids.append(f"{custom_id}_{ligand_code}")
-
-                    return len(real_ligands) > 0, real_ligands
-
+        except (requests.RequestException, ValueError):
+            # Network failure, HTTP error, or non-JSON response — treat as "no
+            # ligand info available" rather than crashing pipeline construction.
             return False, []
 
-        except Exception:
-            return False, []
+        # Check for ligands
+        if 'rcsb_entry_info' in data:
+            entry_info = data['rcsb_entry_info']
+            if 'nonpolymer_bound_components' in entry_info:
+                ligands = entry_info['nonpolymer_bound_components']
+                # Filter out common solvents/ions/crystallization agents
+                common_solvents = {
+                    'HOH', 'WAT', 'H2O',  # Water
+                    'NA', 'CL', 'CA', 'MG', 'K', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',  # Common ions
+                    'SO4', 'PO4', 'NO3',  # Anions
+                    'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',  # Glycols and PEGs
+                    'ACT', 'ACE', 'ACY',  # Acetate
+                    'PYR', 'PYO',  # Pyruvate
+                    'DMS', 'DMSO', 'BME', 'MPD', 'TRS', 'EPE'  # Common solvents
+                }
+                real_ligands = [lig for lig in ligands if lig not in common_solvents]
+
+                # Store predicted compound IDs if custom_id provided
+                if custom_id and real_ligands:
+                    for ligand_code in real_ligands:
+                        self.predicted_compound_ids.append(f"{custom_id}_{ligand_code}")
+
+                return len(real_ligands) > 0, real_ligands
+
+        return False, []
 
     def _check_rcsb_exists_silent(self, rcsb_id: str, custom_id: str = None) -> bool:
         """
@@ -592,14 +595,6 @@ echo "=== PDB ready ==="
                 raise ValueError(f"Error checking RCSB for '{rcsb_id}': {e}")
         except Exception as e:
             raise ValueError(f"Error checking RCSB for '{rcsb_id}': {e}")
-
-    def _fetch_ligand_info_from_rcsb(self):
-        """Fetch ligand information from RCSB API at configuration time (silently for local files)."""
-        self.predicted_compound_ids = []
-
-        # Skip - ligand info already handled in _check_rcsb_exists for downloads
-        # For local files, don't query RCSB (they may be custom files)
-        return
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -800,7 +795,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
         sequences = DataStream(
             name="sequences",
             ids=sequence_id_patterns,
-            files=[self.sequences_csv],
+            files=[],
             map_table=self.sequences_csv,
             format="csv"
         )

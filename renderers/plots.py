@@ -50,7 +50,16 @@ def render(stream, output):
         f'({stream.format}, {len(stream)} items)</span></div>'
     )
 
-    for item_id, file_path in zip(stream.ids, stream.files):
+    files_list = stream.files_expanded if stream.is_shared_file else (
+        stream.files if isinstance(stream.files, list) else [stream.files]
+    )
+    if stream.is_shared_file:
+        # Shared single artifact: render once against every id label.
+        ids_list = list(stream.ids_expanded)
+        files_list = [stream.files] * len(ids_list)
+    else:
+        ids_list = list(stream.ids)
+    for item_id, file_path in zip(ids_list, files_list):
         if not file_path or not os.path.isfile(file_path):
             continue
 

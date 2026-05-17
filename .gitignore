@@ -43,6 +43,12 @@ LocalResults/
 # images
 tests/outputs/lineage_plots/*.png
 
+# pytest-emitted result tables (see tests/conftest.py)
+tests/_results/
+tests/test_results.csv
+tests/test_results.xlsx
+tmp_pytest/
+
 # OS
 .DS_Store
 Thumbs.db

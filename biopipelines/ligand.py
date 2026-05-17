@@ -552,7 +552,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
         compounds = DataStream(
             name="compounds",
             ids=self.custom_ids.copy(),
-            files=[self.compounds_csv],
+            files=[],
             map_table=self.compounds_csv,
             format="csv"
         )

@@ -62,7 +62,11 @@ def render(stream, output):
     """Render fasta stream as inline colored sequence blocks."""
     # Find the first valid fasta file in the stream
     fasta_path = None
-    if stream.files:
+    if stream.is_shared_file:
+        # Shared-file FASTA stream: one artifact, used as-is.
+        if os.path.isfile(stream.files):
+            fasta_path = stream.files
+    elif stream.files:
         for p in stream.files:
             if p and os.path.isfile(p):
                 fasta_path = p

@@ -14,7 +14,13 @@ def render(stream, output):
         f'<span style="font-weight: normal; color: #666;">({stream.format}, {len(stream)} items)</span></div>'
     )
 
-    for item_id, file_path in zip(stream.ids, stream.files):
+    if stream.is_shared_file:
+        ids_list = list(stream.ids_expanded)
+        files_list = [stream.files] * len(ids_list)
+    else:
+        ids_list = list(stream.ids)
+        files_list = stream.files if isinstance(stream.files, list) else []
+    for item_id, file_path in zip(ids_list, files_list):
         if not file_path or not os.path.isfile(file_path):
             continue
 

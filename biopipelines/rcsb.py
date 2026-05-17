@@ -1167,7 +1167,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
         sequences = DataStream(
             name="sequences",
             ids=list(self.output_ids),
-            files=[self.sequences_csv],
+            files=[],
             map_table=self.sequences_csv,
             format="csv"
         )

@@ -663,7 +663,7 @@ echo "=== Panda ready ==="
                 if hasattr(pool, 'streams'):
                     for stream_name in pool.streams.keys():
                         stream = pool.streams.get(stream_name)
-                        if stream and len(stream) > 0 and len(stream.files) > 0:
+                        if stream and len(stream) > 0 and (stream.is_shared_file or len(stream.files) > 0):
                             json_path = self.configuration_path(
                                 f"pool_{pool_idx}_{stream_name}_ds.json"
                             )
@@ -821,11 +821,18 @@ echo "=== Panda ready ==="
                         # don't carry a dedicated map_table.
                         stream_folders_map[name] = self.stream_folder(name)
                         if spec.map_table:
+                            if spec.is_shared_file:
+                                # Shared artifact: pass the path as-is, no
+                                # <id> template substitution at runtime.
+                                file_template = spec.files
+                            elif isinstance(spec.files, list) and spec.files:
+                                file_template = spec.files[0]
+                            else:
+                                file_template = ""
                             stream_map_targets.append({
                                 "stream_name": name,
                                 "map_table": spec.map_table,
-                                "file_template": (spec.files[0]
-                                                  if spec.files else ""),
+                                "file_template": file_template,
                             })
                 # Propagated pool tables now live under our tables/; map
                 # source basenames to their new canonical destinations so
@@ -946,7 +953,12 @@ fi
                                 # when pools disagree (e.g. one produces .pdb,
                                 # another .cif). Mirrors pdb.py/rcsb.py.
                                 "formats": [],
-                                "map_table": stream.map_table or ""
+                                "map_table": stream.map_table or "",
+                                # Shared-file streams (e.g. multi-record FASTA):
+                                # remember the source path; the output stream's
+                                # files stays a single str pointing at the
+                                # sliced copy under our stream folder.
+                                "shared_src": None,
                             }
                         stream_data[stream_name]["ids"].extend(list(stream.ids))
                         for f in (stream.format or "").split("|"):
@@ -955,7 +967,15 @@ fi
                                 stream_data[stream_name]["formats"].append(f)
                         # Only collect files for file-based streams
                         if stream.is_file_based():
-                            stream_data[stream_name]["files"].extend(stream.files)
+                            if stream.is_shared_file:
+                                # First pool's basename wins for the predicted
+                                # dest. At runtime pipe_panda slices each pool
+                                # then merges the parts into this single dest
+                                # via stream_slicers.get_merger(fmt).
+                                if stream_data[stream_name]["shared_src"] is None:
+                                    stream_data[stream_name]["shared_src"] = stream.files
+                            else:
+                                stream_data[stream_name]["files"].extend(stream.files)
 
             # Collapse the per-pool formats into a single "a|b" string —
             # downstream code reads sdata["format"] as before.
@@ -968,6 +988,17 @@ fi
                 seen = set()
                 deduped_ids = []
                 deduped_files = []
+                # Shared-file streams: there's no per-id files list to dedup,
+                # only ids — the slicer will produce one shared output file.
+                if sdata["shared_src"] is not None:
+                    for sid in sdata["ids"]:
+                        if sid not in seen:
+                            seen.add(sid)
+                            deduped_ids.append(sid)
+                    sdata["ids"] = deduped_ids
+                    # Leave sdata["files"] as [] — shared output is built below
+                    # from shared_src and emitted as a str.
+                    continue
                 # A stream is template-shaped if every collected files entry
                 # carries an <id> placeholder. With one pool that's a single
                 # element; with N pools contributing different extensions
@@ -1023,6 +1054,28 @@ fi
                     map_table = os.path.join(stream_dir, map_basename)
                 else:
                     map_table = None
+
+                # Shared-file streams: emit a single str path pointing at
+                # the sliced artifact under our stream folder. The slicer
+                # runs at execution time in pipe_panda — here we just
+                # predict the output path.
+                if data.get("shared_src"):
+                    if self.rename and predicted_count is not None:
+                        new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
+                    elif self.rename:
+                        new_ids = [f"{self.rename}_[<N>]"]
+                    else:
+                        new_ids = data["ids"]
+                    shared_basename = os.path.basename(data["shared_src"])
+                    shared_dest = os.path.join(stream_dir, shared_basename)
+                    output_streams[stream_name] = DataStream(
+                        name=stream_name,
+                        ids=new_ids,
+                        files=shared_dest,   # str — shared form preserved
+                        map_table=map_table or "",
+                        format=data["format"]
+                    )
+                    continue
 
                 # Value-based streams (no files): propagate as-is with original map_table
                 if not data["files"]:

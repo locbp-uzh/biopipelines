@@ -421,12 +421,6 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after ProteinMPNN execution."""
-        # Raw ProteinMPNN .fa files land in execution/seqs/ (one per input
-        # structure). These aren't a first-class pipeline stream — they're
-        # an intermediate format the post-processing step reads.
-        fasta_ids = self.structures_stream.ids
-        fasta_files = [os.path.join(self.seqs_folder, "<id>.fa")]
-
         # Predict sequence IDs (stream_id + sequence number)
         suffix_pattern = f"<1..{self.num_sequences}>"
         sequence_ids = generate_multiplied_ids_pattern(
@@ -444,15 +438,22 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             format="csv"
         )
 
-        # Fasta stream — points at the raw execution/seqs/<id>.fa dumps.
+        # FASTA stream: shared single artifact with one record per designed
+        # sequence. The raw ProteinMPNN execution/seqs/<parent>.fa files are
+        # per-structure dumps and may contain multiple sequence records, so
+        # exposing them as per-ID files makes Panda copy whole multi-record
+        # files when filtering per sequence. The post-processed queries_fasta
+        # is the canonical stream artifact and can be sliced by record ID.
         fasta = DataStream(
             name="fasta",
-            ids=fasta_ids,
-            files=fasta_files,
+            ids=sequence_ids,
+            files=self.queries_fasta,
+            map_table=self.queries_csv,
             format="fasta",
             metadata={
                 "sequences_per_file": self.num_sequences,
                 "contains_original": False,
+                "source": "postprocessed_queries_fasta",
             }
         )
 

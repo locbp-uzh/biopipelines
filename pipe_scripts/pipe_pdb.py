@@ -166,6 +166,55 @@ def convert_cif_to_pdb(cif_content: str) -> str:
         raise Exception(f"CIF to PDB conversion failed: {str(e)}")
 
 
+def convert_pdb_to_cif(pdb_content: str) -> str:
+    """
+    Convert PDB format to mmCIF format using BioPython.
+
+    Mirror of ``convert_cif_to_pdb`` for the opposite direction so PDB(convert="cif")
+    works for local files and for RCSB downloads that arrived as .pdb.
+
+    Args:
+        pdb_content: PDB file content
+
+    Returns:
+        mmCIF format content
+
+    Raises:
+        Exception: If conversion fails
+    """
+    import tempfile
+    from Bio.PDB import PDBParser, MMCIFIO
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.pdb', delete=False) as tmp_pdb:
+        tmp_pdb.write(pdb_content)
+        tmp_pdb.flush()
+        pdb_path = tmp_pdb.name
+
+    try:
+        parser = PDBParser(QUIET=True)
+        structure = parser.get_structure("structure", pdb_path)
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.cif', delete=False) as tmp_cif:
+            cif_path = tmp_cif.name
+
+        io = MMCIFIO()
+        io.set_structure(structure)
+        io.save(cif_path)
+
+        with open(cif_path, 'r') as f:
+            cif_content = f.read()
+
+        os.unlink(pdb_path)
+        os.unlink(cif_path)
+
+        return cif_content
+
+    except Exception as e:
+        if os.path.exists(pdb_path):
+            os.unlink(pdb_path)
+        raise Exception(f"PDB to CIF conversion failed: {str(e)}")
+
+
 def build_rename_mapping(operations: List[Dict[str, Any]]) -> Dict[str, str]:
     """
     Build a mapping from old residue names to new names based on rename operations.
@@ -756,7 +805,9 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
                 content = convert_cif_to_pdb(content)
                 actual_format = "pdb"
             elif source_format == "pdb" and target_format == "cif":
-                raise NotImplementedError("PDB to CIF conversion not implemented")
+                print(f"  Converting PDB to CIF format...")
+                content = convert_pdb_to_cif(content)
+                actual_format = "cif"
 
         if remove_waters:
             content = remove_waters_from_content(content, actual_format)
@@ -905,7 +956,8 @@ def download_from_rcsb(pdb_id: str, custom_id: str, convert: Optional[str], biol
                 print(f"  Converting CIF to PDB format...")
                 content = convert_cif_to_pdb(content)
             elif download_fmt == "pdb" and actual_fmt == "cif":
-                raise NotImplementedError("PDB to CIF conversion not implemented")
+                print(f"  Converting PDB to CIF format...")
+                content = convert_pdb_to_cif(content)
 
         if remove_waters:
             content = remove_waters_from_content(content, actual_fmt)

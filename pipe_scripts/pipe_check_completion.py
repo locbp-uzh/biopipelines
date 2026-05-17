@@ -37,32 +37,6 @@ def check_file_exists(file_path: str) -> bool:
         return len(glob.glob(file_path)) > 0
     return os.path.exists(file_path) and (os.path.isfile(file_path) or os.path.isdir(file_path))
 
-def load_expected_missing_ids(missing_csv_path: str) -> List[str]:
-    """
-    Load expected missing IDs from missing CSV file if it exists.
-
-    Args:
-        missing_csv_path: Path to the missing CSV file
-
-    Returns:
-        List of IDs that are expected to be missing
-    """
-    missing_ids = []
-
-    if os.path.exists(missing_csv_path):
-        try:
-            import pandas as pd
-            df = pd.read_csv(missing_csv_path)
-
-            if 'id' in df.columns:
-                missing_ids = df['id'].astype(str).tolist()
-
-            print(f"Found {len(missing_ids)} IDs expected to be missing from {os.path.basename(missing_csv_path)}")
-        except Exception as e:
-            print(f"Warning: Could not read {os.path.basename(missing_csv_path)}: {e}")
-
-    return missing_ids
-
 def check_files_exist(file_list: List[str]) -> tuple[bool, List[str]]:
     """
     Check if all files in a list exist.
@@ -86,13 +60,15 @@ def extract_file_list(category_data) -> List[str]:
 
     The category data may be:
     - A list of file paths (legacy format)
-    - A dict (serialized DataStream) with a 'files' key containing the list
+    - A bare string path (shared-file stream serialized at top level)
+    - A dict (serialized DataStream) with a 'files' key whose value is
+      either a list (per-id) or a string (shared single artifact)
 
     When files contains a single '<id>' template, expands it using the 'ids'
     field (which may contain compact patterns like 'name_<0..9>').
 
     Args:
-        category_data: List or dict from expected_outputs[category]
+        category_data: List, dict, or string from expected_outputs[category]
 
     Returns:
         List of file paths
@@ -100,6 +76,9 @@ def extract_file_list(category_data) -> List[str]:
     if isinstance(category_data, dict):
         files = category_data.get('files', [])
         ids = category_data.get('ids', [])
+        # Shared-file form: a single str path covers all ids; check it once.
+        if isinstance(files, str):
+            return [files] if files else []
         if len(files) == 1 and '<id>' in files[0] and ids:
             template = files[0]
             expanded_ids, is_complete = id_patterns.try_expand_ids(ids)
@@ -112,194 +91,145 @@ def extract_file_list(category_data) -> List[str]:
         return files
     elif isinstance(category_data, list):
         return category_data
+    elif isinstance(category_data, str):
+        return [category_data] if category_data else []
     return []
 
 
-def is_filter_output(expected_outputs: Dict[str, Any]) -> bool:
+# Top-level keys in expected_outputs that are not stream-shaped and must
+# not be iterated by the generic stream-coverage loop.
+_RESERVED_TOP_LEVEL_KEYS = {'tables', 'output_folder'}
+
+
+def _load_expected_missing_ids(expected_outputs: Dict[str, Any]) -> List[str]:
     """
-    Check if the expected outputs are from a Filter tool (not RemoveDuplicates).
-    
-    Args:
-        expected_outputs: Dictionary with standardized output format
-        
-    Returns:
-        True if this is Filter tool output
+    Load IDs the upstream tool already flagged as removed/missing.
+
+    Reads ``tables.missing.path`` (the canonical filter manifest) if it
+    exists on disk and returns the ``id`` column. These IDs correspond to
+    inputs that an upstream filter dropped on purpose — their content
+    files are *expected* to be absent and should not count as failures.
+
+    Returns an empty list if no missing table is declared, the file does
+    not exist yet, or it lacks an ``id`` column.
     """
-    # Check if tables contain missing AND there are structure files expected
-    # This distinguishes Filter (works with structures) from RemoveDuplicates (sequences only)
-    if 'tables' in expected_outputs and isinstance(expected_outputs['tables'], dict):
-        has_missing_table = 'missing' in expected_outputs['tables']
-        has_structures = bool(extract_file_list(expected_outputs.get('structures', [])))
-
-        # Only treat as filter output if it has missing table AND expects structures
-        return has_missing_table and has_structures
-    
-    return False
-
-
-
-
-def check_expected_outputs_filter_aware(expected_outputs: Dict[str, Any], 
-                                       output_folder: str,
-                                       job_name: str) -> tuple[bool, Dict[str, List[str]], Dict[str, Any]]:
-    """
-    Check expected outputs with filter-aware validation.
-    
-    For filter tools:
-    - Tables and manifests are required (critical)
-    - Content files (structures, sequences) can be partially missing (warning)
-    
-    Args:
-        expected_outputs: Dictionary with standardized output format
-        output_folder: Tool's output folder
-        job_name: Job name
-        
-    Returns:
-        Tuple of (success: bool, missing_by_category: Dict, filter_info: Dict)
-    """
-    missing_by_category = {}
-    warnings_by_category = {}
-    filter_info = {}
-    
-    # Check if this is filter output
-    is_filter = is_filter_output(expected_outputs)
-    filter_info['is_filter'] = is_filter
-    
-    if is_filter:
-        print("Filter-aware validation: This appears to be filter output")
-        
-        # For filters, categorize checks differently
-        critical_files = []
-        content_files = []
-        
-        # Tables are critical
-        if 'tables' in expected_outputs:
-            tables = expected_outputs['tables']
-            if isinstance(tables, dict):
-                for name, info in tables.items():
-                    if isinstance(info, dict) and 'path' in info:
-                        critical_files.append(info['path'])
-                    else:
-                        critical_files.append(str(info))
-            elif isinstance(tables, list):
-                critical_files.extend(tables)
-        
-        # Content files are non-critical for filters
-        standard_categories = ['structures', 'compounds', 'sequences']
-        for category in standard_categories:
-            if category in expected_outputs and expected_outputs[category]:
-                content_files.extend(extract_file_list(expected_outputs[category]))
-        
-        # Check critical files (must exist)
-        if critical_files:
-            exists, missing = check_files_exist(critical_files)
-            if not exists:
-                missing_by_category['critical'] = missing
-        
-        # Check content files (can be partially missing)
-        if content_files:
-            # Find missing CSV path from expected outputs
-            missing_csv_path = None
-            if 'tables' in expected_outputs and isinstance(expected_outputs['tables'], dict):
-                if 'missing' in expected_outputs['tables']:
-                    missing_info = expected_outputs['tables']['missing']
-                    if isinstance(missing_info, dict) and 'path' in missing_info:
-                        missing_csv_path = missing_info['path']
-                    else:
-                        missing_csv_path = str(missing_info)
-            
-            # Load expected missing IDs from missing CSV (if path found)
-            missing_ids = []
-            if missing_csv_path:
-                missing_ids = load_expected_missing_ids(missing_csv_path)
-            else:
-                print("Warning: No missing CSV path found in expected outputs - cannot determine expected missing files")
-
-            # Build set of expected-missing files by matching IDs to content file basenames
-            expected_missing_files = set()
-            for f in content_files:
-                basename = os.path.splitext(os.path.basename(f))[0]
-                for mid in missing_ids:
-                    if mid == basename or basename.startswith(f"{mid}_") or basename.startswith(f"{mid}-"):
-                        expected_missing_files.add(f)
-                        break
-
-            exists, missing = check_files_exist(content_files)
-            if not exists:
-                # Filter out expected missing files
-                unexpected_missing = [f for f in missing if f not in expected_missing_files]
-                expected_missing_found = [f for f in missing if f in expected_missing_files]
-                
-                if unexpected_missing:
-                    warnings_by_category['content'] = unexpected_missing
-                    print(f"Warning: {len(unexpected_missing)} content files unexpectedly missing")
-                
-                if expected_missing_found:
-                    print(f"Info: {len(expected_missing_found)} content files missing as expected (filtered out)")
-        
-        # Success if all critical files exist
-        success = 'critical' not in missing_by_category
-        
-        # Add warnings to result for reporting
-        if warnings_by_category:
-            filter_info['warnings'] = warnings_by_category
-    
+    tables = expected_outputs.get('tables')
+    if not isinstance(tables, dict):
+        return []
+    missing_info = tables.get('missing')
+    if not missing_info:
+        return []
+    if isinstance(missing_info, dict):
+        missing_path = missing_info.get('path')
     else:
-        # Standard validation for non-filter tools
-        success, missing_by_category = check_expected_outputs(expected_outputs)
-        filter_info['is_filter'] = False
-    
-    return success, missing_by_category, filter_info
+        missing_path = str(missing_info)
+    if not missing_path or not os.path.exists(missing_path):
+        return []
+    try:
+        import pandas as pd
+        df = pd.read_csv(missing_path)
+    except Exception as e:
+        print(f"Warning: Could not read {os.path.basename(missing_path)}: {e}")
+        return []
+    if 'id' not in df.columns:
+        return []
+    return df['id'].astype(str).tolist()
+
+
+def _filter_expected_missing(missing_files: List[str],
+                             expected_missing_ids: List[str]) -> tuple[List[str], List[str]]:
+    """
+    Split a missing-file list into (unexpected, expected) given the IDs
+    the upstream filter already dropped.
+
+    A file is "expected-missing" if its basename (without extension) equals
+    one of the expected-missing IDs, or starts with ``<id>_`` / ``<id>-``
+    (covers fan-out files like ``<id>_rank0001.cif``).
+    """
+    if not expected_missing_ids:
+        return missing_files, []
+    expected_set = set(expected_missing_ids)
+    unexpected = []
+    expected = []
+    for f in missing_files:
+        basename = os.path.splitext(os.path.basename(f))[0]
+        if basename in expected_set or any(
+            basename.startswith(f"{mid}_") or basename.startswith(f"{mid}-")
+            for mid in expected_missing_ids
+        ):
+            expected.append(f)
+        else:
+            unexpected.append(f)
+    return unexpected, expected
 
 
 def check_expected_outputs(expected_outputs: Dict[str, Any]) -> tuple[bool, Dict[str, List[str]]]:
     """
-    Check if expected output files exist based on standardized output format.
-    
+    Check that every declared output file exists.
+
+    Iterates *all* stream-shaped top-level keys, not a hardcoded list. A
+    stream-shaped entry is either a list of paths (legacy) or a dict with
+    ``files`` / ``ids`` (new format) — both handled by ``extract_file_list``.
+    This means streams like ``fasta``, ``msas``, ``images``, ``plots`` are
+    checked the same way as the historically-privileged ``structures`` /
+    ``compounds`` / ``sequences``.
+
+    Missing-aware: files corresponding to IDs already flagged in
+    ``tables.missing`` are *expected* to be absent (an upstream filter
+    dropped them) and do not count as failures.
+
     Args:
         expected_outputs: Dictionary with standardized output format
-        
+
     Returns:
         Tuple of (all_exist: bool, missing_by_category: Dict[str, List[str]])
     """
     missing_by_category = {}
     all_exist = True
-    
-    # Check standard categories
-    standard_categories = ['structures', 'compounds', 'sequences']
-    
-    for category in standard_categories:
-        if category in expected_outputs:
-            files = extract_file_list(expected_outputs[category])
-            if files:
-                exists, missing = check_files_exist(files)
-                if not exists:
-                    missing_by_category[category] = missing
-                    all_exist = False
-    
-    # Check tables (handle both old and new format)
+
+    expected_missing_ids = _load_expected_missing_ids(expected_outputs)
+    if expected_missing_ids:
+        print(f"Found {len(expected_missing_ids)} IDs expected to be missing from "
+              f"upstream filter manifest")
+
+    # Every non-reserved key whose value reduces to a file list is a stream.
+    for category, value in expected_outputs.items():
+        if category in _RESERVED_TOP_LEVEL_KEYS:
+            continue
+        files = extract_file_list(value)
+        if not files:
+            continue
+        exists, missing = check_files_exist(files)
+        if exists:
+            continue
+        unexpected, expected = _filter_expected_missing(missing, expected_missing_ids)
+        if expected:
+            print(f"Info: {len(expected)} {category} files missing as expected "
+                  f"(filtered out upstream)")
+        if unexpected:
+            missing_by_category[category] = unexpected
+            all_exist = False
+
+    # Tables (handle both old list-of-paths and new dict-of-TableInfo formats).
     if 'tables' in expected_outputs:
         tables = expected_outputs['tables']
         table_files = []
-        
+
         if isinstance(tables, dict):
-            # New format with named tables
             for name, info in tables.items():
                 if isinstance(info, dict) and 'path' in info:
                     table_files.append(info['path'])
                 else:
-                    # Fallback - treat as path
                     table_files.append(str(info))
         elif isinstance(tables, list):
-            # Old format - list of paths
             table_files = tables
-        
+
         if table_files:
             exists, missing = check_files_exist(table_files)
             if not exists:
                 missing_by_category['tables'] = missing
                 all_exist = False
-    
+
     return all_exist, missing_by_category
 
 def create_status_file(output_folder: str, tool_name: str, status: str, details: Dict[str, Any] = None) -> str:
@@ -351,18 +281,17 @@ def create_status_file(output_folder: str, tool_name: str, status: str, details:
 def check_completion_status(output_folder: str, tool_name: str) -> Optional[str]:
     """
     Check if completion status file already exists.
-    
+
     Args:
         output_folder: Tool's output folder
         tool_name: Name of the tool
-        
+
     Returns:
         Status ("COMPLETED" or "FAILED") if exists, None otherwise
     """
     parent_dir = os.path.dirname(output_folder)
     folder_name = os.path.basename(output_folder)
-    
-    # Try step-numbered format first
+
     if '_' in folder_name and folder_name.split('_')[0].isdigit():
         step_number = folder_name.split('_')[0]
         completed_file = os.path.join(parent_dir, f"{step_number}_{tool_name}_COMPLETED")
@@ -370,14 +299,9 @@ def check_completion_status(output_folder: str, tool_name: str) -> Optional[str]
     else:
         completed_file = os.path.join(parent_dir, f"{tool_name}_COMPLETED")
         failed_file = os.path.join(parent_dir, f"{tool_name}_FAILED")
-    
-    # Derive warning file path
-    warning_file = completed_file.replace("_COMPLETED", "_WARNING")
 
     if os.path.exists(completed_file):
         return "COMPLETED"
-    elif os.path.exists(warning_file):
-        return "WARNING"
     elif os.path.exists(failed_file):
         return "FAILED"
 
@@ -449,9 +373,6 @@ def main():
         if existing_status == "COMPLETED":
             print(f"Tool {args.tool_name} already completed")
             sys.exit(0)
-        elif existing_status == "WARNING":
-            print(f"Tool {args.tool_name} completed with warnings")
-            sys.exit(0)
         elif existing_status == "FAILED":
             print(f"Tool {args.tool_name} previously failed")
             sys.exit(1)
@@ -472,54 +393,24 @@ def main():
     # Unwrap envelope format if present (tool_name, tool_class, output_structure wrapper)
     if 'output_structure' in expected_outputs and 'tool_name' in expected_outputs:
         expected_outputs = expected_outputs['output_structure']
-    
-    # Use filter-aware validation
-    success, missing_by_category, filter_info = check_expected_outputs_filter_aware(
-        expected_outputs, args.output_folder, job_name
-    )
-    
+
+    success, missing_by_category = check_expected_outputs(expected_outputs)
+
     if success:
         print(f"Required outputs found for {args.tool_name}")
-        
-        # Report any warnings for filter tools
-        if filter_info.get('warnings'):
-            print("Warnings (non-critical for filters):")
-            for category, files in filter_info['warnings'].items():
-                print(f"  {category}: {len(files)} files missing")
-                # Optionally list first few missing files
-                for file_path in files[:3]:
-                    print(f"    - {os.path.basename(file_path)}")
-                if len(files) > 3:
-                    print(f"    ... and {len(files) - 3} more")
-        
         if not args.check_only:
-            # Include filter info in completion details
-            details = {}
-            if filter_info.get('is_filter'):
-                details['filter_info'] = filter_info
-
-            # Use WARNING status when success but filter warnings exist
-            if filter_info.get('warnings'):
-                status = "WARNING"
-                details['missing_files'] = filter_info['warnings']
-            else:
-                status = "COMPLETED"
-
-            status_file = create_status_file(args.output_folder, args.tool_name, status, details)
-            print(f"Created {status.lower()} status file: {os.path.basename(status_file)}")
+            status_file = create_status_file(args.output_folder, args.tool_name, "COMPLETED")
+            print(f"Created completed status file: {os.path.basename(status_file)}")
         sys.exit(0)
     else:
-        print(f"Missing critical outputs for {args.tool_name}:")
+        print(f"Missing outputs for {args.tool_name}:")
         for category, files in missing_by_category.items():
             print(f"  {category}:")
             for file_path in files:
                 print(f"    - {file_path}")
-        
+
         if not args.check_only:
             details = {"missing_files": missing_by_category}
-            if filter_info.get('is_filter'):
-                details['filter_info'] = filter_info
-            
             status_file = create_status_file(args.output_folder, args.tool_name, "FAILED", details)
             print(f"Created failure status file: {os.path.basename(status_file)}")
         sys.exit(1)

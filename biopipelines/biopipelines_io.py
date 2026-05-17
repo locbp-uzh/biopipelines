@@ -118,15 +118,21 @@ def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStream:
     if 'ids' not in data:
         raise ValueError("DataStream missing required field: 'ids'")
 
-    # files defaults to empty list
+    # files defaults to empty list. May also be a single str (shared-file form).
     files = data.get('files', [])
 
-    # Validate files/ids relationship (skip for patterns and templates)
+    # Validate files/ids relationship (skip for patterns, templates, and
+    # shared-file form where one path covers every id).
+    is_shared = isinstance(files, str) and bool(files)
     has_patterns = _id_patterns and any(
         _id_patterns.contains_pattern(s) or '[' in s for s in data['ids']
     )
-    has_template = len(files) == 1 and '<id>' in files[0]
-    if not has_patterns and not has_template and len(files) > 1 and len(files) != len(data['ids']):
+    has_template = (
+        isinstance(files, list) and len(files) == 1 and '<id>' in files[0]
+    )
+    if (not is_shared and not has_patterns and not has_template
+            and isinstance(files, list)
+            and len(files) > 1 and len(files) != len(data['ids'])):
         raise ValueError(
             f"Length mismatch: {len(data['ids'])} ids but {len(files)} files. "
             f"Use empty files list or single file for table-based data, "
@@ -235,7 +241,22 @@ def iterate_files(ds: DataStream) -> Iterator[Tuple[str, str]]:
             for item_id, file_path in zip(ids, files):
                 yield (item_id, file_path)
 
-    elif len(ds.files) == 1:
+    elif ds.is_shared_file:
+        # Shared-file stream: one artifact path covers every id.
+        single = ds.files
+        if '*' in single:
+            for item_id in ids:
+                expanded = glob.glob(single)
+                if not expanded:
+                    raise FileNotFoundError(
+                        f"No files found matching pattern '{single}' for ID '{item_id}'"
+                    )
+                yield (item_id, _find_best_match(item_id, expanded))
+        else:
+            for item_id in ids:
+                yield (item_id, single)
+
+    elif isinstance(ds.files, list) and len(ds.files) == 1:
         # Single file/pattern for all IDs
         single = ds.files[0]
         if '*' in single:
@@ -354,7 +375,18 @@ def resolve_file(ds: DataStream, item_id: str) -> str:
             return _find_best_match(item_id, expanded)
         return file_path_for_id
 
-    elif len(ds.files) == 1:
+    elif ds.is_shared_file:
+        single = ds.files
+        if '*' in single:
+            expanded = glob.glob(single)
+            if not expanded:
+                raise FileNotFoundError(
+                    f"No files found matching pattern '{single}' for ID '{item_id}'"
+                )
+            return _find_best_match(item_id, expanded)
+        return single
+
+    elif isinstance(ds.files, list) and len(ds.files) == 1:
         single = ds.files[0]
         if '*' in single:
             expanded = glob.glob(single)

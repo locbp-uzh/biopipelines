@@ -328,7 +328,9 @@ def _load_compound_mols(compounds_ds, conf_dir):
             if idx >= 0:
                 if len(expanded_files) == len(expanded_ids):
                     file_path = expanded_files[idx]
-                elif len(compounds_ds.files) == 1:
+                elif compounds_ds.is_shared_file:
+                    file_path = compounds_ds.files
+                elif isinstance(compounds_ds.files, list) and len(compounds_ds.files) == 1:
                     file_path = compounds_ds.files[0]
                 else:
                     file_path = None

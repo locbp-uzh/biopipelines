@@ -779,10 +779,8 @@ echo "=============================="
 
         parent_dir = os.path.dirname(self.output_folder)
 
-        warning_file = completed_file.replace("_COMPLETED", "_WARNING")
-
         return f"""# Check if already completed
-if [ -f "{parent_dir}/{completed_file}" ] || [ -f "{parent_dir}/{warning_file}" ]; then
+if [ -f "{parent_dir}/{completed_file}" ]; then
     echo "{self.TOOL_NAME} already completed, skipping..."
     exit 0
 fi
@@ -1429,10 +1427,23 @@ class StandardizedOutput:
     
     def __getitem__(self, key: str):
         """
-        ID-based selection: output["CP1"] returns a new StandardizedOutput
-        containing only that ID across all streams.
+        ID-based selection: ``output["CP1"]`` returns a new ``StandardizedOutput``
+        whose streams carry ``ids=[key]`` and the original streams' ``files``,
+        ``map_table``, and ``format`` unchanged.
+
+        ``key`` must appear in every non-empty stream's ``ids_expanded``.
+        ``ids_expanded`` is mode-aware: deterministic streams enumerate
+        fully at config time (typos fail fast); lazy streams at config
+        time enumerate only the deterministic prefix (so only prefix-shaped
+        keys pass); lazy streams at runtime (``_runtime_mode=True``) read
+        from the materialized map_table. See developer_manual.md "ID Patterns".
         """
         from .datastream import DataStream
+
+        if not isinstance(key, str):
+            raise TypeError(
+                f"StandardizedOutput key must be a string ID, got {type(key).__name__}"
+            )
 
         streams = [
             (name, ds) for name, ds in self.streams.items()
@@ -1442,22 +1453,28 @@ class StandardizedOutput:
         if not streams:
             raise KeyError(f"No non-empty streams to select ID '{key}' from")
 
-        reference_name, reference_ds = streams[0]
-        try:
-            idx = list(reference_ds.ids).index(key)
-        except ValueError:
-            raise KeyError(
-                f"ID '{key}' not found in stream '{reference_name}'. "
-                f"Available IDs: {list(reference_ds.ids)}"
-            )
+        for name, ds in streams:
+            if key not in ds.ids_expanded:
+                raise KeyError(
+                    f"ID '{key}' not found in stream '{name}' "
+                    f"(ids: {list(ds.ids_expanded)})"
+                )
 
         single_data = {}
         for name, ds in streams:
-            has_template = len(ds.files) == 1 and '<id>' in ds.files[0]
+            # Pick the right files shape for the sub-stream so the
+            # constructor's "len(files) must match len(ids)" rule holds.
+            # Templates and shared-file form already cover every id, so they
+            # pass through unchanged; explicit per-id lists need slicing.
+            if ds.is_shared_file or ds._has_file_template() or not ds.files:
+                sub_files = ds.files
+            else:
+                idx = ds.ids_expanded.index(key)
+                sub_files = [ds.files[idx]] if 0 <= idx < len(ds.files) else []
             single_data[name] = DataStream(
                 name=ds.name,
-                ids=[ds.ids[idx]],
-                files=ds.files if has_template else ([ds.files[idx]] if len(ds.files) > idx else []),
+                ids=[key],
+                files=sub_files,
                 map_table=ds.map_table,
                 format=ds.format
             )
@@ -1506,10 +1523,17 @@ class StandardizedOutput:
         for idx in range(len(reference_ids)):
             single_streams = {}
             for name, ds in streams:
+                if ds.is_shared_file:
+                    sub_files = ds.files  # str — shared across ids
+                elif isinstance(ds.files, list) and len(ds.files) > idx:
+                    sub_files = [ds.files[idx]]
+                else:
+                    sub_files = []
                 single_streams[name] = DataStream(
                     name=ds.name,
                     ids=[ds.ids[idx]],
-                    files=[ds.files[idx]] if len(ds.files) > idx else [],
+                    files=sub_files,
+                    map_table=ds.map_table,
                     format=ds.format
                 )
             single_streams["output_folder"] = self.output_folder
@@ -1625,7 +1649,12 @@ class StandardizedOutput:
                         parts.append(f"{col}={val}")
                     result.append(f"    – {', '.join(parts)}")
             else:
-                items = list(zip(ds.ids, ds.files)) if ds.files else [(iid, "") for iid in ds.ids]
+                if ds.is_shared_file:
+                    items = [(iid, ds.files) for iid in ds.ids]
+                elif ds.files:
+                    items = list(zip(ds.ids, ds.files))
+                else:
+                    items = [(iid, "") for iid in ds.ids]
                 n_items = len(items)
                 if n_items <= 4:
                     display_items = items

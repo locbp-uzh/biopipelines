@@ -49,8 +49,10 @@ echo "=== Sequence ready ==="
 """
 
     # Lazy path descriptors
-    # Content-bearing sequences stream: sequences.csv IS the content+map;
-    # sequences.fasta is its FASTA twin. Both live in sequences/.
+    # Content-bearing sequences stream: sequences.csv IS the content+map and
+    # lives in sequences/. The companion FASTA is the shared artifact of a
+    # dedicated ``fasta`` stream — also in sequences/ so the stream layout
+    # stays self-contained (no _extras/ side files).
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     sequences_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
     config_file = Path(lambda self: self.configuration_path("sequence_config.json"))
@@ -169,8 +171,17 @@ echo "=== Sequence ready ==="
     # ------------------------------------------------------------------
 
     def _is_pdb_code(self, s: str) -> bool:
-        """Return True if s looks like a 4-character alphanumeric RCSB PDB code."""
-        return len(s) == 4 and s.isalnum() and not os.path.exists(s)
+        """Return True if s looks like a 4-character RCSB PDB code.
+
+        wwPDB Format 3.3 requires the first character to be a digit and the
+        remaining three to be alphanumeric, so checking ``s[0].isdigit()`` is
+        the canonical disambiguator from 4-letter raw sequences like "ACGT"
+        or "MKWV". See https://www.wwpdb.org/documentation/file-format-content/format33/sect1.html
+        """
+        return (len(s) == 4
+                and s.isalnum()
+                and s[0].isdigit()
+                and not os.path.exists(s))
 
     def _has_sequence_extension(self, s: str) -> bool:
         """Return True if s has a CSV, Excel, or FASTA file extension."""
@@ -555,11 +566,14 @@ python "{self.sequence_py}" --config "{self.config_file}"
             format="csv"
         )
 
-        # fasta stream: file-based, single .fasta file shared across all IDs
+        # fasta stream: shared single artifact (one FASTA file with N records).
+        # Same ids as sequences; map_table reuses sequences.csv so downstream
+        # tools can look up sequence metadata against fasta-stream ids.
         fasta = DataStream(
             name="fasta",
             ids=self.custom_ids.copy(),
-            files=[self.sequences_fasta],
+            files=self.sequences_fasta,
+            map_table=self.sequences_csv,
             format="fasta"
         )
 

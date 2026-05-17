@@ -250,9 +250,11 @@ echo "=== StitchSequences ready ==="
                     "sequence_ids": list(source.ids) or []
                 }
             elif source.files:
+                sequences_file = (source.files if source.is_shared_file
+                                  else source.files[0])
                 return {
                     "type": "tool_output",
-                    "sequences_file": source.files[0],
+                    "sequences_file": sequences_file,
                     "source_name": "DataStream",
                     "sequence_ids": list(source.ids) or []
                 }
@@ -438,7 +440,7 @@ fi
         sequences = DataStream(
             name="sequences",
             ids=predicted_ids,
-            files=[self.sequences_csv],
+            files=[],
             map_table=self.sequences_csv,
             format="csv"
         )

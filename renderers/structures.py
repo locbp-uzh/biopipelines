@@ -12,15 +12,26 @@ def render(stream, output):
 
     max_structures = 50
     pdb_data = []
-    for struct_id, file_path in zip(stream.ids_expanded, stream.files_expanded):
-        if file_path and os.path.isfile(file_path):
+    if stream.is_shared_file:
+        # One shared structure file — render once. The stream's ids label
+        # logical entries inside the file, not separate artifacts.
+        path = stream.files
+        if path and os.path.isfile(path):
             try:
-                with open(file_path, "r") as f:
-                    pdb_data.append((struct_id, f.read(), file_path))
+                with open(path, "r") as f:
+                    pdb_data.append((stream.name, f.read(), path))
             except Exception:
                 pass
-        if len(pdb_data) >= max_structures:
-            break
+    else:
+        for struct_id, file_path in zip(stream.ids_expanded, stream.files_expanded):
+            if file_path and os.path.isfile(file_path):
+                try:
+                    with open(file_path, "r") as f:
+                        pdb_data.append((struct_id, f.read(), file_path))
+                except Exception:
+                    pass
+            if len(pdb_data) >= max_structures:
+                break
 
     if not pdb_data:
         return ""

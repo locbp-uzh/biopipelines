@@ -63,6 +63,17 @@ def _validate_identifier(field: str, value: str) -> None:
 from .base_config import _escape_for_double_quotes  # noqa: F401
 
 
+def _validate_sbatch_value(field: str, value: Any) -> None:
+    """Reject values that would inject extra lines or carriage"""
+    if value is None:
+        return
+    s = value if isinstance(value, str) else str(value)
+    if "\n" in s or "\r" in s:
+        raise ValueError(
+            f"{field!r}={value!r} contains a newline or carriage return. "
+        )
+
+
 # Module-level context variable to track active pipeline for auto-registration
 _active_pipeline: contextvars.ContextVar[Optional['Pipeline']] = contextvars.ContextVar('_active_pipeline', default=None)
 
@@ -532,6 +543,10 @@ class Pipeline:
         if not self.tools:
             raise ValueError("Cannot save empty pipeline")
 
+        # Suppress auto-submit on context exit: calling save() directly inside
+        # a `with Pipeline(...)` block is an explicit save just like Save().
+        self._explicit_save_called = True
+
         if self.debug:
             # Print tool outputs with execution order
             for i, tool_output in enumerate(self.tool_outputs, 1):
@@ -996,6 +1011,9 @@ echo "GPU Type: $gpu_type"
             return ""
         sbatch_lines = []
         for param, value in slurm_options.items():
+            # Defence-in-depth: resources() already validates, but values may
+            # also be merged in from inherited batches, so re-check at emit time.
+            _validate_sbatch_value(f"slurm_options[{param!r}]", value)
             if param == "cpus":
                 slurm_param = "cpus-per-task"
             else:
@@ -1012,6 +1030,8 @@ echo "GPU Type: $gpu_type"
     def _generate_single_batch_slurm(self, email_line):
         """Generate single SLURM script for single batch pipeline."""
         resources = self.batch_resources[0]
+        _validate_sbatch_value("memory", resources["memory"])
+        _validate_sbatch_value("time", resources["time"])
         gpu_line = self._generate_gpu_line(resources["gpu"])
         gpu_setup = self._generate_gpu_setup(resources["gpu"])
         additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
@@ -1081,6 +1101,8 @@ umask 002
         # Generate SLURM scripts for each batch
         for batch_idx in range(num_batches):
             resources = self.batch_resources[batch_idx]
+            _validate_sbatch_value("memory", resources["memory"])
+            _validate_sbatch_value("time", resources["time"])
             gpu_line = self._generate_gpu_line(resources["gpu"])
             gpu_setup = self._generate_gpu_setup(resources["gpu"])
             additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
@@ -1299,6 +1321,15 @@ umask 002
             # GPU with specific CPU allocation
             pipeline.resources(gpu="V100", memory="32GB", time="12:00:00", cpus=16)
         """
+        # Reject newline/CR before anything else — these would inject extra
+        # #SBATCH directives at script generation time.
+        _validate_sbatch_value("gpu", gpu)
+        _validate_sbatch_value("memory", memory)
+        _validate_sbatch_value("time", time)
+        _validate_sbatch_value("cpus", cpus)
+        for opt_key, opt_value in slurm_options.items():
+            _validate_sbatch_value(f"slurm_options[{opt_key!r}]", opt_value)
+
         # Start new batch
         self.current_batch += 1
         self.batch_start_indices.append(len(self.tools))
@@ -1626,9 +1657,8 @@ def Save():
             "Save() must be called within a Pipeline context. "
             "Use: with Pipeline(...): Save()"
         )
+    # save() itself sets _explicit_save_called so auto-submit is suppressed.
     pipeline.save()
-    # Mark that save was explicitly called to prevent auto-submit
-    pipeline._explicit_save_called = True
 
 
 def Dependencies(job_ids: Union[str, List[str]]):

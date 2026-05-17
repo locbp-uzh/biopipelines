@@ -63,7 +63,8 @@ echo "=== Fuse ready ==="
 
     # Lazy path descriptors — queries_csv is the content-bearing map_table
     # for the sequences stream, so it lives in sequences/. The matching
-    # FASTA file sits alongside it.
+    # FASTA file is a side artifact (not part of any stream) and lives in
+    # _extras/.
     queries_csv = Path(lambda self: self.stream_path("sequences", f"{self._get_job_base()}_queries.csv"))
     queries_fasta = Path(lambda self: self.stream_path("sequences", f"{self._get_job_base()}_queries.fasta"))
     fuse_config_json = Path(lambda self: self.configuration_path("fuse_config.json"))
@@ -95,7 +96,7 @@ echo "=== Fuse ready ==="
             **kwargs: Additional parameters
 
         Output:
-            Streams: sequences (.fasta)
+            Streams: sequences (.csv), fasta (.fasta — shared multi-record artifact)
             Tables:
                 sequences: id | sequence | lengths | sequences_1.id | sequences_2.id | ... | S1 | L1 | S2 | L2 | ... | Sn
         """
@@ -387,17 +388,30 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
             )
         }
 
-        # Create sequences DataStream
+        # sequences stream: value-based CSV — queries_csv is the map_table.
         sequences = DataStream(
             name="sequences",
             ids=sequence_ids,
-            files=[self.queries_fasta],
+            files=[],
+            map_table=self.queries_csv,
+            format="csv"
+        )
+
+        # fasta stream: shared single artifact (multi-record FASTA). Lives
+        # in sequences/ alongside queries_csv so the stream folder stays
+        # self-contained. Map table reuses queries_csv so downstream tools
+        # can look up sequence metadata against fasta ids.
+        fasta = DataStream(
+            name="fasta",
+            ids=list(sequence_ids),
+            files=self.queries_fasta,
             map_table=self.queries_csv,
             format="fasta"
         )
 
         return {
             "sequences": sequences,
+            "fasta": fasta,
             "tables": tables,
             "output_folder": self.output_folder
         }

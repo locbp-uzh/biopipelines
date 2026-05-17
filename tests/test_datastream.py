@@ -184,3 +184,96 @@ def test_datastream_from_mock_has_map_table_at_config_time(
                 expected=("exists", True),
                 actual=("exists", os.path.exists(map_path)))
     assert os.path.exists(map_path)
+
+
+# ── shared-file DataStream (files: str) ───────────────────────────────────────
+
+def test_datastream_shared_construction(record_case):
+    """files=str with N>1 ids is a valid shared-file stream."""
+    ds = DataStream(name="fasta", ids=["a", "b", "c"], files="/tmp/shared.fasta",
+                    map_table="", format="fasta")
+    record_case(input="files='/tmp/shared.fasta', ids=[a,b,c]",
+                expected=(True, "/tmp/shared.fasta"),
+                actual=(ds.is_shared_file, ds.files))
+    assert ds.is_shared_file is True
+    assert ds.files == "/tmp/shared.fasta"
+    assert len(ds) == 3
+
+
+def test_datastream_shared_files_expanded_single(record_case):
+    """files_expanded returns [shared_path] (length 1), not N copies."""
+    ds = DataStream(name="fasta", ids=["a", "b", "c"], files="/tmp/s.fa",
+                    map_table="", format="fasta")
+    actual = ds.files_expanded
+    record_case(input="3 ids, shared file",
+                expected=["/tmp/s.fa"], actual=actual)
+    assert actual == ["/tmp/s.fa"]
+
+
+def test_datastream_shared_iter_preserves_str(record_case):
+    """Iterating a shared stream yields sub-streams that keep files as str."""
+    ds = DataStream(name="fasta", ids=["a", "b"], files="/tmp/s.fa",
+                    map_table="", format="fasta")
+    subs = list(ds)
+    types = [type(s.files).__name__ for s in subs]
+    paths = [s.files for s in subs]
+    record_case(input="iter shared", expected=(["str", "str"], ["/tmp/s.fa", "/tmp/s.fa"]),
+                actual=(types, paths))
+    assert types == ["str", "str"]
+    assert paths == ["/tmp/s.fa", "/tmp/s.fa"]
+
+
+def test_datastream_shared_getitem_preserves_str(record_case):
+    """Integer and slice indexing on a shared stream preserves str form."""
+    ds = DataStream(name="fasta", ids=["a", "b", "c"], files="/tmp/s.fa",
+                    map_table="", format="fasta")
+    one = ds[1]
+    two = ds[0:2]
+    record_case(input="ds[1] and ds[0:2]",
+                expected=("str", "str"),
+                actual=(type(one.files).__name__, type(two.files).__name__))
+    assert one.files == "/tmp/s.fa"
+    assert two.files == "/tmp/s.fa"
+    assert one.ids == ["b"]
+    assert list(two.ids) == ["a", "b"]
+
+
+def test_datastream_shared_to_dict_roundtrip(record_case):
+    """to_dict / from_dict preserves the str form."""
+    ds = DataStream(name="fasta", ids=["a", "b"], files="/tmp/s.fa",
+                    map_table="", format="fasta")
+    d = ds.to_dict()
+    restored = DataStream.from_dict(d)
+    record_case(input="roundtrip shared",
+                expected=("str", "/tmp/s.fa"),
+                actual=(type(restored.files).__name__, restored.files))
+    assert restored.is_shared_file
+    assert restored.files == "/tmp/s.fa"
+
+
+def test_datastream_shared_filter_by_ids(record_case):
+    """filter_by_ids on a shared stream keeps the shared path."""
+    ds = DataStream(name="fasta", ids=["a", "b", "c"], files="/tmp/s.fa",
+                    map_table="", format="fasta")
+    sub = ds.filter_by_ids(["b", "c"])
+    record_case(input="keep [b,c] from [a,b,c]",
+                expected=(["b", "c"], "/tmp/s.fa"),
+                actual=(list(sub.ids), sub.files))
+    assert list(sub.ids) == ["b", "c"]
+    assert sub.files == "/tmp/s.fa"
+
+
+def test_create_map_table_shared_file(tmp_path, record_case):
+    """create_map_table replicates a shared str path into every row."""
+    from biopipelines.datastream import create_map_table
+    import pandas as pd
+
+    out = tmp_path / "shared_map.csv"
+    create_map_table(str(out), ids=["a", "b", "c"], files="/tmp/s.fa")
+    df = pd.read_csv(out)
+    record_case(input="shared file 3 ids",
+                expected=(3, ["/tmp/s.fa"] * 3),
+                actual=(len(df), df["file"].tolist()))
+    assert len(df) == 3
+    assert df["file"].tolist() == ["/tmp/s.fa"] * 3
+    assert df["id"].tolist() == ["a", "b", "c"]

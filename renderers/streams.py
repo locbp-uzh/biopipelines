@@ -82,7 +82,14 @@ def render(stream, output):
     if map_data is not None and len(map_data) > 0:
         parts.append(_render_dataframe(map_data))
     else:
-        items = list(zip(stream.ids_expanded, stream.files_expanded)) if stream.files_expanded else [(iid, "") for iid in stream.ids_expanded]
+        if stream.is_shared_file:
+            # Pair every id with the shared path; zip(ids_expanded, files_expanded)
+            # would truncate to one row because files_expanded is length-1.
+            items = [(iid, stream.files) for iid in stream.ids_expanded]
+        elif stream.files_expanded:
+            items = list(zip(stream.ids_expanded, stream.files_expanded))
+        else:
+            items = [(iid, "") for iid in stream.ids_expanded]
         n_items = len(items)
         parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
         if n_items <= 4:
