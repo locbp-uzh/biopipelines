@@ -42,15 +42,21 @@ class AllAtoms(Select):
         return True
 
 
-def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int, int]]:
+def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, str, int, int]]:
     """
-    Find all CIF.gz files in raw folder and extract design and model numbers.
+    Find all CIF.gz files in raw folder and extract key, design and model numbers.
+
+    Foundry names each output ``<key>_<design>_model_<model>.cif.gz`` where
+    ``<key>`` is the design key from the input JSON. In the multi-PDB case the
+    key is the input pdb id; otherwise it is the single design prefix. The key
+    is preserved here so the output structure id is ``<key>_d<D>_m<M>`` and
+    multi-PDB outputs stay distinct and joinable to their parent.
 
     Args:
         raw_folder: Path to raw output folder
 
     Returns:
-        List of tuples: (cif_gz_path, json_path, design_number, model_number)
+        List of tuples: (cif_gz_path, json_path, key, design_number, model_number)
     """
     # Pattern: *_*_model_*.cif.gz (no "design" word in newer RFD3 versions)
     pattern = os.path.join(raw_folder, "*_model_*.cif.gz")
@@ -58,35 +64,36 @@ def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int, int]]:
 
     results = []
     for cif_path in cif_files:
-        # Extract design and model numbers from filename
+        # Extract key, design and model numbers from filename
         basename = os.path.basename(cif_path)
         # Remove .cif.gz extension
         name_without_ext = basename.replace(".cif.gz", "")
 
-        # Find N_model_M pattern
-        # Split by _model_ to get the model number
+        # Find <key>_<design>_model_<model> pattern.
+        # Split by _model_ to get the model number.
         parts = name_without_ext.split("_model_")
         if len(parts) == 2:
             try:
                 model_num = int(parts[1])
 
-                # The design number is the last underscore-separated part before _model_
+                # The design number is the last underscore-separated part before
+                # _model_; everything before it is the design key.
                 prefix_and_design = parts[0]
-                design_parts = prefix_and_design.split("_")
-                if len(design_parts) >= 1:
-                    design_num = int(design_parts[-1])
+                design_parts = prefix_and_design.rsplit("_", 1)
+                if len(design_parts) == 2:
+                    key, design_num = design_parts[0], int(design_parts[1])
                 else:
-                    print(f"Warning: Could not extract design number from {basename}")
+                    print(f"Warning: Could not extract key/design from {basename}")
                     continue
 
                 # Find corresponding JSON file
                 json_path = cif_path.replace(".cif.gz", ".json")
 
                 if os.path.exists(json_path):
-                    results.append((cif_path, json_path, design_num, model_num))
+                    results.append((cif_path, json_path, key, design_num, model_num))
                 else:
                     print(f"Warning: JSON file not found for {basename}")
-                    results.append((cif_path, None, design_num, model_num))
+                    results.append((cif_path, None, key, design_num, model_num))
             except ValueError:
                 print(f"Warning: Could not parse design/model numbers from {basename}")
                 continue
@@ -94,8 +101,8 @@ def find_cif_gz_files(raw_folder: str) -> List[Tuple[str, str, int, int]]:
             print(f"Warning: Unexpected filename format: {basename}")
             continue
 
-    # Sort by design number, then model number
-    results.sort(key=lambda x: (x[2], x[3]))
+    # Sort by key, then design number, then model number
+    results.sort(key=lambda x: (x[2], x[3], x[4]))
     return results
 
 
@@ -262,7 +269,6 @@ def main():
     parser = argparse.ArgumentParser(description="Post-process RFdiffusion3 CIF.gz outputs")
     parser.add_argument("--raw_folder", required=True, help="Raw output folder with CIF.gz files")
     parser.add_argument("--output_folder", required=True, help="Final output folder for PDB files")
-    parser.add_argument("--prefix", required=True, help="Prefix for output filenames")
     parser.add_argument("--num_designs", type=int, required=True, help="Expected number of designs")
     parser.add_argument("--num_models", type=int, required=True, help="Expected number of models per design")
     parser.add_argument("--design_startnum", type=int, required=True, help="Starting design number")
@@ -274,7 +280,6 @@ def main():
 
     print(f"Processing RFdiffusion3 outputs from: {args.raw_folder}")
     print(f"Output folder: {args.output_folder}")
-    print(f"Prefix: {args.prefix}")
     print(f"Expected designs: {args.num_designs}")
     print(f"Expected models per design: {args.num_models}")
 
@@ -287,9 +292,14 @@ def main():
 
     print(f"Found {len(cif_files)} CIF.gz files")
 
-    expected_total = args.num_designs * args.num_models
+    # Expected count scales with the number of design keys (one per input PDB
+    # in the multi-PDB case, or one for the single/de-novo case), each
+    # producing num_designs x num_models outputs.
+    num_keys = len({c[2] for c in cif_files})
+    expected_total = num_keys * args.num_designs * args.num_models
     if len(cif_files) != expected_total:
-        print(f"WARNING: Found {len(cif_files)} files but expected {expected_total} ({args.num_designs} designs × {args.num_models} models)")
+        print(f"WARNING: Found {len(cif_files)} files but expected {expected_total} "
+              f"({num_keys} key(s) x {args.num_designs} designs x {args.num_models} models)")
 
     # Create temporary directory for decompressed CIF files
     temp_dir = tempfile.mkdtemp(prefix="rfd3_postprocess_")
@@ -301,17 +311,19 @@ def main():
         sequences_data = []
         success_count = 0
 
-        for idx, (cif_gz_path, json_path, design_num, model_num) in enumerate(cif_files):
+        for idx, (cif_gz_path, json_path, key, design_num, model_num) in enumerate(cif_files):
             # With n_batches parameter, designs are numbered sequentially: 0, 1, 2, ...
             # Models within each design are also numbered sequentially: 0, 1, 2, ...
             output_design = args.design_startnum + design_num
             output_model = args.design_startnum + model_num
 
-            # Conditional naming: include model suffix only if num_models > 1
+            # Name from the foundry design key (the input pdb id in the multi-PDB
+            # case, or the single design prefix). Include the model suffix only
+            # when num_models > 1.
             if args.num_models > 1:
-                structure_id = f"{args.prefix}_d{output_design}_m{output_model}"
+                structure_id = f"{key}_d{output_design}_m{output_model}"
             else:
-                structure_id = f"{args.prefix}_{output_design}"
+                structure_id = f"{key}_{output_design}"
 
             print(f"\nProcessing {design_num}_model_{model_num} -> {structure_id}")
 

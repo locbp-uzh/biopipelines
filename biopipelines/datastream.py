@@ -307,6 +307,25 @@ class DataStream:
         """DataStream is truthy if it has any items."""
         return len(self.ids) > 0
 
+    @property
+    def formats(self) -> tuple:
+        """Return the pipe-delimited stream formats as normalized tokens."""
+        return tuple(
+            fmt.strip().lower()
+            for fmt in (self.format or "").split("|")
+            if fmt.strip()
+        )
+
+    def has_format(self, format: str) -> bool:
+        """Return True when this stream advertises the given format."""
+        return format.strip().lower() in self.formats
+
+    def has_only_formats(self, *formats: str) -> bool:
+        """Return True when all advertised formats are in the allowed set."""
+        allowed = {fmt.strip().lower() for fmt in formats if fmt.strip()}
+        actual = set(self.formats)
+        return bool(actual) and actual <= allowed
+
     def _get_map_data(self) -> Optional[pd.DataFrame]:
         """Lazily load map_table data."""
         if self._map_data is None:
@@ -466,17 +485,6 @@ class DataStream:
         """Create an empty DataStream."""
         return cls(name=name, ids=[], files=[], map_table="", format=format, metadata={})
 
-    def is_file_based(self) -> bool:
-        """
-        Check if this DataStream uses file-based storage.
-
-        Returns:
-            True if format uses files (pdb, cif, sdf, fasta, etc.)
-            False if format uses inline values (smiles, ccd)
-        """
-        value_based_formats = {'smiles', 'ccd', 'sequence'}
-        return self.format.lower() not in value_based_formats
-
     def __repr__(self) -> str:
         """Detailed string representation."""
         if self.is_shared_file:
@@ -517,7 +525,8 @@ def create_map_table(
     provenance: Optional[Dict[str, List[str]]] = None,
     parent_ids: Optional[List[str]] = None,
     suffix_pattern: Optional[str] = None,
-    input_stream_name: Optional[str] = None
+    input_stream_name: Optional[str] = None,
+    prune_redundant_provenance: bool = False
 ) -> str:
     """
     Create a map_table CSV file for a DataStream.
@@ -536,6 +545,10 @@ def create_map_table(
             parent_ids and input_stream_name, auto-generates provenance by
             stripping the suffix from each expanded ID.
         input_stream_name: Name of the input stream for auto-provenance column
+        prune_redundant_provenance: When True, drop plain ``<axis>.id``
+            provenance columns whose every non-empty cell is recoverable from
+            the row id by id-semantics alone (see
+            ``id_map_utils.prune_redundant_provenance_columns``). Default False.
 
     Returns:
         Path to created CSV file
@@ -639,6 +652,10 @@ def create_map_table(
             data[col_name] = expanded_prov
 
     df = pd.DataFrame(data)
+
+    if prune_redundant_provenance:
+        from .id_map_utils import prune_redundant_provenance_columns
+        df = prune_redundant_provenance_columns(df)
 
     # Ensure parent directory exists
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

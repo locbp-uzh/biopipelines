@@ -387,8 +387,8 @@ def run_editor(file_path: str) -> int:
                 state.cursor = min(state.cursor, max(0, len(state.rows) - 1))
 
     def save_to_disk() -> None:
-        bak = state.file_path.with_suffix(state.file_path.suffix + ".bak")
-        shutil.copy2(state.file_path, bak)
+        from .config_manager import backup_file
+        bak = Path(backup_file(state.file_path))
         # Atomic write: dump to a temp in the same dir, then replace.
         buf = io.StringIO()
         yaml.dump(state.doc, buf)
@@ -774,7 +774,7 @@ def run_editor(file_path: str) -> int:
         state.show_help = not state.show_help
 
     @kb.add("q", filter=_body_focused)
-    @kb.add("c-c")
+    @kb.add("c-c", filter=_body_focused)
     def _(event):
         if state.dirty:
             state.status = "unsaved changes — press Q to discard, s to save"
@@ -793,7 +793,7 @@ def run_editor(file_path: str) -> int:
     def _(event):
         end_edit(commit=True)
 
-    @kb.add("escape", filter=_edit_focused, eager=True)
+    @kb.add("escape", filter=_edit_focused)
     def _(event):
         end_edit(commit=False)
 
@@ -853,7 +853,7 @@ def run_editor(file_path: str) -> int:
     def _(event):
         end_search(commit=True)
 
-    @kb.add("escape", filter=_search_focused, eager=True)
+    @kb.add("escape", filter=_search_focused)
     def _(event):
         end_search(commit=False)
 

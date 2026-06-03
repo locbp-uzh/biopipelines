@@ -6,7 +6,14 @@ import html as html_module
 import pandas as pd
 
 
-def _render_compact_table(df):
+def _rel(path, output_folder):
+    """Make path relative to output_folder for display."""
+    if output_folder and path.startswith(output_folder):
+        return "<output_folder>/" + os.path.relpath(path, output_folder)
+    return path
+
+
+def _render_compact_table(df, output_folder=None):
     """Render a DataFrame as a compact HTML table with 2+...+2 row truncation."""
     columns = list(df.columns)
     rows = ['<table class="bp-table"><tr>']
@@ -32,6 +39,8 @@ def _render_compact_table(df):
         rows.append('<tr>')
         for col in columns:
             val = str(row[col]) if pd.notna(row[col]) else ''
+            if output_folder and val.startswith(output_folder):
+                val = _rel(val, output_folder)
             display_val = val if len(val) <= 60 else val[:57] + '...'
             rows.append(f'<td>{html_module.escape(display_val)}</td>')
         rows.append('</tr>')
@@ -77,7 +86,7 @@ def render(stream, output):
             try:
                 df = pd.read_csv(csv_path)
                 if len(df) > 0:
-                    table_html = _render_compact_table(df)
+                    table_html = _render_compact_table(df, output_folder=output.output_folder)
             except Exception:
                 pass
 

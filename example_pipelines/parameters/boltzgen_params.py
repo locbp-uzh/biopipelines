@@ -9,7 +9,7 @@ num_designs and budget tiny so the cluster job stays cheap.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.boltzgen import BoltzGen
+from biopipelines import BoltzGen
 
 with Pipeline(project="ToolParameters",
               job="BoltzGen",

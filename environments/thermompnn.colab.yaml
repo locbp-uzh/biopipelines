@@ -1,0 +1,18 @@
+# ThermoMPNN - COLAB / micromamba variant (variant=colab).
+#
+# Separation from the generic/cluster path: this file is picked up ONLY on Colab
+# (variant-specific <env>.colab.yaml takes precedence over the fallback). The
+# cluster path is a separate file, thermompnn.yaml, which this one never shares
+# state with — edits there cannot regress Colab and vice versa.
+#
+# Mirrors the frame2seq Colab recipe: a minimal conda layer (Python 3.10 + pip),
+# with torch and the rest coming from the pip layer so the torch wheel resolves
+# to Colab's system CUDA automatically. ThermoMPNN itself is cloned, not pip
+# installed; the pip layer only provides its import dependencies.
+# See thermompnn.pip.colab.txt.
+name: thermompnn
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip

@@ -200,7 +200,7 @@ fi
             Streams: sequences (.csv), fasta (.fasta)
             Tables:
                 sequences: id | structures.id | source_pdb | sequence | score | seq_recovery | gaps
-                missing: id | removed_by | cause
+                missing: id | removed_by | kind | cause
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
@@ -347,7 +347,7 @@ echo "ProteinMPNN --out_folder (execution/): {self.pmpnn_out_folder}"
 mkdir -p "{per_pdb_dir}"
 # Seed missing.csv header now so partial failures still produce a readable file.
 if [ ! -f "{self.missing_csv}" ]; then
-    echo "id,removed_by,cause" > "{self.missing_csv}"
+    echo "id,removed_by,kind,cause" > "{self.missing_csv}"
 fi
 
 for struct_id in {Resolve.stream_ids(self.structures_json)}; do
@@ -379,7 +379,7 @@ with open(sys.argv[5], 'w') as out:
 
     if [ ! -s "$SUBSET_JSONL" ]; then
         echo "  [skip] $struct_id: not found in parsed_pdbs.jsonl"
-        echo "${{struct_id}},ProteinMPNN,not_in_parsed_pdbs" >> "{self.missing_csv}"
+        echo "${{struct_id}},ProteinMPNN,failure,not_in_parsed_pdbs" >> "{self.missing_csv}"
         continue
     fi
 
@@ -392,7 +392,7 @@ with open(sys.argv[5], 'w') as out:
         # Capture last non-empty line of the log as the cause; sanitize commas.
         CAUSE=$(grep -vE '^\\s*$' "$SUBSET_LOG" | tail -n1 | tr ',\\n' ' ')
         echo "  [fail] $struct_id (exit $rc): $CAUSE"
-        echo "${{struct_id}},ProteinMPNN,\\"$CAUSE\\"" >> "{self.missing_csv}"
+        echo "${{struct_id}},ProteinMPNN,failure,\\"$CAUSE\\"" >> "{self.missing_csv}"
         cat "$SUBSET_LOG"
     fi
 done
@@ -467,7 +467,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
+                columns=["id", "removed_by", "kind", "cause"],
                 description="IDs removed (duplicates or upstream) with removal reason"
             )
         }

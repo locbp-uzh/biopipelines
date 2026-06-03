@@ -22,7 +22,24 @@ import pandas as pd
 
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.biopipelines_io import load_datastream
+from biopipelines.biopipelines_io import load_datastream, iterate_files
+
+
+def emit_worklist(structures_json, worklist_path):
+    """Resolve the input stream to id<TAB>file lines for the bash loop.
+
+    Runs under biopipelines (Python 3) before the CABSflex Python-2.7 segment,
+    so lazy IDs expand against the map_table at runtime (never at config time).
+    """
+    ds = load_datastream(structures_json)
+    rows = list(iterate_files(ds))
+    if not rows:
+        print("Error: no structures resolved from input DataStream", file=sys.stderr)
+        sys.exit(1)
+    with open(worklist_path, "w") as f:
+        for struct_id, struct_file in rows:
+            f.write("{0}\t{1}\n".format(struct_id, struct_file))
+    print("Wrote worklist: {0} ({1} structures)".format(worklist_path, len(rows)))
 
 
 def parse_rmsf(rmsf_path, struct_id):
@@ -138,9 +155,12 @@ def build_outputs(structures_ds, structures_dir, rmsf_dir, num_models, rmsf_all_
 def main():
     parser = argparse.ArgumentParser(description="CABS-Flex post-processor")
     parser.add_argument("--structures", required=True, help="JSON file containing input DataStream")
-    parser.add_argument("--output_dir", required=True, help="Tool output folder (also used as work_root fallback)")
-    parser.add_argument("--rmsf_all_csv", required=True, help="Output merged RMSF CSV path")
-    parser.add_argument("--structures_map", required=True, help="Output structures map CSV path")
+    parser.add_argument("--emit-worklist", action="store_true",
+                        help="Resolve the stream to id<TAB>file lines and exit (Python 3 segment)")
+    parser.add_argument("--worklist", help="Output worklist TSV path (with --emit-worklist)")
+    parser.add_argument("--output_dir", help="Tool output folder (also used as work_root fallback)")
+    parser.add_argument("--rmsf_all_csv", help="Output merged RMSF CSV path")
+    parser.add_argument("--structures_map", help="Output structures map CSV path")
     parser.add_argument("--num_models", type=int, default=10, help="Number of models per structure")
     parser.add_argument("--work_root", default=None,
                         help="Folder containing per-structure CABSflex work dirs (default: output_dir)")
@@ -152,6 +172,17 @@ def main():
                         help="Destination for per-ID RMSF CSVs (default: output_dir)")
 
     args = parser.parse_args()
+
+    if args.emit_worklist:
+        if not args.worklist:
+            parser.error("--emit-worklist requires --worklist")
+        emit_worklist(args.structures, args.worklist)
+        return
+
+    required = ["output_dir", "rmsf_all_csv", "structures_map"]
+    missing = ["--{0}".format(r) for r in required if getattr(args, r) is None]
+    if missing:
+        parser.error("missing required arguments for post-processing: {0}".format(", ".join(missing)))
 
     structures_ds = load_datastream(args.structures)
 

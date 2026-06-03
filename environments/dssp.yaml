@@ -1,0 +1,12 @@
+# DSSP environment - per-residue secondary structure assignment.
+# Uses mkdssp from PDB-REDO (bioconda).
+name: dssp
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - dssp
+  - pandas
+  - numpy

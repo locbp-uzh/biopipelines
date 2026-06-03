@@ -1,0 +1,47 @@
+# Phase 2 — NeuralPLexer runtime deps.
+#
+# torch is re-pinned here even though phase 1 installed it: a transitive dep in
+# this phase (pytorch-lightning / fair-esm / e3nn) otherwise pulls the newest
+# PyPI torch, which (a) replaces the +cu121 build the PyG wheels link against
+# and (b) drags in a CUDA 13 nvidia-*-cu13 wheel stack — breaking both PyG and
+# openfold's extension. Pin it to the phase-1 build so nothing upgrades it.
+--extra-index-url https://download.pytorch.org/whl/cu121
+--find-links https://data.pyg.org/whl/torch-2.1.0+cu121.html
+torch==2.1.0
+biopython
+prody
+deprecated
+hydra-core==1.1.1
+dm-tree
+ml-collections
+networkx
+pypdb
+dataclasses; python_version < "3.7"
+msgpack
+msgpack-numpy
+# torch 2.1.0 is built against NumPy 1.x; NumPy 2 triggers `Failed to initialize
+# NumPy: _ARRAY_API not found` and breaks tensor<->ndarray interop. The conda
+# layer (rdkit) pulls numpy 2, so pin it back here.
+numpy<2
+pandas
+rmsd
+tensorboard
+tqdm
+lmdb
+wandb
+einops
+# e3nn: torch is 2.1.0 here, so the modern e3nn (which needs torch>=2.1) is fine
+# — no pin required.
+e3nn
+
+# --- Additional NeuralPLexer runtime deps (from upstream requirements.txt) ---
+# We install the package with --no-deps, so its requirements that aren't
+# torch/PyG (already in phase 1) must be listed here explicitly. The compiled
+# deps (openfold) live in phase 4 so they can build --no-build-isolation
+# after the setuptools<81 downgrade in phase 3.
+mendeleev
+fairscale
+seaborn
+pytorch-lightning<2.0.0
+fair-esm
+power-spherical @ git+https://github.com/zrqiao/power_spherical.git@290b1630c5f84e3bb0d61711046edcf6e47200d4

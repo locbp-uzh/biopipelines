@@ -82,34 +82,30 @@ def parse_trb(trb_path, pdb_path):
 def main():
     parser = argparse.ArgumentParser(description="Create RFdiffusion results table from TRB files")
     parser.add_argument("output_folder", type=str, help="RFdiffusion output folder")
-    parser.add_argument("pipeline_name", type=str, help="Pipeline name for ID generation")
-    parser.add_argument("num_designs", type=int, help="Number of designs generated")
     parser.add_argument("table_path", type=str, help="Output CSV table path")
-    parser.add_argument("design_startnum", type=int, nargs="?", default=0,
-                        help="Starting number for design numbering (default: 0 for backward compatibility)")
 
     args = parser.parse_args()
 
+    # Scan the structures folder for every produced design. This covers both
+    # the single-PDB / unconditional case (one prefix) and the multi-PDB case
+    # (one <pdb_id> prefix per input structure) without reconstructing names.
+    import glob
+    pdb_paths = sorted(glob.glob(os.path.join(args.output_folder, "*.pdb")))
+
     designs = []
+    for pdb_path in pdb_paths:
+        pdb_file = os.path.basename(pdb_path)
+        design_id = os.path.splitext(pdb_file)[0]
+        trb_path = os.path.join(args.output_folder, f"{design_id}.trb")
 
-    for i in range(args.num_designs):
-        design_num = args.design_startnum + i
-        pdb_file = f"{args.pipeline_name}_{design_num}.pdb"
-        pdb_path = os.path.join(args.output_folder, pdb_file)
-        trb_path = os.path.join(args.output_folder, f"{args.pipeline_name}_{design_num}.trb")
-        design_id = f"{args.pipeline_name}_{design_num}"
-
-        pdb_exists = os.path.exists(pdb_path)
-        trb_exists = os.path.exists(trb_path)
-
-        if pdb_exists and trb_exists:
+        if os.path.exists(trb_path):
             trb_data = parse_trb(trb_path, pdb_path)
             status = "ok"
         else:
             trb_data = {"fixed": "", "designed": "", "source_fixed": "", "plddt_mean": ""}
-            status = "missing_pdb" if not pdb_exists else "missing_trb"
+            status = "missing_trb"
 
-        design_info = {
+        designs.append({
             "id": design_id,
             "pdb": pdb_file,
             "fixed": trb_data["fixed"],
@@ -117,11 +113,10 @@ def main():
             "source_fixed": trb_data["source_fixed"],
             "plddt_mean": trb_data["plddt_mean"],
             "status": status,
-        }
+        })
 
-        designs.append(design_info)
-
-    df = pd.DataFrame(designs)
+    df = pd.DataFrame(designs, columns=[
+        "id", "pdb", "fixed", "designed", "source_fixed", "plddt_mean", "status"])
     os.makedirs(os.path.dirname(args.table_path), exist_ok=True)
     df.to_csv(args.table_path, index=False)
 

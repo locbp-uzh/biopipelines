@@ -9,7 +9,7 @@
 # SLURM scheduler so the framework emits slurm_batch*.sh files and the
 # Resources()-required-before-tools rule is exercised.
 machine:
-  emails: {}
+  email: ""
   env_manager:
     name: "pip"
     init: []

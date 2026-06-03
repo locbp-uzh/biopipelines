@@ -1,0 +1,8 @@
+# Frame2seq pip dependencies for Google Colab.
+# Frame2seq is published on PyPI; its setup.py pulls in torch, numpy, biopython,
+# einops, etc. transitively, so no further pins are needed for inference.
+frame2seq
+
+# BioPipelines interop (pipe script reads/writes CSVs and DataStream JSON)
+pandas
+biopython

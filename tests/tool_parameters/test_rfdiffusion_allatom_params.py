@@ -10,17 +10,20 @@ pytestmark = pytest.mark.tool_parameters
 
 def _build(local_config, isolated_cwd, new_pipeline, ligand="ATP", **kwargs):
     from biopipelines.rfdiffusion_allatom import RFdiffusionAllAtom
+    from biopipelines.ligand import Ligand
 
     pipeline = new_pipeline("rfdaa_params")
     with pipeline:
-        RFdiffusionAllAtom(ligand=ligand, contigs=kwargs.pop("contigs", "100-200"), **kwargs)
+        RFdiffusionAllAtom(ligand=Ligand(code=ligand), contigs=kwargs.pop("contigs", "100-200"), **kwargs)
         script_path = pipeline.save()
     return read_pipeline_sh(script_path)
 
 
 def test_ligand(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, ligand="HEM")
-    assert "HEM" in content
+    # The code is resolved from the compounds stream at runtime into $LIGAND_CODE.
+    assert "LIGAND_CODE=" in content
+    assert "inference.ligand=$LIGAND_CODE" in content
 
 
 def test_num_designs(local_config, isolated_cwd, new_pipeline):

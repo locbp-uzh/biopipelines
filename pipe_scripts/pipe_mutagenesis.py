@@ -509,9 +509,10 @@ def main():
             if all_missing:
                 for entry in all_missing:
                     entry['removed_by'] = args.missing_step
-                missing_df = pd.DataFrame(all_missing, columns=['id', 'removed_by', 'cause'])
+                    entry['kind'] = 'filter'
+                missing_df = pd.DataFrame(all_missing, columns=['id', 'removed_by', 'kind', 'cause'])
             else:
-                missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+                missing_df = pd.DataFrame(columns=['id', 'removed_by', 'kind', 'cause'])
             missing_df.to_csv(args.missing_output, index=False)
             print(f"Missing table saved to: {args.missing_output} ({len(all_missing)} entries)")
 

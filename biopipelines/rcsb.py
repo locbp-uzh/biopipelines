@@ -1107,10 +1107,27 @@ python "{self.pdb_py}" --config "{self.config_file}"
             stream_format = self.convert
         else:
             # No conversion: RCSB downloads PDB if available, CIF as fallback.
-            # Extension is only known at runtime, so use wildcards.
+            # At config time the extension is unknown, so we emit a wildcard
+            # path and the dual format. At access time (after the runtime
+            # writes structures.csv) we replace both with the resolved values.
             structure_files = [os.path.join(structures_dir, f"{oid}.*")
                               for oid in self.output_ids]
             stream_format = "pdb|cif"
+            if os.path.exists(self.structures_csv):
+                import pandas as pd
+                try:
+                    df = pd.read_csv(self.structures_csv)
+                except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
+                    df = None
+                if df is not None:
+                    if {"id", "file_path"}.issubset(df.columns):
+                        by_id = dict(zip(df["id"].astype(str), df["file_path"].astype(str)))
+                        structure_files = [by_id.get(oid, structure_files[i])
+                                           for i, oid in enumerate(self.output_ids)]
+                    if "format" in df.columns:
+                        observed = {str(f).strip().lower() for f in df["format"].dropna()}
+                        if len(observed) == 1:
+                            stream_format = next(iter(observed))
 
         tables = {
             "structures": TableInfo(

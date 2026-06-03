@@ -6,8 +6,12 @@
 """
 Generic helper to propagate missing.csv from upstream tools to downstream tools.
 
-This script copies the missing table from upstream tools as-is to the current
-tool's output folder. The missing.csv format is: id, removed_by, cause.
+Merges the upstream missing tables and writes the current tool's own
+missing.csv (schema: id, removed_by, kind, cause), in the UPSTREAM (input-axis)
+id space. Mapping those ids into the current tool's output id space (for
+products like ``prot+lig2``, ``_N`` multipliers, or group keys) is done once,
+centrally, by ``pipe_check_completion`` when it excuses missing files — so this
+helper stays a uniform raw merge for every tool.
 """
 
 import os
@@ -16,25 +20,24 @@ import pandas as pd
 from typing import List, Optional
 
 
-def find_upstream_missing_csv(input_folders: List[str]) -> Optional[str]:
+def find_upstream_missing_csvs(input_folders: List[str]) -> List[str]:
     """
-    Find missing.csv from upstream tool folders.
+    Find every upstream missing.csv across the given folders.
 
-    Args:
-        input_folders: List of potential upstream output folders
-
-    Returns:
-        Path to upstream missing.csv, or None if not found
+    Returns the manifests for ALL input axes so a filter on more than one axis
+    propagates fully (de-duped per id downstream). Each folder is the directory
+    holding ``missing.csv`` (a tool's ``tables/`` dir).
     """
+    found = []
+    seen = set()
     for folder in input_folders:
         if not folder or not os.path.exists(folder):
             continue
-
         missing_csv = os.path.join(folder, "missing.csv")
-        if os.path.exists(missing_csv):
-            return missing_csv
-
-    return None
+        if os.path.exists(missing_csv) and missing_csv not in seen:
+            seen.add(missing_csv)
+            found.append(missing_csv)
+    return found
 
 
 def load_missing_ids(missing_csv_path: str) -> List[str]:
@@ -65,41 +68,41 @@ def propagate_missing_table(
     output_folder: str,
     missing_csv_path: Optional[str] = None,
 ) -> List[str]:
-    """Propagate missing table from upstream tools by copying rows as-is."""
+    """Merge upstream missing tables (rows as-is) into this tool's missing.csv.
+
+    Reads every upstream missing.csv across ``upstream_folders``, merges them,
+    and de-dupes by id (last wins). Rows stay in the upstream (input-axis) id
+    space; the completion check maps them to output ids when excusing files.
+    Always writes the destination — even empty — so the completion check finds
+    the path it expects.
+    """
+    columns = ['id', 'removed_by', 'kind', 'cause']
     output_missing_csv = missing_csv_path or os.path.join(output_folder, "missing.csv")
+    os.makedirs(os.path.dirname(output_missing_csv), exist_ok=True)
 
-    # Find upstream missing.csv
-    upstream_missing_csv = find_upstream_missing_csv(upstream_folders)
+    upstream_csvs = find_upstream_missing_csvs(upstream_folders)
+    dfs = []
+    for path in upstream_csvs:
+        try:
+            df = pd.read_csv(path)
+        except Exception as e:
+            print(f"Warning: Could not read upstream missing.csv {path}: {e}")
+            continue
+        if not df.empty:
+            dfs.append(df)
+            print(f"  Merging {len(df)} upstream missing entries from {path}")
 
-    if not upstream_missing_csv:
-        print("No upstream missing.csv found - creating empty missing.csv")
-        pd.DataFrame(columns=['id', 'removed_by', 'cause']).to_csv(output_missing_csv, index=False)
-        return []
+    if dfs:
+        merged = pd.concat(dfs, ignore_index=True)
+        if 'id' in merged.columns:
+            merged = merged.drop_duplicates(subset=['id'], keep='last')
+    else:
+        merged = pd.DataFrame(columns=columns)
 
-    print(f"Found upstream missing.csv: {upstream_missing_csv}")
+    merged.to_csv(output_missing_csv, index=False)
+    print(f"Wrote missing.csv with {len(merged)} entries: {output_missing_csv}")
 
-    # Load upstream missing table
-    try:
-        upstream_df = pd.read_csv(upstream_missing_csv)
-    except Exception as e:
-        print(f"Warning: Could not read upstream missing.csv: {e}")
-        pd.DataFrame(columns=['id', 'removed_by', 'cause']).to_csv(output_missing_csv, index=False)
-        return []
-
-    if upstream_df.empty:
-        print("No missing IDs in upstream table - creating empty missing.csv")
-        pd.DataFrame(columns=['id', 'removed_by', 'cause']).to_csv(output_missing_csv, index=False)
-        return []
-
-    print(f"Propagating {len(upstream_df)} missing entries to current tool")
-
-    # Copy upstream rows as-is (preserve original removed_by and cause)
-    upstream_df.to_csv(output_missing_csv, index=False)
-
-    print(f"Created missing.csv: {output_missing_csv}")
-    print(f"Propagated {len(upstream_df)} missing entries")
-
-    return upstream_df['id'].astype(str).tolist() if 'id' in upstream_df.columns else []
+    return merged['id'].astype(str).tolist() if 'id' in merged.columns else []
 
 
 if __name__ == "__main__":

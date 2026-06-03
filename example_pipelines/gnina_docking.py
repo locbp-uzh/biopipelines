@@ -22,7 +22,7 @@ Prerequisites:
 """
 
 from biopipelines.pipeline import *
-from biopipelines.gnina import Gnina
+from biopipelines import Gnina
 
 with Pipeline(project="Examples",
               job="Gnina-Docking",

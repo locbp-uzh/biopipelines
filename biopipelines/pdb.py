@@ -16,12 +16,52 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
+    from .biopipelines_io import TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
+    from biopipelines_io import TableReference
+
+
+def _normalize_selection(selection):
+    """Normalize a remove/operation selection to a str or TableReference.
+
+    Accepts the documented column-reference forms and converts them to a single
+    canonical TableReference, which serializes to the TABLE_REFERENCE:path:column
+    string the pipe script resolves per-structure:
+
+    - ``str``                       — a literal PyMOL-style selection, passed through.
+    - ``TableReference``            — passed through (e.g. ``tbl.tables.x.col``).
+    - ``(TableInfo, "col")`` tuple  — the user-manual column-reference form.
+    - ``(path_str, "col")`` tuple   — a raw (path, column) pair.
+    """
+    if isinstance(selection, (str, TableReference)):
+        return selection
+    if isinstance(selection, tuple) and len(selection) == 2:
+        table, column = selection
+        if not isinstance(column, str):
+            raise ValueError(
+                f"remove selection tuple must be (TableInfo|path, column_name), "
+                f"got column of type {type(column).__name__}"
+            )
+        if isinstance(table, TableInfo):
+            # TableInfo routes bare attribute access to TableReference; the real
+            # path is only on .info.
+            return TableReference(table.info.path, column)
+        if isinstance(table, str):
+            return TableReference(table, column)
+        raise ValueError(
+            f"remove selection tuple's first element must be a TableInfo or path "
+            f"string, got {type(table).__name__}"
+        )
+    raise ValueError(
+        f"remove selection must be a PyMOL-style string, a TableReference "
+        f"(e.g. tool.tables.structures.designed), or a (TableInfo, column) "
+        f"tuple; got {type(selection).__name__}"
+    )
 
 
 class PDBOperation:
@@ -33,7 +73,13 @@ class PDBOperation:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert operation to dictionary for serialization."""
-        return {"op": self.op_type, **self.params}
+        # Stringify any non-JSON-native params (e.g. a TableReference selection
+        # serializes to its TABLE_REFERENCE:path:column form, parsed downstream).
+        params = {
+            k: (v if isinstance(v, (str, int, float, bool, type(None))) else str(v))
+            for k, v in self.params.items()
+        }
+        return {"op": self.op_type, **params}
 
 
 class PDB(BaseConfig):
@@ -54,14 +100,14 @@ class PDB(BaseConfig):
         # Fetch with ligand renaming (for RFdiffusion3 compatibility)
         pdb = PDB(
             pdbs="rifampicin.pdb",
-            PDB.Rename("LIG", ":L:")
+            PDB.rename("LIG", ":L:")
         )
 
         # Multiple operations
         pdb = PDB(
             pdbs="structure.pdb",
-            PDB.Rename("LIG", ":L:"),
-            PDB.Rename("HOH", ":W:")
+            PDB.rename("LIG", ":L:"),
+            PDB.rename("HOH", ":W:")
         )
     """
 
@@ -84,13 +130,14 @@ echo "=== PDB ready ==="
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     compounds_csv = Path(lambda self: self.stream_path("compounds", "compounds.csv"))
     failed_csv = Path(lambda self: self.table_path("failed"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
     config_file = Path(lambda self: self.configuration_path("fetch_config.json"))
     pdb_py = Path(lambda self: self.pipe_script_path("pipe_pdb.py"))
 
     # --- Static methods for creating operations ---
 
     @staticmethod
-    def Rename(old: str, new: str) -> PDBOperation:
+    def rename(old: str, new: str) -> PDBOperation:
         """
         Rename a residue/ligand in the structure.
 
@@ -105,9 +152,114 @@ echo "=== PDB ready ==="
             PDBOperation for renaming
 
         Example:
-            PDB(pdbs="structure.pdb", PDB.Rename("LIG", ":L:"))
+            PDB(pdbs="structure.pdb", PDB.rename("LIG", ":L:"))
         """
         return PDBOperation("rename", old=old, new=new)
+
+    @staticmethod
+    def remove(selection: Union[str, tuple, 'TableReference'], remove_hetatm: bool = True) -> PDBOperation:
+        """
+        Remove residues from the structure by selection.
+
+        Useful for truncating a structure after docking/posing — e.g. dock a
+        ligand against the full-length protein (which has the real pocket), then
+        drop an N-terminal segment, carrying the bound ligand (HETATM) along.
+
+        Args:
+            selection: Residues to remove, as a PyMOL-style selection string or a
+                table column reference resolved per-structure at runtime.
+                - `"1-83"`              — residues 1-83 (any chain)
+                - `"1-83+90-95"`        — multiple ranges
+                - `"A1-83"`             — chain-qualified range
+                - `tool.tables.x.col`   — a TableReference column (per-structure)
+                - `(TableInfo, "col")`  — equivalent (TableInfo, column) tuple
+                A column reference is matched to each structure by ID at runtime
+                (a single-row table broadcasts to all structures; an unmatched
+                structure is left unchanged).
+            remove_hetatm: When True (default), a HETATM (ligand/ion) whose residue
+                number falls inside the selected range is removed along with the
+                protein residues. Set False to remove only protein ATOM residues and
+                keep all HETATM records — useful when a ligand shares a residue
+                number with a removed protein span but should be preserved. A ligand
+                sitting *outside* the removed range is kept either way; the cleanest
+                way to spare a ligand is to chain-qualify the selection (e.g.
+                "A1-83") so only the protein chain is touched.
+
+        Returns:
+            PDBOperation for residue removal
+
+        Example:
+            # Truncate to residues >=84; a ligand outside 1-83 is kept
+            PDB(docked, PDB.remove("1-83"))
+
+            # Drop chain A residues 1-83, leaving a ligand on another chain intact
+            PDB(docked, PDB.remove("A1-83"))
+
+            # Per-structure truncation from an upstream table column
+            PDB(docked, PDB.remove(rfd.tables.structures.flank))
+        """
+        return PDBOperation("remove", selection=_normalize_selection(selection),
+                            remove_hetatm=remove_hetatm)
+
+    @staticmethod
+    def break_bond(atom1: str, atom2: str) -> PDBOperation:
+        """
+        Break a bond between two atoms (PyMOL `unbond`-style).
+
+        Removes any CONECT/LINK records joining the two named atoms; coordinates
+        are left untouched. Use it to sever a covalent attachment after it has
+        served its purpose — e.g. after PLACER resamples a dye covalently tethered
+        to a catalytic cysteine, break the bond so downstream design tools
+        (RFdiffusion) see the ligand as a separate non-covalent HETATM.
+
+        Atom selections use the standard BioPipelines `<residue>.<atom>` syntax
+        (same as Distance/Angle):
+            - `"A145.SG"`  — atom SG of residue 145 on chain A
+            - `"LIG.C12"`  — atom C12 of residue LIG
+            - `"145.SG"`   — chain-agnostic residue number
+
+        Args:
+            atom1: First atom of the bond (e.g. `"A145.SG"`).
+            atom2: Second atom of the bond (e.g. `"LIG.C12"`).
+
+        Returns:
+            PDBOperation for bond removal
+
+        Example:
+            # Sever the BG-Cys145 thioether on all PLACER conformers before design
+            PDB(placer_poses, PDB.break_bond("A145.SG", "LIG.C12"))
+        """
+        return PDBOperation("break_bond", atom1=atom1, atom2=atom2)
+
+    @staticmethod
+    def rotate_bond(atom1: str, atom2: str, angle: float) -> PDBOperation:
+        """
+        Rotate a fragment about the ``atom1``–``atom2`` bond (torsion rotation).
+
+        Everything on ``atom2``'s side of the bond is rotated by ``angle`` degrees
+        about the bond axis; ``atom1``'s side stays fixed. The moving fragment is
+        found by intra-residue connectivity (atoms reachable from ``atom2`` without
+        crossing the ``atom1``–``atom2`` bond), so only the chosen rotatable bond's
+        downstream atoms move. Useful for re-orienting a flexible ligand moiety
+        while keeping a covalent anchor in place — e.g. swing a dye's fluorophore
+        toward a target region by rotating ~180° about a linker bond, keeping the
+        benzyl/Cys-attached end fixed.
+
+        Atom selections use the standard `<residue>.<atom>` syntax (as break_bond).
+
+        Args:
+            atom1: Fixed end of the bond axis (e.g. `"LIG.C60"`).
+            atom2: Moving end; its side of the bond rotates (e.g. `"LIG.C47"`).
+            angle: Rotation in degrees (e.g. `180`).
+
+        Returns:
+            PDBOperation for the bond rotation.
+
+        Example:
+            # Swing the fluorophore 180 deg about a linker bond, anchor end fixed
+            PDB(complex, PDB.rotate_bond("LIG.C60", "LIG.C47", 180))
+        """
+        return PDBOperation("rotate_bond", atom1=atom1, atom2=atom2, angle=float(angle))
 
     # --- Instance methods ---
 
@@ -133,7 +285,7 @@ echo "=== PDB ready ==="
                   a dictionary mapping IDs to PDB codes (e.g. {"POI": "4ufc", "POI2": "1abc"}),
                   a folder path (absolute or relative to PDBs folder),
                   or a tool output whose structures will be used at execution time.
-            *args: Operations to apply after loading (e.g., PDB.Rename("LIG", ":L:"))
+            *args: Operations to apply after loading (e.g., PDB.rename("LIG", ":L:"))
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
                  Ignored when pdbs is a dictionary (ids come from dict keys).
             convert: Target format to convert structures to - "pdb", "cif", or None (default).
@@ -190,7 +342,7 @@ echo "=== PDB ready ==="
             if isinstance(arg, PDBOperation):
                 self.operations.append(arg)
             else:
-                raise ValueError(f"Unexpected positional argument: {arg}. Expected PDBOperation (e.g., PDB.Rename(...))")
+                raise ValueError(f"Unexpected positional argument: {arg}. Expected PDBOperation (e.g., PDB.rename(...))")
 
         # Collected at RCSB-lookup time; initialize up front so any code path
         # that appends (e.g. _check_ligands_in_rcsb) cannot hit AttributeError.
@@ -207,6 +359,7 @@ echo "=== PDB ready ==="
 
         # Handle StandardizedOutput / DataStream input from upstream tools
         self.from_upstream = False
+        self.pdbs_input = pdbs  # kept for upstream missing-table detection
         if isinstance(pdbs, StandardizedOutput):
             self.structures_stream = pdbs.streams.structures
             self.from_upstream = True
@@ -618,6 +771,12 @@ echo "=== PDB ready ==="
             for op in self.operations:
                 if op.op_type == "rename":
                     op_summaries.append(f"Rename({op.params['old']} -> {op.params['new']})")
+                elif op.op_type == "remove":
+                    op_summaries.append(f"remove({op.params['selection']})")
+                elif op.op_type == "break_bond":
+                    op_summaries.append(f"break_bond({op.params['atom1']}, {op.params['atom2']})")
+                elif op.op_type == "rotate_bond":
+                    op_summaries.append(f"rotate_bond({op.params['atom1']}, {op.params['atom2']}, {op.params['angle']})")
                 else:
                     op_summaries.append(op.op_type)
             config_lines.append(f"OPERATIONS: {', '.join(op_summaries)}")
@@ -679,6 +838,14 @@ echo "=== PDB ready ==="
             config_data["from_upstream"] = True
             config_data["upstream_files"] = list(self.structures_stream.files)
             config_data["upstream_map_table"] = self.structures_stream.map_table
+            # Ids the upstream already filtered out are excused (not failures).
+            # The pipe script owns tables/missing.csv: it skips these ids and
+            # writes them out under THIS tool's id (custom_id), so a rename via
+            # ids= still excuses the renamed output at completion time.
+            upstream_missing = self._collect_upstream_missing_paths(self.pdbs_input)
+            if upstream_missing:
+                config_data["upstream_missing"] = upstream_missing
+                config_data["missing_out"] = self.missing_csv
 
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
@@ -720,23 +887,19 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 extension = ".*"
                 stream_format = "pdb|cif"
 
-        if self.split_chains:
-            if isinstance(self.chain, list):
-                # Explicit chain list -> deterministic per-chain ids.
-                structure_id_patterns = [f"{cid}_{ch}"
-                                         for cid in self.custom_ids
-                                         for ch in self.chain]
-                structure_files = [os.path.join(structures_dir, f"<id>{extension}")]
-            else:
-                # chain="all" -> chain letters resolved at runtime against
-                # the parsed structure; declare a lazy id pattern with an
-                # <id> file template.
-                structure_id_patterns = [f"{cid}[_<chain>]" for cid in self.custom_ids]
-                structure_files = [os.path.join(structures_dir, f"<id>{extension}")]
+        # One file template, expanded per resolved id by the framework — works for
+        # literal ids and lazy patterns (e.g. "_<1..10>" or "[_<chain>]") alike.
+        structure_files = [os.path.join(structures_dir, f"<id>{extension}")]
+        if self.split_chains and isinstance(self.chain, list):
+            # Explicit chain list -> deterministic per-chain ids.
+            structure_id_patterns = [f"{cid}_{ch}"
+                                     for cid in self.custom_ids
+                                     for ch in self.chain]
+        elif self.split_chains:
+            # chain="all" -> chain letters resolved at runtime; lazy id pattern.
+            structure_id_patterns = [f"{cid}[_<chain>]" for cid in self.custom_ids]
         else:
             structure_id_patterns = list(self.custom_ids)
-            structure_files = [os.path.join(structures_dir, f"{cid}{extension}")
-                               for cid in self.custom_ids]
 
         tables = {
             "structures": TableInfo(
@@ -764,6 +927,12 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 description="Failed structure fetches with error details"
             )
         }
+
+        # Excuse upstream-filtered ids: when the upstream input carries a
+        # `missing` manifest, declare + own one here so the completion check
+        # treats those ids' absent structures as expected, not failures.
+        if self._collect_upstream_missing_paths(self.pdbs_input):
+            tables["missing"] = self.missing_table_info(self.missing_csv)
 
         # Create DataStreams
         structures = DataStream(

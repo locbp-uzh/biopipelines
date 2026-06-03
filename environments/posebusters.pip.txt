@@ -1,2 +1,9 @@
 posebusters
 gemmi
+# pipe_posebusters.py imports these directly (and biopipelines/base_config imports
+# pandas). Pin them explicitly rather than relying on posebusters' transitive deps —
+# a partial transitive install left pandas without python-dateutil, breaking the env.
+pandas
+python-dateutil
+numpy
+rdkit

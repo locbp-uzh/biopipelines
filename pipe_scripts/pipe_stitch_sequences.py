@@ -41,12 +41,17 @@ def sele_to_list(s: str) -> List[int]:
     Returns:
         List of 1-indexed positions
     """
+    def _resnum(tok):
+        # Strip an optional leading chain letter (e.g. "A29" -> 29) so chain-
+        # qualified selections from DistanceSelector parse into positions.
+        return int(re.sub(r'^[A-Za-z]+', '', tok))
+
     def contiguous_sele_to_list(pp):
         if '-' in pp:
             min_val, max_val = pp.split('-')
-            return [ri for ri in range(int(min_val), int(max_val) + 1)]
+            return [ri for ri in range(_resnum(min_val), _resnum(max_val) + 1)]
         else:
-            return [int(pp)]
+            return [_resnum(pp)]
 
     a = []
     if s == "":
@@ -331,7 +336,11 @@ def group_sequences_by_template(
     system (exact, provenance, child/parent, sibling).
     """
     seq_ids = list(sequences.keys())
-    matches = get_mapped_ids(template_ids, seq_ids, unique=False)
+    # closest_siblings_only: pair each template with its same-design substitution
+    # sequences only (Panda_29_* with Panda_29_*), not every design's (the sibling
+    # tier would otherwise return all and the Cartesian product explodes).
+    matches = get_mapped_ids(template_ids, seq_ids, unique=False,
+                             closest_siblings_only=True)
 
     grouped = {}
     for template_id in template_ids:
@@ -430,6 +439,7 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
                 duplicate_entries.append({
                     'id': r['id'],
                     'removed_by': step_tool_name,
+                    'kind': 'filter',
                     'cause': f"Duplicate of {kept_id}"
                 })
             else:
@@ -463,7 +473,7 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         if all_missing:
             missing_df = pd.DataFrame(all_missing)
         else:
-            missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+            missing_df = pd.DataFrame(columns=['id', 'removed_by', 'kind', 'cause'])
         missing_df.to_csv(missing_csv_path, index=False)
         print(f"Created missing.csv with {len(duplicate_entries)} duplicates, {len(upstream_rows)} upstream entries")
 

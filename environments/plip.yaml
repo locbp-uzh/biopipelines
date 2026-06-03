@@ -1,0 +1,21 @@
+# PLIP environment - Protein-Ligand Interaction Profiler.
+# PLIP itself is pip-installable, but its setup.py shells out to pip to install
+# openbabel from sdist (SWIG build) whenever `import openbabel` fails — which
+# happens inside pip's isolated build venv even when openbabel is in the env.
+# The fix: install plip with --no-build-isolation so the conda-provided
+# openbabel is visible to setup.py. See environments/plip.pip.1.txt.
+#
+# pymol-open-source is required for PLIP's PyMOL-session export (.pse) and
+# .pml visualization script generation; without it, plip.visualization.pymol
+# cannot be imported.
+name: plip
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - openbabel>=3.1
+  - pymol-open-source
+  - lxml
+  - pandas
+  - numpy

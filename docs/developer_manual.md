@@ -6,6 +6,11 @@
   - [Two-Phase Execution](#two-phase-execution)
   - [Core Classes](#core-classes)
   - [Data Flow](#data-flow)
+  - [Internal Conventions](#internal-conventions)
+    - [Value-Based `csv` Streams](#value-based-csv-streams)
+    - [`resi-csv` Streams](#resi-csv-streams)
+    - [The Ligand Contract: compounds = chemistry, structures = coordinates](#the-ligand-contract-compounds--chemistry-structures--coordinates)
+    - [Internal Tools and Input Shorthands](#internal-tools-and-input-shorthands)
 - [IDs: Configuration Time vs Execution Time](#ids-configuration-time-vs-execution-time)
   - [ID Patterns](#id-patterns)
   - [Lazy IDs](#lazy-ids)
@@ -94,6 +99,23 @@ DataStream attributes:
 - `map_table` — CSV with additional metadata
 - `format` — Data format (pdb, cif, fasta, csv, smiles, etc.)
 
+Streams may advertise more than one possible file format with a pipe-delimited
+`format`, e.g. `"pdb|cif"` when upstream intentionally leaves structures in
+mixed PDB/mmCIF form. Keep the serialized field as that string for compatibility,
+but do not hand-roll checks like `stream.format in ("pdb", "cif", "pdb|cif")`.
+Use the helpers on `DataStream`:
+
+```python
+stream.formats                         # ("pdb", "cif")
+stream.has_format("pdb")               # membership
+stream.has_only_formats("pdb", "cif")  # True for "pdb", "cif", or "pdb|cif"
+```
+
+`has_only_formats()` is a whitelist/subset check: it means there is no advertised
+format outside the allowed set. Thus `"pdb"` passes `has_only_formats("pdb", "cif")`,
+while `"pdb|sdf"` fails. Tools that require homogeneous PDB input should use
+`has_only_formats("pdb")`, not `has_format("pdb")`.
+
 **Shared-file streams and slicers.** When a tool (e.g. Panda) filters a shared-file stream down to a subset of ids, the underlying artifact must also be sliced — copying the whole file would leak stale records past the filter. Format-aware slicers live in `biopipelines/stream_slicers.py` keyed by stream `format`. Built-in slicers cover `fasta`/`fa` and `csv`. To add another format, decorate a function with `@register("sdf")` (or the relevant format key) — Panda picks it up automatically. No silent fallback to "copy whole file": an unregistered format raises `ValueError`.
 
 **TableInfo** (`base_config.py`) — Metadata for CSV outputs:
@@ -135,6 +157,63 @@ rfd = RFdiffusion(contigs="50-100", num_designs=5)
 mpnn = ProteinMPNN(structures=rfd, num_sequences=2)
 # mpnn receives rfd.structures DataStream
 ```
+
+### Internal Conventions
+
+These are framework-wide rules that aren't obvious from any single tool but that every tool must respect. They're invariants, not suggestions — a tool that violates them will silently mislead downstream tools.
+
+#### Value-Based `csv` Streams
+
+A DataStream is *value-based* when its content lives entirely in its `map_table` CSV rather than in per-id files. Such a stream has `files=[]` and **`format="csv"`**. The rule is sharp:
+
+- A value-based stream's `format` is **`"csv"`**. What the stream *carries* — SMILES, a residue code, a protein sequence — is expressed as **columns of the map_table** (the stream's metadata), and is **never** encoded in the `format` field. There is no `format="smiles"` / `format="code"` / `format="sequence"`; those are all `format="csv"` with the relevant column present.
+- The signal that a stream is value-based is **`files == []`**, not the format string. `format` is purely descriptive (`pdb`, `sdf`, `csv`, `a3m`, `resi-csv`, …) and a file-based stream may legitimately use a csv-shaped format (e.g. a per-id MSA). Consumers that need to know whether to collect per-id files (e.g. `panda.py`) test `stream.files` directly.
+- The map_table is still written **only at runtime by the pipe script** (see [Map Table Contract](#map-table-contract)); `get_output_files()` just declares `files=[]`, `map_table=<path>`, `format="csv"`.
+
+Read values from a value-based stream at runtime with `get_value(ds, id, column=...)` or `iterate_values(ds, columns=[...])` from `biopipelines_io` — never by parsing the CSV by hand.
+
+#### `resi-csv` Streams
+
+A `resi-csv` stream is the per-residue counterpart: it carries **one CSV file per id** (file-based), and each CSV has multiple rows, one per residue, with a `resi` column plus one or more value columns. CABSflex's RMSF output is the canonical producer (`biopipelines/cabsflex.py`, `format="resi-csv"`, columns `id, chain, resi, rmsf`), and `Selection` consumes it stream-based (reading the `resi` column against a `"column op value"` threshold). Use `resi-csv` whenever a tool emits a per-residue numeric profile that another tool will threshold or select on.
+
+#### The Ligand Contract: compounds = chemistry, structures = coordinates
+
+Ligands split cleanly across two streams, and every tool must honour the split:
+
+- The **`compounds`** stream is always a value-based `csv` stream (`files=[]`, `format="csv"`). It carries the ligand *chemistry and identity* — `id, format, code, lookup, source, ccd, cid, cas, smiles, name, formula, file_path` — in its map_table. **compounds never carries coordinate files.**
+- The **`structures`** stream carries the ligand *coordinates* — the `.sdf` / `.pdb` / `.cif` / `.mol2` files (`format="sdf"`, etc.). When a tool needs a 3-D ligand, the user produces it explicitly with `OpenBabel(compounds=lig, convert_3d="sdf")`, whose `structures` output is the sdf and whose `compounds` output is the chemistry passthrough.
+
+Two consequences:
+
+1. **Tools never take a ligand SDF path or a bare 3-letter `ligand_code` string.** They take a `Ligand` (or any tool's compounds/structures output) and read the residue `code` (and `smiles`) from the compounds stream's map_table at runtime. A ligand that only names an existing HETATM code is constructed as `Ligand(code="ZIT")` — a one-row `compounds` csv (`format="csv"`, `code="ZIT"`, empty `smiles`) and no structures stream.
+2. **Producers that rename a ligand emit an updated compounds stream.** A tool like Boltz2 assigns its own residue codes (`LIG`, `LIG01`, …) when it writes the complex. It must emit a fresh `compounds` stream carrying the **same ids and SMILES** as its input but with the `code` column overwritten with the codes it actually assigned. Because the ids are unchanged, `{compounds}.id` provenance columns (see [Provenance Columns](#provenance-columns)) stay joinable — a rename changes a *cell*, not an *id*. Passing that output downstream then yields the correct code automatically, with nobody having to guess.
+
+#### Internal Tools and Input Shorthands
+
+A tool constructed with the reserved kwarg `_internal=True` is a **real** tool: it auto-registers in the active pipeline, generates a script, and executes in normal execution order. It is only *hidden from the public layout*. This is how an ergonomic shorthand like `ligand="LIG"` materializes the entity it stands for without cluttering the user's numbered steps.
+
+The framework keeps three counters on the pipeline:
+
+- `execution_order` — every tool, the true run order (drives nothing user-visible directly).
+- `public_step_order` — public tools only; drives public output-folder names and the displayed `Step NNN`.
+- `internal_order` — internal tools only; drives `.internal/` folder names.
+
+Each tool gets a `script_basename` (set in `set_pipeline_context`) that is the **single source of truth** for its `RunTime/<basename>.sh`, `Logs/<basename>.log`, and `ToolOutputs/<basename>.json`. Public tools use `NNN_<Tool>` (the public step); internal tools use `.internal/NNN_<Tool>` (the internal order, nested in a `.internal/` subdir of each). Never re-derive these names from a list index — read `tool.script_basename`. Output folders follow the same split: public tools go under `<Folder stack>/NNN_<Tool>/`, internal tools under `.internal/NNN_<Tool>/` (internal placement ignores the `Folder()` stack).
+
+Because a public tool's *folder* number and its *script/manifest* number both come from `public_step`, they always agree (`002_Tool/` ↔ `RunTime/002_Tool.sh`). The numbering you read off filenames is therefore the public step order, **not** the raw `execution_order` — those differ whenever internal tools are present (an internal tool bumps `execution_order` but not `public_step`). True run order is expressed only by the sequence of invocations in `pipeline.sh` (which iterates `self.tools`), where an internal tool appears right before the consumer that created it. Don't infer run order from public filenames.
+
+**The shared resolver.** Tools that accept the StandardizedOutput / DataStream / shorthand triad normalize the input with `resolve_basic_input` (in `input_standardization.py`) instead of hand-rolling an `isinstance` ladder:
+
+```python
+from .input_standardization import resolve_basic_input
+from .ligand import Ligand
+
+# StandardizedOutput -> streams.compounds; DataStream -> itself;
+# str "LIG" -> Ligand(code="LIG", _internal=True) -> its compounds stream
+self.ligand_stream = resolve_basic_input(ligand, Ligand, "compounds", "code", allow_none=False)
+```
+
+The signature is `resolve_basic_input(obj, cls, stream, argument, *, allow_none=True)`. A bare string is promoted to `cls(**{argument: obj}, _internal=True)` and its `<stream>` is returned. The promotion works both inside and outside a pipeline: inside, the entity auto-registers and `cls(...)` already returns a `StandardizedOutput`; standalone it returns the raw tool instance, which the resolver wraps with `StandardizedOutput(entity.get_output_files())` to reach the same stream. Inside a pipeline the auto-registration also means the entity is constructed *during the consuming tool's `__init__`* and therefore runs **before** the consumer — ordering is correct for free. Only a non-string, non-DataStream, non-StandardizedOutput value raises. Apply the shorthand **only to the parameter whose stream the tool actually consumes** — e.g. a tool's compounds-reading `ligand` gets it, but a coordinate-reading `reference_ligand` (which needs a real 3-D structure) does not.
 
 ---
 
@@ -225,6 +304,12 @@ script += f"""
 ```
 
 Note that `$PDB_FILE` is wrapped in `'"..."'` (single-quoted double quotes) so `eval` preserves the quoting around the variable expansion. Only use `eval` when you need embedded quotes interpreted; for simple arguments, plain `python run.py --flag "$VAR"` is preferred.
+
+#### Per-ID table values inside the loop (the Colab-safe pattern)
+
+A common need is a *different* value per id read from an upstream table — e.g. one contig string per input PDB, supplied as a `(TableInfo, "col")` column reference. There is a `Resolve.table_column(ref, "$ID")` helper that emits an inline lookup, but it wraps the call in `<env_manager> run -n biopipelines`, which **does not exist on Colab** (there tools run in base Python, with no `biopipelines` conda env) and spawns a fresh Python process *per id*. Use it only for a genuine one-off single lookup.
+
+For a per-id value across a loop, follow the same shape every other tool uses: a **pipe script resolves all ids in one pass** (`load_table` + `lookup_table_value` from `biopipelines_io`), writes a small `{id: value}` JSON, and the bash loop reads each id's value from that JSON via a tiny reader script invoked as **plain `python`**. Plain `python` runs under the already-activated tool env, where the pipe script's `sys.path.insert(0, repo_root)` makes `biopipelines` importable — so it works identically on cluster and Colab, with no second env and no per-id process spawn. The RFdiffusion family is the reference (`pipe_rfdiffusion_contigs.py` builds the JSON, `resolve_rfdiffusion_contigs.py` reads one id). The general rule: **never wrap a helper in `<mgr> run -n biopipelines` inside generated bash** — it breaks Colab; resolve via a pipe script under the activated env instead.
 
 ### How to Resolve a Single File
 
@@ -529,37 +614,36 @@ def get_output_files(self) -> Dict[str, Any]:
 
 Every non-empty output DataStream must have a valid `map_table` CSV at runtime. Downstream tools rely on `load_datastream()` → `ids_expanded` / `iterate_files()` to discover what the upstream tool actually produced, and this reads from the map_table.
 
-There are three valid strategies for ensuring the map_table exists:
+**Rule: `create_map_table()` is a runtime-only helper.** Never call it from `get_output_files()` (or anywhere else that runs at config time). `get_output_files()` is purely declarative: it returns a `DataStream` carrying the predicted ids, the `<id>`-templated file pattern, and the `map_table` path — nothing on disk. The pipe script the tool launches is the sole writer of that CSV, and it writes only the rows whose files actually exist. This keeps the map honest under partial failure and keeps `Pipeline.save()` O(#tools), independent of design count.
 
-| Strategy | When to use | Example tools |
-|----------|------------|---------------|
-| **Config-time only** (`create_map_table()`) | Output files are fully predictable from inputs (file templates with `<id>` are fine) | Boltz2, BoltzGen |
-| **Config-time + runtime update** | Output files are predictable but may change (e.g., some structures fail, best-pose selection) | AlphaFold, Gnina, RFdiffusion |
-| **Runtime-only** (pipe script writes the CSV) | Outputs cannot be predicted at config time (e.g., scanning a local folder, downloading from RCSB) | PDB, RCSB, Ligand, Sequence |
-
-**Config-time creation** uses `create_map_table()` in `get_output_files()`.
-The target path lives inside the stream folder:
+Declarative `get_output_files()` example:
 
 ```python
-from .datastream import create_map_table
-
-create_map_table(
-    self.stream_map_path("structures"),
-    ids=structure_ids,
-    files=[self.stream_path("structures", "<id>.pdb")],
-    provenance=provenance
-)
+def get_output_files(self):
+    ids = self.structures_stream.ids
+    files = [self.stream_path("structures", "<id>.pdb")]
+    structures = DataStream(
+        name="structures",
+        ids=ids,
+        files=files,
+        map_table=self.stream_map_path("structures"),
+        format="pdb",
+    )
+    return {"structures": structures, "tables": {}, "output_folder": self.output_folder}
 ```
 
-``create_map_table`` handles ``os.makedirs`` for the target CSV, so tools
-don't need to pre-create the stream folder themselves. (The pipeline's
-layout step also creates it once ``get_output_files()`` returns.)
+Runtime writer (in the pipe script) drops failed items and emits provenance columns when relevant:
 
-File templates with `<id>` are the preferred approach — they keep path definitions compact and work correctly with lazy IDs. At runtime, `iterate_files()` expands `<id>` against each ID in the map_table to resolve actual file paths.
+```python
+rows = []
+for sid, in_path in iterate_files(ds):
+    out_path = os.path.join(out_dir, f"{sid}.pdb")
+    if run_tool(in_path, out_path):
+        rows.append({"id": sid, "file": out_path})
+pd.DataFrame(rows, columns=["id", "file"]).to_csv(args.map_csv, index=False)
+```
 
-**Runtime updates** are needed when the config-time map may become inaccurate (e.g., partial failures). Use `pipe_update_structures_map.py` or write the CSV directly in the pipe script.
-
-**Runtime-only creation** is for tools whose outputs are entirely determined at execution time. The pipe script writes the map CSV with at minimum `id` and `file` columns, plus any provenance columns (`{alias}.id`).
+File templates with `<id>` are the preferred form for the declared stream — compact, lazy-id friendly, and at runtime `iterate_files()` expands `<id>` against the ids the pipe script actually wrote into the map.
 
 **Rule:** if a tool returns a DataStream with a `map_table` path, that CSV **must exist and be accurate** by the time the tool's script finishes. Downstream tools will read it.
 
@@ -994,9 +1078,9 @@ predicted_ids, provenance = predict_output_ids_with_provenance(
     ligands=(self.ligands, "compounds")
 )
 # provenance = {"proteins": ["prot1", "prot1", ...], "ligands": ["lig1", "lig2", ...]}
-
-create_map_table(map_path, predicted_ids, files=structure_files, provenance=provenance)
 ```
+
+`get_output_files()` only declares `DataStream(ids=predicted_ids, files=structure_files, map_table=map_path)`; the pipe script reads `predicted_ids` / `provenance` from the `CombinatoricsConfig` JSON at runtime and writes the map_table CSV with `{stream}.id` provenance columns.
 
 #### Using `generate_multiplied_ids_pattern` (multiplier tools)
 
@@ -1009,17 +1093,6 @@ suffix_pattern = f"<1..{self.num_sequences}>"
 sequence_ids = generate_multiplied_ids_pattern(
     self.structures_stream.ids, suffix_pattern,
     input_stream_name="structures"
-)
-```
-
-#### Passing provenance to `create_map_table`
-
-```python
-from .datastream import create_map_table
-
-create_map_table(
-    output_path, ids=predicted_ids, files=structure_files,
-    provenance=provenance  # Dict keys become {key}.id columns
 )
 ```
 

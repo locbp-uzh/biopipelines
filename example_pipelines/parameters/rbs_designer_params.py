@@ -8,7 +8,7 @@ tests/tool_parameters/test_rbs_designer_params.py.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.rbs_designer import RBSDesigner
+from biopipelines import RBSDesigner
 
 with Pipeline(project="ToolParameters",
               job="RBSDesigner",

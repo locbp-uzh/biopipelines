@@ -18,6 +18,8 @@ typed streams, the cluster-vs-Colab differences, and which tools exist:
 
 - `docs/user_manual.md`
 - `docs/tool_reference.md`
+- `docs/tool/*.md`
+- `README.md` — the tool table records, per tool, the hardware (CPU/GPU), the environments it has been tested on (HPC/Colab), and the upstream references (repo + paper). Read all of this off the badge markup on each row, never the base64 `<img src=...>` blobs (those carry no information): the `alt="..."` attributes give the status (`alt="CPU"`, `alt="GPU"`, `alt="HPC ok"`, `alt="Colab ok"`), and the `<a href="...">` wrapping a badge whose `alt` is `repo` or `paper` gives the reference URL. A BP-native tool shows a `BP` badge and has no repo/paper link. The HPC/Colab badges are presence-means-supported: a tool runs only in the modes whose badge it carries, so a missing badge means that mode is unsupported (not merely unverified). Only MMseqs2/MMseqs2Server is currently HPC-only — don't propose it in a Colab pipeline.
 
 Do not announce that you've read them, do not summarise
 them, do not list what you found. Just have the context loaded so your
@@ -87,6 +89,9 @@ Markdown fallback (use only when `AskUserQuestion` is unavailable):
 
 Either way, the question text and option set should be identical across
 renderers — the format is a presentation choice, not a content choice.
+
+**Do not use `I` and `you` when asking questions** Refer to yourself as
+"The coding agent" and to the user as "The user".
 
 #### 1. Problem framing
 - What is the biological question or objective?
@@ -232,7 +237,7 @@ Outputs land at the path configured on the cluster
 
 ### Writing the pipeline
 
-- Produce a Jupyter notebook (`.ipynb`), not a `.py` script. Example notebooks 
+- Produce a Jupyter notebook (`.ipynb`), not a `.py` script. Example notebooks
   live in `examples/notebooks`, and personal development is in `my_pipelines/`
 - First cell: clone the repo, install BioPipelines, and call `.install()` on
   the tools the pipeline needs. See the "Google Colab" section in

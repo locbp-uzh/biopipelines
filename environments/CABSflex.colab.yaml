@@ -1,0 +1,15 @@
+name: CABSflex
+channels:
+  - salilab
+  - lcbio
+  - conda-forge
+dependencies:
+  # Colab variant: omits `modeller`. On linux-64 the only available modeller
+  # builds require Python >=3.6, which is unsatisfiable against cabs's python=2.7
+  # pin, so the full solve fails on Colab. modeller is only used for the
+  # all-atom rebuild (aa_rebuild=True), which also needs a MODELLER license; the
+  # default aa_rebuild=False path (CG models + RMSF) works without it. The
+  # CABSflex tool raises a clear error if aa_rebuild=True is requested on Colab.
+  - python=2.7
+  - dssp
+  - cabs

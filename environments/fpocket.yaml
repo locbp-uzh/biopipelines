@@ -1,0 +1,11 @@
+# FPocket environment - binding-pocket detection (bioconda binary).
+name: fpocket
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - fpocket
+  - pandas
+  - numpy

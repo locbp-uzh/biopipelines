@@ -5,11 +5,7 @@
 # tested: 
 
 from biopipelines.pipeline import *
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
-from biopipelines.conformational_change import ConformationalChange
-from biopipelines.panda import Panda
-from biopipelines.dna_encoder import DNAEncoder
+from biopipelines import ProteinMPNN, AlphaFold, ConformationalChange, Panda, DNAEncoder
 
 
 with Pipeline(project="Ubiquitin", job="InverseFolding"):

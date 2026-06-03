@@ -18,7 +18,7 @@ Config JSON:
     - output_csv: path to output CSV file
 
 Stream-based operations (add/subtract with stream_json):
-    The stream must have format per-residue-values-csv with a `resi` column
+    The stream must have format resi-csv with a `resi` column
     and a numeric column specified in the filter expression.
     filter_expr syntax: "column op value", e.g. "propensity>0.5", "rmsf<=1.2"
 """
@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
 from biopipelines.sele_utils import sele_to_list, list_to_sele
 from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES
+from biopipelines.id_map_utils import get_mapped_ids
 
 
 # ── PDB-aware helpers ──
@@ -321,43 +322,72 @@ def process_selections(config_path: str):
         for sid, spath in iterate_files(structures_ds):
             struct_map[sid] = spath
 
-    # Collect all IDs from the first add/subtract operation, or fall back to structures
-    all_ids = None
+    # Output ids are the UNION of every ADD op's input ids (not just the first
+    # op's): a second add() in a different id space — e.g. a crystal pocket
+    # alongside a predicted-pose consensus — must contribute its own ids too,
+    # otherwise its structures silently vanish. subtract ops only REMOVE residues
+    # from existing ids, so they must NOT introduce new output ids (that would
+    # leak the subtracted input's id space into the result).
+    all_ids = []
+    seen = set()
+    def _extend(ids):
+        for i in ids:
+            if i not in seen:
+                seen.add(i); all_ids.append(i)
     for op in operations:
-        if op["op"] in ("add", "subtract"):
-            if op.get("refs"):
-                for ref in op["refs"]:
-                    vals = lookup_column_values(ref["table"], ref["column"])
-                    if all_ids is None:
-                        all_ids = list(vals.keys())
-                    break
-            elif op.get("stream_json"):
-                ds = load_datastream(op["stream_json"])
-                all_ids = list(ds.ids_expanded)
-            if all_ids is not None:
-                break
+        if op["op"] != "add":
+            continue
+        for ref in op.get("refs", []):
+            _extend(lookup_column_values(ref["table"], ref["column"]).keys())
+        if op.get("stream_json"):
+            _extend(load_datastream(op["stream_json"]).ids_expanded)
 
     # Predefined pattern ops (n_terminus, c_terminus, etc.) have no refs/stream,
     # so fall back to the structures map for IDs.
-    if all_ids is None and struct_map:
+    if not all_ids and struct_map:
         all_ids = list(struct_map.keys())
 
-    if all_ids is None:
+    if not all_ids:
         raise ValueError("Cannot determine IDs: no add/subtract operation and no structures provided")
 
     print(f"Processing {len(all_ids)} IDs through {len(operations)} operations")
 
+    # Resolve each selection id to its structure id via framework id matching
+    # (exact, else parent/child) — a selection keyed by pose ids still finds the
+    # single best33AA structure it derives from.
+    id_to_struct = {}
+    if struct_map:
+        id_to_struct = get_mapped_ids(all_ids, list(struct_map.keys()), unique=True)
+
+    # Each op input is keyed in its OWN id space (a predictor stream may be keyed
+    # by pooled/pose ids while another input is keyed by a group id). For every
+    # input, map each output id to that input's matching key via framework id
+    # matching, so a per-id lookup resolves across id spaces (e.g. subtract a
+    # pose-keyed predictor from a group-keyed truth).
+    def _key_map(input_keys):
+        ik = list(input_keys)
+        m = {i: i for i in all_ids if i in ik}      # exact first
+        unresolved = [i for i in all_ids if i not in m]
+        if unresolved and ik:
+            for did, k in get_mapped_ids(unresolved, ik, unique=True).items():
+                if k:
+                    m[did] = k
+        return m
+
     # Pre-load all referenced tables
     ref_cache = {}
+    ref_keymap = {}
     for op in operations:
         if op["op"] in ("add", "subtract"):
             for ref in op.get("refs", []):
                 key = (ref["table"], ref["column"])
                 if key not in ref_cache:
                     ref_cache[key] = lookup_column_values(ref["table"], ref["column"])
+                    ref_keymap[key] = _key_map(ref_cache[key].keys())
 
     # Pre-load all stream-based residue sets
     stream_cache = {}
+    stream_keymap = {}
     for op in operations:
         if op["op"] in ("add", "subtract") and op.get("stream_json"):
             filter_expr = op.get("filter_expr")
@@ -369,6 +399,7 @@ def process_selections(config_path: str):
             key = (op["stream_json"], filter_expr)
             if key not in stream_cache:
                 stream_cache[key] = load_stream_residues(op["stream_json"], filter_expr)
+                stream_keymap[key] = _key_map(stream_cache[key].keys())
 
     # Cache for PDB residues (avoid re-parsing)
     pdb_residue_cache = {}
@@ -382,24 +413,27 @@ def process_selections(config_path: str):
 
             if op_type == "add":
                 for ref in op.get("refs", []):
-                    vals = ref_cache[(ref["table"], ref["column"])]
-                    value = vals.get(design_id, "")
-                    current |= set(sele_to_list(value))
+                    k = (ref["table"], ref["column"])
+                    src = ref_keymap[k].get(design_id, design_id)
+                    current |= set(sele_to_list(ref_cache[k].get(src, "")))
                 if op.get("stream_json"):
                     key = (op["stream_json"], op["filter_expr"])
-                    current |= stream_cache[key].get(design_id, set())
+                    src = stream_keymap[key].get(design_id, design_id)
+                    current |= stream_cache[key].get(src, set())
 
             elif op_type == "subtract":
                 for ref in op.get("refs", []):
-                    vals = ref_cache[(ref["table"], ref["column"])]
-                    value = vals.get(design_id, "")
-                    current -= set(sele_to_list(value))
+                    k = (ref["table"], ref["column"])
+                    src = ref_keymap[k].get(design_id, design_id)
+                    current -= set(sele_to_list(ref_cache[k].get(src, "")))
                 if op.get("stream_json"):
                     key = (op["stream_json"], op["filter_expr"])
-                    current -= stream_cache[key].get(design_id, set())
+                    src = stream_keymap[key].get(design_id, design_id)
+                    current -= stream_cache[key].get(src, set())
 
             elif op_type in ("expand", "shrink", "shift", "invert"):
-                pdb_path = struct_map.get(design_id)
+                struct_id = id_to_struct.get(design_id) or design_id
+                pdb_path = struct_map.get(struct_id)
                 if not pdb_path or not os.path.exists(pdb_path):
                     print(f"Warning: No PDB found for '{design_id}', skipping PDB-aware op '{op_type}'")
                     continue
@@ -448,8 +482,9 @@ def process_selections(config_path: str):
                     current |= select_gaps(valid)
 
         sele_str = list_to_sele(sorted(current, key=lambda x: (x[0], x[1])))
-        results.append({"id": design_id, "selection": sele_str})
-        print(f"  {design_id}: {sele_str}")
+        results.append({"id": design_id, "selection": sele_str,
+                        "n_residues": len(current)})
+        print(f"  {design_id}: {sele_str} ({len(current)} residues)")
 
     if not results:
         raise ValueError("No selections were produced")

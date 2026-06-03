@@ -5,10 +5,7 @@
 # tested: 
 
 from biopipelines.pipeline import *
-from biopipelines.compound_library import CompoundLibrary
-from biopipelines.boltz2 import Boltz2
-from biopipelines.panda import Panda
-from biopipelines.plot import Plot
+from biopipelines import CompoundLibrary, Boltz2, Panda, Plot
 
 with Pipeline(project="TrpRepressor", job="CompoundLibraryScreen"):
     Resources(gpu="A100", time="8:00:00", memory="32GB")

@@ -15,8 +15,7 @@ no manual job-id bookkeeping is needed.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.ligand import Ligand
-from biopipelines.boltzgen import BoltzGen, BoltzGenMerge
+from biopipelines import Ligand, BoltzGen, BoltzGenMerge
 
 NUM_BATCHES = 4
 NUM_DESIGNS_PER_BATCH = 10

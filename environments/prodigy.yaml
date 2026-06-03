@@ -1,0 +1,15 @@
+# Prodigy environment - binding-affinity prediction for PPI complexes.
+# prodigy-prot is pip-only; freesasa (its key runtime dep) comes from
+# conda-forge to avoid build-from-source.
+name: prodigy
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - biopython>=1.84
+  - freesasa
+  - numpy
+  - pandas
+  - pip:
+      - prodigy-prot

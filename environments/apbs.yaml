@@ -1,0 +1,14 @@
+# APBS environment - Poisson-Boltzmann electrostatics.
+# apbs + pdb2pqr both come from bioconda; propka via conda-forge for titration.
+name: apbs
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - apbs
+  - pdb2pqr
+  - propka
+  - pandas
+  - numpy

@@ -1,0 +1,10 @@
+name: xtb
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - xtb>=6.7
+  - mdanalysis>=2.7
+  - rdkit
+  - pandas
+  - numpy

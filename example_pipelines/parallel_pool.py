@@ -22,11 +22,7 @@ column with values 1, 2, 3.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.sequence import Sequence
-from biopipelines.ligand import Ligand
-from biopipelines.pdb import PDB
-from biopipelines.pool import Pool
-from biopipelines.panda import Panda
+from biopipelines import Sequence, Ligand, PDB, Pool, Panda
 
 
 with Pipeline(project="Examples",

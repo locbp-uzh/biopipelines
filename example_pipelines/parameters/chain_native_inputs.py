@@ -18,27 +18,29 @@ emitted artefacts per kwarg.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.alphafold import AlphaFold
-from biopipelines.boltz2 import Boltz2
-from biopipelines.boltzgen import BoltzGen
-from biopipelines.cabsflex import CABSflex
-from biopipelines.conformational_change import ConformationalChange
-from biopipelines.dna_encoder import DNAEncoder
-from biopipelines.gnina import Gnina
-from biopipelines.ligand_mpnn import LigandMPNN
-from biopipelines.mmseqs2 import MMseqs2
-from biopipelines.mutagenesis import Mutagenesis
-from biopipelines.panda import Panda
-from biopipelines.posebusters import PoseBusters
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.pymol import PyMOL
-from biopipelines.rbs_designer import RBSDesigner
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.rfdiffusion3 import RFdiffusion3
-from biopipelines.rfdiffusion_allatom import RFdiffusionAllAtom
-from biopipelines.sasa import SASA
-from biopipelines.selection import Selection
-from biopipelines.distance_selector import DistanceSelector
+from biopipelines import (
+    AlphaFold,
+    Boltz2,
+    BoltzGen,
+    CABSflex,
+    ConformationalChange,
+    DNAEncoder,
+    Gnina,
+    LigandMPNN,
+    MMseqs2,
+    Mutagenesis,
+    Panda,
+    PoseBusters,
+    ProteinMPNN,
+    PyMOL,
+    RBSDesigner,
+    RFdiffusion,
+    RFdiffusion3,
+    RFdiffusionAllAtom,
+    SASA,
+    Selection,
+    DistanceSelector,
+)
 
 
 with Pipeline(project="ToolParameters",
@@ -66,16 +68,17 @@ with Pipeline(project="ToolParameters",
     #    Tests Tuple[TableInfo, str] / TableReference form for `redesigned`.
     # ──────────────────────────────────────────────────────────────────────
     Suffix("rfdaa_to_lmpnn_tableref")
+    dp9 = Ligand(code="9DP")
     rfdaa = RFdiffusionAllAtom(
         pdb=abl1,
-        ligand="9DP",
+        ligand=dp9,
         contigs="A227-377,10-20",
         num_designs=2,
         steps=20,
     )
     lmpnn_tableref = LigandMPNN(
         structures=rfdaa,
-        ligand="9DP",
+        ligand=dp9,
         num_sequences=2,
         redesigned=rfdaa.tables.structures.designed,  # TableReference
     )
@@ -137,13 +140,13 @@ with Pipeline(project="ToolParameters",
     # 7. PoseBusters chained from Boltz2 (structures=upstream).
     # ──────────────────────────────────────────────────────────────────────
     Suffix("posebusters_chain")
-    pb_chained = PoseBusters(structures=boltz_holo, ligand="LIG", mode="dock")
+    pb_chained = PoseBusters(structures=boltz_holo, ligand=boltz_holo, mode="dock")
 
     # ──────────────────────────────────────────────────────────────────────
     # 8. SASA chained from Boltz2 (structures=upstream).
     # ──────────────────────────────────────────────────────────────────────
     Suffix("sasa_chain")
-    sasa_chained = SASA(structures=boltz_holo, ligand="LIG")
+    sasa_chained = SASA(structures=boltz_holo, ligand=boltz_holo)
 
     # ──────────────────────────────────────────────────────────────────────
     # 9. ConformationalChange across two Boltz2 outputs.
@@ -167,7 +170,7 @@ with Pipeline(project="ToolParameters",
     Suffix("rfd3_pdb_input")
     rfd3 = RFdiffusion3(
         pdb=abl1,
-        ligand_code="9DP",
+        ligand=dp9,
         contig="A227-377,10-20",
         num_designs=2,
         num_models=1,
@@ -178,7 +181,7 @@ with Pipeline(project="ToolParameters",
     #     Covers TableReference-based selection.
     # ──────────────────────────────────────────────────────────────────────
     Suffix("selection_tableref")
-    selector = DistanceSelector(structures=boltz_holo, ligand="LIG", distance=5.0)
+    selector = DistanceSelector(structures=boltz_holo, ligand=boltz_holo, distance=5.0)
     expanded = Selection(
         Selection.add(selector.tables.selections.within),
         Selection.expand(2),

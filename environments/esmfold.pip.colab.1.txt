@@ -1,0 +1,7 @@
+# ESMFold pip phase 1 - Colab/micromamba variant.
+# Installed before phase 2 because sokrypton/openfold's setup.py imports
+# torch at module level (to pick CppExtension vs CUDAExtension), so torch
+# must be present in the env before phase 2's openfold install runs.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.1.2
+numpy==1.26.4

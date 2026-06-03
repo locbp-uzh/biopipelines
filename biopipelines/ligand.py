@@ -49,12 +49,15 @@ echo "=== Ligand ready ==="
 """
 
     # Lazy path descriptors
-    # Lazy path descriptors — compounds is a content-bearing stream (its
-    # compounds.csv is also the TableInfo content). The physical compound
-    # files (.sdf / .pdb) also live inside compounds/.
+    # compounds is a value-based stream: its compounds.csv holds the chemistry
+    # metadata (SMILES, code, …) and doubles as the TableInfo content. The
+    # physical coordinate files (.pdb / .cif) live on the structures stream,
+    # under structures/, with their own map_table.
     compounds_csv = Path(lambda self: self.stream_path("compounds", "compounds.csv"))
+    structures_map = Path(lambda self: self.stream_map_path("structures"))
     failed_csv = Path(lambda self: self.table_path("failed"))
     config_file = Path(lambda self: self.configuration_path("fetch_config.json"))
+    extract_structures_json = Path(lambda self: self.configuration_path("extract_structures.json"))
     images_folder = Path(lambda self: self.stream_folder("images") if self.generate_images else None)
     compound_images_py = Path(lambda self: self.pipe_script_path("pipe_compound_images.py"))
     ligand_py = Path(lambda self: self.pipe_script_path("pipe_ligand.py"))
@@ -63,10 +66,12 @@ echo "=== Ligand ready ==="
                  lookup: Optional[Union[str, List[str], Dict[str, str]]] = None,
                  ids: Optional[Union[str, List[str]]] = None,
                  codes: Optional[Union[str, List[str]]] = None,
+                 code: Optional[Union[str, List[str]]] = None,
                  source: Optional[str] = None,
                  local_folder: Optional[str] = None,
                  output_format: str = "pdb",
                  smiles: Optional[Union[str, List[str], Dict[str, str]]] = None,
+                 structures: Optional[Union['DataStream', 'StandardizedOutput']] = None,
                  generate_images: bool = False,
                  **kwargs):
         """
@@ -89,6 +94,12 @@ echo "=== Ligand ready ==="
                  Ignored when lookup or smiles is a dictionary (ids come from dict keys).
             codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
                    If not provided, defaults to lookup[:3].upper() (for lookup) or "LIG" (for smiles/cdxml).
+            code: Code-only construction. `Ligand(code="ZIT")` builds a compounds
+                  stream that merely names an existing HETATM residue code — no
+                  download, no SMILES, no structures stream. The result is a
+                  value-based compounds csv (format="csv", code set, smiles empty),
+                  used to hand a residue code to HETATM-selector tools. Mutually
+                  exclusive with lookup / smiles / codes. Accepts a list.
             source: Force source ("rcsb" or "pubchem"). If None, auto-detects.
                     Ignored when using smiles or cdxml.
             local_folder: Custom local folder to check first (before ligands/). Default: None
@@ -96,15 +107,121 @@ echo "=== Ligand ready ==="
             smiles: SMILES string(s) for direct molecule input. Bypasses lookup entirely.
                     Can also be a dictionary mapping IDs to SMILES: {"lig1": "CCO", "lig2": "CC"}
                     Equivalent to Ligand(smiles=list(values), ids=list(keys))
+            structures: a DataStream / StandardizedOutput of complex structures
+                    (PDB/CIF) to carve a bound ligand out of. Requires `codes` (the
+                    HETATM residue code(s) to extract). For each input structure the
+                    matching HETATM block is written to a coordinate file KEEPING the
+                    bound coordinates — no download, no SMILES, no bond-order
+                    templating (run OpenBabel(structures=..., convert_3d="sdf") after
+                    if a tool needs an SDF). A code absent from a structure is routed
+                    to the `failed` table. Mutually exclusive with lookup/smiles/code.
+                    Example: Ligand(structures=complex, codes="STI").
             generate_images: Generate PNG images for each ligand using RDKit. Default: False
             **kwargs: Additional parameters
 
         Output:
-            Streams: structures (.pdb/.cif), compounds (.csv), images (.png, if generate_images=True)
+            Streams: compounds (value-based csv: chemistry/metadata), structures
+                     (.pdb/.cif coordinate files; absent in code-only mode),
+                     images (.png, if generate_images=True)
             Tables:
                 compounds: id | format | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path
                 failed: lookup | error_message | source | attempted_path
         """
+        # Code-only construction: Ligand(code="ZIT"). Names an existing HETATM
+        # residue code with no chemistry — produces a value-based compounds csv
+        # (smiles empty) and no structures stream. Mutually exclusive with the
+        # download/generation paths.
+        self.code_only = False
+        self._structures_only = False
+        if code is not None:
+            if lookup is not None or smiles is not None or codes is not None:
+                raise ValueError("code=... is mutually exclusive with lookup, smiles, and codes")
+            self.code_only = True
+            if isinstance(code, str):
+                code_list = [code]
+            else:
+                code_list = list(code)
+            if not code_list:
+                raise ValueError("code cannot be empty")
+            self.residue_codes = [c.upper() for c in code_list]
+            # Ligand is the sole validator of the code; enforce 1-3 alphanumeric.
+            for c in self.residue_codes:
+                if not re.match(r'^[A-Za-z0-9]{1,3}$', c):
+                    raise ValueError(
+                        f"Invalid ligand code {c!r}: must be 1-3 alphanumeric characters")
+            # ids default to the codes themselves
+            if ids is not None:
+                self.custom_ids = [ids] if isinstance(ids, str) else list(ids)
+            else:
+                self.custom_ids = list(self.residue_codes)
+            if len(self.custom_ids) != len(self.residue_codes):
+                raise ValueError(
+                    f"Length mismatch: ids has {len(self.custom_ids)} items but code has {len(self.residue_codes)}")
+            # No download/generation inputs in code-only mode
+            self.lookup_values = []
+            self.smiles_values = []
+            self.file_smiles_ids = []
+            self.extract_structures_stream = None
+            self.source = None
+            self.local_folder = None
+            self.output_format = output_format if output_format in ("pdb", "cif") else "pdb"
+            self.generate_images = generate_images
+            super().__init__(**kwargs)
+            return
+
+        # Posed-ligand modifier: Ligand("STI", structures=complex). `structures=`
+        # does NOT replace the lookup/smiles path — it changes only WHERE the 3-D
+        # coordinates come from. The chemistry (SMILES, code, metadata) still comes
+        # from the normal lookup/smiles flow below; at runtime the coordinate file
+        # for each id is carved out of the matching bound HETATM in the input
+        # structure (keeping crystal coords) instead of being downloaded/embedded.
+        # The compounds stream therefore still carries SMILES, so a downstream
+        # OpenBabel(compounds=this, convert_3d="sdf") produces a posed,
+        # bond-order-correct SDF. A code absent from every input structure is
+        # routed to the failed table at runtime.
+        self.extract_structures_stream = None
+        self._structures_arg = structures
+        if structures is not None:
+            if code is not None:
+                raise ValueError("structures=... is not compatible with code=... (code-only names a HETATM, it has no coordinates to source)")
+            if isinstance(structures, StandardizedOutput):
+                self.extract_structures_stream = structures.streams.structures
+            elif isinstance(structures, DataStream):
+                self.extract_structures_stream = structures
+            else:
+                raise ValueError(
+                    f"structures must be DataStream or StandardizedOutput, got {type(structures).__name__}")
+
+            # structures= with only codes (no lookup/smiles): carve the bound
+            # HETATM, keeping coords. No chemistry source → compounds stream has
+            # the code but no SMILES, so downstream bond-order templating is not
+            # possible (perception is used instead). When lookup/smiles IS also
+            # given, fall through to the normal path: chemistry comes from there
+            # and the coordinates are still carved (config carries the stream).
+            if lookup is None and smiles is None:
+                if codes is None:
+                    raise ValueError("structures=... requires codes=... (the HETATM residue code(s) to extract) when no lookup/smiles is given")
+                self._structures_only = True
+                self.residue_codes = [codes.upper()] if isinstance(codes, str) else [c.upper() for c in codes]
+                for c in self.residue_codes:
+                    if not re.match(r'^[A-Za-z0-9]{1,3}$', c):
+                        raise ValueError(f"Invalid ligand code {c!r}: must be 1-3 alphanumeric characters")
+                self.custom_ids = ([ids] if isinstance(ids, str) else list(ids)) if ids is not None else list(self.residue_codes)
+                if len(self.custom_ids) != len(self.residue_codes):
+                    raise ValueError(
+                        f"Length mismatch: ids has {len(self.custom_ids)} items but codes has {len(self.residue_codes)}")
+                self.lookup_values = []
+                self.smiles_values = []
+                self.file_smiles_ids = []
+                self.source = None
+                self.local_folder = None
+                self.output_format = output_format if output_format in ("pdb", "cif") else "pdb"
+                self.generate_images = generate_images
+                super().__init__(**kwargs)
+                if isinstance(structures, StandardizedOutput) and hasattr(structures, "config"):
+                    self.dependencies.append(structures.config)
+                return
+
         # Dict input for smiles: {id: smiles_string} -> extract ids and smiles
         _dict_ids = None
         if isinstance(smiles, dict):
@@ -228,6 +345,12 @@ echo "=== Ligand ready ==="
 
         # Initialize base class
         super().__init__(**kwargs)
+
+        # structures= modifier: depend on the upstream tool producing the coords.
+        if (self._structures_arg is not None
+                and isinstance(self._structures_arg, StandardizedOutput)
+                and hasattr(self._structures_arg, "config")):
+            self.dependencies.append(self._structures_arg.config)
 
     @staticmethod
     def _parse_txt_smiles(txt_path: str):
@@ -361,18 +484,30 @@ echo "=== Ligand ready ==="
         if not self.custom_ids:
             raise ValueError("ids cannot be empty")
 
-        if not self.lookup_values and not self.smiles_values:
-            raise ValueError("Must have at least one of 'lookup' or 'smiles'")
-
         if not self.residue_codes:
             raise ValueError("codes cannot be empty")
 
-        total_count = len(self.lookup_values) + len(self.smiles_values)
-        if len(self.custom_ids) != total_count:
-            raise ValueError(f"ids length ({len(self.custom_ids)}) must match total ligands ({total_count})")
+        # structures= modifier: the coordinate source must be non-empty. The
+        # chemistry counts are validated by the lookup/smiles path below.
+        if self.extract_structures_stream is not None and len(self.extract_structures_stream) == 0:
+            raise ValueError("structures input must not be empty")
 
-        if len(self.residue_codes) != total_count:
-            raise ValueError(f"codes length ({len(self.residue_codes)}) must match total ligands ({total_count})")
+        if self.code_only or self._structures_only:
+            # No chemistry source: per-id codes only (code-only names a HETATM;
+            # structures-only carves the bound HETATM keeping coords).
+            if len(self.custom_ids) != len(self.residue_codes):
+                raise ValueError(
+                    f"ids length ({len(self.custom_ids)}) must match code count ({len(self.residue_codes)})")
+        else:
+            if not self.lookup_values and not self.smiles_values:
+                raise ValueError("Must have at least one of 'lookup', 'smiles', or 'code'")
+
+            total_count = len(self.lookup_values) + len(self.smiles_values)
+            if len(self.custom_ids) != total_count:
+                raise ValueError(f"ids length ({len(self.custom_ids)}) must match total ligands ({total_count})")
+
+            if len(self.residue_codes) != total_count:
+                raise ValueError(f"codes length ({len(self.residue_codes)}) must match total ligands ({total_count})")
 
         for code in self.residue_codes:
             if not code:
@@ -436,8 +571,15 @@ echo "=== Ligand ready ==="
         config_lines.extend([
             f"IDS: {', '.join(self.custom_ids)} ({len(self.custom_ids)} ligands)",
             f"CODES: {', '.join(self.residue_codes)}",
-            f"FORMAT: {self.output_format.upper()}",
         ])
+        if self.code_only:
+            config_lines.append("MODE: code-only (names existing HETATM; no structures)")
+            return config_lines
+        config_lines.append(f"FORMAT: {self.output_format.upper()}")
+        if self.extract_structures_stream is not None:
+            config_lines.append(
+                f"COORDS: carved from {len(self.extract_structures_stream)} bound structure(s) "
+                f"(chemistry from lookup/smiles, coordinates from HETATM)")
 
         if self.lookup_values:
             config_lines.append(f"LOOKUP: {', '.join(self.lookup_values)}")
@@ -485,11 +627,22 @@ echo "=== Ligand ready ==="
             "source": self.source,
             "local_folder": self.local_folder,
             "output_format": self.output_format,
+            "code_only": self.code_only,
             "repo_ligands_folder": repo_ligands_folder,
-            "output_folder": self.stream_folder("compounds"),
+            # Coordinate files live on the structures stream; compounds.csv (the
+            # value-based chemistry table) lives in the compounds stream folder.
+            "output_folder": self.stream_folder("structures"),
             "compounds_table": self.compounds_csv,
+            "structures_table": self.structures_map,
             "failed_table": self.failed_csv
         }
+
+        # structures= modifier: hand the pipe script the input complexes (id ->
+        # file) it carves the per-id HETATM `code` out of, keeping bound coords —
+        # the chemistry (smiles/metadata) still comes from the lookup/smiles path.
+        if self.extract_structures_stream is not None:
+            self.extract_structures_stream.save_json(self.extract_structures_json)
+            config_data["extract_structures_json"] = self.extract_structures_json
 
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
@@ -518,13 +671,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after ligand fetching."""
-        # Per-ligand structure files live inside the compounds/ stream folder
-        # (same place as compounds.csv — they're physical artefacts of the
-        # same stream, not a separate structures stream).
         ext = self.output_format  # "pdb" or "cif"
-        compounds_dir = self.stream_folder("compounds")
-        structure_files = [os.path.join(compounds_dir, f"{custom_id}.{ext}")
-                          for custom_id in self.custom_ids]
 
         tables = {
             "compounds": TableInfo(
@@ -541,14 +688,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
             )
         }
 
-        # Create DataStreams
-        structures = DataStream(
-            name="structures",
-            ids=self.custom_ids.copy(),
-            files=structure_files,
-            format=self.output_format
-        )
-
+        # compounds is always a value-based csv (chemistry/metadata in map_table).
         compounds = DataStream(
             name="compounds",
             ids=self.custom_ids.copy(),
@@ -558,13 +698,27 @@ python "{self.ligand_py}" --config "{self.config_file}"
         )
 
         result = {
-            "structures": structures,
             "compounds": compounds,
             "tables": tables,
             "output_folder": self.output_folder
         }
 
-        if self.generate_images:
+        # Code-only mode names an existing HETATM — no coordinate files, so
+        # no structures stream. Otherwise the coordinate files live on the
+        # structures stream (templated, with its own map_table).
+        if self.code_only:
+            result["structures"] = DataStream.empty("structures", self.output_format)
+        else:
+            structures = DataStream(
+                name="structures",
+                ids=self.custom_ids.copy(),
+                files=[self.stream_path("structures", f"<id>.{ext}")],
+                map_table=self.structures_map,
+                format=self.output_format
+            )
+            result["structures"] = structures
+
+        if self.generate_images and not self.code_only:
             image_files = [os.path.join(self.images_folder, f"{cid}.png")
                            for cid in self.custom_ids]
             result["images"] = DataStream(
@@ -585,6 +739,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
                 "residue_codes": self.residue_codes,
                 "lookup_values": self.lookup_values,
                 "smiles_values": self.smiles_values,
+                "code_only": self.code_only,
                 "source": self.source,
                 "local_folder": self.local_folder,
                 "output_format": self.output_format,

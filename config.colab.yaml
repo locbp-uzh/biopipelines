@@ -8,7 +8,7 @@ machine:
   # Colab runs as "root" in most sessions; variant selection is driven by
   # the google.colab import check, not username matching. Left empty.
   username: ""
-  emails: {}
+  email: ""
 
   # micromamba: isolated environments per tool, matching cluster behavior
   env_manager:
@@ -45,24 +45,39 @@ folders:
     containers: "/content/containers"
 
   repositories:
-    RFdiffusion: "<data>/RFdiffusion"
-    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
-    RFdiffusion3: "<data>/rfdiffusion3"
-    ProteinMPNN: "<data>/ProteinMPNN"
-    LigandMPNN: "<data>/LigandMPNN"
+    AF2BIND: "<data>/af2bind"
     AlphaFold: "<data>/localcolabfold"
-
     Boltz: "<data>/boltz"
     BoltzGen: "<data>/boltzgen"
+    DiffDock: "<data>/DiffDock"
+    DynamicBind: "<data>/DynamicBind"
+    GEMS: "<data>/GEMS"
     GhostFold: "<data>/ghostfold"
+    # Gnina and P2Rank ship executables; kept local since Drive's FUSE mount
+    # has no exec bit.
+    Gnina: "/content/gnina"
+    LigandMPNN: "<data>/LigandMPNN"
     MMseqs2: "<data>/mmseqs"
     ModelForge: "<data>/modelforge"
+    NeuralPLexer: "<data>/NeuralPLexer"
+    P2Rank: "/content/p2rank"
+    PLACER: "<data>/PLACER"
+    PLM_Sol: "<data>/PLM_Sol"
+    PocketGen: "<data>/PocketGen"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusion3: "<data>/rfdiffusion3"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RTMScore: "<data>/RTMScore"
+    ThermoMPNN: "<data>/ThermoMPNN"
+    VespaG: "<data>/VespaG"
 
   cache:
-    BoltzCache: "<cache>/Boltz"
+    BoltzCache: "/content/cache/Boltz"
     BoltzGenCache: "<cache>/BoltzGen"
     ColabFoldDatabases: "<cache>/colabfold_databases"
-    MMseqs2Databases: "<cache>/mmseqs2_databases"
+    MMseqs2Databases: "<ColabFoldDatabases>"
+    AlphaFoldParams: "<cache>/alphafold_params"
 
   server:
     MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
@@ -70,68 +85,86 @@ folders:
 # Default Environments
 # Same as the cluster config — micromamba creates isolated envs per tool
 environments:
-  # Structure generation
-  RFdiffusion: "SE3nv"
-  RFdiffusionAllAtom: "SE3nv"
-  RFdiffusion3: "foundry"
-  BoltzGen: "boltzgen"
-  BoltzGenMerge: "boltzgen"
-  BoltzGenImport: "boltzgen"
-
-  # Sequence design
-  ProteinMPNN: "SE3nv"
-  LigandMPNN: "ligandmpnn_env"
-  MutationComposer: "MutationEnv"
-  Mutagenesis: "MutationEnv"
-  Fuse: "biopipelines"
-  StitchSequences: "biopipelines"
-  DNAEncoder: "biopipelines"
-  RBSDesigner: "rbs_designer"
-
-  # Structure prediction
+  ADMETAI: "admet_ai"
+  AF2BIND: "af2bind"
+  Aggrescan3D: "Aggrescan3D"
   AlphaFold: "biopipelines"
+  APBS: "apbs"
+  BayesianAdjuster: "MutationEnv"
+  BioEmu: "bioemu"
   Boltz2: "Boltz2Env"
-  RF3: "modelforge"
-
-  # Flexibility
+  BoltzGen: "boltzgen"
+  BoltzGenImport: "boltzgen"
+  BoltzGenMerge: "boltzgen"
   CABSflex: "CABSflex"
-
-  # Analysis
-  Gnina: "biopipelines"
+  CompoundLibrary: "biopipelines"
+  ConformationalChange: "ProteinEnv"
+  Contacts: "ProteinEnv"
+  DiffDock: "diffdock"
   Distance: "biopipelines"
   DistanceSelector: "biopipelines"
-  ConformationalChange: "ProteinEnv"
-  MutationProfiler: "MutationEnv"
-  SequenceMetricCorrelation: "MutationEnv"
-  BayesianAdjuster: "MutationEnv"
-  PoseBusters: "posebusters"
-  Contacts: "ProteinEnv"
-  PoseChange: "ProteinEnv"
-  SASA: "ProteinEnv"
-  ADMETAI: "admet_ai"
-
-  # Data management
-  Panda: "biopipelines"
+  DNAEncoder: "biopipelines"
+  DSSP: "dssp"
+  DynamicBind: "dynamicbind"
+  ESMFold: "esmfold"
   ExtractMetrics: "biopipelines"
-  Selection: "ProteinEnv"
-
-  # Utilities
+  FPocket: "fpocket"
+  Frame2Seq: "frame2seq"
+  Fuse: "biopipelines"
+  GEMS: "gems"
+  Gnina: "gnina"
+  Ligand: "biopipelines"
+  LigandMPNN: "ligandmpnn_env"
   Load: "biopipelines"
   MMseqs2: "biopipelines"
   MMseqs2Server: "biopipelines"
-  CompoundLibrary: "biopipelines"
+  Mutagenesis: "MutationEnv"
+  MutationComposer: "MutationEnv"
+  MutationProfiler: "MutationEnv"
+  NeuralPLexer: "neuralplexer"
+  OpenBabel: "biopipelines"
+  OpenMM: "openmm"
+  P2Rank: "p2rank"
+  Panda: "biopipelines"
   PDB: "biopipelines"
-  Ligand: "biopipelines"
-  Sequence: "biopipelines"
-  PyMOL: "ProteinEnv"
+  PLACER: "placer"
+  PLIP: "plip"
+  PLM_Sol: "plm_sol"
   Plot: "biopipelines"
+  PocketGen: "pocketgen"
+  PoseBusters: "posebusters"
+  PoseChange: "ProteinEnv"
+  Prodigy: "prodigy"
+  ProLIF: "prolif"
+  ProteinMPNN: "SE3nv"
+  PyMOL: "ProteinEnv"
+  RBSDesigner: "rbs_designer"
+  RDKit: "biopipelines"
+  Reduce: "reduce"
+  RF3: "modelforge"
+  RFdiffusion: "SE3nv"
+  RFdiffusion3: "foundry"
+  RFdiffusionAllAtom: "SE3nv"
+  RTMScore: "rtmscore"
+  SASA: "ProteinEnv"
+  Selection: "ProteinEnv"
+  Sequence: "biopipelines"
+  SequenceMetricCorrelation: "MutationEnv"
+  StitchSequences: "biopipelines"
+  ThermoMPNN: "thermompnn"
+  UniProt: "biopipelines"
+  VespaG: "vespag"
+  XTB: "xtb"
 
 renderers:
   streams:
+    _default: renderers/streams.py
     _metadata: renderers/streams.py
     pdb: renderers/structures.py
     cif: renderers/structures.py
     "pdb|cif": renderers/structures.py
+    pqr: renderers/structures.py
+    dx: renderers/grids.py
     png: renderers/images.py
     jpg: renderers/images.py
     jpeg: renderers/images.py
@@ -143,7 +176,6 @@ renderers:
     plots: renderers/plots.py
     fasta: renderers/fasta.py
     fa: renderers/fasta.py
-    _default: renderers/streams.py
   tables:
     _default: renderers/tables.py
 

@@ -140,6 +140,29 @@ def test_ligand_detect_lookup_types():
 
 # ── option validation ────────────────────────────────────────────────────────
 
+def test_auth_ligand_field_prefers_ccd_for_authoritative_rows():
+    from biopipelines.ligand_utils import auth_ligand_field
+
+    assert auth_ligand_field({
+        "format": "ccd",
+        "source": "",
+        "ccd": "ATP",
+        "smiles": "C1=NC=NC2=C1N=CN2",
+    }) == ("ccd", "ATP")
+    assert auth_ligand_field({
+        "format": "smiles",
+        "source": "rcsb",
+        "ccd": "ATP",
+        "smiles": "C1=NC=NC2=C1N=CN2",
+    }) == ("ccd", "ATP")
+    assert auth_ligand_field({
+        "format": "smiles",
+        "source": "pubchem",
+        "ccd": "ATP",
+        "smiles": "CCO",
+    }) == ("smiles", "CCO")
+
+
 def test_ligand_invalid_source_raises(record_case):
     from biopipelines.ligand import Ligand
 
@@ -417,3 +440,79 @@ def test_ligand_panda_sample(
     record_case(input="Ligand → Panda(sample n=2)",
                 expected="script", actual=os.path.basename(script_path))
     assert_valid_script(script_path, "Ligand", "Panda")
+
+
+# ── code-only construction ───────────────────────────────────────────────────
+
+def test_ligand_code_only_basic(record_case):
+    """Ligand(code='ZIT') — code-only mode: single compounds row, no structures."""
+    from biopipelines.ligand import Ligand
+
+    lig = Ligand(code="ZIT")
+    record_case(input="Ligand(code='ZIT')",
+                expected=(["ZIT"], ["ZIT"], True),
+                actual=(list(lig.custom_ids), list(lig.residue_codes), lig.code_only))
+    assert lig.code_only is True
+    assert lig.custom_ids == ["ZIT"]
+    assert lig.residue_codes == ["ZIT"]
+    assert lig.lookup_values == [] and lig.smiles_values == []
+
+
+def test_ligand_code_only_streams(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Code-only mode: compounds is value-based csv; no structures stream."""
+    from biopipelines.ligand import Ligand
+
+    pipeline = new_pipeline("lig_code_only")
+    with pipeline:
+        lig = Ligand(code="ZIT")
+        pipeline.save()
+
+    compounds = lig.streams.compounds
+    structures = lig.streams.structures
+    record_case(input="Ligand(code='ZIT') streams",
+                expected=("csv", [], 0),
+                actual=(compounds.format, list(compounds.files), len(structures)))
+    assert compounds.format == "csv"
+    assert list(compounds.files) == []
+    assert compounds.map_table
+    assert len(structures) == 0  # no coordinate files in code-only mode
+
+
+def test_ligand_code_mutually_exclusive(record_case):
+    from biopipelines.ligand import Ligand
+
+    record_case(input="Ligand(code=, smiles=) — mutually exclusive",
+                expected="ValueError", actual="ValueError")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Ligand(code="ZIT", smiles="CCO")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Ligand(code="ZIT", lookup="ATP")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Ligand(code="ZIT", codes="LIG")
+
+
+# ── structures stream now carries a map_table ────────────────────────────────
+
+def test_ligand_structures_stream_has_map_and_template(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """A normal Ligand emits a structures stream with a map_table and an
+    <id>-templated file under the structures/ folder (not compounds/)."""
+    from biopipelines.ligand import Ligand
+
+    pipeline = new_pipeline("lig_structures_map")
+    with pipeline:
+        lig = Ligand(lookup="ATP")
+        pipeline.save()
+
+    structures = lig.streams.structures
+    files = list(structures.files)
+    record_case(input="Ligand(lookup='ATP') structures stream",
+                expected=("map_table set", "<id> template", "under structures/"),
+                actual=(bool(structures.map_table), files, files))
+    assert structures.map_table  # now has its own lineage map
+    assert files == ["<id>.pdb"] or (len(files) == 1 and files[0].endswith("<id>.pdb"))
+    # coordinate files live in the structures/ stream folder, not compounds/
+    assert "structures" in str(structures.map_table)

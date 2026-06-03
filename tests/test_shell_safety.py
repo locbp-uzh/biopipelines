@@ -124,8 +124,9 @@ def test_freeform_string_rejects_non_string():
 # ── 3b. Per-tool wiring (spot checks) ────────────────────────────────────────
 
 def test_contacts_rejects_unsafe_ligand_name(local_config, isolated_cwd):
-    """Contacts.ligand is interpolated into an echo line; unsafe chars must
-    be rejected by the tool's validate_params()."""
+    """Contacts.ligand must be a compounds stream, not a string. A bare string
+    (which could otherwise carry shell-injection chars) is rejected outright at
+    construction; the residue code is resolved from the stream's `code` column."""
     from biopipelines.pipeline import Pipeline
     from biopipelines.mock import Mock
     from biopipelines.contacts import Contacts
@@ -145,6 +146,28 @@ def test_contacts_rejects_unsafe_ligand_name(local_config, isolated_cwd):
         )
 
 
+def test_af2bind_rejects_unsafe_chain(local_config, isolated_cwd):
+    """AF2BIND.chain is interpolated into an echo line and a CLI arg; unsafe
+    chars must be rejected by the tool's validate_params()."""
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.mock import Mock
+    from biopipelines.af2bind import AF2BIND
+
+    Pipeline(
+        project="TestSuite", job="af2bind",
+        on_the_fly=True, local_output=True, config="local",
+    )
+    structures = Mock(
+        ids=["x"],
+        streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+    )
+    with pytest.raises(ValueError, match="chain"):
+        AF2BIND(
+            structures=structures.streams.structures,
+            chain='A`rm -rf /`',
+        )
+
+
 def test_rfdiffusion_allatom_rejects_unsafe_contigs(local_config, isolated_cwd):
     """RFdiffusionAllAtom.contigs is interpolated into an unquoted CLI arg.
     Shell metas must be rejected at config time."""
@@ -155,8 +178,25 @@ def test_rfdiffusion_allatom_rejects_unsafe_contigs(local_config, isolated_cwd):
         project="TestSuite", job="rfdaa",
         on_the_fly=True, local_output=True, config="local",
     )
+    from biopipelines.ligand import Ligand
     with pytest.raises(ValueError, match="contigs"):
-        RFdiffusionAllAtom(ligand="LIG", contigs="A1-50 `rm -rf /`")
+        RFdiffusionAllAtom(ligand=Ligand(code="LIG"), contigs="A1-50 `rm -rf /`")
+
+
+def test_ligand_rejects_unsafe_code(local_config, isolated_cwd):
+    """Ligand(code=...) reaches the generated bash; the residue-code contract
+    (1-3 alphanumeric) is enforced at construction, rejecting shell
+    metacharacters. This is where the former per-tool ligand_code injection
+    check now lives — Ligand is the sole validator of the code."""
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.ligand import Ligand
+
+    Pipeline(
+        project="TestSuite", job="ligand",
+        on_the_fly=True, local_output=True, config="local",
+    )
+    with pytest.raises(ValueError, match="alphanumeric"):
+        Ligand(code='LIG"; rm -rf /')
 
 
 def test_table_rejects_unsafe_name(local_config, isolated_cwd, tmp_path):
@@ -273,3 +313,50 @@ def test_config_accepts_safe_paths_with_spaces_and_placeholders(
     path = _write_config(tmp_path, mutate)
     # Must not raise:
     _load_with_config_path(monkeypatch, path)
+
+
+# ── 4. Generated scripts quote paths so a spaced workspace doesn't break bash ──
+
+def test_generated_scripts_quote_paths_under_spaced_workspace(
+    local_config, tmp_path, monkeypatch,
+):
+    """A workspace whose path contains spaces (e.g. OneDrive paths) must not
+    produce broken bash: every `python <script>` invocation the framework emits
+    has to carry a quoted script path. Regression for the completion-check /
+    missing-propagation snippets that interpolated paths unquoted."""
+    import re
+
+    spaced = tmp_path / "dir with space"
+    spaced.mkdir()
+    monkeypatch.chdir(spaced)
+
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.sequence import Sequence
+
+    pipeline = Pipeline(
+        project="TestSuite", job="spaced", description="spaced-path regression",
+        on_the_fly=False, local_output=True, config="local",
+    )
+    with pipeline:
+        Sequence(seq="MKTAYIAKQRQISFVKSHFSRQLEERLGL", type="protein", ids="demo")
+        script_path = pipeline.save()
+
+    runtime_dir = os.path.join(os.path.dirname(script_path))
+    scripts = [
+        os.path.join(runtime_dir, f)
+        for f in os.listdir(runtime_dir)
+        if f.endswith(".sh")
+    ]
+    assert scripts, "no generated scripts found"
+
+    # Any script path passed to `python` must be quoted; an unquoted spaced
+    # path word-splits in bash. A correctly-quoted call reads `python "...`;
+    # an unquoted one reads `python /abs/path...`. Flag the latter.
+    bad = re.compile(r'python\s+[^"\'$\s-]')
+    for sh in scripts:
+        content = open(sh, encoding="utf-8").read()
+        for line in content.splitlines():
+            stripped = line.strip()
+            assert not bad.search(stripped), (
+                f"unquoted script path in {os.path.basename(sh)}: {stripped!r}"
+            )

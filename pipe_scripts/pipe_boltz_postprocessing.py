@@ -22,6 +22,9 @@ parser.add_argument('--affinity-csv', type=str, default=None, help='Path for aff
 parser.add_argument('--sequences-csv', type=str, default=None, help='Path for sequences.csv')
 parser.add_argument('--msas-csv', type=str, default=None, help='Path for msas_map.csv')
 parser.add_argument('--scores-info', type=str, default=None, help='Path for scores_info.txt')
+parser.add_argument('--all-samples', action='store_true', default=False,
+                    help='Surface every diffusion sample (_model_0.._model_N) as a separate '
+                         'structure <id>_1..N+1 instead of only the top model as <id>.')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -31,7 +34,25 @@ import sys
 import json
 import shutil
 import csv
+import re
 import pandas as pd
+
+ALL_SAMPLES = args.all_samples
+
+
+def _prov_index(prov_lookup, row_id):
+    """Index of row_id in the provenance table, tolerating a multi-sample suffix.
+
+    With top_only=False, structure ids are '<base>_<k>' but the combinatorics
+    provenance is keyed by '<base>'. Try the id as-is, then strip a trailing
+    '_<digits>' sample suffix so per-sample rows still get proteins.id/ligands.id.
+    """
+    idx = prov_lookup.get(row_id)
+    if idx is None and "_" in row_id:
+        base, sep, suffix = row_id.rpartition("_")
+        if suffix.isdigit():
+            idx = prov_lookup.get(base)
+    return idx
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.id_map_utils import get_mapped_ids
@@ -173,37 +194,49 @@ for boltz_folder_path, config_id in work_items:
         
         folder_to_sequence_map[config_id] = sequence_id
         
-        # Look for structure files in predictions subfolder
-        pdb_filename = f"{config_id}_model_0.pdb"
-        pdb_filepath = os.path.join(predictions_path, pdb_filename)
-        cif_filename = f"{config_id}_model_0.cif"
-        cif_filepath = os.path.join(predictions_path, cif_filename)
-        
-        # Determine output filename using sequence ID
-        target_filepath = None
-        if os.path.exists(pdb_filepath):
-            target_filepath = os.path.join(results_folder, f"{sequence_id}.pdb")
-            try:
-                shutil.copy2(pdb_filepath, target_filepath)
-                print(f"Copied {pdb_filename} to {sequence_id}.pdb")
-            except Exception as e:
-                print(f"Error copying {pdb_filepath}: {e}")
-                continue
-        elif os.path.exists(cif_filepath):
-            target_filepath = os.path.join(results_folder, f"{sequence_id}.cif")
-            try:
-                shutil.copy2(cif_filepath, target_filepath)
-                print(f"Copied {cif_filename} to {sequence_id}.cif")
-            except Exception as e:
-                print(f"Error copying {cif_filepath}: {e}")
-                continue
-        else:
+        # Discover all diffusion-sample model files for this config_id, sorted by
+        # model index. With --all-samples each becomes its own structure
+        # (<seq>_1.._N); otherwise only model_0 is kept (as <seq>).
+        sample_models = []  # list of (model_idx, ext, src_path)
+        for ext in (".pdb", ".cif"):
+            for f in os.listdir(predictions_path):
+                m = re.match(rf"^{re.escape(config_id)}_model_(\d+){re.escape(ext)}$", f)
+                if m:
+                    sample_models.append((int(m.group(1)), ext, os.path.join(predictions_path, f)))
+        sample_models.sort(key=lambda t: t[0])
+
+        if not sample_models:
             print(f"No structure file found for {config_id}")
             continue
+
+        if not ALL_SAMPLES:
+            sample_models = [t for t in sample_models if t[0] == 0] or sample_models[:1]
+
+        # Map each kept sample to its output id: single -> <seq>, multi -> <seq>_<k>.
+        # `id_models` pairs the output id with its model index (for per-sample
+        # confidence lookup below).
+        id_models = []
+        if len(sample_models) == 1 and not ALL_SAMPLES:
+            id_models.append((sequence_id, sample_models[0][0], sample_models[0][1], sample_models[0][2]))
+        else:
+            for k, (midx, ext, src) in enumerate(sample_models, start=1):
+                id_models.append((f"{sequence_id}_{k}", midx, ext, src))
+
+        copied_any = False
+        for out_id, midx, ext, src in id_models:
+            target_filepath = os.path.join(results_folder, f"{out_id}{ext}")
+            try:
+                shutil.copy2(src, target_filepath)
+                print(f"Copied {os.path.basename(src)} to {out_id}{ext}")
+                copied_any = True
+            except Exception as e:
+                print(f"Error copying {src}: {e}")
+        if not copied_any:
+            continue
+        # Downstream per-id processing (confidence) iterates id_models; the base
+        # sequence_id retains its original meaning for affinity/MSA (per-complex).
         
-        # Process confidence and affinity files (in predictions subfolder)
-        conf_filename = f"confidence_{config_id}_model_0.json"
-        conf_filepath = os.path.join(predictions_path, conf_filename)
+        # Affinity is written once per complex (not per sample) in Boltz2.
         aff_filename = f"affinity_{config_id}.json"
         aff_filepath = os.path.join(predictions_path, aff_filename)
         
@@ -258,40 +291,33 @@ for boltz_folder_path, config_id in work_items:
             else:
                 print(f"No MSA files available for {sequence_id}")
         
-        # Initialize data dictionaries for this sequence
-        confidence_data[sequence_id] = {}
-        affinity_data[sequence_id] = {}
-        
-        # Load confidence data
-        try:
-            if os.path.exists(conf_filepath):
-                with open(conf_filepath, "r") as f:
-                    conf = json.load(f)
-                flattened_conf = flatten_confidence(conf)
-                confidence_data[sequence_id] = flattened_conf
-                print(f"Loaded confidence for {sequence_id}: {len(flattened_conf)} keys")
-        except Exception as e:
-            print(f"Error reading confidence file {conf_filepath}: {e}")
-            confidence_data[sequence_id] = {}
-        
-        # Load affinity data
+        # Affinity is per-complex; load once and replicate to each sample id.
+        flattened_aff = {}
         try:
             if os.path.exists(aff_filepath):
                 with open(aff_filepath, "r") as f:
                     aff = json.load(f)
                 flattened_aff = flatten_confidence(aff)
-                affinity_data[sequence_id] = flattened_aff
-                print(f"Loaded affinity for {sequence_id}: {len(flattened_aff)} keys")
+                print(f"Loaded affinity for {config_id}: {len(flattened_aff)} keys")
             else:
                 print(f"No affinity file found for {config_id}")
-                affinity_data[sequence_id] = {}
         except Exception as e:
             print(f"Error reading affinity file {aff_filepath}: {e}")
-            affinity_data[sequence_id] = {}
-        
-        # Store structural file path
-        if target_filepath:
-            structural_files[sequence_id] = target_filepath
+
+        # Confidence is per-sample: each output id reads its own model's JSON.
+        for out_id, midx, ext, src in id_models:
+            confidence_data[out_id] = {}
+            affinity_data[out_id] = flattened_aff
+            conf_filepath = os.path.join(predictions_path, f"confidence_{config_id}_model_{midx}.json")
+            try:
+                if os.path.exists(conf_filepath):
+                    with open(conf_filepath, "r") as f:
+                        conf = json.load(f)
+                    confidence_data[out_id] = flatten_confidence(conf)
+                    print(f"Loaded confidence for {out_id}: {len(confidence_data[out_id])} keys")
+            except Exception as e:
+                print(f"Error reading confidence file {conf_filepath}: {e}")
+            structural_files[out_id] = os.path.join(results_folder, f"{out_id}{ext}")
 
 # Update structures_map.csv with actual runtime IDs and file paths
 # (config-time map only has prefix IDs when inputs use lazy patterns)
@@ -308,7 +334,7 @@ if STRUCTURES_MAP and structural_files:
             col_name = f"{stream_name}.id"
             col_values = []
             for row in map_rows:
-                idx = prov_lookup.get(row['id'])
+                idx = _prov_index(prov_lookup, row['id'])
                 col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
             map_df[col_name] = col_values
 
@@ -339,7 +365,7 @@ if confidence_rows:
             col_values = []
             for _, row_data in enumerate(confidence_rows):
                 seq_id = row_data['id']
-                idx = prov_lookup.get(seq_id)
+                idx = _prov_index(prov_lookup, seq_id)
                 col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
             confidence_df[col_name] = col_values
     confidence_csv = CONFIDENCE_CSV
@@ -368,7 +394,7 @@ if affinity_rows:
             col_values = []
             for row_data in affinity_rows:
                 seq_id = row_data['id']
-                idx = prov_lookup.get(seq_id)
+                idx = _prov_index(prov_lookup, seq_id)
                 col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
             affinity_df[col_name] = col_values
     affinity_csv = AFFINITY_CSV

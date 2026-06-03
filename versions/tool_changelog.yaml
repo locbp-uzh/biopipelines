@@ -24,11 +24,39 @@
 # changes and should be reflected in biopipelines.__version__ + the
 # Framework section of CHANGELOG.md instead.
 
+ADMETAI:
+  files:
+    - biopipelines/admet_ai.py
+    - pipe_scripts/pipe_admet_ai.py
+  current: "1.0"
+  history: []
+
+AF2BIND:
+  files:
+    - biopipelines/af2bind.py
+    - pipe_scripts/pipe_af2bind.py
+  current: "1.0"
+  history: []
+
+Aggrescan3D:
+  files:
+    - biopipelines/aggrescan3d.py
+    - pipe_scripts/pipe_aggrescan3d.py
+  current: "1.0"
+  history: []
+
 AlphaFold:
   files:
     - biopipelines/alphafold.py
     - pipe_scripts/pipe_alphafold_confidence.py
     - pipe_scripts/pipe_alphafold_msas.py
+  current: "1.0"
+  history: []
+
+APBS:
+  files:
+    - biopipelines/apbs.py
+    - pipe_scripts/pipe_apbs.py
   current: "1.0"
   history: []
 
@@ -43,6 +71,13 @@ BayesianAdjuster:
   files:
     - biopipelines/bayesian_adjuster.py
     - pipe_scripts/pipe_bayesian_adjuster.py
+  current: "1.0"
+  history: []
+
+BioEmu:
+  files:
+    - biopipelines/bioemu.py
+    - pipe_scripts/pipe_bioemu.py
   current: "1.0"
   history: []
 
@@ -103,10 +138,25 @@ ConformationalChange:
   current: "1.0"
   history: []
 
+Consensus:
+  files:
+    - biopipelines/consensus.py
+    - pipe_scripts/pipe_consensus.py
+  current: "1.0"
+  history: []
+
 Contacts:
   files:
     - biopipelines/contacts.py
     - pipe_scripts/pipe_contacts.py
+  current: "1.0"
+  history: []
+
+DiffDock:
+  files:
+    - biopipelines/diffdock.py
+    - pipe_scripts/pipe_diffdock_build_csv.py
+    - pipe_scripts/pipe_diffdock_postprocess.py
   current: "1.0"
   history: []
 
@@ -121,13 +171,44 @@ DistanceSelector:
   files:
     - biopipelines/distance_selector.py
     - pipe_scripts/pipe_distance_selector.py
-  current: "1.0"
+  current: "2.0"
   history: []
 
 DNAEncoder:
   files:
     - biopipelines/dna_encoder.py
     - pipe_scripts/pipe_dna_encoder.py
+  current: "1.0"
+  history: []
+
+DSSP:
+  files:
+    - biopipelines/dssp.py
+    - pipe_scripts/pipe_dssp.py
+  current: "1.0"
+  history: []
+
+DynamicBind:
+  files:
+    - biopipelines/dynamicbind.py
+    - pipe_scripts/pipe_dynamicbind_build_csv.py
+    - pipe_scripts/pipe_dynamicbind_movie.py
+    - pipe_scripts/pipe_dynamicbind_postprocess.py
+  current: "1.0"
+  history: []
+
+EnsembleAnalysis:
+  files:
+    - biopipelines/ensemble_analysis.py
+    - pipe_scripts/pipe_ensemble_analysis.py
+  current: "1.0"
+  history: []
+
+ESMFold:
+  files:
+    - biopipelines/esmfold.py
+    - pipe_scripts/pipe_esmfold_inference.py
+    - pipe_scripts/pipe_esmfold_postprocessing.py
   current: "1.0"
   history: []
 
@@ -138,10 +219,31 @@ ExtractMetrics:
   current: "1.0"
   history: []
 
+FPocket:
+  files:
+    - biopipelines/fpocket.py
+    - pipe_scripts/pipe_fpocket.py
+  current: "1.0"
+  history: []
+
+Frame2Seq:
+  files:
+    - biopipelines/frame2seq.py
+    - pipe_scripts/pipe_frame2seq.py
+  current: "1.0"
+  history: []
+
 Fuse:
   files:
     - biopipelines/fuse.py
     - pipe_scripts/pipe_fuse_queries.py
+  current: "1.0"
+  history: []
+
+GEMS:
+  files:
+    - biopipelines/gems.py
+    - pipe_scripts/pipe_gems.py
   current: "1.0"
   history: []
 
@@ -223,6 +325,35 @@ MutationProfiler:
   current: "1.0"
   history: []
 
+NeuralPLexer:
+  files:
+    - biopipelines/neuralplexer.py
+    - pipe_scripts/pipe_neuralplexer_postprocess.py
+    - pipe_scripts/pipe_neuralplexer_stage.py
+  current: "1.0"
+  history: []
+
+OpenBabel:
+  files:
+    - biopipelines/openbabel.py
+    - pipe_scripts/pipe_openbabel.py
+  current: "1.1"
+  history: []
+
+OpenMM:
+  files:
+    - biopipelines/openmm.py
+    - pipe_scripts/pipe_openmm.py
+  current: "1.0"
+  history: []
+
+P2Rank:
+  files:
+    - biopipelines/p2rank.py
+    - pipe_scripts/pipe_p2rank.py
+  current: "1.0"
+  history: []
+
 Panda:
   files:
     - biopipelines/panda.py
@@ -237,10 +368,48 @@ PDB:
   current: "1.0"
   history: []
 
+PLACER:
+  files:
+    - biopipelines/placer.py
+    - pipe_scripts/pipe_placer_driver.py
+    - pipe_scripts/pipe_placer_postprocess.py
+  current: "1.0"
+  history: []
+
+PLIP:
+  files:
+    - biopipelines/plip.py
+    - pipe_scripts/pipe_plip.py
+  current: "1.0"
+  history: []
+
+PLM_Sol:
+  files:
+    - biopipelines/plm_sol.py
+    - pipe_scripts/pipe_plm_sol.py
+  current: "1.0"
+  history: []
+
 Plot:
   files:
     - biopipelines/plot.py
     - pipe_scripts/pipe_plot.py
+  current: "1.0"
+  history: []
+
+PocketGen:
+  files:
+    - biopipelines/pocketgen.py
+    - pipe_scripts/pipe_pocketgen_driver.py
+    - pipe_scripts/pipe_pocketgen_postprocess.py
+    - pipe_scripts/pipe_pocketgen_stage.py
+  current: "1.0"
+  history: []
+
+Pool:
+  files:
+    - biopipelines/pool.py
+    - pipe_scripts/pipe_pool.py
   current: "1.0"
   history: []
 
@@ -255,6 +424,20 @@ PoseChange:
   files:
     - biopipelines/pose_change.py
     - pipe_scripts/pipe_pose_change.py
+  current: "1.0"
+  history: []
+
+Prodigy:
+  files:
+    - biopipelines/prodigy.py
+    - pipe_scripts/pipe_prodigy.py
+  current: "1.0"
+  history: []
+
+ProLIF:
+  files:
+    - biopipelines/prolif.py
+    - pipe_scripts/pipe_prolif.py
   current: "1.0"
   history: []
 
@@ -286,10 +469,24 @@ RCSB:
   current: "1.0"
   history: []
 
+RDKit:
+  files:
+    - biopipelines/rdkit_descriptors.py
+    - pipe_scripts/pipe_rdkit_descriptors.py
+  current: "1.0"
+  history: []
+
 ReMap:
   files:
     - biopipelines/remap.py
     - pipe_scripts/pipe_remap.py
+  current: "1.0"
+  history: []
+
+Reduce:
+  files:
+    - biopipelines/reduce.py
+    - pipe_scripts/pipe_reduce.py
   current: "1.0"
   history: []
 
@@ -318,6 +515,13 @@ RFdiffusion3:
 RFdiffusionAllAtom:
   files:
     - biopipelines/rfdiffusion_allatom.py
+  current: "1.0"
+  history: []
+
+RTMScore:
+  files:
+    - biopipelines/rtmscore.py
+    - pipe_scripts/pipe_rtmscore.py
   current: "1.0"
   history: []
 
@@ -359,5 +563,33 @@ StitchSequences:
 Table:
   files:
     - biopipelines/table.py
+  current: "1.0"
+  history: []
+
+ThermoMPNN:
+  files:
+    - biopipelines/thermompnn.py
+    - pipe_scripts/pipe_thermompnn.py
+  current: "1.0"
+  history: []
+
+UniProt:
+  files:
+    - biopipelines/uniprot.py
+    - pipe_scripts/pipe_uniprot.py
+  current: "1.0"
+  history: []
+
+VespaG:
+  files:
+    - biopipelines/vespag.py
+    - pipe_scripts/pipe_vespag.py
+  current: "1.0"
+  history: []
+
+XTB:
+  files:
+    - biopipelines/xtb.py
+    - pipe_scripts/pipe_xtb.py
   current: "1.0"
   history: []

@@ -53,9 +53,9 @@ def test_output_format_mmcif(local_config, isolated_cwd, new_pipeline):
     assert "mmcif" in content
 
 
-def test_msa_server_local(local_config, isolated_cwd, new_pipeline):
-    content = _build(local_config, isolated_cwd, new_pipeline, msa_server="local")
-    assert "local" in content
+def test_msa_server_used_when_no_msas(local_config, isolated_cwd, new_pipeline):
+    content = _build(local_config, isolated_cwd, new_pipeline)
+    assert "--use_msa_server" in content
 
 
 def test_template(local_config, isolated_cwd, new_pipeline):
@@ -141,7 +141,6 @@ def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):
         diffusion_samples=2,
         use_potentials=True,
         output_format="pdb",
-        msa_server="public",
         template="/tmp/t.pdb",
         template_chain_ids=["A"],
         template_force=True,

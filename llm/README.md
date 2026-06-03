@@ -15,7 +15,7 @@ command you run, and a template for cluster-specific resource notes.
    works for most assistants. For framework work, swap in `llm/development.md`.
 
 2. **If you'll run on a cluster:** also do the one-time cluster setup —
-   follow `cluster_setup.md` (add an ssh alias, smoke-test with
+   follow `cluster.md` (add an ssh alias, smoke-test with
    `ssh cluster echo ok`), then copy `resources.md.template` to
    `resources.md` and fill in your cluster's partitions, GPU types, and
    walltime policy by running the probe commands in `pipelines.md`. This
@@ -61,7 +61,7 @@ llm/log.sh ssh cluster 'squeue -u $(whoami)'
 | ----------------------- | -------------------------------------------------------- | -------- |
 | `pipelines.md`          | Prompt for pipeline-author sessions                      | yes      |
 | `development.md`        | Prompt for framework-developer sessions                  | yes      |
-| `cluster_setup.md`      | One-time ssh alias setup + `log.sh` usage                | yes      |
+| `cluster.md`            | One-time ssh alias setup + `log.sh` usage                | yes      |
 | `log.sh`                | Generic command logger (wraps ssh / scp / anything)      | yes      |
 | `resources.md.template` | Schema for the user-local `resources.md`                 | yes      |
 | `resources.md`          | Your cluster-specific resource notes                     | no       |

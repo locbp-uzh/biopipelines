@@ -5,17 +5,22 @@
 """
 BayesianAdjuster tool for adjusting mutation frequencies based on correlation signals.
 
-Applies Bayesian log-odds updates to mutation frequency tables using correlation signals
-from SequenceMetricCorrelation. Implements the feedback loop for iterative sequence
-optimization by adjusting probabilities to favor mutations that correlate with metric improvement.
+Applies Bayesian log-odds updates to amino-acid frequency tables using correlation
+signals. Implements the feedback loop for iterative sequence optimization by
+adjusting probabilities to favor mutations that correlate with metric improvement.
 
 Mathematical formula:
-    p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c(i,aa))
+    p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c̃(i,aa))
+    c̃(i,aa) = c(i,aa)·n(i,aa)/(n(i,aa)+κ)   (sample-size shrinkage; κ=0 ⟹ c̃=c)
 
 where:
-    - p₀(i,aa) = prior probability (from MutationProfiler)
-    - c(i,aa) = correlation signal (from SequenceMetricCorrelation)
+    - p₀(i,aa) = prior probability from the input frequency table
+    - c(i,aa) = signal from the input correlation table
+    - n(i,aa) = sample count for (i,aa) from the input sample-counts table
+      (e.g. MutationProfiler.tables.mutations); only used when κ is provided
     - γ = strength hyperparameter
+    - κ = shrinkage pseudo-observations; down-weights correlations with low
+      sample support. κ=None/0 leaves the correlation unchanged.
     - σ(x) = 1/(1+e⁻ˣ) (sigmoid function)
     - σ⁻¹(p) = log(p/(1-p)) (logit function)
 """
@@ -42,9 +47,9 @@ class BayesianAdjuster(BaseConfig):
     """
     Pipeline tool for Bayesian adjustment of mutation frequencies.
 
-    Takes frequency tables e.g. from MutationProfiler and correlation signals e.g. from
-    SequenceMetricCorrelation, applies Bayesian log-odds updates to generate
-    adjusted probabilities that favor beneficial mutations.
+    Takes amino-acid frequency and correlation/evidence tables, applies Bayesian
+    log-odds updates, and generates adjusted probabilities that favor beneficial
+    mutations.
 
     Commonly used for:
     - Iterative sequence optimization with feedback
@@ -84,7 +89,8 @@ echo "=== BayesianAdjuster ready ==="
                  correlations: Union[TableInfo, str],
                  mode: str = "min",
                  gamma: float = 3.0,
-                 kappa: float = 10.0,
+                 kappa: Optional[float] = None,
+                 sample_counts: Optional[Union[TableInfo, str]] = None,
                  pseudocount: float = 0.01,
                  positions: Optional[str] = None,
                  **kwargs):
@@ -92,18 +98,18 @@ echo "=== BayesianAdjuster ready ==="
         Initialize Bayesian frequency adjuster.
 
         Args:
-            frequencies: Frequency table from MutationProfiler (typically absolute_frequencies)
-                        Should have columns: position, original, A, C, D, ..., Y
-            correlations: Correlation table from SequenceMetricCorrelation (correlation_2d)
-                         Should have columns: position, wt_aa, A, C, D, ..., Y
+            frequencies: Frequency table with columns: position, original, A, C, D, ..., Y
+            correlations: Correlation/evidence table with columns: position, original, A, C, D, ..., Y
+            sample_counts: Sample-count table with columns: position, original, A, C, D, ..., Y.
+                           Required when kappa is provided.
             mode: Optimization direction - "min" or "max"
                   "min" = lower metric values are better (e.g., binding affinity)
                   "max" = higher metric values are better (e.g., activity)
             gamma: Strength hyperparameter for Bayesian update (default: 3.0)
                    Higher values = more aggressive adjustment based on correlations
                    Lower values = more conservative, stays closer to prior
-            kappa: Pseudo-observations for sample size shrinkage (default: 10.0)
-                   Used to down-weight correlations from small sample sizes
+            kappa: Pseudo-observations for sample size shrinkage. If provided,
+                   sample_counts is required.
             pseudocount: Pseudocount added only to amino acids with good correlations (default: 0.01)
                         Only amino acids where c(i,aa) is nonzero and good (negative for min mode,
                         positive for max mode) receive pseudocounts. This allows correlation signals
@@ -120,10 +126,11 @@ echo "=== BayesianAdjuster ready ==="
                 adjusted_probabilities: position | original | A | C | D | ... | Y
                 absolute_probabilities: position | original | A | C | D | ... | Y
                 relative_probabilities: position | original | A | C | D | ... | Y
-                adjustment_log: position | wt_aa | aa | prior_freq | correlation | adjusted_prob | change
+                adjustment_log: position | original | aa | prior_freq | correlation | raw_correlation | sample_count | shrinkage_weight | adjusted_prob | change
         """
         self.frequencies_input = frequencies
         self.correlations_input = correlations
+        self.sample_counts_input = sample_counts
         self.mode = mode
         self.gamma = gamma
         self.kappa = kappa
@@ -142,18 +149,33 @@ echo "=== BayesianAdjuster ready ==="
         if not isinstance(self.correlations_input, (TableInfo, str)):
             raise ValueError("correlations must be a TableInfo object or string path")
 
+        # Validate sample counts input
+        if self.sample_counts_input is not None and not isinstance(self.sample_counts_input, (TableInfo, str)):
+            raise ValueError("sample_counts must be a TableInfo object or string path")
+
         # Validate mode
         if self.mode not in ["min", "max"]:
             raise ValueError(f"mode must be 'min' or 'max', got: {self.mode}")
 
         # Validate hyperparameters
-        #if self.gamma <= 0:
-        #    raise ValueError(f"gamma must be positive, got: {self.gamma}")
-        #if self.kappa < 0:
-        #    raise ValueError(f"kappa must be non-negative, got: {self.kappa}")
+        if self.gamma < 0:
+            raise ValueError(f"gamma must be non-negative, got: {self.gamma}")
+        if self.kappa is not None and self.kappa < 0:
+            raise ValueError(f"kappa must be non-negative, got: {self.kappa}")
+        if self.kappa is not None and self.sample_counts_input is None:
+            raise ValueError("sample_counts is required when kappa is provided")
         if self.pseudocount < 0:
             raise ValueError(f"pseudocount must be non-negative, got: {self.pseudocount}")
 
+        # Shell-safety: the table inputs reach bash as paths in the config JSON
+        # and in get_config_display() echo lines. Validate the string form (a
+        # TableInfo path is framework-generated and trusted).
+        if isinstance(self.frequencies_input, str):
+            _validate_freeform_string("frequencies", self.frequencies_input)
+        if isinstance(self.correlations_input, str):
+            _validate_freeform_string("correlations", self.correlations_input)
+        if isinstance(self.sample_counts_input, str):
+            _validate_freeform_string("sample_counts", self.sample_counts_input)
         _validate_freeform_string("positions", self.positions)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
@@ -163,6 +185,9 @@ echo "=== BayesianAdjuster ready ==="
         # Extract table paths
         self.frequencies_path = self.frequencies_input.info.path if isinstance(self.frequencies_input, TableInfo) else self.frequencies_input
         self.correlations_path = self.correlations_input.info.path if isinstance(self.correlations_input, TableInfo) else self.correlations_input
+        self.sample_counts_path = None
+        if self.sample_counts_input is not None:
+            self.sample_counts_path = self.sample_counts_input.info.path if isinstance(self.sample_counts_input, TableInfo) else self.sample_counts_input
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""
@@ -175,7 +200,8 @@ echo "=== BayesianAdjuster ready ==="
             f"PSEUDOCOUNT: {self.pseudocount}",
             f"POSITIONS: {self.positions if self.positions else 'auto (all adjustments)'}",
             f"FREQUENCIES: {self.frequencies_path if hasattr(self, 'frequencies_path') else 'not configured'}",
-            f"CORRELATIONS: {self.correlations_path if hasattr(self, 'correlations_path') else 'not configured'}"
+            f"CORRELATIONS: {self.correlations_path if hasattr(self, 'correlations_path') else 'not configured'}",
+            f"SAMPLE_COUNTS: {self.sample_counts_path if getattr(self, 'sample_counts_path', None) else 'not provided'}"
         ])
 
         return config_lines
@@ -198,6 +224,7 @@ echo "=== BayesianAdjuster ready ==="
         config_data = {
             "frequencies_path": self.frequencies_path,
             "correlations_path": self.correlations_path,
+            "sample_counts_path": self.sample_counts_path,
             "mode": self.mode,
             "gamma": self.gamma,
             "kappa": self.kappa,
@@ -218,7 +245,11 @@ echo "=== BayesianAdjuster ready ==="
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""echo "Running Bayesian frequency adjustment"
+        # Colab exports MPLBACKEND=module://matplotlib_inline.backend_inline,
+        # which leaks into this subprocess; logomaker/matplotlib reject it as an
+        # invalid backend at import. Force a headless backend (correct on HPC too).
+        return f"""export MPLBACKEND=Agg
+echo "Running Bayesian frequency adjustment"
 echo "Mode: {self.mode}"
 echo "Gamma: {self.gamma}"
 echo "Kappa: {self.kappa}"
@@ -244,23 +275,38 @@ python "{self.adjuster_py}" --config "{self.config_file}"
                 name="absolute_probabilities",
                 path=self.absolute_probs_csv,
                 columns=aa_columns,
-                description="Normalized absolute probabilities (comparable to MutationProfiler absolute_frequencies)"
+                description="Normalized probabilities across all amino acids at each position"
             ),
             "relative_probabilities": TableInfo(
                 name="relative_probabilities",
                 path=self.relative_probs_csv,
                 columns=aa_columns,
-                description="Normalized relative probabilities (comparable to MutationProfiler relative_frequencies)"
+                description="Normalized probabilities across non-original amino acids at each position"
             ),
             "adjustment_log": TableInfo(
                 name="adjustment_log",
                 path=self.adjustment_log_csv,
-                columns=["position", "wt_aa", "aa", "prior_freq", "correlation", "adjusted_prob", "change"],
+                columns=[
+                    "position", "original", "aa", "prior_freq", "correlation",
+                    "raw_correlation", "sample_count", "shrinkage_weight",
+                    "adjusted_prob", "change"
+                ],
                 description="Log of Bayesian adjustments for debugging"
             )
         }
 
+        # Declaring the images stream is what makes the framework create the
+        # images/ stream folder; without it the pipe script's plt.savefig into
+        # images/ fails with FileNotFoundError (the dir never exists).
+        images = DataStream(
+            name="images",
+            ids=["adjusted_probabilities_logo", "absolute_probabilities_logo", "relative_probabilities_logo"],
+            files=[self.adjusted_logo_png, self.absolute_logo_png, self.relative_logo_png],
+            format="png"
+        )
+
         return {
+            "images": images,
             "tables": tables,
             "output_folder": self.output_folder
         }
@@ -273,6 +319,7 @@ python "{self.adjuster_py}" --config "{self.config_file}"
                 "mode": self.mode,
                 "gamma": self.gamma,
                 "kappa": self.kappa,
+                "sample_counts": self.sample_counts_path if hasattr(self, "sample_counts_path") else None,
                 "pseudocount": self.pseudocount,
                 "positions": self.positions
             }

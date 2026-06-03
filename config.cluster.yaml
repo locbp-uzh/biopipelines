@@ -4,11 +4,10 @@ machine:
   # without needing Pipeline(config="cluster"). Leave empty to opt out.
   username: "gquarg"
 
-  # Email mapping: Unix username -> notification email
-  # Used by SLURM submissions with email="auto"
-  # Add your username and email here for automatic SLURM notifications
-  emails:
-    gquarg: "gianluca.quargnali@chem.uzh.ch"
+  # Notification email used by SLURM submissions with email="auto".
+  # Empty ("") disables email notifications (the default — avoids spam).
+  # Set your address to opt in, e.g. "you@example.com".
+  email: ""
 
   # Environment manager. `name` selects "mamba", "conda", "micromamba",
   # or "pip". `init` is a list of raw bash lines emitted before any
@@ -37,8 +36,19 @@ machine:
       # are visible to module load. /etc/profile.d/lmod.sh alone is not
       # enough because the site usually carries MODULEPATH in a separate
       # z*_*.sh fragment loaded *after* lmod.sh in alphabetical order.
-    - 'for f in /etc/profile.d/lmod.sh /etc/profile.d/z*_lmodenv.sh; do [ -f "$f"
-      ] && source "$f"; done'
+      # This list is produced by `bp-config auto`, which keeps every
+      # /etc/profile.d/*.sh that contributes module state (lmod function,
+      # MODULEPATH) OR sets an outbound proxy — the latter so runtime
+      # downloads (pip git+https, curl/wget of weights) work on compute
+      # nodes, whose non-interactive SLURM shells don't read profile.d.
+    - 'for f in /etc/profile.d/lmod.sh /etc/profile.d/proxy.sh /etc/profile.d/z*_lmodenv.sh;
+      do [ -f "$f" ] && source "$f"; done'
+      # If stale packages under ~/.local/lib/python<ver>/site-packages shadow a
+      # conda env (symptom: ImportError for a package that is installed in the
+      # env, e.g. "cannot import name 'Sentinel' from typing_extensions"),
+      # uncomment the next line to make every env ignore user-site packages.
+      # The durable fix is to remove the offending ~/.local/lib/python* tree.
+    # - 'export PYTHONNOUSERSITE=1'
     modules:
     - "miniforge3"
     - "apptainer"
@@ -76,26 +86,46 @@ folders:
 
   # Installation files
   repositories:
-    RFdiffusion: "<data>/RFdiffusion"
-    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
-    RFdiffusion3: "<data>/rfdiffusion3"
-    ProteinMPNN: "<data>/ProteinMPNN"
-    LigandMPNN: "<data>/LigandMPNN"
+    AF2BIND: "<data>/af2bind"
     AlphaFold: "<data>/localcolabfold"
-
     Boltz: "<data>/boltz"
     BoltzGen: "<data>/boltzgen"
+    DiffDock: "<data>/DiffDock"
+    DynamicBind: "<data>/DynamicBind"
+    Frame2Seq: "<data>/Frame2Seq"
+    GEMS: "<data>/GEMS"
     GhostFold: "<data>/ghostfold"
+    Gnina: "<data>/gnina"
+    LigandMPNN: "<data>/LigandMPNN"
     MMseqs2: "<data>/mmseqs"
     ModelForge: "<data>/modelforge"
-    Gnina: "<data>/gnina"
+    NeuralPLexer: "<data>/NeuralPLexer"
+    P2Rank: "<data>/p2rank"
+    PLACER: "<data>/PLACER"
+    PLM_Sol: "<data>/PLM_Sol"
+    PocketGen: "<data>/PocketGen"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusion3: "<data>/rfdiffusion3"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RTMScore: "<data>/RTMScore"
+    ThermoMPNN: "<data>/ThermoMPNN"
+    VespaG: "<data>/VespaG"
 
   # Cache paths (shared on group storage)
   cache:
     BoltzCache: "<cache>/Boltz"
     BoltzGenCache: "<cache>/BoltzGen"
-    ColabFoldDatabases: "<group>/models/colabfold_databases"
-    MMseqs2Databases: "<group>/models/mmseqs2_databases/gpu"
+    # Root of the ColabFold MSA database set. Shared downloads (tarballs, pdb/
+    # mmCIF, DOWNLOADS_READY/PDB_MMCIF_READY markers) live at this root; the built
+    # per-mode indexes live in gpu/ (padded, for mmseqs --gpu / colabfold_search
+    # --gpu) and cpu/ (non-padded). MMseqs2Server appends the active mode.
+    ColabFoldDatabases: "<group>/models/mmseqs2_databases"
+    # The MMseqs2 server serves the same ColabFold-formatted DBs.
+    MMseqs2Databases: "<ColabFoldDatabases>"
+    # AF2 params shared by all AF2-consuming tools (AlphaFold, AF2BIND).
+    # Its params/ subdir holds params_model_*.npz; this is ColabDesign's data_dir.
+    AlphaFoldParams: "<data>/localcolabfold/colabfold"
 
   # Server paths
   server:
@@ -106,72 +136,101 @@ folders:
 # If no specific model is used, the default is biopipelines containing pyyaml and pandas (it is automatically created when submitting via submit)
 # If the tool itsef manages the change to an environment (e.g. when it needs more than one environment), set it to null
 environments:
-  # Structure generation
-  RFdiffusion: "SE3nv"
-  RFdiffusionAllAtom: "SE3nv"
-  RFdiffusion3: "foundry"
-  BoltzGen: "boltzgen"
-  BoltzGenMerge: "boltzgen"
-  BoltzGenImport: "boltzgen"
-
-  # Sequence design
-  ProteinMPNN: "SE3nv"
-  LigandMPNN: "ligandmpnn_env"
-  MutationComposer: "MutationEnv"
-  Mutagenesis: "MutationEnv"
-  Fuse: "biopipelines"
-  StitchSequences: "biopipelines"
-  DNAEncoder: "biopipelines"
-  RBSDesigner: "rbs_designer"
-
-  # Structure prediction
+  ADMETAI: "admet_ai"
+  AF2BIND: "af2bind"
+  Aggrescan3D: "Aggrescan3D"
   AlphaFold: "biopipelines"
+  APBS: "apbs"
+  BayesianAdjuster: "MutationEnv"
+  BioEmu: "bioemu"
   Boltz2: "Boltz2Env"
-  RF3: "modelforge"
-
-  # Flexibility
+  BoltzGen: "boltzgen"
+  BoltzGenImport: "boltzgen"
+  BoltzGenMerge: "boltzgen"
   CABSflex: "CABSflex"
-
-  # Analysis
-  Gnina: "biopipelines"
+  CompoundLibrary: "biopipelines"
+  ConformationalChange: "ProteinEnv"
+  Contacts: "ProteinEnv"
+  DiffDock: "diffdock"
   Distance: "biopipelines"
   DistanceSelector: "biopipelines"
-  ConformationalChange: "ProteinEnv"
-  MutationProfiler: "MutationEnv"
-  SequenceMetricCorrelation: "MutationEnv"
-  BayesianAdjuster: "MutationEnv"
-  PoseBusters: "posebusters"
-  Contacts: "ProteinEnv"
-  PoseChange: "ProteinEnv"
-  SASA: "ProteinEnv"
-  ADMETAI: "admet_ai"
-
-  # Data management
-  Panda: "biopipelines"
+  DNAEncoder: "biopipelines"
+  DSSP: "dssp"
+  DynamicBind: "dynamicbind"
+  ESMFold: "esmfold"
   ExtractMetrics: "biopipelines"
-  Selection: "ProteinEnv"
-
-  # Utilities
+  FPocket: "fpocket"
+  Frame2Seq: "frame2seq"
+  Fuse: "biopipelines"
+  GEMS: "gems"
+  Gnina: "biopipelines"
+  Ligand: "biopipelines"
+  LigandMPNN: "ligandmpnn_env"
   Load: "biopipelines"
   MMseqs2: "biopipelines"
   MMseqs2Server: "biopipelines"
-  CompoundLibrary: "biopipelines"
+  Mutagenesis: "MutationEnv"
+  MutationComposer: "MutationEnv"
+  MutationProfiler: "MutationEnv"
+  NeuralPLexer: "neuralplexer"
+  OpenBabel: "biopipelines"
+  OpenMM: "openmm"
+  P2Rank: "p2rank"
+  Panda: "biopipelines"
   PDB: "biopipelines"
-  Ligand: "biopipelines"
-  Sequence: "biopipelines"
-  PyMOL: "ProteinEnv"
+  PLACER: "placer"
+  PLIP: "biopipelines"  # container mode: host env only needs pandas + helpers
+  PLM_Sol: "plm_sol"
   Plot: "biopipelines"
+  PocketGen: "pocketgen"
+  PoseBusters: "posebusters"
+  PoseChange: "ProteinEnv"
+  Prodigy: "prodigy"
+  ProLIF: "prolif"
+  ProteinMPNN: "SE3nv"
+  PyMOL: "ProteinEnv"
+  RBSDesigner: "rbs_designer"
+  RDKit: "biopipelines"
+  Reduce: "reduce"
+  RF3: "modelforge"
+  RFdiffusion: "SE3nv"
+  RFdiffusion3: "foundry"
+  RFdiffusionAllAtom: "SE3nv"
+  RTMScore: "rtmscore"
+  SASA: "ProteinEnv"
+  Selection: "ProteinEnv"
+  Sequence: "biopipelines"
+  SequenceMetricCorrelation: "MutationEnv"
+  StitchSequences: "biopipelines"
+  ThermoMPNN: "thermompnn"
+  UniProt: "biopipelines"
+  VespaG: "vespag"
+  XTB: "xtb"
 
 # Containers
 # Singularity/Apptainer container images for tools that use containerized execution
 # When a container is configured for a tool, it will be used instead of the conda environment
 containers:
+  PLIP: "<containers>/plip_3.0.0.simg"
 tool_overrides:
   gnina:
     modules:
     - "cuda/12.6.3"
     - "cudnn/9.8.0.87-12"
     ld_library_path: "/apps/u24/opt/x86_64_v3/cuda-12.6.3-ok2c7hqa5kefkh3iyolgxrajfpepvh6h/targets/x86_64-linux/lib"
+  mmseqs2server:
+    # Which MMseqs2 server a client auto-starts when none is running: "cpu"
+    # (default) runs colabfold_search on a large-RAM CPU node with the DBs
+    # resident in RAM; "gpu" uses the GPU-padded DBs + gpuserver. A server of
+    # either mode that is already up is reused regardless of this setting.
+    mode: "cpu"
+    # Size of the server pool the auto-start launches (default 1). The single
+    # client that wins the submit lock submits this many identical server jobs;
+    # they all drain the one shared queue (each query is claimed atomically, so
+    # no two servers process the same one). >1 trades cluster allocation for
+    # throughput under many concurrent queries. The user can also launch extra
+    # servers manually at any time.
+    num_servers: 1
 
 # renderers
 # Controls how tool outputs are displayed in Jupyter notebooks.
@@ -183,6 +242,8 @@ renderers:
     pdb: renderers/structures.py
     cif: renderers/structures.py
     "pdb|cif": renderers/structures.py
+    pqr: renderers/structures.py
+    dx: renderers/grids.py
     png: renderers/images.py
     jpg: renderers/images.py
     jpeg: renderers/images.py

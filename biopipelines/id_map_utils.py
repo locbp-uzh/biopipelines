@@ -428,7 +428,8 @@ def get_mapped_ids(
     target_ids: List[str],
     id_map: Dict[str, str] = None,
     unique: bool = True,
-    map_table_paths: Optional[List[str]] = None
+    map_table_paths: Optional[List[str]] = None,
+    closest_siblings_only: bool = False
 ) -> Union[Dict[str, Optional[str]], Dict[str, List[str]]]:
     """
     Match source IDs to target IDs using id_map patterns and provenance.
@@ -453,6 +454,13 @@ def get_mapped_ids(
                          auto-renamed IDs like Panda_1), provenance columns in
                          map_tables (e.g., structures.id) are used to trace back
                          to original source IDs.
+        closest_siblings_only: With unique=False, match strictly within the source's
+                         design group: return all targets that share the source's
+                         IMMEDIATE parent (e.g. Panda_29_2 -> all Panda_29_*), and
+                         nothing if no same-parent target exists. Prevents the sibling
+                         tier from over-matching distant ids (Panda_2_*) that share
+                         only a top-level base and exploding a downstream Cartesian
+                         product. No effect when unique=True.
 
     Returns:
         If unique=True: Dict mapping each source_id to best matching target_id (or None)
@@ -506,6 +514,23 @@ def get_mapped_ids(
     )
 
     for source_id in source_ids:
+        # closest_siblings_only (unique=False): match strictly within the source's
+        # design group — all targets sharing the source's IMMEDIATE parent. This
+        # pairs Panda_29_* with Panda_29_* and never distant Panda_2_*; empty if no
+        # same-parent target exists. Overrides the priority tiers below.
+        if closest_siblings_only and not unique:
+            src_bases = map_table_ids_to_ids(source_id, id_map)
+            parent = src_bases[1] if len(src_bases) > 1 else None
+            group = []
+            if parent is not None:
+                seen_g = set()
+                for tid, tdist in base_to_targets.get(parent, ()):
+                    if tdist == 1 and tid not in seen_g:
+                        group.append(tid)
+                        seen_g.add(tid)
+            result[source_id] = group
+            continue
+
         # Priority 1: Exact match
         if source_id in target_set:
             if unique:
@@ -615,6 +640,82 @@ def get_mapped_ids(
             result[source_id] = []
 
     return result
+
+
+# Provenance-column tokens that are NEVER pruned, even when id-recoverable.
+# `pool` (pool.id / pool.path) and `original` (original.id) carry origin
+# bookkeeping that is meaningful independent of id-derivability.
+_PROVENANCE_PRUNE_EXCLUDE = frozenset({"pool", "original"})
+
+
+def _is_plain_provenance_column(col: str, id_col: str) -> bool:
+    """True for a prunable plain ``<axis>.id`` provenance column.
+
+    A column is "plain" provenance iff its name is exactly ``<token>.id``
+    with a single dot and a non-empty ``<token>`` that is not an excluded
+    bookkeeping token. This structurally excludes, in one rule:
+
+      * the id column itself,
+      * generation columns ``<stream>.-N.id`` (two dots: ``stream`` + ``-N``),
+      * Bundle columns ``<stream>.0.id`` / ``<stream>.1.id`` (two dots),
+      * ``pool.path`` (does not end in ``.id``),
+      * ``pool.id`` / ``original.id`` (excluded tokens).
+    """
+    if col == id_col or not col.endswith(".id"):
+        return False
+    token = col[: -len(".id")]
+    if not token or "." in token:
+        return False
+    return token not in _PROVENANCE_PRUNE_EXCLUDE
+
+
+def prune_redundant_provenance_columns(df, id_col: str = "id"):
+    """Drop plain ``<axis>.id`` provenance columns recoverable from the id alone.
+
+    A provenance cell ``p`` in column ``<axis>.id`` is *redundant* for the row
+    whose id is ``x`` when id-semantics alone recover it — i.e.
+    ``get_mapped_ids([x], [p], map_table_paths=None)`` resolves ``x`` to ``p``
+    *without* consulting any provenance lookup. The whole column is dropped only
+    if every non-empty cell is redundant; a single non-recoverable cell keeps
+    the column intact (mixed columns stay). Empty / ``nan`` cells are ignored —
+    an absent provenance value is not evidence the column is needed.
+
+    Only plain ``<axis>.id`` columns are considered (see
+    :func:`_is_plain_provenance_column`); generation columns (``.-N.id``),
+    Bundle columns (``.0.id``), and ``pool``/``original`` bookkeeping are never
+    touched, because those encode lineage the matcher cannot reconstruct from
+    the id.
+
+    Pure function: returns a new DataFrame, never mutates the input or touches
+    disk. Safe to apply at any map_table write boundary — because the redundancy
+    test is the same matcher downstream tools use to join, a dropped column is a
+    genuine no-op for any downstream lookup.
+    """
+    if id_col not in df.columns:
+        return df
+
+    candidate_cols = [c for c in df.columns if _is_plain_provenance_column(c, id_col)]
+    if not candidate_cols:
+        return df
+
+    row_ids = [str(v) for v in df[id_col].tolist()]
+    cols_to_drop = []
+    for col in candidate_cols:
+        cells = [str(v) for v in df[col].tolist()]
+        column_redundant = True
+        for row_id, cell in zip(row_ids, cells):
+            if cell == "" or cell == "nan":
+                continue
+            matched = get_mapped_ids([row_id], [cell], map_table_paths=None).get(row_id)
+            if matched != cell:
+                column_redundant = False
+                break
+        if column_redundant:
+            cols_to_drop.append(col)
+
+    if not cols_to_drop:
+        return df
+    return df.drop(columns=cols_to_drop)
 
 
 def get_mapped_ids_grouped(

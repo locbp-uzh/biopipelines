@@ -23,6 +23,7 @@ from typing import List, Tuple
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.pdb_parser import relative_accessibility
 
 # Import PyMOL
 import pymol
@@ -134,9 +135,86 @@ def process_structures(structures_ds, ligand_resn: str,
     print(f"Processed {len(results)} structures")
 
 
+def calculate_residue_sasa(structure_path: str, dot_density: int = 4) -> List[dict]:
+    """Per-residue protein SASA. Returns rows of chain, resi, resn, sasa."""
+    cmd.delete("all")
+    cmd.load(structure_path, "s")
+    cmd.set("dot_solvent", 1)
+    cmd.set("dot_density", dot_density)
+
+    # load_b=1 stamps each atom's SASA contribution into its B-factor.
+    cmd.get_area("polymer", load_b=1)
+
+    # resv is PyMOL's integer residue number; the iterate namespace has no builtins.
+    atom_rows = []
+    cmd.iterate("polymer", "atom_rows.append((chain, resv, resn, b))",
+                space={"atom_rows": atom_rows})
+
+    per_residue = {}
+    order = []
+    for chain, resi, resn, b in atom_rows:
+        key = (chain, resi, resn)
+        if key not in per_residue:
+            per_residue[key] = 0.0
+            order.append(key)
+        per_residue[key] += b
+
+    rows = []
+    for chain, resi, resn in order:
+        rows.append({
+            "chain": chain if chain else "A",
+            "resi": resi,
+            "resn": resn,
+            "sasa": round(per_residue[(chain, resi, resn)], 2),
+        })
+    return rows
+
+
+def process_residue_sasa(structures_ds, accessibility_dir: str,
+                         accessibility_map_csv: str, dot_density: int = 4) -> None:
+    """Per-residue SASA + rsa for each structure, one resi-csv per structure."""
+    os.makedirs(accessibility_dir, exist_ok=True)
+    cols = ["id", "chain", "resi", "resn", "sasa", "rsa"]
+    map_rows = []
+
+    for struct_id, struct_path in iterate_files(structures_ds):
+        if not os.path.exists(struct_path):
+            print(f"Warning: Structure file not found: {struct_path}")
+            continue
+        print(f"Processing: {struct_id}")
+        residue_rows = calculate_residue_sasa(struct_path, dot_density)
+        out_rows = []
+        for r in residue_rows:
+            rsa = relative_accessibility(r["sasa"], r["resn"])
+            out_rows.append({
+                "id": struct_id,
+                "chain": r["chain"],
+                "resi": r["resi"],
+                "resn": r["resn"],
+                "sasa": r["sasa"],
+                "rsa": "" if rsa is None else rsa,
+            })
+        out_path = os.path.join(accessibility_dir, f"{struct_id}.csv")
+        pd.DataFrame(out_rows, columns=cols).to_csv(out_path, index=False)
+        map_rows.append({"id": struct_id, "file": out_path})
+        print(f"  {len(out_rows)} residues -> {out_path}")
+
+    os.makedirs(os.path.dirname(accessibility_map_csv), exist_ok=True)
+    pd.DataFrame(map_rows, columns=["id", "file"]).to_csv(accessibility_map_csv, index=False)
+    print(f"\nAccessibility resi-csv map: {accessibility_map_csv} ({len(map_rows)} rows)")
+    if not map_rows:
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Calculate delta SASA for protein-ligand complexes"
+    )
+    parser.add_argument(
+        "--mode",
+        default="ligand",
+        choices=["ligand", "residues"],
+        help="ligand: delta-SASA per complex; residues: per-residue accessibility"
     )
     parser.add_argument(
         "--structures",
@@ -145,13 +223,23 @@ def main():
     )
     parser.add_argument(
         "--ligand",
-        required=True,
-        help="Ligand residue name (e.g., X, LIG, AMX)"
+        default=None,
+        help="Ligand residue name (e.g., X, LIG, AMX); required for mode=ligand"
     )
     parser.add_argument(
         "--output_csv",
-        required=True,
-        help="Output CSV file path"
+        default=None,
+        help="Output CSV file path (mode=ligand)"
+    )
+    parser.add_argument(
+        "--accessibility-dir",
+        default=None,
+        help="Directory for per-residue resi-csv files (mode=residues)"
+    )
+    parser.add_argument(
+        "--accessibility-map-csv",
+        default=None,
+        help="Accessibility stream map CSV (mode=residues)"
     )
     parser.add_argument(
         "--dot_density",
@@ -174,13 +262,23 @@ def main():
     # Initialize PyMOL in quiet mode
     pymol.finish_launching(['pymol', '-qc'])
 
-    # Process structures
-    process_structures(
-        structures_ds=structures_ds,
-        ligand_resn=args.ligand,
-        output_csv=args.output_csv,
-        dot_density=args.dot_density
-    )
+    if args.mode == "residues":
+        process_residue_sasa(
+            structures_ds=structures_ds,
+            accessibility_dir=args.accessibility_dir,
+            accessibility_map_csv=args.accessibility_map_csv,
+            dot_density=args.dot_density,
+        )
+    else:
+        if not args.ligand:
+            print("Error: --ligand is required for mode=ligand")
+            sys.exit(1)
+        process_structures(
+            structures_ds=structures_ds,
+            ligand_resn=args.ligand,
+            output_csv=args.output_csv,
+            dot_density=args.dot_density
+        )
 
     # Quit PyMOL
     cmd.quit()

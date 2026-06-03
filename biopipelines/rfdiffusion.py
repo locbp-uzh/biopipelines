@@ -17,14 +17,54 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
-    from .biopipelines_io import Resolve
+    from .biopipelines_io import Resolve, TableReference
+    from .combinatorics import generate_multiplied_ids_pattern
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
-    from biopipelines_io import Resolve
+    from biopipelines_io import Resolve, TableReference
+    from combinatorics import generate_multiplied_ids_pattern
+
+
+def _normalize_selection_arg(name, value):
+    """Normalize a per-PDB selection argument to a (kind, token) pair.
+
+    RFdiffusion's ``contigs`` / ``inpaint`` / ``inpaint_str`` each accept either
+    a plain string — broadcast to every input PDB — or a per-PDB column
+    reference (a ``TableReference`` from ``tool.tables.X.col``, or a
+    ``(TableInfo, "col")`` tuple). A reference is resolved per-id at runtime via
+    ``Resolve.table_column``; a literal is emitted directly.
+
+    Returns ``("literal", str)`` or ``("table", "TABLE_REFERENCE:path:col")``.
+    A literal is the only kind validated by ``_validate_freeform_string`` (a
+    table reference reaches bash only through a resolved subshell, not as raw
+    interpolation).
+    """
+    if isinstance(value, TableReference):
+        return ("table", str(value))
+    # (TableInfo, "column") tuple — mirror the LigandMPNN/ThermoMPNN convention.
+    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[1], str):
+        return ("table", str(TableReference(value[0].info.path, value[1])))
+    if isinstance(value, str):
+        return ("literal", value)
+    raise ValueError(
+        f"{name} must be a string or a (table, column) reference, got {type(value)}"
+    )
+
+
+def _selection_cli_arg(kind_token) -> str:
+    """CLI arg for the contigs resolver: the token, or '-' when empty.
+
+    ``kind_token`` is the ``(kind, token)`` pair from
+    ``_normalize_selection_arg``. Shared by all three RFdiffusion tools.
+    """
+    kind, token = kind_token
+    if kind == "literal" and not token:
+        return "-"
+    return token
 
 
 class RFdiffusion(BaseConfig):
@@ -199,12 +239,19 @@ fi
     inference_py_file = Path(lambda self: os.path.join(self.folders["RFdiffusion"], "scripts", "run_inference.py"))
     pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
+    #   contigs_json       — per-PDB resolved {contigs, inpaint, inpaint_str},
+    #                        written at runtime by pipe_rfdiffusion_contigs.py.
+    #   contigs_py         — that resolver (one pass over all ids → JSON).
+    #   contigs_reader_py  — per-id reader the bash loop calls for each PDB.
+    contigs_json = Path(lambda self: self.configuration_path("contig_options.json"))
+    contigs_py = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_contigs.py"))
+    contigs_reader_py = Path(lambda self: self.pipe_script_path("resolve_rfdiffusion_contigs.py"))
 
     def __init__(self,
-                 contigs: str,
+                 contigs: Union[str, TableReference, "tuple"],
                  pdb: Optional[Union[DataStream, StandardizedOutput]] = None,
-                 inpaint: str = "",
-                 inpaint_str: str = "",
+                 inpaint: Union[str, TableReference, "tuple"] = "",
+                 inpaint_str: Union[str, TableReference, "tuple"] = "",
                  num_designs: int = 1,
                  active_site: bool = False,
                  steps: int = 50,
@@ -222,20 +269,28 @@ fi
                      segments are specified as length ranges (e.g. "50-100").
                      Multiple segments are separated by "/" (e.g. "A1-50/30-50/A60-100").
                      For unconditional generation (no pdb) use a length range alone
-                     (e.g. "100-200").
-            pdb: Optional input structure. Required for motif scaffolding,
-                 binder design, and partial diffusion. Accepts a DataStream
-                 (single file) or a StandardizedOutput (first structure is used).
+                     (e.g. "100-200"). Either a plain string (broadcast to every
+                     input PDB) or a per-PDB column reference
+                     (``tool.tables.X.col`` / ``(TableInfo, "col")``) resolved by
+                     id match at runtime — use the latter to give each input PDB
+                     its own contigs. A column reference requires ``pdb``.
+            pdb: Optional input structure(s). Required for motif scaffolding,
+                 binder design, and partial diffusion. Accepts a DataStream or a
+                 StandardizedOutput. When it carries multiple structures,
+                 RFdiffusion runs once per input PDB (``num_designs`` designs
+                 each); output ids are ``<pdb_id>_<n>``.
             inpaint: Residues whose sequence should be masked during diffusion
                      (same chain+range format as contigs). When set, the
                      InpaintSeq checkpoint is used automatically — ensure it
-                     was downloaded at install time.
+                     was downloaded at install time. Accepts the same
+                     string-or-column-reference forms as ``contigs``.
             inpaint_str: Residues whose secondary structure should be masked
                      during diffusion (same chain+range format as contigs).
                      Wired to upstream ``contigmap.inpaint_str``. Empty string
                      disables (default). The overall length stays governed by
                      the ``contigs`` argument (use a range like ``"50-100"``
-                     to control it).
+                     to control it). Accepts the same string-or-column-reference
+                     forms as ``contigs``.
             num_designs: Number of independent backbone designs to generate.
             active_site: If True, use the ActiveSite checkpoint instead of
                          Base. Intended for scaffolding very small functional
@@ -258,9 +313,10 @@ fi
             Tables:
                 structures: id | pdb | fixed | designed | source_fixed | plddt_mean | status
         """
-        # Resolve optional pdb input — store stream for runtime resolution
+        # Resolve optional pdb input — store stream for runtime resolution.
+        # All input PDBs are iterated at execution time (see generate_script);
+        # never index ids[0] at config time, which breaks under lazy IDs.
         self.pdb_stream: Optional[DataStream] = None
-        self.pdb_input_id: Optional[str] = None
         if pdb is not None:
             if isinstance(pdb, StandardizedOutput):
                 self.pdb_stream = pdb.streams.structures
@@ -268,11 +324,16 @@ fi
                 self.pdb_stream = pdb
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
-            self.pdb_input_id = self.pdb_stream.ids[0]
 
+        # Normalize the per-PDB selection args to (kind, token) pairs. A literal
+        # is broadcast to every PDB; a table reference is resolved per-id at
+        # runtime. Store both the original (for display) and the normalized form.
         self.contigs = contigs
         self.inpaint = inpaint
         self.inpaint_str = inpaint_str
+        self._contigs_arg = _normalize_selection_arg("contigs", contigs)
+        self._inpaint_arg = _normalize_selection_arg("inpaint", inpaint)
+        self._inpaint_str_arg = _normalize_selection_arg("inpaint_str", inpaint_str)
         self.num_designs = num_designs
         self.active_site = active_site
         self.steps = steps
@@ -284,7 +345,8 @@ fi
 
     def validate_params(self):
         """Validate RFdiffusion-specific parameters."""
-        if not self.contigs:
+        contigs_kind, contigs_token = self._contigs_arg
+        if contigs_kind == "literal" and not contigs_token:
             raise ValueError("contigs parameter is required")
 
         if self.num_designs <= 0:
@@ -296,9 +358,23 @@ fi
         if self.partial_steps < 0:
             raise ValueError("partial_steps cannot be negative")
 
-        _validate_freeform_string("contigs", self.contigs)
-        _validate_freeform_string("inpaint", self.inpaint)
-        _validate_freeform_string("inpaint_str", self.inpaint_str)
+        # A column reference is keyed by input-PDB id, so it needs PDBs to
+        # match against.
+        for name, (kind, _) in (("contigs", self._contigs_arg),
+                                 ("inpaint", self._inpaint_arg),
+                                 ("inpaint_str", self._inpaint_str_arg)):
+            if kind == "table" and self.pdb_stream is None:
+                raise ValueError(
+                    f"{name} given as a table column reference requires a pdb input"
+                )
+
+        # Only literal selections are interpolated raw into bash; table
+        # references reach the shell through a resolved subshell.
+        for name, (kind, token) in (("contigs", self._contigs_arg),
+                                     ("inpaint", self._inpaint_arg),
+                                     ("inpaint_str", self._inpaint_str_arg)):
+            if kind == "literal":
+                _validate_freeform_string(name, token)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files."""
@@ -315,10 +391,10 @@ fi
         ])
 
         if self.pdb_stream:
-            config_lines.append(f"PDB: {self.pdb_input_id}")
-        if self.inpaint:
+            config_lines.append(f"PDB: {', '.join(self.pdb_stream.ids)}")
+        if self._inpaint_arg[1]:
             config_lines.append(f"INPAINT: {self.inpaint}")
-        if self.inpaint_str:
+        if self._inpaint_str_arg[1]:
             config_lines.append(f"INPAINT_STR: {self.inpaint_str}")
         if self.partial_steps > 0:
             config_lines.append(f"PARTIAL STEPS: {self.partial_steps}")
@@ -348,48 +424,46 @@ fi
         script_content += self.generate_completion_check_footer()
         return script_content
 
-    def _generate_script_run_rfdiffusion(self) -> str:
-        """Generate the RFdiffusion execution part of the script."""
-        # Resolve input PDB at runtime if a DataStream is provided
-        resolve_snippet = ""
-        if self.pdb_stream:
-            resolve_snippet = f"""INPUT_PDB_ID={Resolve.stream_ids(self.pdb_ds_json, index=0)}
-INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$INPUT_PDB_ID')}
-"""
-
-        rfd_options = f"'contigmap.contigs=[{self.contigs}]'"
-
-        if self.inpaint:
-            rfd_options += f" 'contigmap.inpaint_seq=[{self.inpaint}]'"
-
-        if self.inpaint_str:
-            rfd_options += f" 'contigmap.inpaint_str=[{self.inpaint_str}]'"
-
-        if self.pdb_stream:
-            rfd_options += " inference.input_pdb=$INPUT_PDB"
-
-        output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
-        # RFdiffusion writes <prefix>_<N>.pdb / .trb at inference time. Route
-        # these into the 'structures' stream folder (created on demand by
-        # RFdiffusion's own os.makedirs chain).
-        structures_dir = self.stream_folder("structures")
-        prefix = os.path.join(structures_dir, output_name)
-        rfd_options += f" inference.output_prefix={prefix}"
-        rfd_options += f" inference.num_designs={self.num_designs}"
-        rfd_options += f" inference.deterministic={self.reproducible}"
-        rfd_options += f" inference.design_startnum={self.design_startnum}"
-
+    def _common_rfd_options(self) -> str:
+        """Inference options shared by every input PDB (no contigs/pdb/prefix)."""
+        opts = f"inference.num_designs={self.num_designs}"
+        opts += f" inference.deterministic={self.reproducible}"
+        opts += f" inference.design_startnum={self.design_startnum}"
         if self.steps != 50:
-            rfd_options += f" diffuser.T={self.steps}"
-
+            opts += f" diffuser.T={self.steps}"
         if self.partial_steps > 0:
-            rfd_options += f" diffuser.partial_T={self.partial_steps}"
-
+            opts += f" diffuser.partial_T={self.partial_steps}"
         if self.active_site:
-            rfd_options += " inference.ckpt_override_path=models/ActiveSite_ckpt.pt"
+            opts += " inference.ckpt_override_path=models/ActiveSite_ckpt.pt"
+        return opts
 
-        return f"""{resolve_snippet}echo "Starting RFdiffusion"
-echo "Options: {rfd_options}"
+    def _generate_script_run_rfdiffusion(self) -> str:
+        """Generate the RFdiffusion execution part of the script.
+
+        With a PDB input, RFdiffusion runs once per input structure inside a
+        bash loop over the input ids (resolved at runtime — never ids[0] at
+        config time, which breaks under lazy IDs). The per-PDB contigs /
+        inpaint / inpaint_str selections (literal broadcast, or a table-column
+        reference) are pre-resolved in one pass into contig_options.json by
+        pipe_rfdiffusion_contigs.py, and the loop reads each id's values from
+        it. Without a PDB it is a single unconditional run named after the
+        pipeline.
+        """
+        common = self._common_rfd_options()
+        structures_dir = self.stream_folder("structures")
+
+        if not self.pdb_stream:
+            # Unconditional generation — single run, contigs is a literal
+            # (validate_params already rejected a table ref without pdb).
+            contigs = self._contigs_arg[1]
+            rfd_options = f"'contigmap.contigs=[{contigs}]'"
+            if self._inpaint_arg[1]:
+                rfd_options += f" 'contigmap.inpaint_seq=[{self._inpaint_arg[1]}]'"
+            if self._inpaint_str_arg[1]:
+                rfd_options += f" 'contigmap.inpaint_str=[{self._inpaint_str_arg[1]}]'"
+            prefix = os.path.join(structures_dir, self.pipeline_name)
+            rfd_options += f" inference.output_prefix={prefix} {common}"
+            return f"""echo "Starting RFdiffusion (unconditional)"
 echo "Output folder: {self.output_folder}"
 
 cd {self.folders["RFdiffusion"]}
@@ -397,14 +471,48 @@ cd {self.folders["RFdiffusion"]}
 
 """
 
+        # PDB-conditioned: pre-resolve per-PDB selections (one pass over all
+        # ids) into a JSON, then loop over the input ids at runtime.
+        contigs_arg = _selection_cli_arg(self._contigs_arg)
+        inpaint_arg = _selection_cli_arg(self._inpaint_arg)
+        inpaint_str_arg = _selection_cli_arg(self._inpaint_str_arg)
+
+        return f"""echo "Resolving per-PDB contig options"
+python {self.contigs_py} "{self.pdb_ds_json}" "{contigs_arg}" "{inpaint_arg}" "{inpaint_str_arg}" "{self.contigs_json}"
+
+echo "Starting RFdiffusion"
+echo "Output folder: {self.output_folder}"
+cd {self.folders["RFdiffusion"]}
+
+for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
+    INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$STRUCT_ID')}
+    OPTS=$(python {self.contigs_reader_py} "{self.contigs_json}" "$STRUCT_ID")
+    CONTIGS=$(echo "$OPTS" | sed -n '1p')
+    INPAINT_SEL=$(echo "$OPTS" | sed -n '2p')
+    INPAINT_STR_SEL=$(echo "$OPTS" | sed -n '3p')
+    RFD_OPTIONS="'contigmap.contigs=[$CONTIGS]'"
+    if [ -n "$INPAINT_SEL" ]; then
+        RFD_OPTIONS="$RFD_OPTIONS 'contigmap.inpaint_seq=[$INPAINT_SEL]'"
+    fi
+    if [ -n "$INPAINT_STR_SEL" ]; then
+        RFD_OPTIONS="$RFD_OPTIONS 'contigmap.inpaint_str=[$INPAINT_STR_SEL]'"
+    fi
+    RFD_OPTIONS="$RFD_OPTIONS inference.input_pdb=$INPUT_PDB"
+    RFD_OPTIONS="$RFD_OPTIONS inference.output_prefix={structures_dir}/$STRUCT_ID {common}"
+    echo "Running RFdiffusion for $STRUCT_ID"
+    eval {self.container_prefix()}python {self.inference_py_file} $RFD_OPTIONS
+done
+
+"""
+
     def _generate_script_create_table(self) -> str:
         """Generate the table creation part of the script."""
-        output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
-        # pipe_rfdiffusion_table.py reads .pdb + .trb files from its first
-        # positional arg; those now live in the structures/ stream folder.
+        # pipe_rfdiffusion_table.py scans the structures/ stream folder for every
+        # produced .pdb/.trb pair — one prefix per input PDB in the multi-PDB
+        # case, one for the unconditional case.
         structures_dir = self.stream_folder("structures")
         return f"""echo "Creating results table"
-python {self.table_py_file} "{structures_dir}" "{output_name}" {self.num_designs} "{self.main_table}" {self.design_startnum}
+python {self.table_py_file} "{structures_dir}" "{self.main_table}"
 
 """
 
@@ -412,10 +520,11 @@ python {self.table_py_file} "{structures_dir}" "{output_name}" {self.num_designs
         """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        # Every generated design shares the same parent PDB (if a PDB input was
-        # given), so set a constant `structures.id` provenance column at runtime.
-        prov_arg = (f' --set-provenance "structures.id={self.pdb_input_id}"'
-                    if self.pdb_input_id else "")
+        # Each design id is "<pdb_id>_<n>"; its parent PDB is the id minus the
+        # trailing "_<n>" suffix. Derive the `structures.id` provenance column
+        # from that suffix at runtime (works for one or many parent PDBs). With
+        # no PDB input there is no parent, so no provenance column.
+        prov_arg = ' --provenance-from-suffix "structures.id"' if self.pdb_stream else ""
         return f"""echo "Writing structures map from actual output files"
 python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
 
@@ -423,16 +532,22 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after RFdiffusion execution."""
-        # Use PDB input ID as base when available, otherwise pipeline name
-        output_name = self.pdb_input_id if self.pdb_input_id else self.pipeline_name
-
         # Pattern-based IDs — PDBs land under <output_folder>/structures/.
         # The per-design map_table is written at runtime by
         # _generate_script_update_structures_map(); here we only declare the
         # stream and its map_table path.
         start = self.design_startnum
         end = self.design_startnum + self.num_designs - 1
-        structure_ids = [f"{output_name}_<{start}..{end}>"]
+        suffix_pattern = f"<{start}..{end}>"
+        if self.pdb_stream:
+            # One <pdb_id>_<n> fan-out per input PDB. Keep parent ids compact /
+            # lazy-safe via the shared multiplier helper.
+            structure_ids = generate_multiplied_ids_pattern(
+                self.pdb_stream.ids, suffix_pattern,
+                input_stream_name="structures"
+            )
+        else:
+            structure_ids = [f"{self.pipeline_name}_{suffix_pattern}"]
         structures_dir = self.stream_folder("structures")
         file_template = [os.path.join(structures_dir, "<id>.pdb")]
         structures_map = self.stream_map_path("structures")
@@ -465,10 +580,10 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         base_dict = super().to_dict()
         base_dict.update({
             "rfd_params": {
-                "pdb_input_id": self.pdb_input_id,
-                "contigs": self.contigs,
-                "inpaint": self.inpaint,
-                "inpaint_str": self.inpaint_str,
+                "pdb_input_ids": self.pdb_stream.ids if self.pdb_stream else None,
+                "contigs": str(self.contigs),
+                "inpaint": str(self.inpaint),
+                "inpaint_str": str(self.inpaint_str),
                 "num_designs": self.num_designs,
                 "active_site": self.active_site,
                 "steps": self.steps,

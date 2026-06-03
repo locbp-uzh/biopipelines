@@ -12,6 +12,7 @@ enabling incremental pipeline development and efficient result reuse.
 import os
 import re
 import json
+import contextlib
 from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
 
@@ -783,6 +784,7 @@ def LoadMultiple(path: str,
                 in_suffix: Optional[Union[str, List[str]]] = None,
                 not_in_suffix: Optional[Union[str, List[str]]] = None,
                 ascending: bool = True,
+                folder: Optional[str] = "LoadMultiple",
                 **load_output_kwargs) -> Dict[str, Load]:
     """
     Load multiple tool outputs from a job folder by scanning tool subfolders.
@@ -797,6 +799,12 @@ def LoadMultiple(path: str,
         in_suffix: Filter requiring suffix to contain string(s)
         not_in_suffix: Filter excluding suffix containing string(s)
         ascending: Sort order (True = ascending by name, False = descending)
+        folder: Name of a Folder() to nest the created Load steps under so they
+                don't clutter the job root (default "LoadMultiple"). Pass None to
+                keep the Load steps at the job root. Note this nests only the
+                Load steps themselves; tools you chain off the returned outputs
+                are constructed after LoadMultiple returns, so they fall outside
+                this folder unless you open your own Folder() around them.
         **load_output_kwargs: Additional parameters passed to Load constructor
 
     Returns:
@@ -811,7 +819,11 @@ def LoadMultiple(path: str,
 
         # Load outputs with a specific suffix
         >>> cycle10 = LoadMultiple("/path/to/Job_001", suffix="Cycle10")
+
+        # Keep the Load steps at the job root (no nesting)
+        >>> data = LoadMultiple("/path/to/Job_001", folder=None)
     """
+    from .pipeline import Folder, Pipeline
     job_folder = os.path.abspath(path)
 
     if not os.path.exists(job_folder):
@@ -821,7 +833,7 @@ def LoadMultiple(path: str,
         raise ValueError(f"Path is not a directory: {job_folder}")
 
     # Scan for tool subfolders matching NNN_ToolName[_Suffix] pattern
-    tool_folder_pattern = re.compile(r'^(\d{3})_(.+)$')
+    tool_folder_pattern = re.compile(r'^(\d+)_(.+)$')
 
     candidates = []
     for entry in os.listdir(job_folder):
@@ -840,45 +852,51 @@ def LoadMultiple(path: str,
     if not candidates:
         raise ValueError(f"No tool folders with .expected_outputs.json found in: {job_folder}")
 
-    # Filter and load outputs
+    # Filter and load outputs. Nest the created Load steps under Folder(folder)
+    # when a pipeline is active and a name was given, so they don't scatter at
+    # the job root. nullcontext keeps the loop body identical when not nesting
+    # (folder=None, or called outside a Pipeline context).
     loaded_outputs = {}
+    nest = (folder is not None and Pipeline.get_active_pipeline() is not None)
+    folder_ctx = Folder(folder) if nest else contextlib.nullcontext()
 
-    for folder_name, index, rest in candidates:
-        # Parse tool name and suffix from the rest (e.g., "Boltz2" or "Boltz2_Cycle10")
-        parts = rest.split('_', 1)
-        folder_tool_name = parts[0]
-        folder_suffix = parts[1] if len(parts) > 1 else None
+    with folder_ctx:
+        for folder_name, index, rest in candidates:
+            # Parse tool name and suffix from the rest (e.g., "Boltz2" or "Boltz2_Cycle10")
+            parts = rest.split('_', 1)
+            folder_tool_name = parts[0]
+            folder_suffix = parts[1] if len(parts) > 1 else None
 
-        # Apply tool name filter
-        if tool is not None and folder_tool_name != tool:
-            continue
-
-        # Apply suffix filters
-        if suffix is not None:
-            if folder_suffix != suffix:
+            # Apply tool name filter
+            if tool is not None and folder_tool_name != tool:
                 continue
 
-        if in_suffix is not None:
-            if folder_suffix is None:
-                continue
-            checks = [in_suffix] if isinstance(in_suffix, str) else in_suffix
-            if not all(c in folder_suffix for c in checks):
-                continue
-
-        if not_in_suffix is not None:
-            if folder_suffix is not None:
-                checks = [not_in_suffix] if isinstance(not_in_suffix, str) else not_in_suffix
-                if any(c in folder_suffix for c in checks):
+            # Apply suffix filters
+            if suffix is not None:
+                if folder_suffix != suffix:
                     continue
 
-        # Passed all filters — create Load
-        folder_path = os.path.join(job_folder, folder_name)
-        try:
-            load_output = Load(folder_path, **load_output_kwargs)
-            loaded_outputs[folder_name] = load_output
-        except Exception as e:
-            print(f"Warning: Could not create Load for {folder_name}: {e}")
-            continue
+            if in_suffix is not None:
+                if folder_suffix is None:
+                    continue
+                checks = [in_suffix] if isinstance(in_suffix, str) else in_suffix
+                if not all(c in folder_suffix for c in checks):
+                    continue
+
+            if not_in_suffix is not None:
+                if folder_suffix is not None:
+                    checks = [not_in_suffix] if isinstance(not_in_suffix, str) else not_in_suffix
+                    if any(c in folder_suffix for c in checks):
+                        continue
+
+            # Passed all filters — create Load
+            folder_path = os.path.join(job_folder, folder_name)
+            try:
+                load_output = Load(folder_path, **load_output_kwargs)
+                loaded_outputs[folder_name] = load_output
+            except Exception as e:
+                print(f"Warning: Could not create Load for {folder_name}: {e}")
+                continue
 
     if not loaded_outputs:
         raise ValueError(

@@ -9,7 +9,7 @@ protein 9RTM with TMR (matches example_pipelines/gnina_docking.py).
 """
 
 from biopipelines.pipeline import *
-from biopipelines.gnina import Gnina
+from biopipelines import Gnina
 
 with Pipeline(project="ToolParameters",
               job="Gnina",

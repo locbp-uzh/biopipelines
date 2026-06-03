@@ -48,6 +48,12 @@ analogue — those are internal work, the user shouldn't see them. The only
 user-visible output during the interview is the substantive question(s)
 or the proposed sketch.
 
+**Do not write narrative comments in the codebase** Keep comments to a
+minimum to understand and use the codebase.
+
+**Do not use `I` and `you` when asking questions** Refer to yourself as
+"The coding agent" and to the user as "The user".
+
 ### Order of operations for a new tool
 
 1. **Settle the branch decision first** — see "Branch and PR
@@ -78,7 +84,7 @@ or the proposed sketch.
    - **Outputs** — streams, tables.
    - **Env** — shared env, dedicated env, colab case.
    - **ID handling** — passes IDs through, generates new IDs, fans out to
-     derived IDs. 
+     derived IDs.
 
    For each axis, find one or two existing tools in `tool_reference.md`
    that exhibit that pattern cleanly and use them as the reference **for
@@ -135,9 +141,9 @@ prose. The user should be able to answer in 30 seconds by selecting an
 option (or saying "other" with a short note).
 
 **First check whether `AskUserQuestion` is in your tool list for this
-session.** If it isn't, you don't have it ask questions in markdown style. 
-If it is available, **you must use it** for any question that has 2–4 
-discrete options. Markdown numbered lists are the fallback for hosts 
+session.** If it isn't, you don't have it ask questions in markdown style.
+If it is available, **you must use it** for any question that has 2–4
+discrete options. Markdown numbered lists are the fallback for hosts
 without the tool, not a stylistic preference when the tool is present.
 
 `AskUserQuestion` constraints: 1–4 questions per call, each with 2–4
@@ -156,9 +162,9 @@ choice.
   cannot be executed locally — verify it via review and CI, not by running it.
 - Never install packages into the user's environments without explicit
   consent. If possible rewrite a script to avoid the missing dep.
-- When writing install specifications, always retrieve the official 
+- When writing install specifications, always retrieve the official
   instructions from the given repository.
-  
+
 ## Branch and PR conventions
 
 **As soon as the task is clear, ask the user where the work should
@@ -214,6 +220,8 @@ the same Python API and runtime logic. The two genuine differences are:
   env entries, and micromamba behavior are the one area where Colab needs
   separate testing even when the runtime logic is unchanged.
 
+**Never regress an already-debugged Colab path to add cluster support.** If a tool already has a verified `<tool>.colab.yaml`, do not edit it for the cluster — keep it and add a generic `<tool>.yaml` (picked up off Colab). Likewise in code: don't replace a working Colab step; put it under `if scheduler == "colab":` and add the cluster logic under `else:`.
+
 ### Cluster verification (default)
 
 If your change touches Resources defaults, partition selection, or anything
@@ -231,6 +239,14 @@ trail for the session. Read `cluster.md` for more information.
 2. On the cluster: `cd <repo> && git fetch && git checkout <branch> && git reset --hard origin/<branch>`. Confirm the branch and the hard-reset target with the user first — this is destructive on the remote checkout.
 3. On the cluster: `./submit <pipeline.py>` with a minimal test pipeline.
 4. Tail `<RunTime>/slurm.out` to inspect.
+5. **Inspect the actual output files, not just the success marker.** "completed successfully" only means the completion-check found the expected paths — not that the result is right. Open the produced files: a structure PDB has plausible coordinates, a scores/affinity table has finite non-empty values, an N-sample run wrote N files. Also sanity-check timing — a GPU job that took minutes for a tiny input likely fell back to CPU.
+
+Two recurring traps:
+
+- **Probe before assuming an install bug.** When a tool errors on real data, check the *inputs* first (coordinates, pose, format) — a scorer's empty-pocket crash was a ligand placed at the origin, not a broken env. A one-shot diagnostic (print the relevant state) beats re-running the whole job on a guess.
+- **`gpu="any"` can land on an H100 (sm_90).** Tools whose env pins torch ≤cu117 have no sm_90 kernel and crash ("no kernel image") or silently run on CPU. Use `gpu="A100"` for cu11x-pinned tools. See `llm/resources.md` → Gotchas.
+
+To test pipelines, write them under `my_pipelines` (gitignored folder) and scp, instead of going through the push-sync cycle.
 
 ### Colab verification (only if install paths are touched)
 
@@ -243,7 +259,7 @@ hand the user a notebook with:
    !git clone -b <branch> https://github.com/<org>/biopipelines.git
    ```
 2. the affected `.install()` call
-3. a minimal pipeline cell 
+3. a minimal pipeline cell
 
 and ask them to:
 

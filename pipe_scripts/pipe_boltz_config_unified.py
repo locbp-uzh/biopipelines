@@ -30,6 +30,7 @@ import yaml
 _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines')
 sys.path.insert(0, _biopipelines_dir)
 from combinatorics import predict_single_output_id, CombinatoricsConfig
+from ligand_utils import auth_ligand_field
 
 
 # Custom YAML representer for inline list formatting in constraints
@@ -288,6 +289,21 @@ def add_covalent_linkage_to_config(config: Dict, covalent_linkage: Dict, ligand_
         print("Warning: covalent_linkage missing required fields")
         return config
 
+    # position may be a selection string (e.g. "C in ILIPCH") resolved per-structure
+    # against this chain's sequence — finds the residue regardless of renumbering.
+    if isinstance(position, str) and not position.lstrip('-').isdigit():
+        seq = next((e['protein']['sequence'] for e in config.get('sequences', [])
+                    if 'protein' in e and e['protein'].get('id') == chain), None)
+        if seq is None:
+            raise ValueError(f"covalent_linkage: no protein chain '{chain}' to resolve "
+                             f"position selection {position!r}")
+        from biopipelines.pdb_parser import resolve_selection_in_sequence
+        hits = resolve_selection_in_sequence(position, seq, chain=chain)
+        if len(hits) != 1:
+            raise ValueError(f"covalent_linkage position {position!r} resolved to "
+                             f"{len(hits)} residues {hits} in chain '{chain}'; need exactly one")
+        position = hits[0]
+
     if 'constraints' not in config:
         config['constraints'] = []
     config['constraints'].append({
@@ -323,10 +339,11 @@ def add_contacts_to_config(config: Dict, contacts: List[Dict]) -> Dict:
             if chain_id in ligand_chain_ids and isinstance(token_value, int):
                 raise ValueError(
                     f"Contact constraint {key}={token}: chain '{chain_id}' is a ligand, "
-                    f"so the second element must be an atom name (string, e.g. 'C1'), "
+                    f"so the second element must be an atom name (string, e.g. 'C8'), "
                     f"not a residue index (integer). "
-                    f"Check the CIF file of your ligand on RCSB to find standardized atom names, "
-                    f"or run a prediction without constraints first and inspect the output."
+                    f"Predict the exact atom names ahead of time with "
+                    f"Boltz2.predict_atom_names(<your ligand>), which returns a labelled "
+                    f"2-D image and a name lookup."
                 )
 
         entry = {
@@ -436,6 +453,25 @@ def build_protein_entry(protein: Dict, chain_id: str, msa_file: Optional[str]) -
     return entry
 
 
+def backfill_empty_msa(config: Dict) -> Dict:
+    """Backfill ``msa: empty`` on un-recycled protein chains when recycling is active.
+
+    If any protein chain in this config resolved a recycled MSA path, Boltz refuses
+    to mix custom MSAs with auto-generated ones. ``empty`` is Boltz's single-sequence
+    sentinel and counts as neither, so it can coexist with explicit paths. Chains
+    sharing a sequence with a recycled chain inherit its path (set at build time),
+    so only chains with no msa at all are backfilled.
+    """
+    protein_entries = [e['protein'] for e in config.get('sequences', []) if 'protein' in e]
+    any_recycled = any(p.get('msa') for p in protein_entries)
+    if not any_recycled:
+        return config
+    for p in protein_entries:
+        if not p.get('msa'):
+            p['msa'] = 'empty'
+    return config
+
+
 def build_dna_entry(dna: Dict, chain_id: str, rev_comp: bool = False) -> Dict:
     """Build a DNA entry for Boltz2 config."""
     seq = dna['sequence']
@@ -464,15 +500,8 @@ def build_rna_entry(rna: Dict, chain_id: str, rev_comp: bool = False) -> Dict:
 
 def build_ligand_entry(ligand: Dict, chain_id: str) -> Dict:
     """Build a ligand entry for Boltz2 config."""
-    entry = {'ligand': {'id': chain_id}}
-
-    fmt = ligand.get('format', '').lower()
-    if fmt == 'smiles' and ligand.get('smiles'):
-        entry['ligand']['smiles'] = ligand['smiles']
-    elif fmt == 'ccd' and ligand.get('ccd'):
-        entry['ligand']['ccd'] = ligand['ccd']
-
-    return entry
+    field, value = auth_ligand_field(ligand)
+    return {'ligand': {'id': chain_id, field: value}}
 
 
 # Entity types that support MSA lookup
@@ -608,6 +637,7 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
 
     def apply_decorations(config, first_ligand_chain):
         """Apply template, glycosylation, affinity, covalent, pocket, contacts."""
+        config = backfill_empty_msa(config)
         config = add_template_to_config(config, args)
         config = add_glycosylation_to_config(config, glycosylation)
         if first_ligand_chain:

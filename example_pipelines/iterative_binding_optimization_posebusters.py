@@ -6,13 +6,15 @@
 
 
 from biopipelines.pipeline import *
-from biopipelines.boltz2 import Boltz2
-from biopipelines.ligand_mpnn import LigandMPNN
-from biopipelines.distance_selector import DistanceSelector
-from biopipelines.mutation_profiler import MutationProfiler
-from biopipelines.mutation_composer import MutationComposer
-from biopipelines.panda import Panda
-from biopipelines.posebusters import PoseBusters
+from biopipelines import (
+    Boltz2,
+    LigandMPNN,
+    DistanceSelector,
+    MutationProfiler,
+    MutationComposer,
+    Panda,
+    PoseBusters,
+)
 
 
 # Variant of iterative_binding_optimization.py that gates each cycle's
@@ -34,10 +36,10 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization_PoseBusters"):
     for cycle in range(5):
         Suffix(f"Cycle{cycle+1}")
         pocket = DistanceSelector(structures=current_best,
-                                  ligand="LIG",
+                                  ligand=original,  # residue code read from Boltz2's compounds at runtime
                                   distance=5)
         variants = LigandMPNN(structures=current_best,
-                              ligand="LIG",
+                              ligand=original,  # Boltz2's compounds carry the LIG code it assigned
                               num_sequences=1000,
                               redesigned=pocket.tables.selections.within)
         profile = MutationProfiler(original=current_best,
@@ -49,7 +51,7 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization_PoseBusters"):
         predicted = Boltz2(proteins=candidates,
                            ligands=ligand)
         busted = PoseBusters(structures=predicted,
-                             ligand="LIG")
+                             ligand=predicted)  # Boltz2's compounds carry the LIG code it assigned
         validated = Panda(tables=[predicted.tables.affinity,
                                   busted.tables.posebusters],
                           operations=[Panda.merge(),

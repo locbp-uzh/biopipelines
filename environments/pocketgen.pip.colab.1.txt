@@ -1,0 +1,12 @@
+# Phase 1 — torch + PyG wheels (cu117). PyG bundles native ops compiled
+# against the exact torch version, so we have to pin tightly here. Matches
+# upstream pocketgen.yaml's pytorch=1.13.0 cu117 entries.
+--extra-index-url https://download.pytorch.org/whl/cu117
+--find-links https://data.pyg.org/whl/torch-1.13.0+cu117.html
+torch==1.13.1+cu117
+torch-cluster==1.6.1
+torch-geometric==2.3.1
+torch-scatter==2.1.1
+torch-sparse==0.6.17
+torch-spline-conv==1.2.2
+pyg-lib==0.2.0

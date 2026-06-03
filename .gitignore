@@ -4,6 +4,11 @@ __pycache__/
 *.pyo
 *.egg-info/
 
+# Config editor / bp-config backups (timestamped + legacy fixed-name)
+*.bak
+*.backup
+*.backup[0-9]*
+
 # Pipeline outputs
 *_[0-9]*/
 RunTime/
@@ -19,6 +24,18 @@ my_pipelines/*
 # Ligands folder (cached ligand files)
 ligands/*
 !ligands/README.md
+
+# PDBs folder (user structures)
+pdbs/*.pdb
+!pdbs/README.md
+
+# Sequences folder (user sequences)
+sequences/*
+!sequences/README.md
+
+# Tables folder (user tables)
+tables/*
+!tables/README.md
 
 # MkDocs build output
 site/
@@ -69,3 +86,5 @@ changes.txt
 comments.docx
 comments.md
 comparison.txt
+package-two.md
+.mcp.json

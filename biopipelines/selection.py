@@ -121,7 +121,7 @@ class Selection(BaseConfig):
         - ``"nc"``: both directions (default)
 
     Stream-based filtering:
-        When a DataStream is passed, it must have format ``per-residue-values-csv``
+        When a DataStream is passed, it must have format ``resi-csv``
         with a ``resi`` column. The ``include=`` or ``exclude=`` expression
         specifies both the column and threshold: ``"column op value"``, e.g.
         ``include="propensity>0.5"`` keeps rows where propensity > 0.5.
@@ -133,12 +133,11 @@ class Selection(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        return """echo "=== Selection ==="
-echo "Requires ProteinEnv (installed with PyMOL.install())"
-echo "No additional installation needed."
-touch "$INSTALL_SUCCESS"
-echo "=== Selection ready ==="
-"""
+        # Runs in ProteinEnv (PyMOL). Delegate the install so a notebook calling
+        # Selection.install() doesn't have to know it depends on PyMOL.
+        from .pymol import PyMOL
+        return PyMOL._install_script(folders, env_manager=env_manager,
+                                     force_reinstall=force_reinstall, **kwargs)
 
     # Lazy path descriptors
     selections_csv = Path(lambda self: self.table_path("selections"))
@@ -156,7 +155,7 @@ echo "=== Selection ready ==="
 
             Selection.add(fuse.tables.sequences.L1, fuse.tables.sequences.L2)
 
-        Stream-based (pass a DataStream of format per-residue-values-csv)::
+        Stream-based (pass a DataStream of format resi-csv)::
 
             Selection.add(cpred.streams.propensities, include="propensity>0.5")
 
@@ -183,7 +182,7 @@ echo "=== Selection ready ==="
 
             Selection.subtract(other.tables.structures.col8)
 
-        Stream-based (pass a DataStream of format per-residue-values-csv)::
+        Stream-based (pass a DataStream of format resi-csv)::
 
             Selection.subtract(cpred.streams.propensities, include="propensity>0.8")
 
@@ -295,7 +294,7 @@ echo "=== Selection ready ==="
 
         Output:
             Tables:
-                selections: id | selection
+                selections: id | selection | n_residues
         """
         # Build ordered operations list (flatten lists from close/open composites)
         self.operations: List[SelectionOp] = []
@@ -449,8 +448,8 @@ echo "Modified selections saved to: {self.selections_csv}"
             "selections": TableInfo(
                 name="selections",
                 path=self.selections_csv,
-                columns=["id", "selection"],
-                description="Modified selections"
+                columns=["id", "selection", "n_residues"],
+                description="Modified selections with per-ID residue count"
             )
         }
 

@@ -54,6 +54,7 @@ Example usage:
 import glob
 import json
 import os
+import sys
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import pandas as pd
@@ -204,14 +205,23 @@ def iterate_files(ds: DataStream) -> Iterator[Tuple[str, str]]:
     2. len(files) == len(ids): Direct zip iteration
     3. len(files) == 1: Single file for all IDs (bundle case)
 
+    Missing files are SKIPPED, not fatal: when a wildcard expands to no file for
+    an id, that id is skipped with a warning and iteration continues. A declared
+    id can legitimately lack a file — e.g. a filtered Pool/Panda still declares
+    every original id in its stream but only carries the rows that survived a
+    downstream filter. The dropped ids are tracked in the upstream `missing`
+    manifest and propagated forward; whether that manifest accounts for every
+    absent file (expected) or some are genuinely missing (a real failure) is
+    decided by pipe_check_completion, not here. So this iterator never raises on
+    a missing file — it just yields the ids whose files are actually present.
+
     Args:
         ds: DataStream instance
 
     Yields:
-        Tuple of (item_id, file_path)
+        Tuple of (item_id, file_path) for every id whose file is present.
 
     Raises:
-        FileNotFoundError: If wildcard expansion yields no files for an ID
         ValueError: If files list is empty and this is a file-based stream
 
     Example:
@@ -225,20 +235,35 @@ def iterate_files(ds: DataStream) -> Iterator[Tuple[str, str]]:
     if not files and not ds.files:
         raise ValueError(f"DataStream '{ds.name}' has no files configured")
 
+    def _resolve_glob(item_id: str, pattern: str):
+        """Expand a wildcard for one id; skip (warn + return None) on no match."""
+        expanded = glob.glob(pattern)
+        if not expanded:
+            print(f"  Warning: No files found matching pattern '{pattern}' for ID "
+                  f"'{item_id}' — skipping (id absent from this stream's files)")
+            return None
+        return _find_best_match(item_id, expanded)
+
     # If files_expanded produced results, use them
     if files and len(files) == len(ids):
         # Detect wildcards
         has_wildcards = any('*' in f for f in files)
         if has_wildcards:
             for item_id, file_pattern in zip(ids, files):
-                expanded = glob.glob(file_pattern)
-                if not expanded:
-                    raise FileNotFoundError(
-                        f"No files found matching pattern '{file_pattern}' for ID '{item_id}'"
-                    )
-                yield (item_id, _find_best_match(item_id, expanded))
+                match = _resolve_glob(item_id, file_pattern)
+                if match is not None:
+                    yield (item_id, match)
         else:
+            # Per-id concrete paths (e.g. the '<id>.pdb' template expands to one
+            # distinct file per id). Skip an id whose file is absent — a filtered
+            # Pool/Panda declares every original id but only carries the surviving
+            # files. (Distinct from the shared/bundle branches below, where a single
+            # real file legitimately covers every id and must not be per-id-skipped.)
             for item_id, file_path in zip(ids, files):
+                if '*' not in file_path and not os.path.exists(file_path):
+                    print(f"  Warning: File not found for ID '{item_id}': "
+                          f"'{file_path}' — skipping (id absent from this stream's files)")
+                    continue
                 yield (item_id, file_path)
 
     elif ds.is_shared_file:
@@ -246,12 +271,9 @@ def iterate_files(ds: DataStream) -> Iterator[Tuple[str, str]]:
         single = ds.files
         if '*' in single:
             for item_id in ids:
-                expanded = glob.glob(single)
-                if not expanded:
-                    raise FileNotFoundError(
-                        f"No files found matching pattern '{single}' for ID '{item_id}'"
-                    )
-                yield (item_id, _find_best_match(item_id, expanded))
+                match = _resolve_glob(item_id, single)
+                if match is not None:
+                    yield (item_id, match)
         else:
             for item_id in ids:
                 yield (item_id, single)
@@ -261,12 +283,9 @@ def iterate_files(ds: DataStream) -> Iterator[Tuple[str, str]]:
         single = ds.files[0]
         if '*' in single:
             for item_id in ids:
-                expanded = glob.glob(single)
-                if not expanded:
-                    raise FileNotFoundError(
-                        f"No files found matching pattern '{single}' for ID '{item_id}'"
-                    )
-                yield (item_id, _find_best_match(item_id, expanded))
+                match = _resolve_glob(item_id, single)
+                if match is not None:
+                    yield (item_id, match)
         else:
             for item_id in ids:
                 yield (item_id, single)
@@ -487,7 +506,6 @@ _table_cache: Dict[str, pd.DataFrame] = {}
 
 def load_table(
     reference: str,
-    id_map: Optional[Dict[str, str]] = None
 ) -> Tuple[pd.DataFrame, Optional[str]]:
     """
     Load a table from a path or TABLE_REFERENCE string.
@@ -498,7 +516,6 @@ def load_table(
 
     Args:
         reference: Either a file path or TABLE_REFERENCE:path:column string
-        id_map: Optional ID mapping pattern (currently stored for later use)
 
     Returns:
         Tuple of (DataFrame, column_name or None)
@@ -573,38 +590,26 @@ def lookup_table_value(
     table: pd.DataFrame,
     item_id: str,
     column: str,
-    id_map: Optional[Dict[str, str]] = None,
     id_column: str = "id",
     pdb_column: str = "pdb"
 ) -> Any:
     """
-    Look up a value from a table for a given ID.
-
-    Tries multiple lookup strategies in order:
-    1. Match by pdb column (if exists): item_id or item_id.pdb
-    2. Match by id column: exact match
-    3. Match by id column with ID mapping: strip suffixes according to id_map
+    Look up a value from a table for a given ID, using the framework's standard
+    id matching (``get_mapped_ids``): exact, child-parent (``design+Cy7RR`` ->
+    ``design``), and provenance.
 
     Args:
         table: DataFrame to search
-        item_id: The item identifier (structure ID, typically filename without extension)
+        item_id: The item identifier (structure id).
         column: Column name to retrieve value from
-        id_map: Optional ID mapping pattern (e.g., {"*": "*_<N>"}) for suffix stripping
-        id_column: Column name for ID lookups (default: "id")
-        pdb_column: Column name for PDB filename lookups (default: "pdb")
+        id_column: Column holding the ids to match against (default: "id";
+                   falls back to ``pdb_column`` if no id column exists).
 
     Returns:
         Value from the specified column
 
     Raises:
-        KeyError: If ID not found in table or column doesn't exist
-
-    Example:
-        table, column = load_table("TABLE_REFERENCE:/path/to/positions.csv:within")
-        positions = lookup_table_value(table, "protein_1", column)
-
-        # With ID mapping (e.g., "protein_1_2" maps to "protein_1" in table)
-        positions = lookup_table_value(table, "protein_1_2", column, id_map={"*": "*_<N>"})
+        KeyError: If the id can't be matched, or the column doesn't exist.
     """
     if column not in table.columns:
         raise KeyError(
@@ -612,59 +617,34 @@ def lookup_table_value(
             f"Available columns: {list(table.columns)}"
         )
 
-    # Track attempted IDs for error reporting
-    attempted_ids = []
+    key_col = id_column if id_column in table.columns else (
+        pdb_column if pdb_column in table.columns else None)
+    if key_col is None:
+        raise KeyError(
+            f"Table has neither '{id_column}' nor '{pdb_column}' column to match "
+            f"'{item_id}' against. Columns: {list(table.columns)}"
+        )
 
-    # Strategy 1: Try pdb column match (with and without extension)
-    if pdb_column in table.columns:
-        # Try with .pdb extension
-        pdb_name = f"{item_id}.pdb"
-        attempted_ids.append(pdb_name)
-        matching_rows = table[table[pdb_column] == pdb_name]
-        if not matching_rows.empty:
-            return matching_rows.iloc[0][column]
+    # pdb-column ids carry a .pdb extension; strip it so they match design ids.
+    table_ids = [str(x) for x in table[key_col].tolist()]
+    stripped = [i[:-4] if i.endswith(".pdb") else i for i in table_ids]
 
-        # Try exact match
-        attempted_ids.append(item_id)
-        matching_rows = table[table[pdb_column] == item_id]
-        if not matching_rows.empty:
-            return matching_rows.iloc[0][column]
-
-    # Strategy 2: Try id column exact match
-    if id_column in table.columns:
-        if item_id not in attempted_ids:
-            attempted_ids.append(item_id)
-        matching_rows = table[table[id_column] == item_id]
-        if not matching_rows.empty:
-            return matching_rows.iloc[0][column]
-
-        # Strategy 3: Try ID mapping (strip suffixes)
-        if id_map:
-            try:
-                from biopipelines.id_map_utils import map_table_ids_to_ids
-                candidate_ids = map_table_ids_to_ids(item_id, id_map)
-
-                for candidate_id in candidate_ids:
-                    if candidate_id == item_id:
-                        continue  # Already tried
-                    attempted_ids.append(candidate_id)
-                    matching_rows = table[table[id_column] == candidate_id]
-                    if not matching_rows.empty:
-                        return matching_rows.iloc[0][column]
-            except ImportError:
-                # id_map_utils not available, skip this strategy
-                pass
-
-    raise KeyError(
-        f"ID '{item_id}' not found in table. Tried: {attempted_ids}"
-    )
+    from biopipelines.id_map_utils import get_mapped_ids
+    matched = get_mapped_ids([item_id], stripped, unique=True).get(item_id)
+    if matched is None:
+        raise KeyError(
+            f"ID '{item_id}' not found in table (col '{key_col}'). "
+            f"Available: {table_ids[:10]}{'...' if len(table_ids) > 10 else ''}"
+        )
+    # Map the stripped match back to the actual table row.
+    row_idx = stripped.index(matched)
+    return table.iloc[row_idx][column]
 
 
 def iterate_table_values(
     table: pd.DataFrame,
     item_ids: List[str],
     column: str,
-    id_map: Optional[Dict[str, str]] = None,
     id_column: str = "id",
     pdb_column: str = "pdb"
 ) -> Iterator[Tuple[str, Any]]:
@@ -675,7 +655,6 @@ def iterate_table_values(
         table: DataFrame to search
         item_ids: List of item identifiers to look up
         column: Column name to retrieve values from
-        id_map: Optional ID mapping pattern for suffix stripping
         id_column: Column name for ID lookups (default: "id")
         pdb_column: Column name for PDB filename lookups (default: "pdb")
 
@@ -691,9 +670,7 @@ def iterate_table_values(
             print(f"{struct_id}: {positions}")
     """
     for item_id in item_ids:
-        value = lookup_table_value(
-            table, item_id, column, id_map, id_column, pdb_column
-        )
+        value = lookup_table_value(table, item_id, column, id_column, pdb_column)
         yield (item_id, value)
 
 
@@ -705,6 +682,64 @@ def clear_table_cache() -> None:
     """
     global _table_cache
     _table_cache = {}
+
+
+MISSING_COLUMNS = ["id", "removed_by", "kind", "cause"]
+
+
+def step_id_from_table_path(table_path: str) -> str:
+    """The step identifier (``<order>_<Tool>``) a tool stamps into ``removed_by``.
+
+    Derived from a tool-owned table path like ``.../005_XTB/tables/missing.csv``
+    -> ``005_XTB`` (the tool's output-folder basename, matching what
+    ``pipe_check_completion`` compares against). This lets a same-tool chain
+    distinguish an upstream step's failure rows from the current step's own:
+    each step writes its OWN step id, so a later step excuses the earlier one
+    instead of mistaking it for a local failure.
+
+    Falls back to "" when the path has no recognizable tool folder.
+    """
+    if not table_path:
+        return ""
+    # <output_folder>/tables/<name>.csv  ->  basename(<output_folder>)
+    tool_folder = os.path.dirname(os.path.dirname(os.path.abspath(table_path)))
+    return os.path.basename(tool_folder)
+
+
+def read_upstream_missing(paths) -> List[Dict[str, Any]]:
+    """Merge every upstream ``missing`` manifest into one list of row dicts.
+
+    A consumer may have several id-bearing input axes (e.g. proteins AND
+    ligands), each carrying its own ``missing.csv``; passing only the first
+    would silently drop the other axis's excused ids. Accepts a single path, a
+    list of paths, or None; reads each that exists, concatenates the rows, and
+    de-dupes by ``id`` (first kept). Rows stay in the upstream (input-axis) id
+    space; mapping them to this tool's output ids is done centrally by
+    ``pipe_check_completion`` when excusing files. Used by pipe scripts that
+    prepend upstream rows to their own local-failure rows before writing their
+    ``missing.csv``.
+    """
+    if paths is None:
+        return []
+    if isinstance(paths, str):
+        paths = [paths]
+    seen = set()
+    rows: List[Dict[str, Any]] = []
+    for path in paths:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            df = pd.read_csv(path)
+        except Exception as e:  # noqa: BLE001 — a malformed upstream file shouldn't abort scoring
+            print(f"Warning: could not read upstream missing.csv {path}: {e}", file=sys.stderr)
+            continue
+        for rec in df.to_dict("records"):
+            rid = str(rec.get("id", "")).strip()
+            if not rid or rid in seen:
+                continue
+            seen.add(rid)
+            rows.append(rec)
+    return rows
 
 
 # =============================================================================
@@ -823,17 +858,25 @@ class Resolve:
     """Static bash snippet generators for runtime resolution."""
 
     @staticmethod
-    def stream_item(ds_json: str, item_id: str) -> str:
+    def stream_item(ds_json: str, item_id: str, column: Optional[str] = None) -> str:
         """
-        Bash expression to resolve a file path from a DataStream JSON at runtime.
+        Bash expression to resolve one item from a DataStream JSON at runtime.
+
+        For a file-based stream this resolves the item's file path. For a
+        value-based stream (files=[]), pass ``column`` to resolve that
+        map_table column's value for the id instead.
 
         Args:
             ds_json: Path to the serialized DataStream JSON file
             item_id: ID of the item to resolve
+            column: When set, resolve this map_table column's value (value-based
+                stream) rather than a file path.
 
         Returns:
             Bash subshell expression, e.g. $(resolve_stream_item "..." "...")
         """
+        if column is not None:
+            return f'$(resolve_stream_item "{ds_json}" "{item_id}" "{column}")'
         return f'$(resolve_stream_item "{ds_json}" "{item_id}")'
 
     @staticmethod
@@ -858,8 +901,19 @@ class Resolve:
         """
         Bash expression to resolve a table value inline (slow — spawns Python).
 
-        Uses conda/mamba run to execute in the biopipelines environment.
-        For bulk lookups, prefer pipe scripts that import biopipelines_io directly.
+        Uses conda/mamba run to execute in the biopipelines environment (on
+        Colab / pip mode it falls back to a plain ``python`` call, since no
+        ``biopipelines`` env exists there).
+
+        Prefer this only for a one-off, single-id lookup. For a per-id value
+        across a loop (e.g. one contig string per input PDB), do NOT call this
+        once per id — that spawns Python N times. Instead resolve all ids in a
+        single pass with a pipe script that imports ``biopipelines_io``
+        (``load_table`` + ``lookup_table_value``), writes a small ``{id: value}``
+        JSON, and have the bash loop read each id's value from that JSON. That
+        pattern runs under the activated tool env (Colab-safe, no second env)
+        and is what the RFdiffusion family uses for per-PDB contigs
+        (``pipe_rfdiffusion_contigs.py`` + ``resolve_rfdiffusion_contigs.py``).
 
         Args:
             reference: TableReference object or TABLE_REFERENCE:path:column string
@@ -870,10 +924,16 @@ class Resolve:
             Bash subshell expression calling resolve_table_column.py
         """
         from .config_manager import ConfigManager
-        mgr = ConfigManager().get_env_manager()
+        cfg = ConfigManager()
+        mgr = cfg.get_env_manager()
         script_dir = os.path.dirname(os.path.abspath(__file__))
         script = os.path.join(script_dir, "..", "pipe_scripts", "resolve_table_column.py")
-        if mgr == "pip":
+        # On Colab the biopipelines package lives in the base Python (no
+        # `biopipelines` conda env exists), so wrapping in `<mgr> run -n
+        # biopipelines` would fail. Pip mode is the same case. In both, emit a
+        # plain `python` call — the activated tool env already has biopipelines
+        # importable via the script's sys.path bootstrap.
+        if mgr == "pip" or cfg.get_scheduler() == "colab":
             return f'$(python "{script}" "{reference}" "{item_id}")'
         return f'$({mgr} run -n {env_name} --no-banner python "{script}" "{reference}" "{item_id}")'
 

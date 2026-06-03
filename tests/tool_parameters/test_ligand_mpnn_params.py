@@ -15,8 +15,9 @@ pytestmark = pytest.mark.tool_parameters
 def _build(local_config, isolated_cwd, new_pipeline, **lmpnn_kwargs):
     from biopipelines.mock import Mock
     from biopipelines.ligand_mpnn import LigandMPNN
+    from biopipelines.ligand import Ligand
 
-    lmpnn_kwargs.setdefault("ligand", "ATP")
+    ligand_code = lmpnn_kwargs.pop("ligand", "ATP")
 
     pipeline = new_pipeline("lmpnn_params")
     with pipeline:
@@ -25,7 +26,7 @@ def _build(local_config, isolated_cwd, new_pipeline, **lmpnn_kwargs):
             streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
             map_table_strategy="config",
         )
-        LigandMPNN(structures=m.streams.structures, **lmpnn_kwargs)
+        LigandMPNN(structures=m.streams.structures, ligand=Ligand(code=ligand_code), **lmpnn_kwargs)
         script_path = pipeline.save()
 
     return read_pipeline_sh(script_path)
@@ -33,7 +34,9 @@ def _build(local_config, isolated_cwd, new_pipeline, **lmpnn_kwargs):
 
 def test_ligand(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, ligand="HEM")
-    assert "HEM" in content
+    # The compounds-stream JSON is passed to the positions script, which reads
+    # the residue `code` from it at runtime.
+    assert "input_ligand.json" in content
 
 
 def test_num_sequences_maps_to_batch_size(local_config, isolated_cwd, new_pipeline):

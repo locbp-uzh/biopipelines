@@ -22,7 +22,10 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
-all = ["pytest>=7"]
+# Colab base-Python deps: conda-only packages from biopipelines.yaml that have
+# no `openbabel`-named PyPI build. Installed via `pip install -e ".[colab]"`.
+colab = ["openbabel-wheel"]
+all = ["pytest>=7", "openbabel-wheel"]
 
 [project.scripts]
 bp-submit = "biopipelines.cli:submit"

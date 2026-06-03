@@ -1,0 +1,28 @@
+# Phase 2 — PyG + DynamicBind runtime deps. The PyG wheels are matched to
+# torch 2.0.0+cu117 per upstream README; the 2.0.1 build also resolves them.
+#
+# torch is re-pinned here even though phase 1 installed it: otherwise a
+# transitive dep in this phase (e.g. fair-esm pulling latest torch) can
+# upgrade torch out from under the PyG wheels, leaving PyG with
+# +pt20cu117 wheels linked against torch 2.0 but the env's torch at the
+# newest PyPI release. Result: undefined-symbol errors at import time.
+--extra-index-url https://download.pytorch.org/whl/cu117
+--find-links https://data.pyg.org/whl/torch-2.0.0+cu117.html
+torch==2.0.1
+torch-geometric==2.3.0
+pyg_lib
+torch_scatter
+torch_sparse
+torch_cluster
+torch_spline_conv
+
+# DynamicBind runtime
+# e3nn 0.5.2+ requires torch>=2.1 (uses torch.compiler.disable); pin to the
+# last torch-2.0-compatible release.
+e3nn==0.5.1
+fair-esm
+spyrmsd
+biopython==1.78
+pandas
+pyyaml
+numpy==1.24.3

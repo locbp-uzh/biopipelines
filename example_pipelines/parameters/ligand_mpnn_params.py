@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 from biopipelines.pipeline import *
-from biopipelines.ligand_mpnn import LigandMPNN
+from biopipelines import LigandMPNN, Ligand
 
 _HERE = Path(__file__).resolve().parent
 BIAS_PATH = str(_HERE / "_lmpnn_bias_per_residue.json")
@@ -30,31 +30,33 @@ with Pipeline(project="ToolParameters",
     Resources(gpu="A100", time="2:00:00", memory="16GB")
 
     backbone = PDB("1A3N", ids="HBA")
+    hem = Ligand(code="HEM")
+    atp = Ligand(code="ATP")
 
     # 1: defaults with HEM ligand
     Suffix("hem_default")
-    LigandMPNN(structures=backbone, ligand="HEM")
+    LigandMPNN(structures=backbone, ligand=hem)
 
     # 2: alternative ligand + design_within
     Suffix("atp_within")
-    LigandMPNN(structures=backbone, ligand="ATP", design_within=8.0)
+    LigandMPNN(structures=backbone, ligand=atp, design_within=8.0)
 
     # 3: batch / batches knobs
     Suffix("batches")
-    LigandMPNN(structures=backbone, ligand="HEM", num_sequences=4, num_batches=3)
+    LigandMPNN(structures=backbone, ligand=hem, num_sequences=4, num_batches=3)
 
     # 4: model variant
     Suffix("model_v32_020")
-    LigandMPNN(structures=backbone, ligand="HEM", model="v_32_020")
+    LigandMPNN(structures=backbone, ligand=hem, model="v_32_020")
 
     # 5: temperature
     Suffix("temperature")
-    LigandMPNN(structures=backbone, ligand="HEM", temperature=0.3, num_sequences=2)
+    LigandMPNN(structures=backbone, ligand=hem, temperature=0.3, num_sequences=2)
 
     # 6: per-residue bias (LigandMPNN-native --bias_AA_per_residue)
     Suffix("bias")
-    LigandMPNN(structures=backbone, ligand="HEM", bias_AA_per_residue=BIAS_PATH, num_sequences=2)
+    LigandMPNN(structures=backbone, ligand=hem, bias_AA_per_residue=BIAS_PATH, num_sequences=2)
 
     # 7: deterministic seed
     Suffix("seed")
-    LigandMPNN(structures=backbone, ligand="HEM", seed=4242, num_sequences=2)
+    LigandMPNN(structures=backbone, ligand=hem, seed=4242, num_sequences=2)

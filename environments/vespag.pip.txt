@@ -1,0 +1,10 @@
+# VespaG pip dependencies (cluster / shared fallback).
+# VespaG is NOT on PyPI (upstream README's `pip install vespag` is wrong) —
+# install the hatchling package from GitHub source. torch + transformers +
+# polars + biopython + typer + dvc come in transitively. ESM-2 3B weights
+# download lazily at first prediction.
+git+https://github.com/JSchlensok/VespaG.git
+
+# BioPipelines interop (pipe script reads/writes CSVs and DataStream JSON)
+pandas
+biopython

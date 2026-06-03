@@ -783,7 +783,7 @@ def test_cycle_sort_head_panda_writes_stream_provenance(
 ):
     """After executing Mock → Panda(sort+head, pool), pipe_panda must write a
     ``<stream>_map.csv`` carrying a ``<stream>.id`` provenance column that
-    links each renamed ``Panda_N`` back to its original upstream ID — this is
+    links each renamed ``<order>_Panda_N`` back to its original upstream ID — this is
     how downstream tools (and Remap) resolve renamed pool IDs across the
     tool boundary."""
     from biopipelines.mock import Mock
@@ -813,12 +813,19 @@ def test_cycle_sort_head_panda_writes_stream_provenance(
     rows = _read_map(map_path)
     panda_to_original = {r["id"]: r["s.id"] for r in rows}
 
+    # Auto-rename prefix keeps the step's execution-order int ("002_Panda" ->
+    # "2_Panda") so unnamed Panda steps don't share an id namespace.
+    folder = os.path.basename(ranked.output_folder)
+    _p = folder.split("_", 1)
+    prefix = f"{int(_p[0])}_{_p[1]}" if len(_p) > 1 and _p[0].isdigit() else folder
+    expected_ids = {f"{prefix}_1", f"{prefix}_2"}
+
     record_case(
         input="Mock → Panda(sort+head, pool) → runtime stream map_table",
-        expected=("Panda_1/Panda_2 → one of a/b/c/d"),
+        expected=(f"{sorted(expected_ids)} → one of a/b/c/d"),
         actual=panda_to_original,
     )
     # The two Panda-renamed IDs must each link to a concrete upstream ID.
     # With score=0.9 uniformly, pandas picks the first two by sort stability.
-    assert set(panda_to_original.keys()) == {"Panda_1", "Panda_2"}
+    assert set(panda_to_original.keys()) == expected_ids
     assert set(panda_to_original.values()).issubset({"a", "b", "c", "d"})

@@ -5,12 +5,7 @@
 # tested: 
 
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
-from biopipelines.conformational_change import ConformationalChange
-from biopipelines.panda import Panda
-from biopipelines.pymol import PyMOL
+from biopipelines import RFdiffusion, ProteinMPNN, AlphaFold, ConformationalChange, Panda, PyMOL
 
 with Pipeline(project="AdenylateKinase", job="LID_Redesign"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")

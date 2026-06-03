@@ -8,7 +8,7 @@ tests/tool_parameters/test_dna_encoder_params.py.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.dna_encoder import DNAEncoder
+from biopipelines import DNAEncoder
 
 with Pipeline(project="ToolParameters",
               job="DNAEncoder",

@@ -1,0 +1,14 @@
+name: bioemu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - mdanalysis>=2.7
+  - pandas
+  - numpy
+  - pip:
+      # The [md] extra (sidechain reconstruction) is installed separately by
+      # BioEmu._install_script when md=True (the default), so it can be toggled
+      # off via BioEmu.install(md=False).
+      - bioemu[cuda]

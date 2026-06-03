@@ -17,13 +17,15 @@ allocations instead of one.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
-from biopipelines.conformational_change import ConformationalChange
-from biopipelines.panda import Panda
-from biopipelines.pool import Pool
-from biopipelines.pymol import PyMOL
+from biopipelines import (
+    RFdiffusion,
+    ProteinMPNN,
+    AlphaFold,
+    ConformationalChange,
+    Panda,
+    Pool,
+    PyMOL,
+)
 
 N_BRANCHES = 5            # number of parallel RFdiffusion jobs
 DESIGNS_PER_BRANCH = 2    # → 10 backbones total, same as the serial version

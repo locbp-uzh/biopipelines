@@ -16,18 +16,20 @@ Uncomment/comment tools as needed for your setup.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.rfdiffusion_allatom import RFdiffusionAllAtom
-from biopipelines.rfdiffusion3 import RFdiffusion3
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.ligand_mpnn import LigandMPNN
-from biopipelines.alphafold import AlphaFold
-from biopipelines.boltz2 import Boltz2
-from biopipelines.boltzgen import BoltzGen
-from biopipelines.mutation_profiler import MutationProfiler
-from biopipelines.pymol import PyMOL
-from biopipelines.gnina import Gnina
-from biopipelines.posebusters import PoseBusters
+from biopipelines import (
+    RFdiffusion,
+    RFdiffusionAllAtom,
+    RFdiffusion3,
+    ProteinMPNN,
+    LigandMPNN,
+    AlphaFold,
+    Boltz2,
+    BoltzGen,
+    MutationProfiler,
+    PyMOL,
+    Gnina,
+    PoseBusters,
+)
 
 with Pipeline(project="Setup", job="InstallTools"):
     Resources(time="8:00:00", memory="32GB")

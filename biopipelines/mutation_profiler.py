@@ -67,7 +67,7 @@ fi
 # MutationEnv.yaml and is actually imported by pipe_mutation_profiler.py;
 # the previous `import torch` check failed on fresh envs (e.g. Colab) since
 # torch is not part of MutationEnv and isn't used by the profiler.
-if {env_manager} run -n MutationEnv python -c "import logomaker" >/dev/null 2>&1; then
+if MPLBACKEND=Agg {env_manager} run -n MutationEnv python -c "import logomaker" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== MutationEnv installation complete ==="
 else
@@ -209,7 +209,11 @@ fi
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""echo "Analyzing mutation patterns"
+        # Colab exports MPLBACKEND=module://matplotlib_inline.backend_inline,
+        # which leaks into this subprocess; logomaker/matplotlib reject it as an
+        # invalid backend at import. Force a headless backend (correct on HPC too).
+        return f"""export MPLBACKEND=Agg
+echo "Analyzing mutation patterns"
 echo "Original sequences: {self.original_stream.map_table}"
 echo "Mutant sequences: {self.mutants_stream.map_table}"
 echo "Output folder: {self.output_folder}"

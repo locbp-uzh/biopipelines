@@ -15,20 +15,22 @@ def _rel(path, output_folder):
 _MAX_EXPANDED_ROWS = 50
 
 
-def _render_rows(df, indices, columns):
+def _render_rows(df, indices, columns, output_folder=None):
     parts = []
     for idx in indices:
         row = df.iloc[idx]
         parts.append('<tr>')
         for col in columns:
             val = str(row[col]) if pd.notna(row[col]) else ''
+            if output_folder and val.startswith(output_folder):
+                val = _rel(val, output_folder)
             display_val = val if len(val) <= 60 else val[:57] + '...'
             parts.append(f'<td>{html_module.escape(display_val)}</td>')
         parts.append('</tr>')
     return parts
 
 
-def _render_dataframe(df):
+def _render_dataframe(df, output_folder=None):
     """Render a DataFrame as a collapsible HTML table.
 
     Collapsed: 2 head + 2 tail rows. Expanded: up to 50 rows (2 head + 46
@@ -46,18 +48,18 @@ def _render_dataframe(df):
 
     if n_rows <= 4:
         parts = ['<table class="bp-table">', header_html]
-        parts.extend(_render_rows(df, range(n_rows), columns))
+        parts.extend(_render_rows(df, range(n_rows), columns, output_folder))
         parts.append('</table>')
         return "\n".join(parts)
 
     collapsed_indices = list(range(2)) + list(range(n_rows - 2, n_rows))
     collapsed_parts = ['<table class="bp-table">', header_html]
-    collapsed_parts.extend(_render_rows(df, collapsed_indices[:2], columns))
+    collapsed_parts.extend(_render_rows(df, collapsed_indices[:2], columns, output_folder))
     collapsed_parts.append(
         f'<tr class="bp-ellipsis"><td colspan="{n_cols}">'
         f'... {n_rows - 4} more ...</td></tr>'
     )
-    collapsed_parts.extend(_render_rows(df, collapsed_indices[2:], columns))
+    collapsed_parts.extend(_render_rows(df, collapsed_indices[2:], columns, output_folder))
     collapsed_parts.append('</table>')
     collapsed_html = "\n".join(collapsed_parts)
 
@@ -85,6 +87,8 @@ def _render_dataframe(df):
         expanded_parts.append('<tr>')
         for col in columns:
             val = str(row[col]) if pd.notna(row[col]) else ''
+            if output_folder and val.startswith(output_folder):
+                val = _rel(val, output_folder)
             display_val = val if len(val) <= 60 else val[:57] + '...'
             expanded_parts.append(f'<td>{html_module.escape(display_val)}</td>')
         expanded_parts.append('</tr>')
@@ -135,7 +139,7 @@ def render(table_info, output):
         try:
             table_df = pd.read_csv(t_meta.path)
             if len(table_df) > 0:
-                parts.append(_render_dataframe(table_df))
+                parts.append(_render_dataframe(table_df, output_folder=output.output_folder))
         except Exception:
             pass
 

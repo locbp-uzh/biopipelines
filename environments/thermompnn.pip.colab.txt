@@ -1,0 +1,15 @@
+# ThermoMPNN pip dependencies for Google Colab.
+# ThermoMPNN is cloned (not on PyPI); these are the libraries custom_inference.py
+# imports at runtime. torch resolves to Colab's system CUDA build automatically.
+torch
+torchvision
+torchaudio
+torchmetrics
+pytorch-lightning
+wandb
+omegaconf
+biopython
+pandas
+numpy
+tqdm
+joblib

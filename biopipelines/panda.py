@@ -325,6 +325,36 @@ echo "=== Panda ready ==="
         return Operation(type="calculate", params={"exprs": exprs})
 
     @staticmethod
+    def zscore(columns: Union[str, List[str]], by: Optional[str] = None,
+               sign: Optional[Dict[str, int]] = None, suffix: str = "_z") -> Operation:
+        """
+        Standardize column(s) to z-scores: (x - mean) / std (population std,
+        ddof=0). Writes one new column per input, named ``<column><suffix>``.
+
+        Use to put metrics on a common scale before combining them (e.g. a
+        weighted sum via calculate), since raw metrics live on different scales.
+
+        Args:
+            columns: Column name or list of names to standardize.
+            by: Optional grouping column — standardize within each group (e.g.
+                z within each parent design) instead of globally.
+            sign: Optional {column: -1} to flip a "lower is better" metric so
+                higher z = better (e.g. aggregation score, affinity_pred_value).
+            suffix: Suffix for the output columns (default "_z").
+
+        Returns:
+            Operation to add z-score column(s).
+
+        Example:
+            # combine on a common scale: higher = better, both equally weighted
+            Panda.zscore(["plddt", "aggrescan_avg"], sign={"aggrescan_avg": -1})
+            Panda.calculate({"score": "plddt_z + aggrescan_avg_z"})
+        """
+        cols = [columns] if isinstance(columns, str) else list(columns)
+        return Operation(type="zscore", params={
+            "columns": cols, "by": by, "sign": sign or {}, "suffix": suffix})
+
+    @staticmethod
     def fillna(value: Any = None, column: Optional[str] = None) -> Operation:
         """
         Fill missing values.
@@ -352,7 +382,8 @@ echo "=== Panda ready ==="
         Requires multi-table input (tables parameter instead of table).
 
         Args:
-            on: Column name(s) to merge on. Can be:
+            on: Column name(s) to merge on. Usually leave as None — biopipelines
+                ID matching pairs the rows for you; you rarely need to pass this.
                 - None (default): uses biopipelines ID matching (get_mapped_ids)
                   which handles exact, child/parent, sibling, and provenance matching
                 - A single string: exact pandas merge on that column (e.g., "id")
@@ -509,6 +540,7 @@ echo "=== Panda ready ==="
                  pool: Optional[Union[StandardizedOutput, List[StandardizedOutput]]] = None,
                  rename: Optional[str] = None,
                  ignore_missing: bool = True,
+                 prune_redundant_provenance: bool = True,
                  **kwargs):
         """
         Initialize Panda tool.
@@ -527,13 +559,20 @@ echo "=== Panda ready ==="
                     Useful after sorting to get ranked IDs (e.g., rename="best" -> best_1, best_2, ...)
             ignore_missing: If True (default), skip missing pool files with a warning instead
                     of failing. Set to False to raise an error on any missing file.
+            prune_redundant_provenance: If True (default), drop plain ``<axis>.id``
+                    provenance columns from emitted stream map_tables when every
+                    non-empty value is recoverable from the row id by id-semantics
+                    alone (the same matcher downstream joins use). Lineage the
+                    matcher cannot reconstruct (Panda-rename ``.-N.id`` columns,
+                    ``pool.id`` / ``original.id``) is always kept. Set False to
+                    retain every provenance column verbatim.
             **kwargs: Additional parameters
 
         Output:
             Streams: inherits all streams from pool input (if pool mode)
             Tables:
                 result: columns derived from input + applied operations (dynamic)
-                missing: id | removed_by | cause
+                missing: id | removed_by | kind | cause
         """
         if tables is None:
             raise ValueError("Must specify 'tables' (single table or list of tables)")
@@ -550,6 +589,7 @@ echo "=== Panda ready ==="
         self.operations = operations or []
         self.rename = rename
         self.ignore_missing = ignore_missing
+        self.prune_redundant_provenance = prune_redundant_provenance
 
         # Handle pool - can be single or list
         if pool is None:
@@ -587,7 +627,7 @@ echo "=== Panda ready ==="
         valid_types = {
             "filter", "head", "tail", "sample", "drop_duplicates",
             "sort", "rank", "select_columns", "drop_columns", "rename",
-            "calculate", "fillna", "merge", "concat", "groupby", "pivot", "melt",
+            "calculate", "zscore", "fillna", "merge", "concat", "groupby", "pivot", "melt",
             "average_by_source"
         }
 
@@ -639,11 +679,15 @@ echo "=== Panda ready ==="
             needs_rename = any(op.type in ("sort", "head", "tail", "sample") for op in self.operations)
 
             if needs_rename:
-                # Derive rename prefix from step folder name (e.g., "010_Panda_Cycle1" -> "Panda_Cycle1")
+                # Derive rename prefix from step folder name, keeping the
+                # execution-order int as a leading namespace so two unnamed Panda
+                # steps don't collide on the same Panda_<N> ids (which suffix/
+                # exact matching would cross-link before provenance). Strip the
+                # zero-padding: "010_Panda_Cycle1" -> "10_Panda_Cycle1".
                 folder_name = os.path.basename(self.output_folder)
                 parts = folder_name.split("_", 1)
                 if len(parts) > 1 and parts[0].isdigit():
-                    self.rename = parts[1]  # e.g., "Panda_Cycle1"
+                    self.rename = f"{int(parts[0])}_{parts[1]}"  # e.g., "10_Panda_Cycle1"
                 else:
                     self.rename = folder_name
 
@@ -865,6 +909,7 @@ echo "=== Panda ready ==="
             "stream_folders": stream_folders_map,
             "pool_table_targets": pool_table_targets,
             "missing_csv": self.missing_csv,
+            "prune_redundant_provenance": self.prune_redundant_provenance,
         }
 
         with open(self.config_file, 'w') as f:
@@ -928,7 +973,7 @@ fi
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
+                columns=["id", "removed_by", "kind", "cause"],
                 description="IDs removed by this tool with removal reason"
             )
         }
@@ -965,8 +1010,12 @@ fi
                             f = f.strip()
                             if f and f not in stream_data[stream_name]["formats"]:
                                 stream_data[stream_name]["formats"].append(f)
-                        # Only collect files for file-based streams
-                        if stream.is_file_based():
+                        # Only collect files for file-based streams. A
+                        # value-based stream has files=[] (content lives in its
+                        # map_table), so emptiness is the signal — not the
+                        # format string (a per-id MSA can be format="csv" yet
+                        # file-based).
+                        if stream.files:
                             if stream.is_shared_file:
                                 # First pool's basename wins for the predicted
                                 # dest. At runtime pipe_panda slices each pool

@@ -10,7 +10,7 @@ This pipeline shows how to determine the flexibility of a protein (RMSF) using a
 """
 
 from biopipelines.pipeline import *
-from biopipelines.cabsflex import CABSflex
+from biopipelines import CABSflex
 
 with Pipeline(project="Examples",
               job="PerResidueFlexibility",

@@ -23,7 +23,7 @@ from typing import Dict, List, Any, Optional, Tuple
 # Import unified I/O utilities for runtime DataStream expansion
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
-from biopipelines.id_map_utils import get_mapped_ids
+from biopipelines.id_map_utils import get_mapped_ids, prune_redundant_provenance_columns
 
 # Mirror of biopipelines.panda.Panda.SOURCE — kept inline to avoid a
 # config-time import dependency in pipe scripts.
@@ -183,6 +183,35 @@ def execute_calculate(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         except Exception as e:
             print(f"  Warning: Failed to calculate '{col_name}': {e}")
             df[col_name] = float('nan')
+
+    return df
+
+
+def execute_zscore(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    """Standardize columns to z-scores ((x-mean)/std, population std)."""
+    columns = params.get("columns", [])
+    by = params.get("by")
+    sign = params.get("sign", {}) or {}
+    suffix = params.get("suffix", "_z")
+    df = df.copy()
+
+    for col in columns:
+        if col not in df.columns:
+            print(f"  Warning: zscore column '{col}' not found, skipping")
+            continue
+        s = pd.to_numeric(df[col], errors="coerce")
+        if by and by in df.columns:
+            # population std within each group (ddof=0)
+            grp = s.groupby(df[by])
+            z = (s - grp.transform("mean")) / grp.transform("std", ddof=0)
+        else:
+            std = s.std(ddof=0)
+            z = (s - s.mean()) / std if std else s * 0.0
+        if sign.get(col, 1) < 0:
+            z = -z
+        df[f"{col}{suffix}"] = z
+        print(f"  Zscore: {col}{suffix}" + (f" (by {by})" if by else "") +
+              (" [sign-flipped]" if sign.get(col, 1) < 0 else ""))
 
     return df
 
@@ -496,6 +525,7 @@ def execute_operation(df_or_dfs, operation: Dict[str, Any], is_multi_table: bool
         "drop_columns": execute_drop_columns,
         "rename": execute_rename,
         "calculate": execute_calculate,
+        "zscore": execute_zscore,
         "fillna": execute_fillna,
         "groupby": execute_groupby,
         "pivot": execute_pivot,
@@ -998,7 +1028,7 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
     missing_data = []
     for mid in truly_missing_ids:
         cause = removed_by_op.get(mid, "Unknown") if removed_by_op else "Unknown"
-        missing_data.append({'id': mid, 'removed_by': step_tool_name, 'cause': cause})
+        missing_data.append({'id': mid, 'removed_by': step_tool_name, 'kind': 'filter', 'cause': cause})
 
     # Add renamed IDs (survived filtering but got a new name)
     if rename_map:
@@ -1008,13 +1038,14 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
                 missing_data.append({
                     'id': orig_str,
                     'removed_by': step_tool_name,
+                    'kind': 'filter',
                     'cause': f"Renamed to {rename_map[orig_str]}"
                 })
 
     if missing_data:
         missing_df = pd.DataFrame(missing_data)
     else:
-        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'kind', 'cause'])
 
     missing_csv = missing_csv_path or os.path.join(output_folder, "missing.csv")
     missing_df.to_csv(missing_csv, index=False)
@@ -1030,7 +1061,7 @@ def merge_upstream_missing(output_folder: str, upstream_missing_paths: List[str]
     if os.path.exists(missing_csv):
         panda_missing = pd.read_csv(missing_csv)
     else:
-        panda_missing = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+        panda_missing = pd.DataFrame(columns=['id', 'removed_by', 'kind', 'cause'])
 
     # Load and merge upstream missing tables
     upstream_dfs = []
@@ -1442,6 +1473,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
         #       structures.pdb). Write a provenance-only CSV with the
         #       canonical `id, file, <stream>.id` schema.
         stream_map_targets = config_data.get('stream_map_targets', [])
+        prune_provenance = config_data.get('prune_redundant_provenance', True)
         if stream_map_targets and not result_df.empty and 'id' in result_df.columns:
             has_original = 'original_id' in result_df.columns
             parent_by_id = {}
@@ -1496,6 +1528,8 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                         + other_cols[id_pos + 1:]
                     )
                     existing = existing[new_order]
+                    if prune_provenance:
+                        existing = prune_redundant_provenance_columns(existing)
                     existing.to_csv(map_path, index=False)
                     print(f"Augmented content table with {axis_col}: {map_path}")
                 else:
@@ -1541,6 +1575,8 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                             + other_cols[id_pos + 1:]
                         )
                         out_df = out_df[new_order]
+                        if prune_provenance:
+                            out_df = prune_redundant_provenance_columns(out_df)
 
                     with open(map_path, 'w', newline='') as mf:
                         fieldnames = (

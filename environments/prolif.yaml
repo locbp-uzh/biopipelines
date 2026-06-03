@@ -1,0 +1,14 @@
+# ProLIF environment - protein-ligand interaction fingerprints.
+# prolif is pip-only; MDAnalysis + rdkit come from conda-forge.
+name: prolif
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - rdkit
+  - mdanalysis>=2.5
+  - pandas
+  - numpy
+  - pip:
+      - prolif

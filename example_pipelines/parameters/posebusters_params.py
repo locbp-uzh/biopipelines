@@ -10,7 +10,7 @@ needing a docking pre-step.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.posebusters import PoseBusters
+from biopipelines import PoseBusters
 
 with Pipeline(project="ToolParameters",
               job="PoseBusters",
@@ -20,7 +20,7 @@ with Pipeline(project="ToolParameters",
 
     complex_struct = PDB("9RTM", ids="rhotag", convert="pdb")
 
-    # 1: defaults — dock mode, ligand code from PDB
+    # 1: defaults — dock mode, ligand code from the compounds stream
     Suffix("dock_lig")
     PoseBusters(structures=complex_struct, ligand="LIG", mode="dock")
 

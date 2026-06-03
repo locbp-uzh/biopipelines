@@ -11,7 +11,7 @@ Provides tool configurations, pipeline orchestration, and seamless integration.
 
 __version__ = "1.1.1"
 
-from .pipeline import Pipeline, Bundle, Each
+from .pipeline import Pipeline, Bundle, Each, Folder
 from .base_config import BaseConfig, ToolOutput, IndexedTableContainer
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .datastream import DataStream, create_map_table
@@ -19,7 +19,9 @@ from .file_paths import Path
 from .table_utils import get_table, get_table_path, list_tables, table_exists, get_indexed_table
 from .rfdiffusion import RFdiffusion
 from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
+from .rfdiffusion3 import RFdiffusion3
 from .protein_mpnn import ProteinMPNN
+from .frame2seq import Frame2Seq
 from .alphafold import AlphaFold
 from .ligand import Ligand
 from .sequence import Sequence
@@ -47,14 +49,55 @@ from .mmseqs2 import MMseqs2, MMseqs2Server
 from .remap import ReMap
 from .mock import Mock
 from .gnina import Gnina
-from .posebusters import PoseBusters as PoseBustersTool
+from .diffdock import DiffDock
+from .pocketgen import PocketGen
+from .placer import PLACER
+from .dynamicbind import DynamicBind
+from .neuralplexer import NeuralPLexer
+from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
+from .esmfold import ESMFold
+from .uniprot import UniProt
+from .rdkit_descriptors import RDKit
+from .openbabel import OpenBabel
+from .plip import PLIP
+from .prodigy import Prodigy
+from .prolif import ProLIF
+from .fpocket import FPocket
+from .p2rank import P2Rank
+from .af2bind import AF2BIND
+from .dssp import DSSP
+from .apbs import APBS
+from .openmm import OpenMM
+from .reduce import Reduce
+from .xtb import XTB
+from .rtmscore import RTMScore
+from .gems import GEMS
+from .bioemu import BioEmu
+from .cabsflex import CABSflex
+from .ensemble_analysis import EnsembleAnalysis
+from .mutagenesis import Mutagenesis
+from .selection import Selection
+from .distance_selector import DistanceSelector
+from .consensus import Consensus
+from .mutation_profiler import MutationProfiler
+from .mutation_composer import MutationComposer
+from .pool import Pool
+from .pdb import PDB
+from .sasa import SASA
+from .pose_change import PoseChange
+from .bayesian_adjuster import BayesianAdjuster
+from .thermompnn import ThermoMPNN
+from .vespag import VespaG
+from .aggrescan3d import Aggrescan3D
+from .plm_sol import PLM_Sol
 from .converters import *
 from .entities import *
 
 __all__ = [
     # Core pipeline components
     'Pipeline',
+    'Folder',
     'BaseConfig',
     'ToolOutput',
     'FolderManager',
@@ -88,7 +131,9 @@ __all__ = [
     'RFdiffusion',
     'RFdiffusionAllAtom',
     'RFDAA_PrepareLigand',
+    'RFdiffusion3',
     'ProteinMPNN',
+    'Frame2Seq',
     'AlphaFold',
     'Ligand',
     'Sequence',
@@ -118,8 +163,49 @@ __all__ = [
     'ReMap',
     'Mock',
     'Gnina',
+    'DiffDock',
+    'PocketGen',
+    'PLACER',
+    'DynamicBind',
+    'NeuralPLexer',
+    'PoseBusters',
     'PoseBustersTool',
     'ADMETAI',
+    'ESMFold',
+    'UniProt',
+    'RDKit',
+    'OpenBabel',
+    'PLIP',
+    'Prodigy',
+    'ProLIF',
+    'FPocket',
+    'P2Rank',
+    'AF2BIND',
+    'DSSP',
+    'APBS',
+    'OpenMM',
+    'Reduce',
+    'XTB',
+    'RTMScore',
+    'GEMS',
+    'BioEmu',
+    'CABSflex',
+    'EnsembleAnalysis',
+    'Mutagenesis',
+    'Selection',
+    'DistanceSelector',
+    'Consensus',
+    'MutationProfiler',
+    'MutationComposer',
+    'Pool',
+    'PDB',
+    'SASA',
+    'PoseChange',
+    'BayesianAdjuster',
+    'ThermoMPNN',
+    'VespaG',
+    'Aggrescan3D',
+    'PLM_Sol',
 
     # Utility functions
     'pdb_to_jsonl',

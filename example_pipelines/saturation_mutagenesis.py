@@ -16,11 +16,7 @@
 #   5. Plots: Boltz2 affinity, GNINA scores, cross-method scatter
 
 from biopipelines.pipeline import *
-from biopipelines.mutagenesis import Mutagenesis
-from biopipelines.boltz2 import Boltz2
-from biopipelines.gnina import Gnina
-from biopipelines.panda import Panda
-from biopipelines.plot import Plot
+from biopipelines import Mutagenesis, Boltz2, Gnina, Panda, Plot
 
 with Pipeline(project="Imatinib", job="PoseSensitivityGnina"):
     Resources(gpu="A100", time="12:00:00", memory="32GB")

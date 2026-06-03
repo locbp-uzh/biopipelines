@@ -40,11 +40,25 @@ MMSEQS2_DIR=$(require_folder "${MMSEQS2_DIR:-}" "MMSEQS2_DIR" "MMseqs2")
 
 TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp"
 GPU_TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp/gpu"
+# colabfold_search searches both UniRef30 (--db1) and the environmental DB
+# (--db3) by default. We keep a warm gpuserver resident for each so the search
+# step can use --gpu-server 1.
 UNIREF_DB="uniref30_2302_db"
-DB_PATH="$DB_DIR/$UNIREF_DB"  # Use databases directly from shares
+ENVDB="colabfold_envdb_202108_db"
+UNIREF_PATH="$DB_DIR/$UNIREF_DB"  # databases used directly from shares
+ENVDB_PATH="$DB_DIR/$ENVDB"
 THREADS=4
 POLL_INTERVAL=10                     # seconds
 MAX_SEQS=10000    # limit homologs per query
+
+# colabfold_search lives in the LocalColabFold conda env; put it on PATH.
+COLABFOLD_DIR=$(require_folder "${COLABFOLD_DIR:-}" "COLABFOLD_DIR" "AlphaFold")
+COLABFOLD_BIN="$COLABFOLD_DIR/colabfold-conda/bin"
+if [[ ! -x "$COLABFOLD_BIN/colabfold_search" ]]; then
+  echo "ERROR: colabfold_search not found at $COLABFOLD_BIN (is LocalColabFold installed?)" >&2
+  exit 1
+fi
+export PATH="$COLABFOLD_BIN:$PATH"
 
 mkdir -p "$JOB_QUEUE_DIR" "$RESULTS_DIR" "$TMP_DIR" "$GPU_TMP_DIR"
 
@@ -92,14 +106,14 @@ mkdir -p "$MMSEQS_SERVER_DIR"
 SERVER_TIMESTAMP_FILE="$MMSEQS_SERVER_DIR/GPU_SERVER"
 SUBMITTING_FILE="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
 
-# Clean up submission timestamp if it exists (server is now starting)
-if [[ -f "$SUBMITTING_FILE" ]]; then
-  log "Cleaning up submission timestamp"
-  rm -f "$SUBMITTING_FILE"
-fi
-
-date '+%H:%M:%S' > "$SERVER_TIMESTAMP_FILE"
-log "Created server timestamp file at $SERVER_TIMESTAMP_FILE"
+# IMPORTANT: we do NOT write GPU_SERVER or clear GPU_SUBMITTING here. A client
+# treats GPU_SERVER as "ready to serve" and GPU_SUBMITTING as "a server is on its
+# way, don't submit another". This server is NOT ready until the DBs are loaded
+# into GPU memory and the page cache is warmed (minutes after start, on top of
+# SLURM queue time). Advertising readiness now would (a) let queries be picked up
+# against not-yet-loaded DBs and (b) reopen the duplicate-submit window for the
+# whole load period. So GPU_SUBMITTING stays held (covering queue + load) and
+# GPU_SERVER is written only after warm-up (see below).
 
 # Check and install MMseqs2 if needed
 check_mmseqs_installation
@@ -109,6 +123,11 @@ export MMSEQS_MAX_MEMORY=${MMSEQS_MAX_MEMORY:-150G}  # Reduced from 200G
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}         # Reduced to 4 for GPU mode
 export CUDA_VISIBLE_DEVICES=0
 
+# Threads for colabfold_search. Its prefilter/search runs on the GPU, but the
+# align / expandaln / result2msa steps run on CPU and dominate runtime, so give
+# them the full SLURM CPU allocation (these GPU nodes are CPU-rich, 144 cores).
+SEARCH_THREADS="${SLURM_CPUS_PER_TASK:-$(nproc)}"
+
 # GPU Memory optimization
 export CUDA_CACHE_MAXSIZE=2147483648  # 2GB CUDA cache
 export CUDA_CACHE_DISABLE=0
@@ -116,30 +135,15 @@ export CUDA_CACHE_DISABLE=0
 # Check available memory
 log "Memory settings: MMSEQS_MAX_MEMORY=$MMSEQS_MAX_MEMORY, OMP_NUM_THREADS=$OMP_NUM_THREADS"
 
-convert_to_a3m() {
-    local result_db=$1
-    local query_db=$2
-    local target_db=$3
-    local output_file=$4
-    local original_fasta=$5
-    local tmp_dir=$6
-
-    # write raw A3M to scratch, then strip nulls
-    local scratch_a3m="$tmp_dir/raw.a3m"
-    local final_a3m="$output_file"
-
-    $MMSEQS2_DIR/bin/mmseqs result2msa "$query_db" "$target_db" "$result_db" "$scratch_a3m" \
-        --msa-format-mode 5 \
-        --threads "$OMP_NUM_THREADS"
-
-    # Dropping the last byte which is a null character and makes boltz crash
-    log "Removing last byte from $scratch_a3m"
-    head -c -1 "$scratch_a3m" > "${scratch_a3m}.clean"
-    mv "${scratch_a3m}.clean" "$final_a3m"
-    rm "$scratch_a3m"
-
-    local seq_count=$(grep -c "^>" "$final_a3m" || echo "0")
-    log "A3M file created with $seq_count sequences"
+# Strip a trailing NUL byte if present. mmseqs result2msa (which colabfold_search
+# runs internally) can emit a final \0 that makes Boltz crash on the a3m.
+strip_trailing_null() {
+    local f=$1
+    [[ -f "$f" ]] || return 0
+    if [[ "$(tail -c 1 "$f")" == $'\0' ]]; then
+        log "Removing trailing NUL byte from $f"
+        head -c -1 "$f" > "${f}.clean" && mv "${f}.clean" "$f"
+    fi
 }
 
 convert_a3m_to_csv() {
@@ -157,29 +161,84 @@ convert_a3m_to_csv() {
     log "CSV file created with $((line_count - 1)) data rows"
 }
 
-# Start GPU server with optimized settings
-log "Starting MMseqs2 GPU server for $DB_PATH"
-CUDA_VISIBLE_DEVICES=0 $MMSEQS2_DIR/bin/mmseqs gpuserver "$DB_PATH" \
+# Start a warm gpuserver for each DB colabfold_search hits (UniRef30 + envdb),
+# so the search step can use --gpu-server 1 against both.
+# With MMSEQS2_GPUS=2, pin the two gpuservers to separate devices (0 and 1) so
+# their prefilters don't contend for one GPU; with 1, both share device 0.
+NUM_GPUS="${MMSEQS2_GPUS:-1}"
+if [[ "$NUM_GPUS" -ge 2 ]]; then ENVDB_DEVICE=1; else ENVDB_DEVICE=0; fi
+log "Using $NUM_GPUS GPU(s): UniRef30 on device 0, envdb on device $ENVDB_DEVICE"
+
+log "Starting MMseqs2 GPU server for $UNIREF_PATH"
+CUDA_VISIBLE_DEVICES=0 $MMSEQS2_DIR/bin/mmseqs gpuserver "$UNIREF_PATH" \
   --max-seqs "$MAX_SEQS" \
   --db-load-mode 0 \
   --prefilter-mode 1 &
-GPUSERVER_PID=$!
-log "GPU server PID=$GPUSERVER_PID"
+UNIREF_GPUSERVER_PID=$!
+log "UniRef30 GPU server PID=$UNIREF_GPUSERVER_PID"
 
-# Wait 3 minutes for database to load into GPU memory
-log "Waiting 3 minutes for database to load into GPU memory..."
+log "Starting MMseqs2 GPU server for $ENVDB_PATH"
+CUDA_VISIBLE_DEVICES=$ENVDB_DEVICE $MMSEQS2_DIR/bin/mmseqs gpuserver "$ENVDB_PATH" \
+  --max-seqs "$MAX_SEQS" \
+  --db-load-mode 0 \
+  --prefilter-mode 1 &
+ENVDB_GPUSERVER_PID=$!
+log "EnvDB GPU server PID=$ENVDB_GPUSERVER_PID"
+
+# Wait for both databases to load into GPU memory
+log "Waiting 3 minutes for databases to load into GPU memory..."
 sleep 180
-log "Wait complete, assuming GPU server is ready"
+log "Wait complete, assuming GPU servers are ready"
+
+# Warm the OS page cache with the CPU-side index files. colabfold_search's
+# expandaln/align steps mmap these .idx files (--db-load-mode 2 = assume
+# resident in RAM); without warming, the first read of each pages ~411GB off
+# the /shares network filesystem PER QUERY, which dominated runtime (3-9 min).
+# Reading them once into the page cache (held by this job's large RAM request)
+# makes subsequent queries hit RAM, matching the public ColabFold server's
+# ~20-30s/query. Needs a node with enough RAM to keep the indices resident
+# (~512GB; the GPU nodes have ~1.5TB). The gpuserver covers the GPU side.
+warm_page_cache() {
+  log "Warming page cache for the DB indices (read once into RAM)..."
+  local total=0
+  for idx in "$UNIREF_PATH".idx "$ENVDB_PATH".idx; do
+    if [[ -f "$idx" ]]; then
+      local sz
+      sz=$(du -h "$idx" 2>/dev/null | cut -f1)
+      log "  caching $idx ($sz)"
+      cat "$idx" > /dev/null 2>&1 || log "  WARNING: could not read $idx"
+    fi
+  done
+  log "Page-cache warm-up complete; free memory now:"
+  free -h | sed 's/^/    /'
+}
+warm_page_cache
+
+# Now the DBs are loaded (GPU memory + warmed page cache): advertise the server
+# as ready and release the submission lock. Write GPU_SERVER first, then clear
+# GPU_SUBMITTING, so there is never a window where a client sees neither (which
+# would let it submit a duplicate).
+date '+%H:%M:%S' > "$SERVER_TIMESTAMP_FILE"
+log "Created server timestamp file at $SERVER_TIMESTAMP_FILE (server is ready to serve)"
+if [[ -f "$SUBMITTING_FILE" ]]; then
+  log "Releasing submission lock"
+  rm -f "$SUBMITTING_FILE"
+fi
+rmdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null || true
 
 # Cleanup on exit
 cleanup() {
   log "MMseqs2 GPU server shutting down"
-  log "Stopping GPU server PID=$GPUSERVER_PID"
-  kill $GPUSERVER_PID || true
+  for pid in "$UNIREF_GPUSERVER_PID" "$ENVDB_GPUSERVER_PID"; do
+    log "Stopping GPU server PID=$pid"
+    kill "$pid" 2>/dev/null || true
+  done
   # Wait for graceful shutdown
   sleep 5
   # Force kill if still running
-  kill -9 $GPUSERVER_PID 2>/dev/null || true
+  for pid in "$UNIREF_GPUSERVER_PID" "$ENVDB_GPUSERVER_PID"; do
+    kill -9 "$pid" 2>/dev/null || true
+  done
   rm -f "$PID_FILE"
   # Remove timestamp file on shutdown
   rm -f "$SERVER_TIMESTAMP_FILE"
@@ -294,6 +353,12 @@ LAST_CLEANUP=$(date +%s)  # Reset cleanup timer after startup cleanup
 
 log "Entering job processing loop"
 
+# Idle auto-shutdown: exit once the queue has been empty for this long, so an
+# idle GPU server doesn't squat the card and hurt SLURM priority. 0 disables.
+IDLE_TIMEOUT="${MMSEQS2_IDLE_TIMEOUT:-600}"
+LAST_JOB_TIME=$(date +%s)
+log "Idle timeout: ${IDLE_TIMEOUT}s (0 = never)"
+
 # Main processing loop
 while true; do
   for job_meta in "$JOB_QUEUE_DIR"/*.job; do
@@ -305,6 +370,7 @@ while true; do
     mkdir -p "$tmp"
     mkdir -p "$tmp/params"
 
+    LAST_JOB_TIME=$(date +%s)   # reset idle clock on each job pickup
     log "Picked up job $job_id"
     mv "$job_meta" "$tmp/params/"
 
@@ -329,49 +395,49 @@ while true; do
       continue
     fi
 
-    # Prepare query DB
+    # Prepare query FASTA
     cp "$fasta" "$tmp/query.fasta"
-    query_db="$tmp/queryDB"
-    log "Creating queryDB"
-    $MMSEQS2_DIR/bin/mmseqs createdb "$tmp/query.fasta" "$query_db"
-
-    # Result database (not m8 format)
-    result_db="$tmp/resultDB"
 
     # Set output prefix
     out_prefix="$RESULTS_DIR/$job_id"
 
-    # Run GPU-enabled search with optimized parameters
-    log "Running MMseqs2 search for job $job_id"
+    # Run colabfold_search against the warm gpuservers (UniRef30 + envdb).
+    # colabfold_search owns the full search + MSA-build pipeline and writes one
+    # unpacked .a3m per query into its output dir.
+    log "Running colabfold_search for job $job_id"
+    cf_out="$tmp/cf_out"
+    mkdir -p "$cf_out"
 
-    # Check GPU memory before search
     gpu_mem_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory before search: ${gpu_mem_before}MB"
 
-    if ! CUDA_VISIBLE_DEVICES=0 $MMSEQS2_DIR/bin/mmseqs search "$query_db" "$DB_PATH" "$result_db" "$tmp" \
+    if ! CUDA_VISIBLE_DEVICES=0 colabfold_search "$tmp/query.fasta" "$DB_DIR" "$cf_out" \
+      --mmseqs "$MMSEQS2_DIR/bin/mmseqs" \
       --gpu 1 \
       --gpu-server 1 \
-      --prefilter-mode 1 \
       --db-load-mode 2 \
-      -a 1 \
-      --alignment-mode 0 \
-      --threads "$OMP_NUM_THREADS" \
-      --max-seqs "$MAX_SEQS" \
-      -s 7.5; then
-      log "Search failed for job $job_id"
-      # Log GPU memory after failure
+      --threads "$SEARCH_THREADS"; then
+      log "colabfold_search failed for job $job_id"
       gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
       log "GPU memory after failed search: ${gpu_mem_after}MB"
       echo "FAILED: Search failed" > "$RESULTS_DIR/$job_id.status"
       continue
     fi
 
-    # Log GPU memory after successful search
     gpu_mem_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
     log "GPU memory after successful search: ${gpu_mem_after}MB"
 
-    log "Converting to A3M format"
-    convert_to_a3m "$result_db" "$query_db" "$DB_PATH" "$out_prefix.a3m" "$tmp/query.fasta" "$tmp"
+    # colabfold_search writes one .a3m per query (named by query index/header).
+    # Each job carries a single query, so take the sole produced a3m.
+    produced_a3m=$(find "$cf_out" -maxdepth 1 -name "*.a3m" | head -1)
+    if [[ -z "$produced_a3m" || ! -f "$produced_a3m" ]]; then
+      log "ERROR: colabfold_search produced no .a3m for job $job_id"
+      echo -e "FAILED\nNo MSA produced" > "$RESULTS_DIR/$job_id.status"
+      continue
+    fi
+    mv "$produced_a3m" "$out_prefix.a3m"
+    strip_trailing_null "$out_prefix.a3m"
+    log "MSA written to $out_prefix.a3m"
     # Convert output based on format
     case $output_format in
       a3m)
@@ -427,6 +493,16 @@ while true; do
     cleanup_old_files
     recover_orphaned_jobs
     LAST_CLEANUP=$CURRENT_TIME
+  fi
+
+  # Idle auto-shutdown: if the queue has been empty long enough, shut down so the
+  # GPU is released. Only counts as idle when there are no pending .job files.
+  if (( IDLE_TIMEOUT > 0 )); then
+    pending=$(ls -1 "$JOB_QUEUE_DIR"/*.job 2>/dev/null | wc -l)
+    if (( pending == 0 )) && (( CURRENT_TIME - LAST_JOB_TIME >= IDLE_TIMEOUT )); then
+      log "No jobs for $((CURRENT_TIME - LAST_JOB_TIME))s (>= ${IDLE_TIMEOUT}s idle timeout); shutting down to release the GPU"
+      cleanup
+    fi
   fi
 
   sleep 5

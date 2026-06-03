@@ -1,0 +1,12 @@
+# DynamicBind - colab/micromamba variant (inference env).
+# Mirrors upstream's environment.yml step-by-step recipe minus the heavy
+# scientific stack we already have via biopipelines. Pip layer is phased so
+# PyG wheels land after torch (see dynamicbind.pip.colab.{1,2}.txt). The
+# relaxation env is separate: dynamicbind_relax.colab.yaml.
+name: dynamicbind
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - rdkit

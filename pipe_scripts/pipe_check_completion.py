@@ -16,7 +16,7 @@ import glob
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines import id_patterns
@@ -37,7 +37,7 @@ def check_file_exists(file_path: str) -> bool:
         return len(glob.glob(file_path)) > 0
     return os.path.exists(file_path) and (os.path.isfile(file_path) or os.path.isdir(file_path))
 
-def check_files_exist(file_list: List[str]) -> tuple[bool, List[str]]:
+def check_files_exist(file_list: List[str]) -> Tuple[bool, List[str]]:
     """
     Check if all files in a list exist.
     
@@ -54,46 +54,62 @@ def check_files_exist(file_list: List[str]) -> tuple[bool, List[str]]:
     
     return len(missing_files) == 0, missing_files
 
-def extract_file_list(category_data) -> List[str]:
+def extract_id_file_pairs(category_data) -> List[Tuple[Optional[str], str]]:
     """
-    Extract file paths from a category entry in expected outputs.
+    Extract (owner_id, file_path) pairs from a category entry.
+
+    The owner_id is the stream id that produced each path — carried through
+    from the ``<id>`` substitution rather than re-derived from the filename.
+    This is what lets excusal match on the id directly, independent of where
+    ``<id>`` sits in the template: ``<id>.pdb``, ``rank1_<id>.pdb``, and
+    ``<id>/model.pdb`` all yield the same owner_id. owner_id is ``None`` when
+    the entry carries no per-id template (legacy bare lists, shared-file
+    streams, raw strings) — such a path can never be id-excused.
 
     The category data may be:
-    - A list of file paths (legacy format)
-    - A bare string path (shared-file stream serialized at top level)
+    - A list of file paths (legacy format) -> owner_id None
+    - A bare string path (shared-file stream serialized at top level) -> None
     - A dict (serialized DataStream) with a 'files' key whose value is
       either a list (per-id) or a string (shared single artifact)
 
     When files contains a single '<id>' template, expands it using the 'ids'
-    field (which may contain compact patterns like 'name_<0..9>').
-
-    Args:
-        category_data: List, dict, or string from expected_outputs[category]
-
-    Returns:
-        List of file paths
+    field (which may contain compact patterns like 'name_<0..9>'); each
+    expanded path is paired with the id it was built from. For lazy ids the
+    bracketed slot becomes a '*' glob and the owner_id is the deterministic
+    prefix the glob was built from.
     """
     if isinstance(category_data, dict):
         files = category_data.get('files', [])
         ids = category_data.get('ids', [])
         # Shared-file form: a single str path covers all ids; check it once.
         if isinstance(files, str):
-            return [files] if files else []
+            return [(None, files)] if files else []
         if len(files) == 1 and '<id>' in files[0] and ids:
             template = files[0]
             expanded_ids, is_complete = id_patterns.try_expand_ids(ids)
             if is_complete:
-                return [template.replace('<id>', eid) for eid in expanded_ids]
+                return [(eid, template.replace('<id>', eid)) for eid in expanded_ids]
             else:
-                # Lazy patterns: replace [...] with '*' then expand <..> slots
+                # Lazy patterns: replace [...] with '*' then expand <..> slots.
+                # The glob_id is both the substitution and the owner id (its
+                # deterministic prefix is what an excused upstream id matches).
                 glob_ids = id_patterns.glob_from_lazy_ids(ids)
-                return [template.replace('<id>', gid) for gid in glob_ids]
-        return files
+                return [(gid, template.replace('<id>', gid)) for gid in glob_ids]
+        return [(None, f) for f in files]
     elif isinstance(category_data, list):
-        return category_data
+        return [(None, f) for f in category_data]
     elif isinstance(category_data, str):
-        return [category_data] if category_data else []
+        return [(None, category_data)] if category_data else []
     return []
+
+
+def check_pairs_exist(pairs: List[Tuple[Optional[str], str]]) -> Tuple[bool, List[Tuple[Optional[str], str]]]:
+    """Like :func:`check_files_exist` but over (owner_id, path) pairs.
+
+    Returns (all_exist, missing_pairs) preserving each missing path's owner id.
+    """
+    missing = [(oid, p) for (oid, p) in pairs if not check_file_exists(p)]
+    return len(missing) == 0, missing
 
 
 # Top-level keys in expected_outputs that are not stream-shaped and must
@@ -101,14 +117,32 @@ def extract_file_list(category_data) -> List[str]:
 _RESERVED_TOP_LEVEL_KEYS = {'tables', 'output_folder'}
 
 
-def _load_expected_missing_ids(expected_outputs: Dict[str, Any]) -> List[str]:
+def _load_expected_missing_ids(expected_outputs: Dict[str, Any],
+                               step_id: str, tool_name: str) -> List[str]:
     """
-    Load IDs the upstream tool already flagged as removed/missing.
+    Load IDs whose missing output files are *excused*.
 
-    Reads ``tables.missing.path`` (the canonical filter manifest) if it
-    exists on disk and returns the ``id`` column. These IDs correspond to
-    inputs that an upstream filter dropped on purpose — their content
-    files are *expected* to be absent and should not count as failures.
+    Reads ``tables.missing.path`` (schema: id | removed_by | kind | cause).
+    An ID is excused when:
+      * ``removed_by`` is neither this step's id nor its bare tool name —
+        the row was propagated from an upstream tool; the file is expected
+        to be absent.
+      * ``kind == "filter"`` — the current tool dropped this ID on purpose
+        (dedup, rename, intentional filter); the file is expected to be
+        absent.
+
+    A row whose ``removed_by`` IS this step (step id or bare tool name) and
+    whose ``kind == "failure"`` is NOT excused — its missing files indicate
+    a real failure and should trigger a FAILED status.
+
+    The primary discriminator is the *step* identifier (``<order>_<Tool>``,
+    e.g. ``005_XTB``), not the bare tool name. In a chain of the same tool
+    (two Panda steps, two XTB scorers), an upstream-failure row carries the
+    upstream step's id (``002_XTB``); comparing it against the current step's
+    id (``007_XTB``) correctly treats it as upstream-propagated and excuses
+    it, instead of mistaking it for a local failure of this step. The bare
+    tool name is also treated as local for back-compatibility with manifests
+    written before producers stamped the step id.
 
     Returns an empty list if no missing table is declared, the file does
     not exist yet, or it lacks an ``id`` column.
@@ -131,55 +165,160 @@ def _load_expected_missing_ids(expected_outputs: Dict[str, Any]) -> List[str]:
     except Exception as e:
         print(f"Warning: Could not read {os.path.basename(missing_path)}: {e}")
         return []
-    if 'id' not in df.columns:
+    if 'id' not in df.columns or 'removed_by' not in df.columns or 'kind' not in df.columns:
         return []
-    return df['id'].astype(str).tolist()
+    local = {step_id, tool_name}
+    excused = df[(~df['removed_by'].astype(str).isin(local))
+                 | (df['kind'].astype(str) == 'filter')]
+    return excused['id'].astype(str).tolist()
 
 
-def _filter_expected_missing(missing_files: List[str],
-                             expected_missing_ids: List[str]) -> tuple[List[str], List[str]]:
+def _filter_expected_missing(missing_pairs: List[Tuple[Optional[str], str]],
+                             expected_missing_ids: List[str]) -> Tuple[List[str], List[str]]:
     """
-    Split a missing-file list into (unexpected, expected) given the IDs
-    the upstream filter already dropped.
+    Split missing (owner_id, path) pairs into (unexpected, expected) paths
+    given the output ids that are excused.
 
-    A file is "expected-missing" if its basename (without extension) equals
-    one of the expected-missing IDs, or starts with ``<id>_`` / ``<id>-``
-    (covers fan-out files like ``<id>_rank0001.cif``).
+    Matching is on the path's *owner id* — the id carried through from the
+    ``<id>`` substitution — never on the filename. A template can put ``<id>``
+    anywhere (``rank1_<id>.pdb``, ``<id>/model.pdb``); the owner id is the same
+    regardless, so excusal does not depend on the id being the filename stem.
+    A path with no owner id (legacy/shared-file/string entries) is never
+    excused.
+
+    A path is "expected-missing" when its owner id is an excused id itself OR
+    *descends from* one — i.e. an excused id appears in the owner id's
+    suffix-base ancestor chain (``map_table_ids_to_ids``). The descends-from
+    test covers a fan-out whose count is unknown at config time:
+    ``_remap_missing_to_output_ids`` can only pre-expand a *deterministic*
+    fan-out (``prot+lig2_<1..2>``) into the declared output ids; a lazy fan-out
+    (``Panda_5[_rank<...>]``) collapses to its prefix ``Panda_5``, so the owner
+    id of ``Panda_5_rank001.pdb`` would never exact-match. The ancestor chain
+    excuses it, because a child of an upstream-filtered parent legitimately
+    cannot exist. Ancestor matching is parent/child only — it walks the owner
+    id's own suffix-strip chain, never the sibling tier — so it does not
+    over-match a different design sharing only a top-level base
+    (``Panda_6_rank001`` is NOT excused by ``Panda_5``). This reuses the suffix
+    machinery ``get_mapped_ids`` applies for its child/parent tiers; there is
+    one id-matching path.
     """
     if not expected_missing_ids:
-        return missing_files, []
+        return [p for (_oid, p) in missing_pairs], []
+    from biopipelines.id_map_utils import map_table_ids_to_ids
     expected_set = set(expected_missing_ids)
     unexpected = []
     expected = []
-    for f in missing_files:
-        basename = os.path.splitext(os.path.basename(f))[0]
-        if basename in expected_set or any(
-            basename.startswith(f"{mid}_") or basename.startswith(f"{mid}-")
-            for mid in expected_missing_ids
-        ):
-            expected.append(f)
-        else:
-            unexpected.append(f)
+    for owner_id, path in missing_pairs:
+        if owner_id is None:
+            unexpected.append(path)
+            continue
+        ancestors = map_table_ids_to_ids(owner_id, {"*": "*_<S>"})
+        is_expected = any(a in expected_set for a in ancestors)
+        (expected if is_expected else unexpected).append(path)
     return unexpected, expected
 
 
-def check_expected_outputs(expected_outputs: Dict[str, Any]) -> tuple[bool, Dict[str, List[str]]]:
+def _collect_declared_output_ids(expected_outputs: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    """Every declared output id across the tool's streams plus their map_table
+    paths (deterministic expansion only; lazy patterns contribute their prefix).
+
+    The ids are the targets for remapping an excused id into this tool's output
+    id space — a product tool declares ``prot+lig2`` here even though the
+    upstream manifest only names ``lig2``. The map_table paths let the remap use
+    provenance matching for renames whose link lives only in a stream map
+    (e.g. Panda's ``Panda_1`` -> ``LID_001_1``), not just suffix/product shape.
+    """
+    ids: List[str] = []
+    seen = set()
+    map_tables: List[str] = []
+    seen_tables = set()
+    for category, value in expected_outputs.items():
+        if category in _RESERVED_TOP_LEVEL_KEYS or not isinstance(value, dict):
+            continue
+        mt = value.get('map_table')
+        if mt and mt not in seen_tables and os.path.exists(mt):
+            seen_tables.add(mt)
+            map_tables.append(mt)
+        raw_ids = value.get('ids', [])
+        if not raw_ids:
+            continue
+        expanded, _complete = id_patterns.try_expand_ids(raw_ids)
+        for eid in expanded:
+            if eid not in seen:
+                seen.add(eid)
+                ids.append(eid)
+    return ids, map_tables
+
+
+def _remap_missing_to_output_ids(expected_missing_ids: List[str],
+                                 expected_outputs: Dict[str, Any]) -> List[str]:
+    """Map input-axis excused ids into this tool's output id space.
+
+    The missing manifest names ids in the UPSTREAM tool's id space (an input
+    axis, e.g. ``lig2``); this tool's expected files are keyed by its OWN output
+    ids (a product ``prot+lig2``, a ``_N`` multiplier ``prot_1``, a group key).
+    ``get_mapped_ids`` already understands ``+`` products, ``_`` suffixes, and
+    provenance, so it bridges the two id spaces. An excused id that matches no
+    declared output id is kept as-is (covers 1:1 tools and exact-name matches).
+    """
+    if not expected_missing_ids:
+        return expected_missing_ids
+    output_ids, map_tables = _collect_declared_output_ids(expected_outputs)
+    if not output_ids:
+        return expected_missing_ids
+    from biopipelines.id_map_utils import get_mapped_ids
+    mapped = get_mapped_ids(expected_missing_ids, output_ids, unique=False,
+                            map_table_paths=map_tables or None)
+    out: List[str] = []
+    seen = set()
+    for mid in expected_missing_ids:
+        matches = mapped.get(mid, [])
+        # No output matched (e.g. an exact-name 1:1 tool, or a stale row) → keep
+        # the original id so exact-basename excusal still works.
+        for cand in (matches or [mid]):
+            if cand not in seen:
+                seen.add(cand)
+                out.append(cand)
+    return out
+
+
+def _step_id(output_folder: str, tool_name: str) -> str:
+    """The step identifier producers write into ``removed_by``.
+
+    Matches ``os.path.basename(self.output_folder)`` used by tools (e.g.
+    ``005_XTB``). Falls back to the bare tool name for folders without a
+    numeric step prefix, so exact-name producers still match.
+    """
+    folder_name = os.path.basename(output_folder.rstrip(os.sep))
+    if '_' in folder_name and folder_name.split('_')[0].isdigit():
+        return folder_name
+    return tool_name
+
+
+def check_expected_outputs(expected_outputs: Dict[str, Any],
+                           tool_name: str,
+                           output_folder: str = "") -> Tuple[bool, Dict[str, List[str]]]:
     """
     Check that every declared output file exists.
 
     Iterates *all* stream-shaped top-level keys, not a hardcoded list. A
     stream-shaped entry is either a list of paths (legacy) or a dict with
-    ``files`` / ``ids`` (new format) — both handled by ``extract_file_list``.
+    ``files`` / ``ids`` (new format) — both handled by ``extract_id_file_pairs``.
     This means streams like ``fasta``, ``msas``, ``images``, ``plots`` are
     checked the same way as the historically-privileged ``structures`` /
     ``compounds`` / ``sequences``.
 
-    Missing-aware: files corresponding to IDs already flagged in
-    ``tables.missing`` are *expected* to be absent (an upstream filter
-    dropped them) and do not count as failures.
+    Missing-aware: files corresponding to IDs flagged in ``tables.missing``
+    as either propagated upstream (``removed_by != tool_name``) or locally
+    filtered (``kind == "filter"``) are *expected* to be absent and do not
+    count as failures. Local failure rows (``removed_by == tool_name`` and
+    ``kind == "failure"``) are NOT excused — their missing files still
+    trigger a FAILED status.
 
     Args:
         expected_outputs: Dictionary with standardized output format
+        tool_name: Name of the current tool (used to distinguish local
+            failure rows from upstream/local-filter rows in missing.csv)
 
     Returns:
         Tuple of (all_exist: bool, missing_by_category: Dict[str, List[str]])
@@ -187,19 +326,21 @@ def check_expected_outputs(expected_outputs: Dict[str, Any]) -> tuple[bool, Dict
     missing_by_category = {}
     all_exist = True
 
-    expected_missing_ids = _load_expected_missing_ids(expected_outputs)
+    step_id = _step_id(output_folder, tool_name)
+    expected_missing_ids = _load_expected_missing_ids(expected_outputs, step_id, tool_name)
+    expected_missing_ids = _remap_missing_to_output_ids(expected_missing_ids, expected_outputs)
     if expected_missing_ids:
-        print(f"Found {len(expected_missing_ids)} IDs expected to be missing from "
-              f"upstream filter manifest")
+        print(f"Found {len(expected_missing_ids)} IDs expected to be missing "
+              f"(upstream propagated or local filter)")
 
     # Every non-reserved key whose value reduces to a file list is a stream.
     for category, value in expected_outputs.items():
         if category in _RESERVED_TOP_LEVEL_KEYS:
             continue
-        files = extract_file_list(value)
-        if not files:
+        pairs = extract_id_file_pairs(value)
+        if not pairs:
             continue
-        exists, missing = check_files_exist(files)
+        exists, missing = check_pairs_exist(pairs)
         if exists:
             continue
         unexpected, expected = _filter_expected_missing(missing, expected_missing_ids)
@@ -394,7 +535,7 @@ def main():
     if 'output_structure' in expected_outputs and 'tool_name' in expected_outputs:
         expected_outputs = expected_outputs['output_structure']
 
-    success, missing_by_category = check_expected_outputs(expected_outputs)
+    success, missing_by_category = check_expected_outputs(expected_outputs, args.tool_name, args.output_folder)
 
     if success:
         print(f"Required outputs found for {args.tool_name}")

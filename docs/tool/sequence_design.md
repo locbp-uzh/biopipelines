@@ -1,51 +1,121 @@
 # Sequence Design
 
-[← Back to Tool Reference](../ToolReference.md)
+[← Back to Tool Reference](../tool_reference.md)
 
 ---
 
-### ProteinMPNN
+### DNAEncoder
 
-Designs protein sequences for given backbone structures. Uses graph neural networks to optimize sequences for structure stability while respecting fixed/designed region constraints.
+Reverse-translates protein sequences to DNA with organism-specific codon optimization. Uses thresholded weighted codon sampling based on CoCoPUTs genome frequency tables.
 
-**References**: https://www.science.org/doi/10.1126/science.add2187.
-
-**Installation**: Go to your data folder and clone the official repository (https://github.com/dauparas/ProteinMPNN). The model will then work in the same environment as RFdiffusion.
-```bash
-git clone https://github.com/dauparas/ProteinMPN
-```
+**Environment**: `biopipelines`
 
 **Parameters**:
-- `structures`: Union[str, List[str], ToolOutput] (required) - Input structures
-- `tables`: Optional[List[str]] = None - Input table files
-- `num_sequences`: int = 1 - Number of sequences per structure
-- `fixed`: str = "" - Fixed positions (PyMOL selection or table reference)
-- `redesigned`: str = "" - Redesigned positions (PyMOL selection or table reference)
-- `chain`: str = "auto" - Chain to apply fixed positions ("auto" detects from input structure)
-- `sampling_temp`: float = 0.1 - Sampling temperature
-- `model_name`: str = "v_48_020" - ProteinMPNN model variant
-- `soluble_model`: bool = True - Use soluble protein model
-- `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine). 
+- `sequences`: Union[ToolOutput, StandardizedOutput] (required) - Input protein sequences
+- `organism`: str = "EC" - Target organism for codon optimization:
+  - "EC" (Escherichia coli)
+  - "SC" (Saccharomyces cerevisiae)
+  - "HS" (Homo sapiens)
+  - Combinations: "EC&HS", "EC&SC", "HS&SC", "EC&HS&SC"
+
+**Tables**:
+- `dna`:
+
+  | id | protein_sequence | dna_sequence | organism | method |
+  |----|------------------|--------------|----------|--------|
+
+- Excel file with color-coded codons (red <5‰, orange 5-10‰, black ≥10‰)
+
+**Example**:
+```python
+from biopipelines.dna_encoder import DNAEncoder
+
+dna = DNAEncoder(
+    sequences=lmpnn,
+    organism="EC&HS"  # Conservative optimization for both E. coli and human
+)
+```
+
+**Note**: Uses thresholded weighted sampling (codons ≥10‰, fallback to ≥5‰). For multi-organism optimization, uses minimum frequency across organisms. Please cite CoCoPUTs (HIVE) when using.
+
+---
+
+### Frame2Seq
+
+Fast structure-conditioned inverse folding. Frame2Seq is a non-autoregressive masked-language model that generates multiple sequences per backbone in a single forward pass — same role as ProteinMPNN (structure → sequence), but materially faster, with slightly higher native-sequence recovery on CATH 4.2. Output IDs follow the ProteinMPNN multiplier convention `<structure_id>_<n>`.
+
+**References**: https://github.com/dakpinaroglu/Frame2seq · https://arxiv.org/abs/2312.02447
+
+**Environment**: `frame2seq`
+
+**Installation**: `Frame2Seq.install()` creates the env and pip-installs the package (weights ship with it). Runs on CPU; a GPU speeds up large/many inputs.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput (required) — Input backbones.
+- `num_sequences`: int = 1 — Sequences to sample per structure.
+- `temperature`: float = 1.0 — Sampling temperature (>0).
+- `chain`: str = "A" — Chain to redesign.
+- `omit_aa`: str = "" — Single-letter codes to exclude from sampling (e.g. `"CM"` to omit Cys and Met).
+- `fixed`: str | (TableInfo, column) = "" — Residues to keep at their input identity. Chain-aware selection (`"A10-20+A30"`) or a table column reference. Mutually exclusive with `redesigned`.
+- `redesigned`: str | (TableInfo, column) = "" — Residues to redesign; everything else on `chain` is held fixed.
+
+**Streams**: `sequences`, `fasta`
+
+**Tables**:
+- `sequences`:
+
+  | id | sequence | score | recovery | structures.id |
+  |----|----------|-------|----------|---------------|
+
+- `missing`: | id | removed_by | cause |
+
+**Example**:
+```python
+from biopipelines.frame2seq import Frame2Seq
+
+seqs = Frame2Seq(structures=rfd, num_sequences=10, temperature=0.5)
+```
+
+---
+
+### Fuse
+
+Concatenates multiple sequences with flexible linkers. Creates fusion sequences with customizable linker lengths for domain engineering. Works with both protein and DNA sequences. Outputs include sequence/linker position columns in PyMOL selection format for easy visualization.
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `sequences`: Union[List[str], str] (required) - List of sequences or PDB file paths
+- `name`: str = "" - Job name for output files
+- `linker`: str = "GGGGSGGGGSGGGGSGGGGS" - Linker sequence that will be cut based on `linker_lengths` if specified
+- `linker_lengths`: List[str] = None - List of length ranges for each junction to generate multiple variants by cutting the linker (e.g., ["1-6", "1-6"])
 
 **Streams**: `sequences`
 
 **Tables**:
 - `sequences`:
 
-  | id | structures.id | source_pdb | sequence | score | seq_recovery | rmsd | gaps |
-  |----|---------------|------------|----------|-------|--------------|------|------|
+  | id | sequence | lengths | S1 | L1 | S2 | L2 | S3 | ... |
+  |----|----------|---------|----|----|----|----|----| --- |
 
-**Note**: Sample 0 is the original/template sequence, samples 1+ are designs.
+  - `lengths`: Shortname of the lengths e.g. 2-4, 5-2-4, ...
+  - `S1`, `S2`, `S3`, ...: Sequence positions in PyMOL selection format (e.g., "1-73", "76-237")
+  - `L1`, `L2`, ...: Linker positions in PyMOL selection format (e.g., "74-75", "238-240")
+  - Number of columns depends on number of input sequences: n sequences → n sequence columns (S1...Sn) and n-1 linker columns (L1...Ln-1)
 
 **Example**:
 ```python
-from biopipelines.protein_mpnn import ProteinMPNN
+from biopipelines.fuse import Fuse
+from biopipelines.pdb import PDB
 
-pmpnn = ProteinMPNN(
-    structures=rfd,
-    num_sequences=10,
-    fixed="1-10+50-60",
-    redesigned="20-40"
+N="GNH..."
+mid=PDB("...")
+C="EFT..."
+fused = Fuse(
+    sequences=[N, mid, C],
+    linker="GSGAG",
+    linker_lengths=["2-4", "2-4"],
+    name="protein_fusion"
 )
 ```
 
@@ -67,18 +137,20 @@ pip3 install -r requirements.txt
 ```
 
 **Parameters**:
-- `structures`: Union[str, List[str], ToolOutput] (required) - Input structures
-- `ligand`: str (required) - Ligand identifier for binding site focus
-- `tables`: Optional[List[str]] = None - Input table files
-- `name`: str = "" - Job name for output files
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Input structures
+- `ligand`: Optional[Union[str, DataStream, StandardizedOutput]] = None - Compounds stream (`Ligand(code="LIG")` or any compounds-producing tool) or a 3-letter code naming the bound ligand for binding-site focus; the residue `code` is read from the stream at runtime
 - `num_sequences`: int = 1 - Number of sequences per batch
-- `fixed`: str = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or table reference)
-- `redesigned`: str = "" - Designed positions (LigandMPNN format or table reference)
-- `design_within`: float = 5.0 - Distance in Angstroms from ligand for post-generation analysis only (does not control design). For actually designing residues within a distance, use [DistanceSelector](Analysis.md#distanceselector) to select positions first.
+- `fixed`: str | (TableInfo, column) = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or table reference)
+- `redesigned`: str | (TableInfo, column) = "" - Designed positions (LigandMPNN format or table reference)
+- `design_within`: float = 5.0 - Distance in Angstroms from ligand for post-generation analysis only (does not control design). For actually designing residues within a distance, use [DistanceSelector](analysis.md#distanceselector) to select positions first.
 - `chain`: str = "A" - Default chain ID applied to chainless position input (e.g. when positions are given as "10-20" without chain prefix)
 - `model`: str = "v_32_010" - LigandMPNN model version (v_32_005, v_32_010, v_32_020, v_32_025)
 - `num_batches`: int = 1 - Number of batches to run. Total sequences = num_sequences × num_batches
-- `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine). 
+- `remove_duplicates`: bool = True - Drop duplicate sequences from the output
+- `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine).
+- `temperature`: float = 0.0 - Sampling temperature (0.0 = argmax / deterministic)
+- `bias_AA_per_residue`: str = "" - Per-residue amino-acid bias (LigandMPNN JSONL path or spec)
+- `seed`: int = 0 - Random seed (0 = random)
 
 **Streams**: `sequences`
 
@@ -91,13 +163,95 @@ pip3 install -r requirements.txt
 **Example**:
 ```python
 from biopipelines.ligand_mpnn import LigandMPNN
+from biopipelines.ligand import Ligand
 
 lmpnn = LigandMPNN(
     structures=rfdaa,
-    ligand="LIG",
+    ligand=Ligand(code="LIG"),
     num_sequences=5,
     redesigned=rfdaa.tables.structures.designed
 )
+```
+
+---
+
+### Mutagenesis
+
+Performs mutagenesis at specified positions. Generates systematic amino acid substitutions for experimental library design or computational scanning.
+
+**Environment**: `MutationEnv`
+
+**Parameters**:
+- `original`: Union[DataStream, StandardizedOutput] (required) - Input structure/sequence
+- `position`: Union[int, str, TableReference, StandardizedOutput] = None (required in practice) - Target position(s) for mutagenesis:
+  - `int`: Fixed position (1-indexed) for all sequences
+  - `str`: PyMOL-style selection (e.g., `"141+143+145-149"`)
+  - `TableReference`: Per-row position lookup (e.g., `fuse.tables.sequences.L1`)
+  - `StandardizedOutput`: From Selection tool (extracts `selections.selection` column)
+- `mutate_to`: str = "" - Target amino acid(s) for "specific" mode (e.g., "A" for alanine, "AV" for alanine and valine). Required when mode is "specific".
+- `mode`: str = "specific" - Mutagenesis strategy:
+  - "specific": Only the amino acid(s) given in `mutate_to` (default)
+  - "saturation": All 20 amino acids
+  - "hydrophobic": Hydrophobic residues only
+  - "hydrophilic": Hydrophilic residues only
+  - "charged": Charged residues only
+  - "polar": Polar residues only
+  - "nonpolar": Nonpolar residues only
+  - "aromatic": Aromatic residues only
+  - "aliphatic": Aliphatic residues only
+  - "positive": Positively charged residues only
+  - "negative": Negatively charged residues only
+- `include_original`: bool = False - Include original amino acid in output
+- `exclude`: str = "" - Amino acids to exclude (single letter codes as string, e.g., "CP")
+- `combinatorial`: bool = False - When multiple positions are given, generate the full Cartesian product of substitutions across positions instead of mutating each position independently
+- `msas`: Union[DataStream, StandardizedOutput] = None - Optional precomputed MSAs for the original protein(s) (e.g. from AlphaFold, MMseqs2, or the MSA tool). When provided, a synthetic per-mutant MSA is derived by copying the parent's MSA (matched on the original protein id) and substituting **only the query (first) row** at the mutated position(s); homolog rows pass through unchanged and the format (a3m/csv) is preserved. The emitted `msas` stream is keyed by the mutant ids, so it feeds straight into a downstream folding tool alongside the mutant sequences. No realignment is performed — point substitutions introduce no gaps, so alignment columns are unchanged. A mutant whose parent has no MSA is skipped (warned, not fabricated). When None (default), no `msas` stream is emitted.
+
+**Streams**: `sequences`; `msas` (only when `msas=` is given)
+
+**Tables**:
+- `sequences`:
+
+  | id | sequences.id | sequence | mutations | mutation_positions | original_aa | new_aa |
+  |----|--------------|----------|-----------|--------------------|-------------|--------|
+
+  When chaining multiple Mutagenesis steps, `mutations` accumulates (e.g., `A42V,G50L`) and `mutation_positions` uses PyMOL selection format (e.g., `42+50`).
+
+- `missing`:
+
+  | id | removed_by | cause |
+  |----|------------|-------|
+
+- `msas` (only when `msas=` is given):
+
+  | id | sequences.id | original.id | sequence | msa_file |
+  |----|--------------|-------------|----------|----------|
+
+  `id` and `sequences.id` are both the mutant id (so downstream folding tools match the mutant query); `original.id` records the parent protein the MSA was derived from; `sequence` is the mutated query sequence.
+
+**Example**:
+```python
+from biopipelines.mutagenesis import Mutagenesis
+
+# Convert position 42 to alanine
+sdm = Mutagenesis(original=template, position=42, mutate_to="A")
+
+# Saturation mutagenesis at position 42 (excluding cysteine and proline)
+sdm = Mutagenesis(original=template, position=42, mode="saturation", exclude="CP")
+
+# Multiple positions
+sdm = Mutagenesis(original=template, position="42+50+55-60", mode="saturation")
+
+# Per-row positions from a table column (e.g., linker positions from Fuse)
+sdm = Mutagenesis(original=fused, position=fused.tables.sequences.L1, mode="saturation")
+
+# Positions from Selection tool
+sdm = Mutagenesis(original=template, position=selection_output, mode="saturation")
+
+# Reuse the wild-type MSA for all mutants: derive one synthetic MSA per mutant
+# (query row substituted, homolog rows kept) and fold without re-querying.
+af = AlphaFold(proteins=template)            # builds the original MSA
+sdm = Mutagenesis(original=template, position=42, mode="saturation", msas=af)
+folded = AlphaFold(proteins=sdm, msas=sdm)   # per-mutant MSAs, keyed by mutant id
 ```
 
 ---
@@ -147,113 +301,113 @@ composer = MutationComposer(
 
 ---
 
-### Mutagenesis
+### ProteinMPNN
 
-Performs mutagenesis at specified positions. Generates systematic amino acid substitutions for experimental library design or computational scanning.
+Designs protein sequences for given backbone structures. Uses graph neural networks to optimize sequences for structure stability while respecting fixed/designed region constraints.
 
-**Environment**: `MutationEnv`
+**References**: https://www.science.org/doi/10.1126/science.add2187.
+
+**Installation**: Go to your data folder and clone the official repository (https://github.com/dauparas/ProteinMPNN). The model will then work in the same environment as RFdiffusion.
+```bash
+git clone https://github.com/dauparas/ProteinMPN
+```
 
 **Parameters**:
-- `original`: Union[str, ToolOutput, StandardizedOutput] (required) - Input structure/sequence
-- `position`: Union[int, str, TableReference, StandardizedOutput] (required) - Target position(s) for mutagenesis:
-  - `int`: Fixed position (1-indexed) for all sequences
-  - `str`: PyMOL-style selection (e.g., `"141+143+145-149"`)
-  - `TableReference`: Per-row position lookup (e.g., `fuse.tables.sequences.L1`)
-  - `StandardizedOutput`: From Selection tool (extracts `selections.selection` column)
-- `mutate_to`: str = "" - Target amino acid(s) for "specific" mode (e.g., "A" for alanine, "AV" for alanine and valine). Required when mode is "specific".
-- `mode`: str = "specific" - Mutagenesis strategy:
-  - "specific": Only the amino acid(s) given in `mutate_to` (default)
-  - "saturation": All 20 amino acids
-  - "hydrophobic": Hydrophobic residues only
-  - "hydrophilic": Hydrophilic residues only
-  - "charged": Charged residues only
-  - "polar": Polar residues only
-  - "nonpolar": Nonpolar residues only
-  - "aromatic": Aromatic residues only
-  - "aliphatic": Aliphatic residues only
-  - "positive": Positively charged residues only
-  - "negative": Negatively charged residues only
-- `include_original`: bool = False - Include original amino acid in output
-- `exclude`: str = "" - Amino acids to exclude (single letter codes as string, e.g., "CP")
-- `prefix`: str = "" - Prefix for sequence IDs
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Input structures
+- `num_sequences`: int = 1 - Number of sequences per structure
+- `fixed`: str | (TableInfo, column) = "" - Fixed positions (PyMOL selection or table reference)
+- `redesigned`: str | (TableInfo, column) = "" - Redesigned positions (PyMOL selection or table reference)
+- `chain`: str = "auto" - Chain to apply fixed positions ("auto" detects from input structure)
+- `sampling_temp`: float = 0.1 - Sampling temperature
+- `model_name`: str = "v_48_020" - ProteinMPNN model variant
+- `soluble_model`: bool = True - Use soluble protein model
+- `remove_duplicates`: bool = True - Drop duplicate sequences from the output
+- `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine).
+- `bias_AA_jsonl`: str = "" - Path to a ProteinMPNN amino-acid bias JSONL
+- `omit_AA_jsonl`: str = "" - Path to a ProteinMPNN per-position omit-AA JSONL
+- `seed`: int = 0 - Random seed (0 = random)
+- `ca_noise_std`: float = 0.0 - Std. dev. of Gaussian noise added to Cα coordinates before design
 
 **Streams**: `sequences`
 
 **Tables**:
 - `sequences`:
 
-  | id | sequences.id | sequence | mutations | mutation_positions | original_aa | new_aa |
-  |----|--------------|----------|-----------|--------------------|-------------|--------|
+  | id | structures.id | source_pdb | sequence | score | seq_recovery | rmsd | gaps |
+  |----|---------------|------------|----------|-------|--------------|------|------|
 
-  When chaining multiple Mutagenesis steps, `mutations` accumulates (e.g., `A42V,G50L`) and `mutation_positions` uses PyMOL selection format (e.g., `42+50`).
-
-- `missing`:
-
-  | id | removed_by | cause |
-  |----|------------|-------|
+**Note**: Sample 0 is the original/template sequence, samples 1+ are designs.
 
 **Example**:
 ```python
-from biopipelines.mutagenesis import Mutagenesis
+from biopipelines.protein_mpnn import ProteinMPNN
 
-# Convert position 42 to alanine
-sdm = Mutagenesis(original=template, position=42, mutate_to="A")
-
-# Saturation mutagenesis at position 42 (excluding cysteine and proline)
-sdm = Mutagenesis(original=template, position=42, mode="saturation", exclude="CP")
-
-# Multiple positions
-sdm = Mutagenesis(original=template, position="42+50+55-60", mode="saturation")
-
-# Per-row positions from a table column (e.g., linker positions from Fuse)
-sdm = Mutagenesis(original=fused, position=fused.tables.sequences.L1, mode="saturation")
-
-# Positions from Selection tool
-sdm = Mutagenesis(original=template, position=selection_output, mode="saturation")
+pmpnn = ProteinMPNN(
+    structures=rfd,
+    num_sequences=10,
+    fixed="1-10+50-60",
+    redesigned="20-40"
+)
 ```
 
 ---
 
-### Fuse
+### RBSDesigner
 
-Concatenates multiple sequences with flexible linkers. Creates fusion sequences with customizable linker lengths for domain engineering. Works with both protein and DNA sequences. Outputs include sequence/linker position columns in PyMOL selection format for easy visualization.
+Designs synthetic ribosome binding sites (RBS) to control protein expression in bacteria. Uses the Salis thermodynamic model to predict translation initiation rates and a simulated annealing optimizer to design RBS sequences matching a target expression level. Requires ViennaRNA for RNA free energy calculations.
 
-**Environment**: `biopipelines`
+**Reference**: Salis, Mirsky & Voigt, *Nat. Biotechnol.* **27**, 946–950 (2009). doi:10.1038/nbt.1568
+
+**Environment**: `rbs_designer` (ViennaRNA from bioconda, requires flexible channel priority)
+
+**Installation**:
+```python
+RBSDesigner.install()
+```
 
 **Parameters**:
-- `sequences`: Union[List[str], str] (required) - List of sequences or PDB file paths
-- `name`: str = "" - Job name for output files
-- `linker`: str = "GGGGSGGGGSGGGGSGGGGS" - Linker sequence that will be cut based on `linker_lengths` if specified
-- `linker_lengths`: List[str] = None - List of length ranges for each junction to generate multiple variants by cutting the linker (e.g., ["1-6", "1-6"])
-
-**Streams**: `sequences`
+- `sequences`: Union[ToolOutput, StandardizedOutput] (required) — Input DNA sequences (typically from DNAEncoder)
+- `tir`: Union[str, int, float] = "medium" — Target translation initiation rate:
+  - "low" (100 au)
+  - "medium" (1000 au)
+  - "high" (10000 au)
+  - "maximum" (100000 au)
+  - Or any numeric value (au)
+- `pre_sequence`: str = "" — Optional fixed 5'UTR DNA to prepend before the designed RBS
+- `add_start_codon`: bool = False — Prepend an ATG start codon to the gene if absent
 
 **Tables**:
-- `sequences`:
+- `rbs`:
 
-  | id | sequence | lengths | S1 | L1 | S2 | L2 | S3 | ... |
-  |----|----------|---------|----|----|----|----|----| --- |
+  | id | dna_sequence | rbs_sequence | full_gene | dg_total | tir_predicted | target_tir | target_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby |
+  |----|-------------|--------------|-----------|----------|---------------|------------|-----------|---------|-------------|----------|------------|---------|------------|
 
-  - `lengths`: Shortname of the lengths e.g. 2-4, 5-2-4, ...
-  - `S1`, `S2`, `S3`, ...: Sequence positions in PyMOL selection format (e.g., "1-73", "76-237")
-  - `L1`, `L2`, ...: Linker positions in PyMOL selection format (e.g., "74-75", "238-240")
-  - Number of columns depends on number of input sequences: n sequences → n sequence columns (S1...Sn) and n-1 linker columns (L1...Ln-1)
+  - `full_gene` = `pre_sequence` + `rbs_sequence` + `dna_sequence` (complete DNA ready for synthesis)
 
 **Example**:
 ```python
-from biopipelines.fuse import Fuse
-from biopipelines.pdb import PDB
+from biopipelines.dna_encoder import DNAEncoder
+from biopipelines.rbs_designer import RBSDesigner
 
-N="GNH..."
-mid=PDB("...")
-C="EFT..."
-fused = Fuse(
-    sequences=[N, mid, C],
-    linker="GSGAG",
-    linker_lengths=["2-4", "2-4"],
-    name="protein_fusion"
-)
+# Codon-optimize then design RBS for high expression in E. coli
+dna = DNAEncoder(sequences=proteins, organism="EC")
+rbs = RBSDesigner(sequences=dna, tir="high")
+
+# Design RBS for specific TIR with 5'UTR prefix
+rbs = RBSDesigner(sequences=dna, tir=5000, pre_sequence="AATTAA")
 ```
+
+**Thermodynamic model** (Equation 2):
+```
+dG_tot = dG_mRNA:rRNA + dG_start + dG_spacing - dG_standby - dG_mRNA
+```
+- `dG_mRNA:rRNA`: SD / anti-SD hybridization energy (ViennaRNA duplexfold)
+- `dG_start`: Start codon identity (AUG = −1.194, GUG = −0.075 kcal/mol)
+- `dG_spacing`: Penalty for non-optimal SD-to-start-codon distance
+- `dG_standby`: Energy to unfold the 4-nt standby site upstream of SD
+- `dG_mRNA`: Local mRNA folding energy (70 nt window around start codon)
+
+**Note**: RBS design uses simulated annealing with adaptive temperature control (5–20% acceptance rate). Each sequence typically requires thousands of energy evaluations. Computation time scales with the number of input sequences. Please cite Salis et al. 2009 when using.
 
 ---
 
@@ -264,14 +418,14 @@ Combines a template sequence with two types of modifications: **substitutions** 
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `template`: Union[str, ToolOutput, StandardizedOutput] - Base sequence (raw string or tool output). Optional if using concatenation mode.
-- `substitutions`: Dict[str, Union[List[str], ToolOutput]] = None - Position-to-position substitutions from equal-length sequences. For each position in the selection, the residue at that position in the substitution sequence replaces the residue at that position in the template.
+- `template`: Union[str, DataStream, StandardizedOutput] - Base sequence (raw string or tool output). Optional if using concatenation mode.
+- `substitutions`: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None - Position-to-position substitutions from equal-length sequences. For each position in the selection, the residue at that position in the substitution sequence replaces the residue at that position in the template.
   - Keys: Position strings like `"11-19"` or `"11-19+31-44"`, or table references
-  - Values: ToolOutput with sequences (must be same length as template)
-- `indels`: Dict[str, Union[List[str], ToolOutput]] = None - Segment replacements where each contiguous segment is replaced with the given sequence. Can change sequence length.
+  - Values: tool output with sequences (must be same length as template)
+- `indels`: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None - Segment replacements where each contiguous segment is replaced with the given sequence. Can change sequence length.
   - Keys: Position strings like `"50-55"` or `"6-7+9-10+17-18"`, or integers for concatenation mode
   - Values: List of raw sequences (each segment replaced with full sequence)
-- `id_map`: Dict[str, str] = {"*": "*_<N>"} - ID mapping pattern for matching sequences
+- `remove_duplicates`: bool = True - Drop duplicate sequences from the generated combinations
 
 **Position Syntax**:
 - `"10-20"` → positions 10 to 20 (inclusive, 1-indexed)
@@ -355,99 +509,5 @@ stitched = StitchSequences(
 )
 # Output: 2 × 1 × 3 = 6 concatenated sequences
 ```
-
----
-
-### DNAEncoder
-
-Reverse-translates protein sequences to DNA with organism-specific codon optimization. Uses thresholded weighted codon sampling based on CoCoPUTs genome frequency tables.
-
-**Environment**: `biopipelines`
-
-**Parameters**:
-- `sequences`: Union[ToolOutput, StandardizedOutput] (required) - Input protein sequences
-- `organism`: str = "EC" - Target organism for codon optimization:
-  - "EC" (Escherichia coli)
-  - "SC" (Saccharomyces cerevisiae)
-  - "HS" (Homo sapiens)
-  - Combinations: "EC&HS", "EC&SC", "HS&SC", "EC&HS&SC"
-
-**Tables**:
-- `dna`:
-
-  | id | protein_sequence | dna_sequence | organism | method |
-  |----|------------------|--------------|----------|--------|
-
-- Excel file with color-coded codons (red <5‰, orange 5-10‰, black ≥10‰)
-
-**Example**:
-```python
-from biopipelines.dna_encoder import DNAEncoder
-
-dna = DNAEncoder(
-    sequences=lmpnn,
-    organism="EC&HS"  # Conservative optimization for both E. coli and human
-)
-```
-
-**Note**: Uses thresholded weighted sampling (codons ≥10‰, fallback to ≥5‰). For multi-organism optimization, uses minimum frequency across organisms. Please cite CoCoPUTs (HIVE) when using.
-
----
-
-### RBSDesigner
-
-Designs synthetic ribosome binding sites (RBS) to control protein expression in bacteria. Uses the Salis thermodynamic model to predict translation initiation rates and a simulated annealing optimizer to design RBS sequences matching a target expression level. Requires ViennaRNA for RNA free energy calculations.
-
-**Reference**: Salis, Mirsky & Voigt, *Nat. Biotechnol.* **27**, 946–950 (2009). doi:10.1038/nbt.1568
-
-**Environment**: `rbs_designer` (ViennaRNA from bioconda, requires flexible channel priority)
-
-**Installation**:
-```python
-RBSDesigner.install()
-```
-
-**Parameters**:
-- `sequences`: Union[ToolOutput, StandardizedOutput] (required) — Input DNA sequences (typically from DNAEncoder)
-- `tir`: Union[str, int, float] = "medium" — Target translation initiation rate:
-  - "low" (100 au)
-  - "medium" (1000 au)
-  - "high" (10000 au)
-  - "maximum" (100000 au)
-  - Or any numeric value (au)
-- `pre_sequence`: str = "" — Optional fixed 5'UTR DNA to prepend before the designed RBS
-
-**Tables**:
-- `rbs`:
-
-  | id | dna_sequence | rbs_sequence | full_gene | dg_total | tir_predicted | target_tir | target_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby |
-  |----|-------------|--------------|-----------|----------|---------------|------------|-----------|---------|-------------|----------|------------|---------|------------|
-
-  - `full_gene` = `pre_sequence` + `rbs_sequence` + `dna_sequence` (complete DNA ready for synthesis)
-
-**Example**:
-```python
-from biopipelines.dna_encoder import DNAEncoder
-from biopipelines.rbs_designer import RBSDesigner
-
-# Codon-optimize then design RBS for high expression in E. coli
-dna = DNAEncoder(sequences=proteins, organism="EC")
-rbs = RBSDesigner(sequences=dna, tir="high")
-
-# Design RBS for specific TIR with 5'UTR prefix
-rbs = RBSDesigner(sequences=dna, tir=5000, pre_sequence="AATTAA")
-```
-
-**Thermodynamic model** (Equation 2):
-```
-dG_tot = dG_mRNA:rRNA + dG_start + dG_spacing - dG_standby - dG_mRNA
-```
-- `dG_mRNA:rRNA`: SD / anti-SD hybridization energy (ViennaRNA duplexfold)
-- `dG_start`: Start codon identity (AUG = −1.194, GUG = −0.075 kcal/mol)
-- `dG_spacing`: Penalty for non-optimal SD-to-start-codon distance
-- `dG_standby`: Energy to unfold the 4-nt standby site upstream of SD
-- `dG_mRNA`: Local mRNA folding energy (70 nt window around start codon)
-
-**Note**: RBS design uses simulated annealing with adaptive temperature control (5–20% acceptance rate). Each sequence typically requires thousands of energy evaluations. Computation time scales with the number of input sequences. Please cite Salis et al. 2009 when using.
 
 ---

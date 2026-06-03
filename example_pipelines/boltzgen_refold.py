@@ -11,11 +11,7 @@ and obtain codon-optimized sequences for e coli
 """
 
 from biopipelines.pipeline import *
-from biopipelines.boltz2 import Boltz2
-from biopipelines.panda import Panda
-from biopipelines.plot import Plot
-from biopipelines.dna_encoder import DNAEncoder
-from biopipelines.conformational_change import ConformationalChange
+from biopipelines import Boltz2, Panda, Plot, DNAEncoder, ConformationalChange
 
 with Pipeline(project="GentamicinBinder", job="BoltzGen-Refold-DNA"):
     Resources(gpu="any", time="24:00:00", memory="16GB")

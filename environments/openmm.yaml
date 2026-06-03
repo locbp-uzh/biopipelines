@@ -1,0 +1,12 @@
+# OpenMM environment - energy minimisation only.
+# CPU build is sufficient for the minimisation use-case; GPU not required.
+name: openmm
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - openmm>=8.0
+  - pdbfixer
+  - pandas
+  - numpy

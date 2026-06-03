@@ -1,0 +1,22 @@
+# Phase 2 — PocketGen runtime deps. None of these need torch at metadata
+# resolution time, so plain pip install (no --no-build-isolation) works.
+rdkit==2023.3.3
+fair-esm==2.0.0
+e3nn==0.5.1
+einops
+easydict
+pyyaml
+omegaconf
+networkx
+numpy==1.23.5
+pandas
+scipy
+biopython
+mdtraj
+lmdb
+
+# pdbfixer + openmm now come from conda (pocketgen.colab.yaml) — PyPI's
+# openmm 8.1.1 is too old for current pdbfixer.
+
+# Weights live on Google Drive; gdown is the standard fetch tool.
+gdown

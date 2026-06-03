@@ -12,8 +12,10 @@ def _rel(path, output_folder):
     return path
 
 
-def _render_dataframe(df):
-    """Render a DataFrame as an HTML table with 2+...+2 row truncation."""
+def _render_dataframe(df, output_folder=None):
+    """Render a DataFrame as an HTML table with 2+...+2 row truncation.
+    Cell values that look like absolute paths under output_folder are
+    rewritten to <output_folder>/... before length-truncation."""
     columns = list(df.columns)
     parts = ['<table class="bp-table"><tr>']
     for col in columns:
@@ -38,6 +40,8 @@ def _render_dataframe(df):
         parts.append('<tr>')
         for col in columns:
             val = str(row[col]) if pd.notna(row[col]) else ''
+            if output_folder and val.startswith(output_folder):
+                val = _rel(val, output_folder)
             display_val = val if len(val) <= 60 else val[:57] + '...'
             parts.append(f'<td>{html_module.escape(display_val)}</td>')
         parts.append('</tr>')
@@ -80,7 +84,7 @@ def render(stream, output):
     # Data: map_table or id/file fallback
     map_data = stream._get_map_data()
     if map_data is not None and len(map_data) > 0:
-        parts.append(_render_dataframe(map_data))
+        parts.append(_render_dataframe(map_data, output_folder=output.output_folder))
     else:
         if stream.is_shared_file:
             # Pair every id with the shared path; zip(ids_expanded, files_expanded)
@@ -90,6 +94,7 @@ def render(stream, output):
             items = list(zip(stream.ids_expanded, stream.files_expanded))
         else:
             items = [(iid, "") for iid in stream.ids_expanded]
+        items = [(iid, rel(p) if p else "") for iid, p in items]
         n_items = len(items)
         parts.append('<table class="bp-table"><tr><th>id</th><th>file</th></tr>')
         if n_items <= 4:

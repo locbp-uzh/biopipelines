@@ -1,0 +1,23 @@
+# DiffDock pip deps - colab/micromamba variant.
+# Pinned to match the canonical hgbrian/biocolabs DiffDock.ipynb recipe
+# (https://colab.research.google.com/github/hgbrian/biocolabs/blob/master/DiffDock.ipynb).
+#
+# torch IS pinned here, despite what the notebook does (it inherits Colab's
+# pre-installed torch). Reason: BioPipelines uses isolated micromamba envs, so
+# we resolve our own torch — and unpinned `torch` resolves to 2.12+cu130 today,
+# which data.pyg.org doesn't yet ship PyG wheels for. Pin to a torch+cuda
+# combination data.pyg.org actually serves: torch 2.6.0+cu121.
+#
+# openfold is intentionally absent — the notebook clones facebookresearch/esm
+# instead (done in _install_script).
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.6.0
+pyyaml==6.0
+scipy==1.7.3
+networkx==2.6.3
+biopython==1.79
+rdkit-pypi==2022.03.5
+e3nn==0.5.0
+spyrmsd==0.5.2
+pandas==1.5.3
+biopandas==0.4.1

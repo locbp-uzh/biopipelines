@@ -164,8 +164,15 @@ def config():
         print("  path [--variant V]    Print absolute path of active config YAML")
         print("  edit [--variant V]    Open the config in an interactive TUI editor")
         print("                        (no --variant: pop a variant picker first)")
+        print("  set <key> <value> [--variant V]")
+        print("                        Set a dotted config key non-interactively")
+        print("                        (e.g. folders.base.biopipelines_output); writes")
+        print("                        via ruamel (comments preserved), .bak created first")
+        print("  get <key> [--variant V]")
+        print("                        Print the RAW value of a dotted config key")
+        print("                        (no placeholder resolution; use 'folder' for that)")
         print("  auto [--variant V]    Probe the host (username, env manager, scheduler,")
-        print("                        modules, lmod profile, container runtime, git email)")
+        print("                        modules, lmod + proxy profile, container runtime, git email)")
         print("                        and write the discovered values into the chosen")
         print("                        config (a .bak is created first). Without --variant,")
         print("                        a picker shows every variant + a [dry-run] preview.")
@@ -182,6 +189,8 @@ def config():
         print("  biopipelines-config list")
         print("  biopipelines-config edit")
         print("  biopipelines-config edit --variant cluster")
+        print("  biopipelines-config set folders.base.biopipelines_output /content/drive/MyDrive/BioPipelines --variant colab")
+        print("  biopipelines-config get folders.base.data --variant colab")
         print("  biopipelines-config auto                       # picker (variants + dry-run)")
         print("  biopipelines-config auto --variant cluster     # write straight to cluster.yaml")
         print("  biopipelines-config folder containers")
@@ -201,6 +210,10 @@ def config():
         _cmd_path(rest)
     elif command == "edit":
         _cmd_edit(rest)
+    elif command == "set":
+        _cmd_set(rest)
+    elif command == "get":
+        _cmd_get(rest)
     elif command == "auto":
         _cmd_auto(rest)
     elif command == "folder":
@@ -455,6 +468,135 @@ def _cmd_edit(args):
     sys.exit(rc)
 
 
+def _walk_to_leaf(doc, keys):
+    """Walk ``doc`` along dotted ``keys``; return the parent node and final key.
+
+    Exits with code 1 and a precise message if any intermediate section or the
+    final key is missing — shared by ``set`` (write) and ``get`` (read) so both
+    report the same way.
+    """
+    node = doc
+    for i, k in enumerate(keys[:-1]):
+        try:
+            node = node[k]
+        except (KeyError, TypeError):
+            print(f"No such config section: {'.'.join(keys[:i + 1])}",
+                  file=sys.stderr)
+            sys.exit(1)
+    leaf = keys[-1]
+    if not isinstance(node, dict) or leaf not in node:
+        print(f"No such config key: {'.'.join(keys)}", file=sys.stderr)
+        sys.exit(1)
+    return node, leaf
+
+
+def _cmd_get(args):
+    """Print the raw value of a dotted config key (no placeholder resolution).
+
+    Usage: ``bp-config get <dotted.key> [--variant V]``
+
+    The mirror of ``set``: reads the leaf straight from the YAML, so e.g.
+    ``folders.cache.AlphaFoldParams`` prints ``<cache>/alphafold_params``, not
+    the expanded path. Use ``bp-config folder <key>`` when you want the
+    resolved filesystem path instead.
+    """
+    from ruamel.yaml import YAML
+    from .config_manager import ConfigManager
+
+    args = list(args)
+    variant = _parse_variant_flag(args)
+    if len(args) != 1:
+        print("Usage: bp-config get <dotted.key> [--variant V]", file=sys.stderr)
+        sys.exit(2)
+
+    path = ConfigManager._get_config_path(variant=variant)
+    if not os.path.exists(path):
+        print(f"Config file not found: {path}", file=sys.stderr)
+        sys.exit(1)
+
+    yaml = YAML()
+    with open(path, "r", encoding="utf-8") as f:
+        doc = yaml.load(f)
+    node, leaf = _walk_to_leaf(doc, args[0].split("."))
+    print(node[leaf])
+
+
+def _cmd_set(args):
+    """Set a dotted config key non-interactively and write it back.
+
+    Usage: ``bp-config set <dotted.key> <value> [--variant V]``
+
+    Writes through ruamel round-trip (comments + key order preserved),
+    creating a ``.bak`` first — same on-disk semantics as the TUI editor's
+    save. Designed for scripted / notebook use where the full-screen ``edit``
+    TUI can't run (e.g. a Colab cell). The value's type is coerced to match
+    the existing leaf when one is present (bool/int/float), otherwise stored
+    as a string.
+
+    The dotted key must point at an existing leaf — we don't create new keys
+    or sections here (use ``edit`` for structural changes), so a typo fails
+    fast rather than silently writing a dead key.
+    """
+    import io
+    import shutil
+    from pathlib import Path
+    from ruamel.yaml import YAML
+    from .config_manager import ConfigManager, reload_config, backup_file
+    from .config_editor import _coerce
+
+    args = list(args)
+    variant = _parse_variant_flag(args)
+    if len(args) < 2:
+        print("Usage: bp-config set <dotted.key> <value> [--variant V]",
+              file=sys.stderr)
+        sys.exit(2)
+    dotted, value_str = args[0], args[1]
+    if len(args) > 2:
+        print(f"Unexpected argument: {args[2]}", file=sys.stderr)
+        sys.exit(2)
+
+    path = Path(ConfigManager._get_config_path(variant=variant))
+    if not path.exists():
+        print(f"Config file not found: {path}", file=sys.stderr)
+        sys.exit(1)
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with path.open("r", encoding="utf-8") as f:
+        doc = yaml.load(f)
+
+    # Walk to the parent of the target leaf; every step must already exist.
+    # set only updates existing keys (structural changes go through 'edit').
+    node, leaf = _walk_to_leaf(doc, dotted.split("."))
+
+    try:
+        new_val = _coerce(value_str, node[leaf])
+    except ValueError as e:
+        print(f"invalid value: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    old_val = node[leaf]
+    node[leaf] = new_val
+
+    # Atomic write with a timestamped .bak alongside, mirroring save_to_disk.
+    from pathlib import Path as _Path
+    bak = _Path(backup_file(path))
+    buf = io.StringIO()
+    yaml.dump(doc, buf)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(buf.getvalue(), encoding="utf-8")
+    os.replace(tmp, path)
+
+    # Refresh the singleton so a same-process caller (e.g. a notebook that
+    # imported biopipelines before this call) sees the new value.
+    try:
+        reload_config()
+    except Exception:
+        pass
+
+    print(f"{dotted}: {old_val!r} -> {new_val!r}  ({path}, backup: {bak.name})")
+
+
 # ── bp-config auto ────────────────────────────────────────────────────────────
 #
 # The probes below favour experiment over hardcoded names. The basic
@@ -521,31 +663,32 @@ def _probe_email():
     return ""
 
 
-def _probe_emails():
-    """Build an emails dict from `{<username>: <git user.email>}`. Empty if either is unknown."""
-    user = _probe_username()
-    email = _probe_email()
-    if user and email:
-        return {user: email}
-    return {}
 
 
 # ── shell-init discovery (lmod / site-specific profile.d files) ──────────────
 
 def _probe_scheduler_init_files(ctx: _ProbeContext) -> list:
-    """Find which /etc/profile.d/*.sh files actually contribute lmod state.
+    """Find which /etc/profile.d/*.sh files a SLURM batch job must source.
 
-    Algorithm: take a baseline subshell with a clean environment, record
-    its `MODULEPATH` and whether `module` is a function. For each
-    /etc/profile.d/*.sh, source it on top of the baseline and check
-    whether either changed. Keep the files that contributed.
+    Non-interactive SLURM shells don't read /etc/profile.d/, so any host
+    state that login shells get for free there has to be re-sourced in the
+    batch script. Two kinds of state matter:
 
-    This generalises beyond the S3IT-specific `lmod.sh + z*_lmodenv*.sh`
-    pattern to any cluster that puts module setup in profile.d under
-    arbitrary names (`spack.sh`, `cluster-init.sh`, `cc_modules.sh`,
-    etc.). Returns the list of contributing absolute paths in
-    alphabetical order (matching the order /etc/profile would source
-    them in a normal login).
+    - **module system** — `MODULEPATH` and whether `module` is a function,
+      so `module load` works in the job (lmod / spack / site init files).
+    - **outbound proxy** — `http_proxy` / `https_proxy`, so runtime
+      downloads (pip `git+https`, `curl`/`wget` of model weights) reach
+      the internet on compute nodes that egress only through a proxy.
+
+    Algorithm: take a baseline subshell with a clean environment and record
+    that state. For each /etc/profile.d/*.sh, source it on top of the
+    baseline and keep the file if it changes any of the tracked state.
+
+    This generalises beyond the S3IT-specific `lmod.sh + proxy.sh +
+    z*_lmodenv*.sh` set to any cluster that puts module/proxy setup in
+    profile.d under arbitrary names (`spack.sh`, `cluster-init.sh`, etc.).
+    Returns the contributing absolute paths in alphabetical order (matching
+    the order /etc/profile would source them in a normal login).
     """
     if ctx._scheduler_init_files is not None:
         return ctx._scheduler_init_files
@@ -566,15 +709,25 @@ def _probe_scheduler_init_files(ctx: _ProbeContext) -> list:
 
     def _probe_state(extra_lines: list) -> tuple:
         """Run a subshell that sources `extra_lines`, return
-        (module_is_function: bool, modulepath: str)."""
+        (module_is_function: bool, modulepath: str, proxy: str)."""
         prelude = "; ".join(extra_lines)
         if prelude:
             prelude += "; "
+        # Capture every proxy-related var, lower- AND upper-case, plus the
+        # no-proxy exclusion lists — a profile.d file may export only the
+        # uppercase forms (or only NO_PROXY), and we must still detect it.
+        # Concatenated into one PROXY= line so any change registers as a delta.
+        # The whole echo argument is double-quoted so the `|` separators stay
+        # literal — unquoted they are shell pipes, which (once a proxy var is
+        # non-empty) pipe the echo into a "command" named after the proxy URL,
+        # swallowing the PROXY= line and silently defeating the detection.
         cmd = (
             f"{prelude}"
             "if type module >/dev/null 2>&1 && [ \"$(type -t module)\" = function ]; "
             "then echo MODULE_FUNC=1; else echo MODULE_FUNC=0; fi; "
-            "echo MODULEPATH=${MODULEPATH:-}"
+            "echo MODULEPATH=${MODULEPATH:-}; "
+            'echo "PROXY=${http_proxy:-}|${https_proxy:-}|${HTTP_PROXY:-}'
+            '|${HTTPS_PROXY:-}|${no_proxy:-}|${NO_PROXY:-}"'
         )
         try:
             r = subprocess.run(
@@ -584,25 +737,30 @@ def _probe_scheduler_init_files(ctx: _ProbeContext) -> list:
             txt = r.stdout
         except Exception as e:
             ctx.log(f"subshell failed for state probe: {e}")
-            return False, ""
+            return False, "", ""
         is_func = "MODULE_FUNC=1" in txt
         mp = ""
+        proxy = ""
         for line in txt.splitlines():
             if line.startswith("MODULEPATH="):
                 mp = line[len("MODULEPATH="):]
-                break
-        return is_func, mp
+            elif line.startswith("PROXY="):
+                proxy = line[len("PROXY="):]
+        return is_func, mp, proxy
 
-    base_func, base_mp = _probe_state([])
-    ctx.log(f"baseline: module-is-function={base_func}, MODULEPATH={base_mp!r}")
+    base_func, base_mp, base_proxy = _probe_state([])
+    ctx.log(f"baseline: module-is-function={base_func}, MODULEPATH={base_mp!r}, proxy={base_proxy!r}")
 
     contributing = []
     for f in all_files:
         # Source baseline (nothing) + this single file.
         line = f'[ -f "{f}" ] && source "{f}"'
-        is_func, mp = _probe_state([line])
-        if (is_func and not base_func) or (mp != base_mp):
-            ctx.log(f"  {f}: contributes (func={is_func}, MODULEPATH delta={mp != base_mp})")
+        is_func, mp, proxy = _probe_state([line])
+        # Any change to the (concatenated) proxy/no-proxy vars vs. the clean
+        # baseline means this file configures networking the job needs.
+        sets_proxy = proxy != base_proxy
+        if (is_func and not base_func) or (mp != base_mp) or sets_proxy:
+            ctx.log(f"  {f}: contributes (func={is_func}, MODULEPATH delta={mp != base_mp}, proxy={sets_proxy})")
             contributing.append(f)
         else:
             ctx.log(f"  {f}: no effect; skipped")
@@ -892,7 +1050,7 @@ def _build_machine_block(ctx: _ProbeContext) -> tuple:
 
     machine = {
         "username": _probe_username(),
-        "emails": _probe_emails(),
+        "email": _probe_email(),
         "env_manager": em_block,  # may be None on miss
         "scheduler": sched_block,
         "container_executor": ce_name,
@@ -1339,7 +1497,7 @@ def _cmd_auto(args):
 
     print("Discovered values:")
     print(f"  username           = {new_machine['username']!r}")
-    print(f"  emails             = {dict(new_machine['emails'])}")
+    print(f"  email              = {new_machine['email']!r}")
     em = new_machine['env_manager']
     if em is None:
         print(f"  env_manager        = <unchanged — probe failed>")
@@ -1408,9 +1566,8 @@ def _cmd_auto(args):
             machine_cm[k] = v
     doc["machine"] = machine_cm
 
-    bak = path + ".bak"
-    import shutil
-    shutil.copy2(path, bak)
+    from .config_manager import backup_file
+    bak = backup_file(path)
     with open(path, "w", encoding="utf-8") as f:
         yaml.dump(doc, f)
     print(f"Wrote {path} (backup: {bak})")
@@ -1465,6 +1622,7 @@ def _cmd_machine(args):
 
     machine_values = {
         "variant": config_manager.get_variant(),
+        "email": config_manager.get_email(),
         "env_manager": config_manager.get_env_manager(),
         "scheduler": config_manager.get_scheduler(),
         "container_executor": config_manager.get_container_executor(),
@@ -1481,13 +1639,9 @@ def _cmd_machine(args):
         return
 
     key = args[0]
-    if key == "emails":
-        emails = config_manager.get_emails()
-        for user, email in emails.items():
-            print(f"{user}: {email}")
-    elif key in machine_values:
+    if key in machine_values:
         print(machine_values[key])
     else:
         print(f"Unknown machine key: {key}", file=sys.stderr)
-        print(f"Available keys: {', '.join(list(machine_values.keys()) + ['emails'])}", file=sys.stderr)
+        print(f"Available keys: {', '.join(machine_values.keys())}", file=sys.stderr)
         sys.exit(1)

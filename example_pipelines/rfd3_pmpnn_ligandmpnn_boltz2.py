@@ -10,15 +10,17 @@ This pipeline shows how to run RFdiffusion3, generate sequences far from the lig
 """
 
 from biopipelines.pipeline import * 
-from biopipelines.rfdiffusion3 import RFdiffusion3
-from biopipelines.distance_selector import DistanceSelector
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.ligand_mpnn import LigandMPNN
-from biopipelines.stitch_sequences import StitchSequences
-from biopipelines.boltz2 import Boltz2
-from biopipelines.panda import Panda
-from biopipelines.plot import Plot
-from biopipelines.pymol import PyMOL
+from biopipelines import (
+    RFdiffusion3,
+    DistanceSelector,
+    ProteinMPNN,
+    LigandMPNN,
+    StitchSequences,
+    Boltz2,
+    Panda,
+    Plot,
+    PyMOL,
+)
 
 with Pipeline(project="Examples",
               job="RFD3-ProteinMPNN-LigandMPNN-Boltz",
@@ -38,23 +40,24 @@ with Pipeline(project="Examples",
                                     ligands=ap5) # sequence pulled directly from RCSB
     
     adenylate_kinase_boltz_renamed = PDB(adenylate_kinase_boltz,
-                                         PDB.Rename("LIG",":L:")) # RFdiffusion3 cannot handle ccd-like ligand codes
+                                         PDB.rename("LIG",":L:")) # RFdiffusion3 cannot handle ccd-like ligand codes
+    ligand_L = Ligand(code="L")  # names the renamed HETATM code for the code-consuming tools
 
     rfd3 = RFdiffusion3(pdb=adenylate_kinase_boltz_renamed, #RFdiffusion3 often needs some PDB cleanup. The easiest solution is to start from a Boltz prediction
-                        ligand_code=':L:', 
+                        ligand=ligand_L,
                         contig='A1-121,50-70,A170-214', #They have renamed contigs -> contig
                         num_designs=3)
 
     #this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
     distances = DistanceSelector(structures=rfd3,
-                                  ligand=":L:",
+                                  ligand=ligand_L,  # residue code "L" read from the compounds stream at runtime
                                   distance=5,
                                   restrict_to=rfd3.tables.structures.designed)
     pmpnn = ProteinMPNN(structures=rfd3,
                         num_sequences=2,
                         redesigned=distances.tables.selections.beyond)
     lmpnn = LigandMPNN(structures=rfd3,
-                       ligand=":L:", #in ligand mpnn you should always specify the ligand name.
+                       ligand=ligand_L, #in ligand mpnn you should always specify the ligand.
                        num_sequences=2,
                        redesigned=distances.tables.selections.within)
 

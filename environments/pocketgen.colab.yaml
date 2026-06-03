@@ -1,0 +1,26 @@
+# PocketGen - colab/micromamba variant.
+# Trimmed from upstream pocketgen.yaml (the upstream pin is enormous and
+# bundles wet-lab/docking deps PocketGen's inference path does not need —
+# alphaspace2, modeller, openeye, posebusters, ... All removed.)
+#
+# The pip layer is phased (see pocketgen.pip.colab.{1,2}.txt):
+#   1 — torch + PyG wheels (cu117, matching the upstream yaml)
+#   2 — runtime deps (rdkit, esm, easydict, etc.), gdown for weights download
+#
+# OpenMM + pdbfixer live in conda: PyPI only ships openmm 8.1.1 today, but
+# pdbfixer (≥1.10) requires openmm≥8.2; pip resolution fails. conda-forge
+# has openmm 8.2/8.3 for py3.8.
+name: pocketgen
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8
+  - pip
+  # OpenBabel + boost — conda is the working install path for these on Colab
+  # (pip wheels are missing or broken). PocketGen's preprocessing reads
+  # ligand SDFs via OpenBabel.
+  - openbabel
+  - boost-cpp
+  # OpenMM and pdbfixer: see header comment.
+  - openmm
+  - pdbfixer

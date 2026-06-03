@@ -10,8 +10,7 @@ This pipeline shows how to run RFdiffusion-AllAtom, generate sequences far from 
 """
 
 from biopipelines.pipeline import *
-from biopipelines.mmseqs2 import MMseqs2
-from biopipelines.boltz2 import Boltz2
+from biopipelines import MMseqs2, Boltz2
 
 with Pipeline(project="Examples",
               job="MMseqs-Boltz",

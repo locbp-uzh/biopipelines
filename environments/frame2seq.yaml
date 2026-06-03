@@ -1,0 +1,12 @@
+# Frame2seq - colab/micromamba variant.
+# Frame2seq ships as a single PyPI package (`pip install frame2seq`). The conda
+# layer is intentionally minimal: just Python 3.10 + pip. PyTorch and Frame2seq
+# come from the pip layer (see frame2seq.pip.colab.txt). Colab already provides
+# CUDA at the system level, so the torch wheel resolves to the CUDA build
+# automatically.
+name: frame2seq
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip

@@ -11,6 +11,7 @@ Provides atom selection and distance calculation utilities.
 """
 
 import math
+import re
 from typing import List, Dict, Any, Optional, Tuple, NamedTuple, Set
 
 
@@ -19,6 +20,31 @@ STANDARD_RESIDUES = {
     'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
     'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
 }
+
+THREE_TO_ONE = {
+    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
+    'GLN': 'Q', 'GLU': 'E', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
+    'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
+    'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V',
+}
+
+# Theoretical max solvent-accessible surface area per residue (one-letter -> Å²).
+MAX_ACC_TIEN = {
+    'A': 129.0, 'R': 274.0, 'N': 195.0, 'D': 193.0, 'C': 167.0,
+    'E': 223.0, 'Q': 225.0, 'G': 104.0, 'H': 224.0, 'I': 197.0,
+    'L': 201.0, 'K': 236.0, 'M': 224.0, 'F': 240.0, 'P': 159.0,
+    'S': 155.0, 'T': 172.0, 'W': 285.0, 'Y': 263.0, 'V': 174.0,
+}
+
+
+def relative_accessibility(acc: float, restype: str) -> Optional[float]:
+    """rsa = acc / max-ACC; None when restype is not a standard residue."""
+    if len(restype) == 3:
+        restype = THREE_TO_ONE.get(restype.upper(), restype)
+    max_acc = MAX_ACC_TIEN.get(restype)
+    if not max_acc:
+        return None
+    return round(acc / max_acc, 4)
 
 class Atom(NamedTuple):
     """Represents an atom from PDB file."""
@@ -201,10 +227,12 @@ def select_atoms_by_residue_number(atoms: List[Atom], residue_numbers: List[int]
     else:
         actual_residue_numbers = residue_numbers
 
-    # Select atoms with the resolved residue numbers
+    # Select atoms with the resolved residue numbers (optionally chain-restricted).
     selected = []
     for atom in atoms:
         if atom.res_num in actual_residue_numbers:
+            if chain and atom.chain != chain:
+                continue
             selected.append(atom)
     return selected
 
@@ -308,6 +336,9 @@ def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
 
     Supports:
     - Residue.atom: ``10.CA``, ``-1.C`` (numeric before dot)
+    - Chain-qualified residue.atom: ``A141.CB``, ``B1.SI81`` (single chain letter
+      then a residue number — restricts to that chain; also disambiguates a ligand
+      copy on a specific chain, e.g. ``B1.SI81`` for the ligand at chain B residue 1)
     - Keyword.atom: ``first.CA``, ``last.C``
     - Ligand.atom:  ``LIG.Cl`` (non-numeric before dot)
     - Sequence context: ``D in IGDWG``
@@ -329,29 +360,39 @@ def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
         prefix = parts[0]
         atom_name = parts[1] if len(parts) > 1 else None
 
+        # Detect a chain-qualified residue prefix: one chain letter then a
+        # (possibly negative) residue number, e.g. 'A141', 'B1', 'A-1'. A
+        # ligand resname of this shape (B12, K21, T3) takes precedence, so the
+        # chain reading only applies when the prefix isn't a present resname.
+        chain_match = re.match(r'^([A-Za-z])(-?\d+)$', prefix)
+        if chain_match and any(a.res_name == prefix for a in atoms):
+            chain_match = None
+
+        def _filter_by_atom_name(residue_atoms):
+            if atom_name is None:
+                return residue_atoms
+            selected = []
+            for atom in residue_atoms:
+                atom_clean = atom.atom_name.strip()
+                if atom_clean == atom_name or atom_clean.upper() == atom_name.upper():
+                    selected.append(atom)
+            return selected
+
         if prefix.lower() in ('first', 'last'):
             # Keyword.atom: 'first.CA', 'last.C'
             res_num = _resolve_keyword_residue(prefix.lower(), atoms)
-            residue_atoms = select_atoms_by_residue_number(atoms, [res_num])
-            if atom_name is None:
-                return residue_atoms
-            selected = []
-            for atom in residue_atoms:
-                atom_clean = atom.atom_name.strip()
-                if atom_clean == atom_name or atom_clean.upper() == atom_name.upper():
-                    selected.append(atom)
-            return selected
+            return _filter_by_atom_name(select_atoms_by_residue_number(atoms, [res_num]))
+        elif chain_match:
+            # Chain-qualified residue.atom: 'A141.CB', 'B1.SI81'. Restrict to that
+            # chain so a residue number / ligand copy is disambiguated per chain.
+            chain = chain_match.group(1)
+            res_num = int(chain_match.group(2))
+            return _filter_by_atom_name(
+                select_atoms_by_residue_number(atoms, [res_num], chain=chain)
+            )
         elif prefix.lstrip('-').isdigit():
-            # Residue.atom: '10.CA', '-1.C'
-            residue_atoms = select_atoms_by_residue_number(atoms, [int(prefix)])
-            if atom_name is None:
-                return residue_atoms
-            selected = []
-            for atom in residue_atoms:
-                atom_clean = atom.atom_name.strip()
-                if atom_clean == atom_name or atom_clean.upper() == atom_name.upper():
-                    selected.append(atom)
-            return selected
+            # Residue.atom: '10.CA', '-1.C' (any chain)
+            return _filter_by_atom_name(select_atoms_by_residue_number(atoms, [int(prefix)]))
         else:
             # Ligand.atom: 'LIG.Cl'
             return select_atoms_by_ligand(atoms, prefix, atom_name)
@@ -406,6 +447,29 @@ def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
             if atom.atom_name == selection:
                 selected.append(atom)
         return selected
+
+
+_ONE_TO_THREE = {
+    'A': 'ALA', 'R': 'ARG', 'N': 'ASN', 'D': 'ASP', 'C': 'CYS',
+    'Q': 'GLN', 'E': 'GLU', 'G': 'GLY', 'H': 'HIS', 'I': 'ILE',
+    'L': 'LEU', 'K': 'LYS', 'M': 'MET', 'F': 'PHE', 'P': 'PRO',
+    'S': 'SER', 'T': 'THR', 'W': 'TRP', 'Y': 'TYR', 'V': 'VAL',
+}
+
+
+def resolve_selection_in_sequence(selection: str, sequence: str, chain: str = "A") -> List[int]:
+    """Resolve a selection string against a raw sequence, returning residue numbers.
+
+    Builds one pseudo-atom per residue (numbered 1..N) so the common
+    ``resolve_selection`` grammar (``"C in ILIPCH"``, ``"145"``, ``"10-20"``,
+    ``"first"``/``"last"`` …) works without a structure — for callers that only
+    have a sequence (e.g. building a Boltz constraint from a designed sequence)."""
+    pseudo = [
+        Atom(0.0, 0.0, 0.0, "CA", _ONE_TO_THREE.get(aa, "UNK"), i + 1, chain, "C")
+        for i, aa in enumerate(sequence)
+        if aa in _ONE_TO_THREE
+    ]
+    return sorted({a.res_num for a in resolve_selection(selection, pseudo)})
 
 def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     """

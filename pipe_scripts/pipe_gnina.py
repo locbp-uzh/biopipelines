@@ -33,7 +33,7 @@ from rdkit.ML.Cluster import Butina
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table
+from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, read_upstream_missing, MISSING_COLUMNS
 
 
 @contextmanager
@@ -628,6 +628,10 @@ def run_docking(prepared_proteins, conformers, config):
     cnn_scoring = config["cnn_scoring"]
     cnn_score_threshold = config["cnn_score_threshold"]
     box = config["box"]
+    # Per-run wall-clock cap (seconds). A flexible-ligand search can occasionally
+    # never terminate; kill that run and move on rather than hanging the job.
+    # None or 0 disables. Set at config time via Gnina(dock_timeout=...).
+    dock_timeout = config.get("dock_timeout", 1800) or None
 
     dock_dir = os.path.join(output_folder, "docking")
     os.makedirs(dock_dir, exist_ok=True)
@@ -678,7 +682,13 @@ def run_docking(prepared_proteins, conformers, config):
                     "-o", out_sdf,
                 ]
 
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True,
+                                            timeout=dock_timeout)
+                except subprocess.TimeoutExpired:
+                    print(f"Warning: GNINA timed out (>{dock_timeout}s), skipping run "
+                          f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}")
+                    continue
                 if result.returncode != 0:
                     print(f"Warning: GNINA failed for "
                           f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}")
@@ -987,6 +997,19 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
     summary_df.to_csv(docking_summary_csv, index=False)
     print(f"Wrote {len(summary_df)} docking summaries to {docking_summary_csv}")
 
+    structures_map = config.get("structures_map")
+    if structures_map:
+        os.makedirs(os.path.dirname(structures_map), exist_ok=True)
+        map_rows = [
+            {"id": r["id"], "file": r["best_pose_file"],
+             "structures.id": r["structures.id"], "compounds.id": r["compounds.id"]}
+            for r in summary_rows if r.get("best_pose_file")
+        ]
+        pd.DataFrame(map_rows, columns=["id", "file", "structures.id", "compounds.id"]).to_csv(
+            structures_map, index=False
+        )
+        print(f"Wrote structures map: {structures_map} ({len(map_rows)} rows)")
+
 
 def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
     """
@@ -1039,11 +1062,21 @@ def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
             ligand_conects.append(line)
 
     with open(dst_pdb, 'w') as out:
+        wrote_protein = False
         with open(protein_pdb, 'r') as prot:
             for line in prot:
                 if line.startswith(("CONECT", "MASTER", "END")):
                     continue
+                if line.startswith("TER"):
+                    continue  # re-emit a single TER after the protein block below
                 out.write(line)
+                if line.startswith(("ATOM", "HETATM")):
+                    wrote_protein = True
+        # Terminate the protein chain before the ligand. OpenBabel's -h re-emit
+        # drops the TER record, and without it viewers/parsers bond the protein
+        # C-terminus straight into the chain-Z ligand (the protein renders broken).
+        if wrote_protein:
+            out.write("TER\n")
 
         for line in ligand_atoms:
             old_serial = int(line[6:11].strip())
@@ -1084,22 +1117,27 @@ def main():
     structures_ds = load_datastream(config["structures_json"])
     compounds_ds = load_datastream(config["compounds_json"])
 
-    missing_csv = config.get("missing_csv")
-    if missing_csv and os.path.exists(missing_csv):
-        missing_df = pd.read_csv(missing_csv)
-        missing_ids = set(missing_df["id"].astype(str))
-        if missing_ids:
-            expanded_ids = structures_ds.ids_expanded
-            expanded_files = structures_ds.files_expanded
-            pairs = [(id_, f) for id_, f in zip(expanded_ids, expanded_files)
-                     if id_ not in missing_ids]
-            skipped = len(expanded_ids) - len(pairs)
-            if skipped:
-                print(f"  Skipping {skipped} IDs from upstream missing table")
-            structures_ds.ids = [p[0] for p in pairs]
-            structures_ds.files = [p[1] for p in pairs]
-            structures_ds._ids_expanded_cache = None
-            structures_ds._files_expanded_cache = None
+    upstream_missing_rows = read_upstream_missing(config.get("upstream_missing"))
+    missing_ids = {str(r["id"]) for r in upstream_missing_rows}
+    if missing_ids:
+        expanded_ids = structures_ds.ids_expanded
+        expanded_files = structures_ds.files_expanded
+        pairs = [(id_, f) for id_, f in zip(expanded_ids, expanded_files)
+                 if id_ not in missing_ids]
+        skipped = len(expanded_ids) - len(pairs)
+        if skipped:
+            print(f"  Skipping {skipped} structure IDs from upstream missing table")
+        structures_ds.ids = [p[0] for p in pairs]
+        structures_ds.files = [p[1] for p in pairs]
+        structures_ds._ids_expanded = None
+        structures_ds._files_expanded = None
+
+        comp_all = compounds_ds.ids_expanded
+        comp_kept = [cid for cid in comp_all if cid not in missing_ids]
+        if len(comp_all) - len(comp_kept):
+            print(f"  Skipping {len(comp_all) - len(comp_kept)} compound IDs from upstream missing table")
+        compounds_ds.ids = comp_kept
+        compounds_ds._ids_expanded = comp_kept
 
     print("\n--- Step 1: Protein Preparation ---")
     prepared_proteins = prepare_proteins(
@@ -1121,6 +1159,12 @@ def main():
 
     print("\n--- Step 5: Results Aggregation ---")
     aggregate_results(all_poses, conformers, consistency, config, prepared_proteins)
+
+    missing_csv = config.get("missing_csv")
+    if missing_csv:
+        os.makedirs(os.path.dirname(missing_csv), exist_ok=True)
+        pd.DataFrame(upstream_missing_rows, columns=MISSING_COLUMNS).to_csv(missing_csv, index=False)
+        print(f"Wrote missing manifest: {missing_csv} ({len(upstream_missing_rows)} rows)")
 
     print("\n" + "=" * 60)
     print("GNINA docking pipeline complete")

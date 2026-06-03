@@ -115,28 +115,60 @@ def test_pool_three_sequence_runs_with_unique_ids(
     assert ids == ["a_1", "b_2", "c_3"]
 
 
-def test_pool_emits_pool_path_column_in_map_table(
+def test_pool_no_config_time_map_and_content_table_unified(
     local_config, isolated_cwd, new_pipeline,
 ):
-    """The map_table CSV emitted at config time must carry a ``pool.path``
-    column with the 1-based source-run index for every output id."""
-    import pandas as pd
-    from biopipelines.sequence import Sequence
+    """PDB's ``structures`` stream is content-bearing (it owns the
+    ``structures`` table): its map_table is declared at the same file as the
+    TableInfo, composite ids are predicted at config time, and — per the Map
+    Table Contract — no CSV is written at config time."""
+    from biopipelines.pdb import PDB
     from biopipelines.pool import Pool
 
     pipeline = new_pipeline("pool_provenance_column")
     with pipeline:
-        run_a = Sequence(seq=["MK", "AY"], ids=["a", "b"], type="protein")
-        run_b = Sequence(seq=["GF", "CD"], ids=["a", "b"], type="protein")
+        run_a = PDB("1ubq", ids="p")
+        run_b = PDB("1ubq", ids="p")
         pooled = Pool(runs=[run_a, run_b])
         pipeline.save()
 
-    map_path = pooled.streams.sequences.map_table
-    assert os.path.isfile(map_path), f"map_table not written: {map_path}"
-    df = pd.read_csv(map_path)
-    assert "pool.path" in df.columns
-    assert list(df["pool.path"]) == [1, 1, 2, 2]
-    assert list(df["id"]) == ["a_1", "b_1", "a_2", "b_2"]
+    map_path = pooled.streams.structures.map_table
+    assert map_path == pooled.tables.structures.info.path
+    assert list(pooled.streams.structures.ids) == ["p_1", "p_2"]
+    # No config-time map is written.
+    assert not os.path.isfile(map_path)
+
+
+def test_pool_lineage_only_stream_uses_map_csv_not_content_path(
+    local_config, isolated_cwd, new_pipeline,
+):
+    """A stream that reuses a sibling's content CSV only as a metadata lookup
+    (Sequence's ``fasta`` reusing ``sequences.csv``) is NOT content-bearing.
+    Its pooled map_table must stay the lineage-only ``fasta/fasta_map.csv``,
+    never a relocated/duplicated ``fasta/sequences.csv`` content table — and
+    the real ``sequences`` content table must stay at ``sequences/sequences.csv``."""
+    from biopipelines.sequence import Sequence
+    from biopipelines.pool import Pool
+
+    pipeline = new_pipeline("pool_lineage_only_fasta")
+    with pipeline:
+        a = Sequence(seq=["MK", "AY"], ids=["a", "b"], type="protein")
+        b = Sequence(seq=["GF", "CD"], ids=["a", "b"], type="protein")
+        pooled = Pool(runs=[a, b])
+        pipeline.save()
+
+    # The content-bearing `sequences` stream owns sequences/sequences.csv.
+    seq_map = pooled.streams.sequences.map_table
+    assert seq_map == pooled.tables.sequences.info.path
+    assert os.path.basename(seq_map) == "sequences.csv"
+    assert os.path.basename(os.path.dirname(seq_map)) == "sequences"
+
+    # The lineage-only `fasta` stream stays at fasta/fasta_map.csv — it must
+    # NOT be classified content-bearing nor relocate sequences.csv under fasta/.
+    fasta_map = pooled.streams.fasta.map_table
+    assert os.path.basename(fasta_map) == "fasta_map.csv"
+    assert os.path.basename(os.path.dirname(fasta_map)) == "fasta"
+    assert fasta_map != seq_map
 
 
 # ── happy path: pool two Ligand runs ──────────────────────────────────────────
@@ -166,6 +198,172 @@ def test_pool_two_ligand_runs(
         actual=ids,
     )
     assert ids == ["a_1", "b_1", "a_2", "b_2"]
+
+
+def test_pool_compounds_stream_map_is_the_content_table(
+    local_config, isolated_cwd, new_pipeline,
+):
+    """The compounds stream is content-bearing: its map_table must be the
+    same file as the pooled compounds TableInfo, and live at
+    ``compounds/compounds.csv`` (the upstream convention), not a separate
+    ``compounds_map.csv`` or ``tables/compounds.csv``."""
+    from biopipelines.ligand import Ligand
+    from biopipelines.pool import Pool
+
+    pipeline = new_pipeline("pool_compounds_unify")
+    with pipeline:
+        a = Ligand({"a": "CCO", "b": "C(=O)O"})
+        b = Ligand({"a": "CC", "b": "CCC"})
+        pooled = Pool(runs=[a, b])
+        pipeline.save()
+
+    map_path = pooled.streams.compounds.map_table
+    table_path = pooled.tables.compounds.info.path
+    assert map_path == table_path
+    assert os.path.basename(map_path) == "compounds.csv"
+    assert os.path.basename(os.path.dirname(map_path)) == "compounds"
+
+
+def test_pool_preserves_compounds_chemistry_at_runtime(
+    local_config, isolated_cwd, new_pipeline, tmp_path,
+):
+    """End-to-end runtime check: after pipe_pool runs, the compounds stream
+    map_table preserves the Ligand Contract domain columns (code, smiles)
+    plus pool.path — so a downstream ligand-aware tool no longer hits a
+    KeyError on streams.compounds."""
+    import json
+    import pandas as pd
+    from biopipelines.ligand import Ligand
+    from biopipelines.pool import Pool
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    # Two upstream Ligand runs with real compounds.csv content tables.
+    cols = ["id", "format", "code", "lookup", "source", "ccd", "cid",
+            "cas", "smiles", "name", "formula", "file_path"]
+    up = []
+    for i, smis in enumerate([("CCO", "CC(=O)O"), ("CC", "CCC")], start=1):
+        d = tmp_path / f"run{i}" / "compounds"
+        d.mkdir(parents=True)
+        csv = d / "compounds.csv"
+        pd.DataFrame([
+            {"id": "a", "code": "LIG", "smiles": smis[0], "format": "csv",
+             "lookup": "", "source": "smiles", "ccd": "", "cid": "",
+             "cas": "", "name": "", "formula": "", "file_path": ""},
+            {"id": "b", "code": "LIG", "smiles": smis[1], "format": "csv",
+             "lookup": "", "source": "smiles", "ccd": "", "cid": "",
+             "cas": "", "name": "", "formula": "", "file_path": ""},
+        ], columns=cols).to_csv(csv, index=False)
+        up.append(str(csv))
+
+    out_compounds = tmp_path / "out" / "compounds"
+    out_compounds.mkdir(parents=True)
+    combined = str(out_compounds / "compounds.csv")
+
+    config = {
+        "runs": [
+            {"streams": [{"name": "compounds", "stream_key": "compounds",
+                          "format": "csv", "ids": ["a", "b"], "files": [],
+                          "map_table": up[i], "is_shared_file": False}],
+             "tables": [{"name": "compounds", "path": up[i], "columns": cols}]}
+            for i in range(2)
+        ],
+        "shared_streams": ["compounds"],
+        "shared_tables": ["compounds"],
+        "out_streams": {"compounds": {
+            "stream_dir": str(out_compounds), "map_table": combined,
+            "format": "csv"}},
+        "out_tables": {"compounds": combined},
+        "content_bearing_streams": ["compounds"],
+        "content_file_cols": {"compounds": "file_path"},
+        "output_folder": str(tmp_path / "out"),
+        "recount_prefix": None,
+    }
+    config_json = tmp_path / "pool_config.json"
+    config_json.write_text(json.dumps(config))
+
+    import sys
+    sys.argv = ["pipe_pool.py", str(config_json)]
+    pipe_pool.main()
+
+    df = pd.read_csv(combined)
+    assert {"id", "code", "smiles", "pool.path"} <= set(df.columns)
+    assert list(df["id"]) == ["a_1", "b_1", "a_2", "b_2"]
+    assert list(df["pool.path"]) == [1, 1, 2, 2]
+    assert list(df["smiles"]) == ["CCO", "CC(=O)O", "CC", "CCC"]
+    # A content table must NOT carry the generic file/value scratch columns.
+    assert "value" not in df.columns
+    assert "file" not in df.columns
+
+
+def test_pool_pdb_content_table_preserves_file_path_at_runtime(
+    local_config, isolated_cwd, new_pipeline, tmp_path,
+):
+    """End-to-end runtime check for a content-bearing stream that ALSO carries
+    per-id files (PDB's ``structures``): the pooled content table must keep the
+    upstream ``file_path`` column (not a generic ``file``), and the structure
+    files must be copied into the gather folder. Guards the Map Table Contract
+    schema fidelity downstream readers (e.g. rcsb) rely on."""
+    import json
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    cols = ["id", "pdb_id", "file_path", "format", "file_size", "source"]
+    up = []
+    for i in range(1, 3):
+        d = tmp_path / f"run{i}" / "structures"
+        d.mkdir(parents=True)
+        pdb_file = d / "p.pdb"
+        pdb_file.write_text("ATOM      1  N   MET A   1\n")
+        csv = d / "structures.csv"
+        pd.DataFrame([{
+            "id": "p", "pdb_id": "1ubq", "file_path": str(pdb_file),
+            "format": "pdb", "file_size": pdb_file.stat().st_size,
+            "source": "rcsb",
+        }], columns=cols).to_csv(csv, index=False)
+        up.append((str(csv), str(pdb_file)))
+
+    out_structs = tmp_path / "out" / "structures"
+    out_structs.mkdir(parents=True)
+    combined = str(out_structs / "structures.csv")
+
+    config = {
+        "runs": [
+            {"streams": [{"name": "structures", "stream_key": "structures",
+                          "format": "pdb", "ids": ["p"],
+                          "files": [str(tmp_path / f"run{i+1}" / "structures" / "<id>.pdb")],
+                          "map_table": up[i][0], "is_shared_file": False}],
+             "tables": [{"name": "structures", "path": up[i][0], "columns": cols}]}
+            for i in range(2)
+        ],
+        "shared_streams": ["structures"],
+        "shared_tables": ["structures"],
+        "out_streams": {"structures": {
+            "stream_dir": str(out_structs), "map_table": combined,
+            "format": "pdb"}},
+        "out_tables": {"structures": combined},
+        "content_bearing_streams": ["structures"],
+        "content_file_cols": {"structures": "file_path"},
+        "output_folder": str(tmp_path / "out"),
+        "recount_prefix": None,
+    }
+    config_json = tmp_path / "pool_config.json"
+    config_json.write_text(json.dumps(config))
+
+    import sys
+    sys.argv = ["pipe_pool.py", str(config_json)]
+    pipe_pool.main()
+
+    df = pd.read_csv(combined)
+    assert "file_path" in df.columns
+    assert "file" not in df.columns
+    assert "value" not in df.columns
+    assert list(df["id"]) == ["p_1", "p_2"]
+    assert list(df["pool.path"]) == [1, 2]
+    # The structure files were copied into the gather folder under composite ids.
+    copied = [df["file_path"].iloc[0], df["file_path"].iloc[1]]
+    assert all(os.path.exists(p) for p in copied)
+    assert os.path.basename(copied[0]) == "p_1.pdb"
+    assert os.path.basename(copied[1]) == "p_2.pdb"
 
 
 # ── tables ────────────────────────────────────────────────────────────────────

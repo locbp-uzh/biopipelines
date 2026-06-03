@@ -97,6 +97,31 @@ def test_iteration_count_matches_len(record_case):
     assert actual == len(ds) == 10
 
 
+@pytest.mark.parametrize(
+    "stream_format, allowed, expected",
+    [
+        ("pdb", ("pdb", "cif"), True),
+        ("cif", ("pdb", "cif"), True),
+        ("pdb|cif", ("pdb", "cif"), True),
+        ("pdb|sdf", ("pdb", "cif"), False),
+        ("sdf", ("pdb", "cif"), False),
+    ],
+)
+def test_datastream_has_only_formats(record_case, stream_format, allowed, expected):
+    ds = DataStream(name="s", ids=["x"], format=stream_format)
+    actual = ds.has_only_formats(*allowed)
+    record_case(input=(stream_format, allowed), expected=expected, actual=actual)
+    assert actual is expected
+
+
+def test_datastream_format_helpers_normalize_tokens(record_case):
+    ds = DataStream(name="s", ids=["x"], format=" PDB | cif ")
+    actual = (ds.formats, ds.has_format("pdb"), ds.has_only_formats("pdb", "cif"))
+    expected = (("pdb", "cif"), True, True)
+    record_case(input="format=' PDB | cif '", expected=expected, actual=actual)
+    assert actual == expected
+
+
 # ── StandardizedOutput ID-based selection (c302877) ───────────────────────────
 
 def test_standardized_output_select_by_id(record_case):

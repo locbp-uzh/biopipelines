@@ -1,0 +1,16 @@
+# AF2BIND environment - AlphaFold2-pair-representation binding-site prediction.
+# Conda layer only (python + numpy<2 + pandas). The JAX/ColabDesign stack is
+# pip-installed in the install script as an explicit `pip install` step, NOT in
+# a yaml `pip:` section — mamba's env-create pip handling can swallow a failing
+# pip resolve (env create still exits 0), leaving a half-built env. The pinned
+# set (jax 0.4.23 + dm-haiku 0.0.10 + chex 0.1.7 + optax 0.1.7 + colabdesign
+# 1.1.1) is verified to resolve together; jax 0.4.23 is the last release with
+# jax.linear_util, which ColabDesign v1.1.1's haiku imports.
+name: af2bind
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy<2
+  - pandas

@@ -11,7 +11,7 @@ example_pipelines/test_all.py.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion_allatom import RFdiffusionAllAtom
+from biopipelines import RFdiffusionAllAtom, Ligand
 
 with Pipeline(project="ToolParameters",
               job="RFdiffusionAllAtom",
@@ -21,28 +21,29 @@ with Pipeline(project="ToolParameters",
 
     abl1 = PDB("3QRK", ids="ABL1")
     contigs = "A227-377,10-20"
+    dp9 = Ligand(code="9DP")
 
     # 1: defaults — 9DP ligand context
     Suffix("default")
-    RFdiffusionAllAtom(pdb=abl1, ligand="9DP", contigs=contigs, num_designs=2, steps=20)
+    RFdiffusionAllAtom(pdb=abl1, ligand=dp9, contigs=contigs, num_designs=2, steps=20)
 
     # 2: more designs
     Suffix("num_designs")
-    RFdiffusionAllAtom(pdb=abl1, ligand="9DP", contigs=contigs, num_designs=4, steps=20)
+    RFdiffusionAllAtom(pdb=abl1, ligand=dp9, contigs=contigs, num_designs=4, steps=20)
 
     # 3: explicit step count
     Suffix("steps")
-    RFdiffusionAllAtom(pdb=abl1, ligand="9DP", contigs=contigs, num_designs=2, steps=80)
+    RFdiffusionAllAtom(pdb=abl1, ligand=dp9, contigs=contigs, num_designs=2, steps=80)
 
     # 4: extra recycles
     Suffix("recycles")
-    RFdiffusionAllAtom(pdb=abl1, ligand="9DP", contigs=contigs, num_designs=2, steps=20, num_recycles=3)
+    RFdiffusionAllAtom(pdb=abl1, ligand=dp9, contigs=contigs, num_designs=2, steps=20, num_recycles=3)
 
     # 5: deterministic + design_startnum
     Suffix("deterministic_startnum")
     RFdiffusionAllAtom(
         pdb=abl1,
-        ligand="9DP",
+        ligand=dp9,
         contigs=contigs,
         num_designs=2,
         steps=20,

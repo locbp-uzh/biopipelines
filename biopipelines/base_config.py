@@ -11,10 +11,16 @@ validation, and integration with the pipeline system.
 
 import pandas as pd
 import os
+import sys
 import re
 import json
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, Union, TypeVar, overload, Type
+
+try:
+    from ._layout import INTERNAL_FOLDER
+except ImportError:
+    from _layout import INTERNAL_FOLDER
 
 
 _SAFE_FREEFORM_RE = re.compile(r'^[^"`$\\]*$')
@@ -181,32 +187,108 @@ class BaseConfig(ABC):
     @staticmethod
     def _env_install_block(env_name: str, env_manager: str, biopipelines: str) -> str:
         """Return bash that creates an env from environments/<env>.<variant>.yaml
-        and (if present) installs environments/<env>.pip.<variant>.txt on top.
+        and (if present) installs the matching pip requirements on top.
 
         For both the conda YAML and the pip txt, falls back to the variant-less
         filename (``<env>.yaml`` / ``<env>.pip.txt``) when the variant-specific
         one is absent — envs that resolve identically across variants are
         stored under a single file.
 
+        Phased pip installs: if numbered pip files exist
+        (``<env>.pip.<variant>.<N>.txt`` for N=1,2,...), they are installed in
+        numeric order as separate ``pip install -r`` calls. Use this when one
+        package's setup.py imports another at module level (e.g. openfold
+        importing torch) so build isolation can't see it via metadata. A pip
+        file whose first non-empty line is ``# bp:no-build-isolation`` is
+        installed with ``--no-build-isolation``, letting it pick up packages
+        already installed in the env from an earlier phase. When no numbered
+        files exist, falls back to the single-file form
+        ``<env>.pip.<variant>.txt`` / ``<env>.pip.txt``.
+
         The variant is read from the active ConfigManager so each install script
         only needs to call this helper with the env name.
         """
+        import glob, re
         variant = ConfigManager().get_variant()
         env_dir = f"{biopipelines}/environments"
         env_yaml_variant = f"{env_dir}/{env_name}.{variant}.yaml"
         env_yaml_shared = f"{env_dir}/{env_name}.yaml"
+
+        env_block = (
+            f'if [ -f "{env_yaml_variant}" ]; then\n'
+            f'    {env_manager} env create -f "{env_yaml_variant}" -y\n'
+            f'else\n'
+            f'    {env_manager} env create -f "{env_yaml_shared}" -y\n'
+            f'fi\n'
+        )
+
+        # Discover numbered pip files in phase order. Variant-specific
+        # (<env>.pip.<variant>.<N>.txt) takes precedence; if none exist we
+        # fall back to the shared form (<env>.pip.<N>.txt) so environments
+        # that resolve identically across variants don't need duplicated files.
+        def _numbered(pattern_glob, pattern_re):
+            return sorted(
+                ((int(m.group(1)), p.replace("\\", "/")) for p, m in (
+                    (p, re.search(pattern_re, p))
+                    for p in glob.glob(pattern_glob)
+                ) if m),
+                key=lambda t: t[0],
+            )
+
+        numbered = _numbered(
+            f"{env_dir}/{env_name}.pip.{variant}.*.txt",
+            rf"{re.escape(env_name)}\.pip\.{re.escape(variant)}\.(\d+)\.txt$",
+        )
+        if not numbered:
+            numbered = _numbered(
+                f"{env_dir}/{env_name}.pip.*.txt",
+                rf"{re.escape(env_name)}\.pip\.(\d+)\.txt$",
+            )
+
+        def _pip_line(path: str) -> str:
+            # Honor leading `# bp:*` markers. `# bp:no-build-isolation` opts
+            # the phase out of PEP 517 isolation (so it can see packages
+            # already installed in the env by an earlier phase or the conda
+            # layer). `# bp:no-deps` tells pip not to resolve transitive
+            # dependencies (used when the conda layer already provides them
+            # and pip would otherwise try to install from sdist). Both markers
+            # must appear at the top of the file, in any order, before the
+            # first requirement; the first non-comment line ends the header.
+            flags = []
+            try:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        s = line.strip()
+                        if not s:
+                            continue
+                        if s == "# bp:no-build-isolation":
+                            flags.append("--no-build-isolation")
+                            continue
+                        if s == "# bp:no-deps":
+                            flags.append("--no-deps")
+                            continue
+                        if s.startswith("#"):
+                            continue
+                        break
+            except OSError as exc:
+                # Unreadable marker header just means no flags; warn so a botched
+                # install isn't silently missing --no-deps/--no-build-isolation.
+                print(f"Warning: could not read pip marker header {path!r}: {exc}",
+                      file=sys.stderr)
+            flag_str = (" " + " ".join(flags)) if flags else ""
+            return f'{env_manager} run -n {env_name} pip install{flag_str} -r "{path}"'
+
+        if numbered:
+            pip_block = "\n".join(_pip_line(p) for _, p in numbered)
+            return env_block + pip_block
+
         pip_txt_variant = f"{env_dir}/{env_name}.pip.{variant}.txt"
         pip_txt_shared = f"{env_dir}/{env_name}.pip.txt"
-        return (
-            f'if [ -f {env_yaml_variant} ]; then\n'
-            f'    {env_manager} env create -f {env_yaml_variant} -y\n'
-            f'else\n'
-            f'    {env_manager} env create -f {env_yaml_shared} -y\n'
-            f'fi\n'
-            f'if [ -f {pip_txt_variant} ]; then\n'
-            f'    {env_manager} run -n {env_name} pip install -r {pip_txt_variant}\n'
-            f'elif [ -f {pip_txt_shared} ]; then\n'
-            f'    {env_manager} run -n {env_name} pip install -r {pip_txt_shared}\n'
+        return env_block + (
+            f'if [ -f "{pip_txt_variant}" ]; then\n'
+            f'    {env_manager} run -n {env_name} pip install -r "{pip_txt_variant}"\n'
+            f'elif [ -f "{pip_txt_shared}" ]; then\n'
+            f'    {env_manager} run -n {env_name} pip install -r "{pip_txt_shared}"\n'
             f'fi'
         )
 
@@ -292,6 +374,9 @@ class BaseConfig(ABC):
 
     def __init__(self, **kwargs):
         """Initialize base configuration with common parameters."""
+        # Internal tools auto-register and execute but are hidden from public numbering/layout.
+        self.internal = bool(kwargs.pop("_internal", False))
+
         # Core identification
         self.tool_name = self.TOOL_NAME
         self.job_name = kwargs.get('name', '')
@@ -377,6 +462,30 @@ class BaseConfig(ABC):
         bind_arg = f"-B {','.join(binds)} " if binds else ""
         return f"{executor} exec --nv {bind_arg}{image} "
 
+    def _resolve_env_placeholders(self, env_name: str) -> str:
+        """Substitute ``<folder>`` placeholders in an env value against the
+        resolved folder map.
+
+        Lets the config target a path-based (conda ``-p``) env by reusing a
+        folder key, e.g. ``AF2BIND: "<AlphaFold>/colabfold-conda"`` ->
+        ``/.../colabfold/colabfold-conda``. Bare names pass through untouched.
+        Raises if a placeholder names an unknown folder key — silently leaving
+        an unresolved ``<...>`` would produce a broken ``activate`` at runtime.
+        """
+        if not env_name or "<" not in env_name:
+            return env_name
+        folders = getattr(self, "folders", {}) or {}
+        import re as _re
+        def _sub(m):
+            key = m.group(1)
+            if key not in folders:
+                raise ValueError(
+                    f"Environment '{env_name}' for {self.TOOL_NAME} references "
+                    f"unknown folder placeholder '<{key}>'. Known: {sorted(folders)}"
+                )
+            return folders[key]
+        return _re.sub(r"<([^<>]+)>", _sub, env_name)
+
     def activate_environment(self, index: int = 0, name: Optional[str] = None) -> str:
         """
         Generate bash script snippet to activate an environment.
@@ -419,6 +528,31 @@ class BaseConfig(ABC):
                     f"Available environments: {self.environments}"
                 )
             env_name = self.environments[index]
+
+        # Resolve <folder> placeholders in the env value against the resolved
+        # folder map, so the config can point a tool at a path-based (conda
+        # ``-p``) env — e.g. ``AF2BIND: "<AlphaFold>/colabfold-conda"``. A bare
+        # name (no ``<...>``) passes through unchanged. mamba/conda accept both
+        # a registered name and an absolute prefix path after ``activate``;
+        # prefix envs are NOT name-resolvable, so the placeholder form is the
+        # only way to target them from the env map.
+        env_name = self._resolve_env_placeholders(env_name)
+
+        # On Colab the `biopipelines` env is never created — its deps live in
+        # base Python (pip install -e). We don't `activate` it, but if another
+        # per-tool env is currently active (a multi-phase tool that ran, e.g.,
+        # foundry/diffdock inference then switches back to biopipelines for
+        # post-processing) its python is still on PATH and lacks the base deps
+        # (BioPython, pandas). Deactivate to fall back to base Python before
+        # running biopipelines-env work. Harmless when nothing is active.
+        if config_manager.get_scheduler() == "colab" and env_name == "biopipelines":
+            shell_hook = config_manager.get_shell_hook_command()
+            return (
+                f"# Colab: biopipelines deps in base Python; deactivate any active env\n"
+                f"{shell_hook}\n"
+                f"micromamba deactivate 2>/dev/null || true\n"
+                f"{resolve_source}\n"
+            )
 
         shell_hook = config_manager.get_shell_hook_command()
         activate_cmd = config_manager.get_activate_command(env_name)
@@ -700,12 +834,23 @@ echo "=============================="
         """
         return self.get_output_files()
     
-    def set_pipeline_context(self, pipeline_ref, execution_order: int, output_folder: str, suffix: str = ""):
+    def set_pipeline_context(self, pipeline_ref, execution_order: int, output_folder: str,
+                             suffix: str = "", public_step: int = None, internal_order: int = None):
         """Set context when added to pipeline."""
         self.pipeline_ref = pipeline_ref
         self.execution_order = execution_order
         self.output_folder = output_folder
         self.suffix = suffix
+        self.public_step = public_step
+        self.internal_order = internal_order
+        # Single source of truth for this tool's RunTime/<basename>.sh and Logs/<basename>.log.
+        # Internal tools nest under a .internal/ subdir of RunTime and Logs.
+        if self.internal:
+            self.script_basename = os.path.join(INTERNAL_FOLDER, f"{internal_order:03d}_{self.TOOL_NAME}")
+        elif suffix:
+            self.script_basename = f"{public_step:03d}_{self.TOOL_NAME}_{suffix}"
+        else:
+            self.script_basename = f"{public_step:03d}_{self.TOOL_NAME}"
         self.configured = True
     
     def resolve_dependency_outputs(self, dependency):
@@ -906,7 +1051,7 @@ fi
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
 
-python {pipe_check_completion} "{self.output_folder}" "{self.TOOL_NAME}" "{expected_outputs_file}"
+python "{pipe_check_completion}" "{self.output_folder}" "{self.TOOL_NAME}" "{expected_outputs_file}"
 
 if [ $? -eq 0 ]; then
     echo "{self.TOOL_NAME} completed successfully"
@@ -922,12 +1067,48 @@ fi
     def __repr__(self) -> str:
         return self.__str__()
     
+    @staticmethod
+    def _missing_path_of(input_source) -> Optional[str]:
+        """Extract one input source's `missing` table path, or None."""
+        if input_source is None or not hasattr(input_source, 'tables'):
+            return None
+        tables = input_source.tables
+        if hasattr(tables, '_tables') and 'missing' in tables._tables:
+            missing_info = tables._tables['missing']
+            return missing_info.info.path if hasattr(missing_info, 'info') else str(missing_info)
+        if isinstance(tables, dict) and 'missing' in tables:
+            missing_info = tables['missing']
+            if isinstance(missing_info, dict) and 'path' in missing_info:
+                return missing_info['path']
+            if hasattr(missing_info, 'info'):
+                return missing_info.info.path
+            return str(missing_info)
+        return None
+
+    def _collect_upstream_missing_paths(self, *input_sources) -> List[str]:
+        """All distinct upstream `missing` table paths across input sources.
+
+        Unlike ``_get_upstream_missing_table_path`` (first match only), this
+        returns every input axis's manifest so a filter on more than one axis
+        (e.g. both proteins and ligands) propagates fully. Order-preserving,
+        de-duplicated.
+        """
+        paths: List[str] = []
+        seen = set()
+        for src in input_sources:
+            p = self._missing_path_of(src)
+            if p and p not in seen:
+                seen.add(p)
+                paths.append(p)
+        return paths
+
     def _get_upstream_missing_table_path(self, *input_sources) -> Optional[str]:
         """
         Get the path to the missing table from upstream tool outputs.
 
         This should be called during get_output_files() to check if there's an upstream
-        missing table that needs to be propagated.
+        missing table that needs to be propagated. Returns the FIRST input source's
+        missing table; use ``_collect_upstream_missing_paths`` to merge several axes.
 
         Args:
             *input_sources: Variable number of StandardizedOutput or ToolOutput objects
@@ -935,26 +1116,71 @@ fi
         Returns:
             Path to upstream missing.csv, or None if no missing table exists
         """
-        for input_source in input_sources:
-            if input_source is None:
-                continue
+        paths = self._collect_upstream_missing_paths(*input_sources)
+        return paths[0] if paths else None
 
-            # Try to find missing table from input source
-            if hasattr(input_source, 'tables'):
-                tables = input_source.tables
-                if hasattr(tables, '_tables') and 'missing' in tables._tables:
-                    missing_info = tables._tables['missing']
-                    return missing_info.info.path if hasattr(missing_info, 'info') else str(missing_info)
-                elif isinstance(tables, dict) and 'missing' in tables:
-                    missing_info = tables['missing']
-                    if isinstance(missing_info, dict) and 'path' in missing_info:
-                        return missing_info['path']
-                    elif hasattr(missing_info, 'info'):
-                        return missing_info.info.path
-                    else:
-                        return str(missing_info)
+    def upstream_missing_flag(self, *input_sources, flag: str = "--upstream-missing") -> str:
+        """A CLI flag carrying EVERY upstream `missing` path, for pipe scripts.
 
-        return None
+        For tools that propagate inside their own pipe script (read upstream
+        rows, merge with local failures, write their `missing.csv`): emits
+        ``" --upstream-missing \\"p1\\" \\"p2\\""`` across all id-bearing input
+        axes, or ``""`` when none exist. The pipe script reads them with
+        ``biopipelines_io.read_upstream_missing`` (accepts the list). Passing
+        every axis fixes the multi-input case where only the first manifest
+        would otherwise propagate.
+        """
+        paths = self._collect_upstream_missing_paths(*input_sources)
+        if not paths:
+            return ""
+        return " " + flag + "".join(f' "{p}"' for p in paths)
+
+    def missing_table_info(self, missing_csv: Optional[str] = None) -> "TableInfo":
+        """The standard `missing` TableInfo (schema id|removed_by|kind|cause).
+
+        Tools that consume ids declare this in ``get_output_files()`` whenever an
+        upstream manifest exists, so ``pipe_check_completion`` excuses the dropped
+        ids instead of flagging them FAILED. Defaults the path to
+        ``self.table_path("missing")``.
+        """
+        return TableInfo(
+            name="missing",
+            path=missing_csv or self.table_path("missing"),
+            columns=["id", "removed_by", "kind", "cause"],
+            description="IDs removed by upstream tools (or local failures) with removal reason",
+        )
+
+    def generate_missing_propagation(self, *input_sources, missing_csv: Optional[str] = None) -> str:
+        """Bash that propagates the union of upstream `missing` manifests.
+
+        The single inheritable propagation block: collects every input axis's
+        missing-table folder and hands them to ``pipe_propagate_missing.py``,
+        which merges them (de-duping by id) into this tool's own
+        ``tables/missing.csv``. The tool OWNS the resulting file rather than
+        pointing downstream at an upstream path, so it survives the upstream
+        folder being cleaned or moved. Returns "" when no upstream manifest
+        exists (the tool then declares no `missing` table).
+
+        Rows are propagated in the UPSTREAM (input-axis) id space; mapping them
+        into this tool's output id space (for products / ``_N`` multipliers /
+        group keys) is done once, centrally, by ``pipe_check_completion`` when it
+        excuses missing files — so every tool propagates raw rows uniformly.
+        """
+        paths = self._collect_upstream_missing_paths(*input_sources)
+        if not paths:
+            return ""
+        out_csv = missing_csv or self.table_path("missing")
+        propagate_py = self.pipe_script_path("pipe_propagate_missing.py")
+        folders = " ".join(f'"{os.path.dirname(p)}"' for p in paths)
+        return f"""
+# Propagate `missing` manifest(s) from upstream tools — writes tables/missing.csv.
+echo "Propagating upstream missing manifest(s)"
+python "{propagate_py}" \\
+    --upstream-folders {folders} \\
+    --output-folder "{self.output_folder}" \\
+    --missing-csv "{out_csv}"
+
+"""
 
 
 class _Installer(BaseConfig):

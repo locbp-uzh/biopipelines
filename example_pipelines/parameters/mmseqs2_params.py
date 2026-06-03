@@ -8,7 +8,7 @@ tests/tool_parameters/test_mmseqs2_params.py.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.mmseqs2 import MMseqs2
+from biopipelines import MMseqs2
 
 with Pipeline(project="ToolParameters",
               job="MMseqs2",

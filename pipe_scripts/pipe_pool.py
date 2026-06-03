@@ -194,7 +194,8 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
 
 
 def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
-                   recount_prefix: Optional[str] = None) -> None:
+                   recount_prefix: Optional[str] = None,
+                   content_file_col: Optional[str] = None) -> None:
     """Copy / symlink per-run files into the gather folder and write the
     consolidated map_table for one shared stream.
 
@@ -209,6 +210,13 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
     rename map, then the parts are merged into a single combined artifact
     under the stream folder. The map_table is written with one row per
     composite id, all pointing at the merged file.
+
+    Content streams (the map_table IS the content table) own a domain
+    schema; ``content_file_col`` names the column that holds the per-id file
+    path (``file_path`` for PDB's structures.csv, ``file`` otherwise) so the
+    pooled content table keeps the upstream schema instead of inventing a
+    generic ``file``/``value`` pair. When None, this is a non-content stream
+    and the generic ``file``/``value`` columns are used.
     """
     stream_dir = out_spec["stream_dir"]
     out_map = out_spec["map_table"]
@@ -289,7 +297,14 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
             if src_file and ext:
                 _link_or_copy(src_file, dest_file)
 
-            row = {"id": composite, "file": dest_file, "value": "", "pool.path": pool_idx}
+            if content_file_col is not None:
+                # Content table: write the file path under the upstream column
+                # name and don't inject the generic file/value pair.
+                row = {"id": composite, content_file_col: dest_file,
+                       "pool.path": pool_idx}
+            else:
+                row = {"id": composite, "file": dest_file, "value": "",
+                       "pool.path": pool_idx}
             if recount_prefix is not None:
                 row["original.id"] = oid
 
@@ -302,7 +317,7 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
             if run_df is not None and j < len(run_df):
                 run_row = run_df.iloc[j].to_dict()
                 for col, val in run_row.items():
-                    if col in ("id", "file", "file_path"):
+                    if col in ("id", "file", "file_path") or col in row:
                         continue
                     if (recount_prefix is None and col.endswith(".id")
                             and pd.notna(val) and str(val) != ""):
@@ -372,6 +387,11 @@ def main():
     out_streams = config["out_streams"]
     out_tables = config["out_tables"]
     recount_prefix = config.get("recount_prefix")
+    # Content streams: _gather_stream writes the combined file (preserving
+    # the upstream domain schema + copying any per-id files); the table of the
+    # same name points at that file, so skip the redundant table concat.
+    content_bearing_streams = set(config.get("content_bearing_streams", []))
+    content_file_cols = config.get("content_file_cols", {})
 
     print(f"Pool: {len(runs_cfg)} input runs"
           + (f" (recount_prefix={recount_prefix!r})" if recount_prefix else ""))
@@ -381,9 +401,15 @@ def main():
 
     for stream_key in shared_streams:
         _gather_stream(stream_key, runs_streams, out_streams[stream_key],
-                       recount_prefix=recount_prefix)
+                       recount_prefix=recount_prefix,
+                       content_file_col=content_file_cols.get(stream_key)
+                       if stream_key in content_bearing_streams else None)
 
+    # A content table shares its file with the stream of the same name (already
+    # written by _gather_stream above); don't overwrite it with the table concat.
     for table_name in shared_tables:
+        if table_name in content_bearing_streams:
+            continue
         _gather_table(table_name, runs_tables, out_tables[table_name],
                       recount_prefix=recount_prefix)
 

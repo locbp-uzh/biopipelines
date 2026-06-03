@@ -20,12 +20,34 @@ order: colab (if google.colab imports), then any config.<variant>.yaml
 whose `machine.username` matches the current Unix user, otherwise cluster.
 """
 
+import datetime
 import getpass
 import glob
 import os
 import shutil
 import urllib.request
 from typing import Dict, Any, List, Optional
+
+
+def backup_file(path) -> str:
+    """Copy ``path`` to a timestamped ``<path>.<YYYYMMDD-HHMMSS>.bak`` and
+    return the backup path.
+
+    Timestamped so successive edits never clobber an earlier backup (the old
+    fixed ``<path>.bak`` lost the previous copy on every save). If two saves
+    land in the same second, a numeric suffix is appended to stay unique.
+    """
+    import shutil as _shutil
+    from pathlib import Path
+    path = Path(path)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak = path.with_name(f"{path.name}.{stamp}.bak")
+    n = 1
+    while bak.exists():
+        bak = path.with_name(f"{path.name}.{stamp}-{n}.bak")
+        n += 1
+    _shutil.copy2(path, bak)
+    return str(bak)
 
 
 def _autodetect_variant() -> str:
@@ -390,9 +412,29 @@ class ConfigManager:
             )
         return machine
 
-    def get_emails(self) -> Dict[str, str]:
-        """Get email mapping (Unix username -> email address)."""
-        return self._get_machine_config().get('emails', {})
+    def get_email(self) -> str:
+        """Get the SLURM-notification email address (empty string if unset).
+
+        Each config serves a single user, so this is a flat ``machine.email``
+        string. The legacy ``machine.emails`` dict ({username: address}) is
+        still read for back-compat: the current user's entry wins, else the
+        first address present.
+        """
+        machine = self._get_machine_config()
+        email = machine.get('email')
+        if email is not None:
+            return email
+        legacy = machine.get('emails')
+        if isinstance(legacy, dict) and legacy:
+            import getpass
+            try:
+                user = getpass.getuser()
+            except Exception:
+                user = None
+            if user in legacy:
+                return legacy[user]
+            return next(iter(legacy.values()))
+        return ""
 
     def _machine_block(self, key: str) -> Dict[str, Any]:
         """Return the dict at ``machine.<key>``; raise if missing or wrong shape.
@@ -526,6 +568,23 @@ class ConfigManager:
         if mgr == "pip":
             return ""
         return f'{mgr} activate {env_name}'
+
+    def get_env_python_command(self, env_name: str) -> str:
+        """Bash that prints the Python executable of ``env_name`` via the
+        configured env manager.
+
+        Multi-env tools (a tool whose runtime dispatches to a *second* env's
+        Python without activating it) must resolve that Python through the
+        same manager the rest of the pipeline uses — never a hard-coded
+        ``micromamba || mamba || conda`` fallback chain, which can pick a
+        different manager than the active config. In pip mode there is no
+        second env, so this resolves to the current interpreter.
+        """
+        mgr = self.get_env_manager()
+        py = 'python -c "import sys; print(sys.executable)"'
+        if mgr == "pip":
+            return f'$({py})'
+        return f'$({mgr} run -n {env_name} {py})'
 
     def get_module_load_line(self) -> str:
         """Get the full 'module load ...' line for SLURM scripts, or empty string if none."""

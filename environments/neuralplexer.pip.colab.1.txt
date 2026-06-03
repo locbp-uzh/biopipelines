@@ -1,0 +1,21 @@
+# Phase 1 — torch + pytorch3d + PyG (cu121). Order matters: pytorch3d's setup
+# imports torch; PyG bundles ops compiled against the exact torch ABI.
+#
+# CUDA 12.1 (not 11.7): openfold's CUDA extension must build at install time,
+# and a self-consistent CUDA toolchain for that build is only cleanly
+# installable from conda-forge at CUDA >=12 (conda-forge ships no cuda-cccl /
+# cuda-cudart below 12.0). torch 2.1.0+cu121 matches the conda-forge CUDA 12.1
+# toolkit pinned in neuralplexer.colab.yaml.
+--extra-index-url https://download.pytorch.org/whl/cu121
+--find-links https://data.pyg.org/whl/torch-2.1.0+cu121.html
+torch==2.1.0
+torch-geometric
+torch-scatter
+torch-sparse
+torch-cluster
+torch-spline-conv
+
+# pytorch3d prebuilt wheel for py310 / cu121 / torch 2.1.0. Falls back to a
+# source build if the wheel index is unreachable.
+--find-links https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt210/download.html
+pytorch3d

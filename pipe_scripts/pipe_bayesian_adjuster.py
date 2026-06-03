@@ -6,15 +6,18 @@
 """
 Bayesian frequency adjustment runtime script for BioPipelines.
 
-Applies Bayesian log-odds updates to mutation frequency tables using correlation signals.
+Applies Bayesian log-odds updates to amino-acid frequency tables using correlation signals.
 
 Formula:
-    p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c(i,aa))
+    p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c̃(i,aa))
+    c̃(i,aa) = c(i,aa)·n(i,aa)/(n(i,aa)+κ)   (sample-size shrinkage; κ=0 ⟹ c̃=c)
 
 where:
-    - p₀(i,aa) = prior probability from MutationProfiler frequencies
-    - c(i,aa) = correlation signal from SequenceMetricCorrelation
+    - p₀(i,aa) = prior probability from the input frequency table
+    - c(i,aa) = signal from the input correlation table
+    - n(i,aa) = sample count from the input sample-counts table; used only when κ>0
     - γ = strength hyperparameter
+    - κ = shrinkage pseudo-observations (down-weights low-support correlations)
     - σ(x) = 1/(1+e⁻ˣ) = sigmoid function
     - σ⁻¹(p) = log(p/(1-p)) = logit function
 """
@@ -23,11 +26,12 @@ import argparse
 import json
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import logomaker
 from pathlib import Path
 import logging
-from typing import Dict, List, Tuple
+# matplotlib + logomaker are imported lazily inside create_logo_plot() so the
+# module can be imported in lean envs (e.g. the CI [test] extra) without
+# pulling in plotting deps — only the plot path requires them.
+from typing import Dict, List, Tuple, Optional
 import sys
 
 # Standard amino acids
@@ -127,6 +131,23 @@ def bayesian_update(prior_prob: float, correlation: float, gamma: float) -> floa
     return updated_prob
 
 
+def shrink_correlation(correlation: float, sample_count: float, kappa: float) -> Tuple[float, float]:
+    """
+    Shrink a correlation signal toward zero based on sample support.
+
+    Uses n / (n + kappa), where kappa is interpreted as pseudo-observations.
+    kappa=0 leaves correlations unchanged.
+    """
+    if kappa <= 0:
+        return correlation, 1.0
+
+    if sample_count is None or pd.isna(sample_count) or sample_count < 0:
+        return correlation, 1.0
+
+    shrinkage_weight = sample_count / (sample_count + kappa)
+    return correlation * shrinkage_weight, shrinkage_weight
+
+
 def load_and_merge_tables(frequencies_path: str, correlations_path: str,
                           logger) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -145,19 +166,36 @@ def load_and_merge_tables(frequencies_path: str, correlations_path: str,
 
     logger.info(f"Loading correlations from: {correlations_path}")
     correlations_df = pd.read_csv(correlations_path)
+    if 'original' not in correlations_df.columns and 'wt_aa' in correlations_df.columns:
+        correlations_df = correlations_df.rename(columns={'wt_aa': 'original'})
 
     # Validate columns
     required_cols = ['position', 'original'] + AMINO_ACIDS
     for col in required_cols:
         if col not in frequencies_df.columns:
             raise ValueError(f"Missing column '{col}' in frequencies table")
-        if col.replace('original', 'wt_aa') not in correlations_df.columns:
+        if col not in correlations_df.columns:
             raise ValueError(f"Missing column '{col}' in correlations table")
 
     logger.info(f"Loaded {len(frequencies_df)} positions from frequencies table")
     logger.info(f"Loaded {len(correlations_df)} positions from correlations table")
 
     return frequencies_df, correlations_df
+
+
+def load_sample_counts(sample_counts_path: str, logger) -> pd.DataFrame:
+    """Load amino-acid sample counts for kappa shrinkage."""
+    logger.info(f"Loading sample counts from: {sample_counts_path}")
+    sample_counts_df = pd.read_csv(sample_counts_path)
+    if 'original' not in sample_counts_df.columns and 'wt_aa' in sample_counts_df.columns:
+        sample_counts_df = sample_counts_df.rename(columns={'wt_aa': 'original'})
+
+    required_cols = ['position', 'original'] + AMINO_ACIDS
+    for col in required_cols:
+        if col not in sample_counts_df.columns:
+            raise ValueError(f"Missing column '{col}' in sample counts table")
+
+    return sample_counts_df
 
 
 def apply_pseudocounts(frequencies_df: pd.DataFrame, correlations_df: pd.DataFrame,
@@ -232,6 +270,8 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
                               correlations_df: pd.DataFrame,
                               mode: str,
                               gamma: float,
+                              kappa: float,
+                              sample_counts_df: Optional[pd.DataFrame],
                               pseudocount: float,
                               logger) -> Tuple[pd.DataFrame, List[Dict]]:
     """
@@ -242,6 +282,8 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
         correlations_df: DataFrame with correlation signals
         mode: "min" or "max" (determines sign of correlations)
         gamma: Strength hyperparameter
+        kappa: Pseudo-observations for sample size shrinkage
+        sample_counts_df: DataFrame with sample counts, required when kappa > 0
         pseudocount: Pseudocount to add only to amino acids with good correlations
         logger: Logger instance
 
@@ -249,6 +291,11 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
         Tuple of (adjusted_probabilities_df, adjustment_log)
     """
     logger.info("Applying Bayesian adjustments...")
+
+    kappa_given = kappa is not None
+    if kappa_given and sample_counts_df is None:
+        raise ValueError("sample_counts_path is required when kappa is provided")
+    kappa = 0.0 if kappa is None else kappa
 
     # If gamma is 0, return original frequencies unchanged
     if gamma == 0:
@@ -263,10 +310,13 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
             for aa in AMINO_ACIDS:
                 adjustment_log.append({
                     'position': position,
-                    'wt_aa': original_aa,
+                    'original': original_aa,
                     'aa': aa,
                     'prior_freq': row[aa],
                     'correlation': 0.0,
+                    'raw_correlation': 0.0,
+                    'sample_count': 0.0,
+                    'shrinkage_weight': 0.0,
                     'adjusted_prob': row[aa],
                     'change': 0.0
                 })
@@ -282,6 +332,7 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
     # Sign correction based on mode
     sign_factor = -1.0 if mode == "min" else 1.0
     logger.info(f"Mode: {mode}, sign factor: {sign_factor}")
+    logger.info(f"Kappa: {kappa}")
 
     for _, freq_row in frequencies_df.iterrows():
         position = freq_row['position']
@@ -294,18 +345,26 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
             continue
 
         corr_row = corr_row.iloc[0]
+        count_row = None
+        if sample_counts_df is not None:
+            count_matches = sample_counts_df[sample_counts_df['position'] == position]
+            if count_matches.empty:
+                raise ValueError(f"No sample count data for position {position}")
+            count_row = count_matches.iloc[0]
 
         # Verify original amino acid matches
-        if corr_row.get('wt_aa', corr_row.get('original')) != original_aa:
+        if corr_row.get('original', corr_row.get('wt_aa')) != original_aa:
             logger.warning(f"Original AA mismatch at position {position}: "
-                          f"freq={original_aa}, corr={corr_row.get('wt_aa')}")
+                          f"freq={original_aa}, corr={corr_row.get('original', corr_row.get('wt_aa'))}")
 
         # Adjust each amino acid
         adjusted_row = {'position': position, 'original': original_aa}
 
         for aa in AMINO_ACIDS:
             prior_freq = freq_row[aa]
-            correlation = corr_row[aa] * sign_factor  # Apply sign correction
+            raw_correlation = corr_row[aa] * sign_factor  # Apply sign correction
+            sample_count = count_row[aa] if count_row is not None else np.nan
+            correlation, shrinkage_weight = shrink_correlation(raw_correlation, sample_count, kappa)
 
             # Apply Bayesian update
             adjusted_prob = bayesian_update(prior_freq, correlation, gamma)
@@ -315,10 +374,13 @@ def apply_bayesian_adjustment(frequencies_df: pd.DataFrame,
             # Log the adjustment
             adjustment_log.append({
                 'position': position,
-                'wt_aa': original_aa,
+                'original': original_aa,
                 'aa': aa,
                 'prior_freq': prior_freq,
                 'correlation': correlation,
+                'raw_correlation': raw_correlation,
+                'sample_count': sample_count,
+                'shrinkage_weight': shrinkage_weight,
                 'adjusted_prob': adjusted_prob,
                 'change': adjusted_prob - prior_freq
             })
@@ -336,7 +398,6 @@ def normalize_absolute(adjusted_df: pd.DataFrame, logger) -> pd.DataFrame:
     """
     Normalize adjusted probabilities as absolute probabilities.
 
-    This makes them comparable to MutationProfiler's absolute_frequencies.
     Each value is normalized by the sum across all amino acids at that position.
 
     Args:
@@ -371,7 +432,6 @@ def normalize_relative(adjusted_df: pd.DataFrame, logger) -> pd.DataFrame:
     """
     Normalize adjusted probabilities as relative probabilities.
 
-    This makes them comparable to MutationProfiler's relative_frequencies.
     - Original amino acid is set to 0.0
     - Other amino acids are normalized to sum to 1.0
 
@@ -412,7 +472,6 @@ def create_logo_plot(prob_df: pd.DataFrame, title: str, ylabel: str,
     """
     Create sequence logo visualization for probabilities.
 
-    Follows the same pattern as MutationProfiler:
     - Filters positions with significant mutations
     - Excludes original amino acid from visualization
     - Uses logomaker with chemistry color scheme
@@ -427,6 +486,8 @@ def create_logo_plot(prob_df: pd.DataFrame, title: str, ylabel: str,
         positions_filter: List of positions to include (1-indexed). If None, includes positions where any amino acid has p(i,aa) > threshold.
         pseudocount: Threshold for significance. If None, uses 0.01 (1%).
     """
+    import matplotlib.pyplot as plt
+    import logomaker
     logger.info(f"Creating logo plot: {title}")
 
     # Determine threshold: pseudocount if given, otherwise 1%
@@ -540,6 +601,8 @@ def main():
             config['correlations_path'],
             logger
         )
+        sample_counts_path = config.get('sample_counts_path')
+        sample_counts_df = load_sample_counts(sample_counts_path, logger) if sample_counts_path else None
 
         # Apply Bayesian adjustment
         adjusted_df, adjustment_log = apply_bayesian_adjustment(
@@ -547,6 +610,8 @@ def main():
             correlations_df,
             config['mode'],
             config['gamma'],
+            config.get('kappa'),
+            sample_counts_df,
             config['pseudocount'],
             logger
         )
@@ -617,6 +682,7 @@ def main():
         logger.info(f"  Positions adjusted: {len(adjusted_df)}")
         logger.info(f"  Mode: {config['mode']}")
         logger.info(f"  Gamma: {config['gamma']}")
+        logger.info(f"  Kappa: {config.get('kappa', 0.0)}")
         logger.info(f"  Pseudocount: {config['pseudocount']}")
 
         # Calculate and log some statistics

@@ -1,0 +1,20 @@
+# DiffDock - colab/micromamba variant.
+# Recipe mirrors the canonical Colab notebook
+# (https://colab.research.google.com/github/hgbrian/biocolabs/blob/master/DiffDock.ipynb),
+# which is the upstream-maintained reference for running DiffDock on Colab.
+# Key deviations from upstream's environment.yml:
+#   - NO openfold: the Colab notebook clones facebookresearch/esm separately
+#     and points PYTHONPATH at it. ESM embeddings work without openfold's
+#     CUDA-kernel build (no nvcc on Colab).
+#   - Lets Colab's pre-installed torch drive the PyG wheel index; we don't
+#     pin a cu117 torch wheel (the Colab base image is past torch 2.x and
+#     installing the old wheel would force-downgrade ~2 GB of CUDA libs).
+#   - The esm side-clone happens in the install script (see _install_script);
+#     the env only owns the Python interpreter + conda-only base.
+name: diffdock
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - prody==2.2.0

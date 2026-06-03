@@ -1,0 +1,39 @@
+# PLACER (baker-laboratory/PLACER) environment — generic (cluster) variant.
+#
+# Loose recipe derived from the upstream envs/placer_env.yml install-time
+# floors (the upstream file is a fully-pinned `conda env export` of ~300
+# build-locked packages; we keep only the deps the README declares as
+# requirements so the env stays portable across cluster CUDA stacks, per the
+# framework's "loose >= for install" reproducibility policy).
+#
+# The DGL build must come from the dglteam th23_cu121 channel (it ships the
+# torch-2.3 / CUDA-12.1 build of dgl 2.4.0; conda-forge has no matching one).
+# se3-transformer has no conda package — it is a pip git install on top.
+name: placer
+channels:
+  - pytorch
+  - dglteam/label/th23_cu121
+  - nvidia/label/cuda-12.1.0
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.10
+  - pip
+  # Core ML stack — CUDA 12.1 / torch 2.3 (README requirement).
+  - pytorch=2.3.*
+  - pytorch-cuda=12.1
+  - cuda-version=12.1
+  - dgl=2.4.0
+  # Graph / tensor ops.
+  - e3nn=0.5.4
+  - opt_einsum=3.4.0
+  - networkx>=3.2
+  - numpy>=1.26
+  - pandas=2.2.*
+  - scipy
+  # Ligand chemistry — OpenBabel reads/writes the ligand structures.
+  - openbabel=3.1.1
+  - pip:
+      # SE(3)-Transformer is only distributed as a subdirectory of the NVIDIA
+      # DeepLearningExamples repo (no PyPI/conda package).
+      - se3-transformer @ git+https://github.com/NVIDIA/DeepLearningExamples.git#subdirectory=DGLPyTorch/DrugDiscovery/SE3Transformer

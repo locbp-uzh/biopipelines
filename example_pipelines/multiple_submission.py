@@ -10,7 +10,7 @@ This pipeline shows how to use boltz2
 """
 
 from biopipelines.pipeline import *
-from biopipelines.boltz2 import Boltz2
+from biopipelines import Boltz2
 
 """
 when running via submit, all the sbatch commands generated in the python script will be submitted

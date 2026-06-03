@@ -21,9 +21,11 @@ from typing import Dict, List, Any, Optional, Tuple
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.ligand_utils import resolve_ligand_code, resolve_ligand_smiles as _resolve_ligand_smiles
 
 
-def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structure_id):
+def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structure_id,
+                               ligand_smiles=None):
     """
     Extract ligand to SDF and protein to PDB from a PDB/CIF structure.
 
@@ -35,6 +37,10 @@ def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structur
         ligand_name: 3-letter residue code for the ligand
         output_dir: Directory to write extracted files
         structure_id: Identifier for naming output files
+        ligand_smiles: Optional SMILES template for bond-order assignment. Large
+            conjugated/charged ligands (e.g. Si-rhodamine dyes) cannot be bond-
+            perceived from coordinates alone (rdDetermineBonds fails on charge),
+            so a template is required for PoseBusters to validate them.
 
     Returns:
         List of (ligand_sdf_path, protein_pdb_path, suffix) tuples.
@@ -99,24 +105,32 @@ def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structur
             )
         lig_pdb_block = "".join(lig_lines) + "END\n"
 
-        # Convert to RDKit mol via PDB block
-        mol = Chem.MolFromPDBBlock(lig_pdb_block, removeHs=False, sanitize=False)
-        if mol is None:
-            print(f"  [WARNING] RDKit could not parse ligand {ligand_name} (copy {lig_idx + 1}) from {structure_path}")
-            continue
-
-        # Determine bonds (predicted structures often lack CONECT records)
-        try:
-            rdDetermineBonds.DetermineBonds(mol)
-        except Exception as e:
-            print(f"  [WARNING] Bond perception failed for {ligand_name} copy {lig_idx + 1}: {e}")
-            # Continue anyway — PoseBusters may still work with partial info
-
-        # Write to SDF
         ligand_sdf_path = os.path.join(output_dir, f"{structure_id}{suffix}_ligand.sdf")
-        writer = Chem.SDWriter(ligand_sdf_path)
-        writer.write(mol)
-        writer.close()
+        # Prefer the shared SMILES-templated conversion (bond orders from the
+        # template, coordinates kept) — coordinate-only perception fails on
+        # charged/conjugated dyes. Write the extracted block to a temp PDB and
+        # route through write_ligand_sdf; fall back to rdDetermineBonds only if
+        # no SMILES is available.
+        lig_tmp_pdb = os.path.join(output_dir, f"{structure_id}{suffix}_ligand_raw.pdb")
+        with open(lig_tmp_pdb, "w") as _f:
+            _f.write(lig_pdb_block)
+        try:
+            from biopipelines.ligand_utils import write_ligand_sdf
+            write_ligand_sdf(lig_tmp_pdb, ligand_sdf_path, smiles=ligand_smiles)
+        except Exception as e:
+            print(f"  [WARNING] templated SDF write failed for {ligand_name} copy {lig_idx + 1}: {e}; "
+                  f"falling back to coordinate bond perception")
+            mol = Chem.MolFromPDBBlock(lig_pdb_block, removeHs=False, sanitize=False)
+            if mol is None:
+                print(f"  [WARNING] RDKit could not parse ligand {ligand_name} (copy {lig_idx + 1})")
+                continue
+            try:
+                rdDetermineBonds.DetermineBonds(mol)
+            except Exception as e2:
+                print(f"  [WARNING] Bond perception failed for {ligand_name} copy {lig_idx + 1}: {e2}")
+            writer = Chem.SDWriter(ligand_sdf_path)
+            writer.write(mol)
+            writer.close()
 
         results.append((ligand_sdf_path, protein_pdb_path, suffix))
 
@@ -198,10 +212,14 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
 
     # Load parameters
     structures_ds = load_datastream(config_data['structures_json'])
-    ligand_name = config_data['ligand_name']
+    ligand_name = resolve_ligand_code(config_data['ligand_json'])
+    # SMILES template (if the compounds stream carries one) — needed for ligands
+    # whose bond order/charge can't be perceived from coordinates alone.
+    ligand_smiles = _resolve_ligand_smiles(config_data['ligand_json'])
     mode = config_data['mode']
     reference_pdb_json = config_data.get('reference_pdb')
-    reference_ligand_code = config_data.get('reference_ligand_code', ligand_name)
+    # The reference-structure residue code defaults to the ligand code.
+    reference_ligand_code = ligand_name
     output_csv = config_data['output_csv']
     execution_dir = config_data['execution_dir']
     check_columns = list(config_data.get('check_columns') or [])
@@ -241,7 +259,8 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
         struct_work_dir = os.path.join(execution_dir, structure_id)
         os.makedirs(struct_work_dir)
 
-        extractions = extract_ligand_and_protein(structure_path, ligand_name, struct_work_dir, structure_id)
+        extractions = extract_ligand_and_protein(structure_path, ligand_name, struct_work_dir, structure_id,
+                                                  ligand_smiles=ligand_smiles)
 
         if not extractions:
             print(f"  [WARNING] No ligand extracted, skipping structure")
@@ -287,8 +306,14 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
                 # Compute all_pass over the user-selected check subset only.
                 # Selected columns absent from this row (e.g. an identity check that
                 # PoseBusters did not emit) are ignored rather than treated as failures.
+                # Values come from a pandas DataFrame, so they are numpy.bool_, NOT
+                # Python bool — accept both. A check is "present" if it is a real
+                # boolean (True/False); pandas NA / None / non-bool are skipped.
+                import numpy as _np
+                def _is_boolish(v):
+                    return isinstance(v, (bool, _np.bool_))
                 selected = [c for c in check_columns
-                            if c in result_row and isinstance(result_row[c], (bool,))]
+                            if c in result_row and _is_boolish(result_row[c])]
                 if selected:
                     result_row['all_pass'] = all(bool(result_row[c]) for c in selected)
                 else:
@@ -360,7 +385,7 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['structures_json', 'ligand_name', 'mode', 'output_csv']
+    required_params = ['structures_json', 'ligand_json', 'mode', 'output_csv']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")

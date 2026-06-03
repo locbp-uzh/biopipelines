@@ -5,12 +5,7 @@
 # tested:
 
 from biopipelines.pipeline import *
-from biopipelines.fuse import Fuse
-from biopipelines.boltz2 import Boltz2
-from biopipelines.distance import Distance
-from biopipelines.panda import Panda
-from biopipelines.plot import Plot
-from biopipelines.pymol import PyMOL
+from biopipelines import Fuse, Boltz2, Distance, Panda, Plot, PyMOL
 
 donor = Sequence("VSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLTHGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNFNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAA",
                      ids="EBFP")  

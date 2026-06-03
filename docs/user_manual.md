@@ -3,6 +3,8 @@
 ## Index
 
 - [What is BioPipelines?](#what-is-biopipelines)
+- [Ways to run BioPipelines](#ways-to-run-biopipelines)
+- [Usage with an AI coding assistant](#usage-with-an-ai-coding-assistant)
 - [Installation](#installation)
 - [Google Colab](#google-colab)
 - [Quick Start](#quick-start)
@@ -13,6 +15,7 @@
   - [Combinatorics: Bundle and Each](#combinatorics-bundle-and-each)
   - [Table Column References](#table-column-references)
 - [Resources](#resources)
+- [Grouping Outputs with Folder](#grouping-outputs-with-folder)
 - [On-the-fly Execution](#on-the-fly-execution)
 - [Job Submission](#job-submission)
 - [Data Management with Panda](#data-management-with-panda)
@@ -23,7 +26,7 @@
 
 ## What is BioPipelines?
 
-BioPipelines is a Python framework for writing bioinformatics workflows that  encompasses bash and script orchestration and slurm submission. It does not execute computations directly - instead, it predicts the filesystem structure and creates scripts that will be executed on SLURM clusters. 
+BioPipelines is a Python framework for writing and executing protein engineering workflows that run with the same syntax on SLURM HPC clusters, Jupyter, and Google Colab.
 
 BioPipelines was designed to maximize pipeline clarity and conciseness, as shown in the following example:
 
@@ -32,23 +35,88 @@ BioPipelines was designed to maximize pipeline clarity and conciseness, as shown
 with Pipeline(project="Examples",
               job="RFD-ProteinMPNN-AlphaFold2",
               description="Redesign of N terminus domain of lysozyme"):
-    Resources(gpu="A100", 
+    Resources(gpu="A100",
               time="4:00:00",
               memory="16GB")
     lysozyme = PDB("168L")
     rfd = RFdiffusion(pdb=lysozyme,
                         contigs='50-70/A81-140', #redesign N terminus
                         num_designs=3)
-    pmpnn = ProteinMPNN(structures=rfd, 
+    pmpnn = ProteinMPNN(structures=rfd,
                       num_sequences=2)
     af = AlphaFold(proteins=pmpnn)
 ```
 
 ---
 
-## Installation
+## Ways to run BioPipelines
 
-### 1. Clone and create the environment
+There are three ways to use BioPipelines, in increasing order of hands-on effort:
+
+1. **With an AI coding assistant (recommended for non-programmers).** You clone the repo and on your computer and run an AI coding assistant (Claude Code, Codex, …) inside it. The assistant reads the framework's prompts under `llm/`, interviews you about your biological problem, and writes and runs the pipeline for you. You never write Python yourself — you describe the protocol you want in plain language. This is the easiest entry point and the one most users should start with. See [Usage with an AI coding assistant](#usage-with-an-ai-coding-assistant).
+2. **On a SLURM cluster.** You write pipeline scripts yourself and submit them with `biopipelines-submit`. Best for large production runs on institutional compute. See [Installation (Slurm HPC)](#installation-slurm-hpc).
+3. **On Google Colab.** You write pipeline cells in a notebook and run them inline with a Colab GPU, no SLURM needed. Best for quick interactive prototyping. See [Installation (Google Colab)](#installation-google-colab).
+
+The three are not mutually exclusive: a common pattern is to let an AI assistant author a pipeline (mode 1) and then submit the resulting script to a cluster (mode 2) or run it on Colab (mode 3).
+
+---
+
+## Usage with an AI coding assistant
+
+If you are not comfortable writing Python, the simplest way to use BioPipelines is to let an AI coding assistant drive it for you. You describe the computational protocol you want in plain language; the assistant translates that into a BioPipelines pipeline, runs it (on a cluster or Colab), inspects the outputs, and iterates.
+
+The repository ships with prompt files under `llm/` that configure the assistant with the framework's contract — typed streams, the `Pipeline`/`Resources` API, the available tools — so it grounds its suggestions in what BioPipelines actually provides instead of guessing.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/locbp-uzh/biopipelines
+cd biopipelines
+```
+
+### 2. Open an AI coding assistant inside the repo
+
+Start your assistant from the repository root so it can read the `llm/` prompts and the rest of the codebase. For example, with [Claude Code](https://claude.com/claude-code):
+
+```bash
+claude
+```
+
+or with [Codex](https://openai.com/codex/):
+
+```bash
+codex
+```
+
+Any repository-aware assistant works (Claude Code, Codex, Cursor, Copilot Chat, …). The only requirement is that it can read files in the working directory.
+
+### 3. Point the assistant at the right prompt and state your goal
+
+The `llm/` folder contains two prompts, depending on what you want to do:
+
+- **`llm/pipelines.md`** — to *use* the framework: design and run a pipeline for a specific biological problem. This is what most users want.
+- **`llm/development.md`** — to *change* the framework itself: add a tool wrapper, fix a bug, refactor internals.
+
+Open your session with a message like:
+
+> Read and follow `llm/pipelines.md`. I want to redesign the N-terminal domain of lysozyme with RFdiffusion, then inverse-fold and validate with AlphaFold.
+
+The assistant reads the prompt, loads the framework's documentation, interviews you about any open choices (which tools, how many designs, which execution mode), and then writes and runs the pipeline.
+
+### 4. One-time setup for where the pipeline will run
+
+The assistant authors the pipeline locally, but the heavy compute runs elsewhere — on a cluster or on Colab. Set that up once:
+
+- **Cluster:** follow `llm/cluster.md` to add an ssh alias and the `llm/log.sh` command logger, then copy `llm/resources.md.template` to `llm/resources.md` and let the assistant fill in your cluster's partitions, GPU types, and walltime policy. This gives the assistant honest defaults instead of generic guesses.
+- **Colab:** no setup needed here — the assistant hands you notebook cells to run, and you paste back the outputs.
+
+After that, the assistant can push the pipeline, submit it, tail the logs, and report back the results — all from within the same session.
+
+---
+
+## Installation (Slurm HPC)
+
+### 1. Setting up BioPipelines
 
 ```bash
 # Clone the repository
@@ -63,10 +131,11 @@ mamba activate biopipelines
 pip install -e .
 
 # Optional: register a Jupyter kernel if you plan to work with Jupyter
+pip install ipython
 ipython kernel install --user --name biopipelines
 ```
 
-### 2. Configure your machine
+### 2. Configuring your machine
 
 Each machine you run on (cluster, laptop, colab) is described by a `config.<variant>.yaml` at the repo root. The `bp-config` CLI manages those files:
 
@@ -103,15 +172,13 @@ bp-config folder <key>     # resolve one folder path
 bp-config env <Tool>       # the conda env configured for a tool
 ```
 
-### 3. Install tools
+### 3. Installing tools
 
 Each external tool (RFdiffusion, ProteinMPNN, AlphaFold, …) lives in its own conda env. Install them on demand:
 
 ```python
-from biopipelines.pipeline import Pipeline
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
+from biopipelines.pipeline import *
+from biopipelines import RFdiffusion, ProteinMPNN, AlphaFold
 
 with Pipeline("Setup", "install", description="Install tools"):
     RFdiffusion.install()
@@ -121,13 +188,33 @@ with Pipeline("Setup", "install", description="Install tools"):
 
 `.install()` clones the upstream repo (where applicable) and creates the per-tool conda env. Re-running is a no-op once the env exists; pass `force_reinstall=True` to rebuild.
 
+*Note: installation was optimized on the S3IT UZH HPC (Ubuntu 24.04, SLURM 25.05) and might require adjusting e.g. due to CUDA version mismatch.*
+
+### 4. Submitting a pipeline
+
+After activating the biopipelines environment:
+
+```bash
+# Cluster: generate scripts and submit them to SLURM
+bp-submit example_pipelines/<pipeline>.py
+
+# Laptop / interactive: run inline (no SLURM); each tool's bash script
+# executes immediately as the tool is added (need resources on node)
+bp-run example_pipelines/<pipeline>.py
+```
+
+Note: you must have installed the relevant tool environments
+(`Tool.install()`) and configured them in your `config.<variant>.yaml`.
+
 ---
 
-## Google Colab
+---
+
+## Installation (Google Colab)
 
 BioPipelines runs on Google Colab with GPU support out of the box. No SLURM needed — tools are installed via `micromamba` into isolated environments, matching the cluster behavior.
 
-### Setup
+### 1. Setting up BioPipelines
 
 Run this cell at the top of your Colab notebook:
 
@@ -135,10 +222,11 @@ Run this cell at the top of your Colab notebook:
 # Cell 1: Install BioPipelines and micromamba
 !git clone https://github.com/locbp-uzh/biopipelines
 %cd biopipelines
-!pip install -e ".[all]"
+!pip install -e ".[colab]"
 !wget -q https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64 -O /usr/local/bin/micromamba && chmod +x /usr/local/bin/micromamba
-!micromamba create -f environments/biopipelines.yaml -y
 ```
+
+On Colab the `biopipelines` env is **not** created: tools mapped to it run in base Python, where `pip install -e ".[colab]"` installed the deps (the `colab` extra adds conda-only packages like `openbabel-wheel`). That env is never activated on Colab, so creating it just wastes setup time. The `micromamba` binary is still needed — each per-tool `.install()` creates its own env with it.
 
 BioPipelines automatically detects the Colab environment and loads `colab.yaml` instead of `config.yaml`. This sets `env_manager: "micromamba"`, which means:
 
@@ -146,15 +234,13 @@ BioPipelines automatically detects the Colab environment and loads `colab.yaml` 
 - Tool installation uses `micromamba` to create environments from YAML specs
 - SLURM-related settings are disabled
 
-### Installing Tools
+### 2. Installing tools
 
 Install the tools you need using `.install()`. This only needs to run once per Colab session (completed steps are skipped on re-run):
 
 ```python
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
+from biopipelines import RFdiffusion, ProteinMPNN, AlphaFold
 
 with Pipeline("Setup", "install", description="Install tools"):
     RFdiffusion.install()
@@ -162,7 +248,7 @@ with Pipeline("Setup", "install", description="Install tools"):
     AlphaFold.install()
 ```
 
-### Running Pipelines
+### 3. Running Pipelines
 
 After installation, pipelines work exactly as described in the rest of this manual. On-the-fly execution is enabled automatically in notebooks:
 
@@ -182,34 +268,11 @@ af = AlphaFold(proteins=pmpnn)
 
 | | Cluster | Google Colab |
 |---|---|---|
-| **Environment manager** | mamba/conda | micromamba |
+| **Environment manager** | mamba/conda/micromamba | micromamba (hardcoded) |
 | **Execution** | SLURM or on-the-fly | On-the-fly only |
 | **GPU** | Configured via `Resources()` | Colab's assigned GPU |
-| **Output location** | Configured in `config.yaml` | `./BioPipelines/` |
-| **Config file** | `config.yaml` | `colab.yaml` (auto-detected) |
-| **Tool install** | Conda, mamba, micromamba supported | Creates micromamba environments |
 
-!!! note "Colab session limits"
-    Colab sessions are ephemeral. Installed tools and generated outputs are lost when the runtime disconnects. Mount Google Drive or download results before the session ends.
-
----
-
-## Quick Start
-
-After activating the biopipelines environment, pick the runner that matches the host:
-
-```bash
-# Cluster: generate scripts and submit them to SLURM
-bp-submit example_pipelines/<pipeline>.py
-bp-submit example_pipelines/<pipeline>.ipynb   # notebooks too
-
-# Laptop / interactive: run inline (no SLURM); each tool's bash script
-# executes immediately as the tool is added
-bp-run example_pipelines/<pipeline>.py
-```
-
-Note: you must have installed the relevant tool environments
-(`Tool.install()`) and configured them in your `config.<variant>.yaml`.
+Colab sessions are ephemeral. Installed tools and generated outputs are lost when the runtime disconnects. Mount Google Drive or download results before the session ends.
 
 ---
 
@@ -220,15 +283,15 @@ Note: you must have installed the relevant tool environments
 BioPipelines operates alternatively in one or two phases:
 
 One phase (Jupyter/Colab notebooks):
-| Phase | What Happens | Executer | Where |
-|-------|--------------|-------|-------|
-| **Notebook cell** | Generation and running of bash scripts, prediction of output paths and files | Python + bash | Cluster |
+| Phase | What Happens | Executer |
+|-------|--------------|-------|
+| **Notebook cell** | Generation and running of bash scripts, prediction of output paths and files | Python + bash |
 
 Two phases (biopipelines-submit):
-| Phase | What Happens | Executer | Where |
-|-------|--------------|-------|-------|
-| **Configuration** | Generation of bash scripts, prediction of output paths and files | Python | Cluster |
-| **Execution** | Bash scripts execute, files are created | Bash + Python | Cluster |
+| Phase | What Happens | Executer |
+|-------|--------------|-------|
+| **Configuration** | Generation of bash scripts, prediction of output paths and files | Python |
+| **Execution** | Bash scripts execute, files are created | Bash + Python |
 
 ### DataStream vs Tables
 
@@ -236,30 +299,10 @@ Tools output two types of data containers:
 
 **DataStream** - Unified container supporting ID tracking, and association of IDs to files (e.g. .pdb, .cif, .sdf) or values (e.g. protein/dna sequences):
 
-```python
-# Iterate over structures - each item is a single-item DataStream
-for structure in boltz.streams.structures:
-    print(f"{structure.ids[0]}: {structure.files[0]}")
-
-# Each item can be passed directly to downstream tools
-for structure in proteins.streams.structures:
-    result = SomeTool(structures=structure)
-
-# Iterate over the tool output itself (requires all streams to share the same IDs)
-# Each item is a single-item StandardizedOutput with all streams sliced to one ID
-for item in boltz:
-    print(item.streams.structures.ids[0])  # same ID across all streams
-    result = SomeTool(structures=item)     # passable directly to tools
-
-# Count items
-print(f"Generated {len(boltz.streams.structures)} structures")
-print(f"Expected ids: {boltz.streams.structures.ids}")
-```
-
 DataStream types accessed via `tool.streams.<name>`:
-- `streams.structures` - PDB/CIF files
+- `streams.structures` - PDB/CIF/SDF coordinate files (a ligand's 3-D coordinates live here)
 - `streams.sequences` - ID-tracked table with id, sequence columns
-- `streams.compounds` - CSV with SMILES column, or SDF/PDB files
+- `streams.compounds` - value-based CSV (the ligand's chemistry/identity: `smiles`, `code`)
 - `streams.msas` - A3M or CSV files
 - `streams.images` - PNG files
 
@@ -271,7 +314,6 @@ info = tool.tables.confidence.info
 print(info.path)        # /path/to/confidence.csv
 print(info.columns)     # ["id", "pTM", "complex_plddt", ...]
 print(info.description) # "Confidence scores"
-print(info.count)       # Number of rows
 
 # Access column references for downstream tools
 tool.tables.confidence.plddt  # Returns (TableInfo, "plddt") tuple
@@ -281,7 +323,7 @@ In the ToolReference, one can find for each tool what is the expected output in 
 
 ### Common inputs
 
-Basic input types can be imported from `biopipelines/entities.py`. Importantly, for models having entities such as PDB paths, proteins sequences or ligand smiles as parameters, we always pass an entity object rather than a string to ensure representation coherence across the repository.
+Basic input types can be imported from `biopipelines/entities.py`. Importantly, for models having entities such as PDB paths, proteins sequences or ligand smiles or codes as parameters, we always pass an entity object rather than a string to ensure representation coherence across the repository. The same is true for ligand codes (some tools alter them in output structures).
 
 | Entity | Purpose |
 |--------|---------|
@@ -291,8 +333,8 @@ Basic input types can be imported from `biopipelines/entities.py`. Importantly, 
 | `CompoundLibrary` | Create compound collections |
 | `Table` | Load existing CSV files |
 
-**PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/pdbs/` → RCSB download. 
-It also generates protein sequences for each of the proteins. 
+**PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/pdbs/` → RCSB download.
+It also generates protein sequences for each of the proteins.
 If an RCSB code is provided, ligands will also be downloaded and will be available with their smiles/ccd.
 
 ```python
@@ -333,6 +375,29 @@ ethanol = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
 
 # From CDXML file: each molecule is a separate ligand; ChemDraw names used as IDs
 ligands = Ligand(cdxml="my_ligands.cdxml")
+
+# Code-only: name an existing HETATM residue code (no download, no SMILES).
+# Produces a compounds stream you hand to tools that read a ligand's code
+# (LigandMPNN, PoseBusters, PLIP, RFdiffusionAllAtom, RFdiffusion3, …).
+lig = Ligand(code="ZIT")
+```
+
+A `code`-only Ligand has no SMILES, so it cannot be converted to 3-D. To get a
+3-D ligand (e.g. an SDF for docking-adjacent tools), start from a Ligand that
+carries a SMILES and run OpenBabel:
+
+```python
+aspirin = Ligand("aspirin")                       # has SMILES
+sdf = OpenBabel(compounds=aspirin, convert_3d="sdf")
+# sdf.streams.structures -> the SDF; sdf.streams.compounds -> chemistry passthrough
+```
+
+**Ligand string shorthand.** Tools that read a ligand by its residue code (LigandMPNN, PLIP, PoseBusters, RFdiffusionAllAtom, RFdiffusion3) accept a bare string in place of a `Ligand`: `ligand="LIG"` is shorthand for `ligand=Ligand(code="LIG")`. It creates a code-only ligand — no chemistry, no SMILES — and is exactly equivalent to constructing the `Ligand` yourself. For a ligand with chemistry (to fetch SMILES, or to convert to 3-D), pass an explicit `Ligand("ATP")` / `Ligand(smiles=...)` instead; the string shorthand never fetches or downloads. The auto-created ligand is registered as an internal step (see [Filesystem Structure](#filesystem-structure)).
+
+```python
+# These two are equivalent:
+LigandMPNN(structures=rfd, ligand="STI")
+LigandMPNN(structures=rfd, ligand=Ligand(code="STI"))
 ```
 
 **CompoundLibrary** - Creates compound collections:
@@ -442,7 +507,7 @@ rfd = RFdiffusion(contigs="50-100", num_designs=5)
 # Pass column reference to downstream tool
 lmpnn = LigandMPNN(
     structures=rfd,
-    ligand="LIG",
+    ligand=Ligand(code="LIG"),  # code read from the compounds stream at runtime
     redesigned=rfd.tables.structures.designed  # Tuple: (TableInfo, "designed")
 )
 ```
@@ -495,6 +560,32 @@ with Pipeline("Project", "Job"):
 ```
 
 Each iteration must call `Resources()` to open its own sibling batch. `Dependencies()` and nested `Parallel()` are disallowed inside the block.
+
+---
+
+## Grouping Outputs with Folder
+
+`Folder("name")` is a context manager that nests the output folders of the tools created inside it under a named subdirectory. It is purely organizational — it does not change execution order, resources, batching, or dependencies. The global step counter keeps running, so the numbers still reflect true execution order:
+
+```python
+with Pipeline("Project", "Job"):
+    Resources()
+    Tool1()                 # 001_Tool1/
+    with Folder("group"):
+        Tool2()             # group/002_Tool2/
+    Tool3()                 # 003_Tool3/
+```
+
+Blocks nest (`with Folder("a"): with Folder("b"):` produces `a/b/...`). Folder names must be filesystem-safe (`[A-Za-z0-9._-]`, no path separators); `.internal` is reserved for the framework.
+
+**Downloading a group (Colab).** Bind the block and call `.download()` after it to zip the folder and trigger a browser download. This works in on-the-fly / Colab runs (where tools execute as they are added, so the files exist by the time the block closes); in submit mode it raises, since the outputs don't exist yet at that point.
+
+```python
+with Folder("Results") as results:
+    af = AlphaFold(proteins=pmpnn)
+    PoseBusters(structures=af, ligand="LIG")
+results.download()   # zips Results/ -> Results.zip and downloads it in Colab
+```
 
 ---
 
@@ -577,7 +668,7 @@ with Pipeline("Project", "Job", "Description"):
 Panda provides pandas-style table transformations:
 
 ```python
-from biopipelines.panda import Panda
+from biopipelines import Panda
 
 # Filter rows
 filtered = Panda(
@@ -625,7 +716,7 @@ ranked = Panda(
 )
 ```
 
-Available operations: `filter`, `sort`, `head`, `tail`, `sample`, `rank`, `drop_duplicates`, `merge`, `concat`, `calculate`, `groupby`, `select_columns`, `drop_columns`, `rename`, `fillna`, `pivot`, `melt`, `average_by_source`
+Available operations: `filter`, `sort`, `head`, `tail`, `sample`, `rank`, `drop_duplicates`, `merge`, `concat`, `calculate`, `zscore`, `groupby`, `select_columns`, `drop_columns`, `rename`, `fillna`, `pivot`, `melt`, `average_by_source`
 
 ---
 
@@ -640,13 +731,19 @@ their own stream's folder; standalone tables live under `tables/`.
 ├── RunTime/                    # Execution scripts
 │   ├── pipeline.sh
 │   ├── 001_<tool>.sh
-│   └── 002_<tool>.sh
+│   ├── 002_<tool>.sh
+│   └── .internal/              # scripts for auto-generated internal tools
+│       └── 001_<tool>.sh
 ├── Logs/                       # Execution logs
 │   ├── 001_<tool>.log
-│   └── 002_<tool>.log
+│   ├── 002_<tool>.log
+│   └── .internal/
+│       └── 001_<tool>.log
 ├── ToolOutputs/                # Tool output predictions (JSON manifests)
 │   ├── 001_<tool>.json
-│   └── 002_<tool>.json
+│   ├── 002_<tool>.json
+│   └── .internal/
+│       └── 001_<tool>.json
 ├── 001_<Tool>/                 # Tool outputs — canonical sub-layout
 │   ├── .expected_outputs.json  # status/manifest at the folder root
 │   ├── _configuration/         # config-time inputs: JSONs, YAMLs, CSVs
@@ -656,8 +753,12 @@ their own stream's folder; standalone tables live under `tables/`.
 │   │   └── <id>.pdb / .fasta / ...
 │   ├── tables/                 # standalone TableInfo CSVs
 │   └── _extras/                # catch-all (plots, logs, sessions)
-└── 002_<Tool>/
-... └── ...
+├── 002_<Tool>/
+│   └── ...
+├── <folder>/                   # Folder("<folder>") groups public tool outputs
+│   └── 003_<Tool>/
+└── .internal/                  # framework-owned internal tools (hidden)
+    └── 001_<Tool>/
 ```
 
 **Where to find each kind of output:**
@@ -670,6 +771,10 @@ their own stream's folder; standalone tables live under `tables/`.
 | Input JSONs / YAMLs sent to the tool's CLI | `_configuration/` |
 | Raw model dumps (Boltz's `boltz_results_*`, ColabFold's Folding dump, etc.) | `_execution/` |
 | The tool's quick-glance status manifest | `.expected_outputs.json` (root) |
+| Outputs grouped under `Folder("x")` | `x/<NNN>_<Tool>/` |
+| Auto-generated internal tools (e.g. a `Ligand` from `ligand="LIG"`) | `.internal/<NNN>_<Tool>/` |
+
+Each public tool carries the same step number across its output folder, its `RunTime/`/`Logs/` scripts, and its `ToolOutputs/` manifest, so `002_LigandMPNN/` pairs with `RunTime/002_LigandMPNN.sh`. Internal tools (auto-generated, e.g. a `Ligand` from `ligand="LIG"`) are numbered separately under their own `.internal/` subdirectories and don't consume a public step number.
 
 Configure paths and environments in `config.yaml` at repository root.
 
@@ -713,11 +818,11 @@ artefact captured on UZH S3IT lives at
 
 **Path errors**: Run from BioPipelines root directory.
 
-**Environment issues**: Check conda environments in `config.yaml`.
+**Tool installation issues**: The variety of HPC configurations makes it very difficult to define a tool installer that is portable accross all. Please refer to the official documentation (references are in the README file). If installation fails on Colab, please open a Git Issue.
 
-**Resource limits**: Adjust GPU/memory in `Resources()`.
+**Job killed/00MM**: Most likely the jobs requires more resources. Adjust GPU/memory in `Resources()`.
 
-**Missing files**: Check `Logs/<NNN>_<tool>.log`.
+**Missing files**: Check `Logs/<NNN>_<tool>.log`
 
 **Local output**: Write results to the current directory instead of the config-defined path:
 
@@ -731,7 +836,7 @@ Note: `local_output` defaults to `True` automatically when `on_the_fly` is enabl
 **Load previous outputs**:
 
 ```python
-from biopipelines.load import Load, LoadMultiple
+from biopipelines import Load, LoadMultiple
 
 # Single output (pass the tool's output folder)
 prev = Load("/path/to/job/001_Boltz2")

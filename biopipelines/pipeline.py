@@ -23,6 +23,7 @@ from datetime import datetime
 
 from .folders import FolderManager
 from .config_manager import ConfigManager
+from ._layout import INTERNAL_FOLDER
 try:
     from .base_config import BaseConfig, ToolOutput
     from .combinatorics import Bundle, Each
@@ -134,7 +135,12 @@ class Pipeline:
         self.on_the_fly = on_the_fly
 
         if local_output is None:
-            local_output = on_the_fly
+            # Auto-enable local output for interactive/notebook runs, which usually
+            # lack shared storage. EXCEPT on Colab: there the config's
+            # biopipelines_output is deliberately repointed at mounted Drive for
+            # persistence, and forcing local_output would overwrite it with the
+            # ephemeral cwd/outputs (lost on runtime recycle). Let the config win.
+            local_output = on_the_fly and ConfigManager().get_scheduler() != "colab"
         self.local_output = local_output
 
         self.folder_manager = FolderManager(project, job, local_output=local_output)
@@ -148,10 +154,15 @@ class Pipeline:
         # Tool management
         self.tools = []
         self.tool_outputs = []
-        self.execution_order = 0
+        self.execution_order = 0      # all tools, real run order
+        self.public_step_order = 0    # public tools only, drives public folder/script names
+        self.internal_order = 0       # internal tools only, drives .internal layout + ".NNN" names
 
         # Suffix for tool folder naming
         self.current_suffix = ""
+
+        # Stack of public subfolder names pushed by the Folder() context manager.
+        self._folder_stack = []
 
         # Script generation
         self.pipeline_script = ""
@@ -285,6 +296,30 @@ class Pipeline:
         """
         self.current_suffix = suffix
     
+    def _assign_step_context(self, tool_config: BaseConfig):
+        """Bump counters, create the step folder, and set the tool's pipeline context."""
+        self.execution_order += 1
+        if tool_config.internal:
+            self.internal_order += 1
+            folder_name = f"{self.internal_order:03d}_{tool_config.TOOL_NAME}"
+            tool_output_folder = os.path.join(self.folders["output"], INTERNAL_FOLDER, folder_name)
+            os.makedirs(os.path.join(self.folders["runtime"], INTERNAL_FOLDER), exist_ok=True)
+            os.makedirs(os.path.join(self.folders["logs"], INTERNAL_FOLDER), exist_ok=True)
+            public_step, internal_order = None, self.internal_order
+        else:
+            self.public_step_order += 1
+            if self.current_suffix:
+                folder_name = f"{self.public_step_order:03d}_{tool_config.TOOL_NAME}_{self.current_suffix}"
+            else:
+                folder_name = f"{self.public_step_order:03d}_{tool_config.TOOL_NAME}"
+            tool_output_folder = os.path.join(self.folders["output"], *self._folder_stack, folder_name)
+            public_step, internal_order = self.public_step_order, None
+        os.makedirs(tool_output_folder, exist_ok=True)
+        tool_config.set_pipeline_context(
+            self, self.execution_order, tool_output_folder, self.current_suffix,
+            public_step=public_step, internal_order=internal_order
+        )
+
     def add(self, tool_config: BaseConfig, **kwargs):
         """
         Add a tool to the pipeline.
@@ -310,18 +345,7 @@ class Pipeline:
                 tool_config.resources[key] = value
 
         # Set execution order and create step-numbered folder immediately
-        self.execution_order += 1
-        if self.current_suffix:
-            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}_{self.current_suffix}"
-        else:
-            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}"
-        tool_output_folder = os.path.join(self.folders["output"], step_folder_name)
-        os.makedirs(tool_output_folder, exist_ok=True)
-
-        # Set pipeline context with unified folder structure
-        tool_config.set_pipeline_context(
-            self, self.execution_order, tool_output_folder, self.current_suffix
-        )
+        self._assign_step_context(tool_config)
 
         # Configure inputs immediately so tool outputs are properly set
         tool_config.configure_inputs(self.folders)
@@ -396,18 +420,7 @@ class Pipeline:
                 tool_config.resources[key] = value
 
         # Set execution order and create step-numbered folder
-        self.execution_order += 1
-        if self.current_suffix:
-            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}_{self.current_suffix}"
-        else:
-            step_folder_name = f"{self.execution_order:03d}_{tool_config.TOOL_NAME}"
-        tool_output_folder = os.path.join(self.folders["output"], step_folder_name)
-        os.makedirs(tool_output_folder, exist_ok=True)
-
-        # Set pipeline context
-        tool_config.set_pipeline_context(
-            self, self.execution_order, tool_output_folder, self.current_suffix
-        )
+        self._assign_step_context(tool_config)
 
         # Configure inputs immediately
         tool_config.configure_inputs(self.folders)
@@ -449,16 +462,8 @@ class Pipeline:
         Raises:
             RuntimeError: If the tool's script exits with a non-zero code
         """
-        step_idx = self.execution_order
-        if hasattr(tool_config, 'suffix') and tool_config.suffix:
-            tool_script_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}_{tool_config.suffix}.sh"
-            log_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}_{tool_config.suffix}.log"
-        else:
-            tool_script_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}.sh"
-            log_name = f"{step_idx:03d}_{tool_config.TOOL_NAME}.log"
-
-        tool_script_path = os.path.join(self.folders["runtime"], tool_script_name)
-        log_path = os.path.join(self.folders["logs"], log_name)
+        tool_script_path = os.path.join(self.folders["runtime"], f"{tool_config.script_basename}.sh")
+        log_path = os.path.join(self.folders["logs"], f"{tool_config.script_basename}.log")
 
         # Generate the tool script
         script_content = tool_config.generate_script(tool_script_path)
@@ -467,7 +472,7 @@ class Pipeline:
         os.chmod(tool_script_path, 0o755)
 
         print(f"\n{'='*60}")
-        print(f"Running {tool_config.TOOL_NAME} (step {step_idx})")
+        print(f"Running {tool_config.TOOL_NAME} (step {tool_config.execution_order})")
         print(f"{'='*60}")
 
         # Execute the script, streaming output in real-time
@@ -625,9 +630,13 @@ class Pipeline:
         ]
         
         # Add tool configurations
-        for i, tool in enumerate(self.tools, 1):
+        for tool in self.tools:
+            if tool.internal:
+                label = f"Internal {tool.internal_order:03d}: {tool.TOOL_NAME}"
+            else:
+                label = f"Step {tool.public_step:03d}: {tool.TOOL_NAME}"
             config_lines.extend([
-                f'echo "Step {i}: {tool.TOOL_NAME}"',
+                f'echo "{label}"',
                 f'echo "  Environments: {tool.environments}"'
             ])
             
@@ -694,13 +703,9 @@ class Pipeline:
         ]
 
         # Add each tool execution (each tool handles its own environment activation)
-        for i, tool in enumerate(self.tools, 1):
+        for tool in self.tools:
             # Generate tool-specific script
-            # Include suffix in script name if present
-            if hasattr(tool, 'suffix') and tool.suffix:
-                tool_script_path = os.path.join(self.folders["runtime"], f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.sh")
-            else:
-                tool_script_path = os.path.join(self.folders["runtime"], f"{i:03d}_{tool.TOOL_NAME}.sh")
+            tool_script_path = os.path.join(self.folders["runtime"], f"{tool.script_basename}.sh")
             tool_script_content = tool.generate_script(tool_script_path)
             
             # Write tool script
@@ -722,11 +727,7 @@ class Pipeline:
                 print(f"Debug: Could not determine output files for {tool.TOOL_NAME} during script generation: {e}")
             
             # Add tool execution following notebook pattern
-            # Include suffix in log file name if present
-            if hasattr(tool, 'suffix') and tool.suffix:
-                log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.log")
-            else:
-                log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}.log")
+            log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
             tool_folder_log = os.path.join(tool.output_folder, "_log")
             script_lines.extend([
                 f"echo {tool.TOOL_NAME}",
@@ -946,15 +947,12 @@ class Pipeline:
 
         # Handle auto email detection
         if email == "auto":
-            current_user = getpass.getuser()
-            emails = ConfigManager().get_emails()
-            if current_user in emails:
-                email = emails[current_user]
-                print(f"Auto-detected email: {email} (user: {current_user})")
+            email = ConfigManager().get_email()
+            if email:
+                print(f"Auto-detected email: {email}")
             else:
-                print(f"Warning: No email mapping found for user '{current_user}'. Disabling email notifications.")
-                print(f"Add your username to the 'machine.emails' section in your config file.")
-                email = ""
+                print("Warning: No email configured. Disabling email notifications.")
+                print("Set the 'machine.email' field in your config file.")
 
         email_line = "" if email == "" else f"""
 #SBATCH --mail-type=END,FAIL
@@ -970,20 +968,27 @@ class Pipeline:
             # Multiple batches - generate chained SLURM scripts
             self._generate_multi_batch_slurm(email_line, num_batches)
 
-    def _generate_gpu_line(self, gpu_spec):
-        """Generate SBATCH GPU constraint line based on GPU specification."""
+    def _generate_gpu_line(self, gpu_spec, gpus=1):
+        """Generate SBATCH GPU line(s) based on GPU specification and count.
+
+        ``gpus`` is the number of GPUs to request (``#SBATCH --gpus=<n>``),
+        independent of the model/memory constraint encoded in ``gpu_spec``.
+        For a specific model spec (e.g. ``"A100"``) the count rides on the
+        ``--gpus=<model>:<n>`` form instead.
+        """
+        n = gpus if gpus else 1
         if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
             return ""
         elif gpu_spec == "high-memory":
-            return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
+            return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
         elif gpu_spec == "gpu" or gpu_spec == "any":
-            return "#SBATCH --gpus=1"
+            return f"#SBATCH --gpus={n}"
         elif gpu_spec.startswith("!"):
             excluded_model = gpu_spec[1:]
             if excluded_model.upper() == "L4":
-                return "#SBATCH --gpus=1\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
+                return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
             else:
-                return f"#SBATCH --gpus=1\n#SBATCH --constraint=\"~GPU{excluded_model}\""
+                return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"~GPU{excluded_model}\""
         elif gpu_spec in ["24GB", "32GB", "80GB", "96GB"] or "|" in gpu_spec:
             if "|" in gpu_spec:
                 memory_options = gpu_spec.split("|")
@@ -991,9 +996,9 @@ class Pipeline:
                 constraint = "|".join(constraint_parts)
             else:
                 constraint = f"GPUMEM{gpu_spec}"
-            return f"#SBATCH --gpus=1\n#SBATCH --constraint=\"{constraint}\""
+            return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"{constraint}\""
         else:
-            return f"#SBATCH --gpus={gpu_spec}:1"
+            return f"#SBATCH --gpus={gpu_spec}:{n}"
 
     def _generate_gpu_setup(self, gpu_spec):
         """Generate GPU setup script based on GPU specification."""
@@ -1032,7 +1037,7 @@ echo "GPU Type: $gpu_type"
         resources = self.batch_resources[0]
         _validate_sbatch_value("memory", resources["memory"])
         _validate_sbatch_value("time", resources["time"])
-        gpu_line = self._generate_gpu_line(resources["gpu"])
+        gpu_line = self._generate_gpu_line(resources["gpu"], resources.get("gpus", 1))
         gpu_setup = self._generate_gpu_setup(resources["gpu"])
         additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
         dependency_line = self._generate_dependency_line(self.external_dependencies)
@@ -1103,7 +1108,7 @@ umask 002
             resources = self.batch_resources[batch_idx]
             _validate_sbatch_value("memory", resources["memory"])
             _validate_sbatch_value("time", resources["time"])
-            gpu_line = self._generate_gpu_line(resources["gpu"])
+            gpu_line = self._generate_gpu_line(resources["gpu"], resources.get("gpus", 1))
             gpu_setup = self._generate_gpu_setup(resources["gpu"])
             additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
 
@@ -1181,9 +1186,13 @@ umask 002
             'echo'
         ]
 
-        for i, tool in enumerate(batch_tools, start=start_tool_idx + 1):
+        for tool in batch_tools:
+            if tool.internal:
+                label = f"Internal {tool.internal_order:03d}: {tool.TOOL_NAME}"
+            else:
+                label = f"Step {tool.public_step:03d}: {tool.TOOL_NAME}"
             config_lines.extend([
-                f'echo "Step {i}: {tool.TOOL_NAME}"',
+                f'echo "{label}"',
                 f'echo "  Environments: {tool.environments}"'
             ])
             tool_config = tool.get_config_display()
@@ -1240,14 +1249,10 @@ umask 002
         ]
 
         # Add each tool execution (each tool handles its own environment activation)
-        for i, tool in enumerate(batch_tools, start=start_tool_idx + 1):
+        for tool in batch_tools:
             # Tool script path
-            if hasattr(tool, 'suffix') and tool.suffix:
-                tool_script_path = os.path.join(self.folders["runtime"], f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.sh")
-                log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.log")
-            else:
-                tool_script_path = os.path.join(self.folders["runtime"], f"{i:03d}_{tool.TOOL_NAME}.sh")
-                log_file = os.path.join(self.folders["logs"], f"{i:03d}_{tool.TOOL_NAME}.log")
+            tool_script_path = os.path.join(self.folders["runtime"], f"{tool.script_basename}.sh")
+            log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
             tool_folder_log = os.path.join(tool.output_folder, "_log")
 
             script_lines.extend([f"echo {tool.TOOL_NAME}", f"{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}", "echo"])
@@ -1274,7 +1279,7 @@ umask 002
             job_ids = [job_ids]
         self.external_dependencies.extend(job_ids)
 
-    def resources(self, gpu: str = None, memory: str = None, time: str = None, cpus: int = None, **slurm_options):
+    def resources(self, gpu: str = None, memory: str = None, time: str = None, cpus: int = None, gpus: int = None, **slurm_options):
         """
         Configure computational resources and start a new batch.
 
@@ -1294,6 +1299,9 @@ umask 002
             time: Wall time limit in HH:MM:SS format (e.g., "24:00:00", "48:00:00")
             cpus: CPUs per task → #SBATCH --cpus-per-task=<cpus>.
                 - None: Inherits from previous batch (omitted on first batch)
+            gpus: Number of GPUs → #SBATCH --gpus=<gpus> (combined with any
+                gpu= model/memory constraint). Default behaviour (None) is 1 GPU
+                whenever a gpu spec is set. Use gpus=2 to request two GPUs.
             **slurm_options: Additional SLURM parameters. Examples:
                 - nodes=1 → #SBATCH --nodes=1
                 - ntasks_per_node=1 → #SBATCH --ntasks-per-node=1
@@ -1330,6 +1338,9 @@ umask 002
         for opt_key, opt_value in slurm_options.items():
             _validate_sbatch_value(f"slurm_options[{opt_key!r}]", opt_value)
 
+        if gpus is not None and (not isinstance(gpus, int) or gpus < 1):
+            raise ValueError(f"gpus must be a positive integer, got {gpus!r}")
+
         # Start new batch
         self.current_batch += 1
         self.batch_start_indices.append(len(self.tools))
@@ -1361,6 +1372,7 @@ umask 002
             # First batch: use provided values or defaults
             batch_res = {
                 "gpu": gpu if gpu is not None else None,
+                "gpus": gpus if gpus is not None else 1,
                 "memory": memory if memory is not None else "15GB",
                 "time": time if time is not None else "24:00:00",
                 "slurm_options": slurm_options if slurm_options else {}
@@ -1375,6 +1387,7 @@ umask 002
                 merged_opts = prev_opts
             batch_res = {
                 "gpu": gpu if gpu is not None else prev_res["gpu"],
+                "gpus": gpus if gpus is not None else prev_res.get("gpus", 1),
                 "memory": memory if memory is not None else prev_res["memory"],
                 "time": time if time is not None else prev_res["time"],
                 "slurm_options": merged_opts
@@ -1407,9 +1420,11 @@ umask 002
             ""
         ]
 
-        for i, tool in enumerate(self.tools, 1):
+        for tool in self.tools:
+            n = tool.internal_order if tool.internal else tool.public_step
+            tag = f".{n:03d}" if tool.internal else f"{n:03d}"
             summary.append(
-                f"{i}. {tool.TOOL_NAME} ({tool.environments}) -> {tool.job_name}"
+                f"{tag}. {tool.TOOL_NAME} ({tool.environments}) -> {tool.job_name}"
             )
 
         return "\n".join(summary)
@@ -1429,7 +1444,7 @@ umask 002
         
         exported_count = 0
         
-        for i, (tool, tool_output) in enumerate(zip(self.tools, self.tool_outputs), 1):
+        for tool, tool_output in zip(self.tools, self.tool_outputs):
             try:
                 # Get current output structure
                 output_structure = tool.get_output_files()
@@ -1457,7 +1472,8 @@ umask 002
                     "tool_name": tool.TOOL_NAME,
                     "tool_class": tool.__class__.__name__,
                     "job_name": tool.job_name,
-                    "execution_order": i,
+                    "execution_order": tool.execution_order,
+                    "internal": tool.internal,
                     "environments": tool.environments,
                     "output_structure": output_structure,
                     "configuration": {
@@ -1484,13 +1500,10 @@ umask 002
                     "runtime_notes": "Execution metadata will be available after pipeline execution"
                 }
                 
-                # Generate filename with 3-digit execution order
-                if hasattr(tool, 'suffix') and tool.suffix:
-                    output_filename = f"{i:03d}_{tool.TOOL_NAME}_{tool.suffix}.json"
-                else:
-                    output_filename = f"{i:03d}_{tool.TOOL_NAME}.json"
-                output_path = os.path.join(tool_outputs_dir, output_filename)
-                
+                # Filename mirrors the tool's script basename (internal tools nest under .internal/)
+                output_path = os.path.join(tool_outputs_dir, f"{tool.script_basename}.json")
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
                 # Save to JSON file with custom serialization
                 with open(output_path, 'w') as f:
                     json.dump(tool_metadata, f, indent=2, default=self._json_serializer)
@@ -1772,3 +1785,78 @@ class Parallel:
         if siblings:
             pipeline._pending_post_parents = siblings
         return False  # don't suppress exceptions
+
+
+class Folder:
+    """Context manager that nests public tool outputs under a named subfolder.
+
+    Purely organizational: it prepends a path segment to the output folder of
+    every public tool created inside the block, leaving execution order,
+    resources, batching, and dependencies untouched. The global step counter
+    keeps running, so numbers still reflect true execution order::
+
+        with Pipeline(...):
+            Resources()
+            Tool1()                 # 001_Tool1/
+            with Folder("group"):
+                Tool2()             # group/002_Tool2/
+            Tool3()                 # 003_Tool3/
+
+    Blocks nest (``with Folder("a"): with Folder("b"):`` -> ``a/b/...``).
+    Internal tools ignore the stack; they always land under .internal/.
+
+    In on-the-fly / Colab runs the block can be bound and zipped for download::
+
+        with Folder("Results") as results:
+            ...tools...
+        results.download()   # zips Results/ and triggers a Colab download
+    """
+
+    def __init__(self, name: str):
+        self.name = name
+        self.path = None
+
+    def __enter__(self):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is None:
+            raise RuntimeError(
+                "Folder() must be used within a Pipeline context. "
+                "Use: with Pipeline(...): with Folder('...'): ..."
+            )
+        _validate_identifier("Folder name", self.name)
+        if self.name == INTERNAL_FOLDER:
+            raise ValueError(f"{INTERNAL_FOLDER!r} is reserved for framework-internal tools.")
+        # Absolute path of this folder, including any enclosing Folder() blocks.
+        self.path = os.path.join(pipeline.folders["output"], *pipeline._folder_stack, self.name)
+        self._on_the_fly = pipeline.on_the_fly
+        pipeline._folder_stack.append(self.name)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is not None and pipeline._folder_stack:
+            pipeline._folder_stack.pop()
+        return False  # don't suppress exceptions
+
+    def download(self) -> str:
+        """Zip this folder and trigger a browser download in Colab.
+
+        Meaningful only in on-the-fly / Colab runs, where tools execute as they
+        are added so the folder already holds real files when the block exits.
+        Returns the path to the created .zip. Outside Colab the archive is still
+        written and its path printed.
+        """
+        if not self._on_the_fly:
+            raise RuntimeError(
+                "Folder.download() is only available in on-the-fly / Colab runs; "
+                "in submit mode the outputs do not exist yet at this point."
+            )
+        if not os.path.isdir(self.path):
+            raise FileNotFoundError(f"Folder {self.path!r} has no outputs to download.")
+        archive = shutil.make_archive(self.path, "zip", self.path)
+        try:
+            from google.colab import files
+            files.download(archive)
+        except ImportError:
+            print(f"Not running in Colab; archive written to {archive}")
+        return archive

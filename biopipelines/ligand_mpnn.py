@@ -7,7 +7,7 @@ LigandMPNN configuration for ligand-aware sequence design.
 """
 
 import os
-from typing import Dict, List, Any, Union, Tuple
+from typing import Dict, List, Any, Union, Tuple, Optional
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
@@ -15,6 +15,8 @@ try:
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from .biopipelines_io import Resolve
+    from .input_standardization import resolve_basic_input
+    from .ligand import Ligand
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -23,6 +25,8 @@ except ImportError:
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
     from biopipelines_io import Resolve
+    from input_standardization import resolve_basic_input
+    from ligand import Ligand
 
 
 class LigandMPNN(BaseConfig):
@@ -49,18 +53,18 @@ fi
         remove_block = cls._env_remove_block("ligandmpnn_env", env_manager) if force_reinstall else ""
         env_block = cls._env_install_block("ligandmpnn_env", env_manager, biopipelines)
         return f"""echo "=== Installing LigandMPNN ==="
-{skip}mkdir -p {parent_dir}
-cd {parent_dir}
+{skip}mkdir -p "{parent_dir}"
+cd "{parent_dir}"
 if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/dauparas/LigandMPNN.git
 fi
-cd {repo_dir}
+cd "{repo_dir}"
 bash get_model_params.sh "./model_params"
 
 {remove_block}
 {env_block}
 # LigandMPNN's own pinned requirements (lives in the cloned repo)
-{env_manager} run -n ligandmpnn_env pip install -r {repo_dir}/requirements.txt
+{env_manager} run -n ligandmpnn_env pip install -r "{repo_dir}/requirements.txt"
 
 # Verify installation
 if [ -d "{repo_dir}/model_params" ] && {env_manager} run -n ligandmpnn_env python -c "import torch" >/dev/null 2>&1; then
@@ -91,10 +95,11 @@ fi
     lmpnn_folder = Path(lambda self: os.path.join(self.folders["data"], "LigandMPNN"))
     runtime_positions_py = Path(lambda self: self.pipe_script_path("pipe_lmpnn_runtime_positions.py"))
     resolve_positions_py = Path(lambda self: self.pipe_script_path("resolve_lmpnn_positions.py"))
+    ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
-                 ligand: str = "",
+                 ligand: Optional[Union[str, DataStream, StandardizedOutput]] = None,
                  num_sequences: int = 1,
                  fixed: Union[str, Tuple['TableInfo', str]] = "",
                  redesigned: Union[str, Tuple['TableInfo', str]] = "",
@@ -113,7 +118,12 @@ fi
 
         Args:
             structures: Input structures as DataStream or StandardizedOutput
-            ligand: Ligand identifier for binding site focus
+            ligand: Compounds stream (Ligand(code="LIG") or any
+                    compounds-producing tool) naming the bound ligand to focus
+                    the design around. A bare string ("LIG") is shorthand for
+                    Ligand(code="LIG") and creates an internal code-only Ligand.
+                    The residue `code` is read from the stream's `code` column
+                    at runtime.
             num_sequences: Number of sequences per batch (maps to --batch_size in LigandMPNN)
             fixed: Fixed positions. Accepts:
                    - PyMOL selection string: "10-20+30-40"
@@ -140,7 +150,7 @@ fi
             Streams: sequences (.csv), fasta (.fasta)
             Tables:
                 sequences: id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps
-                missing: id | removed_by | cause
+                missing: id | removed_by | kind | cause
         """
         # Resolve input to DataStream
         if isinstance(structures, StandardizedOutput):
@@ -150,8 +160,11 @@ fi
         else:
             raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
 
-        # Store LigandMPNN-specific parameters
-        self.ligand = ligand
+        # Ligand binding-site focus — optional compounds stream; the residue
+        # code is resolved from its `code` column at runtime. A bare string is
+        # promoted to an internal code-only Ligand.
+        self.ligand_stream: Optional[DataStream] = resolve_basic_input(
+            ligand, Ligand, "compounds", "code")
         self.num_sequences = num_sequences
         self.fixed = fixed
         self.redesigned = redesigned
@@ -172,8 +185,8 @@ fi
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
 
-        if not self.ligand:
-            raise ValueError("ligand parameter is required")
+        if not self.ligand_stream or len(self.ligand_stream) == 0:
+            raise ValueError("ligand (a compounds stream, e.g. Ligand(code=...)) is required and must not be empty")
 
         if self.num_sequences <= 0:
             raise ValueError("num_sequences must be positive")
@@ -195,8 +208,6 @@ fi
         if self.model not in valid_models:
             raise ValueError(f"model must be one of: {valid_models}")
 
-        _validate_freeform_string("ligand", self.ligand)
-
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
         self.folders = pipeline_folders
@@ -205,7 +216,7 @@ fi
         """Get LigandMPNN configuration display lines."""
         config_lines = super().get_config_display()
         config_lines.extend([
-            f"LIGAND: {self.ligand}",
+            "LIGAND: (code resolved from compounds stream at runtime)",
             f"FIXED: {self.fixed or 'Auto (from table or ligand-based)'}",
             f"REDESIGNED: {self.redesigned or 'Auto (from table or ligand-based)'}",
             f"CHAIN: {self.chain}",
@@ -248,11 +259,14 @@ fi
         fixed_param = resolved_fixed if resolved_fixed else "-"
         designed_param = resolved_redesigned if resolved_redesigned else "-"
 
+        # The ligand `code` is read from the compounds stream inside the script.
+        self.ligand_stream.save_json(self.ligand_json)
+
         return f"""echo "Setting up LigandMPNN position constraints"
 
 # Create positions JSON for runtime lookup
 echo "Computing position constraints..."
-python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand}" "{self.design_within}" "{self.positions_json}" "{self.chain}"
+python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand_json}" "{self.design_within}" "{self.positions_json}" "{self.chain}"
 
 """
 
@@ -354,7 +368,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
+                columns=["id", "removed_by", "kind", "cause"],
                 description="IDs removed (duplicates or upstream) with removal reason"
             )
         }
@@ -371,7 +385,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         base_dict = super().to_dict()
         base_dict.update({
             "lmpnn_params": {
-                "ligand": self.ligand,
+                "ligand_ids": list(self.ligand_stream.ids) if self.ligand_stream else [],
                 "num_sequences": self.num_sequences,
                 "num_batches": self.num_batches,
                 "fixed": self.fixed,

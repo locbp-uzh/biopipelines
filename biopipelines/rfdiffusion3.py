@@ -20,6 +20,9 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .biopipelines_io import Resolve
+    from .combinatorics import generate_multiplied_ids_pattern
+    from .input_standardization import resolve_basic_input
+    from .ligand import Ligand
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -27,6 +30,9 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from biopipelines_io import Resolve
+    from combinatorics import generate_multiplied_ids_pattern
+    from input_standardization import resolve_basic_input
+    from ligand import Ligand
 
 
 class RFdiffusion3(BaseConfig):
@@ -75,28 +81,41 @@ class RFdiffusion3(BaseConfig):
             Use '\\0' for chain breaks. Chain letters reference input structure.
             Example: "A50-100,80-100,\\0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
         pdb (DataStream or StandardizedOutput): Input PDB structure (required when using contig)
-        ligand_code (str): Ligand three-letter code identifying the molecule in input structure
-        ligand_structure (DataStream or StandardizedOutput): Output from Ligand tool providing ligand PDB file.
-            When provided, this PDB becomes the input structure for design.
+        ligand (DataStream or StandardizedOutput): Ligand as a compounds stream
+            (Ligand(code="LIG") or any compounds-producing tool). The residue
+            `code` is read from the stream's `code` column at runtime. If the
+            source also exposes a `structures` stream, that PDB becomes the
+            input structure for design.
         num_designs (int): Number of designs to generate (default: 1)
         num_models (int): Number of models per design (default: 1).
             WARNING: RFdiffusion3's internal default is 8 models per design. Always
             explicitly pass this parameter to avoid unexpected behavior.
         prefix (str): Prefix for output file names (default: uses pipeline name)
+        IMPORTANT — selection keys are <chain><resnum>, NOT residue names. Every
+        per-residue/atom selector below (select_hotspots, select_fixed_atoms,
+        select_buried, select_exposed, select_hbond_donor/acceptor) keys its dict by
+        the chain id + residue number (e.g. "A84", and for a LIGAND its chain+resnum
+        like "B1"), the same "contig index" form RFD3 uses internally — NOT the
+        3-letter ligand code. Passing a ligand code key (e.g. {"LIG": "..."} or
+        {"AXL": "..."}) silently selects zero atoms, which for RASA selectors fails
+        with "could not broadcast ... (0,3)". To target a ligand, use its chain and
+        residue number (find them in the input PDB; e.g. a dye on chain B residue 1
+        is "B1").
+
         select_hotspots (str or dict): Hotspot residues for binder design
             String: "A67,A89" (all atoms) or "A67:CA,CB;A89:CA" (specific atoms)
             Dict: {"A67": "CA,CB", "A89": ""}
         select_fixed_atoms (bool, str, or dict): Atoms with fixed 3D coordinates.
-            True=all atoms fixed, ""=none fixed, dict=specific atoms per residue/ligand.
-            Example: {"AXL": ""} to not fix any ligand atoms
+            True=all atoms fixed, ""=none fixed, dict=specific atoms per <chain><resnum>.
+            Example: {"B1": ""} to not fix any atoms of the ligand at chain B residue 1
         select_buried (str or dict): Atoms that should be buried in protein (RASA control).
-            Example: {"AXL": "C1,C2,C3"} or "AXL" for all atoms
+            Example: {"B1": "C1,C2,C3"} (ligand at B1) or "B1" for all its atoms
         select_exposed (str or dict): Atoms that should be solvent-exposed (RASA control).
-            Example: {"AXL": "O1,O2"} or "AXL" for all atoms
+            Example: {"B1": "O1,O2"} or "B1" for all atoms
         select_hbond_donor (dict): Hydrogen bond donor specification.
-            Dict mapping residue/ligand to donor atoms. Example: {"AXL": "N1,N2"}
+            Dict mapping <chain><resnum> to donor atoms. Example: {"B1": "N1,N2"}
         select_hbond_acceptor (dict): Hydrogen bond acceptor specification.
-            Dict mapping residue/ligand to acceptor atoms. Example: {"AXL": "O1,O2"}
+            Dict mapping <chain><resnum> to acceptor atoms. Example: {"B1": "O1,O2"}
         json_config (str or dict): Override with full JSON configuration for advanced use
         design_startnum (int): Starting number for design numbering (default: 1)
 
@@ -172,6 +191,10 @@ fi
     #   sequences/      — sequences.csv (content-bearing stream: map == content)
     #   tables/         — standalone TableInfo CSVs (main, metrics, specs)
     json_file = Path(lambda self: self.configuration_path(f"{self._get_prefix()}_rfd3_input.json"))
+    # Config-time template entry (shared design params); the runtime builder
+    # expands it into one keyed entry per input PDB, writing json_file.
+    json_template = Path(lambda self: self.configuration_path(f"{self._get_prefix()}_rfd3_template.json"))
+    build_inputs_py = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion3_build_inputs.py"))
     main_table = Path(lambda self: self.table_path("structures"))
     metrics_csv = Path(lambda self: self.table_path("metrics"))
     specifications_csv = Path(lambda self: self.table_path("specifications"))
@@ -187,14 +210,14 @@ fi
     table_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion3_table.py"))
     postprocess_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion3_postprocess.py"))
     pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
+    ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
 
     def __init__(self,
                  contig: str = "",
                  length: Union[str, int] = None,
                  pdb: Optional[Union[DataStream, StandardizedOutput]] = None,
-                 ligand_code: str = "",
-                 ligand_structure: Optional[Union[DataStream, StandardizedOutput]] = None,
+                 ligand: Optional[Union[str, DataStream, StandardizedOutput]] = None,
                  num_designs: int = 1,
                  num_models: int = 1,
                  prefix: str = None,
@@ -214,8 +237,11 @@ fi
             contig: Contig specification (use '\\0' for chain breaks)
             length: Length constraint (str "min-max" or int)
             pdb: Input PDB structure as DataStream or StandardizedOutput (optional)
-            ligand_code: Ligand CCD code identifying the molecule
-            ligand_structure: Output from Ligand tool providing ligand PDB file
+            ligand: Ligand as a compounds stream (Ligand(code="LIG") or any
+                    compounds-producing tool). The residue `code` is read from
+                    the stream's `code` column at runtime. If the source also
+                    exposes a `structures` stream (e.g. a Ligand with a bound
+                    PDB), that structure is used as the input PDB.
             num_designs: Number of designs to generate
             num_models: Number of models per design (default: 1). WARNING: RFdiffusion3's
                 internal default is 8. Always pass explicitly.
@@ -238,40 +264,33 @@ fi
                 specifications: id | design | model | sampled_contig | num_tokens_in | num_residues_in | num_chains | num_atoms | num_residues
                 sequences: id | source_id | source_pdb | chain | sequence | length
         """
-        # Resolve PDB input — store stream for runtime resolution
+        # Resolve PDB input — store stream for runtime resolution. All input
+        # PDBs are iterated at execution time (one foundry design entry per id);
+        # never index ids[0] at config time (breaks under lazy IDs).
         self.pdb_stream: Optional[DataStream] = None
-        self.pdb_input_id: Optional[str] = None
 
-        # Handle ligand structure (takes precedence over pdb)
-        if ligand_structure is not None:
-            if isinstance(ligand_structure, StandardizedOutput):
-                self.pdb_stream = ligand_structure.streams.structures
-                # Auto-extract ligand code from compound_ids if not provided
-                if not ligand_code and ligand_structure.streams.compounds:
-                    ligand_code = ligand_structure.streams.compounds.ids[0] if ligand_structure.streams.compounds.ids else ""
-            elif isinstance(ligand_structure, DataStream):
-                self.pdb_stream = ligand_structure
-            else:
-                raise ValueError(f"ligand_structure must be DataStream or StandardizedOutput, got {type(ligand_structure)}")
-            self.pdb_input_id = self.pdb_stream.ids[0]
-        # Handle PDB input (only if ligand_structure not provided)
-        elif pdb is not None:
+        # Ligand — a compounds stream supplying the residue `code` (resolved at
+        # runtime). If the source also exposes a structures stream (a Ligand
+        # with a bound PDB), those structures become the input PDBs.
+        # A bare string is shorthand for an internal Ligand(code=...).
+        self.ligand_stream: Optional[DataStream] = resolve_basic_input(
+            ligand, Ligand, "compounds", "code")
+        if ligand is not None and isinstance(ligand, StandardizedOutput):
+            lig_structures = ligand.streams.structures
+            if lig_structures and len(lig_structures) > 0:
+                self.pdb_stream = lig_structures
+        # Handle PDB input (only if a ligand structure wasn't provided)
+        if self.pdb_stream is None and pdb is not None:
             if isinstance(pdb, StandardizedOutput):
                 self.pdb_stream = pdb.streams.structures
-                if len(pdb.streams.structures) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb.streams.structures)}), using first: {pdb.streams.structures.ids[0]}")
             elif isinstance(pdb, DataStream):
                 self.pdb_stream = pdb
-                if len(pdb) > 1:
-                    print(f"Warning: Multiple structures provided ({len(pdb)}), using first: {pdb.ids[0]}")
             else:
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
-            self.pdb_input_id = self.pdb_stream.ids[0]
 
         # Store parameters
         self.contig = contig
         self.length = length
-        self.ligand_code = ligand_code
         self.num_designs = num_designs
         self.num_models = num_models
         self.prefix = prefix
@@ -288,11 +307,14 @@ fi
         super().__init__(**kwargs)
 
     def _get_prefix(self) -> str:
-        """Get the prefix to use for output files."""
+        """Design key for the de-novo (no-PDB) single-entry case.
+
+        With PDB input, each design key is its input pdb id (resolved at
+        runtime), so this is only the fallback name for the no-PDB case and for
+        config-time artifact filenames (e.g. the template JSON).
+        """
         if self.prefix:
             return self.prefix
-        if self.pdb_input_id:
-            return self.pdb_input_id
         return self.pipeline_name
 
     def validate_params(self):
@@ -314,7 +336,6 @@ fi
             raise ValueError("num_designs must be positive")
 
         _validate_freeform_string("contig", self.contig)
-        _validate_freeform_string("ligand_code", self.ligand_code)
         _validate_freeform_string("prefix", self.prefix)
         if isinstance(self.length, str):
             _validate_freeform_string("length", self.length)
@@ -397,66 +418,35 @@ fi
         else:
             return {}
 
-    def _build_json_config(self) -> Dict[str, Any]:
+    def _build_json_template(self) -> Dict[str, Any]:
+        """Build the shared per-design template entry (one flat dict).
+
+        This holds every design parameter EXCEPT the per-PDB `input` path and
+        the `ligand` code, which the runtime builder fills in per entry (input
+        resolved per input pdb id; ligand code broadcast). It is a single entry
+        dict, not the keyed ``{key: {...}}`` config — the keying happens at
+        runtime, one key per input PDB.
         """
-        Build JSON configuration from parameters.
+        entry: Dict[str, Any] = {}
 
-        Returns:
-            Dictionary representing JSON config
-        """
-        # If full JSON config provided, use it
-        if self.json_config:
-            if isinstance(self.json_config, dict):
-                return self.json_config
-            else:
-                return json.loads(self.json_config)
-
-        # Build config from parameters
-        prefix = self._get_prefix()
-
-        # Create single design entry (n_batches and diffusion_batch_size control multiplicity)
-        config = {}
-        design_key = f"{prefix}"
-        config[design_key] = {}
-        entry = config[design_key]
-
-        # Input structure — use placeholder; resolved at runtime via jq
-        if self.pdb_stream:
-            entry["input"] = "__RESOLVE_INPUT_PDB__"
-
-        # Ligand specification
-        if self.ligand_code:
-            entry["ligand"] = self.ligand_code
-
-        # Contig specification (for motif scaffolding)
         if self.contig:
             entry["contig"] = self.contig
-
-        # Length constraint
         if self.length is not None:
             entry["length"] = str(self.length)
-
-        # Hotspot specification
         if self.select_hotspots:
             entry["select_hotspots"] = self._format_hotspots()
-
-        # Constraint parameters for small molecule binder design
         if self.select_fixed_atoms is not None:
             entry["select_fixed_atoms"] = self.select_fixed_atoms
-
         if self.select_buried is not None:
             entry["select_buried"] = self.select_buried
-
         if self.select_exposed is not None:
             entry["select_exposed"] = self.select_exposed
-
         if self.select_hbond_donor is not None:
             entry["select_hbond_donor"] = self.select_hbond_donor
-
         if self.select_hbond_acceptor is not None:
             entry["select_hbond_acceptor"] = self.select_hbond_acceptor
 
-        return config
+        return entry
 
     def get_config_display(self) -> List[str]:
         """Get RFdiffusion3 configuration display lines."""
@@ -464,7 +454,7 @@ fi
 
         # Input information
         if self.pdb_stream:
-            config_lines.append(f"INPUT PDB: {self.pdb_input_id}")
+            config_lines.append(f"INPUT PDB: {', '.join(self.pdb_stream.ids)}")
         else:
             config_lines.append("INPUT: De novo design")
 
@@ -474,8 +464,8 @@ fi
         if self.length:
             config_lines.append(f"LENGTH: {self.length}")
 
-        if self.ligand_code:
-            config_lines.append(f"LIGAND CODE: {self.ligand_code}")
+        if self.ligand_stream is not None:
+            config_lines.append("LIGAND CODE: (resolved from compounds stream at runtime)")
 
         if self.select_hotspots:
             hotspots_str = str(self.select_hotspots)
@@ -525,31 +515,49 @@ fi
         return str(constraint)
 
     def _generate_json_section(self) -> str:
-        """Generate bash section that creates JSON input file."""
-        json_config = self._build_json_config()
+        """Generate the bash section that materializes the inputs JSON.
 
-        # Write JSON config file at configuration time (not execution time).
-        # configuration_folder is auto-created by the pipeline.
-        with open(self.json_file, 'w') as f:
-            json.dump(json_config, f, indent=2)
+        Advanced (json_config) mode writes the user's full keyed config verbatim
+        at config time. Otherwise a config-time template entry is written and a
+        runtime builder expands it into one keyed entry per input PDB (input
+        paths resolved per id, ligand code broadcast) — replacing the old single
+        -entry + jq-patch approach so multiple PDBs each get their own entry.
+        """
+        # Advanced override: a full {key: {...}} config, passed through as-is.
+        if self.json_config:
+            cfg = self.json_config if isinstance(self.json_config, dict) else json.loads(self.json_config)
+            with open(self.json_file, 'w') as f:
+                json.dump(cfg, f, indent=2)
+            return f"""echo "Using RFdiffusion3 JSON configuration (advanced): {self.json_file}"
 
-        # If input PDB uses a DataStream, resolve the placeholder at runtime
-        resolve_snippet = ""
-        if self.pdb_stream:
-            resolve_snippet = f"""INPUT_PDB_ID={Resolve.stream_ids(self.pdb_ds_json, index=0)}
-INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$INPUT_PDB_ID')}
-
-# Patch the JSON config with the resolved input PDB path
-jq --arg path "$INPUT_PDB" '(.[] | select(.input == "__RESOLVE_INPUT_PDB__")).input = $path' "{self.json_file}" > "{self.json_file}.tmp" && mv "{self.json_file}.tmp" "{self.json_file}"
 """
 
-        return f"""{resolve_snippet}echo "Using RFdiffusion3 JSON configuration: {self.json_file}"
+        # Write the shared template entry at config time.
+        with open(self.json_template, 'w') as f:
+            json.dump(self._build_json_template(), f, indent=2)
+
+        builder_args = f'--template "{self.json_template}" --output "{self.json_file}"'
+        if self.pdb_stream:
+            builder_args += f' --structures-json "{self.pdb_ds_json}"'
+        else:
+            builder_args += f' --denovo-prefix "{self._get_prefix()}"'
+        if self.ligand_stream is not None:
+            self.ligand_stream.save_json(self.ligand_json)
+            builder_args += f' --ligand-json "{self.ligand_json}"'
+
+        return f"""echo "Building RFdiffusion3 inputs JSON"
+python "{self.build_inputs_py}" {builder_args}
+echo "Using RFdiffusion3 JSON configuration: {self.json_file}"
 
 """
 
     def generate_script_run_rfdiffusion3(self) -> str:
-        """Generate RFdiffusion3 execution bash code."""
-        prefix = self._get_prefix()
+        """Generate RFdiffusion3 execution bash code.
+
+        No ``global_prefix`` is set: each design key in the inputs JSON is its
+        own name (the input pdb id in the multi-PDB case), so foundry names
+        outputs ``<key>_<design>_model_<model>``.
+        """
         return f"""echo "Starting RFdiffusion3"
 echo "JSON config: {self.json_file}"
 echo "Output folder: {self.output_folder}"
@@ -576,7 +584,6 @@ python -c "import torch; import torchvision" 2>/dev/null || true
 {self.container_prefix()}rfd3 design \\
     out_dir="{self.raw_output_folder}" \\
     inputs="{self.json_file}" \\
-    global_prefix="{prefix}" \\
     n_batches={self.num_designs} \\
     diffusion_batch_size={self.num_models}
 
@@ -588,16 +595,24 @@ python -c "import torch; import torchvision" 2>/dev/null || true
         Converts CIF.gz outputs to PDB format and extracts metrics from JSON files.
         Runs in biopipelines environment (has BioPython, pandas).
         """
-        prefix = self._get_prefix()
         structures_dir = self.stream_folder("structures")
+        # Switch to the biopipelines env (BioPython + pandas) via the framework
+        # helper — NOT a hardcoded `mamba run`, which doesn't exist on Colab
+        # (micromamba) and left the CIF->PDB conversion unrun. On Colab this is a
+        # no-op (biopipelines deps live in base Python); on cluster/local it
+        # activates the env with whatever env_manager is configured.
+        activate_biopipelines = self.activate_environment(name="biopipelines")
+        # Output structure ids are keyed by the foundry design key (the input
+        # pdb id per entry), so no single --prefix is passed; the postprocess
+        # derives each id from the produced filename.
         return f"""echo "Post-processing RFdiffusion3 outputs"
 
+{activate_biopipelines}
 # Process CIF.gz files: decompress, convert to PDB, extract metrics and sequences.
 # --output_folder is the PDB destination (structures/ stream folder).
-mamba run -n biopipelines python "{self.postprocess_py_file}" \\
+python "{self.postprocess_py_file}" \\
     --raw_folder "{self.raw_output_folder}" \\
     --output_folder "{structures_dir}" \\
-    --prefix "{prefix}" \\
     --num_designs {self.num_designs} \\
     --num_models {self.num_models} \\
     --design_startnum {self.design_startnum} \\
@@ -608,17 +623,16 @@ mamba run -n biopipelines python "{self.postprocess_py_file}" \\
 """
 
     def generate_script_create_table(self) -> str:
-        """Generate table creation bash code."""
-        prefix = self._get_prefix()
+        """Generate table creation bash code.
+
+        The table builder scans the structures/ folder and matches each id back
+        to its JSON design key, so it needs no prefix/num_designs.
+        """
         return f"""echo "Creating results table"
 python "{self.table_py_file}" \\
     --output_folder "{self.output_folder}" \\
     --json_file "{self.json_file}" \\
-    --pipeline_name "{prefix}" \\
-    --num_designs {self.num_designs} \\
-    --num_models {self.num_models} \\
     --table_path "{self.main_table}" \\
-    --design_startnum {self.design_startnum} \\
     --specifications_csv "{self.specifications_csv}"
 
 """
@@ -655,9 +669,15 @@ python "{self.table_py_file}" \\
         """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        # All designs/models share the same parent PDB (if a PDB input was given).
-        prov_arg = (f' --set-provenance "structures.id={self.pdb_input_id}"'
-                    if self.pdb_input_id else "")
+        # Each id is "<pdb_id>_d<D>_m<M>" (num_models>1) or "<pdb_id>_<D>";
+        # strip that design/model suffix to recover the parent `structures.id`.
+        # The regex is RFd3's id shape, passed to the tool-agnostic helper.
+        if self.pdb_stream:
+            suffix_re = r"_d\d+_m\d+$" if self.num_models > 1 else r"_\d+$"
+            prov_arg = (f' --provenance-from-suffix "structures.id"'
+                        f' --suffix-regex "{suffix_re}"')
+        else:
+            prov_arg = ""
         return f"""echo "Writing structures map from actual output files"
 python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
 
@@ -677,18 +697,24 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             - tables: Dict of TableInfo objects
             - output_folder: Tool's output directory
         """
-        prefix = self._get_prefix()
-
-        # Generate pattern-based IDs
+        # Generate pattern-based IDs. The base is each design key — the input
+        # pdb id(s) in the multi-PDB case, or the de-novo prefix otherwise.
         d_start = self.design_startnum
         d_end = self.design_startnum + self.num_designs - 1
         m_start = self.design_startnum
         m_end = self.design_startnum + self.num_models - 1
 
+        # Suffix appended after the helper's "_" separator. Keep parent ids
+        # compact (no config-time expansion) via generate_multiplied_ids_pattern.
         if self.num_models > 1:
-            structure_ids = [f"{prefix}_d<{d_start}..{d_end}>_m<{m_start}..{m_end}>"]
+            suffix_pattern = f"d<{d_start}..{d_end}>_m<{m_start}..{m_end}>"
         else:
-            structure_ids = [f"{prefix}_<{d_start}..{d_end}>"]
+            suffix_pattern = f"<{d_start}..{d_end}>"
+
+        base_keys = self.pdb_stream.ids if self.pdb_stream else [self._get_prefix()]
+        structure_ids = generate_multiplied_ids_pattern(
+            base_keys, suffix_pattern, input_stream_name="structures"
+        )
         file_template = [self.stream_path("structures", "<id>.pdb")]
 
         # The per-design map_table is written at runtime by
@@ -765,7 +791,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             "rfd3_params": {
                 "contig": self.contig,
                 "length": self.length,
-                "ligand_code": self.ligand_code,
+                "ligand_ids": list(self.ligand_stream.ids) if self.ligand_stream else [],
                 "num_designs": self.num_designs,
                 "num_models": self.num_models,
                 "prefix": self.prefix,
@@ -777,7 +803,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 "select_hbond_acceptor": self.select_hbond_acceptor,
                 "has_json_config": self.json_config is not None,
                 "design_startnum": self.design_startnum,
-                "pdb_input_id": self.pdb_input_id
+                "pdb_input_ids": self.pdb_stream.ids if self.pdb_stream else None
             }
         })
         return base_dict

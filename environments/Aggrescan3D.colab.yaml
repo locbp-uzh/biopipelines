@@ -1,0 +1,7 @@
+name: Aggrescan3D
+channels:
+  - lcbio
+  - conda-forge
+dependencies:
+  - python=2.7
+  - aggrescan3d

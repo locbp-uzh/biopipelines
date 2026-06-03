@@ -9,7 +9,7 @@
 # activation (pip mode means the generated bash emits empty shell-hook /
 # activate lines, so pipeline.sh runs on any host with python on PATH).
 machine:
-  emails: {}
+  email: ""
   env_manager:
     name: "pip"
     init: []
@@ -54,6 +54,15 @@ folders:
     MMseqs2: "<biopipelines>/_stub_repos/mmseqs2"
     RBSDesigner: "<biopipelines>/_stub_repos/RBSDesigner"
     DNAEncoder: "<biopipelines>/_stub_repos/DNAEncoder"
+    DiffDock: "<biopipelines>/_stub_repos/DiffDock"
+    DynamicBind: "<biopipelines>/_stub_repos/DynamicBind"
+    PocketGen: "<biopipelines>/_stub_repos/PocketGen"
+    PLACER: "<biopipelines>/_stub_repos/PLACER"
+    GEMS: "<biopipelines>/_stub_repos/GEMS"
+    RTMScore: "<biopipelines>/_stub_repos/RTMScore"
+    NeuralPLexer: "<biopipelines>/_stub_repos/NeuralPLexer"
+    AF2BIND: "<biopipelines>/_stub_repos/af2bind"
   cache:
     BoltzCache: "./cache/boltz"
+    AlphaFoldParams: "<biopipelines>/_stub_repos/alphafold_params"
   server: {}

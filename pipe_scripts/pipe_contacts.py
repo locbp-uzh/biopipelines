@@ -23,6 +23,7 @@ from typing import Dict, List, Any, Optional, Tuple, NamedTuple
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, lookup_table_value
+from biopipelines.id_map_utils import get_mapped_ids
 
 # Import PDB parser and selection utilities
 from biopipelines.pdb_parser import Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file, STANDARD_RESIDUES
@@ -63,6 +64,29 @@ def parse_residue_selection(selection_str: str) -> List[Tuple[str, int]]:
         return []
 
     return _sele_to_list(str(selection_str))
+
+
+def load_selection_from_table(table_path: str, column_name: str) -> Dict[str, str]:
+    """
+    Load per-structure selection specifications from a table CSV file.
+
+    The first column is taken as the ID column. Returns a dict mapping
+    structure ID -> selection string.
+    """
+    if not os.path.exists(table_path):
+        raise FileNotFoundError(f"Table file not found: {table_path}")
+
+    df = pd.read_csv(table_path)
+    if column_name not in df.columns:
+        raise ValueError(f"Column '{column_name}' not found in table. Available columns: {list(df.columns)}")
+
+    id_column = df.columns[0]
+    selection_map = {}
+    for _, row in df.iterrows():
+        selection_map[str(row[id_column])] = str(row[column_name])
+
+    print(f"Loaded selections for {len(selection_map)} structures from {table_path}")
+    return selection_map
 
 
 def get_protein_atoms(atoms: List[Atom], ligand_name: str) -> List[Atom]:
@@ -145,7 +169,7 @@ def calculate_distance(atom1: Atom, atom2: Atom) -> float:
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
 
-def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
+def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float, reference: str = "ligand") -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
     """
     Calculate protein-ligand contact metrics for a structure.
 
@@ -160,15 +184,20 @@ def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: 
         or (None, None, None, None, None) if calculation failed
     """
     try:
-        # Get protein and ligand atoms
+        # Protein atoms always exclude HETATM; the reference atoms are either the
+        # named ligand or a residue selection (residues-vs-residues contacts).
         protein_atoms = get_protein_atoms(atoms, ligand_name)
-        ligand_atoms = get_ligand_atoms(atoms, ligand_name)
+        if reference == "ligand":
+            ligand_atoms = get_ligand_atoms(atoms, ligand_name)
+        else:
+            ref_residues = parse_residue_selection(reference)
+            ligand_atoms = filter_atoms_by_selection(protein_atoms, ref_residues) if ref_residues else []
 
         print(f"[DEBUG] - Found {len(protein_atoms)} protein atoms")
-        print(f"[DEBUG] - Found {len(ligand_atoms)} ligand atoms")
+        print(f"[DEBUG] - Found {len(ligand_atoms)} reference atoms ({reference})")
 
         if not ligand_atoms:
-            print(f"[WARNING] - No ligand atoms found for '{ligand_name}'")
+            print(f"[WARNING] - No reference atoms found for '{reference}'")
             return None, None, None, None, None
 
         # Filter protein atoms by selection if specified
@@ -177,6 +206,17 @@ def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: 
             if residue_numbers:
                 protein_atoms = filter_atoms_by_selection(protein_atoms, residue_numbers)
                 print(f"[DEBUG] - After selection filtering: {len(protein_atoms)} protein atoms")
+
+        # In residue-reference mode, drop reference residues from the protein side
+        # so a residue is not counted as contacting itself. Chainless ref entries
+        # ('', resnum) match any chain, mirroring filter_atoms_by_selection.
+        if reference != "ligand" and ref_residues:
+            ref_with_chain = {(c, r) for c, r in ref_residues if c}
+            ref_any_chain = {r for c, r in ref_residues if not c}
+            protein_atoms = [a for a in protein_atoms
+                             if a.res_num not in ref_any_chain
+                             and (a.chain, a.res_num) not in ref_with_chain]
+            print(f"[DEBUG] - After reference-exclusion: {len(protein_atoms)} protein atoms")
 
         if not protein_atoms:
             print(f"[WARNING] - No protein atoms found after selection filtering")
@@ -278,7 +318,7 @@ def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: 
         return None, None, None, None, None
 
 
-def calculate_contact_metrics(structure_path: str, selections: str, ligand: str, threshold: float) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
+def calculate_contact_metrics(structure_path: str, selections: str, ligand: str, threshold: float, reference: str = "ligand") -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:
     """
     Calculate protein-ligand contact metrics for a structure.
 
@@ -308,7 +348,7 @@ def calculate_contact_metrics(structure_path: str, selections: str, ligand: str,
 
         # Calculate contact metrics
         contact_count, min_dist, max_dist, mean_dist, sum_sqrt_norm = calculate_contacts(
-            atoms, selections, ligand, threshold
+            atoms, selections, ligand, threshold, reference
         )
 
         print(f"  - Contact count: {contact_count}")
@@ -336,30 +376,73 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
 
     selections_config = config_data['protein_selections']
     ligand_name = config_data['ligand_name']
+    reference = config_data.get('reference', 'ligand')
     contact_threshold = config_data['contact_threshold']
     contact_metric_name = config_data['contact_metric_name']
     output_csv = config_data['output_csv']
 
-    print(f"Analyzing protein-ligand contacts")
+    print(f"Analyzing contacts (reference: {reference})")
     print(f"Structures: {len(structures_ds.ids_expanded)}")
     print(f"Protein selections: {selections_config}")
-    print(f"Ligand: {ligand_name}")
+    if reference == "ligand":
+        print(f"Ligand: {ligand_name}")
     print(f"Contact threshold: {contact_threshold} Å")
     print(f"Contact metric: {contact_metric_name}")
 
-    # Handle protein selections - build map using IDs from DataStream
+    # Handle protein selections - build map using IDs from DataStream.
+    # For all_protein / fixed the same value applies to every structure;
+    # for table_column each structure's selection is resolved by ID match
+    # (single-row table broadcasts to all; otherwise unmatched IDs are skipped).
+    structure_ids = list(structures_ds.ids_expanded)
     selections_map = {}
+    structure_to_sele_id = None
     if selections_config['type'] == 'all_protein':
         print(f"Using all protein residues for all structures")
-        for structure_id in structures_ds.ids_expanded:
+        for structure_id in structure_ids:
             selections_map[structure_id] = None
     elif selections_config['type'] == 'fixed':
         fixed_selection = selections_config['value']
         print(f"Using fixed protein selection: {fixed_selection}")
-        for structure_id in structures_ds.ids_expanded:
+        for structure_id in structure_ids:
             selections_map[structure_id] = fixed_selection
+    elif selections_config['type'] == 'table_column':
+        table_path = selections_config['table_path']
+        column_name = selections_config['column_name']
+        selections_map = load_selection_from_table(table_path, column_name)
+        if len(selections_map) == 1:
+            single_value = next(iter(selections_map.values()))
+            print(f"Using single table selection for all structures: {single_value}")
+            for structure_id in structure_ids:
+                selections_map[structure_id] = single_value
+        else:
+            structure_to_sele_id = get_mapped_ids(
+                source_ids=structure_ids,
+                target_ids=list(selections_map.keys()),
+                unique=True,
+            )
     else:
         raise ValueError(f"Unsupported protein_selections type: {selections_config['type']}")
+
+    # Handle a per-structure reference table the same way as selections:
+    # `reference == "table_column"` means the contact-target residues come from
+    # a table column resolved by ID match (single-row broadcasts; unmatched
+    # IDs are skipped). For "ligand" / static-string references this is a no-op.
+    reference_map = {}
+    structure_to_ref_id = None
+    if reference == "table_column":
+        ref_table = config_data['reference_table']
+        reference_map = load_selection_from_table(ref_table['table_path'], ref_table['column_name'])
+        if len(reference_map) == 1:
+            single_ref = next(iter(reference_map.values()))
+            print(f"Using single table reference for all structures: {single_ref}")
+            for structure_id in structure_ids:
+                reference_map[structure_id] = single_ref
+        else:
+            structure_to_ref_id = get_mapped_ids(
+                source_ids=structure_ids,
+                target_ids=list(reference_map.keys()),
+                unique=True,
+            )
 
     # Process structures using iterate_files for proper ID-file matching
     results = []
@@ -374,11 +457,36 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
         print(f"\nProcessing structure {i+1}/{total}: {structure_path}")
         print(f"  - ID: {structure_id}")
 
-        selections = selections_map.get(structure_id)
+        if structure_to_sele_id is not None:
+            matched_sele_id = structure_to_sele_id.get(structure_id)
+            if matched_sele_id is None:
+                print(f"Warning: No selection-table entry for structure ID '{structure_id}', skipping")
+                continue
+            if matched_sele_id != structure_id:
+                print(f"  - Matched selection ID: {structure_id} -> {matched_sele_id}")
+            selections = selections_map[matched_sele_id]
+        else:
+            selections = selections_map.get(structure_id)
+
+        # Resolve the per-structure reference (table_column mode); otherwise the
+        # config reference string applies unchanged.
+        if reference == "table_column":
+            if structure_to_ref_id is not None:
+                matched_ref_id = structure_to_ref_id.get(structure_id)
+                if matched_ref_id is None:
+                    print(f"Warning: No reference-table entry for structure ID '{structure_id}', skipping")
+                    continue
+                if matched_ref_id != structure_id:
+                    print(f"  - Matched reference ID: {structure_id} -> {matched_ref_id}")
+                structure_reference = reference_map[matched_ref_id]
+            else:
+                structure_reference = reference_map[structure_id]
+        else:
+            structure_reference = reference
 
         # Calculate contact metrics
         contact_count, min_dist, max_dist, mean_dist, sum_sqrt_norm = calculate_contact_metrics(
-            structure_path, selections, ligand_name, contact_threshold
+            structure_path, selections, ligand_name, contact_threshold, structure_reference
         )
 
         # Store result using proper ID from DataStream
@@ -386,7 +494,7 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
             'id': structure_id,
             'source_structure': structure_path,
             'selections': selections if selections else 'all_protein',
-            'ligand': ligand_name,
+            'ligand': ligand_name if structure_reference == "ligand" else structure_reference,
             contact_metric_name: contact_count,
             'min_distance': min_dist,
             'max_distance': max_dist,
@@ -453,6 +561,9 @@ def analyze_contacts(config_data: Dict[str, Any]) -> None:
 def main():
     parser = argparse.ArgumentParser(description='Analyze protein-ligand contacts in structures')
     parser.add_argument('--config', required=True, help='JSON config file with analysis parameters')
+    parser.add_argument('--ligand', default=None,
+                        help='Ligand residue code, overrides ligand_name in the config '
+                             '(used when the code is resolved from a compounds stream at runtime)')
 
     args = parser.parse_args()
 
@@ -468,13 +579,27 @@ def main():
         print(f"Error loading config: {e}")
         sys.exit(1)
 
-    # Validate required parameters
-    required_params = ['structures_json', 'protein_selections', 'ligand_name',
+    if args.ligand:
+        config_data['ligand_name'] = args.ligand
+
+    # ligand_name is only required when reference="ligand"; residue-reference
+    # mode (static string or table_column) resolves contact targets from the
+    # residue selection instead.
+    reference = config_data.get('reference', 'ligand')
+    required_params = ['structures_json', 'protein_selections',
                        'contact_threshold', 'contact_metric_name', 'output_csv']
+    if reference == 'ligand':
+        required_params.append('ligand_name')
+    elif reference == 'table_column':
+        required_params.append('reference_table')
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")
             sys.exit(1)
+
+    if reference == 'ligand' and not config_data['ligand_name']:
+        print("Error: ligand residue code is empty (no --ligand override and no ligand_name in config)")
+        sys.exit(1)
 
     try:
         analyze_contacts(config_data)

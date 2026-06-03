@@ -122,13 +122,18 @@ def get_pdb_length(pdb_file):
 
 def extract_metadata_from_json(json_file):
     """
-    Extract metadata from JSON input file.
+    Extract per-design-key metadata from the JSON input file.
+
+    The JSON holds one entry per design key (the input pdb id in the multi-PDB
+    case, or a single design prefix otherwise). Returns a dict mapping each key
+    to its {contig, length, hotspots, input}, so a structure id can be matched
+    back to the entry that produced it.
 
     Args:
         json_file: Path to JSON configuration file
 
     Returns:
-        Dictionary with metadata (contig, length, hotspots, input)
+        Dict mapping design_key -> {contig, length, hotspots, input}
     """
     if not os.path.exists(json_file):
         print(f"Warning: JSON file not found: {json_file}")
@@ -138,26 +143,30 @@ def extract_metadata_from_json(json_file):
         with open(json_file, 'r') as f:
             config = json.load(f)
 
-        # Extract first (and typically only) entry
-        if not config:
-            return {}
-
-        # Get first design entry
-        design_key = list(config.keys())[0]
-        design_config = config[design_key]
-
-        metadata = {
-            "contig": design_config.get("contig", ""),
-            "length": design_config.get("length", ""),
-            "hotspots": json.dumps(design_config.get("select_hotspots", {})),
-            "input": design_config.get("input", "")
-        }
-
-        return metadata
+        per_key = {}
+        for design_key, design_config in (config or {}).items():
+            per_key[design_key] = {
+                "contig": design_config.get("contig", ""),
+                "length": design_config.get("length", ""),
+                "hotspots": json.dumps(design_config.get("select_hotspots", {})),
+                "input": design_config.get("input", ""),
+            }
+        return per_key
 
     except Exception as e:
         print(f"Warning: Could not parse JSON metadata: {e}")
         return {}
+
+
+def design_key_for_id(structure_id, known_keys):
+    """Match an output structure id back to its JSON design key.
+
+    Output ids are "<key>_d<D>_m<M>" or "<key>_<D>". Pick the longest known key
+    that prefixes the id (keys can contain underscores, so prefer the longest
+    match to avoid a shorter key shadowing a longer one).
+    """
+    candidates = [k for k in known_keys if structure_id.startswith(f"{k}_")]
+    return max(candidates, key=len) if candidates else None
 
 
 def load_specifications(specs_csv):
@@ -240,32 +249,9 @@ def main():
         help="Path to JSON input file"
     )
     parser.add_argument(
-        '--pipeline_name',
-        required=True,
-        help="Pipeline name for ID generation"
-    )
-    parser.add_argument(
-        '--num_designs',
-        type=int,
-        required=True,
-        help="Number of designs"
-    )
-    parser.add_argument(
-        '--num_models',
-        type=int,
-        required=True,
-        help="Number of models per design"
-    )
-    parser.add_argument(
         '--table_path',
         required=True,
         help="Output CSV table path"
-    )
-    parser.add_argument(
-        '--design_startnum',
-        type=int,
-        default=1,
-        help="Starting design number"
     )
     parser.add_argument(
         '--specifications_csv',
@@ -276,8 +262,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Extract metadata from JSON
-    metadata = extract_metadata_from_json(args.json_file)
+    # Per-design-key metadata (contig/length) from the JSON input.
+    metadata_by_key = extract_metadata_from_json(args.json_file)
 
     # Load specifications for sampled_contig data
     specs_csv = args.specifications_csv
@@ -285,61 +271,54 @@ def main():
         specs_csv = os.path.join(args.output_folder, "tables", "specifications.csv")
     specs_dict = load_specifications(specs_csv)
 
-    # Parse log file for timing (optional)
-    timing_info = parse_rfd3_log(
-        os.path.join(os.path.dirname(args.output_folder), "Logs",
-                     f"{os.path.basename(args.output_folder).split('_')[0]}_RFdiffusion3.log")
-    )
+    # Scan the structures folder for every produced PDB — one prefix per input
+    # PDB in the multi-PDB case, one for the single/de-novo case. Each id is
+    # "<key>_d<D>_m<M>" or "<key>_<D>", matched back to its JSON entry by key.
+    import glob
+    structures_dir = os.path.join(args.output_folder, "structures")
+    pdb_paths = sorted(glob.glob(os.path.join(structures_dir, "*.pdb")))
 
-    # Build table
     designs = []
-    for i in range(args.num_designs):
-        for j in range(args.num_models):
-            design_num = args.design_startnum + i
-            model_num = args.design_startnum + j
+    for pdb_path in pdb_paths:
+        pdb_file = os.path.basename(pdb_path)
+        structure_id = os.path.splitext(pdb_file)[0]
 
-            # Conditional naming: include model suffix only if num_models > 1
-            if args.num_models > 1:
-                structure_id = f"{args.pipeline_name}_d{design_num}_m{model_num}"
-            else:
-                structure_id = f"{args.pipeline_name}_{design_num}"
+        key = design_key_for_id(structure_id, metadata_by_key.keys())
+        meta = metadata_by_key.get(key, {}) if key else {}
 
-            pdb_file = f"{structure_id}.pdb"
-            pdb_path = os.path.join(args.output_folder, "structures", pdb_file)
+        # Parse the design/model numbers off the id suffix.
+        m = re.search(r'_d(\d+)_m(\d+)$', structure_id)
+        if m:
+            design_num, model_num = int(m.group(1)), int(m.group(2))
+        else:
+            m = re.search(r'_(\d+)$', structure_id)
+            design_num = int(m.group(1)) if m else ""
+            model_num = ""
 
-            # Get actual length from PDB
-            actual_length = get_pdb_length(pdb_path)
+        actual_length = get_pdb_length(pdb_path)
 
-            # Get sampled_contig for this structure and parse fixed/designed
-            sampled_contig = specs_dict.get(structure_id, "")
-            fixed_sele, designed_sele = parse_sampled_contig(
-                sampled_contig,
-                actual_length if actual_length else 0
-            )
+        sampled_contig = specs_dict.get(structure_id, "")
+        fixed_sele, designed_sele = parse_sampled_contig(
+            sampled_contig, actual_length if actual_length else 0
+        )
 
-            # Determine status
-            if os.path.exists(pdb_path):
-                status = "success"
-            else:
-                status = "missing"
-
-            design_entry = {
-                "id": structure_id,
-                "design": design_num,
-                "model": model_num,
-                "pdb": pdb_file,
-                "fixed": fixed_sele,
-                "designed": designed_sele,
-                "contig": metadata.get("contig", ""),
-                "length": actual_length if actual_length else metadata.get("length", ""),
-                "time": timing_info.get(i, None),
-                "status": status
-            }
-
-            designs.append(design_entry)
+        designs.append({
+            "id": structure_id,
+            "design": design_num,
+            "model": model_num,
+            "pdb": pdb_file,
+            "fixed": fixed_sele,
+            "designed": designed_sele,
+            "contig": meta.get("contig", ""),
+            "length": actual_length if actual_length else meta.get("length", ""),
+            "time": None,
+            "status": "success",
+        })
 
     # Create DataFrame and save
-    df = pd.DataFrame(designs)
+    df = pd.DataFrame(designs, columns=[
+        "id", "design", "model", "pdb", "fixed", "designed",
+        "contig", "length", "time", "status"])
 
     # Ensure output directory exists
     os.makedirs(os.path.dirname(args.table_path), exist_ok=True)

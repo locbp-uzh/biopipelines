@@ -17,12 +17,29 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
+    from .config_manager import ConfigManager
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
+    from config_manager import ConfigManager
+
+
+def _configured_server_mode() -> str:
+    """Server mode the client would auto-start: tool_overrides.mmseqs2server.mode.
+
+    Mirrors the resolution in pipe_mmseqs2_sequences.py (default 'cpu'). Used to
+    reject GPU server mode at config time, since the GPU server path is currently
+    unsupported.
+    """
+    try:
+        overrides = ConfigManager()._config.get('tool_overrides', {}) or {}
+        mode = (overrides.get('mmseqs2server', {}) or {}).get('mode', 'cpu')
+    except Exception:
+        return 'cpu'
+    return str(mode).strip().lower()
 
 
 class MMseqs2(BaseConfig):
@@ -55,6 +72,7 @@ echo "=== MMseqs2 ready ==="
     client_script = Path(lambda self: self.pipe_script_path("mmseqs2_client.sh"))
     helper_script = Path(lambda self: self.pipe_script_path("pipe_mmseqs2_sequences.py"))
     input_sequences_csv = Path(lambda self: self._get_input_sequences_path())
+    missing_csv = Path(lambda self: self.table_path("missing"))
 
     def __init__(self, sequences: Union[str, List[str], DataStream, StandardizedOutput],
                  output_format: str = "csv",
@@ -80,6 +98,7 @@ echo "=== MMseqs2 ready ==="
                 msas: id | sequences.id | sequence | msa_file
         """
         # Resolve sequences input
+        self.sequences_input = sequences  # retained for upstream missing-table lookup
         self.sequences_source_file: Optional[str] = None
         self.sequences_stream: Optional[DataStream] = None
         self.raw_sequences: Optional[Union[str, List[str]]] = None
@@ -113,6 +132,13 @@ echo "=== MMseqs2 ready ==="
 
     def validate_params(self):
         """Validate MMseqs2-specific parameters."""
+        if _configured_server_mode() == "gpu":
+            raise NotImplementedError(
+                "tool_overrides.mmseqs2server.mode is set to 'gpu', but the MMseqs2 "
+                "GPU server is not currently supported. Set it to 'cpu' (the CPU "
+                "server serves the RAM-resident ColabFold databases)."
+            )
+
         if self.sequences_stream is None and self.raw_sequences is None:
             raise ValueError("sequences parameter is required for MMseqs2")
 
@@ -181,6 +207,16 @@ echo "=== MMseqs2 ready ==="
         """
         server_dir = self.folders.get("MMseqs2Server", "")
 
+        # Sequences the upstream tool already dropped: forward its missing.csv so
+        # the helper seeds those rows and excludes those ids before searching.
+        upstream_missing_path = self._get_upstream_missing_table_path(
+            self.sequences_input
+        )
+        upstream_flag = (
+            f' \\\n    --upstream_missing "{upstream_missing_path}"'
+            if upstream_missing_path else ""
+        )
+
         return f"""echo "Starting MMseqs2 MSA generation"
 echo "Input sequences: {self.input_sequences_csv}"
 echo "Output format: {self.output_format}"
@@ -194,7 +230,8 @@ python {self.helper_script} \\
     "{self.output_msa_csv}" \\
     "{self.client_script}" \\
     --output_format {self.output_format} \\
-    --server_dir "{server_dir}"{self._generate_mask_arguments()}
+    --server_dir "{server_dir}" \\
+    --missing_csv "{self.missing_csv}"{upstream_flag}{self._generate_mask_arguments()}
 
 echo "MMseqs2 processing completed"
 
@@ -234,18 +271,14 @@ echo "MMseqs2 processing completed"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after MMseqs2 execution."""
         sequence_ids = self._predict_sequence_ids()
-
-        # Generate individual MSA file paths based on sequence IDs
-        msa_files = []
         ext = "csv" if self.output_format == "csv" else "a3m"
-        for seq_id in sequence_ids:
-            msa_file = os.path.join(self.output_folder, f"{seq_id}.{ext}")
-            msa_files.append(msa_file)
 
+        # One <id> template (not a concrete path per id) so the completion check
+        # expands it against the resolved ids at runtime — lazy ids stay lazy.
         msas = DataStream(
             name="msas",
             ids=sequence_ids,
-            files=msa_files,
+            files=[self.stream_path("msas", f"<id>.{ext}")],
             map_table=self.output_msa_csv,
             format=ext
         )
@@ -256,7 +289,13 @@ echo "MMseqs2 processing completed"
                 path=self.output_msa_csv,
                 columns=["id", "sequences.id", "sequence", "msa_file"],
                 description="MSA files for sequence alignment"
-            )
+            ),
+            "missing": TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "kind", "cause"],
+                description="Sequences with no MSA (search failure) plus any propagated from upstream"
+            ),
         }
 
         return {
@@ -297,11 +336,212 @@ class MMseqs2Server(BaseConfig):
     TOOL_VERSION = "1.0"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        return """echo "=== MMseqs2Server ==="
-echo "Uses biopipelines environment (no additional installation needed)."
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
+                        step=None, mode="gpu", **kwargs):
+        """Install bash for the ColabFold MSA databases.
+
+        Args:
+            step: Which stage to run.
+                None (default) — no-op: the server runs in the biopipelines env
+                    and needs nothing installed, so just touch the marker.
+                "databases" — download stage only: fetch the four ColabFold
+                    tarballs + rsync the mmCIF snapshot into the ColabFoldDatabases
+                    folder root (DOWNLOADS_ONLY=1). Mode-independent; shared by both
+                    the cpu and gpu builds. No DB indexes are built.
+                "build" — build the indexed databases from the already downloaded
+                    tarballs into a mode subfolder (see `mode`). The downloads stay
+                    at the ColabFoldDatabases root and are symlinked into the
+                    subfolder so they aren't duplicated per mode.
+            mode: Build flavour for step="build" (default "gpu").
+                "gpu" — GPU-padded build (tsv2exprofiledb --gpu 1, makepaddedseqdb,
+                    --index-subset 2) into <ColabFoldDatabases>/gpu/. Requires a GPU
+                    node, so the user must call Resources(gpu=...) first; ensures a
+                    GPU-capable MMseqs2 (release >=16, with gpuserver) is present.
+                "cpu" — non-padded build (no GPU flags) into
+                    <ColabFoldDatabases>/cpu/. Runs on a CPU node; uses the MMseqs2
+                    already at the configured MMseqs2 folder (the AVX2 build the CPU
+                    server installs is sufficient).
+
+        The build is idempotent via setup_databases.sh's marker files
+        (UNIREF30_READY, COLABDB_READY, PDB_READY, PDB100_READY) which live inside
+        the mode subfolder, so re-running resumes where it left off. The download
+        markers (DOWNLOADS_READY, PDB_MMCIF_READY) live at the root.
+        """
+        if step is None:
+            # The server itself needs no install, but the CPU server runs
+            # colabfold_search + the mmseqs bundled with LocalColabFold (under the
+            # AlphaFold folder). Verify both are present; if not, point the user at
+            # AlphaFold.install(). `folders` is {} during the override-probe in
+            # base_config, so resolve defensively.
+            cf_bin = os.path.join(folders.get("AlphaFold", ""), "colabfold-conda", "bin")
+            return f"""echo "=== MMseqs2Server ==="
+echo "The server needs no install of its own, but it runs colabfold_search and"
+echo "the mmseqs bundled with LocalColabFold."
+CF_BIN="{cf_bin}"
+if [ -x "$CF_BIN/colabfold_search" ] && [ -x "$CF_BIN/mmseqs" ]; then
+    echo "Found LocalColabFold (colabfold_search + mmseqs) at $CF_BIN."
+    echo "Pass step=\\"databases\\" to download the ColabFold DBs, or step=\\"build\\" (mode=\\"cpu\\"|\\"gpu\\") to build the indexes."
+    touch "$INSTALL_SUCCESS"
+    echo "=== MMseqs2Server ready ==="
+else
+    echo "ERROR: LocalColabFold not found at $CF_BIN (need colabfold_search + mmseqs)."
+    echo "Run AlphaFold.install() first - it installs LocalColabFold, which the"
+    echo "MMseqs2 server uses for both colabfold_search and its CPU mmseqs binary."
+    exit 1
+fi
+"""
+
+        if step not in ("databases", "build"):
+            raise ValueError(
+                f"MMseqs2Server.install: step must be None, 'databases', or 'build', got {step!r}"
+            )
+        if step == "build" and mode not in ("cpu", "gpu"):
+            raise ValueError(
+                f"MMseqs2Server.install: mode must be 'cpu' or 'gpu', got {mode!r}"
+            )
+
+        # Trust the config: a missing folder key raises KeyError at config time,
+        # which is the framework's intended "no fallbacks" behavior.
+        db_dir = folders["ColabFoldDatabases"]
+        mmseqs_dir = folders["MMseqs2"]
+        setup_script = os.path.join(folders["pipe_scripts"], "colabfold_setup_databases.sh")
+
+        if step == "databases":
+            return f"""echo "=== MMseqs2Server: downloading ColabFold databases ==="
+DB_DIR="{db_dir}"
+mkdir -p "$DB_DIR"
+echo "Target: $DB_DIR"
+echo "Running download-only stage (tarballs + mmCIF rsync, no DB build)..."
+DOWNLOADS_ONLY=1 bash "{setup_script}" "$DB_DIR"
+echo "=== ColabFold database download complete ==="
 touch "$INSTALL_SUCCESS"
-echo "=== MMseqs2Server ready ==="
+"""
+
+        # step == "build": build into a per-mode subfolder, sharing the downloads.
+        # The downloads (tarballs, pdb/ mmCIF, download markers) stay at DB_DIR root
+        # and are symlinked into DB_DIR/<mode>/ so setup_databases.sh — which builds
+        # in its WORKDIR and reads the tarballs from there — finds them without
+        # re-downloading. Only the built *_db* indexes end up under DB_DIR/<mode>/.
+        link_downloads = f"""# Symlink the shared downloads into the mode subfolder so the upstream
+# setup script (which builds in its WORKDIR) finds them without re-downloading.
+# Tarballs (uniref30/envdb/pdb100-foldseek) and the pdb100 fasta (createdb input).
+for f in "$DB_DIR"/*.tar.gz "$DB_DIR"/*.fasta.gz; do
+    [ -e "$f" ] && ln -sf "$f" "$BUILD_DIR/$(basename "$f")"
+done
+for marker in DOWNLOADS_READY PDB_MMCIF_READY; do
+    [ -e "$DB_DIR/$marker" ] && ln -sf "$DB_DIR/$marker" "$BUILD_DIR/$marker"
+done
+# mmCIF snapshot: symlink the whole pdb/ tree so PDB_MMCIF_READY stays valid.
+[ -e "$DB_DIR/pdb" ] && ln -sfn "$DB_DIR/pdb" "$BUILD_DIR/pdb"
+"""
+
+        if mode == "cpu":
+            return f"""echo "=== MMseqs2Server: building CPU (non-padded) ColabFold databases ==="
+DB_DIR="{db_dir}"
+MMSEQS_DIR="{mmseqs_dir}"
+BUILD_DIR="$DB_DIR/cpu"
+mkdir -p "$BUILD_DIR"
+
+if [ ! -f "$DB_DIR/DOWNLOADS_READY" ]; then
+    echo "ERROR: downloads not present at $DB_DIR (no DOWNLOADS_READY)."
+    echo "Run MMseqs2Server.install(step=\\"databases\\") first."
+    exit 1
+fi
+
+# Ensure an MMseqs2 binary is present (AVX2 CPU build is sufficient here).
+MMSEQS_BIN="$MMSEQS_DIR/bin/mmseqs"
+if [ ! -x "$MMSEQS_BIN" ]; then
+    echo "MMseqs2 not found at $MMSEQS_BIN, downloading AVX2 build..."
+    PARENT="$(dirname "$MMSEQS_DIR")"
+    mkdir -p "$PARENT"
+    cd "$PARENT"
+    wget -q https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz
+    tar xzf mmseqs-linux-avx2.tar.gz
+    rm -f mmseqs-linux-avx2.tar.gz
+fi
+if [ ! -x "$MMSEQS_BIN" ]; then
+    echo "ERROR: failed to obtain MMseqs2 at $MMSEQS_BIN"
+    exit 1
+fi
+echo "Using MMseqs2: $MMSEQS_BIN ($("$MMSEQS_BIN" version 2>/dev/null))"
+export PATH="$MMSEQS_DIR/bin:$PATH"
+
+# createindex's indexdb child loads the whole DB into RAM (~273G for UniRef30
+# alone) and OOM-kills an under-provisioned node. Cap it well below the node's
+# RAM so indexdb splits into bounded passes instead. Derived from the SLURM
+# memory allocation when available, else a safe default.
+if [ -n "${{SLURM_MEM_PER_NODE:-}}" ]; then
+    # SLURM_MEM_PER_NODE is in MB; use ~70% of it, floored at 32G.
+    LIMIT_GB=$(( SLURM_MEM_PER_NODE * 70 / 100 / 1024 ))
+    [ "$LIMIT_GB" -lt 32 ] && LIMIT_GB=32
+    export MMSEQS_SPLIT_MEMORY_LIMIT="${{LIMIT_GB}}G"
+else
+    export MMSEQS_SPLIT_MEMORY_LIMIT="${{MMSEQS_SPLIT_MEMORY_LIMIT:-180G}}"
+fi
+echo "createindex split-memory-limit: $MMSEQS_SPLIT_MEMORY_LIMIT"
+
+{link_downloads}
+echo "Building non-padded indexes in $BUILD_DIR (resumes via marker files)..."
+if ! bash "{setup_script}" "$BUILD_DIR"; then
+    echo "ERROR: ColabFold CPU database build failed (see above)."
+    exit 1
+fi
+echo "=== ColabFold CPU database build complete ==="
+touch "$INSTALL_SUCCESS"
+"""
+
+        # mode == "gpu": GPU-padded index build into DB_DIR/gpu/.
+        return f"""echo "=== MMseqs2Server: building GPU-padded ColabFold databases ==="
+DB_DIR="{db_dir}"
+MMSEQS_DIR="{mmseqs_dir}"
+BUILD_DIR="$DB_DIR/gpu"
+mkdir -p "$BUILD_DIR"
+
+if [ ! -f "$DB_DIR/DOWNLOADS_READY" ]; then
+    echo "ERROR: downloads not present at $DB_DIR (no DOWNLOADS_READY)."
+    echo "Run MMseqs2Server.install(step=\\"databases\\") first."
+    exit 1
+fi
+
+# A GPU build needs an actual GPU. The user must set Resources(gpu=...) before
+# .install(step="build"); fail loudly rather than silently building CPU DBs.
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "ERROR: mode=\\"gpu\\" build needs a GPU node, but nvidia-smi is not available."
+    echo "Call Resources(gpu=\\"A100\\") before MMseqs2Server.install(step=\\"build\\", mode=\\"gpu\\")."
+    exit 1
+fi
+nvidia-smi --query-gpu=gpu_name --format=csv,noheader || true
+
+# Ensure a GPU-capable MMseqs2 (release >=16, with gpuserver) is present.
+# The colabfold-conda mmseqs is v15 (no GPU), so we install the GPU build here.
+MMSEQS_BIN="$MMSEQS_DIR/bin/mmseqs"
+if [ ! -x "$MMSEQS_BIN" ] || ! "$MMSEQS_BIN" --help 2>/dev/null | grep -q gpuserver; then
+    echo "GPU-capable MMseqs2 not found at $MMSEQS_BIN, downloading..."
+    PARENT="$(dirname "$MMSEQS_DIR")"
+    mkdir -p "$PARENT"
+    cd "$PARENT"
+    wget -q https://mmseqs.com/latest/mmseqs-linux-gpu.tar.gz
+    tar xzf mmseqs-linux-gpu.tar.gz
+    rm -f mmseqs-linux-gpu.tar.gz
+fi
+if [ ! -x "$MMSEQS_BIN" ] || ! "$MMSEQS_BIN" --help 2>/dev/null | grep -q gpuserver; then
+    echo "ERROR: failed to obtain a GPU-capable MMseqs2 at $MMSEQS_BIN"
+    exit 1
+fi
+echo "Using MMseqs2: $MMSEQS_BIN ($("$MMSEQS_BIN" version 2>/dev/null))"
+
+# Put the GPU mmseqs first on PATH so setup_databases.sh's bare `mmseqs` calls
+# hit it (the script invokes mmseqs unqualified).
+export PATH="$MMSEQS_DIR/bin:$PATH"
+
+{link_downloads}
+echo "Building GPU-padded indexes in $BUILD_DIR (resumes via marker files)..."
+if ! GPU=1 bash "{setup_script}" "$BUILD_DIR"; then
+    echo "ERROR: ColabFold GPU database build failed (see above)."
+    exit 1
+fi
+echo "=== ColabFold GPU database build complete ==="
+touch "$INSTALL_SUCCESS"
 """
 
     # Lazy path descriptors
@@ -314,6 +554,8 @@ echo "=== MMseqs2Server ready ==="
                  max_seqs: int = 10000,
                  threads: int = None,
                  poll_interval: int = 10,
+                 gpus: int = 1,
+                 idle_timeout: int = 600,
                  **kwargs):
         """
         Initialize MMseqs2Server configuration.
@@ -324,6 +566,17 @@ echo "=== MMseqs2Server ready ==="
             max_seqs: Maximum sequences to return per query
             threads: Number of threads (auto-detect if None)
             poll_interval: Job polling interval in seconds
+            gpus: Number of GPUs for the GPU server (1 or 2). With 2, the UniRef30
+                  and environmental gpuservers are pinned to separate GPUs
+                  (CUDA_VISIBLE_DEVICES 0 and 1) so their prefilters don't share
+                  one device; with 1, both run on GPU 0. Only meaningful for
+                  mode="gpu".
+            idle_timeout: Shut the server down after this many seconds with no
+                  jobs in the queue (0 disables). A long-lived idle GPU server
+                  squats the card and wrecks SLURM priority, so the server exits
+                  once the queue has been empty for this long. Default 600 (10 min)
+                  — re-initialising (locking the DB indices into RAM) takes ~4–6 min,
+                  so 10 min idle is a small overhang over the re-warm cost.
             **kwargs: Additional parameters
         """
         self.mode = mode
@@ -331,10 +584,18 @@ echo "=== MMseqs2Server ready ==="
         self.max_seqs = max_seqs
         self.threads = threads
         self.poll_interval = poll_interval
+        self.gpus = gpus
+        self.idle_timeout = idle_timeout
 
-        # Set mode-specific default resources
+        # Set mode-specific default resources. CPU mode runs the same
+        # colabfold_search pipeline as GPU mode but keeps the DB indices resident
+        # in the OS page cache (warmed at startup) instead of on the GPU. The CPU
+        # indices are bigger than the GPU ones (~746GB vs ~410GB) because CPU mode
+        # keeps the k-mer prefilter table the GPU build drops (--index-subset 2),
+        # so it needs a ~1TB-class node to stay fully resident; the search itself
+        # is CPU-bound and benefits from many cores.
         if mode == "cpu":
-            mode_resources = {"gpu": "none", "memory": "16GB", "time": "24:00:00"}
+            mode_resources = {"gpu": "none", "memory": "800GB", "time": "24:00:00", "cpus": 32}
         else:  # gpu mode
             mode_resources = {"gpu": "V100", "memory": "32GB", "time": "24:00:00"}
 
@@ -351,6 +612,13 @@ echo "=== MMseqs2Server ready ==="
         if self.mode not in ["cpu", "gpu"]:
             raise ValueError("mode must be 'cpu' or 'gpu'")
 
+        if self.mode == "gpu":
+            raise NotImplementedError(
+                "MMseqs2Server GPU mode is not currently supported; use mode='cpu' "
+                "(the CPU server serves the RAM-resident ColabFold databases). The "
+                "GPU server path is retained but disabled."
+            )
+
         if self.max_seqs <= 0:
             raise ValueError("max_seqs must be positive")
 
@@ -359,6 +627,12 @@ echo "=== MMseqs2Server ready ==="
 
         if self.poll_interval <= 0:
             raise ValueError("poll_interval must be positive")
+
+        if self.gpus not in (1, 2):
+            raise ValueError("gpus must be 1 or 2")
+
+        if self.idle_timeout < 0:
+            raise ValueError("idle_timeout must be >= 0")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files and dependencies."""
@@ -431,8 +705,17 @@ echo "=== MMseqs2Server ready ==="
             f"export MMSEQS2_POLL_INTERVAL={self.poll_interval}",
             f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
             f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log",
+            # Built databases live in the cpu/ subfolder of the DB root (see
+            # MMseqs2Server.install(step="build", mode="cpu")).
+            f"export MMSEQS2_DB_DIR={os.path.join(self.folders.get('MMseqs2Databases', ''), 'cpu')}",
             f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}",
-            f"export MMSEQS2_DIR={self.folders.get('MMseqs2', '')}"
+            # LocalColabFold install: provides colabfold_search AND the CPU mmseqs
+            # binary the server uses (colabfold-conda/bin). No separate MMseqs2
+            # install needed for CPU mode — keeps it portable to CPU-only clusters.
+            f"export COLABFOLD_DIR={self.folders.get('AlphaFold', '')}",
+            # Auto-shutdown after this many idle seconds (0 disables) so an idle
+            # large-RAM server doesn't squat the node and hurt SLURM priority.
+            f"export MMSEQS2_IDLE_TIMEOUT={self.idle_timeout}"
         ])
 
         env_setup = "\n".join(env_vars)
@@ -466,10 +749,21 @@ bash {self.cpu_server_script}
             f"export MMSEQS2_POLL_INTERVAL={self.poll_interval}",
             f"export MMSEQS2_SHARED_FOLDER={self.shared_server_folder}",
             f"export MMSEQS2_PIPELINE_LOG={self.output_folder}/server.log",
-            f"export MMSEQS2_DB_DIR={self.folders.get('MMseqs2Databases', '')}",
+            # Built databases live in the gpu/ subfolder of the DB root (see
+            # MMseqs2Server.install(step="build", mode="gpu")).
+            f"export MMSEQS2_DB_DIR={os.path.join(self.folders.get('MMseqs2Databases', ''), 'gpu')}",
             f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}",
             f"export MMSEQS2_DIR={self.folders.get('MMseqs2', '')}",
-            "export CUDA_VISIBLE_DEVICES=0",
+            # LocalColabFold install (ships colabfold_search); the server adds
+            # its colabfold-conda/bin to PATH.
+            f"export COLABFOLD_DIR={self.folders.get('AlphaFold', '')}",
+            # Number of GPUs (1 or 2). With 2, the script pins the UniRef30 and
+            # envdb gpuservers to separate devices.
+            f"export MMSEQS2_GPUS={self.gpus}",
+            f"export CUDA_VISIBLE_DEVICES={','.join(str(i) for i in range(self.gpus))}",
+            # Auto-shutdown after this many idle seconds (0 disables) so an idle
+            # GPU server doesn't squat the card and hurt SLURM priority.
+            f"export MMSEQS2_IDLE_TIMEOUT={self.idle_timeout}",
             "export CUDA_CACHE_MAXSIZE=2147483648",
             "export CUDA_CACHE_DISABLE=0"
         ])

@@ -10,6 +10,7 @@ ligand binding affinity calculation, and comprehensive analysis.
 """
 
 import os
+import sys
 import json
 from typing import Dict, List, Any, Optional, Union
 
@@ -39,6 +40,398 @@ class Boltz2(BaseConfig):
 
     TOOL_NAME = "Boltz2"
     TOOL_VERSION = "1.0"
+
+    @classmethod
+    def predict_atom_names(cls, ligand, *, path=None, size=(500, 500), scale=3):
+        """Predict and depict the atom names Boltz2 will assign to a ligand.
+
+        Boltz names ligand atoms deterministically from chemistry alone, so the
+        names used in ligand-atom constraint tokens (contacts / covalent /
+        metal_coord, e.g. ``["B", "C8"]``) can be looked up before any prediction
+        runs — no GPU, no Pipeline context.
+
+        Two naming regimes, matching Boltz's parser:
+
+        - SMILES ligands (raw SMILES, ``Ligand(smiles=...)``, a PubChem name/CID/
+          CAS lookup, ``CompoundLibrary``): ``AddHs`` then
+          ``element.upper() + str(CanonicalRankAtoms + 1)``. Hydrogens take part
+          in the ranking (so heavy-atom indices are NOT 1..N) but are hidden from
+          the picture.
+        - CCD ligands (``Ligand("ATP")`` and any RCSB CCD code): atom names come
+          from the CCD definition (``_chem_comp_atom.atom_id`` in the RCSB CIF).
+          PDB output collapses the residue NAME to ``LIG`` but leaves atom names
+          intact.
+
+        Args:
+            ligand: a SMILES string, a Ligand / CompoundLibrary instance, or the
+                    StandardizedOutput one returns when constructed inside a
+                    Pipeline (unwrapped to its tool). No Pipeline context required.
+            path: PNG output path. Defaults to ``./<id>_atoms.png`` in the current
+                  directory (``./ligand_atoms.png`` for a bare SMILES or a multi-
+                  compound grid). The PNG is always written.
+            size: per-compound depiction size in pixels.
+            scale: supersampling factor; each depiction is rasterized at
+                   ``size * scale`` for a crisper, higher-resolution image.
+
+        Returns:
+            ``Boltz2.AtomNameResult`` — renders inline in Jupyter, and exposes
+            ``.names`` (``{id: {atom_name: serial}}``), ``.path``, ``.regime``.
+
+        Network is used only to resolve a name/CID/CAS or CCD lookup to chemistry;
+        a raw SMILES or ``Ligand(smiles=...)`` is fully offline.
+        """
+        compounds = cls._atom_name_compounds(ligand)
+
+        names: Dict[str, Dict[str, int]] = {}
+        regime: Dict[str, str] = {}
+        images = []
+        legends = []
+        for cid, reg, payload in compounds:
+            if reg == "smiles":
+                img, name_map = cls._draw_smiles_atom_names(payload, size, scale)
+            else:
+                img, name_map = cls._draw_ccd_atom_names(payload, size, scale)
+            names[cid] = name_map
+            regime[cid] = reg
+            images.append(img)
+            legends.append(cid)
+
+        if len(images) == 1:
+            final_img = images[0]
+            default_name = f"{legends[0]}_atoms.png"
+        else:
+            final_img = cls._atom_name_grid(images, legends)
+            default_name = "ligand_atoms.png"
+
+        out_path = path or os.path.join(os.getcwd(), default_name)
+        final_img.save(out_path)
+        return cls.AtomNameResult(names=names, image=final_img, path=out_path, regime=regime)
+
+    class AtomNameResult:
+        """Result of ``Boltz2.predict_atom_names``.
+
+        Attributes:
+            names: ``{compound_id: {atom_name: heavy-atom serial}}`` — the token to
+                   put in a Boltz constraint.
+            image: a PIL image (single compound) or a stitched grid (multiple).
+                   Renders inline in Jupyter via ``_repr_png_``.
+            path: the PNG written to disk.
+            regime: ``{compound_id: "smiles" | "ccd"}`` — which scheme was used.
+        """
+
+        def __init__(self, names, image, path, regime):
+            self.names = names
+            self.image = image
+            self.path = path
+            self.regime = regime
+
+        def _repr_png_(self):
+            if self.image is not None and hasattr(self.image, "_repr_png_"):
+                return self.image._repr_png_()
+            return None
+
+        def __repr__(self):
+            per = ", ".join(f"{cid}: {len(n)} heavy atoms ({self.regime[cid]})"
+                            for cid, n in self.names.items())
+            return f"AtomNameResult({per}; png={self.path})"
+
+    @staticmethod
+    def _import_pipe_ligand():
+        """Import the runtime SMILES/CIF resolvers from pipe_scripts/pipe_ligand.py."""
+        pipe_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pipe_scripts")
+        if pipe_dir not in sys.path:
+            sys.path.insert(0, pipe_dir)
+        import pipe_ligand
+        return pipe_ligand
+
+    @classmethod
+    def _atom_name_compounds(cls, ligand):
+        """Normalize ligand input to a list of (id, regime, payload) tuples.
+
+        regime is "smiles" or "ccd"; payload is the SMILES or the CCD code.
+        Accepts a SMILES string, a Ligand/CompoundLibrary instance, or the
+        StandardizedOutput one returns inside a pipeline (incl. the never-closing
+        Colab/Jupyter context). Network lookups resolve a name/CID/CAS to SMILES.
+        """
+        if isinstance(ligand, str):
+            return [("ligand", "smiles", ligand)]
+
+        # Unwrap a StandardizedOutput (.tool) or ToolOutput (.config) to the instance.
+        tool_obj = ligand
+        if hasattr(ligand, "tool") and hasattr(getattr(ligand, "tool"), "TOOL_NAME"):
+            tool_obj = ligand.tool
+        elif hasattr(ligand, "config") and hasattr(getattr(ligand, "config"), "TOOL_NAME"):
+            tool_obj = ligand.config
+        if not hasattr(tool_obj, "TOOL_NAME"):
+            raise ValueError(
+                "predict_atom_names accepts a SMILES string, a Ligand/"
+                "CompoundLibrary instance, or the StandardizedOutput from one; "
+                f"got {type(ligand).__name__}.")
+
+        tool = tool_obj.TOOL_NAME
+        if tool == "CompoundLibrary":
+            comps = getattr(tool_obj, "expanded_compounds", None)
+            ids = getattr(tool_obj, "compound_ids", None)
+            if not comps or not ids:
+                raise ValueError(
+                    "CompoundLibrary has no expanded compounds yet. Dict and CDXML "
+                    "libraries expand on construction; a CSV-file library only "
+                    "expands inside a Pipeline. Build it from a dict/CDXML, or pass "
+                    "the SMILES directly.")
+            return [(cid, "smiles", c["smiles"]) for cid, c in zip(ids, comps)]
+
+        if tool != "Ligand":
+            raise ValueError(
+                f"predict_atom_names expects a Ligand or CompoundLibrary, got {tool}.")
+
+        if getattr(tool_obj, "code_only", False):
+            raise ValueError(
+                "code-only Ligand(code=...) carries no chemistry, so atom names "
+                "cannot be predicted. Pass the SMILES or a CCD/name lookup instead.")
+        if getattr(tool_obj, "_structures_only", False):
+            raise ValueError(
+                "Ligand(structures=...) takes atom names from the bound structure, "
+                "not from chemistry. Inspect the extracted PDB after running instead.")
+
+        pipe = cls._import_pipe_ligand()
+        out = []
+        smiles_vals = list(getattr(tool_obj, "smiles_values", []) or [])
+        lookup_vals = list(getattr(tool_obj, "lookup_values", []) or [])
+        ids = list(getattr(tool_obj, "custom_ids", []) or [])
+
+        # custom_ids ordering is lookup_values first, then smiles_values (Ligand.__init__).
+        id_iter = iter(ids)
+        for lk in lookup_vals:
+            cid = next(id_iter, lk)
+            lk_type = tool_obj._detect_lookup_type(lk)
+            if lk_type == "ccd":
+                out.append((cid, "ccd", lk))
+            else:
+                smi = pipe.fetch_smiles_from_pubchem(lk, lk_type)
+                if not smi:
+                    raise ValueError(f"Could not resolve SMILES for lookup {lk!r} from PubChem.")
+                out.append((cid, "smiles", smi))
+        for smi in smiles_vals:
+            cid = next(id_iter, smi)
+            out.append((cid, "smiles", smi))
+
+        if not out:
+            raise ValueError("Ligand has no resolvable chemistry to draw.")
+        return out
+
+    @staticmethod
+    def _smiles_atom_names(smiles):
+        """Reproduce Boltz's SMILES atom-naming verbatim.
+
+        Returns (rdkit_atom_idx, element, atom_name) for every atom incl. H — the
+        ranking must include hydrogens to match Boltz even though they are hidden.
+        """
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        mol = AllChem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"RDKit could not parse SMILES: {smiles!r}")
+        mol = AllChem.AddHs(mol)
+
+        canonical_order = AllChem.CanonicalRankAtoms(mol)
+        Chem.AssignStereochemistry(mol, force=True, cleanIt=True)
+
+        out = []
+        for atom, can_idx in zip(mol.GetAtoms(), canonical_order):
+            atom_name = atom.GetSymbol().upper() + str(can_idx + 1)
+            if len(atom_name) > 4:
+                raise ValueError(
+                    f"{smiles} has an atom with a name longer than 4 characters: "
+                    f"{atom_name}. Boltz rejects this ligand.")
+            out.append((atom.GetIdx(), atom.GetSymbol(), atom_name))
+        return out
+
+    @classmethod
+    def _draw_smiles_atom_names(cls, smiles, size, scale=3):
+        """2D depiction of a SMILES, heavy atoms annotated by Boltz atom names.
+
+        Returns (PIL image, {atom_name: heavy_serial}).
+        """
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+        from rdkit.Chem.Draw import rdMolDraw2D
+        from PIL import Image
+        import io
+
+        named = cls._smiles_atom_names(smiles)
+        name_by_idx = {idx: name for idx, _el, name in named}
+
+        mol = AllChem.MolFromSmiles(smiles)
+        mol = AllChem.AddHs(mol)
+        names_map = {}
+        serial = 0
+        for atom in mol.GetAtoms():
+            if atom.GetSymbol() == "H":
+                continue
+            name = name_by_idx[atom.GetIdx()]
+            atom.SetProp("atomNote", name)
+            names_map[name] = serial
+            serial += 1
+        mol = Chem.RemoveHs(mol)
+        AllChem.Compute2DCoords(mol)
+
+        drawer = rdMolDraw2D.MolDraw2DCairo(size[0] * scale, size[1] * scale)
+        drawer.DrawMolecule(mol)
+        drawer.FinishDrawing()
+        return Image.open(io.BytesIO(drawer.GetDrawingText())), names_map
+
+    @staticmethod
+    def _read_cif_loop(text, prefix):
+        """Parse a single mmCIF ``loop_`` into a list of column->value dicts.
+
+        ``prefix`` is the category tag (e.g. ``_chem_comp_atom.``). Quoted tokens
+        (prime-bearing atom ids like ``O5'``) are split with shlex so quotes are
+        stripped without dropping the prime.
+        """
+        import shlex
+
+        columns = []
+        records = []
+        reading_data = False
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith(prefix):
+                columns.append(s[len(prefix):])
+                reading_data = False
+                continue
+            if columns and not reading_data:
+                if not s or s.startswith("#") or s == "loop_" or s.startswith("data_"):
+                    continue
+                reading_data = True
+            if reading_data:
+                if not s or s.startswith("_") or s.startswith("#") or s == "loop_" or s.startswith("data_"):
+                    break
+                parts = shlex.split(s)
+                if len(parts) != len(columns):
+                    continue
+                records.append(dict(zip(columns, parts)))
+        return records
+
+    @classmethod
+    def _fetch_ccd_cif(cls, ccd_code):
+        """Download an RCSB chem-comp CIF; raise a clear error if absent."""
+        import requests
+
+        code = ccd_code.strip().upper()
+        url = f"https://files.rcsb.org/ligands/download/{code}.cif"
+        headers = {"User-Agent": "BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code == 404:
+            raise ValueError(f"No CCD entry {code!r} at RCSB (cannot read atom names).")
+        resp.raise_for_status()
+        return resp.text
+
+    # mmCIF bond value_order -> RDKit bond type.
+    _CIF_BOND_ORDER = {"SING": 1.0, "DOUB": 2.0, "TRIP": 3.0, "QUAD": 4.0, "AROM": 1.5}
+
+    @classmethod
+    def _build_ccd_mol(cls, ccd_code):
+        """Build an RDKit mol straight from the CCD's own atoms+bonds+coords.
+
+        Names attach to atoms by construction (no SMILES re-ordering), so the
+        depiction is guaranteed to label the right atom. Returns (mol, names_map)
+        where mol carries heavy atoms only, each with its CCD ``atom_id`` set as
+        ``atomNote``, laid out from the ideal 2-D projection of the CCD coords.
+        """
+        from rdkit import Chem
+        from rdkit.Geometry import Point3D
+
+        text = cls._fetch_ccd_cif(ccd_code)
+        atoms = cls._read_cif_loop(text, "_chem_comp_atom.")
+        bonds = cls._read_cif_loop(text, "_chem_comp_bond.")
+        if not atoms:
+            raise ValueError(f"Could not parse atoms from CCD CIF for {ccd_code!r}.")
+
+        # Heavy atoms only, in CIF order.
+        heavy = [a for a in atoms if a.get("type_symbol", "").upper() != "H"]
+        idx_by_id = {}
+        rw = Chem.RWMol()
+        conf_xyz = []
+        for a in heavy:
+            aid = a["atom_id"]
+            el = a["type_symbol"]
+            atom = Chem.Atom(el.capitalize())
+            charge = a.get("charge", "0")
+            try:
+                atom.SetFormalCharge(int(float(charge)))
+            except (TypeError, ValueError):
+                pass
+            atom.SetProp("atomNote", aid)
+            new_idx = rw.AddAtom(atom)
+            idx_by_id[aid] = new_idx
+            x = float(a.get("pdbx_model_Cartn_x_ideal", a.get("model_Cartn_x", 0.0)) or 0.0)
+            y = float(a.get("pdbx_model_Cartn_y_ideal", a.get("model_Cartn_y", 0.0)) or 0.0)
+            z = float(a.get("pdbx_model_Cartn_z_ideal", a.get("model_Cartn_z", 0.0)) or 0.0)
+            conf_xyz.append((x, y, z))
+
+        for b in bonds:
+            a1, a2 = b.get("atom_id_1"), b.get("atom_id_2")
+            if a1 not in idx_by_id or a2 not in idx_by_id:
+                continue  # bond to a hydrogen (dropped) — skip
+            order = cls._CIF_BOND_ORDER.get(b.get("value_order", "SING"), 1.0)
+            bt = Chem.BondType.AROMATIC if order == 1.5 else Chem.BondType.values[int(order)]
+            rw.AddBond(idx_by_id[a1], idx_by_id[a2], bt)
+
+        mol = rw.GetMol()
+        conf = Chem.Conformer(mol.GetNumAtoms())
+        for i, (x, y, z) in enumerate(conf_xyz):
+            conf.SetAtomPosition(i, Point3D(x, y, z))
+        mol.AddConformer(conf, assignId=True)
+        try:
+            Chem.SanitizeMol(mol)
+        except Exception:
+            # Layout/labels don't need a fully sanitized mol; keep going.
+            pass
+
+        names_map = {aid: i for aid, i in idx_by_id.items()}
+        return mol, names_map
+
+    @classmethod
+    def _draw_ccd_atom_names(cls, ccd_code, size, scale=3):
+        """Depiction for a CCD ligand, annotated by the CCD's own atom names."""
+        from rdkit.Chem.Draw import rdMolDraw2D
+        from rdkit.Chem import rdDepictor
+        from PIL import Image
+        import io
+
+        mol, names_map = cls._build_ccd_mol(ccd_code)
+        # Flatten the CCD's 3-D ideal coords to a clean 2-D layout for display.
+        rdDepictor.Compute2DCoords(mol)
+
+        drawer = rdMolDraw2D.MolDraw2DCairo(size[0] * scale, size[1] * scale)
+        drawer.DrawMolecule(mol)
+        drawer.FinishDrawing()
+        return Image.open(io.BytesIO(drawer.GetDrawingText())), names_map
+
+    @staticmethod
+    def _atom_name_grid(images, legends):
+        """Stitch per-compound images side by side with id legends underneath."""
+        from PIL import Image, ImageDraw, ImageFont
+
+        max_h = max(im.height for im in images)
+        font_px = max(14, max_h // 22)
+        try:
+            font = ImageFont.truetype("DejaVuSans.ttf", font_px)
+        except OSError:
+            font = ImageFont.load_default()
+        pad = max(8, max_h // 50)
+        legend_h = font_px + pad
+        w = sum(im.width for im in images) + pad * (len(images) + 1)
+        h = max_h + legend_h + pad * 2
+        canvas = Image.new("RGB", (w, h), "white")
+        draw = ImageDraw.Draw(canvas)
+        x = pad
+        for im, legend in zip(images, legends):
+            canvas.paste(im, (x, pad))
+            draw.text((x, im.height + pad), str(legend), fill="black", font=font)
+            x += im.width + pad
+        return canvas
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -87,7 +480,6 @@ fi
     fasta_files_list_file = Path(lambda self: self.configuration_path(".input_fasta_files.txt"))
     sequence_ids_file = Path(lambda self: self.configuration_path("sequence_ids.csv"))
     combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
-    ligands_csv = Path(lambda self: self.configuration_path("ligands.csv"))
 
     # Raw boltz dumps
     prediction_folder = Path(lambda self: self.execution_folder)
@@ -96,6 +488,10 @@ fi
     # Stream maps (lineage)
     structures_map_csv = Path(lambda self: self.stream_map_path("structures"))
     msas_csv = Path(lambda self: self.stream_map_path("msas"))
+    # Emitted compounds map: same ids/SMILES as the input ligands, but with the
+    # `code` column overwritten with the residue code Boltz assigns (CCD code
+    # for CCD ligands, "LIG" for SMILES ligands). Written at runtime.
+    compounds_map_csv = Path(lambda self: self.stream_map_path("compounds"))
 
     # Content-bearing stream (sequences.csv IS the content table)
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
@@ -112,7 +508,7 @@ fi
     boltz_config_unified_py = Path(lambda self: self.pipe_script_path("pipe_boltz_config_unified.py"))
     boltz_postprocessing_py = Path(lambda self: self.pipe_script_path("pipe_boltz_postprocessing.py"))
     boltz_msa_copy_py = Path(lambda self: self.pipe_script_path("pipe_boltz_msa_copy.py"))
-    propagate_missing_py = Path(lambda self: self.pipe_script_path("pipe_propagate_missing.py"))
+    boltz_compounds_py = Path(lambda self: self.pipe_script_path("pipe_boltz_compounds.py"))
 
     def __init__(self,
                  # Primary input parameters
@@ -122,15 +518,15 @@ fi
                  dsDNA: Optional[Union[DataStream, StandardizedOutput]] = None,
                  ssRNA: Optional[Union[DataStream, StandardizedOutput]] = None,
                  dsRNA: Optional[Union[DataStream, StandardizedOutput]] = None,
-                 ligands: Optional[Union[str, DataStream, StandardizedOutput]] = None,
+                 ligands: Optional[Union[DataStream, StandardizedOutput]] = None,
                  msas: Optional[StandardizedOutput] = None,
                  # Core prediction parameters
                  affinity: bool = True,
                  output_format: str = "pdb",
-                 msa_server: str = "public",
                  # Advanced prediction parameters
                  recycling_steps: Optional[int] = None,
                  diffusion_samples: Optional[int] = None,
+                 top_only: bool = True,
                  use_potentials: bool = False,
                  # Template parameters
                  template: Optional[str] = None,
@@ -162,11 +558,13 @@ fi
             dsDNA: Double-stranded DNA sequences (two chains per sequence, reverse complement auto-generated)
             ssRNA: Single-stranded RNA sequences (one chain per sequence)
             dsRNA: Double-stranded RNA sequences (two chains per sequence, reverse complement auto-generated)
-            ligands: Single SMILES string, DataStream, or StandardizedOutput with compounds
-            msas: MSA files from previous Boltz2 run (StandardizedOutput with msas table)
+            ligands: DataStream or StandardizedOutput with a compounds stream (e.g. Ligand, CompoundLibrary)
+            msas: Precomputed MSAs (StandardizedOutput with an msas table, e.g. from
+                MMseqs2 or a previous Boltz2 run). When provided, the public MSA
+                server is not queried. When omitted, MSAs are generated via the
+                public MSA server.
             affinity: Whether to calculate binding affinity
             output_format: Output format ("pdb" or "mmcif")
-            msa_server: MSA generation ("public" or "local")
             recycling_steps: Number of recycling steps
             diffusion_samples: Number of diffusion samples
             use_potentials: Enable potentials for improved structure prediction
@@ -178,11 +576,17 @@ fi
             pocket_max_distance: Maximum distance for pocket constraint
             pocket_force: Whether to force pocket constraint
             glycosylation: Dict mapping chain IDs to Asn positions for N-glycosylation
-            covalent_linkage: Dict specifying covalent attachment
+            covalent_linkage: Dict specifying covalent attachment (chain, position,
+                      protein_atom, ligand_atom). `position` may be a residue index
+                      or a selection string resolved per-structure against the chain's
+                      sequence (e.g. "C in ILIPCH" finds the catalytic Cys regardless
+                      of renumbering); it must resolve to exactly one residue.
             contacts: List of contact constraints, each a dict with token1, token2,
                       optional max_distance (4-20A, default 6.0), optional force (bool).
                       Tokens are [chain_id, residue_index] for proteins or
-                      [chain_id, atom_name] for ligands (e.g. ["B", "C1"]).
+                      [chain_id, atom_name] for ligands (e.g. ["B", "C8"]). Use
+                      Boltz2.predict_atom_names(<ligand>) to see the exact ligand
+                      atom names before writing the constraint.
             disulfide_bonds: List of cysteine-cysteine bond constraints. Each entry is a
                       dict with token1=[chain, residue] and token2=[chain, residue]. Atom
                       names default to SG/SG and are filled in automatically.
@@ -199,8 +603,8 @@ fi
                 sequences: id | sequence
                 msas: id | sequences.id | sequence | msa_file
                 affinity: id | input_file | affinity_pred_value | affinity_probability_binary
-                compounds: id | format | smiles | ccd
-                missing: id | removed_by | cause
+                compounds: id | format | code | smiles | ccd  (code = residue code Boltz assigned)
+                missing: id | removed_by | kind | cause
         """
         self.config = config
         self.msas = msas
@@ -228,26 +632,25 @@ fi
         self.ssRNA_stream: Optional[DataStream] = resolve_input_to_datastream(ssRNA, fallback_stream="sequences")
         self.dsRNA_stream: Optional[DataStream] = resolve_input_to_datastream(dsRNA, fallback_stream="sequences")
 
-        # Resolve ligand input (special handling for direct SMILES string)
+        # Resolve ligand input to a compounds stream.
         self.ligands_stream: Optional[DataStream] = None
-        self.ligands_smiles: Optional[str] = None
-        if isinstance(ligands, str):
-            # Direct SMILES string
-            self.ligands_smiles = ligands
-        elif ligands is not None:
+        if ligands is not None:
             self.ligands_stream = resolve_input_to_datastream(ligands, fallback_stream="compounds")
 
         # Override affinity to False if no ligands
-        if self.ligands is None and self.ligands_smiles is None and affinity:
+        if self.ligands is None and affinity:
             print("Warning: No ligands detected, setting affinity=False")
             self.affinity = False
         else:
             self.affinity = affinity
 
         self.output_format = output_format
-        self.msa_server = msa_server
         self.recycling_steps = recycling_steps
         self.diffusion_samples = diffusion_samples
+        # When False, every diffusion sample is surfaced as a separate structure
+        # (<id>_1..N) instead of just the top model (<id>) — e.g. to feed a pose
+        # ensemble into downstream design. Default True keeps the single-best output.
+        self.top_only = top_only
         self.use_potentials = use_potentials
 
         # Template parameters
@@ -292,9 +695,6 @@ fi
         if self.output_format not in ["pdb", "mmcif"]:
             raise ValueError("output_format must be 'pdb' or 'mmcif'")
 
-        if self.msa_server not in ["public", "local"]:
-            raise ValueError("msa_server must be 'public' or 'local'")
-
         _validate_freeform_string("template", self.template)
         _validate_freeform_string("config", self.config)
 
@@ -303,6 +703,8 @@ fi
 
         if self.diffusion_samples is not None and (not isinstance(self.diffusion_samples, int) or self.diffusion_samples < 1):
             raise ValueError("diffusion_samples must be a positive integer")
+        if not isinstance(self.top_only, bool):
+            raise ValueError("top_only must be a bool")
 
         if self.contacts is not None:
             if not isinstance(self.contacts, list):
@@ -414,6 +816,13 @@ fi
 
         return " ".join(extra_params)
 
+    def _supplied_msa_format(self) -> str:
+        """Format of the upstream msas stream (csv/a3m); defaults to csv."""
+        try:
+            return self.msas.streams.msas.format or "csv"
+        except Exception:
+            return "csv"
+
     def _get_msa_table_flag(self) -> str:
         """Get the MSA table flag for the config generator."""
         if not self.msas:
@@ -433,7 +842,8 @@ fi
     def generate_script(self, script_path: str) -> str:
         """Generate bash script for Boltz2 execution."""
         boltz_cache_folder = self.folders["BoltzCache"]
-        msa_option = "" if self.msa_server == "local" else " --use_msa_server"
+        # Query the public MSA server only when no MSAs were supplied.
+        msa_option = "" if self.msas is not None else " --use_msa_server"
 
         script_content = "#!/bin/bash\n"
         script_content += "# Boltz2 execution script\n"
@@ -505,6 +915,9 @@ echo "Running Boltz2 prediction"
         # Post-process results
         script_content += self._generate_postprocess_section()
 
+        # Emit the compounds stream with the residue code Boltz assigned
+        script_content += self._generate_compounds_section()
+
         # Propagate missing table
         script_content += self._generate_missing_table_propagation()
 
@@ -520,17 +933,6 @@ echo "Generating Boltz2 configurations using unified config generator"
 mkdir -p {self.config_files_dir}
 
 """
-        # Generate ligands CSV if using direct SMILES string — config-time write.
-        # configuration/ is already created by the pipeline.
-        if self.ligands_smiles:
-            ligand_id = config_name if config_name != "prediction" else "ligand"
-            with open(self.ligands_csv, 'w') as f:
-                f.write("id,format,smiles,ccd\n")
-                f.write(f"{ligand_id},smiles,{self.ligands_smiles},\n")
-            script += f"""# Using ligands CSV: {self.ligands_csv}
-
-"""
-
         # Build command for unified config generator
         cmd_parts = [
             f'python {self.boltz_config_unified_py}',
@@ -602,7 +1004,7 @@ python {self.boltz_postprocessing_py} {self.execution_folder} {self.output_folde
     --affinity-csv "{self.affinity_csv}" \\
     --sequences-csv "{self.sequences_csv}" \\
     --msas-csv "{self.msas_csv}" \\
-    --scores-info "{self.scores_info_file}"
+    --scores-info "{self.scores_info_file}"{"" if self.top_only else " --all-samples"}
 
 if [ $? -ne 0 ]; then
     echo "Error: Post-processing failed"
@@ -613,36 +1015,42 @@ echo "Post-processing completed"
 
 """
 
-    def _generate_missing_table_propagation(self) -> str:
-        """Generate script section to propagate missing.csv from upstream tools."""
-        upstream_missing_path = self._get_upstream_missing_table_path(
+    def _generate_compounds_section(self) -> str:
+        """Emit the compounds stream map with the residue code Boltz assigned.
+
+        Boltz writes SMILES ligands into the complex with the residue name
+        ``LIG`` and CCD ligands with their CCD code. The pipe script reads the
+        input ligand metadata (id, format, smiles, ccd) and writes a fresh
+        compounds map that preserves id/smiles but sets ``code`` accordingly,
+        so downstream HETATM-selector tools read the right code automatically.
+        """
+        if not self.ligands_stream:
+            return ""
+        return f"""
+echo "Emitting compounds stream with assigned residue codes"
+python {self.boltz_compounds_py} \\
+    --combinatorics-config "{self.combinatorics_config_file}" \\
+    --output-format "{self.output_format}" \\
+    --output-compounds "{self.compounds_map_csv}"
+
+"""
+
+    def _missing_input_sources(self):
+        """All id-bearing input axes that may carry an upstream `missing` table."""
+        return (
             self.proteins, self.proteins_stream,
+            self.ligands, self.ligands_stream,
             self.ssDNA, self.ssDNA_stream,
             self.dsDNA, self.dsDNA_stream,
             self.ssRNA, self.ssRNA_stream,
-            self.dsRNA, self.dsRNA_stream
+            self.dsRNA, self.dsRNA_stream,
         )
 
-        if not upstream_missing_path:
-            return ""
-
-        upstream_folder = os.path.dirname(upstream_missing_path)
-
-        return f"""
-# Propagate missing table from upstream tools — writes to tables/missing.csv.
-echo "Checking for upstream missing sequences..."
-if [ -f "{upstream_missing_path}" ]; then
-    echo "Found upstream missing.csv - propagating to current tool"
-    python {self.propagate_missing_py} \\
-        --upstream-folders "{upstream_folder}" \\
-        --output-folder "{self.output_folder}" \\
-        --missing-csv "{self.missing_csv}"
-else
-    echo "No upstream missing.csv found - creating empty missing.csv"
-    echo "id,removed_by,cause" > "{self.missing_csv}"
-fi
-
-"""
+    def _generate_missing_table_propagation(self) -> str:
+        """Propagate the union of upstream `missing` manifests into tables/missing.csv."""
+        return self.generate_missing_propagation(
+            *self._missing_input_sources(), missing_csv=self.missing_csv
+        )
 
 
     def _predict_sequence_ids(self) -> List[str]:
@@ -668,24 +1076,35 @@ fi
         structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
         structure_files = [self.stream_path("structures", f"<id>{structure_ext}")]
 
+        # With top_only=False the postprocess surfaces EVERY diffusion sample as
+        # <id>_1..K (for any K, including K=1), so the declared structure ids must
+        # mirror that exactly or the completion check mismatches. Suffix whenever
+        # top_only is off; K = diffusion_samples (Boltz's effective default is 1).
+        # Use the compact lazy-id range pattern (<1..K>) rather than materializing.
+        # Other streams (msas/sequences/compounds) stay per-complex on the base ids.
+        structure_ids = predicted_ids
+        if not self.top_only:
+            k = self.diffusion_samples or 1
+            structure_ids = [f"{pid}_<1..{k}>" for pid in predicted_ids]
+
         structures = DataStream(
             name="structures",
-            ids=predicted_ids,
+            ids=structure_ids,
             files=structure_files,
             map_table=self.structures_map_csv,
             format=self.output_format
         )
 
-        # MSA files — msa_cache_folder is the msas/ stream folder.
-        msa_ext = ".csv" if self.msa_server == "public" else ".a3m"
-        msa_files = [self.stream_path("msas", f"<id>{msa_ext}")]
+        # Supplied MSAs keep their upstream format; public-server MSAs are csv.
+        msa_fmt = self._supplied_msa_format() if self.msas is not None else "csv"
+        msa_files = [self.stream_path("msas", f"<id>.{msa_fmt}")]
 
         msas = DataStream(
             name="msas",
             ids=predicted_ids,
             files=msa_files,
             map_table=self.msas_csv,
-            format="csv" if self.msa_server == "public" else "a3m"
+            format=msa_fmt
         )
 
         # Sequences DataStream (from input)
@@ -697,19 +1116,16 @@ fi
             format="csv"
         )
 
-        # Compounds DataStream
+        # Compounds DataStream — emit a FRESH value-based csv carrying the same
+        # ids/SMILES as the input ligands but with `code` overwritten with the
+        # residue code Boltz assigns (written at runtime by pipe_boltz_compounds).
         if self.ligands_stream:
-            compounds = self.ligands_stream
-        elif self.ligands_smiles:
-            # Single SMILES - create compound entry
-            effective_job_name = self.get_effective_job_name() or "ligand"
-            compound_ids = [effective_job_name]
             compounds = DataStream(
                 name="compounds",
-                ids=compound_ids,
+                ids=self.ligands_stream.ids,
                 files=[],
-                map_table=self.ligands_csv,
-                format="smiles"
+                map_table=self.compounds_map_csv,
+                format="csv",
             )
         else:
             compounds = None
@@ -750,29 +1166,18 @@ fi
                 description="Boltz2 affinity predictions"
             )
 
-        if self.ligands_stream or self.ligands_smiles:
+        if self.ligands_stream:
             tables["compounds"] = TableInfo(
                 name="compounds",
-                path=self.ligands_csv if self.ligands_smiles else (self.ligands_stream.map_table if self.ligands_stream else ""),
-                columns=["id", "format", "smiles", "ccd"],
-                description="Ligand compounds"
+                path=self.compounds_map_csv,
+                columns=["id", "format", "code", "smiles", "ccd"],
+                description="Ligand compounds with the residue code Boltz assigned"
             )
 
-        # Check for upstream missing table
-        upstream_missing_path = self._get_upstream_missing_table_path(
-            self.proteins, self.proteins_stream,
-            self.ssDNA, self.ssDNA_stream,
-            self.dsDNA, self.dsDNA_stream,
-            self.ssRNA, self.ssRNA_stream,
-            self.dsRNA, self.dsRNA_stream
-        )
-        if upstream_missing_path:
-            tables["missing"] = TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
-                description="IDs removed by upstream tools with removal reason"
-            )
+        # Declare a `missing` table whenever any input axis carries one, so the
+        # completion check excuses upstream-filtered ids instead of failing.
+        if self._collect_upstream_missing_paths(*self._missing_input_sources()):
+            tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {
             "structures": structures,
@@ -801,14 +1206,12 @@ fi
             config_lines.append(f"ssRNA: {len(self.ssRNA_stream)} sequences")
         if self.dsRNA_stream:
             config_lines.append(f"dsRNA: {len(self.dsRNA_stream)} sequences")
-        if self.ligands_smiles:
-            config_lines.append(f"Ligands: {self.ligands_smiles}")
-        elif self.ligands_stream:
+        if self.ligands_stream:
             config_lines.append(f"Ligands: {len(self.ligands_stream)} compounds")
 
         config_lines.extend([
             f"Output format: {self.output_format}",
-            f"MSA server: {self.msa_server}",
+            f"MSA source: {'supplied' if self.msas is not None else 'public server'}",
             f"Affinity calculation: {self.affinity}"
         ])
 
@@ -857,11 +1260,10 @@ fi
                 "dsDNA": str(self.dsDNA) if self.dsDNA else None,
                 "ssRNA": str(self.ssRNA) if self.ssRNA else None,
                 "dsRNA": str(self.dsRNA) if self.dsRNA else None,
-                "ligands": str(self.ligands) if self.ligands else self.ligands_smiles,
+                "ligands": str(self.ligands) if self.ligands else None,
                 "msas": str(self.msas) if self.msas else None,
                 "affinity": self.affinity,
                 "output_format": self.output_format,
-                "msa_server": self.msa_server,
                 "recycling_steps": self.recycling_steps,
                 "diffusion_samples": self.diffusion_samples,
                 "use_potentials": self.use_potentials,

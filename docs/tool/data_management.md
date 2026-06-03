@@ -1,32 +1,36 @@
 # Data Management
 
-[← Back to Tool Reference](../ToolReference.md)
+[← Back to Tool Reference](../tool_reference.md)
+
+These tools reshape and route the **tables and streams** flowing through a pipeline — filtering and merging metric tables, gathering parallel runs, renaming IDs, and reformatting for external software. To load an *existing* CSV/Excel file into a pipeline, see [Table](inputs_io.md#table) under Inputs & I/O.
 
 ---
 
-## Table
+## ExtractMetrics
 
-Direct table construction from an existing CSV or Excel file. Loads the file at config time, exposes the resulting table to downstream tools through the standard `tables.<name>` interface, and (for `.xlsx`/`.xls` inputs) writes a sibling CSV so the run is fully CSV-native.
+Creates separate CSV files per metric for statistical software (GraphPad Prism).
 
-**Environment**: `biopipelines` (no extra installation).
+**Environment**: `biopipelines`
 
 **Parameters**:
-- `path`: str (required) — Path to a `.csv`, `.xlsx`, or `.xls` file.
-- `name`: str = `"data"` — Logical table name; downstream tools reference it as `<step>.tables.<name>`.
-- `description`: str = `""` — Free-form description captured in `tools.json` provenance.
+- `tables`: List[TableInfo | str] - Input tables (one per condition)
+- `metrics`: List[str] - Column names to extract
+- `table_names`: List[str] = None - Custom column names
 
 **Tables**:
-- `<name>`: the loaded table, columns preserved verbatim.
+- `{metric}` - One CSV per metric with columns for each table
 
 **Example**:
+
 ```python
-from biopipelines.table import Table
+from biopipelines.extract_metrics import ExtractMetrics
 
-# CSV input → directly available as tbl.tables.metrics
-tbl = Table("metrics.csv", name="metrics", description="Per-design metrics")
-
-# Excel input → sibling .csv emitted, then loaded
-tbl_xl = Table("results.xlsx", name="results")
+metrics = ExtractMetrics(
+    tables=[cycle0.tables.merged, cycle1.tables.merged, cycle2.tables.merged],
+    metrics=["affinity_delta", "pLDDT"],
+    table_names=["Cycle0", "Cycle1", "Cycle2"]
+)
+# Output: affinity_delta.csv, pLDDT.csv
 ```
 
 ---
@@ -38,11 +42,12 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `table`: TableInfo | StandardizedOutput | str - Single table input
-- `tables`: List[...] - Multiple tables (for merge/concat)
-- `operations`: List[Operation] - Sequence of operations
-- `pool`: StandardizedOutput - Copy files matching filtered IDs
-- `rename`: str - Rename output IDs to `{rename}_1`, `{rename}_2`, ...
+- `tables`: TableInfo | StandardizedOutput | str | List[...] = None - One table or a list of tables (a list enables per-frame ops and merge/concat)
+- `operations`: List[Operation] = None - Sequence of operations
+- `pool`: StandardizedOutput | List[StandardizedOutput] = None - Copy files matching filtered IDs (list = one pool per input table)
+- `rename`: str = None - Rename output IDs to `{rename}_1`, `{rename}_2`, ...
+- `ignore_missing`: bool = True - Tolerate missing columns/tables instead of raising
+- `prune_redundant_provenance`: bool = True - Drop redundant `<axis>.id` provenance columns from the result
 
 **Operations**:
 
@@ -58,6 +63,7 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 | `merge(on, how, prefixes)` | `Panda.merge(prefixes=["a_", "b_"])` |
 | `concat(fill)` | `Panda.concat(fill="")` (auto-tags rows with `Panda.SOURCE` when >1 inputs) |
 | `calculate(exprs)` | `Panda.calculate({"delta": "a - b", "k2": "cos(angle) ** 2"})` |
+| `zscore(columns, by, sign)` | `Panda.zscore(["plddt","aggr"], sign={"aggr":-1})` — standardize to `<col>_z` for scale-fair combining (optional per-group `by=`, sign flip for lower-is-better) |
 | `groupby(by, agg)` | `Panda.groupby("cat", {"score": "mean"})` |
 | `select_columns(cols)` | `Panda.select_columns(["id", "score"])` |
 | `drop_columns(cols)` | `Panda.drop_columns(["temp"])` |
@@ -212,7 +218,7 @@ mean_per_source = Panda(
 
 ## Pool
 
-Gathers N `StandardizedOutput`s from parallel runs of the **same upstream tool** into one combined `StandardizedOutput`. Designed to pair with `with Parallel():` (see *Parallel batches and Pool* in the [user manual](../UserManual.md#parallel-batches-and-pool)) for the canonical fan-out / fan-in pattern.
+Gathers N `StandardizedOutput`s from parallel runs of the **same upstream tool** into one combined `StandardizedOutput`. Designed to pair with `with Parallel():` (see *Parallel batches* under [Resources](../user_manual.md#resources) in the user manual) for the canonical fan-out / fan-in pattern.
 
 **Environment**: `biopipelines`
 
@@ -307,35 +313,6 @@ remapped = ReMap(source=tool_a, onto=tool_c, map=tool_b)
 
 ---
 
-## ExtractMetrics
-
-Creates separate CSV files per metric for statistical software (GraphPad Prism).
-
-**Environment**: `biopipelines`
-
-**Parameters**:
-- `tables`: List[TableInfo | str] - Input tables (one per condition)
-- `metrics`: List[str] - Column names to extract
-- `table_names`: List[str] = None - Custom column names
-
-**Tables**:
-- `{metric}` - One CSV per metric with columns for each table
-
-**Example**:
-
-```python
-from biopipelines.extract_metrics import ExtractMetrics
-
-metrics = ExtractMetrics(
-    tables=[cycle0.tables.merged, cycle1.tables.merged, cycle2.tables.merged],
-    metrics=["affinity_delta", "pLDDT"],
-    table_names=["Cycle0", "Cycle1", "Cycle2"]
-)
-# Output: affinity_delta.csv, pLDDT.csv
-```
-
----
-
 ## Selection
 
 Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right.
@@ -355,7 +332,7 @@ Combines and modifies PyMOL-formatted selection strings using composable operati
 - `Selection.invert()` - Select complement
 
 **Tables**:
-- `selections`: | id | pdb | {column} | original_{column} |
+- `selections`: `id | selection | n_residues` — `selection` is the chain-aware PyMOL selection string (e.g. `"A12+A45-47"`); `n_residues` is the number of residues it contains, so a Selection result can be used directly as a size metric (e.g. to measure how many pocket residues survive a set-difference).
 
 **Example**:
 
@@ -363,7 +340,7 @@ Combines and modifies PyMOL-formatted selection strings using composable operati
 from biopipelines.selection import Selection
 from biopipelines.distance_selector import DistanceSelector
 
-distances = DistanceSelector(structures=rfdaa, ligand="LIG", distance=5)
+distances = DistanceSelector(structures=rfdaa, ligand=rfdaa, distance=5)
 
 # Expand by 2 residues
 expanded = Selection(

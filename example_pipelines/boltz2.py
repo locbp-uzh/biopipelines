@@ -5,8 +5,7 @@
 # tested: 
 
 from biopipelines.pipeline import *
-from biopipelines.boltz2 import Boltz2
-from biopipelines.combinatorics import Bundle, Each
+from biopipelines import Boltz2, Bundle, Each
 
 with Pipeline(project="Examples",
               job="Boltz2",

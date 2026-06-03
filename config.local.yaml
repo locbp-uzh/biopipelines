@@ -20,7 +20,7 @@ machine:
   # this variant when you run on your own machine. Leave empty to force
   # explicit selection via Pipeline(config="local").
   username: ""
-  emails: {}
+  email: ""
   env_manager:
     name: "pip"
     init: []
@@ -49,3 +49,29 @@ folders:
   repositories: {}
   cache: {}
   server: {}
+
+# Controls how tool outputs are displayed in Jupyter notebooks.
+# Maps stream formats (or stream names) to renderer scripts in the renderers/ folder.
+# Lookup order: stream name first, then format, then _default.
+renderers:
+  streams:
+    _metadata: renderers/streams.py
+    pdb: renderers/structures.py
+    cif: renderers/structures.py
+    "pdb|cif": renderers/structures.py
+    pqr: renderers/structures.py
+    dx: renderers/grids.py
+    png: renderers/images.py
+    jpg: renderers/images.py
+    jpeg: renderers/images.py
+    svg: renderers/images.py
+    gif: renderers/images.py
+    bmp: renderers/images.py
+    tiff: renderers/images.py
+    webp: renderers/images.py
+    plots: renderers/plots.py
+    fasta: renderers/fasta.py
+    fa: renderers/fasta.py
+    _default: renderers/streams.py
+  tables:
+    _default: renderers/tables.py

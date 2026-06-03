@@ -119,7 +119,6 @@ fi
                  # For protein-anything: use target_structure parameter
                  ligand: Union[DataStream, StandardizedOutput] = None,
                  target_structure: Union[str, DataStream, StandardizedOutput] = None,
-                 ligand_code: str = None,
                  binder_spec: Union[str, Dict[str, Any]] = None,
                  binding_region: str = None,
                  # Output configuration
@@ -165,13 +164,10 @@ fi
                    to determine format (smiles/ccd) automatically.
             target_structure: BioPipelines structure input (DataStream or file path) for
                             protein-anything protocol (binder against protein target)
-            ligand_code: Ligand residue name in target structure (e.g., "LIG", "ATP")
-                        for binding site detection when using target_structure
             binder_spec: Binder specification for automatic building:
                         - String format: "50-100" for length range, or "50" for fixed length
                         - Dict format: {"length": [50, 100]} or custom specification
             binding_region: Target binding region (optional, PyMOL-style: "A:9-140")
-                          If not provided and ligand_code is given, will auto-detect from ligand proximity
             protocol: Design protocol - one of:
                      - "protein-anything": General protein binder design
                      - "peptide-anything": Peptide binder design
@@ -210,7 +206,6 @@ fi
         """
         # Store design specification parameters
         self.design_spec = design_spec
-        self.ligand_code = ligand_code
         self.binder_spec = binder_spec
         self.binding_region = binding_region
 
@@ -413,7 +408,6 @@ fi
         if self.devices is not None and self.devices <= 0:
             raise ValueError("devices must be positive")
 
-        _validate_freeform_string("ligand_code", self.ligand_code)
         _validate_freeform_string("binding_region", self.binding_region)
         _validate_freeform_string("cache_dir", self.cache_dir)
         if isinstance(self.design_spec, str):
@@ -525,8 +519,6 @@ fi
                 spec_display += f"\n  Target: {self.target_input_id}"
             elif self.target_structure_path:
                 spec_display += f"\n  Target: {os.path.basename(self.target_structure_path)}"
-            if self.ligand_code:
-                spec_display += f"\n  Ligand code: {self.ligand_code}"
             if self.binder_spec:
                 spec_display += f"\n  Binder: {self.binder_spec}"
             if self.binding_region:
@@ -778,8 +770,6 @@ TARGET_STRUCTURE={Resolve.stream_item(self.target_ds_json, '$TARGET_ID')}
             else:
                 target_args = f' --target-structure "{self.target_structure_path}"'
 
-            if self.ligand_code:
-                target_args += f' --ligand-code "{self.ligand_code}"'
             if self.binding_region:
                 target_args += f' --binding-region "{self.binding_region}"'
 

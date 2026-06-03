@@ -61,6 +61,7 @@ echo "=== SequenceMetricCorrelation ready ==="
     # Lazy path descriptors
     correlation_1d_csv = Path(lambda self: self.table_path("correlation_1d"))
     correlation_2d_csv = Path(lambda self: self.table_path("correlation_2d"))
+    sample_counts_2d_csv = Path(lambda self: self.table_path("sample_counts_2d"))
     logo_svg = Path(lambda self: self.stream_path("images", "correlation_logo.svg"))
     logo_png = Path(lambda self: self.stream_path("images", "correlation_logo.png"))
     config_file = Path(lambda self: self.configuration_path("analysis_config.json"))
@@ -91,8 +92,9 @@ echo "=== SequenceMetricCorrelation ready ==="
         Output:
             Streams: (none)
             Tables:
-                correlation_1d: position | wt_aa | correlation | mean_mutated | mean_wt | var_mutated | var_wt | n_mutated | n_wt
-                correlation_2d: position | wt_aa | A | C | D | ... | Y
+                correlation_1d: position | original | correlation | mean_mutated | mean_wt | var_mutated | var_wt | n_mutated | n_wt
+                correlation_2d: position | original | A | C | D | ... | Y
+                sample_counts_2d: position | original | A | C | D | ... | Y
         """
         # Handle list inputs
         self.mutants_input = mutants if isinstance(mutants, list) else [mutants]
@@ -141,6 +143,13 @@ echo "=== SequenceMetricCorrelation ready ==="
 
         # Extract reference sequence
         self.original_sequence = self._extract_reference_sequence(self.original_input)
+
+        # Collect map_table paths for provenance-based ID matching at runtime.
+        # Only DataStream inputs carry provenance; string/TableInfo paths don't.
+        self.map_table_paths = []
+        for input_obj in [*self.mutants_input, *self.data_input]:
+            if isinstance(input_obj, DataStream) and input_obj.map_table:
+                self.map_table_paths.append(input_obj.map_table)
 
     def _extract_path(self, input_obj: Union[DataStream, StandardizedOutput, TableInfo, str], input_type: str) -> str:
         """Extract table path from various input types."""
@@ -210,14 +219,20 @@ echo "=== SequenceMetricCorrelation ready ==="
             "positions": self.positions,
             "correlation_1d_output": self.correlation_1d_csv,
             "correlation_2d_output": self.correlation_2d_csv,
+            "sample_counts_2d_output": self.sample_counts_2d_csv,
             "logo_svg_output": self.logo_svg,
-            "logo_png_output": self.logo_png
+            "logo_png_output": self.logo_png,
+            "map_table_paths": self.map_table_paths
         }
 
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
-        return f"""echo "Running sequence-metric correlation analysis"
+        # Colab exports MPLBACKEND=module://matplotlib_inline.backend_inline,
+        # which leaks into this subprocess; logomaker/matplotlib reject it as an
+        # invalid backend at import. Force a headless backend (correct on HPC too).
+        return f"""export MPLBACKEND=Agg
+echo "Running sequence-metric correlation analysis"
 echo "Metric: {self.metric}"
 echo "Output folder: {self.output_folder}"
 
@@ -227,13 +242,13 @@ python "{self.correlation_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after analysis."""
-        aa_columns = ["position", "wt_aa"] + AMINO_ACIDS
+        aa_columns = ["position", "original"] + AMINO_ACIDS
 
         tables = {
             "correlation_1d": TableInfo(
                 name="correlation_1d",
                 path=self.correlation_1d_csv,
-                columns=["position", "wt_aa", "correlation", "mean_mutated", "mean_wt", "var_mutated", "var_wt", "n_mutated", "n_wt"],
+                columns=["position", "original", "correlation", "mean_mutated", "mean_wt", "var_mutated", "var_wt", "n_mutated", "n_wt"],
                 description="1D correlation signal c(i) for position i"
             ),
             "correlation_2d": TableInfo(
@@ -241,10 +256,27 @@ python "{self.correlation_py}" --config "{self.config_file}"
                 path=self.correlation_2d_csv,
                 columns=aa_columns,
                 description="2D correlation signal c(i,aa) for each position and amino acid"
+            ),
+            "sample_counts_2d": TableInfo(
+                name="sample_counts_2d",
+                path=self.sample_counts_2d_csv,
+                columns=aa_columns,
+                description="Sample count n(i,aa) for each position and amino acid"
             )
         }
 
+        # Declaring the images stream is what makes the framework create the
+        # images/ stream folder; without it the pipe script's plt.savefig into
+        # images/ fails with FileNotFoundError (the dir never exists).
+        images = DataStream(
+            name="images",
+            ids=["correlation_logo"],
+            files=[self.logo_png],
+            format="png"
+        )
+
         return {
+            "images": images,
             "tables": tables,
             "output_folder": self.output_folder
         }

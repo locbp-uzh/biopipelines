@@ -18,6 +18,11 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .datastream_resolver import resolve_input_to_datastream
+    from .combinatorics import (
+        Bundle, Each, get_mode, contains_combinatorics_wrapper,
+        generate_combinatorics_config, predict_output_ids_with_provenance,
+    )
+    from ._weights_cache import link_weights_block
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -25,6 +30,11 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from datastream_resolver import resolve_input_to_datastream
+    from combinatorics import (
+        Bundle, Each, get_mode, contains_combinatorics_wrapper,
+        generate_combinatorics_config, predict_output_ids_with_provenance,
+    )
+    from _weights_cache import link_weights_block
 
 
 class AlphaFold(BaseConfig):
@@ -33,13 +43,26 @@ class AlphaFold(BaseConfig):
 
     Predicts protein structures from amino acid sequences.
 
+    By default each input sequence is folded as a separate monomer. Wrap the
+    ``proteins`` input in ``Bundle(...)`` to fold the bundled sequences together
+    as one multi-chain complex: ColabFold receives a single colon-joined query
+    (``SEQ_A:SEQ_B``), auto-selects the multimer model, and runs its default
+    paired+unpaired MSA pipeline. ``Bundle(static, Each(...))`` holds ``static``
+    fixed and folds it against each iterated sequence (one complex per element).
+
     Example:
-        # Using Sequence tool
+        # Using Sequence tool — two independent monomers
         proteins = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
         af = AlphaFold(proteins=proteins)
 
         # Using output from another tool
         af = AlphaFold(proteins=mpnn_output)
+
+        # Fold a single A:B complex (one prediction, id "p1+p2")
+        af = AlphaFold(proteins=Bundle(seqs_a, seqs_b))
+
+        # One complex per binder: fixed receptor + each binder
+        af = AlphaFold(proteins=Bundle(receptor, Each(binders)))
     """
 
     TOOL_NAME = "AlphaFold"
@@ -85,23 +108,42 @@ else
     exit 1
 fi
 """
+        # Skip only if the install dir AND a working colabfold-conda env are
+        # present — a bare dir (or one whose env was clobbered, e.g. by a
+        # downstream tool upgrading jax) must not read as "installed".
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ]; then
+if [ -d "{repo_dir}" ] && [ -x "{repo_dir}/colabfold-conda/bin/colabfold_batch" ] \\
+   && "{repo_dir}/colabfold-conda/bin/python" -c "import colabfold" >/dev/null 2>&1; then
     echo "AlphaFold (LocalColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        # On force_reinstall, remove the bundled Miniconda and the conda env —
+        # install_colabbatch_linux.sh's Miniconda installer aborts if its target
+        # dir already exists. Keep colabfold/params so the weights aren't re-downloaded.
+        remove_block = f"""rm -rf "{repo_dir}/conda" "{repo_dir}/colabfold-conda"
+""" if force_reinstall else ""
         return f"""echo "=== Installing AlphaFold (LocalColabFold) ==="
-{skip}cd {parent_dir}
-wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/v1.0.0/install_colabfold_linux.sh
-# Replace conda commands with the configured environment manager
-sed -i 's/conda create/{env_manager} create/g' install_colabfold_linux.sh
-sed -i 's/conda activate/{env_manager} activate/g' install_colabfold_linux.sh
-sed -i 's/conda update/{env_manager} update/g' install_colabfold_linux.sh
-sed -i 's/conda install/{env_manager} install/g' install_colabfold_linux.sh
-bash install_colabfold_linux.sh
-rm install_colabfold_linux.sh
+{skip}{remove_block}cd {parent_dir}
+# install_colabbatch_linux.sh builds colabfold_batch into
+# <dir>/localcolabfold/colabfold-conda via its own bundled Miniconda
+# (python 3.10, jax[cuda11_pip]). Run it unmodified — it sources only the
+# `conda` shell function, so rewriting conda->mamba would break its internal
+# `conda activate` and leak installs into the active env. The subshell runs it
+# with no host env active (stray writes can't touch a tool env) and accepts
+# conda's ToS non-interactively (else `conda create` aborts).
+wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/v1.5.5/install_colabbatch_linux.sh
+# Ensure pip in the env it creates: `conda create ... python=3.10` (conda-forge
+# python ships no pip) is followed by `colabfold-conda/bin/pip install`, which
+# would otherwise be missing. Add pip to the create spec.
+sed -i 's/git python=3.10/git python=3.10 pip/' install_colabbatch_linux.sh
+(
+export CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
+{env_manager} deactivate 2>/dev/null || true
+bash install_colabbatch_linux.sh
+)
+rm install_colabbatch_linux.sh
 
 # Verify installation
 if [ -d "{repo_dir}" ] && [ -x "{repo_dir}/colabfold-conda/bin/colabfold_batch" ]; then
@@ -121,6 +163,7 @@ fi
     #   tables/         — confidence, missing.
     queries_csv = Path(lambda self: self.configuration_path(f"{self.pipeline_name}_queries.csv"))
     queries_fasta = Path(lambda self: self.configuration_path(f"{self.pipeline_name}_queries.fasta"))
+    combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
     confidence_csv = Path(lambda self: self.table_path("confidence"))
     folding_folder = Path(lambda self: self.execution_folder)
     msas_folder = Path(lambda self: self.stream_folder("msas"))
@@ -133,7 +176,7 @@ fi
     fa_to_csv_fasta_py = Path(lambda self: self.pipe_script_path("pipe_fa_to_csv_fasta.py"))
     alphafold_confidence_py = Path(lambda self: self.pipe_script_path("pipe_alphafold_confidence.py"))
     alphafold_msas_py = Path(lambda self: self.pipe_script_path("pipe_alphafold_msas.py"))
-    propagate_missing_py = Path(lambda self: self.pipe_script_path("pipe_propagate_missing.py"))
+    alphafold_queries_py = Path(lambda self: self.pipe_script_path("pipe_alphafold_queries.py"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
     unsanitize_ids_py = Path(lambda self: self.pipe_script_path("pipe_unsanitize_ids.py"))
     msa_copy_py = Path(lambda self: self.pipe_script_path("pipe_boltz_msa_copy.py"))
@@ -165,18 +208,30 @@ fi
                 structures: id | file
                 confidence: id | structure | plddt | max_pae | ptm
                 msas: id | sequences.id | sequence | msa_file
-                missing: id | removed_by | cause
+                missing: id | removed_by | kind | cause
         """
-        # Store original input for upstream missing table lookup
+        # Store original input for upstream missing table lookup and
+        # combinatorics config generation (may be Bundle/Each-wrapped).
         self.proteins = proteins
 
-        # Resolve input to DataStream
+        # When proteins is wrapped in Bundle/Each, sequences are grouped into
+        # complexes via a combinatorics config + a queries-builder pipe script.
+        # A bare input keeps the legacy one-monomer-per-sequence path.
+        self._uses_combinatorics = contains_combinatorics_wrapper(proteins)
+        self._proteins_mode = get_mode(proteins)
+
+        # Resolve input to a DataStream for the msas/missing-table machinery.
+        # resolve_input_to_datastream unwraps Bundle/Each to the sequences stream.
         if isinstance(proteins, StandardizedOutput):
             self.sequences_stream: DataStream = proteins.streams.sequences
         elif isinstance(proteins, DataStream):
             self.sequences_stream = proteins
+        elif self._uses_combinatorics:
+            self.sequences_stream = resolve_input_to_datastream(proteins, fallback_stream="sequences")
         else:
-            raise ValueError(f"proteins must be DataStream or StandardizedOutput, got {type(proteins)}")
+            raise ValueError(
+                f"proteins must be DataStream, StandardizedOutput, or Bundle/Each, got {type(proteins)}"
+            )
 
         # Pre-computed MSAs for recycling
         self.msas_input = msas
@@ -203,6 +258,13 @@ fi
                 raise ValueError(
                     f"AlphaFold requires MSAs in A3M format, got '{fmt}'. "
                     f"Use MSA(source, convert=\"a3m\") to convert first."
+                )
+            if self._proteins_mode == "bundle":
+                raise ValueError(
+                    "Pre-computed msas= are not supported together with a Bundle "
+                    "(multi-chain complex). Bundled complexes use ColabFold's own "
+                    "paired+unpaired MSA pipeline; drop msas= for the bundle, or "
+                    "fold the chains as separate monomers to reuse precomputed MSAs."
                 )
 
         if self.num_relax < 0:
@@ -255,7 +317,24 @@ fi
         return script_content
 
     def _generate_script_prepare_sequences(self) -> str:
-        """Generate the sequence preparation part of the script."""
+        """Generate the sequence preparation part of the script.
+
+        Bundle/Each inputs go through the combinatorics queries-builder, which
+        groups sequences into one colon-joined ColabFold query per complex. A
+        bare input keeps the legacy copy/convert path (one monomer per row).
+        """
+        if self._uses_combinatorics:
+            generate_combinatorics_config(
+                self.combinatorics_config_file,
+                proteins=(self.proteins, "sequences", "protein"),
+            )
+            return f"""echo "Building ColabFold queries from combinatorics config"
+python {self.alphafold_queries_py} \\
+    --combinatorics-config "{self.combinatorics_config_file}" \\
+    --output-csv "{self.queries_csv}"
+
+"""
+
         # Get source file from input DataStream
         source_file = self.sequences_stream.map_table
 
@@ -329,12 +408,35 @@ python "{self.msa_copy_py}" \\
         else:
             run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}"""
 
+        # On Colab, colabfold_batch runs as the system Python and downloads its
+        # AF2 params into $HOME/.cache/colabfold/params (i.e. /root/.cache/...),
+        # which is ephemeral and not shared. Point that path at the shared
+        # AlphaFoldParams cache (on Drive once the user repoints `cache`), so the
+        # first run downloads into the shared cache and later sessions reuse it —
+        # the same wiring AF2BIND/BioEmu use. On the cluster, LocalColabFold owns
+        # its own params dir; leave it alone (don't regress that path).
+        cache_wiring = ""
+        if scheduler == "colab":
+            af2_params_root = self.folders.get("AlphaFoldParams", "")
+            if af2_params_root:
+                params_dir = f"{af2_params_root}/params"
+                cache_wiring = (
+                    f'mkdir -p "{params_dir}"\n'
+                    + link_weights_block(
+                        target_dir=params_dir,
+                        link_path="$HOME/.cache/colabfold/params",
+                        label="AF2 params",
+                    )
+                    + "\n\n"
+                )
+
         return f"""echo "Running AlphaFold2/ColabFold"
 echo "Options: {af_options}"
 echo "Output folder: {self.output_folder}"
 echo "Folding (raw) folder: {self.folding_folder}"
 
-# execution/ auto-created by the pipeline.
+# Share AF2 params via the AlphaFoldParams cache instead of ephemeral ~/.cache.
+{cache_wiring}# execution/ auto-created by the pipeline.
 # Run ColabFold batch
 {run_colabfold}
 
@@ -437,37 +539,22 @@ python {self.unsanitize_ids_py} \\
 """
 
     def _generate_missing_table_propagation(self) -> str:
-        """Generate script section to propagate missing.csv from upstream tools."""
-        upstream_missing_path = self._get_upstream_missing_table_path(
-            self.proteins,
-            self.sequences_stream
+        """Propagate the union of upstream `missing` manifests into tables/missing.csv."""
+        return self.generate_missing_propagation(
+            self.proteins, self.sequences_stream, missing_csv=self.missing_csv
         )
-
-        if not upstream_missing_path:
-            return ""
-
-        upstream_folder = os.path.dirname(upstream_missing_path)
-
-        return f"""
-# Propagate missing table from upstream tools — writes to tables/missing.csv.
-echo "Checking for upstream missing sequences..."
-if [ -f "{upstream_missing_path}" ]; then
-    echo "Found upstream missing.csv - propagating to current tool"
-    python {self.propagate_missing_py} \\
-        --upstream-folders "{upstream_folder}" \\
-        --output-folder "{self.output_folder}" \\
-        --missing-csv "{self.missing_csv}"
-else
-    echo "No upstream missing.csv found - creating empty missing.csv"
-    echo "id,removed_by,cause" > "{self.missing_csv}"
-fi
-
-"""
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after AlphaFold execution."""
-        # Use sequence IDs from input to predict structure files
-        sequence_ids = list(self.sequences_stream.ids)
+        # Predict output IDs. With Bundle/Each, ids come from combinatorics
+        # (e.g. a complex of p1+p2 yields id "p1+p2"); otherwise one id per
+        # input sequence (monomer-per-row, the legacy path).
+        if self._uses_combinatorics:
+            sequence_ids, _provenance = predict_output_ids_with_provenance(
+                proteins=(self.proteins, "sequences", "protein"),
+            )
+        else:
+            sequence_ids = list(self.sequences_stream.ids)
 
         # Structure files land in structures/; map_table co-locates there.
         # The per-design map_table is written at runtime by
@@ -516,18 +603,9 @@ fi
             )
         }
 
-        # Check for upstream missing table
-        upstream_missing_path = self._get_upstream_missing_table_path(
-            self.proteins,
-            self.sequences_stream
-        )
-        if upstream_missing_path:
-            tables["missing"] = TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
-                description="IDs removed by upstream tools with removal reason"
-            )
+        # Declare a `missing` table when any input axis carries one.
+        if self._collect_upstream_missing_paths(self.proteins, self.sequences_stream):
+            tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {
             "structures": structures,

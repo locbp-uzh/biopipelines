@@ -17,7 +17,7 @@ Arguments:
     input_table: Path to table file (or "-" if not using table)
     fixed_positions: PyMOL selection for fixed positions (or "-")
     designed_positions: PyMOL selection for designed positions (or "-")
-    ligand: Ligand identifier
+    ligand: compounds-stream JSON; the residue `code` is read from it
     design_within: Distance cutoff for ligand-based design
     output_file: Path to output JSON file
     default_chain: Fallback chain ID for chainless positions (default "A")
@@ -36,6 +36,7 @@ from pathlib import Path
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
+from biopipelines.ligand_utils import resolve_ligand_code
 from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES
 from biopipelines.sele_utils import sele_to_list
 
@@ -64,6 +65,11 @@ def process_table_source(input_table, design_entries):
             row = matching_rows.iloc[0]
             fixed_positions = sele_to_list(row.get('fixed', ''))
             designed_positions = sele_to_list(row.get('designed', ''))
+
+            # fixed wins: drop fixed residues from the designed set.
+            if fixed_positions and designed_positions:
+                fixed_set = set(fixed_positions)
+                designed_positions = [p for p in designed_positions if p not in fixed_set]
 
             positions_data[design_id] = {
                 'fixed_positions': fixed_positions,
@@ -139,6 +145,13 @@ def process_selection_source(fixed_positions, designed_positions, design_entries
     for design_id, pdb_file in design_entries:
         fixed = fixed_per_design.get(design_id, [])
         designed = designed_per_design.get(design_id, [])
+
+        # fixed wins: a residue named in fixed is never redesigned, even if it
+        # also falls in the redesigned set (e.g. a catalytic residue inside the
+        # pocket selection).
+        if fixed and designed:
+            fixed_set = set(fixed)
+            designed = [p for p in designed if p not in fixed_set]
 
         # When redesigned resolves to empty and fixed is also empty,
         # fix all residues so the tool outputs the original sequence.
@@ -227,7 +240,7 @@ def main():
     input_table = sys.argv[3]
     fixed_positions = sys.argv[4]
     designed_positions = sys.argv[5]
-    ligand = sys.argv[6]
+    ligand_json = sys.argv[6]  # compounds-stream JSON; `code` read from it below
     design_within = float(sys.argv[7])
     output_file = sys.argv[8]
     default_chain = sys.argv[9] if len(sys.argv) > 9 else "A"
@@ -247,7 +260,8 @@ def main():
     elif input_source == "selection":
         positions_data = process_selection_source(fixed_positions, designed_positions, design_entries)
     elif input_source == "ligand":
-        positions_data = process_ligand_source(ligand, design_within, design_entries)
+        ligand_code = resolve_ligand_code(ligand_json)
+        positions_data = process_ligand_source(ligand_code, design_within, design_entries)
     else:
         raise ValueError(f"Invalid input_source: {input_source}")
 

@@ -1,0 +1,15 @@
+# P2Rank environment - template-free ligand binding-site prediction.
+# P2Rank is a JVM tool. The bioconda `p2rank` package was removed (the channel
+# 404s), so we no longer depend on it: the install script downloads the upstream
+# release tarball (github.com/rdk/p2rank) and symlinks its `prank` launcher onto
+# this env's PATH. We only need a Java 17+ runtime here (P2Rank 2.5+ requires it)
+# plus pandas/numpy for the pipe script.
+name: p2rank
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - openjdk>=17
+  - pandas
+  - numpy

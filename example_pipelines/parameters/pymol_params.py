@@ -8,7 +8,7 @@ tests/tool_parameters/test_pymol_params.py.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.pymol import PyMOL
+from biopipelines import PyMOL
 
 with Pipeline(project="ToolParameters",
               job="PyMOL",

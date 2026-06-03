@@ -22,6 +22,168 @@ from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
 
 
+def extract_hetatm_block(structure_pdb: str, code: str) -> Optional[str]:
+    """Return a mini-PDB string with only the HETATM records whose residue name
+    (cols 18-20, 1-indexed) matches `code`, keeping the bound coordinates. If
+    multiple copies of the ligand are present, keep the first (same chain, same
+    resSeq) — a single ligand molecule. Returns None if no matching HETATM
+    records exist (caller routes that to the failed table).
+    """
+    code_u = code.strip().upper()
+    selected = []
+    first_key = None  # (chain, resnum)
+    with open(structure_pdb) as f:
+        for line in f:
+            if not line.startswith("HETATM"):
+                continue
+            rname = line[17:20].strip().upper()
+            if rname != code_u:
+                continue
+            chain = line[21:22]
+            resnum = line[22:26].strip()
+            key = (chain, resnum)
+            if first_key is None:
+                first_key = key
+            if key != first_key:
+                continue
+            selected.append(line.rstrip("\n"))
+    if not selected:
+        return None
+    return "\n".join(selected) + "\nEND\n"
+
+
+def _write_ligand_tables(successful: List[Dict[str, Any]],
+                         failed: List[Dict[str, Any]],
+                         compounds_table: str,
+                         structures_table: Optional[str],
+                         failed_table: str) -> None:
+    """Write the compounds csv, structures map_table, and failed table — the
+    same outputs the download paths produce, shared by extract mode."""
+    compound_cols = ["id", "format", "code", "lookup", "source", "ccd", "cid",
+                     "cas", "smiles", "name", "formula", "file_path"]
+    if successful:
+        pd.DataFrame(successful, columns=compound_cols).to_csv(compounds_table, index=False)
+        print(f"\nExtracted ligands saved: {compounds_table} ({len(successful)} ligands)")
+    else:
+        pd.DataFrame(columns=compound_cols).to_csv(compounds_table, index=False)
+        print(f"No ligands extracted - created empty table: {compounds_table}")
+
+    if structures_table:
+        struct_rows = [{'id': item['id'], 'file': item['file_path']}
+                       for item in successful if item.get('file_path')]
+        pd.DataFrame(struct_rows, columns=["id", "file"]).to_csv(structures_table, index=False)
+        print(f"Structures map saved: {structures_table} ({len(struct_rows)} files)")
+
+    if failed:
+        pd.DataFrame(failed).to_csv(failed_table, index=False)
+        print(f"Failed extractions saved: {failed_table} ({len(failed)} failures)")
+    else:
+        pd.DataFrame(columns=["lookup", "error_message", "source", "attempted_path"]).to_csv(failed_table, index=False)
+        print("No failed extractions")
+
+
+def extract_ligands_from_structures(config_data: Dict[str, Any],
+                                    successful: List[Dict[str, Any]],
+                                    failed: List[Dict[str, Any]]) -> None:
+    """Carve each requested HETATM code out of the input structures, keeping the
+    bound coordinates, and write one coordinate file per ligand id. Appends rows
+    to `successful` / `failed` using the same schema as the download paths.
+
+    For each (id, code) pair we scan the input structures and use the first one
+    that contains a matching HETATM block. A code present in none of the inputs
+    is routed to the failed table.
+    """
+    # Local import so the download paths don't pay for it.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from biopipelines.biopipelines_io import load_datastream, iterate_files
+
+    custom_ids = config_data['custom_ids']
+    residue_codes = config_data['residue_codes']
+    output_folder = config_data['output_folder']
+    output_format = config_data.get('output_format', 'pdb')
+    structures_json = config_data['extract_structures_json']
+
+    os.makedirs(output_folder, exist_ok=True)
+    structures = [(sid, path) for sid, path in iterate_files(load_datastream(structures_json))]
+    if not structures:
+        for cid, code in zip(custom_ids, residue_codes):
+            failed.append({'lookup': f"extract:{code}", 'error_message': 'no input structures',
+                           'source': 'extract_failed', 'attempted_path': ''})
+        return
+
+    print(f"Extracting {len(custom_ids)} ligand(s) from {len(structures)} structure(s)")
+    for cid, code in zip(custom_ids, residue_codes):
+        block = None
+        src_id = None
+        for sid, path in structures:
+            block = extract_hetatm_block(path, code)
+            if block is not None:
+                src_id = sid
+                break
+        if block is None:
+            present = ', '.join(sid for sid, _ in structures)
+            print(f"  MISSING: code {code!r} not found as HETATM in any input structure ({present})")
+            failed.append({'lookup': f"extract:{code}",
+                           'error_message': f"HETATM code {code!r} not present in any input structure",
+                           'source': 'extract_failed', 'attempted_path': ''})
+            continue
+        out_path = os.path.join(output_folder, f"{cid}.{output_format}")
+        with open(out_path, 'w') as fh:
+            fh.write(block)
+        print(f"  {cid}: extracted {code} from {src_id} -> {out_path}")
+        successful.append({
+            'id': cid, 'format': 'pdb', 'code': code,
+            'lookup': '', 'source': f"extract({src_id})",
+            'ccd': '', 'cid': '', 'cas': '', 'smiles': '', 'name': '', 'formula': '',
+            'file_path': out_path,
+        })
+
+
+def overlay_extracted_coords(config_data: Dict[str, Any],
+                             successful: List[Dict[str, Any]],
+                             failed: List[Dict[str, Any]]) -> None:
+    """Replace each already-built ligand's coordinate file with the bound HETATM
+    carved from the input structures (keeps crystal coords), preserving the
+    chemistry (SMILES/metadata) the lookup/smiles path already filled in. A code
+    absent from every input structure moves that ligand from `successful` to
+    `failed`.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from biopipelines.biopipelines_io import load_datastream, iterate_files
+
+    output_folder = config_data['output_folder']
+    output_format = config_data.get('output_format', 'pdb')
+    structures = [(sid, path) for sid, path in
+                  iterate_files(load_datastream(config_data['extract_structures_json']))]
+    os.makedirs(output_folder, exist_ok=True)
+    print(f"Overlaying bound coordinates from {len(structures)} structure(s)")
+
+    kept = []
+    for item in successful:
+        code = item.get('code', '')
+        block, src_id = None, None
+        for sid, path in structures:
+            block = extract_hetatm_block(path, code)
+            if block is not None:
+                src_id = sid
+                break
+        if block is None:
+            present = ', '.join(sid for sid, _ in structures)
+            print(f"  MISSING: code {code!r} ({item['id']}) not found as HETATM in any structure ({present})")
+            failed.append({'lookup': f"extract:{code}",
+                           'error_message': f"HETATM code {code!r} not present in any input structure",
+                           'source': 'extract_failed', 'attempted_path': ''})
+            continue
+        out_path = os.path.join(output_folder, f"{item['id']}.{output_format}")
+        with open(out_path, 'w') as fh:
+            fh.write(block)
+        item['file_path'] = out_path
+        item['source'] = f"{item.get('source','')}+extract({src_id})".lstrip('+')
+        print(f"  {item['id']}: bound {code} from {src_id} -> {out_path}")
+        kept.append(item)
+    successful[:] = kept
+
+
 def detect_lookup_type(lookup: str) -> str:
     """
     Detect the type of lookup value.
@@ -1325,10 +1487,40 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
     source = config_data.get('source')  # "rcsb", "pubchem", or None (auto-detect)
     local_folder = config_data.get('local_folder')
     output_format = config_data.get('output_format', 'pdb')  # "pdb" or "cif"
+    code_only = config_data.get('code_only', False)
     repo_ligands_folder = config_data['repo_ligands_folder']
-    output_folder = config_data['output_folder']
+    output_folder = config_data['output_folder']  # structures stream folder
     compounds_table = config_data['compounds_table']
+    structures_table = config_data.get('structures_table')
     failed_table = config_data['failed_table']
+
+    # Code-only mode: just name existing HETATM codes. No download / generation,
+    # no coordinate files; write the value-based compounds csv (smiles empty) and
+    # an empty failed table. No structures map (there are no coordinate files).
+    if code_only:
+        rows = [{
+            'id': cid, 'format': 'csv', 'code': rc, 'lookup': '', 'source': 'code',
+            'ccd': '', 'cid': '', 'cas': '', 'smiles': '', 'name': '', 'formula': '',
+            'file_path': ''
+        } for cid, rc in zip(custom_ids, residue_codes)]
+        cols = ["id", "format", "code", "lookup", "source", "ccd", "cid", "cas", "smiles", "name", "formula", "file_path"]
+        pd.DataFrame(rows, columns=cols).to_csv(compounds_table, index=False)
+        pd.DataFrame(columns=["lookup", "error_message", "source", "attempted_path"]).to_csv(failed_table, index=False)
+        print(f"Code-only: wrote {len(rows)} compound row(s) to {compounds_table}")
+        return 0
+
+    # structures= with no lookup/smiles: standalone carve of the bound HETATM
+    # (coords kept; compounds row carries the code but no SMILES). When lookup/
+    # smiles IS present too, the normal path below runs for the chemistry and the
+    # carved coordinates are overlaid afterward (see extract_structures_json use).
+    extract_structures_json = config_data.get('extract_structures_json')
+    if extract_structures_json and not lookup_values and not smiles_values:
+        successful_downloads: List[Dict[str, Any]] = []
+        failed_downloads: List[Dict[str, Any]] = []
+        extract_ligands_from_structures(config_data, successful_downloads, failed_downloads)
+        _write_ligand_tables(successful_downloads, failed_downloads,
+                             compounds_table, structures_table, failed_table)
+        return len(failed_downloads)
 
     total_count = len(lookup_values) + len(smiles_values)
     print(f"Processing {total_count} ligands ({len(lookup_values)} lookup, {len(smiles_values)} SMILES)")
@@ -1448,6 +1640,13 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
                 'attempted_path': metadata.get('attempted_path', '')
             })
 
+    # structures= modifier alongside lookup/smiles: the chemistry rows are built
+    # above (SMILES/metadata); now OVERRIDE each ligand's coordinate file with the
+    # bound HETATM carved from the input structures (keeps crystal coords). A code
+    # absent from every input structure moves that ligand to the failed table.
+    if extract_structures_json:
+        overlay_extracted_coords(config_data, successful_downloads, failed_downloads)
+
     # Save successful downloads table
     if successful_downloads:
         df_success = pd.DataFrame(successful_downloads)
@@ -1459,6 +1658,14 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
         empty_df = pd.DataFrame(columns=columns)
         empty_df.to_csv(compounds_table, index=False)
         print(f"No successful fetches - created empty table: {compounds_table}")
+
+    # Write the structures stream map_table (id, file) for the coordinate files —
+    # only rows whose files actually exist (map_table contract).
+    if structures_table:
+        struct_rows = [{'id': item['id'], 'file': item['file_path']}
+                       for item in successful_downloads if item.get('file_path')]
+        pd.DataFrame(struct_rows, columns=["id", "file"]).to_csv(structures_table, index=False)
+        print(f"Structures map saved: {structures_table} ({len(struct_rows)} files)")
 
     # Save failed downloads table
     if failed_downloads:
@@ -1520,11 +1727,13 @@ def main():
             print(f"Error: Missing required parameter: {param}")
             sys.exit(1)
 
-    # Ensure at least one of lookup_values or smiles_values is present
+    # Ensure at least one of lookup_values / smiles_values is present, unless
+    # this is code-only mode (which has neither and just names HETATM codes).
     lookup_values = config_data.get('lookup_values', [])
     smiles_values = config_data.get('smiles_values', [])
-    if not lookup_values and not smiles_values:
-        print("Error: Must provide at least one of 'lookup_values' or 'smiles_values'")
+    if (not config_data.get('code_only', False) and not config_data.get('extract_structures_json')
+            and not lookup_values and not smiles_values):
+        print("Error: Must provide at least one of 'lookup_values', 'smiles_values', code-only, or structures= extraction")
         sys.exit(1)
 
     try:

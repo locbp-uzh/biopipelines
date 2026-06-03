@@ -1,0 +1,10 @@
+# Phase 3 — downgrade setuptools BEFORE the openfold build (phase 4).
+#
+# This must be its own phase, not bundled with openfold: pip prepares openfold's
+# metadata (which imports torch's cpp_extension -> `from pkg_resources import
+# packaging`) during the collect step, *before* it installs anything from the
+# same requirements file. The conda layer ships setuptools>=81, which dropped
+# the vendored pkg_resources, so a combined phase fails at metadata generation
+# with ModuleNotFoundError: pkg_resources. Downgrading here, in a prior phase,
+# guarantees pkg_resources exists by the time phase 4 builds openfold.
+setuptools<81

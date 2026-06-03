@@ -1,0 +1,60 @@
+# ThermoMPNN - GENERIC / cluster-HPC variant (env_manager: mamba/conda).
+#
+# Separation from the Colab path: this file (thermompnn.yaml) is the variant-less
+# fallback, picked up on the cluster (and anywhere that is not Colab). The Colab
+# path is a SEPARATE pair of files that this one never touches:
+#   - thermompnn.colab.yaml      (minimal conda: python + pip)
+#   - thermompnn.pip.colab.txt   (torch via pip, resolved to Colab's system CUDA)
+# _env_install_block prefers <env>.<variant>.yaml and only falls back here when
+# the variant-specific file is absent, so editing this file cannot regress Colab.
+#
+# ThermoMPNN is cloned (not on PyPI); custom_inference.py imports torch,
+# pytorch-lightning, torchmetrics, biopython, omegaconf, pandas, numpy, wandb at
+# runtime. The model checkpoint ships in the repo's models/ dir (no weights
+# download). wandb IS required even for inference (custom_inference.py imports
+# train_thermompnn, which imports wandb at module top). mmseqs2 (in the upstream
+# env) is training/dataset-only and is intentionally omitted.
+#
+# GPU-build pinning. A flat `mamba env create` from the upstream environment.yaml
+# resolves torch to the CPU build (upstream's README warns of exactly this), and
+# the resulting Pillow links libtiff.so.5 while the env ships libtiff.so.6 -> the
+# import chain breaks. Two things fix it, both verified by a dry-run solve on the
+# cluster (2026-05-24):
+#   1. channel order nvidia > pytorch > conda-forge so pytorch-mutex resolves to
+#      the `cuda` variant (this is what forces the CUDA torch build, not CPU);
+#   2. pytorch-cuda=11.8 (upstream's working README value; 11.7 is what the
+#      failing yaml used).
+# This solves to pytorch 2.5.1 py3.10_cuda11.8 + pytorch-mutex=cuda +
+# torchvision/torchaudio cu118.
+#
+# Pillow channel pin. Without `conda-forge::pillow` the solver pulls Pillow from
+# pkgs/main (build py310h6a678d5_0, channel column blank in `conda list`), which
+# is linked against libtiff.so.5, while the env's libtiff is conda-forge's
+# (.so.6) -> torchvision -> PIL._imaging fails with "libtiff.so.5: cannot open
+# shared object file". Forcing Pillow from conda-forge pulls a build linked
+# against the conda-forge libtiff (.so.6), so the imaging stack is consistent.
+# Verified by dry-run (2026-05-24): pillow 12.2.0 + libtiff 4.7.1, both
+# conda-forge; torch/vision/audio stay on the cu118 builds.
+name: thermompnn
+channels:
+  - nvidia
+  - pytorch
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - pytorch
+  - pytorch-cuda=11.8
+  - pytorch-mutex=*=cuda
+  - conda-forge::pillow
+  - torchvision
+  - torchaudio
+  - torchmetrics
+  - pytorch-lightning
+  - wandb
+  - biopython
+  - omegaconf
+  - pandas
+  - numpy
+  - tqdm
+  - joblib

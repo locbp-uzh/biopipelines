@@ -162,6 +162,52 @@ def test_get_mapped_ids_sibling_prefers_closer_common_ancestor():
     assert out == {"protein_1_1": "protein_1_2"}
 
 
+# ── get_mapped_ids: closest_siblings_only (design-group matching) ─────────────
+
+def test_closest_siblings_only_returns_same_parent_group():
+    """A source returns ALL targets sharing its immediate parent (design group),
+    including itself, and nothing from distant lineages."""
+    from biopipelines.id_map_utils import get_mapped_ids
+
+    subs = ["protein_29_1", "protein_29_2", "protein_2_1", "protein_2_2"]
+    out = get_mapped_ids(["protein_29_1"], subs, unique=False,
+                         closest_siblings_only=True)
+    assert sorted(out["protein_29_1"]) == ["protein_29_1", "protein_29_2"]
+
+
+def test_closest_siblings_only_no_cross_design_overmatch():
+    """A source whose exact id is absent matches only its same-parent siblings,
+    not the multi-segment-collapsed lineages (29_2 must not pull 2_*)."""
+    from biopipelines.id_map_utils import get_mapped_ids
+
+    # protein_29 made only one substitution sample (29_1); 29_2 has no exact match.
+    subs = ["protein_29_1", "protein_2_1", "protein_2_2", "protein_49_1"]
+    out = get_mapped_ids(["protein_29_2"], subs, unique=False,
+                         closest_siblings_only=True)
+    assert out["protein_29_2"] == ["protein_29_1"]
+
+
+def test_closest_siblings_only_empty_when_no_same_parent():
+    """No target shares the source's immediate parent -> empty, never a distant id."""
+    from biopipelines.id_map_utils import get_mapped_ids
+
+    subs = ["protein_2_1", "protein_2_2"]
+    out = get_mapped_ids(["protein_99_1"], subs, unique=False,
+                         closest_siblings_only=True)
+    assert out["protein_99_1"] == []
+
+
+def test_closest_siblings_only_default_off_keeps_legacy_overmatch():
+    """Without the flag, the sibling tier still returns the broad match set."""
+    from biopipelines.id_map_utils import get_mapped_ids
+
+    subs = ["protein_29_1", "protein_2_1", "protein_2_2"]
+    out = get_mapped_ids(["protein_29_2"], subs, unique=False)
+    # legacy behavior: sibling tier returns more than just the same-parent match
+    assert len(out["protein_29_2"]) > 1
+    assert "protein_29_1" in out["protein_29_2"]
+
+
 # ── get_mapped_ids: no match ──────────────────────────────────────────────────
 
 def test_get_mapped_ids_no_match_returns_none():
@@ -313,3 +359,115 @@ def test_get_mapped_ids_handles_empty_inputs():
     assert get_mapped_ids([], ["a"]) == {}
     # Empty target list -> no match for the source.
     assert get_mapped_ids(["a"], []) == {"a": None}
+
+
+# ── prune_redundant_provenance_columns ────────────────────────────────────────
+#
+# Redundancy is defined through the matcher itself: a provenance cell p in
+# column <axis>.id is redundant for row id=x iff get_mapped_ids([x],[p],
+# map_table_paths=None) resolves x to p — i.e. id-semantics alone recover it
+# with no provenance lookup. A whole column is dropped only when every
+# non-empty cell is redundant.
+
+
+def test_prune_drops_multiplier_provenance():
+    """structure_1 -> structure_1_3: structures.id is recoverable, dropped."""
+    from biopipelines.id_map_utils import prune_redundant_provenance_columns
+
+    df = pd.DataFrame({
+        "id": ["structure_1_1", "structure_1_2", "structure_1_3"],
+        "structures.id": ["structure_1", "structure_1", "structure_1"],
+        "score": [1, 2, 3],
+    })
+    out = prune_redundant_provenance_columns(df)
+    assert list(out.columns) == ["id", "score"]
+
+
+def test_prune_keeps_unrecoverable_rename():
+    """structure_1 -> Panda_1: rename is not id-recoverable, column kept."""
+    from biopipelines.id_map_utils import prune_redundant_provenance_columns
+
+    df = pd.DataFrame({
+        "id": ["Panda_1", "Panda_2"],
+        "structures.id": ["a", "b"],
+    })
+    out = prune_redundant_provenance_columns(df)
+    assert "structures.id" in out.columns
+
+
+def test_prune_drops_multi_axis_when_matcher_resolves():
+    """a+b with a.id,b.id: both recoverable from the joined id, both dropped.
+
+    This is the case the naive 'differs from id' rule mishandles: neither
+    'a' nor 'b' equals 'a+b' as a string, yet the matcher recovers both via
+    +-component expansion, so both columns are genuine no-ops.
+    """
+    from biopipelines.id_map_utils import prune_redundant_provenance_columns
+
+    df = pd.DataFrame({
+        "id": ["a+b", "a+c"],
+        "proteins.id": ["a", "a"],
+        "ligands.id": ["b", "c"],
+    })
+    out = prune_redundant_provenance_columns(df)
+    assert list(out.columns) == ["id"]
+
+
+def test_prune_keeps_mixed_column():
+    """One row recoverable, one renamed -> whole column kept (per-column rule)."""
+    from biopipelines.id_map_utils import prune_redundant_provenance_columns
+
+    df = pd.DataFrame({
+        "id": ["structure_1_1", "Panda_9"],
+        "structures.id": ["structure_1", "zzz"],
+    })
+    out = prune_redundant_provenance_columns(df)
+    assert "structures.id" in out.columns
+
+
+def test_prune_ignores_empty_cells():
+    """An empty provenance cell does not block pruning an otherwise-redundant
+    column (every NON-empty value is recoverable)."""
+    from biopipelines.id_map_utils import prune_redundant_provenance_columns
+
+    df = pd.DataFrame({
+        "id": ["structure_1_1", "structure_1_2"],
+        "structures.id": ["structure_1", ""],
+    })
+    out = prune_redundant_provenance_columns(df)
+    assert "structures.id" not in out.columns
+
+
+def test_prune_excludes_generation_pool_and_original_columns():
+    """Generation (.-N.id), Bundle (.0.id), pool.id/pool.path and original.id
+    are never pruned, even when id-recoverable — they encode lineage the
+    matcher cannot reconstruct from the current id."""
+    from biopipelines.id_map_utils import prune_redundant_provenance_columns
+
+    df = pd.DataFrame({
+        "id": ["a_1"],
+        "structures.-1.id": ["a"],
+        "structures.0.id": ["a"],
+        "pool.id": ["a"],
+        "pool.path": ["/some/origin"],
+        "original.id": ["a"],
+        "structures.id": ["a"],   # plain + recoverable -> the only drop
+    })
+    out = prune_redundant_provenance_columns(df)
+    assert list(out.columns) == [
+        "id", "structures.-1.id", "structures.0.id",
+        "pool.id", "pool.path", "original.id",
+    ]
+
+
+def test_prune_is_pure_no_mutation():
+    """The helper returns a new frame and never mutates its input."""
+    from biopipelines.id_map_utils import prune_redundant_provenance_columns
+
+    df = pd.DataFrame({
+        "id": ["structure_1_1"],
+        "structures.id": ["structure_1"],
+    })
+    before = list(df.columns)
+    prune_redundant_provenance_columns(df)
+    assert list(df.columns) == before

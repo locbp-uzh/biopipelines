@@ -1,0 +1,21 @@
+name: gems
+channels:
+  - conda-forge
+  - pytorch
+  - pyg
+  - huggingface
+dependencies:
+  - python=3.10
+  - pip
+  - numpy=1.26.4
+  - mkl=2024.0.0  # newer MKL drops iJIT_NotifyEvent → pytorch 2.0.1 segfault
+  - rdkit=2024.03.3
+  - biopython=1.83
+  - pytorch=2.0.1
+  - cpuonly
+  - pyg=2.5.2
+  - transformers=4.33.3
+  - matplotlib
+  - pandas
+  - pip:
+      - ankh==1.10.0

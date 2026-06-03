@@ -1,0 +1,11 @@
+# bp:no-build-isolation
+# bp:no-deps
+# PLIP's setup.py uses `import openbabel` to decide whether to skip its own
+# openbabel-from-sdist build. Without --no-build-isolation, pip runs setup.py
+# inside a fresh build venv where openbabel isn't installed, and PLIP shells
+# out to pip install openbabel from sdist (SWIG build → fails).
+#
+# Then PLIP's metadata lists openbabel>=3.1.1 as a runtime dep, so without
+# --no-deps, pip resolves and tries to build openbabel from sdist anyway
+# even though conda already provided it. --no-deps skips that path.
+plip

@@ -1,105 +1,145 @@
 # BioPipelines Tool Reference
 
-Complete tool reference organized by category.
+Complete tool reference, organized into the same categories as the project
+[README](https://github.com/locbp-uzh/biopipelines#tools).
 
 For a single flat list of every public-API tool (with category and source-file
 mapping), see [tool_index.md](tool_index.md).
 
 ---
 
-## [Utilities](Tool/Utilities.md)
+## [Structure Generation](tool/structure_generation.md)
 
-Input entities and utility tools.
+Generate novel protein structures and pockets.
 
-**Basic Input Types**:
-- [PDB](Tool/Utilities.md#pdb) - Fetch protein structures
-- [RCSB](Tool/Utilities.md#rcsb) - Search RCSB PDB and download structures
-- [Sequence](Tool/Utilities.md#sequence) - Create sequences from strings
-- [Ligand](Tool/Utilities.md#ligand) - Fetch small molecules
-- [CompoundLibrary](Tool/Utilities.md#compoundlibrary) - Create compound collections
-
-**Loading & MSA**:
-- [Load / LoadMultiple](Tool/Utilities.md#Load) - Load previous outputs
-- [MSA](Tool/Utilities.md#msa) - MSA format conversion (CSV/A3M)
-- [MMseqs2](Tool/Utilities.md#mmseqs2) - MSA generation
-
-**Visualization**:
-- [PyMOL](Tool/Utilities.md#pymol) - Session creation
-- [Plot](Tool/Utilities.md#plot) - plots
+- [BoltzGen](tool/structure_generation.md#boltzgen) — Protein/peptide/nanobody binder design
+- [PocketGen](tool/structure_generation.md#pocketgen) — Ligand-tailored pocket co-design
+- [RFdiffusion](tool/structure_generation.md#rfdiffusion) — Backbone generation
+- [RFdiffusion3](tool/structure_generation.md#rfdiffusion3) — Third-generation design
+- [RFdiffusionAllAtom](tool/structure_generation.md#rfdiffusionallatom) — All-atom with ligands
 
 ---
 
-## [Structure Generation](Tool/StructureGeneration.md)
-
-Generate novel protein structures.
-
-- [RFdiffusion](Tool/StructureGeneration.md#rfdiffusion) - Backbone generation
-- [RFdiffusionAllAtom](Tool/StructureGeneration.md#rfdiffusionallatom) - All-atom with ligands
-- [RFdiffusion3](Tool/StructureGeneration.md#rfdiffusion3) - Third-generation design
-- [BoltzGen](Tool/StructureGeneration.md#boltzgen) - End-to-end binder design
-
----
-
-## [Sequence Design](Tool/SequenceDesign.md)
+## [Sequence Design](tool/sequence_design.md)
 
 Design and manipulate sequences.
 
-- [ProteinMPNN](Tool/SequenceDesign.md#proteinmpnn) - Sequence design for backbones
-- [LigandMPNN](Tool/SequenceDesign.md#ligandmpnn) - Ligand-aware sequence design
-- [MutationComposer](Tool/SequenceDesign.md#mutationcomposer) - Combinatorial mutants
-- [Mutagenesis](Tool/SequenceDesign.md#sdm-sitedirectedmutagenesis) - Systematic substitutions
-- [Fuse](Tool/SequenceDesign.md#fuse) - Fusion proteins with linkers
-- [StitchSequences](Tool/SequenceDesign.md#stitchsequences) - Sequence combinations
-- [DNAEncoder](Tool/SequenceDesign.md#dnaencoder) - Codon optimization
-- [RBSDesigner](Tool/SequenceDesign.md#rbsdesigner) - Ribosome binding site design
+- [DNAEncoder](tool/sequence_design.md#dnaencoder) — Codon optimization
+- [Frame2Seq](tool/sequence_design.md#frame2seq) — Fast inverse folding
+- [Fuse](tool/sequence_design.md#fuse) — Fusion proteins with linkers
+- [LigandMPNN](tool/sequence_design.md#ligandmpnn) — Ligand-aware sequence design
+- [Mutagenesis](tool/sequence_design.md#mutagenesis) — Systematic substitutions
+- [MutationComposer](tool/sequence_design.md#mutationcomposer) — Combinatorial mutants
+- [ProteinMPNN](tool/sequence_design.md#proteinmpnn) — Sequence design for backbones
+- [RBSDesigner](tool/sequence_design.md#rbsdesigner) — Ribosome binding site design
+- [StitchSequences](tool/sequence_design.md#stitchsequences) — Sequence combinations
 
 ---
 
-## [Structure Prediction](Tool/StructurePrediction.md)
+## [Structure Prediction & Docking](tool/structure_prediction.md)
 
 Predict protein and complex structures, and dock ligands.
 
-- [AlphaFold](Tool/StructurePrediction.md#alphafold) - AlphaFold2 prediction
-- [Boltz2](Tool/StructurePrediction.md#boltz2) - Biomolecular complex prediction
-- [Gnina](Tool/StructurePrediction.md#gnina) - Molecular docking with CNN scoring
+- [AlphaFold](tool/structure_prediction.md#alphafold) — AlphaFold2 prediction
+- [Boltz2](tool/structure_prediction.md#boltz2) — Biomolecular complex prediction
+- [DiffDock](tool/structure_prediction.md#diffdock) — Blind diffusion docking
+- [DynamicBind](tool/structure_prediction.md#dynamicbind) — Flexible-backbone docking
+- [ESMFold](tool/structure_prediction.md#esmfold) — Single-sequence prediction (no MSA)
+- [Gnina](tool/structure_prediction.md#gnina) — Docking with CNN scoring
+- [NeuralPLexer](tool/structure_prediction.md#neuralplexer) — Protein–ligand complex prediction
+- [PLACER](tool/structure_prediction.md#placer) — Ligand-pose ensemble in a bound pocket
 
 ---
 
-## [Analysis](Tool/Analysis.md)
+## [Analysis](tool/analysis.md)
 
-Analyze structures and interactions.
+Analyze structures, interactions, stability, and fitness.
 
-- [Distance](Tool/Analysis.md#distance) - Distance measurements
-- [Angle](Tool/Analysis.md#angle) - Bond, torsional, and vector-vector angles
-- [DistanceSelector](Tool/Analysis.md#distanceselector) - Proximity-based selection
-- [ConformationalChange](Tool/Analysis.md#conformationalchange) - Structural changes
-- [Contacts](Tool/Analysis.md#contacts) - Contact analysis
-- [PoseBusters](Tool/Analysis.md#posebusters) - Pose validation (bond lengths, clashes, etc.)
-- [PoseChange](Tool/Analysis.md#posechange) - Ligand pose comparison (to be unified with ConformationalChange)
-- [CABSflex](Tool/Analysis.md#cabsflex) - Fast protein flexibility simulation
-- [SASA](Tool/Analysis.md#sasa) - Solvent-accessible surface area
-- [ADMETAI](Tool/Analysis.md#admetai) - ADMET endpoint predictions for compound libraries
+- [ADMETAI](tool/analysis.md#admetai) — ADMET endpoint predictions
+- [AF2BIND](tool/analysis.md#af2bind) — AF2-based binding-residue prediction
+- [Aggrescan3D](tool/analysis.md#aggrescan3d) — Structure-based aggregation propensity
+- [Angle](tool/analysis.md#angle) — Bond, torsional, and vector angles
+- [APBS](tool/analysis.md#apbs) — Electrostatic surface potential
+- [BioEmu](tool/analysis.md#bioemu) — Equilibrium ensemble sampling
+- [CABSflex](tool/analysis.md#cabsflex) — Fast flexibility simulation
+- [ConformationalChange](tool/analysis.md#conformationalchange) — Structural changes
+- [Consensus](tool/analysis.md#consensus) — Per-group aggregation of a resi-csv stream
+- [Contacts](tool/analysis.md#contacts) — Contact analysis
+- [Distance](tool/analysis.md#distance) — Distance measurements
+- [DistanceSelector](tool/analysis.md#distanceselector) — Proximity-based selection
+- [DSSP](tool/analysis.md#dssp) — Secondary-structure assignment
+- [EnsembleAnalysis](tool/analysis.md#ensembleanalysis) — Per-residue RMSF from any ensemble
+- [FPocket](tool/analysis.md#fpocket) — Alpha-sphere pocket detection
+- [GEMS](tool/analysis.md#gems) — Protein–ligand affinity (GNN)
+- [OpenMM](tool/analysis.md#openmm) — Energy minimization
+- [P2Rank](tool/analysis.md#p2rank) — Ligand binding-site prediction
+- [PLIP](tool/analysis.md#plip) — Interaction profiling
+- [PLM_Sol](tool/analysis.md#plm_sol) — Sequence-based solubility prediction
+- [PoseBusters](tool/analysis.md#posebusters) — Pose validation
+- [PoseChange](tool/analysis.md#posechange) — Ligand pose comparison
+- [Prodigy](tool/analysis.md#prodigy) — Protein–protein affinity
+- [ProLIF](tool/analysis.md#prolif) — Interaction fingerprints
+- [Reduce](tool/analysis.md#reduce) — Add explicit hydrogens
+- [RTMScore](tool/analysis.md#rtmscore) — Pose ranking
+- [SASA](tool/analysis.md#sasa) — Solvent-accessible surface area
+- [ThermoMPNN](tool/analysis.md#thermompnn) — Fold-stability change (ddG) from structure
+- [VespaG](tool/analysis.md#vespag) — Zero-shot fitness from sequence
+- [XTB](tool/analysis.md#xtb) — Quantum interaction energy
 
 ---
 
-## [Statistics](Tool/Statistics.md)
+## [Cheminformatics](tool/cheminformatics.md)
+
+Convert molecules and compute chemical descriptors.
+
+- [OpenBabel](tool/cheminformatics.md#openbabel) — Format conversion, 3-D coordinates, protonation
+- [RDKit](tool/cheminformatics.md#rdkit) — Molecular descriptors
+
+---
+
+## [Sequence Statistics](tool/statistics.md)
 
 Mutation analysis and frequency optimization.
 
-- [MutationProfiler](Tool/Statistics.md#mutationprofiler) - Mutation patterns
-- [SequenceMetricCorrelation](Tool/Statistics.md#sequencemetriccorrelation) - Mutation-metric correlations
-- [BayesianAdjuster](Tool/Statistics.md#bayesianadjuster) - Correlation-based frequency adjustment
+- [BayesianAdjuster](tool/statistics.md#bayesianadjuster) — Correlation-based frequency adjustment
+- [MutationProfiler](tool/statistics.md#mutationprofiler) — Mutation patterns
+- [SequenceMetricCorrelation](tool/statistics.md#sequencemetriccorrelation) — Mutation–metric correlations
 
 ---
 
-## [Data Management](Tool/DataManagement.md)
+## [MSAs](tool/msas.md)
 
-Filter, transform, and manipulate tables.
+Generate and convert multiple-sequence alignments.
 
-- [Table](Tool/DataManagement.md#table) - Direct table construction from values or files
-- [Panda](Tool/DataManagement.md#panda) - Unified table transformations (filter, sort, merge, concat, rank, ...)
-- [Pool](Tool/DataManagement.md#pool) - Gather N parallel-run StandardizedOutputs into one (use with `with Parallel():`)
-- [ReMap](Tool/DataManagement.md#remap) - Rename IDs across streams and tables
-- [ExtractMetrics](Tool/DataManagement.md#extractmetrics) - Metric extraction for Prism
-- [Selection](Tool/DataManagement.md#selection) - Selection string manipulation
+- [MMseqs2](tool/msas.md#mmseqs2) — MSA generation
+- [MMseqs2Server](tool/msas.md#mmseqs2server) — Local MSA server management
+- [MSA](tool/msas.md#msa) — MSA format conversion (CSV/A3M)
 
+---
+
+## [Data Management](tool/data_management.md)
+
+Filter, transform, and route tables and streams.
+
+- [ExtractMetrics](tool/data_management.md#extractmetrics) — Metric extraction for Prism
+- [Panda](tool/data_management.md#panda) — Unified table transformations
+- [Pool](tool/data_management.md#pool) — Gather parallel-run outputs
+- [ReMap](tool/data_management.md#remap) — Rename IDs across streams and tables
+- [Selection](tool/data_management.md#selection) — Selection string manipulation
+
+---
+
+## [Inputs & I/O](tool/inputs_io.md)
+
+Bring data into a pipeline and take results out.
+
+- [CompoundLibrary](tool/inputs_io.md#compoundlibrary) — Create compound collections
+- [Ligand](tool/inputs_io.md#ligand) — Fetch small molecules
+- [Load / LoadMultiple](tool/inputs_io.md#load) — Reload previous outputs
+- [PDB](tool/inputs_io.md#pdb) — Fetch protein structures
+- [Plot](tool/inputs_io.md#plot) — Plots
+- [PyMOL](tool/inputs_io.md#pymol) — Session creation and rendering
+- [RCSB](tool/inputs_io.md#rcsb) — Search RCSB PDB and download
+- [Sequence](tool/inputs_io.md#sequence) — Create sequences from strings
+- [Table](tool/inputs_io.md#table) — Load an existing CSV/Excel table
+- [UniProt](tool/inputs_io.md#uniprot) — Fetch sequences and annotations

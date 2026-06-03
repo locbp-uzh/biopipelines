@@ -232,7 +232,8 @@ def build_rename_mapping(operations: List[Dict[str, Any]]) -> Dict[str, str]:
     return mapping
 
 
-def apply_operations(content: str, format: str, operations: List[Dict[str, Any]]) -> str:
+def apply_operations(content: str, format: str, operations: List[Dict[str, Any]],
+                     structure_id: Optional[str] = None) -> str:
     """
     Apply a sequence of operations to structure content.
 
@@ -240,6 +241,8 @@ def apply_operations(content: str, format: str, operations: List[Dict[str, Any]]
         content: Structure file content
         format: File format ("pdb" or "cif")
         operations: List of operation dictionaries with 'op' key and parameters
+        structure_id: ID of the structure being processed (used to resolve a
+                      per-structure TableReference selection for the remove op).
 
     Returns:
         Modified structure content
@@ -248,6 +251,15 @@ def apply_operations(content: str, format: str, operations: List[Dict[str, Any]]
         op_type = op.get("op")
         if op_type == "rename":
             content = apply_rename_operation(content, format, op["old"], op["new"])
+        elif op_type == "remove":
+            # Back-compat: accept the old key name if an older config carries it.
+            remove_het = op.get("remove_hetatm", op.get("include_hetatm", True))
+            content = apply_remove_operation(content, format, op["selection"], structure_id,
+                                             remove_hetatm=remove_het)
+        elif op_type == "break_bond":
+            content = apply_break_bond_operation(content, format, op["atom1"], op["atom2"])
+        elif op_type == "rotate_bond":
+            content = apply_rotate_bond_operation(content, format, op["atom1"], op["atom2"], op["angle"])
         else:
             print(f"Warning: Unknown operation type '{op_type}', skipping")
 
@@ -310,6 +322,369 @@ def apply_rename_operation(content: str, format: str, old_name: str, new_name: s
         print(f"  Warning: No atoms found with residue name '{old_name}'")
 
     return '\n'.join(modified_lines)
+
+
+def _parse_residue_selection(selection: str):
+    """Parse a PyMOL-style residue selection into a list of (chain, lo, hi) ranges.
+
+    `chain` is None when the token is unqualified (matches any chain). Accepts
+    forms like "1-83", "1-83+90-95", "A1-83", "84", "A84+A90-95".
+    """
+    ranges = []
+    for tok in str(selection).replace(" ", "").split("+"):
+        if not tok:
+            continue
+        chain = None
+        # Optional leading chain letter(s): a non-digit, non-'-' prefix.
+        i = 0
+        while i < len(tok) and not (tok[i].isdigit() or tok[i] == "-"):
+            i += 1
+        if i > 0:
+            chain = tok[:i]
+            tok = tok[i:]
+        if "-" in tok:
+            lo_s, hi_s = tok.split("-", 1)
+            lo, hi = int(lo_s), int(hi_s)
+        else:
+            lo = hi = int(tok)
+        ranges.append((chain, lo, hi))
+    return ranges
+
+
+def _resolve_remove_selection(selection: str, structure_id: Optional[str]) -> Optional[str]:
+    """Resolve a remove-op selection to a literal selection string.
+
+    Plain selection strings pass through. A TABLE_REFERENCE:path:column resolves
+    to the cell for `structure_id`, matched via the framework's hierarchical ID
+    mapping (exact/provenance/parent/child/sibling). A single-row table therefore
+    broadcasts to every structure. Returns None if no row matches (caller skips).
+    """
+    if not isinstance(selection, str) or not selection.startswith("TABLE_REFERENCE:"):
+        return selection
+    from biopipelines.biopipelines_io import load_table
+    from biopipelines.id_map_utils import get_mapped_ids
+    table, column = load_table(selection)
+    id_col = "id" if "id" in table.columns else table.columns[0]
+    target_ids = [str(x) for x in table[id_col].tolist()]
+    if structure_id is None:
+        matched = target_ids[0] if len(target_ids) == 1 else None
+    else:
+        matched = get_mapped_ids([structure_id], target_ids).get(structure_id)
+    if matched is None:
+        print(f"  Warning: remove — no table row matched structure '{structure_id}'; "
+              f"leaving structure unchanged")
+        return None
+    row = table[table[id_col].astype(str) == matched]
+    return str(row.iloc[0][column])
+
+
+def apply_remove_operation(content: str, format: str, selection, structure_id: Optional[str] = None,
+                           remove_hetatm: bool = True) -> str:
+    """Remove residues matching `selection` from the structure.
+
+    With `remove_hetatm=True` (default), any residue in the selected
+    (chain, resseq) ranges is dropped regardless of record type — a HETATM
+    (ligand/ion) numbered inside the selection is removed along with the protein
+    residues. With `remove_hetatm=False`, only ATOM records are dropped and all
+    HETATM records are preserved. Either way a ligand sitting *outside* the
+    selected range is kept, because it never matches the selection. `selection`
+    may be a literal string or a resolved TABLE_REFERENCE (per-structure by ID
+    match)."""
+    sel = _resolve_remove_selection(selection, structure_id)
+    if sel is None:
+        return content
+    if format != "pdb":
+        print("Warning: remove operation not yet implemented for CIF format")
+        return content
+
+    ranges = _parse_residue_selection(sel)
+    if not ranges:
+        return content
+
+    def _in_selection(chain_id: str, resseq: int) -> bool:
+        for ch, lo, hi in ranges:
+            if ch is not None and ch != chain_id:
+                continue
+            if lo <= resseq <= hi:
+                return True
+        return False
+
+    record_prefixes = ("ATOM", "HETATM") if remove_hetatm else ("ATOM",)
+
+    kept, removed = [], 0
+    for line in content.split('\n'):
+        if line.startswith(record_prefixes):
+            try:
+                resseq = int(line[22:26])
+            except ValueError:
+                kept.append(line); continue
+            chain_id = line[21] if len(line) > 21 else " "
+            if _in_selection(chain_id, resseq):
+                removed += 1
+                continue
+        kept.append(line)
+
+    het_note = "ATOM+HETATM" if remove_hetatm else "ATOM only"
+    print(f"  Removed {removed} atoms ({het_note}) matching selection '{sel}'")
+    return '\n'.join(kept)
+
+
+def _parse_atom_selection(sel: str):
+    """Parse a BioPipelines '<residue>.<atom>' atom selection.
+
+    Returns (chain or None, resnum or None, resname or None, atom_name). The
+    residue part may be a chain-prefixed number ("A145"), a bare number ("145"),
+    or a residue name ("LIG"). Examples: "A145.SG", "145.SG", "LIG.C12".
+    """
+    if "." not in sel:
+        raise ValueError(f"atom selection must be '<residue>.<atom>', got {sel!r}")
+    res_part, atom_name = sel.rsplit(".", 1)
+    chain = resnum = resname = None
+    # Optional leading chain letter(s).
+    i = 0
+    while i < len(res_part) and not (res_part[i].isdigit() or res_part[i] == "-"):
+        i += 1
+    if i > 0 and i < len(res_part) and (res_part[i].isdigit() or res_part[i] == "-"):
+        chain = res_part[:i]
+        res_part = res_part[i:]
+    if res_part.lstrip("-").isdigit():
+        resnum = int(res_part)
+    else:
+        resname = res_part  # e.g. "LIG"
+    return chain, resnum, resname, atom_name.strip()
+
+
+def _atom_matches(line: str, sel) -> bool:
+    """True if a PDB ATOM/HETATM line matches a parsed atom selection tuple."""
+    chain, resnum, resname, atom_name = sel
+    if line[12:16].strip() != atom_name:
+        return False
+    if chain is not None and (len(line) <= 21 or line[21] != chain):
+        return False
+    if resname is not None and line[17:20].strip() != resname:
+        return False
+    if resnum is not None:
+        try:
+            if int(line[22:26]) != resnum:
+                return False
+        except ValueError:
+            return False
+    return True
+
+
+def apply_break_bond_operation(content: str, format: str, atom1: str, atom2: str) -> str:
+    """Remove CONECT/LINK records joining the two named atoms (PyMOL `unbond`).
+
+    Coordinates are untouched; only connectivity records are stripped so a
+    covalently-tethered ligand becomes a separate non-covalent entity for
+    downstream design. Atom selections use '<residue>.<atom>' syntax."""
+    if format != "pdb":
+        print("Warning: break_bond not yet implemented for CIF format")
+        return content
+
+    sel1, sel2 = _parse_atom_selection(atom1), _parse_atom_selection(atom2)
+    # Resolve each selection to the matching atom serial numbers.
+    serials1, serials2 = set(), set()
+    for line in content.split('\n'):
+        if line.startswith(("ATOM", "HETATM")):
+            try:
+                serial = int(line[6:11])
+            except ValueError:
+                continue
+            if _atom_matches(line, sel1):
+                serials1.add(serial)
+            if _atom_matches(line, sel2):
+                serials2.add(serial)
+
+    if not serials1 or not serials2:
+        print(f"  Warning: break_bond — no atoms matched "
+              f"({atom1!r}->{len(serials1)}, {atom2!r}->{len(serials2)}); nothing broken")
+        return content
+    # Unlike rotate_bond, break_bond legitimately strips every matching
+    # connectivity record, but a too-broad selection silently breaks more bonds
+    # than intended — warn so the user can qualify it with chain/resnum.
+    if len(serials1) > 1 or len(serials2) > 1:
+        print(f"  Warning: break_bond — ambiguous selection "
+              f"({atom1!r}->{len(serials1)} atoms, {atom2!r}->{len(serials2)} atoms); "
+              f"breaking every matching bond. Qualify with chain/resnum to narrow.")
+
+    kept, removed = [], 0
+    for line in content.split('\n'):
+        if line.startswith("CONECT"):
+            nums = [int(x) for x in line[6:].split()]
+            if not nums:
+                kept.append(line); continue
+            base, bonded = nums[0], nums[1:]
+            # Drop references that join an atom in set1 to one in set2 (either order).
+            drop = (base in serials1 and any(b in serials2 for b in bonded)) or \
+                   (base in serials2 and any(b in serials1 for b in bonded))
+            if drop:
+                remaining = [b for b in bonded
+                             if not ((base in serials1 and b in serials2) or
+                                     (base in serials2 and b in serials1))]
+                removed += len(bonded) - len(remaining)
+                if remaining:
+                    kept.append("CONECT" + "".join(f"{base:5d}" + "".join(f"{r:5d}" for r in remaining)))
+                # else: drop the now-empty CONECT entirely
+            else:
+                kept.append(line)
+        elif line.startswith("LINK"):
+            # LINK names atoms by name/resname/chain/resseq in fixed columns.
+            a1 = line[12:16].strip(); r1 = line[17:20].strip(); c1 = line[21:22]; n1 = line[22:26].strip()
+            a2 = line[42:46].strip(); r2 = line[47:50].strip(); c2 = line[51:52]; n2 = line[52:56].strip()
+            def _link_end_matches(an, rn, ch, ns, sel):
+                cs, rns, rname, atn = sel
+                if atn != an: return False
+                if cs is not None and cs != ch: return False
+                if rname is not None and rname != rn: return False
+                if rns is not None and str(rns) != ns: return False
+                return True
+            j = (_link_end_matches(a1,r1,c1,n1,sel1) and _link_end_matches(a2,r2,c2,n2,sel2)) or \
+                (_link_end_matches(a1,r1,c1,n1,sel2) and _link_end_matches(a2,r2,c2,n2,sel1))
+            if j:
+                removed += 1
+                continue
+            kept.append(line)
+        else:
+            kept.append(line)
+
+    print(f"  break_bond: removed {removed} connectivity record(s) between {atom1} and {atom2}")
+    return '\n'.join(kept)
+
+
+def _atom_coords(line: str):
+    """Parse (x, y, z) from an ATOM/HETATM line."""
+    return (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+
+
+def apply_rotate_bond_operation(content: str, format: str, atom1: str, atom2: str,
+                                angle: float) -> str:
+    """Rotate the fragment on atom2's side of the atom1-atom2 bond by `angle` deg.
+
+    atom1's side stays fixed; the moving fragment is the set of atoms reachable
+    from atom2 (within atom2's residue) without crossing the atom1-atom2 bond,
+    found by a connectivity BFS over inferred bonds (distance <= 1.9 A). Atoms
+    are rotated about the atom1->atom2 axis through atom2 (Rodrigues' formula).
+    Atom selections use '<residue>.<atom>' syntax."""
+    import math
+
+    if format != "pdb":
+        print("Warning: rotate_bond not yet implemented for CIF format")
+        return content
+
+    sel1, sel2 = _parse_atom_selection(atom1), _parse_atom_selection(atom2)
+    lines = content.split('\n')
+
+    # Index atom lines: collect serial, coords, residue key, and match flags.
+    atoms = []  # list of dicts for ATOM/HETATM lines
+    matches1, matches2 = [], []
+    for li, line in enumerate(lines):
+        if line.startswith(("ATOM", "HETATM")):
+            try:
+                coords = _atom_coords(line)
+            except ValueError:
+                continue
+            reskey = (line[21:22], line[22:27])  # chain, resseq+icode
+            rec = {"li": li, "coords": coords, "reskey": reskey}
+            atoms.append(rec)
+            if _atom_matches(line, sel1):
+                matches1.append(len(atoms) - 1)
+            if _atom_matches(line, sel2):
+                matches2.append(len(atoms) - 1)
+
+    if not matches1 or not matches2:
+        print(f"  Warning: rotate_bond — atom not found "
+              f"({atom1!r}->{len(matches1)}, {atom2!r}->{len(matches2)}); nothing rotated")
+        return content
+    # A rotate must resolve each end to exactly one atom; an ambiguous
+    # selection (e.g. "CA" with no chain/resnum) would otherwise silently
+    # rotate about whichever match comes last.
+    if len(matches1) > 1 or len(matches2) > 1:
+        raise ValueError(
+            f"rotate_bond: ambiguous selection — {atom1!r} matched {len(matches1)} atom(s), "
+            f"{atom2!r} matched {len(matches2)} atom(s). Each end must resolve to exactly one "
+            f"atom; qualify the selection with chain/resnum (e.g. 'A64.C64')."
+        )
+    idx1, idx2 = matches1[0], matches2[0]
+
+    # Restrict connectivity to atom2's residue (intra-residue fragment).
+    res = atoms[idx2]["reskey"]
+    members = [i for i, a in enumerate(atoms) if a["reskey"] == res]
+
+    def dist2(a, b):
+        return sum((a[k] - b[k]) ** 2 for k in range(3))
+
+    BOND2 = 1.9 ** 2
+    # Build adjacency within the residue, excluding the atom1-atom2 bond itself.
+    adj = {i: [] for i in members}
+    for ii in range(len(members)):
+        for jj in range(ii + 1, len(members)):
+            a, b = members[ii], members[jj]
+            if {a, b} == {idx1, idx2}:
+                continue  # do not cross the rotatable bond
+            if dist2(atoms[a]["coords"], atoms[b]["coords"]) <= BOND2:
+                adj[a].append(b)
+                adj[b].append(a)
+
+    # BFS from atom2; everything reachable (without crossing the bond) moves.
+    moving, stack = set(), [idx2]
+    while stack:
+        cur = stack.pop()
+        if cur in moving:
+            continue
+        moving.add(cur)
+        for nb in adj[cur]:
+            if nb not in moving:
+                stack.append(nb)
+
+    if idx1 in moving:
+        print(f"  Warning: rotate_bond — atom1 reachable from atom2 (ring/no clean "
+              f"split across {atom1}-{atom2}); nothing rotated")
+        return content
+
+    # Rotation axis: unit vector atom1 -> atom2, pivot at atom2.
+    p1, p2 = atoms[idx1]["coords"], atoms[idx2]["coords"]
+    ax = [p2[k] - p1[k] for k in range(3)]
+    norm = math.sqrt(sum(c * c for c in ax))
+    if norm == 0:
+        print("  Warning: rotate_bond — atom1 and atom2 coincide; nothing rotated")
+        return content
+    ux, uy, uz = (ax[0] / norm, ax[1] / norm, ax[2] / norm)
+    theta = math.radians(angle)
+    ct, st = math.cos(theta), math.sin(theta)
+
+    def rotate(pt):
+        # Rodrigues about axis u through pivot p2.
+        vx, vy, vz = (pt[0] - p2[0], pt[1] - p2[1], pt[2] - p2[2])
+        dot = ux * vx + uy * vy + uz * vz
+        cx = uy * vz - uz * vy
+        cy = uz * vx - ux * vz
+        cz = ux * vy - uy * vx
+        rx = vx * ct + cx * st + ux * dot * (1 - ct)
+        ry = vy * ct + cy * st + uy * dot * (1 - ct)
+        rz = vz * ct + cz * st + uz * dot * (1 - ct)
+        return (rx + p2[0], ry + p2[1], rz + p2[2])
+
+    for i in moving:
+        if i == idx2:
+            continue  # pivot stays fixed
+        a = atoms[i]
+        nx, ny, nz = rotate(a["coords"])
+        # PDB coordinate columns are fixed 8-char %8.3f: anything outside
+        # [-999.999, 9999.999] overflows the field and corrupts the record.
+        for c in (nx, ny, nz):
+            if not (-999.999 <= c <= 9999.999):
+                raise ValueError(
+                    f"rotate_bond: rotated coordinate {c:.3f} (atom serial near "
+                    f"line {a['li'] + 1}) exceeds the PDB 8-char column range "
+                    f"[-999.999, 9999.999]."
+                )
+        line = lines[a["li"]]
+        lines[a["li"]] = (line[:30] + f"{nx:8.3f}{ny:8.3f}{nz:8.3f}" + line[54:])
+
+    print(f"  rotate_bond: rotated {len(moving) - 1} atom(s) on {atom2}'s side of "
+          f"{atom1}-{atom2} by {angle} deg")
+    return '\n'.join(lines)
 
 
 def remove_waters_from_content(content: str, format: str) -> str:
@@ -820,9 +1195,9 @@ def copy_local_structure(pdb_id: str, custom_id: str, source_path: str,
         original_ligand_codes = extract_ligands_from_structure(content, actual_format)
         rename_mapping = build_rename_mapping(operations) if operations else {}
 
-        # Apply operations (e.g., rename)
+        # Apply operations (e.g., rename, remove)
         if operations:
-            content = apply_operations(content, actual_format, operations)
+            content = apply_operations(content, actual_format, operations, structure_id=custom_id)
 
         extension = ".pdb" if actual_format == "pdb" else ".cif"
         output_path = os.path.join(output_folder, f"{custom_id}{extension}")
@@ -1163,6 +1538,31 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         upstream_files = raw_upstream_files
     upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)  # Legacy, ignored
 
+    # Ids an upstream filter already dropped — their files are legitimately
+    # absent and must NOT count as fetch failures (would otherwise hard-exit).
+    # PDB owns tables/missing.csv: rows are re-keyed to THIS tool's id
+    # (custom_id) so a rename via ids= still excuses the renamed output.
+    from biopipelines.biopipelines_io import read_upstream_missing
+    from biopipelines.id_map_utils import get_mapped_ids
+    upstream_missing_rows = read_upstream_missing(config_data.get('upstream_missing'))
+    upstream_missing_by_id = {str(r.get('id', '')).strip(): r for r in upstream_missing_rows}
+    upstream_missing_ids = set(upstream_missing_by_id)
+    missing_out_path = config_data.get('missing_out')
+    propagated_missing = []  # rows re-keyed to custom_id, written to missing_out
+    # Upstream missing.csv is keyed in the UPSTREAM id space (e.g. a ligand id
+    # `nilotinib`), while this tool's ids are the combinatorial product
+    # (`2HYY+nilotinib`). Map each output id to its upstream missing component
+    # via provenance/suffix matching (same matcher the completion check uses),
+    # so a product id is excused when any of its components was dropped upstream.
+    excused_to_upstream = {}  # custom_id/pdb_id -> upstream missing id
+    if upstream_missing_ids:
+        print(f"Excusing {len(upstream_missing_ids)} ids dropped upstream: {sorted(upstream_missing_ids)}")
+        candidate_ids = sorted(set(pdb_ids) | set(custom_ids))
+        mapped = get_mapped_ids(candidate_ids, sorted(upstream_missing_ids), unique=True)
+        for out_id, up_id in mapped.items():
+            if up_id:
+                excused_to_upstream[out_id] = up_id
+
     if from_upstream:
         print(f"Processing {len(pdb_ids)} structures from upstream tool")
     else:
@@ -1195,6 +1595,24 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     # Fetch each structure
     for i, (pdb_id, custom_id) in enumerate(zip(pdb_ids, custom_ids), 1):
         print(f"\n[{i}/{len(pdb_ids)}] Processing {pdb_id} -> {custom_id}")
+
+        # Upstream missing.csv names the UPSTREAM stream id (== pdb_id when
+        # from_upstream); custom_id may be a rename via ids=. Match either so a
+        # renamed input is still excused, not re-failed, and re-key the row to
+        # custom_id so completion excuses THIS tool's (possibly renamed) output.
+        matched_key = pdb_id if pdb_id in upstream_missing_ids else (
+            custom_id if custom_id in upstream_missing_ids else
+            excused_to_upstream.get(pdb_id) or excused_to_upstream.get(custom_id))
+        if matched_key is not None:
+            src = upstream_missing_by_id[matched_key]
+            propagated_missing.append({
+                "id": custom_id,
+                "removed_by": src.get("removed_by", ""),
+                "kind": src.get("kind", "filter"),
+                "cause": src.get("cause", ""),
+            })
+            print(f"  Skipping {pdb_id} -> {custom_id}: dropped by an upstream filter (excused)")
+            continue
 
         if from_upstream:
             # Resolve file from upstream tool output
@@ -1433,7 +1851,16 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         else:
             empty_missing_df = pd.DataFrame(columns=["pdb_id", "error_message", "source", "attempted_path"])
             empty_missing_df.to_csv(missing_table, index=False)
-    
+
+    # Own the declared `missing` table (id|removed_by|kind|cause), re-keyed to
+    # this tool's output ids, so completion excuses the (possibly renamed)
+    # upstream-filtered outputs. Always written when declared.
+    if missing_out_path:
+        os.makedirs(os.path.dirname(missing_out_path), exist_ok=True)
+        pd.DataFrame(propagated_missing,
+                     columns=["id", "removed_by", "kind", "cause"]).to_csv(missing_out_path, index=False)
+        print(f"Propagated missing.csv: {missing_out_path} ({len(propagated_missing)} excused)")
+
     # Summary
     print(f"\n=== FETCH SUMMARY ===")
     print(f"Requested: {len(pdb_ids)} structures")
@@ -1486,14 +1913,13 @@ def main():
     try:
         failed_count = fetch_structures(config_data)
 
-        # Fail if ANY fetches failed
+        # Don't hard-exit on partial failures: the tables (structures, failed,
+        # missing) are written, and the completion check adjudicates — it flags
+        # FAILED only for ids that are missing AND not excused by missing.csv.
         if failed_count > 0:
-            print(f"\nERROR: {failed_count} structure fetch(es) failed")
-            print("Pipeline cannot continue with incomplete structure set")
-            print("Check failed_downloads.csv for details")
-            sys.exit(1)
-
-        print("\nAll structures fetched successfully")
+            print(f"\n{failed_count} structure(s) not produced — recorded in failed/missing tables")
+        else:
+            print("\nAll structures fetched successfully")
 
     except Exception as e:
         print(f"Error fetching structures: {e}")

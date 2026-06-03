@@ -82,12 +82,16 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
+    from .input_standardization import resolve_basic_input
+    from .ligand import Ligand
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
+    from input_standardization import resolve_basic_input
+    from ligand import Ligand
 
 
 class PoseBusters(BaseConfig):
@@ -132,12 +136,16 @@ fi
 {skip}{remove_block}
 {env_block}
 
-# Verify installation
-if {env_manager} run -n posebusters python -c "import posebusters" >/dev/null 2>&1; then
+# Verify installation. Check pandas too (not just posebusters): pipe_posebusters.py
+# and biopipelines/base_config both import pandas at module load, so a pandas that
+# can't import (e.g. missing python-dateutil) silently breaks every run while
+# `import posebusters` still succeeds.
+if {env_manager} run -n posebusters python -c "import posebusters, pandas, numpy, gemmi" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PoseBusters installation complete ==="
 else
-    echo "ERROR: PoseBusters verification failed (cannot import posebusters)"
+    echo "ERROR: PoseBusters verification failed (import of posebusters/pandas/numpy/gemmi)"
+    {env_manager} run -n posebusters python -c "import posebusters, pandas, numpy, gemmi" 2>&1 | tail -5
     exit 1
 fi
 """
@@ -146,24 +154,42 @@ fi
     analysis_csv = Path(lambda self: self.table_path("posebusters"))
     config_file = Path(lambda self: self.configuration_path("posebusters_config.json"))
     structures_ds_json = Path(lambda self: self.configuration_path("structures.json"))
+    ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
     posebusters_py = Path(lambda self: self.pipe_script_path("pipe_posebusters.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
-                 ligand: str,
+                 ligand: Union[str, DataStream, StandardizedOutput],
                  reference_ligand: Union[DataStream, StandardizedOutput, None] = None,
-                 reference_ligand_code: Optional[str] = None,
                  mode: str = "dock",
                  check: Union[str, List[str]] = "pose",
+                 exclude: Union[str, List[str], None] = None,
                  **kwargs):
         """
         Initialize PoseBusters validation tool.
 
         Args:
             structures: Input protein-ligand complexes as DataStream or StandardizedOutput
-            ligand: 3-letter residue code for the ligand (e.g., 'LIG', 'ATP')
+            ligand: Compounds stream (Ligand(code="LIG") or any compounds-producing
+                    tool) naming the ligand. The residue `code` is read from the
+                    stream's `code` column at runtime, and is also used as the
+                    reference-structure residue code in redock mode.
+
+                    IMPORTANT — provide a SMILES for non-trivial ligands. The ligand
+                    is extracted from each complex and rebuilt as an SDF for validation.
+                    When the stream carries a SMILES (e.g. ``Ligand(smiles=..., codes="LIG")``),
+                    bond orders are templated from it; otherwise they are perceived from
+                    coordinates alone (RDKit ``rdDetermineBonds``). Coordinate-only
+                    perception FAILS on charged/conjugated ligands (dyes, metallo-organics,
+                    zwitterions): the molecule won't build, so `mol_pred_loaded` fails and
+                    EVERY check — including the coordinate-based distance/overlap checks —
+                    reports False (the whole step yields all_pass=False). For such ligands
+                    you MUST pass a SMILES-bearing Ligand whose ``codes`` matches the
+                    residue code in the structures. Bare ``Ligand(code="LIG")`` (no SMILES)
+                    is fine only for simple ligands RDKit can perceive from coordinates.
+                    A bare code with no SMILES also triggers a (failing) RCSB SMILES
+                    lookup unless the code is a real CCD code.
             reference_ligand: Reference ligand structure for redock mode (SDF or PDB)
-            reference_ligand_code: Residue code in reference structure (defaults to ligand)
             mode: 'dock' or 'redock' (auto-set to 'redock' if reference_ligand provided)
             check: Which checks contribute to ``all_pass``. Either a preset string or a
                 list of column names.
@@ -182,6 +208,13 @@ fi
                 columns determine ``all_pass``. All check columns are still written to
                 the CSV; excluded columns are placed to the right of ``all_pass``.
 
+            exclude: Check column(s) to drop from whatever ``check`` selected — a name
+                or list of names. Easier than re-listing every check to keep when you
+                only need to omit one or two. E.g. ``exclude="minimum_distance_to_protein"``
+                keeps the ``pose`` preset but ignores the protein-distance check (which
+                fails by construction on covalent-derived poses, where the attachment
+                atom sits at bonding distance).
+
             **kwargs: Additional parameters
 
         Output:
@@ -199,7 +232,11 @@ fi
         else:
             raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
 
-        self.ligand_name = ligand
+        # Ligand naming — a compounds stream; the residue code is resolved from
+        # its `code` column at runtime. A bare string is shorthand for an
+        # internal Ligand(code=...).
+        self.ligand_stream: DataStream = resolve_basic_input(
+            ligand, Ligand, "compounds", "code", allow_none=False)
 
         # Resolve reference_ligand input
         self.reference_ligand_stream: Optional[DataStream] = None
@@ -211,8 +248,6 @@ fi
             else:
                 raise ValueError(f"reference_ligand must be DataStream, StandardizedOutput, or None, got {type(reference_ligand)}")
 
-        self.reference_ligand_code = reference_ligand_code
-
         # Auto-set mode to redock if reference_ligand is provided
         if self.reference_ligand_stream is not None and mode == "dock":
             self.mode = "redock"
@@ -220,22 +255,25 @@ fi
             self.mode = mode
 
         self.check = check
-        self._check_columns = self._resolve_check(check)
+        self.exclude = exclude
+        self._check_columns = self._resolve_check(check, exclude)
 
         super().__init__(**kwargs)
 
     @staticmethod
-    def _resolve_check(check: Union[str, List[str]]) -> List[str]:
-        """Resolve a check spec (preset name or list) to a list of column names."""
+    def _resolve_check(check: Union[str, List[str]],
+                       exclude: Union[str, List[str], None] = None) -> List[str]:
+        """Resolve a check spec (preset name or list) to a list of column names,
+        then drop any names in ``exclude``."""
         if isinstance(check, str):
             if check not in _CHECK_PRESETS:
                 raise ValueError(
                     f"check preset '{check}' is unknown. "
                     f"Valid presets: {sorted(_CHECK_PRESETS)}, or pass a list of column names."
                 )
-            return list(_CHECK_PRESETS[check])
-        if isinstance(check, (list, tuple)):
-            resolved = []
+            selected = list(_CHECK_PRESETS[check])
+        elif isinstance(check, (list, tuple)):
+            selected = []
             unknown = []
             for c in check:
                 if not isinstance(c, str):
@@ -243,30 +281,39 @@ fi
                 if c not in _ALL_KNOWN_CHECKS:
                     unknown.append(c)
                 else:
-                    resolved.append(c)
+                    selected.append(c)
             if unknown:
                 raise ValueError(
                     f"check contains unknown column(s) {unknown}. "
                     f"Known: {sorted(_ALL_KNOWN_CHECKS)}"
                 )
-            if not resolved:
+            if not selected:
                 raise ValueError("check list is empty")
-            return resolved
-        raise ValueError(f"check must be a preset name or list of column names, got {type(check)}")
+        else:
+            raise ValueError(f"check must be a preset name or list of column names, got {type(check)}")
+
+        # Drop any excluded checks from the selection.
+        if exclude is not None:
+            excl = [exclude] if isinstance(exclude, str) else list(exclude)
+            unknown_excl = [c for c in excl if c not in _ALL_KNOWN_CHECKS]
+            if unknown_excl:
+                raise ValueError(
+                    f"exclude contains unknown column(s) {unknown_excl}. "
+                    f"Known: {sorted(_ALL_KNOWN_CHECKS)}"
+                )
+            excl_set = set(excl)
+            selected = [c for c in selected if c not in excl_set]
+            if not selected:
+                raise ValueError("all checks were excluded; nothing left to determine all_pass")
+        return selected
 
     def validate_params(self):
         """Validate PoseBusters parameters."""
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures cannot be empty")
 
-        if not self.ligand_name or not isinstance(self.ligand_name, str):
-            raise ValueError("ligand must be a non-empty string")
-
-        if len(self.ligand_name) > 3:
-            raise ValueError(f"ligand code must be 1-3 characters, got '{self.ligand_name}'")
-
-        _validate_freeform_string("ligand", self.ligand_name)
-        _validate_freeform_string("reference_ligand_code", self.reference_ligand_code)
+        if not self.ligand_stream or len(self.ligand_stream) == 0:
+            raise ValueError("ligand (a compounds stream, e.g. Ligand(code=...)) is required and must not be empty")
 
         if self.mode not in ("dock", "redock"):
             raise ValueError(f"mode must be 'dock' or 'redock', got '{self.mode}'")
@@ -285,15 +332,13 @@ fi
         check_display = self.check if isinstance(self.check, str) else f"[{len(self._check_columns)} columns]"
         config_lines.extend([
             f"STRUCTURES: {len(self.structures_stream)} files",
-            f"LIGAND: {self.ligand_name}",
+            "LIGAND: (code resolved from compounds stream at runtime)",
             f"MODE: {self.mode}",
             f"CHECK: {check_display}",
         ])
 
         if self.reference_ligand_stream is not None:
             config_lines.append(f"REFERENCE LIGAND: {len(self.reference_ligand_stream)} files")
-            if self.reference_ligand_code:
-                config_lines.append(f"REFERENCE LIGAND CODE: {self.reference_ligand_code}")
 
         return config_lines
 
@@ -310,8 +355,11 @@ fi
 
     def generate_script_run_posebusters(self) -> str:
         """Generate the PoseBusters validation part of the script."""
-        # Serialize structures DataStream to JSON
+        # Serialize structures + ligand DataStreams to JSON. The ligand residue
+        # code is resolved from the compounds stream at runtime by the pipe
+        # script (also used as the reference-structure code in redock mode).
         self.structures_stream.save_json(self.structures_ds_json)
+        self.ligand_stream.save_json(self.ligand_json)
 
         # Build reference_pdb path for redock mode
         reference_pdb = None
@@ -322,10 +370,9 @@ fi
 
         config_data = {
             "structures_json": self.structures_ds_json,
-            "ligand_name": self.ligand_name,
+            "ligand_json": self.ligand_json,
             "mode": self.mode,
             "reference_pdb": reference_pdb,
-            "reference_ligand_code": self.reference_ligand_code if self.reference_ligand_code else self.ligand_name,
             "output_csv": self.analysis_csv,
             "execution_dir": self.execution_folder,
             "check_columns": self._check_columns,
@@ -336,7 +383,6 @@ fi
 
         return f"""echo "Running PoseBusters validation"
 echo "Structures: {len(self.structures_stream)}"
-echo "Ligand: {self.ligand_name}"
 echo "Mode: {self.mode}"
 echo "Output: {self.analysis_csv}"
 
@@ -365,7 +411,7 @@ python "{self.posebusters_py}" --config "{self.config_file}"
                 name="posebusters",
                 path=self.analysis_csv,
                 columns=columns,
-                description=f"PoseBusters validation ({self.mode} mode): {self.ligand_name}"
+                description=f"PoseBusters validation ({self.mode} mode)"
             )
         }
 
@@ -379,9 +425,8 @@ python "{self.posebusters_py}" --config "{self.config_file}"
         base_dict = super().to_dict()
         base_dict.update({
             "tool_params": {
-                "ligand_name": self.ligand_name,
+                "ligand_ids": list(self.ligand_stream.ids),
                 "mode": self.mode,
-                "reference_ligand_code": self.reference_ligand_code,
                 "check": self.check,
                 "check_columns": self._check_columns,
             }

@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 from biopipelines.pipeline import *
-from biopipelines.protein_mpnn import ProteinMPNN
+from biopipelines import ProteinMPNN
 
 # ProteinMPNN's --bias_AA_jsonl is a flat {"<AA>": <bias>} dict (global per-AA bias).
 # Written next to the pipeline so the cluster job can find it.

@@ -48,7 +48,7 @@ elif args.id_map and os.path.exists(args.id_map):
 
 fa_files = os.listdir(args.FA_FOLDER)
 seen_sequences = {}  # sequence -> first_seen_id
-duplicate_entries = []  # list of {id, removed_by, cause} dicts
+duplicate_entries = []  # list of {id, removed_by, kind, cause} dicts
 for fa in fa_files:
     if fa.endswith(".fa"):
         data = []
@@ -88,6 +88,7 @@ for fa in fa_files:
                             duplicate_entries.append({
                                 'id': seq_data['id'],
                                 'removed_by': args.step_tool_name,
+                                'kind': 'filter',
                                 'cause': f"Duplicate of {kept_id}"
                             })
                 else:
@@ -146,6 +147,6 @@ if args.missing_csv:
     if all_missing:
         missing_df = pd.DataFrame(all_missing)
     else:
-        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'cause'])
+        missing_df = pd.DataFrame(columns=['id', 'removed_by', 'kind', 'cause'])
     missing_df.to_csv(args.missing_csv, index=False)
     print(f"Created missing.csv with {len(duplicate_entries)} duplicates, {len(upstream_rows)} upstream entries")

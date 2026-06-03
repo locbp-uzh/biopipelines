@@ -16,6 +16,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
+    from .datastream_resolver import resolve_input_to_datastream
     from .biopipelines_io import TableReference
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
 except ImportError:
@@ -24,6 +25,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
+    from datastream_resolver import resolve_input_to_datastream
     from biopipelines_io import TableReference
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
 
@@ -69,6 +71,11 @@ echo "=== Mutagenesis ready ==="
     missing_csv = Path(lambda self: self.table_path("missing"))
     mutagenesis_helper_py = Path(lambda self: self.pipe_script_path("pipe_mutagenesis.py"))
 
+    # MSA propagation (only used when msas= is provided)
+    msas_folder = Path(lambda self: self.stream_folder("msas"))
+    msas_csv = Path(lambda self: self.stream_map_path("msas"))
+    msa_helper_py = Path(lambda self: self.pipe_script_path("pipe_mutagenesis_msa.py"))
+
     def __init__(self,
                  original: Union[DataStream, StandardizedOutput],
                  position: Union[int, str, TableReference, StandardizedOutput] = None,
@@ -77,6 +84,7 @@ echo "=== Mutagenesis ready ==="
                  include_original: bool = False,
                  exclude: str = "",
                  combinatorial: bool = False,
+                 msas: Optional[Union[DataStream, StandardizedOutput]] = None,
                  **kwargs):
         """
         Initialize Mutagenesis tool.
@@ -111,13 +119,23 @@ echo "=== Mutagenesis ready ==="
             combinatorial: If True and multiple positions are specified, generate
                 all combinations (cartesian product) of mutations across positions.
                 Default False generates independent single-point mutants per position.
+            msas: Optional precomputed MSAs for the original protein(s), as a
+                DataStream or StandardizedOutput carrying an `msas` stream (e.g.
+                from AlphaFold, MMseqs2, or the MSA tool). When provided, a
+                synthetic per-mutant MSA is derived by copying the parent's MSA
+                (matched on the original protein id) and substituting only the
+                query (first) row at the mutated position(s); homolog rows pass
+                through unchanged, and the format (a3m/csv) is preserved. The
+                resulting `msas` stream is keyed by the mutant ids, so it can be
+                fed straight into a downstream folding tool alongside the mutant
+                sequences. When None (default), no msas stream is emitted.
             **kwargs: Additional parameters
 
         Output:
-            Streams: sequences (.csv)
+            Streams: sequences (.csv); msas (.a3m/.csv, only when msas= given)
             Tables:
                 sequences: id | original.id | sequence | mutations | mutation_positions | original_aa | new_aa
-                missing: id | removed_by | cause
+                missing: id | removed_by | kind | cause
         """
         # Store Mutagenesis-specific parameters
         # Resolve position into either a fixed int/str or a TableReference (selection)
@@ -159,6 +177,10 @@ echo "=== Mutagenesis ready ==="
             self.sequences_stream = original
         else:
             raise ValueError(f"original must be DataStream or StandardizedOutput, got {type(original)}")
+
+        # Optional MSA propagation: resolve to an msas stream keyed by the
+        # original protein id. None disables MSA output entirely.
+        self.msas_stream = resolve_input_to_datastream(msas, fallback_stream="msas")
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -203,6 +225,10 @@ echo "=== Mutagenesis ready ==="
             if invalid_aas:
                 raise ValueError(f"Invalid amino acids in exclude: {invalid_aas}")
 
+        # Validate msas input if provided
+        if self.msas_stream is not None and len(self.msas_stream) == 0:
+            raise ValueError("msas was provided but resolves to an empty msas stream")
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files and dependencies."""
         self.folders = pipeline_folders
@@ -216,6 +242,7 @@ echo "=== Mutagenesis ready ==="
 
         script_content += self._generate_script_run_sdm()
         script_content += self._generate_script_missing_sequences()
+        script_content += self._generate_script_propagate_msas()
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -260,6 +287,31 @@ echo "Generated sequences saved to: {self.sequences_csv}"
     def _generate_script_missing_sequences(self) -> str:
         """Missing table is now generated by the pipe script via --missing-output."""
         return ""
+
+    def _generate_script_propagate_msas(self) -> str:
+        """Generate synthetic per-mutant MSAs from the original protein MSAs.
+
+        Reads the mutants table written by the SDM step (id, original.id,
+        mutation_positions, new_aa) and the input msas map_table; for each
+        mutant, copies the parent MSA (matched on original.id) and substitutes
+        only the query row at the mutated positions. No-op when msas= absent.
+        """
+        if self.msas_stream is None:
+            return ""
+
+        self.msas_stream.save_json(self.configuration_path(".input_msas.json"))
+
+        return f"""echo "Propagating MSAs to mutants (query-row substitution)"
+
+python {self.msa_helper_py} \\
+    --mutants "{self.sequences_csv}" \\
+    --input-msas "{self.msas_stream.map_table}" \\
+    --output-folder "{self.msas_folder}" \\
+    --output "{self.msas_csv}"
+
+echo "Synthetic MSAs saved to: {self.msas_folder}"
+
+"""
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after Mutagenesis execution."""
@@ -310,7 +362,7 @@ echo "Generated sequences saved to: {self.sequences_csv}"
             tables["missing"] = TableInfo(
                 name="missing",
                 path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
+                columns=["id", "removed_by", "kind", "cause"],
                 description="IDs removed (original amino acid excluded from mutagenesis)"
             )
 
@@ -323,11 +375,32 @@ echo "Generated sequences saved to: {self.sequences_csv}"
             format="csv"
         )
 
-        return {
+        result = {
             "sequences": sequences,
             "tables": tables,
             "output_folder": self.output_folder
         }
+
+        # Synthetic per-mutant MSAs: same ids as the sequences stream (mutant
+        # ids), one file per mutant, format preserved from the input MSAs.
+        if self.msas_stream is not None:
+            msa_format = self.msas_stream.format
+            ext = ".a3m" if msa_format == "a3m" else ".csv"
+            result["msas"] = DataStream(
+                name="msas",
+                ids=sequence_ids,
+                files=[os.path.join(self.msas_folder, f"<id>{ext}")],
+                map_table=self.msas_csv,
+                format=msa_format,
+            )
+            tables["msas"] = TableInfo(
+                name="msas",
+                path=self.msas_csv,
+                columns=["id", "sequences.id", "original.id", "sequence", "msa_file"],
+                description="Synthetic per-mutant MSAs (query-row substitution)"
+            )
+
+        return result
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines for pipeline output."""
@@ -341,6 +414,8 @@ echo "Generated sequences saved to: {self.sequences_csv}"
         config_lines.append(f"INCLUDE ORIGINAL: {self.include_original}")
         config_lines.append(f"EXCLUDE: {self.exclude if self.exclude else 'None'}")
         config_lines.append(f"COMBINATORIAL: {self.combinatorial}")
+        if self.msas_stream is not None:
+            config_lines.append(f"MSAS: {len(self.msas_stream)} input ({self.msas_stream.format}) -> synthetic per-mutant")
 
         return config_lines
 

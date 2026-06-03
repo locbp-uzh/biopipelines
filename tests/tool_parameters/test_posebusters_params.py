@@ -16,8 +16,9 @@ pytestmark = pytest.mark.tool_parameters
 def _build(local_config, isolated_cwd, new_pipeline, **kwargs):
     from biopipelines.mock import Mock
     from biopipelines.posebusters import PoseBusters
+    from biopipelines.ligand import Ligand
 
-    kwargs.setdefault("ligand", "ATP")
+    ligand_code = kwargs.pop("ligand", "ATP")
     pipeline = new_pipeline("pb_params")
     with pipeline:
         m = Mock(
@@ -25,14 +26,16 @@ def _build(local_config, isolated_cwd, new_pipeline, **kwargs):
             streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
             map_table_strategy="config",
         )
-        PoseBusters(structures=m.streams.structures, **kwargs)
+        PoseBusters(structures=m.streams.structures, ligand=Ligand(code=ligand_code), **kwargs)
         script_path = pipeline.save()
     return read_all_emitted_artifacts(script_path)
 
 
 def test_ligand(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, ligand="HEM")
-    assert "HEM" in content
+    # The residue code is resolved from the compounds stream at runtime; the
+    # config now carries the ligand stream JSON, not a literal code.
+    assert "ligand_json" in content
 
 
 def test_mode_dock(local_config, isolated_cwd, new_pipeline):
@@ -46,4 +49,4 @@ def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):
         ligand="LIG",
         mode="dock",
     )
-    assert_substrings_in(content, ['"ligand_name": "LIG"', '"mode": "dock"'])
+    assert_substrings_in(content, ['"ligand_json"', '"mode": "dock"'])

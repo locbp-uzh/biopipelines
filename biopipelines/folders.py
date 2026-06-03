@@ -153,7 +153,9 @@ class FolderManager:
 
         # Create necessary directories
         folders_to_create = ["biopipelines_output", "pdbs", "ligands", "sequences", "tables"]
-        if not self._local_output:
+        # The shared per-user dir only exists in cluster-style configs; Colab/local
+        # configs don't define a "user" folder. Only create it when configured.
+        if not self._local_output and "user" in self._folders:
             folders_to_create.append("user")
         for folder_key in folders_to_create:
             os.makedirs(self._folders[folder_key], exist_ok=True)

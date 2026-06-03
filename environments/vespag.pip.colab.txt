@@ -1,0 +1,11 @@
+# VespaG pip dependencies for Google Colab.
+# VespaG is NOT on PyPI (the upstream README's `pip install vespag` is wrong) —
+# install the hatchling package from GitHub source. Its dependencies (torch,
+# transformers, polars, biopython, typer, dvc, etc.) come in transitively;
+# torch resolves to a CUDA build. ESM-2 3B weights download lazily at first
+# prediction (GPU runtime recommended).
+git+https://github.com/JSchlensok/VespaG.git
+
+# BioPipelines interop (pipe script reads/writes CSVs and DataStream JSON)
+pandas
+biopython

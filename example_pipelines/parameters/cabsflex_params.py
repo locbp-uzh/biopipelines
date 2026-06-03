@@ -9,7 +9,7 @@ enough that even with reduced MC settings each run finishes in minutes.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.cabsflex import CABSflex
+from biopipelines import CABSflex
 
 with Pipeline(project="ToolParameters",
               job="CABSflex",

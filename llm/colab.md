@@ -40,6 +40,10 @@ The user picks the *runtime type* in the Colab UI; the assistant cannot request 
 
 What the MCP path does **not** give you: `userdata.get()` / Colab Secrets and `drive.mount()` are reportedly unavailable through it (true of the VS Code extension; assume the same here until shown otherwise). If a pipeline or `.install()` cell expects Drive, that's a gap.
 
+## Persisting output to Google Drive
+
+Colab VMs are ephemeral — everything under `/content` vanishes on recycle. Mounting Drive and repointing the config keeps results (and the expensive-to-re-download model params) across sessions. Note that tool *installs* are not persistable: the conda/micromamba envs live in the micromamba root (`/root`).
+
 ## Workflow — running a test pipeline on Colab
 
 1. Push the branch under test.
@@ -62,13 +66,26 @@ What the MCP path does **not** give you: `userdata.get()` / Colab Secrets and `d
    `getpass` keeps the value out of the notebook output. Revoke the token when you're done and don't paste it into chat with the assistant either, since transcripts and MCP tool args get logged.
 
    Follow with the canonical Colab setup from `docs/user_manual.md` → "Google Colab".
-3. Add a cell with the affected `.install()` call(s).
-4. Add a minimal pipeline cell.
-5. Execute cells in order; read cell outputs (success markers, traceback, `_log` files) directly via the MCP tools — no copy-paste round-trip with the user.
-6. Iterate.
+3.  Agent asks the user whether to mount drive or stay ephemeral, in the former case, run:
+   ```python
+   from google.colab import drive
+   drive.mount('/content/drive')
+   !bp-config set folders.base.biopipelines_output /content/drive/MyDrive/BioPipelines
+   !bp-config set folders.base.data /content/drive/MyDrive/BioPipelines/data
+   !bp-config set folders.infrastructure.cache /content/drive/MyDrive/BioPipelines/cache
+   ```
+   (Setting `data` cascades to every `folders.repositories.*` entry via the `<data>` placeholder, so cloned model repos persist too.)
+
+   Outputs honor `biopipelines_output` on Colab: `local_output` does **not** auto-enable on the colab scheduler (it would otherwise overwrite `biopipelines_output` with the ephemeral `cwd/outputs`, lost on recycle). So once you repoint `biopipelines_output` at Drive above, pipeline outputs land there with no extra flag. (On plain local Jupyter, `local_output` still auto-enables.)
+4. Add a cell with the affected `.install()` call(s).
+5. Add a minimal pipeline cell.
+6. Execute cells in order; read cell outputs (success markers, traceback, `_log` files) directly via the MCP tools — no copy-paste round-trip with the user.
+7. Iterate.
 
 ## Notes
 
 - The settings in config.colab.yaml are automatically picked up.
+- The `biopipelines` env is **not** created on Colab — tools mapped to it run in base Python, where `pip install -e ".[colab]"` put the deps (the `colab` extra adds conda-only packages like `openbabel-wheel` that base Python otherwise lacks). Activation of that env is skipped on Colab (guarded by `scheduler == "colab"` in `activate_environment`), so no failed `micromamba activate biopipelines` line appears. Real per-tool envs still install and activate normally.
 - A Colab VM recycles at ~12 h (less on free, with idle disconnects). Keep test pipelines minimal.
 - Guard Colab-specific fixes/patches that might break on cluster/local setups behind the scheduler (`if scheduler == "colab":`).
+- To view a tool's output inline in a notebook, just reference the variable on its own line (`x = Tool(...)` then a cell with `x`) — tool outputs have built-in renderers. Don't hand-roll py3Dmol/matplotlib.

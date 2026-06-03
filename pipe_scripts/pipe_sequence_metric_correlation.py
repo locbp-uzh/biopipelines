@@ -29,14 +29,19 @@ When n <= 1 for either group, variance cannot be reliably computed and correlati
 
 import argparse
 import json
+import os
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import logomaker
 from pathlib import Path
 import logging
 from typing import Dict, List, Tuple, Optional
+# matplotlib + logomaker are imported lazily inside create_correlation_logo()
+# so the module can be imported in lean envs (e.g. the CI [test] extra) without
+# pulling in plotting deps — only the plot path requires them.
 import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.id_map_utils import get_mapped_ids
 
 # Standard amino acids
 AMINO_ACIDS = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
@@ -152,7 +157,8 @@ def call_mutations(sequence: str, reference: str) -> List[Tuple[int, str, str]]:
 
 
 def load_and_merge_data(mutants_paths: List[str], data_paths: List[str],
-                       metric: str, logger) -> pd.DataFrame:
+                       metric: str, logger,
+                       map_table_paths: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Load and merge all mutants and data tables.
 
@@ -161,6 +167,9 @@ def load_and_merge_data(mutants_paths: List[str], data_paths: List[str],
         data_paths: List of paths to data tables
         metric: Metric column name
         logger: Logger instance
+        map_table_paths: Optional list of map_table CSV paths for provenance-based
+                         ID matching, used when suffix matching fails (e.g. IDs that
+                         were opaquely renamed upstream by a Panda/Pool step).
 
     Returns:
         Merged DataFrame with id, sequence, and metric columns
@@ -188,7 +197,31 @@ def load_and_merge_data(mutants_paths: List[str], data_paths: List[str],
         if metric not in data_df.columns:
             raise ValueError(f"Metric column '{metric}' not found in {data_path}. Available columns: {list(data_df.columns)}")
 
-        # Merge on id
+        # Match data IDs to mutant IDs via biopipelines ID matching, so that
+        # e.g. "SH3_16T" (mutant) and "SH3_16T+pep" (data) align even when the
+        # data IDs carry +component suffixes. Map each mutant id -> data id,
+        # then rewrite the data id column to the mutant id before a plain merge.
+        mutant_ids = mutants_df['id'].astype(str).tolist()
+        data_ids = data_df['id'].astype(str).tolist()
+        mutant_to_data = get_mapped_ids(mutant_ids, data_ids, unique=True,
+                                        map_table_paths=map_table_paths or None)
+
+        data_to_mutant = {
+            data_id: mutant_id
+            for mutant_id, data_id in mutant_to_data.items()
+            if data_id is not None
+        }
+        n_matched = len(data_to_mutant)
+        logger.info(f"Matched {n_matched}/{len(mutant_ids)} mutant IDs to data IDs")
+
+        data_df = data_df.copy()
+        data_df['id'] = data_df['id'].astype(str).map(
+            lambda x: data_to_mutant.get(x, x))
+
+        mutants_df = mutants_df.copy()
+        mutants_df['id'] = mutants_df['id'].astype(str)
+
+        # Merge on the now-aligned id
         merged = pd.merge(mutants_df[['id', seq_col]], data_df[['id', metric]], on='id', how='inner')
         merged = merged.rename(columns={seq_col: 'sequence'})
 
@@ -278,7 +311,7 @@ def compute_correlation_1d(merged_df: pd.DataFrame, reference_seq: str,
 
         correlation_1d_data.append({
             'position': position_label,
-            'wt_aa': ref_aa,
+            'original': ref_aa,
             'correlation': correlation,
             'mean_mutated': mean_mutated,
             'mean_wt': mean_wt,
@@ -296,7 +329,7 @@ def compute_correlation_1d(merged_df: pd.DataFrame, reference_seq: str,
 
 
 def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
-                          metric: str, logger) -> pd.DataFrame:
+                          metric: str, logger) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute 2D correlation signal c(i,aa) for each position and amino acid.
 
@@ -309,11 +342,14 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
         logger: Logger instance
 
     Returns:
-        DataFrame with correlation_2d results (position, wt_aa, A, C, D, ...)
+        Tuple of:
+            - DataFrame with correlation_2d results (position, original, A, C, D, ...)
+            - DataFrame with sample counts (position, original, A, C, D, ...)
     """
     logger.info("Computing 2D correlation signals...")
 
     correlation_2d_data = []
+    sample_count_data = []
     seq_length = len(reference_seq)
 
     for pos in range(seq_length):
@@ -339,8 +375,9 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
                     position_aa_metrics[current_aa] = []
                 position_aa_metrics[current_aa].append(metric_value)
 
-        # Compute correlation for each amino acid
-        row_data = {'position': position_label, 'wt_aa': ref_aa}
+        # Compute correlation and sample count for each amino acid.
+        row_data = {'position': position_label, 'original': ref_aa}
+        count_row = {'position': position_label, 'original': ref_aa}
 
         for aa in AMINO_ACIDS:
             # Get values for sequences with this aa at position i vs all other aa
@@ -352,6 +389,7 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
 
             n_aa = len(aa_values)
             n_non_aa = len(non_aa_values)
+            count_row[aa] = n_aa
 
             if n_aa > 0 and n_non_aa > 0:
                 mean_aa = np.mean(aa_values)
@@ -379,12 +417,14 @@ def compute_correlation_2d(merged_df: pd.DataFrame, reference_seq: str,
             row_data[aa] = correlation
 
         correlation_2d_data.append(row_data)
+        sample_count_data.append(count_row)
 
     correlation_2d_df = pd.DataFrame(correlation_2d_data)
+    sample_count_df = pd.DataFrame(sample_count_data)
 
     logger.info(f"Computed 2D correlations for {len(correlation_2d_df)} positions")
 
-    return correlation_2d_df
+    return correlation_2d_df, sample_count_df
 
 
 def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: pd.DataFrame,
@@ -404,6 +444,8 @@ def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: 
         logger: Logger instance
         positions_filter: List of positions to include (1-indexed). If None, includes all positions in the sequence (both mutated >1% and positions with correlations).
     """
+    import matplotlib.pyplot as plt
+    import logomaker
     logger.info("Creating correlation logo plot...")
 
     # Filter positions based on positions_filter or mutation/correlation
@@ -449,14 +491,14 @@ def create_correlation_logo(correlation_2d_df: pd.DataFrame, correlation_1d_df: 
 
     for row_2d, row_1d in positions_to_plot:
         position = row_2d['position']
-        wt_aa = row_2d['wt_aa']
+        original_aa = row_2d.get('original', row_2d.get('wt_aa'))
 
         aa_row = {}
         for aa in AMINO_ACIDS:
             aa_row[aa] = row_2d[aa]  # Keep both positive and negative values
 
         logo_data.append(aa_row)
-        x_labels.append(f"{wt_aa}{position}")
+        x_labels.append(f"{original_aa}{position}")
 
     # Create figure
     num_positions = len(positions_to_plot)
@@ -520,14 +562,15 @@ def main():
             config['mutants_paths'],
             config['data_paths'],
             config['metric'],
-            logger
+            logger,
+            map_table_paths=config.get('map_table_paths')
         )
 
         # Compute 1D correlations
         correlation_1d_df = compute_correlation_1d(merged_df, reference_seq, config['metric'], logger)
 
-        # Compute 2D correlations
-        correlation_2d_df = compute_correlation_2d(merged_df, reference_seq, config['metric'], logger)
+        # Compute 2D correlations and sample counts
+        correlation_2d_df, sample_count_df = compute_correlation_2d(merged_df, reference_seq, config['metric'], logger)
 
         # Save results
         logger.info(f"Saving 1D correlations to: {config['correlation_1d_output']}")
@@ -535,6 +578,9 @@ def main():
 
         logger.info(f"Saving 2D correlations to: {config['correlation_2d_output']}")
         correlation_2d_df.to_csv(config['correlation_2d_output'], index=False)
+
+        logger.info(f"Saving 2D sample counts to: {config['sample_counts_2d_output']}")
+        sample_count_df.to_csv(config['sample_counts_2d_output'], index=False)
 
         # Create correlation logo
         # Parse positions filter if provided

@@ -1,0 +1,27 @@
+name: rtmscore
+channels:
+  - conda-forge
+  - dglteam
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch>=2.0,<2.5
+  - pytorch-cuda=11.8
+  - dgl
+  # dgl 2.x's graphbolt imports torchdata.datapipes, removed in torchdata
+  # >= 0.10. Pin conda to the last 0.9.x that still ships datapipes so the
+  # dependency solver doesn't pull 0.11 (which breaks `import dgl`).
+  - torchdata>=0.7,<0.10
+  # RTMScore.model.utils imports torch_scatter (PyG companion); not pulled
+  # in transitively, so request it explicitly.
+  - pytorch_scatter
+  - rdkit
+  - mdanalysis>=2.7
+  - prody
+  - openbabel>=3.1
+  - pandas
+  - numpy
+  - scikit-learn
+  - joblib

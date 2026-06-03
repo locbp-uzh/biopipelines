@@ -21,7 +21,6 @@ try:
     from .file_paths import Path
     from .datastream import DataStream, create_map_table
     from .combinatorics import generate_multiplied_ids_pattern
-    from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -29,7 +28,6 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream, create_map_table
     from combinatorics import generate_multiplied_ids_pattern
-    from biopipelines_io import Resolve
 
 
 class CABSflex(BaseConfig):
@@ -50,21 +48,32 @@ class CABSflex(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        try:
+            from .config_manager import ConfigManager
+        except ImportError:
+            from config_manager import ConfigManager
+        is_colab = ConfigManager().get_scheduler() == "colab"
+
         biopipelines = folders.get("biopipelines", "")
-        skip = "" if force_reinstall else """# Check if already installed
-if conda list -n CABSflex cabs 2>/dev/null | grep -q cabs; then
+        # Use the same env-manager-agnostic import check as the verification
+        # step below — `conda list` is unavailable on Colab (micromamba only).
+        skip = "" if force_reinstall else f"""# Check if already installed
+if {env_manager} run -n CABSflex python -c "import CABS" >/dev/null 2>&1; then
     echo "CABS-Flex already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+        # MODELLER (for aa_rebuild) ships only in the cluster/default env; the
+        # Colab CABSflex env omits it (see environments/CABSflex.colab.yaml).
+        modeller_note = "" if is_colab else """echo "WARNING: MODELLER (for aa_rebuild) requires a license key."
+echo "Get one at https://salilab.org/modeller/registration.html"
+echo "Then set: export KEY_MODELLER=your_key"
+"""
         remove_block = cls._env_remove_block("CABSflex", env_manager) if force_reinstall else ""
         env_block = cls._env_install_block("CABSflex", env_manager, biopipelines)
         return f"""echo "=== Installing CABS-Flex ==="
-{skip}echo "WARNING: MODELLER requires a license key."
-echo "Get one at https://salilab.org/modeller/registration.html"
-echo "Then set: export KEY_MODELLER=your_key"
-{remove_block}
+{skip}{modeller_note}{remove_block}
 {env_block}
 
 # Verify installation
@@ -85,6 +94,7 @@ fi
     #   rmsf/          — per-residue CSVs + rmsf_map.
     #   tables/        — rmsf_all (merged).
     structures_ds_json = Path(lambda self: self.configuration_path("structures.json"))
+    worklist_tsv = Path(lambda self: self.configuration_path("worklist.tsv"))
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     rmsf_all_csv = Path(lambda self: self.table_path("rmsf_all"))
     rmsf_map = Path(lambda self: self.stream_map_path("rmsf"))
@@ -137,7 +147,7 @@ fi
             Streams:
                 structures: PDB ensemble models (num_models per input structure)
                 images: SVG plots (RMSF, RMSD, energy) per input structure
-                rmsf: Per-residue RMSF CSVs (per-residue-values-csv format),
+                rmsf: Per-residue RMSF CSVs (resi-csv format),
                     one per input structure; columns: id, chain, resi, rmsf
             Tables:
                 rmsf_all: id | chain | resi | rmsf  (merged, all structures)
@@ -189,6 +199,23 @@ fi
         if self.max_parallel < 1:
             raise ValueError(f"max_parallel must be >= 1, got: {self.max_parallel}")
 
+        # aa_rebuild needs MODELLER, which cannot be installed in the Colab
+        # CABSflex env (the only modeller builds on linux-64 require Python
+        # >=3.6, unsatisfiable against cabs's python=2.7 pin). Fail loud rather
+        # than let CABS crash mid-run with an opaque import error.
+        if self.aa_rebuild:
+            try:
+                from .config_manager import ConfigManager
+            except ImportError:
+                from config_manager import ConfigManager
+            if ConfigManager().get_scheduler() == "colab":
+                raise ValueError(
+                    "aa_rebuild=True requires MODELLER, which is unavailable on "
+                    "Colab (no python-2.7 modeller build resolves there). Run "
+                    "aa_rebuild on the cluster, or use aa_rebuild=False (the "
+                    "default; produces coarse-grained models + RMSF)."
+                )
+
         _validate_freeform_string("temperature", self.temperature)
         _validate_freeform_string("flexibility", self.flexibility)
         _validate_freeform_string("weighted_fit", self.weighted_fit)
@@ -224,7 +251,11 @@ fi
         script_content = "#!/bin/bash\n"
         script_content += "# CABS-Flex execution script\n"
         script_content += self.generate_completion_check_header()
-        script_content += self.activate_environment()
+        # Start in biopipelines (Python 3): worklist resolution and post-processing
+        # both need it. CABSflex itself runs under its own Python-2.7 env in the
+        # middle (see _generate_script_run_cabsflex); resolving stream IDs there
+        # would crash, because resolve_stream_ids.py imports the py3 package.
+        script_content += self.activate_environment(name="biopipelines")
         script_content += self._generate_script_run_cabsflex()
         script_content += self.generate_completion_check_footer()
 
@@ -266,7 +297,7 @@ fi
 
         flags_str = " ".join(flags)
 
-        # Iterate at runtime via Resolve.stream_ids (works for lazy streams).
+        # Iterate at runtime from the worklist TSV (works for lazy streams).
         # The parallel-vs-serial decision uses the deterministic-prefix count
         # as a heuristic — lazy streams may expand to more at runtime, but
         # that only causes serial fallback in the rare prefix-of-1 case.
@@ -281,8 +312,8 @@ fi
 echo "Running structures in parallel (max {self.max_parallel} concurrent)"
 PIDS=()
 FAILED=0
-for struct_id in {Resolve.stream_ids(self.structures_ds_json)}; do
-    STRUCT_FILE={Resolve.stream_item(self.structures_ds_json, "$struct_id")}
+while IFS=$'\\t' read -r struct_id STRUCT_FILE; do
+    [ -z "$struct_id" ] && continue
     WORK_DIR="{execution_folder}/$struct_id"
     LOG_FILE="{execution_folder}/$struct_id.log"
 
@@ -307,7 +338,7 @@ for struct_id in {Resolve.stream_ids(self.structures_ds_json)}; do
         {container_prefix}CABSflex -i "$STRUCT_FILE" -w "$WORK_DIR" {flags_str}
     ) > "$LOG_FILE" 2>&1 &
     PIDS+=($!)
-done
+done < "{self.worklist_tsv}"
 
 # Wait for remaining jobs
 for PID in "${{PIDS[@]}}"; do
@@ -321,8 +352,8 @@ fi
 """
         else:
             cabsflex_cmds = f"""
-for struct_id in {Resolve.stream_ids(self.structures_ds_json)}; do
-    STRUCT_FILE={Resolve.stream_item(self.structures_ds_json, "$struct_id")}
+while IFS=$'\\t' read -r struct_id STRUCT_FILE; do
+    [ -z "$struct_id" ] && continue
     WORK_DIR="{execution_folder}/$struct_id"
 
     echo "=== Processing $struct_id ==="
@@ -332,22 +363,43 @@ for struct_id in {Resolve.stream_ids(self.structures_ds_json)}; do
         echo "Error: CABS-Flex failed for $struct_id"
         exit 1
     fi
-done
+done < "{self.worklist_tsv}"
 """
 
-        # Post-processing runs under biopipelines (Python 3)
+        # CABSflex runs in its own Python-2.7 env; post-processing back in py3.
+        cabsflex_env = self.activate_environment()
         postproc_env = self.activate_environment(name="biopipelines")
 
         return f"""echo "Running CABS-Flex flexibility simulation"
 echo "Input structures: {len(self.structures_stream)} files"
 echo "Models per structure: {self.num_models}"
 
-# --- Run CABSflex for each structure (Python 2.7 env) ---
+# Resolve the id->file worklist under biopipelines (Python 3) BEFORE switching
+# to CABSflex's Python-2.7 env — resolve_stream_ids.py imports the py3 package
+# and would crash under py2.7. The bash loop below then reads the TSV with no
+# Python in the py2.7 section.
+python "{self.helper_script}" \\
+    --emit-worklist \\
+    --structures "{self.structures_ds_json}" \\
+    --worklist "{self.worklist_tsv}"
+if [ $? -ne 0 ]; then
+    echo "Error: failed to resolve CABSflex worklist"
+    exit 1
+fi
+
+# CABSflex's Python-2.7 matplotlib must use a headless backend. On Colab the
+# host exports MPLBACKEND=module://matplotlib_inline.backend_inline (for its
+# py3 kernel), which the py2.7 env cannot import and crashes CABS at startup.
+# Agg is the correct backend on any headless runtime (Colab and HPC alike).
+export MPLBACKEND=Agg
+
+# --- Switch to the CABSflex (Python 2.7) env and run per structure ---
+{cabsflex_env}
 {cabsflex_cmds}
 
 echo "=== CABSflex runs complete, starting post-processing ==="
 
-# --- Switch to Python 3 for post-processing ---
+# --- Switch back to Python 3 for post-processing ---
 {postproc_env}
 
 python "{self.helper_script}" \\
@@ -376,14 +428,6 @@ fi
         suffix_pattern = f"<1..{self.num_models}>"
         structure_ids = generate_multiplied_ids_pattern(
             self.structures_stream.ids, suffix_pattern
-        )
-
-        create_map_table(
-            self.structures_map, structure_ids,
-            files=[self.stream_path("structures", "<id>.pdb")],
-            parent_ids=self.structures_stream.ids,
-            suffix_pattern=suffix_pattern,
-            input_stream_name="structures"
         )
 
         structures = DataStream(
@@ -422,7 +466,7 @@ fi
             ids=list(input_ids),
             files=rmsf_files,
             map_table=self.rmsf_map,
-            format="per-residue-values-csv"
+            format="resi-csv"
         )
 
         # --- Output tables ---

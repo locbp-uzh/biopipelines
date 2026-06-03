@@ -31,7 +31,9 @@ import pandas as pd
 
 
 def update_map_from_folder(structures_map, output_folder, extension="pdb",
-                           best_poses_dir=None, set_provenance=None):
+                           best_poses_dir=None, set_provenance=None,
+                           provenance_from_suffix=None,
+                           suffix_regex=r"_\d+$"):
     """Write structures_map.csv based on the actual files in output_folder.
 
     Args:
@@ -41,7 +43,15 @@ def update_map_from_folder(structures_map, output_folder, extension="pdb",
         best_poses_dir: If set, scan this directory instead (for Gnina best_poses).
         set_provenance: Optional dict {column_name: constant_value} of provenance
             columns to add to every row (e.g. {"structures.id": "4AKE"}).
+        provenance_from_suffix: Optional column name. When set, that column is
+            filled per-row with the parent id derived by stripping ``suffix_regex``
+            from each file id. This recovers parent-PDB provenance when a tool
+            fans out N derived structures per input PDB across one or many parents.
+        suffix_regex: The trailing-suffix pattern the *caller* knows its ids use
+            (default ``_<digits>$``). The caller passes its own id shape so this
+            helper stays tool-agnostic — it just strips whatever regex it is given.
     """
+    import re
     scan_dir = best_poses_dir or output_folder
     pattern = os.path.join(scan_dir, f"*.{extension}")
     found_files = sorted(glob.glob(pattern))
@@ -66,6 +76,14 @@ def update_map_from_folder(structures_map, output_folder, extension="pdb",
     if set_provenance:
         for col, value in set_provenance.items():
             new_df[col] = value
+
+    # Per-row provenance: parent id = file id with the caller-supplied
+    # suffix_regex stripped. The pattern is the caller's id-shape, kept out of
+    # this shared, tool-agnostic helper.
+    if provenance_from_suffix:
+        new_df[provenance_from_suffix] = new_df["id"].map(
+            lambda x: re.sub(suffix_regex, "", str(x))
+        )
 
     # Carry forward any provenance columns from a pre-existing (legacy) map by
     # exact id match. No-op when the config-time map was not written.
@@ -120,6 +138,13 @@ def main():
     parser.add_argument("--set-provenance", default=None,
                         help="Constant provenance columns, 'col=value[,col2=value2]' "
                              "(e.g. 'structures.id=4AKE')")
+    parser.add_argument("--provenance-from-suffix", default=None,
+                        help="Column name to fill per-row with the parent id "
+                             "(file id minus the --suffix-regex match), "
+                             "e.g. 'structures.id' turns '4AKE_3' into '4AKE'")
+    parser.add_argument("--suffix-regex", default=r"_\d+$",
+                        help="Trailing-suffix regex the caller's ids use "
+                             "(default '_<digits>$'); stripped to get the parent id")
 
     args = parser.parse_args()
 
@@ -129,6 +154,8 @@ def main():
         extension=args.extension,
         best_poses_dir=args.best_poses_dir,
         set_provenance=_parse_set_provenance(args.set_provenance),
+        provenance_from_suffix=args.provenance_from_suffix,
+        suffix_regex=args.suffix_regex,
     )
 
 

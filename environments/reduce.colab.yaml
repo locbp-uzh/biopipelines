@@ -1,0 +1,8 @@
+name: reduce
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - reduce
+  - pandas

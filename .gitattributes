@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings — they run on Linux clusters/Colab, and a
+# CRLF working copy on Windows otherwise commits \r bytes that break execution
+# ($'\r' errors). Force LF for .sh regardless of core.autocrlf.
+*.sh text eol=lf

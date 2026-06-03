@@ -1040,13 +1040,14 @@ class PyMOLSessionBuilder:
         structures = self._resolve_structures(structures_ref)
         print(f"RenderEach: Rendering {len(structures)} structures individually")
 
-        # Create renders subfolder
-        renders_folder = os.path.join(self.output_folder, "renders")
+        # output_folder is already the renders stream folder; don't double-join.
+        renders_folder = self.output_folder
         os.makedirs(renders_folder, exist_ok=True)
 
         # Set background color
         cmd.bg_color(background)
 
+        rendered = 0
         for struct in structures:
             struct_id = struct["id"]
             struct_path = struct["path"]
@@ -1057,54 +1058,49 @@ class PyMOLSessionBuilder:
 
             print(f"\n  Rendering: {struct_id}")
 
-            # Clear previous objects
-            cmd.delete("all")
+            # Quote the object name so ids that collide with PyMOL selection
+            # keywords (e.g. a bare "b" reads as b-factor) resolve as objects.
+            obj = f'"{struct_id}"'
 
-            # Load structure
+            # Skip a failed structure rather than aborting the whole loop —
+            # the session save and missing.csv propagation must still run.
             try:
+                cmd.delete("all")
                 cmd.load(struct_path, struct_id)
-            except Exception as e:
-                print(f"    Error loading {struct_path}: {e}")
-                continue
 
-            # Show cartoon for protein
-            cmd.show("cartoon", f"{struct_id} and polymer")
-            cmd.hide("lines", f"{struct_id}")
+                cmd.show("cartoon", f"{obj} and polymer")
+                cmd.hide("lines", obj)
 
-            # Color protein
-            if color_protein == "plddt":
-                self._apply_plddt_coloring(struct_id, "polymer", upper=plddt_upper)
-            else:
-                cmd.color(color_protein, f"{struct_id} and polymer")
+                if color_protein == "plddt":
+                    self._apply_plddt_coloring(struct_id, "polymer", upper=plddt_upper)
+                else:
+                    cmd.color(color_protein, f"{obj} and polymer")
 
-            # Show and color ligand
-            cmd.show("sticks", f"{struct_id} and {ligand_selection}")
-            if color_ligand == "byatom":
-                cmd.util.cbag(f"{struct_id} and {ligand_selection}")  # Color by atom, gray carbons
-            else:
-                cmd.color(color_ligand, f"{struct_id} and {ligand_selection}")
+                cmd.show("sticks", f"{obj} and {ligand_selection}")
+                if color_ligand == "byatom":
+                    cmd.util.cbag(f"{obj} and {ligand_selection}")  # Color by atom, gray carbons
+                else:
+                    cmd.color(color_ligand, f"{obj} and {ligand_selection}")
 
-            # Orient towards ligand/selection
-            try:
-                # First orient the whole structure
-                cmd.orient(struct_id)
-                # Then zoom to show the ligand prominently
-                if cmd.count_atoms(f"{struct_id} and {orient_selection}") > 0:
-                    cmd.zoom(f"{struct_id} and {orient_selection}", buffer=15)
-            except Exception as e:
-                print(f"    Warning: Could not orient to {orient_selection}: {e}")
-                cmd.orient(struct_id)
+                # Orient towards ligand/selection
+                try:
+                    cmd.orient(obj)
+                    if cmd.count_atoms(f"{obj} and {orient_selection}") > 0:
+                        cmd.zoom(f"{obj} and {orient_selection}", buffer=15)
+                except Exception as e:
+                    print(f"    Warning: Could not orient to {orient_selection}: {e}")
+                    cmd.orient(obj)
 
-            # Ray trace and save
-            output_file = os.path.join(renders_folder, f"{struct_id}.png")
-            try:
+                # Ray trace and save
+                output_file = os.path.join(renders_folder, f"{struct_id}.png")
                 cmd.ray(width, height)
                 cmd.png(output_file, width=width, height=height, dpi=dpi)
                 print(f"    Saved: {output_file}")
+                rendered += 1
             except Exception as e:
-                print(f"    Error saving PNG: {e}")
+                print(f"    Error rendering {struct_id}: {e}")
 
-        print(f"\nRenderEach: Completed {len(structures)} renders")
+        print(f"\nRenderEach: Completed {rendered}/{len(structures)} renders")
 
     def _apply_plddt_coloring(self, obj_name: str, selection: str = "polymer", upper: float = 100):
         """
@@ -1219,6 +1215,41 @@ class PyMOLSessionBuilder:
         print(f"Session complete: {len(self.loaded_objects)} structures loaded")
 
 
+def write_missing_csv(config: Dict[str, Any]) -> None:
+    """Propagate upstream `missing` tables into PyMOL's own missing.csv.
+
+    PyMOL drops no ids itself; every row originates upstream and keeps its
+    original `removed_by`/`kind`, so pipe_check_completion treats the absent
+    renders for those ids as expected. Always writes the file (even empty)
+    when declared, so the completion check finds the path it expects.
+    """
+    missing_csv = config.get("missing_csv")
+    upstream_paths = config.get("upstream_missing_paths", [])
+    if not missing_csv:
+        return
+
+    columns = ['id', 'removed_by', 'kind', 'cause']
+    dfs = []
+    for path in upstream_paths:
+        if path and os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                if not df.empty:
+                    dfs.append(df)
+                    print(f"  Merging {len(df)} upstream missing entries from {path}")
+            except Exception as e:
+                print(f"  Warning: Could not read upstream missing {path}: {e}")
+
+    if dfs:
+        merged = pd.concat(dfs, ignore_index=True).drop_duplicates(subset=['id'], keep='last')
+    else:
+        merged = pd.DataFrame(columns=columns)
+
+    os.makedirs(os.path.dirname(missing_csv), exist_ok=True)
+    merged.to_csv(missing_csv, index=False)
+    print(f"Wrote missing.csv with {len(merged)} entries: {missing_csv}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Create PyMOL session from pipeline operations')
     parser.add_argument('--config', required=True, help='JSON configuration file')
@@ -1240,6 +1271,10 @@ def main():
 
     # Quit PyMOL
     cmd.quit()
+
+    # Propagate upstream missing manifest (after renders are produced)
+    write_missing_csv(config)
+
     print("\nPyMOL session creation completed successfully")
 
 

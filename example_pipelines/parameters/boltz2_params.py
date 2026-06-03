@@ -11,7 +11,7 @@ metal_coord are the constraint families surfaced by the wrapper.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.boltz2 import Boltz2
+from biopipelines import Boltz2
 
 with Pipeline(project="ToolParameters",
               job="Boltz2",

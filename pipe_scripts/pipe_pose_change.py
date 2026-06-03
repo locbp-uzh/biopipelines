@@ -19,6 +19,7 @@ import pandas as pd
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.id_map_utils import get_mapped_ids
 
 
 def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
@@ -161,9 +162,19 @@ def main():
     reference_alignment = config['reference_alignment']
     target_alignment = config['target_alignment']
     output_csv = config['output_csv']
+    multi_reference = config.get('multi_reference', False)
 
     # Load sample structures DataStream using pipe_biopipelines_io
     samples_ds = load_datastream(config['samples_json'])
+
+    # Per-structure reference: build an id -> reference_pdb map and match each
+    # sample to its own reference by id/provenance (like Contacts/DistanceSelector).
+    ref_map = {}
+    if multi_reference:
+        reference_ds = load_datastream(config['reference_json'])
+        for rid, rpath in iterate_files(reference_ds):
+            ref_map[rid] = rpath
+        print(f"Per-structure references: {len(ref_map)}")
 
     # Initialize PyMOL once for all structures
     try:
@@ -191,12 +202,29 @@ def main():
     target_items = list(iterate_files(samples_ds))
     total = len(target_items)
 
+    sample_ids = [tid for tid, _ in target_items]
+    sample_to_ref = {}
+    if multi_reference and ref_map:
+        map_paths = [p for p in (samples_ds.map_table,) if p]
+        sample_to_ref = get_mapped_ids(
+            source_ids=sample_ids, target_ids=list(ref_map.keys()),
+            unique=True, map_table_paths=map_paths or None,
+        )
+
     for idx, (target_id, target_pdb) in enumerate(target_items, 1):
         print(f"[{idx}/{total}] Processing {target_id}...", end=" ")
         try:
+            ref_for_sample = reference_pdb
+            if multi_reference:
+                matched = sample_to_ref.get(target_id)
+                if matched is None or matched not in ref_map:
+                    print(f"SKIPPED: no matching reference for {target_id}")
+                    failed.append({'id': target_id, 'error': 'no matching reference'})
+                    continue
+                ref_for_sample = ref_map[matched]
             result = calculate_pose_change(
                 cmd=cmd,
-                reference_pdb=reference_pdb,
+                reference_pdb=ref_for_sample,
                 reference_ligand=reference_ligand,
                 target_pdb=target_pdb,
                 target_id=target_id,

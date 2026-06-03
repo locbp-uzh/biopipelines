@@ -1,0 +1,12 @@
+# VespaG - colab/micromamba variant.
+# VespaG ships on PyPI (`pip install vespag`) and pulls torch + its ESM-2
+# dependency transitively. Minimal conda layer (Python 3.10 + pip); torch
+# resolves to Colab's system CUDA build automatically. See vespag.pip.colab.txt.
+# NOTE: ESM-2 3B weights (~11 GB) download lazily on first prediction — GPU
+# runtime strongly recommended.
+name: vespag
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip

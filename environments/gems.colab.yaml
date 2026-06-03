@@ -1,0 +1,24 @@
+name: gems
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+  - pyg
+  - huggingface
+dependencies:
+  - python=3.10
+  - pip
+  # mkl 2024.1+ drops the iJIT_NotifyEvent symbol that this pytorch 2.0.1 build's
+  # libtorch_cpu.so links against -> `import torch` ImportError. Pin to 2024.0.0.
+  - mkl=2024.0.0
+  - numpy=1.26.4
+  - rdkit=2024.03.3
+  - biopython=1.83
+  - pytorch=2.0.1
+  - pytorch-cuda=11.7
+  - pyg=2.5.2
+  - transformers=4.33.3
+  - matplotlib
+  - pandas
+  - pip:
+      - ankh==1.10.0

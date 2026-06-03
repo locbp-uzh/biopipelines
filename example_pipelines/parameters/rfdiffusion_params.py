@@ -8,7 +8,7 @@ tests/tool_parameters/test_rfdiffusion_params.py.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
+from biopipelines import RFdiffusion
 
 with Pipeline(project="ToolParameters",
               job="RFdiffusion",

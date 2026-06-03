@@ -143,7 +143,12 @@ fi
         script_content += "# ADMET-AI execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += f"""echo "Running ADMET-AI predictions"
+        # admet_ai imports matplotlib; on Colab the host kernel exports
+        # MPLBACKEND=module://matplotlib_inline.backend_inline, which leaks into
+        # this subprocess and matplotlib rejects it as an invalid backend. Force
+        # a headless backend (correct on HPC too; mirrors the install check).
+        script_content += f"""export MPLBACKEND=Agg
+echo "Running ADMET-AI predictions"
 echo "Compounds: {len(self.compounds_stream)}"
 echo "Output: {self.admet_csv}"
 

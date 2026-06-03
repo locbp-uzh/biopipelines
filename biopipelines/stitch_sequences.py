@@ -106,7 +106,7 @@ echo "=== StitchSequences ready ==="
             Streams: sequences (.csv)
             Tables:
                 sequences: id | sequence
-                missing: id | removed_by | cause
+                missing: id | removed_by | kind | cause
         """
         # Handle concatenation mode: no template, integer keys in indels
         if template is None and indels:
@@ -138,14 +138,19 @@ echo "=== StitchSequences ready ==="
         else:
             raise ValueError(f"template must be str, DataStream, or StandardizedOutput, got {type(template)}")
 
-        # Validate substitution keys are position strings or table references
+        # Validate substitution keys are position strings or table references.
+        # A TableReference is duck-typed by (path, column) — the same shape the
+        # processing logic below accepts (see hasattr checks).
+        def _is_table_ref(k):
+            return hasattr(k, "path") and hasattr(k, "column")
+
         for pos_key in self.substitutions.keys():
-            if not isinstance(pos_key, (str, tuple)):
+            if not isinstance(pos_key, (str, tuple)) and not _is_table_ref(pos_key):
                 raise ValueError(f"Substitution key must be position string or table reference, got {type(pos_key)}")
 
         # Validate indel keys are position strings or table references
         for pos_key in self.indels.keys():
-            if not isinstance(pos_key, (str, tuple)):
+            if not isinstance(pos_key, (str, tuple)) and not _is_table_ref(pos_key):
                 raise ValueError(f"Indel key must be position string or table reference, got {type(pos_key)}")
 
         # Initialize base class
@@ -432,7 +437,7 @@ fi
             "missing": TableInfo(
                 name="missing",
                 path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
+                columns=["id", "removed_by", "kind", "cause"],
                 description="IDs removed (duplicates or upstream) with removal reason"
             )
         }

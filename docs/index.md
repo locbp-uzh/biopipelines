@@ -20,9 +20,9 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
 ## Key Features
 
-**30+ integrated tools** -- Structure generation (RFdiffusion, BoltzGen), sequence design (ProteinMPNN, LigandMPNN), structure prediction (AlphaFold, Boltz2), analysis, and more.
+**70+ integrated tools** -- Structure generation (RFdiffusion, BoltzGen), sequence design (ProteinMPNN, LigandMPNN), structure prediction (AlphaFold, Boltz2), analysis, and more.
 
-**Two execution modes** -- Submit to SLURM clusters with `biopipelines-submit`, or run interactively in Jupyter/Colab notebooks with on-the-fly execution.
+**Three ways to run** -- Let an AI coding assistant author and run pipelines for you, submit to SLURM clusters with `biopipelines-submit`, or run interactively in Jupyter/Colab notebooks with on-the-fly execution.
 
 **Combinatorics** -- Cartesian products (`Each`) and grouping (`Bundle`) to systematically explore protein-ligand combinations.
 
@@ -33,6 +33,23 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 ---
 
 ## Quick Start
+
+=== "AI coding assistant"
+
+    The easiest way to use BioPipelines, especially if you don't write Python. Clone the repo on your computer and run an AI coding assistant (Claude Code, Codex, …) inside it; describe your protocol in plain language and let it author and run the pipeline. We recommend forking the repository prior to start working.
+
+    ```bash
+    #git clone https://github.com/locbp-uzh/biopipelines
+    git clone https://github.com/<your-project>/biopipelines
+    cd biopipelines
+    claude   # or: codex
+    ```
+
+    Then open the session by pointing the assistant at the pipeline prompt:
+
+    > Read and follow `llm/pipelines.md`. <then describe the protocol you want>
+
+    The assistant reads the framework's contract from `llm/`, interviews you about any open choices, and writes and runs the pipeline. Four contracts available: `pipelines.md` (workflows), `development.md` (tool implementation), `cluster.md` (automated debugging on HPCs), `colab.md` (automated debugging on Google Colab).
 
 === "Cluster (conda/mamba)"
 
@@ -88,13 +105,12 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
         RFdiffusion.install()
     ```
 
-    The Colab configuration (`colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `micromamba` into isolated environments, matching the cluster behavior. See [Google Colab](UserManual.md#google-colab) in the User Guide for details.
+    The Colab configuration (`colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `micromamba` into isolated environments, matching the cluster behavior. See [Google Colab](user_manual.md#installation-google-colab) in the User Guide for details.
 
 ---
 
 ## Documentation
 
-- **[User Guide](UserManual.md)** -- Core concepts, installation, and usage
-- **[Tool Reference](ToolReference.md)** -- Complete reference for all tools
-- **[Examples](examples.md)** -- Example pipelines with explanations
-- **[Developer Guide](DeveloperManual.md)** -- Architecture and tool development
+- **[User Guide](user_manual.md)** -- Core concepts, installation, and usage
+- **[Tool Reference](tool_reference.md)** -- Complete reference for all tools
+- **[Developer Guide](developer_manual.md)** -- Architecture and tool development

@@ -1,0 +1,28 @@
+# bp:no-build-isolation
+# ESMFold pip phase 2 - Colab/micromamba variant.
+# Installed with --no-build-isolation (signalled by the first-line marker
+# above) so openfold's setup.py picks up the torch installed in phase 1
+# instead of pip creating a fresh isolated build env without it.
+# Runtime deps used by pipe_esmfold_inference.py and by esm/openfold internals.
+omegaconf
+ml-collections
+einops
+modelcif
+# pytorch_lightning unpinned: upstream's 1.5.10 wheel has invalid metadata
+# ('torch (>=1.7.*)') that modern pip rejects, and our pipe_esmfold_inference.py
+# doesn't use it - it's only an esm/openfold runtime import dep.
+pytorch_lightning
+dm-tree
+scipy
+biopython
+pandas
+
+# NVIDIA dllogger - openfold runtime dep, not on PyPI.
+dllogger @ git+https://github.com/NVIDIA/dllogger.git
+
+# sokrypton forks: openfold with pure-Python attention (no nvcc compile), and
+# the matching esm fork that targets it. This is the pair the ColabFold ESMFold
+# notebook ships with. The esm fork's pyproject.toml declares the dist name as
+# 'fair-esm' (matching upstream), so require it as 'fair-esm' here.
+openfold @ git+https://github.com/sokrypton/openfold.git
+fair-esm @ git+https://github.com/sokrypton/esm.git

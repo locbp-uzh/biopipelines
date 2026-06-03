@@ -1,0 +1,17 @@
+# GNINA wrapper environment.
+# The GNINA binary itself is a standalone prebuilt download (see Gnina.install);
+# this env only provides the Python deps the pipe script needs to prepare
+# inputs and parse outputs: RDKit (conformers/alignment), OpenBabel (`obabel`
+# protonation), plus numpy/pandas. Kept separate from the base interpreter so
+# `obabel` is on PATH on every platform (the previous `biopipelines` env mapping
+# only existed on the cluster, so Gnina could not run on Colab).
+name: gnina
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - rdkit
+  - openbabel
+  - numpy
+  - pandas

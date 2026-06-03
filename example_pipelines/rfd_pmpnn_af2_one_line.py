@@ -5,9 +5,7 @@
 # tested: 
 
 from biopipelines.pipeline import *
-from biopipelines.rfdiffusion import RFdiffusion
-from biopipelines.protein_mpnn import ProteinMPNN
-from biopipelines.alphafold import AlphaFold
+from biopipelines import RFdiffusion, ProteinMPNN, AlphaFold
 
 with Pipeline(project="Examples", job="ContextAutoregistrationDemonstration"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")

@@ -1,6 +1,82 @@
-# Statistics
+# Sequence Statistics
 
-[← Back to Tool Reference](../ToolReference.md)
+[← Back to Tool Reference](../tool_reference.md)
+
+---
+
+### BayesianAdjuster
+
+Adjusts mutation frequencies using correlation signals via Bayesian log-odds updates. Boosts beneficial mutations and suppresses detrimental ones based on correlation evidence.
+
+**Bayesian Update Formula**:
+```
+p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c(i,aa))
+```
+Where:
+- p₀(i,aa) = prior probability from the input frequency table
+- c(i,aa) = signal from the input correlation table
+- γ = strength hyperparameter (higher = more aggressive adjustment)
+- σ(x) = sigmoid function = 1/(1+e⁻ˣ)
+- σ⁻¹(p) = logit function = log(p/(1-p))
+
+**Installation**: Requires the standard mutation-analysis Python environment with pandas, NumPy, matplotlib, and logomaker.
+
+**Parameters**:
+- `frequencies`: Union[TableInfo, str] (required) - Frequency table with columns `position`, `original`, and one column per amino acid: `A`, `C`, `D`, ..., `Y`.
+- `correlations`: Union[TableInfo, str] (required) - Correlation/evidence table with columns `position`, `original`, and one column per amino acid: `A`, `C`, `D`, ..., `Y`.
+- `sample_counts`: Optional[Union[TableInfo, str]] = None - Sample-count table with columns `position`, `original`, and one column per amino acid: `A`, `C`, `D`, ..., `Y`. Required when `kappa` is provided.
+- `mode`: str = "min" - Optimization direction:
+  - "min" = lower metric values are better (e.g., binding affinity)
+  - "max" = higher metric values are better (e.g., activity)
+- `gamma`: float = 3.0 - Strength hyperparameter for Bayesian update (higher = more aggressive)
+- `kappa`: Optional[float] = None - Pseudo-observations for sample size shrinkage. When provided, correlation signals are weighted by `n / (n + kappa)` using `sample_counts`.
+- `pseudocount`: float = 0.01 - Pseudocount added to all amino acids before adjustment. Ensures no amino acid has zero probability, allowing correlation signals to resurrect beneficial mutations. After adding, frequencies are normalized to preserve original sum.
+- `positions`: Optional[str] = None - PyMOL-style position filter (e.g., "141+143+145+147-149")
+
+**Outputs**:
+- `tables.adjusted_probabilities`: Raw Bayesian-adjusted probabilities
+- `tables.absolute_probabilities`: Normalized as absolute probabilities
+- `tables.relative_probabilities`: Normalized as relative probabilities (original AA = 0)
+- `tables.adjustment_log`: Detailed log of all adjustments
+
+**Example**:
+```python
+from biopipelines.bayesian_adjuster import BayesianAdjuster
+from biopipelines.mutation_composer import MutationComposer
+
+# Basic usage
+adjuster = BayesianAdjuster(
+    frequencies=frequency_table,
+    correlations=correlation_table,
+    mode="min",  # Minimize affinity
+    gamma=3.0,
+    pseudocount=0.01
+)
+
+# More aggressive adjustment with position filter
+adjuster = BayesianAdjuster(
+    frequencies=frequency_table,
+    correlations=correlation_table,
+    sample_counts=sample_counts_table,
+    mode="min",
+    gamma=5.0,  # More aggressive
+    kappa=10.0,  # Shrink low-sample correlation signals
+    pseudocount=0.005,  # Lower threshold for resurrected mutations
+    positions="141+143+145+147-149"
+)
+
+# Use adjusted frequencies in MutationComposer
+composer = MutationComposer(
+    frequencies=adjuster.tables.absolute_probabilities,
+    num_sequences=50,
+    mode="weighted_random"
+)
+```
+
+**Key Features**:
+- **Pseudocount mechanism**: Allows resurrection of beneficial mutations that weren't initially present (probability = 0) but have strong positive correlations
+- **Position filtering**: Restricts sequence-logo plots to selected positions for easier visual comparison
+- **Dual normalization**: Provides both all-amino-acid normalization and relative probabilities with the original amino acid excluded
 
 ---
 
@@ -17,6 +93,7 @@ mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 - `original`: Union[ToolOutput, StandardizedOutput] (required) - Original/reference sequences
 - `mutants`: Union[ToolOutput, StandardizedOutput] (required) - Mutant sequences to analyze
 - `include_original`: bool = True - Include original sequence in frequency analysis
+- `positions`: Optional[str] = None - PyMOL-style position filter restricting the analysis/logos to selected positions (e.g., "141+143+145+147-149")
 - `color_palette`: str = "okabe-ito" - Color palette for sequence logos. Options: "okabe-ito" (colorblind-friendly), "standard" (property-based shading)
 
 **Tables**:
@@ -77,7 +154,7 @@ Where:
 
 Note: When n ≤ 1 for either group, correlation is set to 0.
 
-**Installation**: Same environment as MutationProfiler.
+**Installation**: Requires the standard mutation-analysis Python environment with pandas, NumPy, matplotlib, and logomaker.
 
 **Parameters**:
 - `mutants`: Union[ToolOutput, StandardizedOutput, List[...]] (required) - Mutant sequences
@@ -89,13 +166,18 @@ Note: When n ≤ 1 for either group, correlation is set to 0.
 **Outputs**:
 - `tables.correlation_1d`:
 
-  | position | wt_aa | correlation | mean_mutated | mean_wt | var_mutated | var_wt | n_mutated | n_wt |
+  | position | original | correlation | mean_mutated | mean_wt | var_mutated | var_wt | n_mutated | n_wt |
   |----------|-------|-------------|--------------|---------|-------------|--------|-----------|------|
 
 - `tables.correlation_2d`:
 
-  | position | wt_aa | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
-  |----------|-------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | position | original | A | C | ... | Y |
+  |----------|-------|---|---|-----|---|
+
+- `tables.sample_counts_2d`:
+
+  | position | original | A | C | ... | Y |
+  |----------|-------|---|---|-----|---|
 
 **Example**:
 ```python
@@ -120,74 +202,3 @@ correlation = SequenceMetricCorrelation(
 ```
 
 ---
-
-### BayesianAdjuster
-
-Adjusts mutation frequencies using correlation signals via Bayesian log-odds updates. Boosts beneficial mutations and suppresses detrimental ones based on correlation evidence.
-
-**Bayesian Update Formula**:
-```
-p(i,aa|c) = σ(σ⁻¹(p₀(i,aa)) + γ·c(i,aa))
-```
-Where:
-- p₀(i,aa) = prior probability from MutationProfiler frequencies
-- c(i,aa) = correlation signal from SequenceMetricCorrelation
-- γ = strength hyperparameter (higher = more aggressive adjustment)
-- σ(x) = sigmoid function = 1/(1+e⁻ˣ)
-- σ⁻¹(p) = logit function = log(p/(1-p))
-
-**Installation**: Same environment as MutationProfiler.
-
-**Parameters**:
-- `frequencies`: Union[TableInfo, str] (required) - Frequency table from MutationProfiler (typically absolute_frequencies)
-- `correlations`: Union[TableInfo, str] (required) - Correlation table from SequenceMetricCorrelation (correlation_2d)
-- `mode`: str = "min" - Optimization direction:
-  - "min" = lower metric values are better (e.g., binding affinity)
-  - "max" = higher metric values are better (e.g., activity)
-- `gamma`: float = 3.0 - Strength hyperparameter for Bayesian update (higher = more aggressive)
-- `kappa`: float = 10.0 - Pseudo-observations for sample size shrinkage (planned feature, not yet implemented). Intended to down-weight correlations from small sample sizes.
-- `pseudocount`: float = 0.01 - Pseudocount added to all amino acids before adjustment. Ensures no amino acid has zero probability, allowing correlation signals to resurrect beneficial mutations. After adding, frequencies are normalized to preserve original sum.
-- `positions`: Optional[str] = None - PyMOL-style position filter (e.g., "141+143+145+147-149")
-
-**Outputs**:
-- `tables.adjusted_probabilities`: Raw Bayesian-adjusted probabilities
-- `tables.absolute_probabilities`: Normalized as absolute probabilities
-- `tables.relative_probabilities`: Normalized as relative probabilities (original AA = 0)
-- `tables.adjustment_log`: Detailed log of all adjustments
-
-**Example**:
-```python
-from biopipelines.bayesian_adjuster import BayesianAdjuster
-from biopipelines.mutation_composer import MutationComposer
-
-# Basic usage
-adjuster = BayesianAdjuster(
-    frequencies=profiler.tables.absolute_frequencies,
-    correlations=correlation.tables.correlation_2d,
-    mode="min",  # Minimize affinity
-    gamma=3.0,
-    pseudocount=0.01
-)
-
-# More aggressive adjustment with position filter
-adjuster = BayesianAdjuster(
-    frequencies=profiler.tables.absolute_frequencies,
-    correlations=correlation.tables.correlation_2d,
-    mode="min",
-    gamma=5.0,  # More aggressive
-    pseudocount=0.005,  # Lower threshold for resurrected mutations
-    positions="141+143+145+147-149"
-)
-
-# Use adjusted frequencies in MutationComposer
-composer = MutationComposer(
-    frequencies=adjuster.tables.absolute_probabilities,
-    num_sequences=50,
-    mode="weighted_random"
-)
-```
-
-**Key Features**:
-- **Pseudocount mechanism**: Allows resurrection of beneficial mutations that weren't initially present (probability = 0) but have strong positive correlations
-- **Position filtering**: Consistent x-axis with MutationProfiler and SequenceMetricCorrelation for easy visual comparison
-- **Dual normalization**: Provides both absolute (comparable to MutationProfiler) and relative (original AA excluded) probabilities

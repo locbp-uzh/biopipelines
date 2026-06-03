@@ -32,6 +32,19 @@ def _repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(_p.__file__)))
 
 
+def _auto_rename_ids(output_folder, n):
+    """The ids Panda's auto-rename produces for a step (no explicit rename=).
+
+    Mirrors panda.py: prefix is the step folder name with its zero-padded
+    execution order normalized to an int ("002_Panda" -> "2_Panda"), so two
+    unnamed Panda steps get distinct id namespaces.
+    """
+    folder = os.path.basename(output_folder)
+    parts = folder.split("_", 1)
+    prefix = f"{int(parts[0])}_{parts[1]}" if len(parts) > 1 and parts[0].isdigit() else folder
+    return [f"{prefix}_{i + 1}" for i in range(n)]
+
+
 def _run_pipe(name, config_path, config_flag=True):
     """Execute a pipe_*.py script with its JSON config.
 
@@ -477,10 +490,10 @@ def test_panda_pool_sequence_preserves_content_columns(
 def test_panda_pool_sequence_rename_preserves_content_columns(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
-    """Sequence → Panda(pool=seq, sort+head) triggers the rename path
-    (`Panda_1`, `Panda_2`). Even then, `sequences.csv` must keep the
-    `sequence` content column; `pool.id` provenance is expected as the
-    only new column."""
+    """Sequence → Panda(pool=seq, sort+head) triggers the auto-rename path
+    (`<order>_Panda_1`, `<order>_Panda_2`). Even then, `sequences.csv` must
+    keep the `sequence` content column; `pool.id` provenance is expected as
+    the only new column."""
     from biopipelines.sequence import Sequence
     from biopipelines.panda import Panda
 
@@ -506,14 +519,15 @@ def test_panda_pool_sequence_rename_preserves_content_columns(
     parents = sorted(r.get("pool.id", "") for r in rows)
     longest_two_seqs = sorted(r["sequence"] for r in rows)
 
+    expected_ids = _auto_rename_ids(pan.output_folder, 2)
     record_case(
         input="Sequence[a,b,c,d lengths 5,8,2,8] → Panda(sort+head(2), pool)",
-        expected=("sequence col kept", ["Panda_1", "Panda_2"],
+        expected=("sequence col kept", expected_ids,
                   ["b", "d"], ["AETGFLMK", "HHHHHKKK"]),
         actual=("sequence" in cols, ids, parents, longest_two_seqs),
     )
     assert "sequence" in cols, f"sequence column lost after rename — cols={cols}"
-    assert ids == ["Panda_1", "Panda_2"]
+    assert ids == sorted(expected_ids)
     assert set(parents) == {"b", "d"}
     assert longest_two_seqs == ["AETGFLMK", "HHHHHKKK"]
 
@@ -567,7 +581,7 @@ def test_panda_pool_writes_stream_map_tables_with_provenance(
 
     The stream_map_target writer must still produce the structures
     map_table with `id, file, structures.id` provenance columns, pointing
-    each renamed `Panda_N` back to its upstream parent. This locks in the
+    each renamed `<order>_Panda_N` back to its upstream parent. This locks in the
     behavior the bug-fix preserves for streams that genuinely need a map
     table (non-empty ``file_template``)."""
     from biopipelines.mock import Mock
@@ -598,17 +612,69 @@ def test_panda_pool_writes_stream_map_tables_with_provenance(
     cols = set(rows[0].keys()) if rows else set()
     rename_map = {r["id"]: r["structures.id"] for r in rows}
 
+    expected_ids = set(_auto_rename_ids(pan.output_folder, 2))
     record_case(
         input="Mock(4 ids) → Panda(sort+head(2), pool) — structures map_table",
-        expected=({"id", "file", "structures.id"}, {"Panda_1", "Panda_2"}),
+        expected=({"id", "file", "structures.id"}, expected_ids),
         actual=(cols, set(rename_map.keys())),
     )
     assert cols == {"id", "file", "structures.id"}, (
         f"unexpected stream map_table schema: {cols}"
     )
-    assert set(rename_map.keys()) == {"Panda_1", "Panda_2"}
+    assert set(rename_map.keys()) == expected_ids
     # Each renamed ID must link to a concrete upstream parent.
     assert set(rename_map.values()).issubset({"a", "b", "c", "d"})
+
+
+def test_panda_pool_prunes_recoverable_provenance_by_default(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Mock(structures) → Panda(filter, no rename): output IDs stay equal to
+    the upstream IDs, so the emitted `structures.id` provenance column is
+    fully recoverable from the row id by id-semantics. With Panda's default
+    prune_redundant_provenance=True it must be dropped — the column is a
+    genuine no-op for any downstream join. Setting the flag False keeps it."""
+    from biopipelines.mock import Mock
+    from biopipelines.panda import Panda
+
+    def run(prune, job):
+        pipeline = new_pipeline(job)
+        with pipeline:
+            m = Mock(
+                ids=["a", "b", "c"],
+                streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+                tables={"scores": {"columns": ["score"], "fill": {"score": 0.9}}},
+            )
+            pan = Panda(
+                tables=m.tables.scores,
+                operations=[Panda.filter("score >= 0.5")],
+                pool=m,
+                prune_redundant_provenance=prune,
+            )
+            pipeline.save()
+        _run_pipe("mock", os.path.join(m.output_folder, "_configuration", "mock_config.json"),
+                  config_flag=False)
+        _run_pipe("panda", os.path.join(pan.output_folder, "_configuration", "panda_config.json"))
+        rows = _read_csv_rows(pan.streams.structures.map_table)
+        return set(rows[0].keys()) if rows else set()
+
+    cols_pruned = run(True, "panda_prune_on")
+    cols_kept = run(False, "panda_prune_off")
+
+    record_case(
+        input="Mock(a,b,c) → Panda(filter, no rename) — structures map_table",
+        expected=("structures.id absent (default)", "structures.id present (off)"),
+        actual=("structures.id" not in cols_pruned, "structures.id" in cols_kept),
+    )
+    # Default True: recoverable provenance column is gone, id/file remain.
+    assert "structures.id" not in cols_pruned, (
+        f"recoverable structures.id was not pruned: {cols_pruned}"
+    )
+    assert {"id", "file"}.issubset(cols_pruned)
+    # Off: column retained verbatim.
+    assert "structures.id" in cols_kept, (
+        f"prune_redundant_provenance=False should keep the column: {cols_kept}"
+    )
 
 
 def test_panda_pool_content_and_stream_map_coexist(

@@ -1,0 +1,16 @@
+# DynamicBind relax env - colab/micromamba variant.
+# Used by run_single_protein_inference.py --relax_python; runs OpenMM-based
+# structural relaxation on the docked poses. Separate from the inference env
+# because openmm + ambertools + the inference stack conflict.
+name: dynamicbind_relax
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8
+  - openmm
+  - pdbfixer
+  - openmmforcefields
+  - openff-toolkit
+  - ambertools=22
+  - biopython
+  - libstdcxx-ng

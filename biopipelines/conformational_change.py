@@ -48,12 +48,11 @@ class ConformationalChange(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        return """echo "=== ConformationalChange ==="
-echo "Requires ProteinEnv (installed with PyMOL.install())"
-echo "No additional installation needed."
-touch "$INSTALL_SUCCESS"
-echo "=== ConformationalChange ready ==="
-"""
+        # Runs in ProteinEnv (PyMOL). Delegate the install so a notebook calling
+        # ConformationalChange.install() doesn't have to know it depends on PyMOL.
+        from .pymol import PyMOL
+        return PyMOL._install_script(folders, env_manager=env_manager,
+                                     force_reinstall=force_reinstall, **kwargs)
 
     # Lazy path descriptors
     analysis_csv = Path(lambda self: self.table_path("conformational_change_analysis"))

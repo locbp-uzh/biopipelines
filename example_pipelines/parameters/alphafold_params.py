@@ -8,7 +8,7 @@ tests/tool_parameters/test_alphafold_params.py.
 """
 
 from biopipelines.pipeline import *
-from biopipelines.alphafold import AlphaFold
+from biopipelines import AlphaFold
 
 with Pipeline(project="ToolParameters",
               job="AlphaFold",

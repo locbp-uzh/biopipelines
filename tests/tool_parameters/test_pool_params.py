@@ -26,7 +26,7 @@ def test_pool_emits_pipe_pool_call(local_config, isolated_cwd, new_pipeline):
     with pipeline:
         a = Sequence(seq="MKTAY", ids="a")
         b = Sequence(seq="AETGF", ids="b")
-        Pool(a, b)
+        Pool(runs=[a, b])
         script_path = pipeline.save()
 
     content = read_pipeline_sh(script_path)

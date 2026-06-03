@@ -1,13 +1,50 @@
 # Renderer for pdb/cif structure streams: interactive 3D viewer (py3Dmol)
 
+import glob
 import os
 import json
 import random
 
 
+def _resolve_path(file_path):
+    """Return file_path if it's a real file, or expand a wildcard to the first
+    match on disk. Tools that don't know the final extension at declaration
+    time store paths like ``<id>.*``; this resolves them at render."""
+    if not file_path:
+        return None
+    if os.path.isfile(file_path):
+        return file_path
+    if any(ch in file_path for ch in "*?["):
+        matches = sorted(glob.glob(file_path))
+        if matches:
+            return matches[0]
+    return None
+
+
+def _iter_id_file(stream):
+    """Yield (id, file_path) pairs for a per-id structure stream.
+
+    Prefer the map_table: it holds the fully-expanded ids and concrete paths
+    the run actually produced. ``files_expanded`` only consults the map_table
+    in runtime mode, so a post-run display of a lazy-id stream (Boltz2's
+    ``<id>_<1..K>``, split-chain PDB, …) would otherwise expand to just the
+    deterministic prefix and miss every real file. Fall back to the id/file
+    zip for streams without a map on disk."""
+    map_data = stream._get_map_data()
+    if map_data is not None and len(map_data) > 0:
+        file_col = next((c for c in ("file", "file_path") if c in map_data.columns), None)
+        id_col = "id" if "id" in map_data.columns else None
+        if file_col and id_col:
+            for _, row in map_data.iterrows():
+                yield str(row[id_col]), str(row[file_col])
+            return
+    for struct_id, file_path in zip(stream.ids_expanded, stream.files_expanded):
+        yield struct_id, file_path
+
+
 def render(stream, output):
-    """Render an interactive 3D structure viewer for pdb/cif streams."""
-    if stream.format not in ("pdb", "cif", "pdb|cif"):
+    """Render an interactive 3D structure viewer for pdb/cif/pqr streams."""
+    if not stream.has_only_formats("pdb", "cif", "pqr"):
         return ""
 
     max_structures = 50
@@ -15,19 +52,20 @@ def render(stream, output):
     if stream.is_shared_file:
         # One shared structure file — render once. The stream's ids label
         # logical entries inside the file, not separate artifacts.
-        path = stream.files
-        if path and os.path.isfile(path):
+        path = _resolve_path(stream.files)
+        if path:
             try:
                 with open(path, "r") as f:
                     pdb_data.append((stream.name, f.read(), path))
             except Exception:
                 pass
     else:
-        for struct_id, file_path in zip(stream.ids_expanded, stream.files_expanded):
-            if file_path and os.path.isfile(file_path):
+        for struct_id, file_path in _iter_id_file(stream):
+            resolved = _resolve_path(file_path)
+            if resolved:
                 try:
-                    with open(file_path, "r") as f:
-                        pdb_data.append((struct_id, f.read(), file_path))
+                    with open(resolved, "r") as f:
+                        pdb_data.append((struct_id, f.read(), resolved))
                 except Exception:
                     pass
             if len(pdb_data) >= max_structures:
@@ -36,18 +74,13 @@ def render(stream, output):
     if not pdb_data:
         return ""
 
-    # Detect format per-file from extension when format is "pdb|cif"
-    def _detect_fmt(file_path, default):
+    # Detect format per-file from extension (pqr is parsed as pdb by 3Dmol).
+    def _detect_fmt(file_path):
         if file_path.endswith(".cif"):
             return "cif"
-        if file_path.endswith(".pdb"):
-            return "pdb"
-        return default
+        return "pdb"
 
-    if stream.format == "pdb|cif":
-        fmt = _detect_fmt(pdb_data[0][2], "pdb")
-    else:
-        fmt = "pdb" if stream.format == "pdb" else "cif"
+    fmt = _detect_fmt(pdb_data[0][2])
 
     viewer_id = f"bp3d_{random.randint(100000, 999999)}"
 

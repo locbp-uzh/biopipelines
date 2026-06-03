@@ -159,16 +159,16 @@ def test_pdb_invalid_convert_raises(record_case):
         PDB(pdbs="4ufc", convert="xyz")
 
 
-# ── operations (PDB.Rename) ──────────────────────────────────────────────────
+# ── operations (PDB.rename) ──────────────────────────────────────────────────
 
 def test_pdb_rename_operation(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
-    """PDB.Rename creates a PDBOperation that rides along in to_dict."""
+    """PDB.rename creates a PDBOperation that rides along in to_dict."""
     from biopipelines.pdb import PDB, PDBOperation
 
-    op = PDB.Rename("LIG", ":L:")
-    record_case(input="PDB.Rename('LIG', ':L:')",
+    op = PDB.rename("LIG", ":L:")
+    record_case(input="PDB.rename('LIG', ':L:')",
                 expected=("rename", "LIG", ":L:"),
                 actual=(op.op_type, op.params["old"], op.params["new"]))
     assert isinstance(op, PDBOperation)
@@ -176,9 +176,27 @@ def test_pdb_rename_operation(
     assert op.params == {"old": "LIG", "new": ":L:"}
 
     # Outside a pipeline to keep raw-attribute access to `operations`.
-    p = PDB("4ufc", PDB.Rename("LIG", ":L:"))
+    p = PDB("4ufc", PDB.rename("LIG", ":L:"))
     assert len(p.operations) == 1
     assert p.operations[0].op_type == "rename"
+
+
+def test_pdb_rotate_bond_operation(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """PDB.rotate_bond creates a PDBOperation carrying atoms + angle."""
+    from biopipelines.pdb import PDB, PDBOperation
+
+    op = PDB.rotate_bond("LIG.C60", "LIG.C70", 180)
+    record_case(input="PDB.rotate_bond('LIG.C60', 'LIG.C70', 180)",
+                expected=("rotate_bond", "LIG.C60", "LIG.C70", 180.0),
+                actual=(op.op_type, op.params["atom1"], op.params["atom2"],
+                        op.params["angle"]))
+    assert isinstance(op, PDBOperation)
+    assert op.op_type == "rotate_bond"
+    assert op.params == {"atom1": "LIG.C60", "atom2": "LIG.C70", "angle": 180.0}
+    # angle is coerced to float for clean JSON serialization.
+    assert isinstance(op.params["angle"], float)
 
 
 def test_pdb_rejects_non_operation_positional_args(record_case):

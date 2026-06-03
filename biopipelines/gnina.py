@@ -27,7 +27,7 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
     from .config_manager import ConfigManager
     from .biopipelines_io import Resolve
 except ImportError:
@@ -35,7 +35,7 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
     from config_manager import ConfigManager
     from biopipelines_io import Resolve
 
@@ -93,28 +93,65 @@ class Gnina(BaseConfig):
             module avail cuda && module avail cudnn
             module show cuda/<version>
         """
+        try:
+            from .config_manager import ConfigManager
+        except ImportError:
+            from config_manager import ConfigManager
+        scheduler = ConfigManager().get_scheduler()
+
         repo_dir = folders.get("Gnina", "")
         binary = os.path.join(repo_dir, "gnina.1.3.2")
+
+        # The GNINA wrapper's pipe script needs RDKit + OpenBabel (`obabel`) +
+        # numpy/pandas. On the cluster these come from the shared `biopipelines`
+        # env (config maps Gnina there). Colab has no `biopipelines` micromamba
+        # env, so we create a dedicated `gnina` env there (config.colab.yaml maps
+        # Gnina -> gnina). Only emitted on Colab to leave the cluster path intact.
+        # On Colab a dedicated `gnina` env supplies the pipe script's
+        # RDKit/OpenBabel deps (config.colab.yaml maps Gnina -> gnina); the
+        # cluster reuses the shared `biopipelines` env and needs no env here.
+        # Guard the env creation independently of the binary download so each
+        # half is (re)done only when *its own* artefact is missing — on Colab
+        # the binary may persist on Drive while the env is ephemeral, or vice
+        # versa, and we must repair only the missing one.
+        env_block = ""
+        env_check = "true"  # cluster: nothing to verify beyond the binary.
+        if scheduler == "colab":
+            biopipelines = folders.get("biopipelines", "")
+            install = cls._env_install_block("gnina", env_manager, biopipelines)
+            env_check = cls._env_exists_check("gnina", env_manager)
+            env_block = f"""# Create the gnina env (skip if it already exists).
+if ! {env_check}; then
+    {install}
+else
+    echo "gnina environment already exists, skipping creation."
+fi
+"""
+
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -f "{binary}" ]; then
+if [ -f "{binary}" ] && {env_check}; then
     echo "GNINA already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
         return f"""echo "=== Installing GNINA ==="
-{skip}mkdir -p {repo_dir}
-cd {repo_dir}
-wget https://github.com/gnina/gnina/releases/download/v1.3.2/gnina.1.3.2
-chmod +x gnina.1.3.2
+{skip}{env_block}mkdir -p "{repo_dir}"
+cd "{repo_dir}"
+# Download the prebuilt binary only if absent (it may persist on Drive while
+# the env was lost); -nc keeps a present file untouched.
+if [ ! -f "{binary}" ]; then
+    wget -nc https://github.com/gnina/gnina/releases/download/v1.3.2/gnina.1.3.2
+    chmod +x gnina.1.3.2
+fi
 ln -sf gnina.1.3.2 gnina
 
 # Verify installation
-if [ -x "{binary}" ]; then
+if [ -x "{binary}" ] && {env_check}; then
     touch "$INSTALL_SUCCESS"
     echo "=== GNINA installation complete ==="
 else
-    echo "ERROR: GNINA verification failed (binary missing or not executable)"
+    echo "ERROR: GNINA verification failed (binary missing/not executable or gnina env absent)"
     exit 1
 fi
 """
@@ -134,8 +171,6 @@ fi
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     missing_csv = Path(lambda self: self.table_path("missing"))
     autobox_ds_json = Path(lambda self: self.configuration_path("autobox_ligand_ds.json"))
-    propagate_missing_py = Path(lambda self: self.pipe_script_path("pipe_propagate_missing.py"))
-    update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -158,6 +193,7 @@ fi
                  rmsd_threshold: float = 2.0,
                  protonate: bool = True,
                  pH: float = 7.4,
+                 dock_timeout: Optional[int] = 1800,
                  **kwargs):
         """
         Initialize GNINA docking configuration.
@@ -213,13 +249,21 @@ fi
                 the specified pH before docking (default True). Requires obabel
                 in PATH.
             pH: Protonation pH for OpenBabel (default 7.4).
+            dock_timeout: Per-run wall-clock cap in seconds for a single GNINA
+                docking invocation (default 1800 = 30 min). A flexible ligand
+                (e.g. an aminoglycoside) at high exhaustiveness can occasionally
+                produce a Vina search that never terminates and would otherwise
+                hang the whole job; a run that exceeds this is killed, warned,
+                and treated as a failed run (the other runs/poses still count).
+                Set generously above a normal dock — scale it up if you raise
+                exhaustiveness. None or 0 disables the cap.
 
         Output:
             Streams: structures (.pdb)
             Tables:
                 docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity
                 docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
-                missing: id | removed_by | cause
+                missing: id | removed_by | kind | cause
         """
         # Keep original input for upstream missing table detection
         self.structures_input = structures
@@ -231,6 +275,9 @@ fi
             self.structures_stream = structures
         else:
             raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
+
+        # Keep original input for upstream missing table detection
+        self.compounds_input = compounds
 
         # Resolve compounds input to DataStream
         if isinstance(compounds, StandardizedOutput):
@@ -279,6 +326,7 @@ fi
 
         # Filtering & analysis
         self.cnn_score_threshold = cnn_score_threshold
+        self.dock_timeout = dock_timeout
         self.rmsd_threshold = rmsd_threshold
 
         # Protonation
@@ -297,7 +345,7 @@ fi
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
 
-        if self.structures_stream.format != "pdb":
+        if not self.structures_stream.has_only_formats("pdb"):
             raise ValueError(
                 f"GNINA requires PDB format structures, got '{self.structures_stream.format}'. "
                 f"Use convert='pdb' in PDB() or RCSB() to ensure PDB format output."
@@ -382,7 +430,7 @@ fi
         elif self.autobox_ligand_path is not None:
             box_config["autobox_ligand"] = self.autobox_ligand_path
 
-        upstream_missing = self._get_upstream_missing_table_path(self.structures_input)
+        upstream_missing = self._collect_upstream_missing_paths(self.structures_input, self.compounds_input)
 
         config = {
             "output_folder": self.execution_folder,
@@ -392,7 +440,9 @@ fi
             "compounds_json": self.compounds_json,
             "docking_results_csv": self.docking_results_csv,
             "docking_summary_csv": self.docking_summary_csv,
-            "missing_csv": upstream_missing,
+            "structures_map": self.structures_map,
+            "upstream_missing": upstream_missing,
+            "missing_csv": self.missing_csv if upstream_missing else None,
             "box": box_config,
             "exhaustiveness": self.exhaustiveness,
             "num_modes": self.num_modes,
@@ -405,6 +455,7 @@ fi
             "conformer_rmsd": self.conformer_rmsd,
             "conformer_energies_ref": self.conformer_energies_ref,
             "cnn_score_threshold": self.cnn_score_threshold,
+            "dock_timeout": self.dock_timeout,
             "rmsd_threshold": self.rmsd_threshold,
             "protonate": self.protonate,
             "pH": self.pH,
@@ -458,43 +509,15 @@ fi
 
         script_content += "\n"
         script_content += self._generate_script_run_gnina()
-        script_content += self._generate_script_update_structures_map()
         script_content += self._generate_missing_table_propagation()
         script_content += self.generate_completion_check_footer()
         return script_content
 
-    def _generate_script_update_structures_map(self) -> str:
-        """Generate script to update structures_map.csv with actual runtime output files."""
-        best_poses_dir = self.stream_folder("structures")
-        return f"""echo "Updating structures map with actual output files"
-python {self.update_map_py} --structures-map "{self.structures_map}" --output-folder "{self.execution_folder}" --best-poses-dir "{best_poses_dir}"
-
-"""
-
     def _generate_missing_table_propagation(self) -> str:
-        """Generate script section to propagate missing.csv from upstream tools."""
-        upstream_missing_path = self._get_upstream_missing_table_path(self.structures_input)
-
-        if not upstream_missing_path:
-            return ""
-
-        upstream_folder = os.path.dirname(upstream_missing_path)
-
-        return f"""
-# Propagate missing table from upstream tools — writes to tables/missing.csv.
-echo "Checking for upstream missing structures..."
-if [ -f "{upstream_missing_path}" ]; then
-    echo "Found upstream missing.csv - propagating to current tool"
-    python {self.propagate_missing_py} \\
-        --upstream-folders "{upstream_folder}" \\
-        --output-folder "{self.output_folder}" \\
-        --missing-csv "{self.missing_csv}"
-else
-    echo "No upstream missing.csv found - creating empty missing.csv"
-    echo "id,removed_by,cause" > "{self.missing_csv}"
-fi
-
-"""
+        """Propagate the union of upstream `missing` manifests into tables/missing.csv."""
+        return self.generate_missing_propagation(
+            self.structures_input, self.compounds_input, missing_csv=self.missing_csv
+        )
 
     def _generate_script_resolve_autobox(self) -> str:
         """Generate bash snippet to resolve autobox ligand at runtime."""
@@ -524,8 +547,6 @@ python {self.helper_py} {self.config_json}
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after GNINA execution."""
-        upstream_missing_path = self._get_upstream_missing_table_path(self.structures_input)
-
         tables = {
             "docking_results": TableInfo(
                 name="docking_results",
@@ -546,13 +567,8 @@ python {self.helper_py} {self.config_json}
             ),
         }
 
-        if upstream_missing_path:
-            tables["missing"] = TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "cause"],
-                description="IDs removed by upstream tools with removal reason"
-            )
+        if self._collect_upstream_missing_paths(self.structures_input, self.compounds_input):
+            tables["missing"] = self.missing_table_info(self.missing_csv)
 
         best_poses_dir = self.stream_folder("structures")
         protein_ids = list(self.structures_stream.ids)
@@ -564,12 +580,7 @@ python {self.helper_py} {self.config_json}
             for lig in ligand_ids
         ]
         structure_files = [os.path.join(best_poses_dir, "<id>_best.pdb")]
-        provenance = {
-            "structures": [prot for prot in protein_ids for _ in ligand_ids],
-            "compounds": [lig for _ in protein_ids for lig in ligand_ids],
-        }
-        create_map_table(self.structures_map, structure_ids, files=structure_files,
-                         provenance=provenance)
+
         structures = DataStream(
             name="structures",
             ids=structure_ids,

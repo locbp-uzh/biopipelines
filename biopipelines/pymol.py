@@ -138,6 +138,7 @@ fi
     # artefact; put it in _extras/ since it's not a typed stream or table.
     config_file = Path(lambda self: self.configuration_path("pymol_config.json"))
     session_file = Path(lambda self: os.path.join(self.extras_folder, f"{self.session_name}.pse"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
     pymol_py = Path(lambda self: self.pipe_script_path("pipe_pymol.py"))
 
     # --- Static methods for creating operations ---
@@ -619,6 +620,18 @@ fi
                     'structure_ids': getattr(source, 'structure_ids', [])
                 }
 
+        # Collect upstream `missing` tables from render_each sources so the
+        # pipe script propagates them into PyMOL's own missing.csv. A filtered
+        # upstream (Pool/Panda) declares every original id but carries only the
+        # surviving files; its missing table excuses the absent renders.
+        self.upstream_missing_paths = []
+        for op in self.operations:
+            if op.op_type == "render_each":
+                structures = op.params.get("structures")
+                missing_path = self._get_upstream_missing_table_path(structures)
+                if missing_path and missing_path not in self.upstream_missing_paths:
+                    self.upstream_missing_paths.append(missing_path)
+
     def _serialize_operation(self, op: PyMOLOperation, op_index: int) -> Dict[str, Any]:
         """Serialize an operation to a dictionary for JSON config."""
         result = {"op": op.op_type}
@@ -709,6 +722,8 @@ fi
             "output_folder": self.stream_folder("renders"),
             "renders_folder": self.stream_folder("renders"),
             "session_file": self.session_file,
+            "missing_csv": self.missing_csv,
+            "upstream_missing_paths": getattr(self, "upstream_missing_paths", []),
         }
 
         # Write config file at configuration time (not execution time)
@@ -778,9 +793,22 @@ python "{self.pymol_py}" --config "{self.config_file}"
         else:
             renders = None
 
+        # Declare our own missing.csv when a filtered upstream feeds render_each.
+        # The pipe script writes it by propagating the upstream rows (PyMOL drops
+        # no ids itself); pipe_check_completion then treats those ids' absent
+        # renders as expected rather than failures (removed_by != "PyMOL").
+        tables = {}
+        if getattr(self, "upstream_missing_paths", None):
+            tables["missing"] = TableInfo(
+                name="missing",
+                path=self.missing_csv,
+                columns=["id", "removed_by", "kind", "cause"],
+                description="IDs propagated from an upstream filter (renders expected absent)"
+            )
+
         return {
             "renders": renders,
-            "tables": {},
+            "tables": tables,
             "output_folder": self.output_folder,
             "session_file": self.session_file
         }

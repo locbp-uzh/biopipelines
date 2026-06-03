@@ -1,0 +1,44 @@
+# NeuralPLexer - colab/micromamba variant.
+# Trimmed from upstream environment_dev.yaml. Upstream's `make environment`
+# is fragile (multiple open issues); pinning the heavy bits in pip (phase 1)
+# rather than conda gives micromamba a less constrained solver problem.
+#
+# Pip layer is phased (see neuralplexer.pip.colab.{1,2}.txt):
+#   1 — torch + pytorch3d + PyG (cu117 wheels)
+#   2 — NeuralPLexer's `requirements.txt` and runtime deps
+name: neuralplexer
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - pip
+  # OpenBabel + RDKit go via conda (pip wheels are unreliable for OpenBabel).
+  - openbabel
+  - rdkit
+  - tmalign
+  # NeuralPLexer's model code hard-imports openfold's compiled CUDA extension
+  # (attn_core_inplace_cuda), so openfold must build at install time. We give it
+  # a *self-consistent* CUDA 12.1 toolchain entirely from conda-forge, matching
+  # torch 2.1.0+cu121 (phase 1). cuda-version=12.1 pins the whole stack so
+  # nvcc / cudart / cccl all resolve to the same series — mixing the nvidia
+  # 11.7 label with conda-forge produced a CUDA-13 runtime libcudart against an
+  # 11.7 dev symlink (dangling -> link failure). One channel, one CUDA series.
+  #   cuda-nvcc        — the compiler
+  #   cuda-cudart-dev  — cuda_runtime.h + libcudart.so (link target)
+  #   cuda-cccl        — Thrust/CUB headers pulled in via torch's complex.h
+  #   libcu*-dev       — cusparse/cublas/cusolver headers torch's CUDAContext.h needs
+  - cuda-version=12.1
+  - cuda-nvcc
+  - cuda-cudart-dev
+  - cuda-cccl
+  - libcusparse-dev
+  - libcublas-dev
+  - libcusolver-dev
+  # Host compiler for the openfold build: nvcc 12.1 driving the system gcc 12
+  # chokes on torch 2.1's bundled pybind11 templates (`expected template-name`).
+  # gcc 10 is the newest host compiler CUDA 12.1 fully supports and compiles
+  # pybind11 cleanly. The install script points nvcc at it via -ccbin and sets
+  # CC/CXX, so the extension builds against gcc 10, not Colab's gcc 12.
+  - gxx_linux-64=10
+  - gcc_linux-64=10

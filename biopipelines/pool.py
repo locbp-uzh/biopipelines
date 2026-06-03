@@ -43,13 +43,13 @@ from typing import Dict, List, Any, Optional
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
 
 
 class Pool(BaseConfig):
@@ -77,13 +77,16 @@ echo "=== Pool ready ==="
 
     def __init__(self, runs: List[StandardizedOutput],
                  recount_prefix: Optional[str] = None,
+                 streams: Optional[List[str]] = None,
                  **kwargs):
         """
         Args:
-            runs: List of two or more StandardizedOutput objects, all from
-                runs of the same upstream tool. Must expose identical
-                stream-name sets and identical table-name sets, with
-                matching formats per shared stream.
+            runs: List of two or more StandardizedOutput objects. With the
+                default ``streams=None`` all inputs must expose identical
+                stream-name sets (typically because they come from runs of the
+                same tool). Pass ``streams=[...]`` to pool only those named
+                streams when inputs differ (e.g. one structure carries a
+                ``compounds`` stream and another doesn't).
             recount_prefix: If set, replace the default per-run id suffix
                 (`<orig_id>_<pool_idx>`) with a flat 1-based renumber across
                 all rows of the pool, producing ids `<recount_prefix>_1`,
@@ -91,6 +94,11 @@ echo "=== Pool ready ==="
                 config time when every input run has fully-resolved ids;
                 otherwise the framework emits a lazy `<recount_prefix>_[<N>]`
                 pattern that pipe_pool resolves at runtime.
+            streams: Stream names to pool. ``None`` (default) is strict: every
+                input must expose the same stream set. A list keeps exactly
+                those streams (each must exist in every input, with matching
+                format/shape) and drops the rest. Tables are always pooled as
+                the intersection across inputs, regardless of this setting.
         """
         if not isinstance(runs, (list, tuple)):
             raise ValueError(
@@ -115,33 +123,57 @@ echo "=== Pool ready ==="
         self.recount_prefix = recount_prefix
         self.runs = list(runs)
 
-        # Validate identical stream / table names + matching formats.
-        first = self.runs[0]
-        first_streams = self._stream_names(first)
-        first_tables = self._table_names(first)
-        first_formats = self._stream_formats(first)
-        for i, r in enumerate(self.runs[1:], start=2):
-            other_streams = self._stream_names(r)
-            if other_streams != first_streams:
-                raise ValueError(
-                    f"Pool input #{i} has stream names {sorted(other_streams)} "
-                    f"but input #1 has {sorted(first_streams)}. All inputs "
-                    "must come from the same upstream tool."
-                )
-            other_tables = self._table_names(r)
-            if other_tables != first_tables:
-                raise ValueError(
-                    f"Pool input #{i} has table names {sorted(other_tables)} "
-                    f"but input #1 has {sorted(first_tables)}. All inputs "
-                    "must come from the same upstream tool."
-                )
-            other_formats = self._stream_formats(r)
-            for name, fmt in first_formats.items():
-                if other_formats.get(name) != fmt:
+        run_streams = [self._stream_names(r) for r in self.runs]
+        run_tables = [self._table_names(r) for r in self.runs]
+
+        if streams is None:
+            # Strict: every input must expose the same stream set.
+            first_streams = run_streams[0]
+            for i, other_streams in enumerate(run_streams[1:], start=2):
+                if other_streams != first_streams:
+                    raise ValueError(
+                        f"Pool input #{i} has stream names {sorted(other_streams)} "
+                        f"but input #1 has {sorted(first_streams)}. All inputs "
+                        "must come from the same upstream tool, or pass "
+                        "streams=[...] to pool only the streams they share."
+                    )
+        else:
+            # Explicit: pool exactly the named streams; each must exist everywhere.
+            requested = set(streams)
+            for i, other_streams in enumerate(run_streams, start=1):
+                missing = requested - other_streams
+                if missing:
+                    raise ValueError(
+                        f"Pool input #{i} is missing requested stream(s) "
+                        f"{sorted(missing)} (has {sorted(other_streams)})."
+                    )
+            first_streams = requested
+
+        # Tables are always pooled as the intersection across inputs.
+        first_tables = set.intersection(*run_tables) if run_tables else set()
+
+        # Formats must be COMPATIBLE across runs for every pooled stream. A
+        # multi-format stream (e.g. "pdb|cif", the form RCSB uses before the
+        # extension is known) is compatible with any run whose tokens overlap;
+        # an exact-match check would wrongly reject pooling a "pdb" stream with
+        # a "pdb|cif" one. The pooled stream advertises the union of tokens, so
+        # per-file renderers/consumers resolve the actual extension at runtime.
+        def _tokens(fmt):
+            return {t.strip().lower() for t in (fmt or "").split("|") if t.strip()}
+
+        first_formats = {}
+        for name in first_streams:
+            token_union = set()
+            for i, r in enumerate(self.runs, start=1):
+                toks = _tokens(self._stream_formats(r).get(name))
+                if token_union and toks and not (token_union & toks):
                     raise ValueError(
                         f"Pool input #{i} stream '{name}' has format "
-                        f"{other_formats.get(name)!r} but input #1 has {fmt!r}."
+                        f"{self._stream_formats(r).get(name)!r}, incompatible "
+                        f"with {'|'.join(sorted(token_union))!r} from earlier inputs."
                     )
+                token_union |= toks
+            first_formats[name] = "|".join(sorted(token_union))
 
         # Validate that every run uses the same storage shape (shared-file
         # vs per-id) for a given stream. Mixed shapes can't be combined
@@ -162,6 +194,29 @@ echo "=== Pool ready ==="
                     f"shared-file in runs {shared_idxs}, per-id in runs "
                     f"{perid_idxs}. All runs must agree."
                 )
+
+        # Content-bearing streams: a stream OWNS a content table when its
+        # map_table is the same file as the TableInfo of the same name. A
+        # stream that merely reuses a sibling stream's content CSV as a
+        # metadata lookup (e.g. Sequence's `fasta` reusing `sequences.csv`)
+        # is NOT content-bearing — matching by table name (not bare path)
+        # keeps that many-to-one reuse a lineage-only stream.
+        self._content_streams: set = set()
+        for name in first_streams:
+            if self._is_content_stream(self.runs[0], name):
+                self._content_streams.add(name)
+
+        # Classification must agree across all runs.
+        for i, r in enumerate(self.runs[1:], start=2):
+            for name in first_streams:
+                is_content = self._is_content_stream(r, name)
+                if is_content != (name in self._content_streams):
+                    raise ValueError(
+                        f"Pool stream '{name}' is content-bearing in some "
+                        f"runs but not others (input #{i} disagrees with "
+                        "input #1). All inputs must come from the same "
+                        "upstream tool."
+                    )
 
         # Cache per-stream / per-table info for use in get_output_files.
         self._shared_streams = sorted(first_streams)
@@ -196,6 +251,37 @@ echo "=== Pool ready ==="
         if hasattr(run, 'tables') and hasattr(run.tables, '_tables'):
             return set(run.tables._tables.keys())
         return set()
+
+    @staticmethod
+    def _is_content_stream(run: StandardizedOutput, name: str) -> bool:
+        """A stream is content-bearing when it OWNS the content table of the
+        same name: a TableInfo named ``name`` whose path is the stream's
+        own ``map_table``. Streams that reuse a sibling's content CSV only as
+        a metadata lookup (different table name) are lineage-only."""
+        ds = run.streams.get(name)
+        mt = getattr(ds, "map_table", None) if ds is not None else None
+        if not mt:
+            return False
+        table = run.tables._tables.get(name)
+        return table is not None and table.info.path == mt
+
+    def _content_file_col(self, stream_name: str) -> Optional[str]:
+        """Name of the file column in a content stream's table, or None when
+        the content stream carries no per-id files (value-based). Read from
+        the upstream TableInfo so the pooled table keeps the same schema
+        (PDB's ``structures`` uses ``file_path``, not the generic ``file``)."""
+        cols = self.runs[0].tables._tables.get(stream_name).info.columns or []
+        for cand in ("file_path", "file"):
+            if cand in cols:
+                return cand
+        return None
+
+    def _content_path(self, stream_name: str) -> str:
+        """Combined-file path for a content-bearing stream, following the
+        upstream ``<stream>/<basename>.csv`` convention (reusing the upstream
+        map_table's basename)."""
+        upstream_mt = self.runs[0].streams.get(stream_name).map_table
+        return self.stream_path(stream_name, os.path.basename(upstream_mt))
 
     # ── BaseConfig hooks ─────────────────────────────────────────────────────
 
@@ -249,15 +335,26 @@ echo "=== Pool ready ==="
         # Pre-compute the per-stream output stream dirs and per-table output
         # paths so pipe_pool.py doesn't need to know about FolderManager.
         out_streams: Dict[str, Dict[str, str]] = {}
+        content_file_cols: Dict[str, str] = {}
         for name in self._shared_streams:
+            is_content = name in self._content_streams
             out_streams[name] = {
                 "stream_dir": self.stream_folder(name),
-                "map_table": self.stream_map_path(name),
+                "map_table": self._content_path(name) if is_content else self.stream_map_path(name),
                 "format": self._stream_format_map[name],
             }
-        out_tables: Dict[str, str] = {
-            name: self.table_path(name) for name in self._shared_tables
-        }
+            if is_content:
+                fc = self._content_file_col(name)
+                if fc:
+                    content_file_cols[name] = fc
+        # A content table shares its file with the stream of the same name;
+        # other tables get the canonical tables/<name>.csv path.
+        out_tables: Dict[str, str] = {}
+        for name in self._shared_tables:
+            if name in self._content_streams:
+                out_tables[name] = self._content_path(name)
+            else:
+                out_tables[name] = self.table_path(name)
 
         config = {
             "runs": runs_cfg,
@@ -265,6 +362,8 @@ echo "=== Pool ready ==="
             "shared_tables": self._shared_tables,
             "out_streams": out_streams,
             "out_tables": out_tables,
+            "content_bearing_streams": sorted(self._content_streams),
+            "content_file_cols": content_file_cols,
             "output_folder": self.output_folder,
             "recount_prefix": self.recount_prefix,
         }
@@ -306,7 +405,10 @@ echo "=== Pool ready ==="
         for name in self._shared_streams:
             fmt = self._stream_format_map[name]
             stream_dir = self.stream_folder(name)
-            map_path = self.stream_map_path(name)
+            # Content streams share one file with their TableInfo; others use
+            # the lineage-only <stream>_map.csv.
+            is_content = name in self._content_streams
+            map_path = self._content_path(name) if is_content else self.stream_map_path(name)
 
             # Shared-file streams: every run owns one artifact. We slice each
             # run (with the per-run rename to composite ids) and merge them
@@ -318,73 +420,25 @@ echo "=== Pool ready ==="
             )
 
             new_ids: List[str] = []
-            new_files: List[str] = []
-            pool_paths: List[int] = []
-            # Original ids preserved per row for the map_table when
-            # recounting, so the renumber stays auditable.
-            orig_id_col: List[str] = []
-            # Only populated in the lazy-recount path; placeholder otherwise
-            # so the DataStream construction below can reference it freely.
             lazy_pattern_ids: List[str] = []
 
             for pool_idx, r in enumerate(self.runs, start=1):
                 ds = r.streams.get(name)
                 orig_ids = list(ds.ids_expanded) if hasattr(ds, "ids_expanded") and ds.ids_expanded else list(ds.ids)
-                # Shared-file streams: files_expanded would return a single-path
-                # list but len != len(orig_ids), and we don't want it threaded
-                # through the per-id append branch below anyway. Skip files here.
-                if getattr(ds, "is_shared_file", False):
-                    orig_files = []
-                else:
-                    orig_files = list(ds.files_expanded) if hasattr(ds, "files_expanded") and ds.files_expanded else list(ds.files)
-                for j, oid in enumerate(orig_ids):
+                for oid in orig_ids:
                     if recount and not any_lazy:
                         composite = f"{self.recount_prefix}_{len(new_ids) + 1}"
                     else:
                         composite = f"{oid}_{pool_idx}"
                     new_ids.append(composite)
-                    pool_paths.append(pool_idx)
-                    orig_id_col.append(oid)
-                    if orig_files and len(orig_files) == len(orig_ids):
-                        src = orig_files[j] or ""
-                        # Skip wildcard extensions ('.*') — the upstream
-                        # tool didn't resolve a concrete extension at
-                        # config time. pipe_pool.py picks the real one
-                        # at runtime by reading the upstream map_table.
-                        if src.endswith(".*") or "*" in os.path.basename(src):
-                            ext = ""
-                        else:
-                            ext = os.path.splitext(src)[1]
-                        if ext:
-                            new_files.append(os.path.join(stream_dir, f"{composite}{ext}"))
 
-            # In recount mode with lazy upstream ids, drop the per-row id
-            # list and emit a single lazy pattern. pipe_pool fills the
-            # actual count and rewrites the map at runtime.
+            # In recount mode with lazy upstream ids, emit a single lazy
+            # pattern; pipe_pool fills the count at runtime.
             if recount and any_lazy:
                 lazy_pattern_ids = [f"{self.recount_prefix}_[<N>]"]
 
-            # Always materialise the map_table at config time with the
-            # composite ids and pool.path column. pipe_pool.py overwrites
-            # it at runtime once the actual files have been copied (so
-            # post-run inspection sees the same shape as config-time
-            # prediction). If any composite id has no resolved extension,
-            # drop the files list entirely — runtime fills it in from the
-            # upstream map_tables. With lazy recount we skip the config-time
-            # map (no concrete ids to write).
-            if recount and any_lazy:
-                pass
-            else:
-                files_for_map = new_files if (new_files and len(new_files) == len(new_ids)) else None
-                additional = {"pool.path": pool_paths}
-                if recount:
-                    additional["original.id"] = orig_id_col
-                create_map_table(
-                    map_path,
-                    ids=new_ids,
-                    files=files_for_map,
-                    additional_columns=additional,
-                )
+            # No config-time map: pipe_pool writes every map_table at runtime
+            # (declarative get_output_files, per the Map Table Contract).
 
             # The DataStream's `files` declaration drives the framework's
             # completion-check glob. For file-bearing streams we use the
@@ -436,9 +490,15 @@ echo "=== Pool ready ==="
             cols = list(first_t.info.columns) if first_t.info.columns else []
             if "pool.path" not in cols:
                 cols.append("pool.path")
+            # Content tables (name matches a content-bearing stream) share the
+            # one file with that stream; others get tables/<name>.csv.
+            if name in self._content_streams:
+                table_path = self._content_path(name)
+            else:
+                table_path = self.table_path(name)
             tables[name] = TableInfo(
                 name=name,
-                path=self.table_path(name),
+                path=table_path,
                 columns=cols,
                 description=f"Pooled {name} from {len(self.runs)} runs"
             )

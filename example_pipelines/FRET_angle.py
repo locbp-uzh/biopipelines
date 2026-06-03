@@ -5,13 +5,15 @@
 # tested:
 
 from biopipelines.pipeline import *
-from biopipelines.fuse import Fuse
-from biopipelines.boltz2 import Boltz2
-from biopipelines.distance import Distance
-from biopipelines.angle import Angle
-from biopipelines.panda import Panda
-from biopipelines.plot import Plot
-from biopipelines.pymol import PyMOL 
+from biopipelines import (
+    Fuse,
+    Boltz2,
+    Distance,
+    Angle,
+    Panda,
+    Plot,
+    PyMOL,
+)
 
 with Pipeline(project="Biosensor", job="CaFRET"):
     Resources(gpu="A100", time="8:00:00", memory="16GB")
