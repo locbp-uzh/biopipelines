@@ -41,6 +41,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     iterate_values,
 )
 from biopipelines.ligand_utils import resolve_ligand_code, write_ligand_sdf  # noqa: E402
+from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
 def load_template_smiles(ligand_json: str, ligand_code: str) -> str:
@@ -73,11 +74,11 @@ def extract_hetatm_block(scaffold_pdb: str, code: str) -> str:
         for line in f:
             if not line.startswith("HETATM"):
                 continue
-            rname = line[17:20].strip().upper()
+            rname = field_res_name(line).upper()
             if rname != code_u:
                 continue
-            chain = line[21:22]
-            resnum = line[22:26].strip()
+            chain = field_chain(line)
+            resnum = field_res_seq(line)
             key = (chain, resnum)
             if first_key is None:
                 first_key = key

@@ -84,22 +84,23 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 **Parameters**:
 - `lookup`: str | List[str] | Dict[str, str] = None - Lookup values (CCD, CID, CAS, name), or path to a `.txt` file (one SMILES per line) or `.cdxml` file (ChemDraw molecules). File types are auto-detected by extension.
 - `ids`: str | List[str] = None - Custom IDs (defaults to lookup / file-derived names / "smilesN")
-- `codes`: str | List[str] = None - 3-letter PDB residue codes (defaults to lookup[:3] or "LIG")
-- `code`: str | List[str] = None - Name an existing HETATM residue by its 3-letter code **without** downloading or generating any structure (compounds-only). Hand the result to tools that only need the residue code (LigandMPNN, PoseBusters, PLIP, …).
+- `codes`: str | List[str] = None - Residue codes carried on the compounds stream, 1-5 alphanumeric (extended CCD); defaults to the lookup value or "LIG"
+- `code`: str | List[str] = None - Name an existing HETATM residue by its code (1-5 alphanumeric) **without** downloading or generating any structure (compounds-only). Hand the result to tools that only need the residue code (LigandMPNN, PoseBusters, PLIP, …).
 - `source`: str = None - Force "rcsb" or "pubchem" (auto-detects if None)
 - `local_folder`: str = None - Check first before ligands/
-- `output_format`: str = "pdb" - Output format ("pdb" or "cif")
 - `smiles`: str | List[str] | Dict[str, str] = None - Direct SMILES input (bypasses lookup)
 - `structures`: DataStream | StandardizedOutput = None - Extract the ligand's bound coordinates from these structures (keeps the crystal pose) while taking chemistry from `code`/`smiles`. See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates).
 - `generate_images`: bool = False - Generate PNG images per ligand using RDKit
 
 **Auto-detection** (when source=None):
-- 1-3 uppercase alphanumeric → RCSB (CCD)
+- 1-5 uppercase alphanumeric → RCSB (CCD)
 - Purely numeric → PubChem (CID)
 - XX-XX-X format → PubChem (CAS)
 - Otherwise → PubChem (name)
 
 **Streams**: `structures`, `compounds`, `images` (if `generate_images=True`)
+
+The `structures` stream is **SDF** for fetched/generated ligands (download, PubChem, SMILES) and the input structure's own format (pdb/cif) for the `structures=` HETATM-extract path; it is absent in `code`-only mode. `Ligand` does not write PDB/CIF coordinates itself — for those, convert afterwards with `OpenBabel(compounds=lig, convert_3d="pdb"|"cif")`. The residue code (1-5 chars, extended-CCD capable) lives on the `compounds` stream and is independent of the coordinate file's format.
 
 **Tables**:
 - `compounds`: | id | code | lookup | source | smiles | formula |
@@ -307,6 +308,8 @@ Plot(
 
 Creates PyMOL sessions using a declarative operation-based API.
 
+> **⚠ Ray-traced rendering is VERY SLOW.** With the default settings (`ray_trace_mode, 1`) every PNG is ray-traced at ~5–10 s each. `RenderEach` renders one image *per structure*, so on a few hundred–thousand structures it takes **hours** and can silently blow a short batch walltime. Only render a small, curated set (e.g. the top-N winners after scoring), never a full design pool. To inspect many structures cheaply, save a session (`Save`) and open it interactively instead.
+
 **Resources**: Requires a GPU node.
 
 **Environment**: `ProteinEnv`
@@ -341,7 +344,7 @@ To override defaults, use `PyMOL.Set()` before other operations.
 - `Orient(selection="all")` - Orient view to show selection from best angle
 - `Save(filename)` - Save session
 - `Render(structures, orient_selection, width, height, filename, dpi)` - Render single PNG
-- `RenderEach(structures, ...)` - Render each structure individually as PNG
+- `RenderEach(structures, ...)` - Render each structure individually as PNG. **SLOW** (~5–10 s ray-traced per structure); pass only a small curated set, not a full design pool — see the warning above.
 
 **Streams**: `images` (when using Render/RenderEach)
 

@@ -16,10 +16,16 @@ import sys
 import argparse
 import json
 import re
+import shlex
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from biopipelines.pdb_parser import (  # noqa: E402
+    field_res_name, field_chain, field_res_seq,
+)
 
 
 def extract_hetatm_block(structure_pdb: str, code: str) -> Optional[str]:
@@ -36,11 +42,11 @@ def extract_hetatm_block(structure_pdb: str, code: str) -> Optional[str]:
         for line in f:
             if not line.startswith("HETATM"):
                 continue
-            rname = line[17:20].strip().upper()
+            rname = field_res_name(line).upper()
             if rname != code_u:
                 continue
-            chain = line[21:22]
-            resnum = line[22:26].strip()
+            chain = field_chain(line)
+            resnum = field_res_seq(line)
             key = (chain, resnum)
             if first_key is None:
                 first_key = key
@@ -50,6 +56,85 @@ def extract_hetatm_block(structure_pdb: str, code: str) -> Optional[str]:
     if not selected:
         return None
     return "\n".join(selected) + "\nEND\n"
+
+
+def extract_hetatm_block_cif(structure_cif: str, code: str) -> Optional[str]:
+    """Return a minimal mmCIF with only the `_atom_site` rows whose comp_id
+    matches `code`, keeping the bound coordinates. Like the PDB extractor, if
+    multiple copies are present keep the first (same asym_id + seq_id). Returns
+    None if no matching atom rows exist (caller routes that to failed)."""
+    code_u = code.strip().upper()
+    with open(structure_cif) as f:
+        lines = f.read().split("\n")
+
+    columns: List[str] = []
+    comp_idx = asym_idx = seq_idx = None
+    in_loop = False
+    header: List[str] = []
+    selected: List[str] = []
+    first_key = None
+
+    for line in lines:
+        if line.strip() == "loop_":
+            in_loop = False
+            columns = []
+            comp_idx = asym_idx = seq_idx = None
+            continue
+        if line.startswith("_atom_site."):
+            in_loop = True
+            columns.append(line.strip())
+            i = len(columns) - 1
+            # auth_comp_id wins over label_comp_id (matches RCSB-assigned code).
+            if line.strip() == "_atom_site.auth_comp_id":
+                comp_idx = i
+            elif line.strip() == "_atom_site.label_comp_id" and comp_idx is None:
+                comp_idx = i
+            elif line.strip() == "_atom_site.auth_asym_id":
+                asym_idx = i
+            elif line.strip() == "_atom_site.label_asym_id" and asym_idx is None:
+                asym_idx = i
+            elif line.strip() == "_atom_site.auth_seq_id":
+                seq_idx = i
+            elif line.strip() == "_atom_site.label_seq_id" and seq_idx is None:
+                seq_idx = i
+            continue
+        if in_loop and (line.startswith("HETATM") or line.startswith("ATOM")):
+            # shlex respects CIF single/double-quoted values (e.g. atom names
+            # with spaces); fall back to a plain split if the quoting is broken.
+            try:
+                parts = shlex.split(line)
+            except ValueError:
+                parts = line.split()
+            if comp_idx is None or comp_idx >= len(parts):
+                continue
+            if parts[comp_idx].upper() != code_u:
+                continue
+            asym = parts[asym_idx] if asym_idx is not None and asym_idx < len(parts) else ""
+            seq = parts[seq_idx] if seq_idx is not None and seq_idx < len(parts) else ""
+            key = (asym, seq)
+            if first_key is None:
+                first_key = key
+                header = columns[:]
+            if key != first_key:
+                continue
+            selected.append(line.rstrip("\n"))
+
+    if not selected:
+        return None
+    out = [f"data_{code_u}", "loop_"]
+    out.extend(header)
+    out.extend(selected)
+    out.append("#")
+    return "\n".join(out) + "\n"
+
+
+def _carve_hetatm_block(path: str, code: str) -> Tuple[Optional[str], str]:
+    """Carve the bound HETATM `code` from a PDB or CIF input, dispatching on the
+    file extension. Returns (block_or_None, format) where format is 'pdb'/'cif'."""
+    fmt = "cif" if path.lower().endswith((".cif", ".mmcif")) else "pdb"
+    if fmt == "cif":
+        return extract_hetatm_block_cif(path, code), "cif"
+    return extract_hetatm_block(path, code), "pdb"
 
 
 def _write_ligand_tables(successful: List[Dict[str, Any]],
@@ -100,7 +185,6 @@ def extract_ligands_from_structures(config_data: Dict[str, Any],
     custom_ids = config_data['custom_ids']
     residue_codes = config_data['residue_codes']
     output_folder = config_data['output_folder']
-    output_format = config_data.get('output_format', 'pdb')
     structures_json = config_data['extract_structures_json']
 
     os.makedirs(output_folder, exist_ok=True)
@@ -115,8 +199,9 @@ def extract_ligands_from_structures(config_data: Dict[str, Any],
     for cid, code in zip(custom_ids, residue_codes):
         block = None
         src_id = None
+        carved_fmt = "pdb"
         for sid, path in structures:
-            block = extract_hetatm_block(path, code)
+            block, carved_fmt = _carve_hetatm_block(path, code)
             if block is not None:
                 src_id = sid
                 break
@@ -127,12 +212,12 @@ def extract_ligands_from_structures(config_data: Dict[str, Any],
                            'error_message': f"HETATM code {code!r} not present in any input structure",
                            'source': 'extract_failed', 'attempted_path': ''})
             continue
-        out_path = os.path.join(output_folder, f"{cid}.{output_format}")
+        out_path = os.path.join(output_folder, f"{cid}.{carved_fmt}")
         with open(out_path, 'w') as fh:
             fh.write(block)
         print(f"  {cid}: extracted {code} from {src_id} -> {out_path}")
         successful.append({
-            'id': cid, 'format': 'pdb', 'code': code,
+            'id': cid, 'format': carved_fmt, 'code': code,
             'lookup': '', 'source': f"extract({src_id})",
             'ccd': '', 'cid': '', 'cas': '', 'smiles': '', 'name': '', 'formula': '',
             'file_path': out_path,
@@ -152,7 +237,6 @@ def overlay_extracted_coords(config_data: Dict[str, Any],
     from biopipelines.biopipelines_io import load_datastream, iterate_files
 
     output_folder = config_data['output_folder']
-    output_format = config_data.get('output_format', 'pdb')
     structures = [(sid, path) for sid, path in
                   iterate_files(load_datastream(config_data['extract_structures_json']))]
     os.makedirs(output_folder, exist_ok=True)
@@ -161,9 +245,9 @@ def overlay_extracted_coords(config_data: Dict[str, Any],
     kept = []
     for item in successful:
         code = item.get('code', '')
-        block, src_id = None, None
+        block, src_id, carved_fmt = None, None, "pdb"
         for sid, path in structures:
-            block = extract_hetatm_block(path, code)
+            block, carved_fmt = _carve_hetatm_block(path, code)
             if block is not None:
                 src_id = sid
                 break
@@ -174,10 +258,11 @@ def overlay_extracted_coords(config_data: Dict[str, Any],
                            'error_message': f"HETATM code {code!r} not present in any input structure",
                            'source': 'extract_failed', 'attempted_path': ''})
             continue
-        out_path = os.path.join(output_folder, f"{item['id']}.{output_format}")
+        out_path = os.path.join(output_folder, f"{item['id']}.{carved_fmt}")
         with open(out_path, 'w') as fh:
             fh.write(block)
         item['file_path'] = out_path
+        item['format'] = carved_fmt
         item['source'] = f"{item.get('source','')}+extract({src_id})".lstrip('+')
         print(f"  {item['id']}: bound {code} from {src_id} -> {out_path}")
         kept.append(item)
@@ -194,8 +279,9 @@ def detect_lookup_type(lookup: str) -> str:
     Returns:
         "ccd" (RCSB), "cid" (PubChem), "cas" (PubChem), or "name" (PubChem)
     """
-    # CCD codes: 1-3 uppercase alphanumeric characters
-    if re.match(r'^[A-Z0-9]{1,3}$', lookup.upper()) and not lookup.isdigit():
+    # CCD codes: 1-5 alphanumeric, canonically uppercase. A value carrying a
+    # lowercase letter (water, urea, aspirin) is a PubChem name, not a CCD.
+    if re.match(r'^[A-Z0-9]{1,5}$', lookup) and not lookup.isdigit():
         return "ccd"
 
     # PubChem CID: purely numeric
@@ -330,220 +416,43 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         return False, "", metadata
 
 
-def convert_smiles_to_pdb_rdkit(smiles: str, residue_code: str) -> Optional[str]:
-    """
-    Convert SMILES to PDB format using RDKit.
+def convert_smiles_to_sdf_rdkit(smiles: str, residue_code: str) -> Optional[str]:
+    """Convert SMILES to an SDF molblock using RDKit (ETKDG embed + MMFF).
 
-    IMPORTANT: This preserves RDKit's atom naming convention, which is required
-    for compatibility with tools like RFdiffusion3 that internally use RDKit
-    to regenerate conformers and expect matching atom names.
-
-    Args:
-        smiles: SMILES string of the molecule
-        residue_code: 3-letter residue code to use in PDB (e.g., "AMX")
-
-    Returns:
-        PDB content as string, or None if conversion fails
-    """
+    SDF carries no residue code (the code lives on the compounds stream); the
+    residue_code argument is accepted for signature parity but unused here."""
     try:
         from rdkit import Chem
         from rdkit.Chem import AllChem
 
-        # Parse SMILES
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             print(f"  Error: Could not parse SMILES: {smiles[:50]}...")
             return None
-
-        # Add hydrogens for proper 3D geometry
         mol = Chem.AddHs(mol)
-
-        # Generate 3D coordinates using ETKDG (recommended method)
         params = AllChem.ETKDGv3()
-        params.randomSeed = 42  # For reproducibility
-        result = AllChem.EmbedMolecule(mol, params)
-
-        if result == -1:
-            # ETKDG failed, try with random coordinates
-            print(f"  Warning: ETKDG embedding failed, trying random coordinates...")
+        params.randomSeed = 42
+        if AllChem.EmbedMolecule(mol, params) == -1:
+            print("  Warning: ETKDG embedding failed, trying random coordinates...")
             params.useRandomCoords = True
-            result = AllChem.EmbedMolecule(mol, params)
-
-            if result == -1:
-                print(f"  Error: Could not generate 3D coordinates")
+            if AllChem.EmbedMolecule(mol, params) == -1:
+                print("  Error: Could not generate 3D coordinates")
                 return None
-
-        # Optimize geometry with MMFF force field
         try:
             AllChem.MMFFOptimizeMolecule(mol, maxIters=200)
         except Exception as e:
             print(f"  Warning: MMFF optimization failed: {e}, using unoptimized coordinates")
-
-        # Remove hydrogens for cleaner output (RFD3 will add them back)
         mol = Chem.RemoveHs(mol)
-
-        # Generate PDB block - RDKit uses its own atom naming
-        pdb_block = Chem.MolToPDBBlock(mol)
-
-        if not pdb_block:
-            print(f"  Error: Could not generate PDB block")
+        sdf_block = Chem.MolToMolBlock(mol)
+        if not sdf_block:
+            print("  Error: Could not generate SDF block")
             return None
-
-        # Only rename the residue code, preserve RDKit's atom naming
-        pdb_content = rename_residue_chain_A(pdb_block, residue_code)
-
-        return pdb_content
-
+        return sdf_block
     except ImportError:
         print("  Error: RDKit not available. Install with: pip install rdkit")
         return None
     except Exception as e:
-        print(f"  Error converting SMILES to PDB with RDKit: {str(e)}")
-        return None
-
-
-def convert_smiles_to_cif_rdkit(smiles: str, residue_code: str) -> Optional[str]:
-    """
-    Convert SMILES to mmCIF format using RDKit with explicit bond orders.
-
-    Generates a proper mmCIF structure file with:
-    - _atom_site category for atomic coordinates (required by biotite/foundry)
-    - _chem_comp_bond category for explicit bond orders (for RFdiffusion3)
-
-    This format is required for tools like RFdiffusion3 that use biotite to parse
-    structures and need explicit bond order information.
-
-    Args:
-        smiles: SMILES string of the molecule
-        residue_code: Residue code to use (e.g., "LIG", "L_G")
-
-    Returns:
-        mmCIF content as string, or None if conversion fails
-    """
-    try:
-        from rdkit import Chem
-        from rdkit.Chem import AllChem
-
-        # Parse SMILES
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            print(f"  Error: Could not parse SMILES: {smiles[:50]}...")
-            return None
-
-        # Add hydrogens for proper 3D geometry
-        mol = Chem.AddHs(mol)
-
-        # Generate 3D coordinates using ETKDG (recommended method)
-        params = AllChem.ETKDGv3()
-        params.randomSeed = 42  # For reproducibility
-        result = AllChem.EmbedMolecule(mol, params)
-
-        if result == -1:
-            # ETKDG failed, try with random coordinates
-            print(f"  Warning: ETKDG embedding failed, trying random coordinates...")
-            params.useRandomCoords = True
-            result = AllChem.EmbedMolecule(mol, params)
-
-            if result == -1:
-                print(f"  Error: Could not generate 3D coordinates")
-                return None
-
-        # Optimize geometry with MMFF force field
-        try:
-            AllChem.MMFFOptimizeMolecule(mol, maxIters=200)
-        except Exception as e:
-            print(f"  Warning: MMFF optimization failed: {e}, using unoptimized coordinates")
-
-        # Remove hydrogens for cleaner output
-        mol = Chem.RemoveHs(mol)
-
-        # Get conformer for coordinates
-        conf = mol.GetConformer()
-
-        # Build mmCIF content with proper _atom_site category
-        cif_lines = []
-        cif_lines.append("data_" + residue_code)
-        cif_lines.append("#")
-
-        # _entry section
-        cif_lines.append(f"_entry.id {residue_code}")
-        cif_lines.append("#")
-
-        # _chem_comp section (component metadata)
-        cif_lines.append(f"_chem_comp.id {residue_code}")
-        cif_lines.append("_chem_comp.name 'Small molecule ligand'")
-        cif_lines.append("_chem_comp.type NON-POLYMER")
-        cif_lines.append("#")
-
-        # Track atom names for bond section
-        atom_names = []
-        element_counts = {}
-
-        # Pre-generate atom names
-        for atom in mol.GetAtoms():
-            element = atom.GetSymbol()
-            element_counts[element] = element_counts.get(element, 0) + 1
-            atom_name = f"{element}{element_counts[element]}"
-            atom_names.append(atom_name)
-
-        # _atom_site section (required by biotite for structure parsing)
-        # Include all standard mmCIF fields that biotite/foundry may require
-        cif_lines.append("loop_")
-        cif_lines.append("_atom_site.group_PDB")
-        cif_lines.append("_atom_site.id")
-        cif_lines.append("_atom_site.type_symbol")
-        cif_lines.append("_atom_site.label_atom_id")
-        cif_lines.append("_atom_site.label_alt_id")
-        cif_lines.append("_atom_site.label_comp_id")
-        cif_lines.append("_atom_site.label_asym_id")
-        cif_lines.append("_atom_site.label_entity_id")
-        cif_lines.append("_atom_site.label_seq_id")
-        cif_lines.append("_atom_site.pdbx_PDB_ins_code")
-        cif_lines.append("_atom_site.pdbx_PDB_model_num")
-        cif_lines.append("_atom_site.Cartn_x")
-        cif_lines.append("_atom_site.Cartn_y")
-        cif_lines.append("_atom_site.Cartn_z")
-        cif_lines.append("_atom_site.occupancy")
-        cif_lines.append("_atom_site.B_iso_or_equiv")
-        cif_lines.append("_atom_site.auth_atom_id")
-        cif_lines.append("_atom_site.auth_comp_id")
-        cif_lines.append("_atom_site.auth_asym_id")
-        cif_lines.append("_atom_site.auth_seq_id")
-        cif_lines.append("_atom_site.pdbx_formal_charge")
-
-        for atom in mol.GetAtoms():
-            idx = atom.GetIdx()
-            element = atom.GetSymbol()
-            charge = atom.GetFormalCharge()
-            pos = conf.GetAtomPosition(idx)
-            atom_name = atom_names[idx]
-            atom_id = idx + 1  # 1-indexed
-
-            # Format: group_PDB id type_symbol label_atom_id label_alt_id label_comp_id
-            #         label_asym_id label_entity_id label_seq_id pdbx_PDB_ins_code
-            #         pdbx_PDB_model_num Cartn_x Cartn_y Cartn_z occupancy B_iso
-            #         auth_atom_id auth_comp_id auth_asym_id auth_seq_id pdbx_formal_charge
-            # Use . for empty/null values, HETATM for ligand atoms
-            cif_lines.append(
-                f"HETATM {atom_id} {element} {atom_name} . {residue_code} A 1 . . 1 "
-                f"{pos.x:.3f} {pos.y:.3f} {pos.z:.3f} 1.00 0.00 "
-                f"{atom_name} {residue_code} A 1 {charge}"
-            )
-
-        cif_lines.append("#")
-
-        # Note: _chem_comp_bond is intentionally omitted as it's for CCD files,
-        # not structure files. Foundry/biotite infers bonds from coordinates.
-
-        return "\n".join(cif_lines)
-
-    except ImportError:
-        print("  Error: RDKit not available. Install with: pip install rdkit")
-        return None
-    except Exception as e:
-        print(f"  Error converting SMILES to CIF with RDKit: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"  Error converting SMILES to SDF with RDKit: {str(e)}")
         return None
 
 
@@ -694,170 +603,6 @@ def rename_residue_chain_A(pdb_content: str, residue_code: str) -> str:
     return '\n'.join(output_lines)
 
 
-def _extract_element_from_line(line: str) -> str:
-    """
-    Extract element symbol from a PDB ATOM/HETATM line.
-
-    Tries multiple sources: element column (76-77), atom name, or first alpha chars.
-
-    Args:
-        line: PDB ATOM/HETATM line
-
-    Returns:
-        Element symbol (1-2 chars, uppercase)
-    """
-    # Try element column (76-77) first - most reliable
-    if len(line) >= 78:
-        element = line[76:78].strip()
-        if element and element[0].isalpha():
-            return element.upper()
-
-    # Try to extract from atom name (columns 12-15)
-    if len(line) >= 16:
-        atom_name = line[12:16].strip()
-        if atom_name:
-            # Extract leading alpha characters
-            element = ''
-            for char in atom_name:
-                if char.isalpha():
-                    element += char
-                else:
-                    break
-            if element:
-                # Handle 2-char elements (e.g., CL, BR, FE)
-                element = element.upper()
-                if len(element) >= 2 and element[:2] in ['CL', 'BR', 'FE', 'ZN', 'MG', 'CA', 'NA', 'MN', 'CU', 'CO', 'NI', 'SE']:
-                    return element[:2]
-                return element[0]
-
-    return 'X'  # Unknown element
-
-
-def normalize_pdb_content(pdb_content: str, residue_code: str) -> str:
-    """
-    Normalize PDB content with proper atom numbering.
-
-    Args:
-        pdb_content: Raw PDB content from OpenBabel conversion or local file
-        residue_code: 3-letter residue code to use (e.g., "LIG")
-
-    Returns:
-        Normalized PDB content with:
-        - Sequential atom serial numbers (1, 2, 3, ...)
-        - Properly numbered atom names (C1, C2, N1, O1, ...)
-        - Chain ID = 'A'
-        - Residue number = 1
-        - Residue name = residue_code (3-letter, uppercase)
-        - Element symbol in columns 76-77
-        - Renumbered CONECT records
-    """
-    lines = pdb_content.split('\n')
-    atom_lines = []
-    conect_lines = []
-    other_lines = []
-    end_line = None
-
-    # Ensure residue code is uppercase and max 3 chars
-    res_code = residue_code.upper()[:3].ljust(3)
-
-    # First pass: categorize lines and build serial number mapping
-    old_to_new_serial = {}
-    new_serial = 0
-
-    for line in lines:
-        if line.startswith(('HETATM', 'ATOM')):
-            new_serial += 1
-            # Extract old serial number (columns 6-10)
-            try:
-                old_serial = int(line[6:11].strip())
-                old_to_new_serial[old_serial] = new_serial
-            except (ValueError, IndexError):
-                pass
-            atom_lines.append(line)
-        elif line.startswith('CONECT'):
-            conect_lines.append(line)
-        elif line.startswith('END'):
-            end_line = line
-        else:
-            other_lines.append(line)
-
-    # Second pass: process atoms with new serial numbers and atom names
-    output_lines = []
-    element_counts = {}
-    atom_serial = 0
-
-    for line in atom_lines:
-        atom_serial += 1
-
-        # Extract element symbol
-        element = _extract_element_from_line(line)
-
-        # Generate numbered atom name
-        element_counts[element] = element_counts.get(element, 0) + 1
-        atom_num = element_counts[element]
-
-        # Format atom name (4 chars, columns 12-15)
-        atom_name_str = f"{element}{atom_num}"
-        if len(element) == 1:
-            atom_name = f" {atom_name_str:<3}"
-        else:
-            atom_name = f"{atom_name_str:<4}"
-
-        record = 'HETATM'
-        serial_str = f"{atom_serial:5d}"
-        alt_loc = ' '
-        chain = 'A'
-        res_seq = '   1'
-        icode = ' '
-
-        # Get coordinates and other data (columns 27-66)
-        if len(line) >= 54:
-            coords = line[27:66]
-        elif len(line) >= 27:
-            coords = line[27:].ljust(39)
-        else:
-            coords = ' ' * 39
-
-        coords = coords.ljust(39)
-        element_col = f"{element:>2}"
-
-        new_line = f"{record}{serial_str} {atom_name}{alt_loc}{res_code} {chain}{res_seq}{icode}{coords}          {element_col}"
-        output_lines.append(new_line)
-
-    # Third pass: renumber CONECT records
-    for line in conect_lines:
-        # CONECT records have atom serial numbers in columns 6-10, 11-15, 16-20, 21-25, 26-30
-        # Each field is 5 characters wide
-        try:
-            new_conect = "CONECT"
-            # Parse all serial numbers from the CONECT line
-            i = 6
-            while i + 5 <= len(line):
-                field = line[i:i+5].strip()
-                if field:
-                    try:
-                        old_num = int(field)
-                        new_num = old_to_new_serial.get(old_num, old_num)
-                        new_conect += f"{new_num:5d}"
-                    except ValueError:
-                        break
-                else:
-                    break
-                i += 5
-
-            if len(new_conect) > 6:  # Has at least one connection
-                output_lines.append(new_conect)
-        except Exception:
-            # If parsing fails, skip this CONECT record
-            continue
-
-    # Add END record
-    if end_line:
-        output_lines.append(end_line)
-    else:
-        output_lines.append("END")
-
-    return '\n'.join(output_lines)
 
 
 def fetch_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
@@ -998,60 +743,6 @@ def fetch_properties_from_rcsb(ligand_code: str) -> Dict[str, Any]:
         return {}
 
 
-def convert_sdf_to_pdb(sdf_content: str, ligand_code: str) -> Optional[str]:
-    """
-    Convert SDF content to PDB format using OpenBabel.
-
-    Args:
-        sdf_content: SDF file content as string
-        ligand_code: 3-letter ligand code for residue naming
-
-    Returns:
-        PDB content as string, or None if conversion fails
-    """
-    try:
-        import tempfile
-        import subprocess
-
-        # Create temporary files for conversion
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sdf', delete=False) as sdf_file:
-            sdf_file.write(sdf_content)
-            sdf_path = sdf_file.name
-
-        with tempfile.NamedTemporaryFile(mode='r', suffix='.pdb', delete=False) as pdb_file:
-            pdb_path = pdb_file.name
-
-        try:
-            # Use obabel command line tool
-            result = subprocess.run(
-                ['obabel', sdf_path, '-O', pdb_path],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode != 0:
-                print(f"  Error: OpenBabel conversion failed: {result.stderr}")
-                return None
-
-            with open(pdb_path, 'r') as f:
-                pdb_content = f.read()
-
-            # Normalize the PDB content (sets residue name, renumbers atoms, etc.)
-            return normalize_pdb_content(pdb_content, ligand_code)
-
-        finally:
-            # Clean up temporary files
-            if os.path.exists(sdf_path):
-                os.unlink(sdf_path)
-            if os.path.exists(pdb_path):
-                os.unlink(pdb_path)
-
-    except Exception as e:
-        print(f"  Error converting SDF to PDB with OpenBabel: {str(e)}")
-        return None
-
-
 def fetch_properties_from_pubchem(lookup: str, lookup_type: str) -> Dict[str, Any]:
     """
     Fetch compound properties from PubChem (without downloading SDF).
@@ -1178,9 +869,9 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
     """
     ligand_code = ligand_code.upper()
 
-    # Validate ligand code format
-    if not ligand_code or len(ligand_code) > 3 or not ligand_code.isalnum():
-        error_msg = f"Invalid ligand code format: {ligand_code}. Must be 1-3 alphanumeric characters."
+    # Validate ligand code format (1-5 alphanumeric, extended CCD)
+    if not ligand_code or len(ligand_code) > 5 or not ligand_code.isalnum():
+        error_msg = f"Invalid ligand code format: {ligand_code}. Must be 1-5 alphanumeric characters."
         print(f"Error: {error_msg}")
         metadata = {
             "error_message": error_msg,
@@ -1199,36 +890,29 @@ def download_from_rcsb(ligand_code: str, custom_id: str, residue_code: str,
         smiles = props.get('smiles', '')
 
         content = None
-        ext = output_format  # "pdb" or "cif"
+        ext = output_format  # always "sdf" for Ligand (see structures_format)
 
-        # Convert SMILES to requested format using RDKit
-        if smiles:
-            print(f"  SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"  SMILES: {smiles}")
-            if output_format == "cif":
-                print(f"  Converting SMILES to CIF using RDKit (with bond orders)...")
-                content = convert_smiles_to_cif_rdkit(smiles, residue_code)
-            else:
-                print(f"  Converting SMILES to PDB using RDKit...")
-                content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
-
-        # Fallback for PDB: OpenBabel SDF conversion (only if RDKit failed)
-        if content is None and output_format == "pdb":
-            print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
-            sdf_url = f"https://files.rcsb.org/ligands/download/{ligand_code}_ideal.sdf"
-            headers = {
-                'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'
-            }
+        # Prefer the RCSB ideal SDF directly (no conversion); fall back to a
+        # fresh RDKit embed from the SMILES if the download is unavailable.
+        sdf_url = f"https://files.rcsb.org/ligands/download/{ligand_code}_ideal.sdf"
+        headers = {
+            'User-Agent': 'BioPipelines-Ligand/1.0 (https://github.com/locbp-uzh/biopipelines)'
+        }
+        try:
             response = requests.get(sdf_url, headers=headers, timeout=30)
             response.raise_for_status()
-            sdf_content = response.text
+            if response.text.strip():
+                content = response.text
+                print(f"  Downloaded ideal SDF for {ligand_code}")
+        except Exception as e:
+            print(f"  Ideal SDF download failed ({e}); embedding from SMILES...")
 
-            if not sdf_content.strip():
-                raise ValueError(f"Downloaded SDF file is empty")
-
-            content = convert_sdf_to_pdb(sdf_content, residue_code)
+        if content is None and smiles:
+            print(f"  SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"  SMILES: {smiles}")
+            content = convert_smiles_to_sdf_rdkit(smiles, residue_code)
 
         if content is None:
-            raise ValueError(f"Failed to convert ligand to {output_format.upper()} format")
+            raise ValueError(f"Failed to obtain SDF coordinates for {ligand_code}")
 
         # Save to ligands/ folder for caching (using ligand_code as filename)
         os.makedirs(repo_ligands_folder, exist_ok=True)
@@ -1320,25 +1004,24 @@ def download_from_pubchem(lookup: str, lookup_type: str, custom_id: str, residue
         cid = pubchem_data.get('cid', '')
 
         content = None
-        ext = output_format  # "pdb" or "cif"
+        ext = output_format  # always "sdf" for Ligand (see structures_format)
 
-        # Convert SMILES to requested format using RDKit
-        if smiles:
-            if output_format == "cif":
-                print(f"  Converting SMILES to CIF using RDKit (with bond orders)...")
-                content = convert_smiles_to_cif_rdkit(smiles, residue_code)
-            else:
-                print(f"  Converting SMILES to PDB using RDKit...")
-                content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
+        # Prefer PubChem's 3-D SDF directly; fall back to an RDKit embed.
+        if cid:
+            try:
+                sdf_content = fetch_sdf_from_pubchem(cid)
+                if sdf_content and sdf_content.strip():
+                    content = sdf_content
+                    print(f"  Downloaded 3-D SDF for CID {cid}")
+            except Exception as e:
+                print(f"  PubChem SDF download failed ({e}); embedding from SMILES...")
 
-        # Fallback for PDB: Download SDF and use OpenBabel (only if RDKit failed)
-        if content is None and output_format == "pdb":
-            print(f"  RDKit conversion failed or no SMILES, falling back to OpenBabel SDF...")
-            sdf_content = fetch_sdf_from_pubchem(cid)
-            content = convert_sdf_to_pdb(sdf_content, residue_code)
+        if content is None and smiles:
+            print(f"  Embedding SMILES to SDF using RDKit...")
+            content = convert_smiles_to_sdf_rdkit(smiles, residue_code)
 
         if content is None:
-            raise ValueError(f"Failed to convert ligand to {output_format.upper()} format")
+            raise ValueError(f"Failed to obtain SDF coordinates for {lookup}")
 
         # Save to ligands/ folder for caching (always cache both formats if possible)
         os.makedirs(repo_ligands_folder, exist_ok=True)
@@ -1419,18 +1102,13 @@ def generate_from_smiles(smiles: str, custom_id: str, residue_code: str,
         print(f"Generating structure from SMILES: {smiles[:50]}..." if len(smiles) > 50 else f"Generating structure from SMILES: {smiles}")
 
         content = None
-        ext = output_format
+        ext = output_format  # always "sdf" for Ligand (see structures_format)
 
-        # Convert SMILES to requested format using RDKit
-        if output_format == "cif":
-            print(f"  Converting SMILES to CIF using RDKit (with bond orders)...")
-            content = convert_smiles_to_cif_rdkit(smiles, residue_code)
-        else:
-            print(f"  Converting SMILES to PDB using RDKit...")
-            content = convert_smiles_to_pdb_rdkit(smiles, residue_code)
+        print(f"  Embedding SMILES to SDF using RDKit...")
+        content = convert_smiles_to_sdf_rdkit(smiles, residue_code)
 
         if content is None:
-            raise ValueError(f"Failed to convert SMILES to {output_format.upper()} format")
+            raise ValueError(f"Failed to embed SMILES to SDF")
 
         # Save to output folder
         output_filename = f"{custom_id}.{ext}"

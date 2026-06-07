@@ -132,10 +132,14 @@ def test_ligand_detect_lookup_types():
     lig = Ligand(lookup=["ATP"])  # any construction works; we use the helper
     assert lig._detect_lookup_type("ATP") == "ccd"
     assert lig._detect_lookup_type("HEM") == "ccd"
+    assert lig._detect_lookup_type("A1LU6") == "ccd"   # extended 5-char CCD
     assert lig._detect_lookup_type("2244") == "cid"
     assert lig._detect_lookup_type("50-78-2") == "cas"
     assert lig._detect_lookup_type("aspirin") == "name"
     assert lig._detect_lookup_type("caffeine") == "name"
+    # Short lowercase compound names are PubChem names, not CCD codes.
+    assert lig._detect_lookup_type("water") == "name"
+    assert lig._detect_lookup_type("urea") == "name"
 
 
 # ── option validation ────────────────────────────────────────────────────────
@@ -172,29 +176,30 @@ def test_ligand_invalid_source_raises(record_case):
         Ligand(lookup="ATP", source="nowhere")
 
 
-def test_ligand_invalid_output_format_raises(record_case):
+def test_ligand_output_format_removed_raises(record_case):
+    """output_format is no longer user-selectable; passing it points to OpenBabel."""
     from biopipelines.ligand import Ligand
-
-    record_case(input="Ligand(output_format='sdf')",
-                expected="ValueError", actual="ValueError")
-    with pytest.raises(ValueError, match="output_format"):
-        Ligand(lookup="ATP", output_format="sdf")
-
-
-def test_ligand_output_format_cif(
-    local_config, isolated_cwd, new_pipeline, record_case,
-):
-    """output_format='cif' propagates through the streams.structures format."""
-    from biopipelines.ligand import Ligand
-
-    pipeline = new_pipeline("lig_cif")
-    with pipeline:
-        lig = Ligand(lookup="ATP", output_format="cif")
-        pipeline.save()
 
     record_case(input="Ligand(output_format='cif')",
-                expected="cif", actual=lig.streams.structures.format)
-    assert lig.streams.structures.format == "cif"
+                expected="ValueError", actual="ValueError")
+    with pytest.raises(ValueError, match="output_format was removed"):
+        Ligand(lookup="ATP", output_format="cif")
+
+
+def test_ligand_structures_default_sdf(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """A fetched/generated Ligand emits its structures stream as SDF."""
+    from biopipelines.ligand import Ligand
+
+    pipeline = new_pipeline("lig_sdf")
+    with pipeline:
+        lig = Ligand(lookup="ATP")
+        pipeline.save()
+
+    record_case(input="Ligand(lookup='ATP') structures format",
+                expected="sdf", actual=lig.streams.structures.format)
+    assert lig.streams.structures.format == "sdf"
 
 
 def test_ligand_no_lookup_or_smiles_raises(record_case):
@@ -513,6 +518,103 @@ def test_ligand_structures_stream_has_map_and_template(
                 expected=("map_table set", "<id> template", "under structures/"),
                 actual=(bool(structures.map_table), files, files))
     assert structures.map_table  # now has its own lineage map
-    assert files == ["<id>.pdb"] or (len(files) == 1 and files[0].endswith("<id>.pdb"))
+    assert len(files) == 1 and files[0].endswith("<id>.sdf")
     # coordinate files live in the structures/ stream folder, not compounds/
     assert "structures" in str(structures.map_table)
+
+
+# ── HETATM extraction (structures= path) ─────────────────────────────────────
+
+def _load_pipe_ligand():
+    import importlib.util
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(repo, "pipe_scripts", "pipe_ligand.py")
+    spec = importlib.util.spec_from_file_location("pipe_ligand", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_extract_hetatm_block_pdb(tmp_path, record_case):
+    """The PDB carver keeps only the named ligand's HETATM lines (first copy)."""
+    pl = _load_pipe_ligand()
+    pdb = tmp_path / "complex.pdb"
+    pdb.write_text(
+        "ATOM      1  CA  ALA A   1      11.000  11.000  11.000  1.00  0.00           C\n"
+        "HETATM    2  C1  LIG A 200      20.000  20.000  20.000  1.00  0.00           C\n"
+        "HETATM    3  O1  LIG A 200      21.000  21.000  21.000  1.00  0.00           O\n"
+        "HETATM    4  C1  LIG B 200      30.000  30.000  30.000  1.00  0.00           C\n"
+    )
+    block = pl.extract_hetatm_block(str(pdb), "LIG")
+    record_case(input="extract_hetatm_block(pdb,'LIG')",
+                expected="2 HETATM lines (first copy)",
+                actual=block)
+    assert block is not None
+    lines = [l for l in block.splitlines() if l.startswith("HETATM")]
+    assert len(lines) == 2  # only chain A copy
+    assert pl.extract_hetatm_block(str(pdb), "NOPE") is None
+
+
+def test_extract_hetatm_block_cif(tmp_path, record_case):
+    """The CIF carver selects _atom_site rows by comp_id, keeping the first copy,
+    and supports an extended (5-char) code."""
+    pl = _load_pipe_ligand()
+    cif = tmp_path / "complex.cif"
+    cif.write_text(
+        "data_complex\n"
+        "loop_\n"
+        "_atom_site.group_PDB\n"
+        "_atom_site.id\n"
+        "_atom_site.label_atom_id\n"
+        "_atom_site.label_comp_id\n"
+        "_atom_site.auth_asym_id\n"
+        "_atom_site.auth_seq_id\n"
+        "_atom_site.Cartn_x\n"
+        "_atom_site.Cartn_y\n"
+        "_atom_site.Cartn_z\n"
+        "ATOM   1 CA ALA A 1 11.0 11.0 11.0\n"
+        "HETATM 2 C1 A7ZK B 200 20.0 20.0 20.0\n"
+        "HETATM 3 O1 A7ZK B 200 21.0 21.0 21.0\n"
+        "HETATM 4 C1 A7ZK C 200 30.0 30.0 30.0\n"
+        "#\n"
+    )
+    block = pl.extract_hetatm_block_cif(str(cif), "A7ZK")
+    record_case(input="extract_hetatm_block_cif(cif,'A7ZK')",
+                expected="2 HETATM rows (first copy), valid mini-cif",
+                actual=block)
+    assert block is not None
+    rows = [l for l in block.splitlines() if l.startswith("HETATM")]
+    assert len(rows) == 2  # only chain B copy
+    assert block.startswith("data_A7ZK")
+    assert "_atom_site.label_comp_id" in block
+    assert pl.extract_hetatm_block_cif(str(cif), "NOPE") is None
+
+
+def test_extract_hetatm_block_cif_quoted_values(tmp_path, record_case):
+    """The CIF carver matches comp_id correctly even when a row carries a
+    space-containing quoted value (shlex-aware split, not a naive .split())."""
+    pl = _load_pipe_ligand()
+    cif = tmp_path / "quoted.cif"
+    # label_atom_id values are single-quoted and contain a space.
+    cif.write_text(
+        "data_x\n"
+        "loop_\n"
+        "_atom_site.group_PDB\n"
+        "_atom_site.id\n"
+        "_atom_site.label_atom_id\n"
+        "_atom_site.label_comp_id\n"
+        "_atom_site.auth_asym_id\n"
+        "_atom_site.auth_seq_id\n"
+        "_atom_site.Cartn_x\n"
+        "_atom_site.Cartn_y\n"
+        "_atom_site.Cartn_z\n"
+        "HETATM 1 'C 1' LIG A 200 20.0 20.0 20.0\n"
+        "HETATM 2 'O 1' LIG A 200 21.0 21.0 21.0\n"
+    )
+    block = pl.extract_hetatm_block_cif(str(cif), "LIG")
+    record_case(input="extract_hetatm_block_cif quoted atom ids",
+                expected="2 rows matched despite spaces in quoted field",
+                actual=block)
+    assert block is not None
+    rows = [l for l in block.splitlines() if l.startswith("HETATM")]
+    assert len(rows) == 2

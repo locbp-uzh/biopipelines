@@ -14,6 +14,7 @@ import os
 import sys
 import argparse
 import json
+import re
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
@@ -21,7 +22,10 @@ from pathlib import Path
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.pdb_parser import get_protein_sequence, parse_pdb_file
+from biopipelines.pdb_parser import (
+    get_protein_sequence, parse_pdb_file,
+    field_atom_name, field_res_name, field_chain, field_res_seq,
+)
 from biopipelines.id_patterns import expand_ids, contains_pattern, expand_file_pattern
 
 
@@ -293,9 +297,7 @@ def apply_rename_operation(content: str, format: str, old_name: str, new_name: s
 
     for line in lines:
         if line.startswith(('ATOM', 'HETATM')):
-            # PDB format: columns 18-20 (0-indexed: 17-20) contain residue name
-            # The field is 3 characters, right-justified with spaces
-            current_res_name = line[17:20].strip()
+            current_res_name = field_res_name(line)
 
             if current_res_name == old_name:
                 # Format new name to fit in 3-character field
@@ -324,31 +326,56 @@ def apply_rename_operation(content: str, format: str, old_name: str, new_name: s
     return '\n'.join(modified_lines)
 
 
-def _parse_residue_selection(selection: str):
-    """Parse a PyMOL-style residue selection into a list of (chain, lo, hi) ranges.
+def _parse_residue_selection(selection: str, present_names=None):
+    """Parse a residue selection into (ranges, names).
 
-    `chain` is None when the token is unqualified (matches any chain). Accepts
-    forms like "1-83", "1-83+90-95", "A1-83", "84", "A84+A90-95".
+    A token shaped like an (optionally chain-qualified) residue number or range
+    is a **range**; anything else is a residue **name** to remove. So 'A1-83',
+    '84', '1-83' are ranges while 'NAP', 'EDO', and digit-bearing CCD names like
+    '9DP' or 'A7ZK' are names. Names and ranges may mix ('NAP+A1-83'). Returns
+    ``(ranges, names)`` where ranges is a list of ``(chain, lo, hi)`` (chain None
+    when unqualified) and names is a set of uppercased residue names.
+
+    Forms: "1-83", "1-83+90-95", "A1-83", "84", "A84+A90-95", "NAP", "9DP+EDO".
+
+    A token shaped like one chain letter + digits ('B12', 'K21') is ambiguous —
+    chain B residue 12, or the CCD ligand named B12. `present_names` (the residue
+    names actually in the structure) breaks the tie the same way
+    ``resolve_selection`` does: a token equal to a present residue name is a name,
+    else a range. With no `present_names` such a token defaults to a range.
     """
+    # Optional leading chain letter(s), then a number or lo-hi range.
+    range_re = re.compile(r'^([A-Za-z]*)(\d+)(?:-(\d+))?$')
+    # One chain letter + digits, no range: the only chain/name-ambiguous shape.
+    ambiguous_re = re.compile(r'^[A-Za-z]\d+$')
+    present = {n.upper() for n in (present_names or ())}
     ranges = []
+    names = set()
     for tok in str(selection).replace(" ", "").split("+"):
         if not tok:
             continue
-        chain = None
-        # Optional leading chain letter(s): a non-digit, non-'-' prefix.
-        i = 0
-        while i < len(tok) and not (tok[i].isdigit() or tok[i] == "-"):
-            i += 1
-        if i > 0:
-            chain = tok[:i]
-            tok = tok[i:]
-        if "-" in tok:
-            lo_s, hi_s = tok.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
-        else:
-            lo = hi = int(tok)
+        # A ligand name present in the structure wins over the chain reading
+        # (matches resolve_selection's 'B12 takes precedence' rule).
+        if ambiguous_re.match(tok) and tok.upper() in present:
+            names.add(tok.upper())
+            continue
+        m = range_re.match(tok)
+        if not m:
+            # A '-' marks an intended range; if it didn't parse, it's malformed
+            # (CCD names never contain '-'). Otherwise it's a residue name
+            # (including digit-bearing CCD codes like '9DP', 'A7ZK').
+            if "-" in tok:
+                raise ValueError(
+                    f"PDB.remove selection {selection!r} has an unparseable token {tok!r}. "
+                    f"Use residue-number ranges ('1-83', 'A1-83', '1-83+90-95') or "
+                    f"residue names ('NAP', 'EDO', 'NAP+EDO').")
+            names.add(tok.upper())
+            continue
+        chain = m.group(1) or None
+        lo = int(m.group(2))
+        hi = int(m.group(3)) if m.group(3) is not None else lo
         ranges.append((chain, lo, hi))
-    return ranges
+    return ranges, names
 
 
 def _resolve_remove_selection(selection: str, structure_id: Optional[str]) -> Optional[str]:
@@ -375,21 +402,34 @@ def _resolve_remove_selection(selection: str, structure_id: Optional[str]) -> Op
               f"leaving structure unchanged")
         return None
     row = table[table[id_col].astype(str) == matched]
-    return str(row.iloc[0][column])
+    cell = row.iloc[0][column]
+    # An empty/NaN cell means "nothing to remove for this structure" — skip.
+    if pd.isna(cell):
+        return None
+    text = str(cell).strip()
+    if not text or text.lower() == "nan":
+        return None
+    return text
 
 
 def apply_remove_operation(content: str, format: str, selection, structure_id: Optional[str] = None,
                            remove_hetatm: bool = True) -> str:
     """Remove residues matching `selection` from the structure.
 
-    With `remove_hetatm=True` (default), any residue in the selected
-    (chain, resseq) ranges is dropped regardless of record type — a HETATM
-    (ligand/ion) numbered inside the selection is removed along with the protein
-    residues. With `remove_hetatm=False`, only ATOM records are dropped and all
-    HETATM records are preserved. Either way a ligand sitting *outside* the
-    selected range is kept, because it never matches the selection. `selection`
-    may be a literal string or a resolved TABLE_REFERENCE (per-structure by ID
-    match)."""
+    A range-shaped token (an optionally chain-qualified residue number or range)
+    is a (chain,resseq) **range**; any other token is a residue **name** (a HETATM
+    group like 'NAP', 'EDO', or a digit-bearing CCD code like '9DP'); the two may
+    mix ('NAP+A1-83').
+
+    With `remove_hetatm=True` (default), any residue in the selected ranges is
+    dropped regardless of record type — a HETATM (ligand/ion) numbered inside the
+    range is removed along with the protein residues. With `remove_hetatm=False`,
+    only ATOM records are dropped by range and all HETATM records are preserved.
+    A **named** residue is always removed wherever it appears (it is itself the
+    HETATM target), so `remove_hetatm` does not gate name removal. Dependent
+    records that reference a removed atom (ANISOU, CONECT, LINK) are dropped or
+    rewritten so the result stays self-consistent. `selection` may be a literal
+    string or a resolved TABLE_REFERENCE (per-structure by ID match)."""
     sel = _resolve_remove_selection(selection, structure_id)
     if sel is None:
         return content
@@ -397,11 +437,15 @@ def apply_remove_operation(content: str, format: str, selection, structure_id: O
         print("Warning: remove operation not yet implemented for CIF format")
         return content
 
-    ranges = _parse_residue_selection(sel)
-    if not ranges:
+    # Residue names present in the structure disambiguate 'B12'-shaped tokens
+    # (chain B res 12 vs the ligand named B12) the way resolve_selection does.
+    present_names = {field_res_name(l).upper() for l in content.split('\n')
+                     if l.startswith(("ATOM", "HETATM"))}
+    ranges, names = _parse_residue_selection(sel, present_names)
+    if not ranges and not names:
         return content
 
-    def _in_selection(chain_id: str, resseq: int) -> bool:
+    def _in_range(chain_id: str, resseq: int) -> bool:
         for ch, lo, hi in ranges:
             if ch is not None and ch != chain_id:
                 continue
@@ -409,18 +453,70 @@ def apply_remove_operation(content: str, format: str, selection, structure_id: O
                 return True
         return False
 
-    record_prefixes = ("ATOM", "HETATM") if remove_hetatm else ("ATOM",)
+    range_prefixes = ("ATOM", "HETATM") if remove_hetatm else ("ATOM",)
+
+    def _line_residue(line):
+        """(chain, resseq) of an ATOM/HETATM/ANISOU line, resseq None if unparseable."""
+        chain_id = line[21] if len(line) > 21 else " "
+        try:
+            return chain_id, int(field_res_seq(line))
+        except ValueError:
+            return chain_id, None
+
+    def _is_removed_atom(line):
+        """True if this atom line matches the name/range selection and is dropped."""
+        if names and field_res_name(line).upper() in names:
+            return True
+        if line.startswith(range_prefixes):
+            _, resseq = _line_residue(line)
+            if resseq is not None and _in_range(line[21] if len(line) > 21 else " ", resseq):
+                return True
+        return False
+
+    # Two passes: first collect the serials of removed atoms so dependent
+    # records (CONECT, ANISOU) that reference them can be dropped too.
+    removed_serials = set()
+    for line in content.split('\n'):
+        if line.startswith(("ATOM", "HETATM")) and _is_removed_atom(line):
+            serial = line[6:11].strip()
+            if serial:
+                removed_serials.add(serial)
 
     kept, removed = [], 0
     for line in content.split('\n'):
-        if line.startswith(record_prefixes):
-            try:
-                resseq = int(line[22:26])
-            except ValueError:
-                kept.append(line); continue
-            chain_id = line[21] if len(line) > 21 else " "
-            if _in_selection(chain_id, resseq):
+        if line.startswith(("ATOM", "HETATM")):
+            if _is_removed_atom(line):
                 removed += 1
+                continue
+        elif line.startswith("ANISOU"):
+            # ANISOU shares its atom's serial; drop it when the atom is gone.
+            if line[6:11].strip() in removed_serials:
+                continue
+        elif line.startswith("CONECT"):
+            # CONECT lists bonded atom serials in 5-col fields from col 7 on.
+            refs = [line[i:i + 5].strip() for i in range(6, len(line.rstrip()), 5)]
+            refs = [r for r in refs if r]
+            if any(r in removed_serials for r in refs):
+                kept_refs = [r for r in refs if r not in removed_serials]
+                # Drop the record if its base atom is gone, or if fewer than two
+                # serials remain (a CONECT needs the base plus >=1 bonded partner;
+                # a lone base records no bond). Otherwise rewrite without dead refs.
+                if refs[0] in removed_serials or len(kept_refs) < 2:
+                    continue
+                line = "CONECT" + "".join(f"{r:>5}" for r in kept_refs)
+        elif line.startswith("LINK"):
+            # LINK names two residues by (resname, chain, resseq) at cols 18-27
+            # and 48-57. Drop the record if either endpoint was removed.
+            def _link_removed(rname, chain, resnum):
+                if rname.upper() in names:
+                    return True
+                try:
+                    return _in_range(chain, int(resnum))
+                except ValueError:
+                    return False
+            r1 = _link_removed(line[17:20].strip(), line[21:22].strip(), line[22:26].strip())
+            r2 = _link_removed(line[47:50].strip(), line[51:52].strip(), line[52:56].strip())
+            if r1 or r2:
                 continue
         kept.append(line)
 
@@ -457,15 +553,15 @@ def _parse_atom_selection(sel: str):
 def _atom_matches(line: str, sel) -> bool:
     """True if a PDB ATOM/HETATM line matches a parsed atom selection tuple."""
     chain, resnum, resname, atom_name = sel
-    if line[12:16].strip() != atom_name:
+    if field_atom_name(line) != atom_name:
         return False
     if chain is not None and (len(line) <= 21 or line[21] != chain):
         return False
-    if resname is not None and line[17:20].strip() != resname:
+    if resname is not None and field_res_name(line) != resname:
         return False
     if resnum is not None:
         try:
-            if int(line[22:26]) != resnum:
+            if int(field_res_seq(line)) != resnum:
                 return False
         except ValueError:
             return False
@@ -708,7 +804,7 @@ def remove_waters_from_content(content: str, format: str) -> str:
     for line in lines:
         # Skip water molecules (HOH) and other common solvent molecules
         if line.startswith(('ATOM', 'HETATM')):
-            res_name = line[17:20].strip()
+            res_name = field_res_name(line)
             if res_name in ['HOH', 'WAT', 'H2O', 'SOL', 'TIP3', 'TIP4', 'SPC']:
                 continue  # Skip water lines
         filtered_lines.append(line)
@@ -1017,9 +1113,9 @@ def extract_ligands_from_structure(content: str, format: str) -> List[str]:
 
     for line in lines:
         if line.startswith('HETATM'):
-            res_name = line[17:20].strip()
-            # Only include if not in exclusion list and is 3 characters
-            if res_name and len(res_name) <= 3 and res_name not in exclude_residues:
+            res_name = field_res_name(line)
+            # Only include if not in exclusion list (1-5 char extended CCD)
+            if res_name and len(res_name) <= 5 and res_name not in exclude_residues:
                 ligands.add(res_name)
 
     return sorted(list(ligands))

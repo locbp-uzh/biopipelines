@@ -21,6 +21,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path  # noqa: E402
+from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
 E_COLS = ["id", "net_charge", "n_basic", "n_acidic", "pI", "mean_potential"]
@@ -49,9 +50,9 @@ def parse_pqr(pqr_path: str):
             except (ValueError, IndexError):
                 continue
             net += charge
-            resname = line[17:20].strip()
-            chain = line[21].strip()
-            resnum = line[22:26].strip()
+            resname = field_res_name(line)
+            chain = field_chain(line)
+            resnum = field_res_seq(line)
             key = (chain, resnum)
             if key not in seen:
                 seen.add(key)

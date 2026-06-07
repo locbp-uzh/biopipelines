@@ -47,6 +47,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files  # noqa: E402
 from biopipelines.ligand_utils import resolve_ligand_code  # noqa: E402
+from biopipelines.pdb_parser import field_res_name, field_res_seq  # noqa: E402
 
 
 def _count_ligand_copies(struct_path, code):
@@ -70,7 +71,7 @@ def _count_ligand_copies(struct_path, code):
             return 1  # be permissive: fall back to single-ligand path
     with open(struct_path) as fh:
         for ln in fh:
-            if ln.startswith("HETATM") and ln[17:20].strip() == code:
+            if ln.startswith("HETATM") and field_res_name(ln) == code:
                 seen.add((ln[20:22].strip(), ln[22:27].strip()))
     return len(seen)
 
@@ -101,9 +102,9 @@ def _atom_sel_to_placer_tuple(sel, struct_path):
             if not line.startswith(("ATOM", "HETATM")):
                 continue
             ln_chain = line[21] if len(line) > 21 else " "
-            ln_resname = line[17:20].strip()
+            ln_resname = field_res_name(line)
             try:
-                ln_resnum = int(line[22:26])
+                ln_resnum = int(field_res_seq(line))
             except ValueError:
                 continue
             if chain is not None and ln_chain != chain:

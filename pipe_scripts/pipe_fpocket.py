@@ -18,6 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path  # noqa: E402
+from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
 P_COLS = ["id", "pocket_idx", "druggability", "volume",
@@ -58,9 +59,9 @@ def parse_residues(pocket_pdb: str):
     with open(pocket_pdb) as f:
         for line in f:
             if line.startswith("ATOM"):
-                resname = line[17:20].strip()
-                chain = line[21].strip()
-                resnum = line[22:26].strip()
+                resname = field_res_name(line)
+                chain = field_chain(line)
+                resnum = field_res_seq(line)
                 res.add((chain, int(resnum), resname))
     return sorted(res, key=lambda r: (r[0], r[1]))
 

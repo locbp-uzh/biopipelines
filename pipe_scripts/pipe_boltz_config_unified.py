@@ -297,7 +297,7 @@ def add_covalent_linkage_to_config(config: Dict, covalent_linkage: Dict, ligand_
         if seq is None:
             raise ValueError(f"covalent_linkage: no protein chain '{chain}' to resolve "
                              f"position selection {position!r}")
-        from biopipelines.pdb_parser import resolve_selection_in_sequence
+        from pdb_parser import resolve_selection_in_sequence
         hits = resolve_selection_in_sequence(position, seq, chain=chain)
         if len(hits) != 1:
             raise ValueError(f"covalent_linkage position {position!r} resolved to "

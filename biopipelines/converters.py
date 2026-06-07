@@ -14,6 +14,13 @@ import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+try:
+    from .pdb_parser import field_atom_name, field_res_name, field_res_seq
+except ImportError:
+    import sys
+    sys.path.append(os.path.dirname(__file__))
+    from pdb_parser import field_atom_name, field_res_name, field_res_seq
+
 
 def pdb_to_jsonl(pdb_folder: str, output_jsonl: str) -> bool:
     """
@@ -268,10 +275,10 @@ def extract_sequences_from_pdb(pdb_file: str) -> Dict[str, str]:
         last_resnum = None
         
         for line in lines:
-            if line.startswith('ATOM') and line[12:16].strip() == 'CA':
+            if line.startswith('ATOM') and field_atom_name(line) == 'CA':
                 chain = line[21]
-                resnum = int(line[22:26])
-                resname = line[17:20].strip()
+                resnum = int(field_res_seq(line))
+                resname = field_res_name(line)
                 
                 # Convert 3-letter to 1-letter amino acid code
                 aa_map = {

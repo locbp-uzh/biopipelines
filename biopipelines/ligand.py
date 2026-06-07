@@ -27,6 +27,20 @@ except ImportError:
     from datastream import DataStream
 
 
+# Extended CCD codes are 1-5 alphanumeric; 4-5 char codes only exist in mmCIF.
+_CCD_CODE_RE = re.compile(r'^[A-Za-z0-9]{1,5}$')
+
+
+def _validate_ccd_code(code: str) -> str:
+    """Validate and uppercase a CCD residue code (1-5 alphanumeric, extended format)."""
+    if not code:
+        raise ValueError("Residue code cannot be empty")
+    if not _CCD_CODE_RE.match(code):
+        raise ValueError(
+            f"Invalid ligand code {code!r}: must be 1-5 alphanumeric characters")
+    return code.upper()
+
+
 class Ligand(BaseConfig):
     """
     Pipeline tool for fetching small molecule ligands from RCSB PDB, PubChem, or SMILES strings.
@@ -69,7 +83,6 @@ echo "=== Ligand ready ==="
                  code: Optional[Union[str, List[str]]] = None,
                  source: Optional[str] = None,
                  local_folder: Optional[str] = None,
-                 output_format: str = "pdb",
                  smiles: Optional[Union[str, List[str], Dict[str, str]]] = None,
                  structures: Optional[Union['DataStream', 'StandardizedOutput']] = None,
                  generate_images: bool = False,
@@ -92,8 +105,9 @@ echo "=== Ligand ready ==="
                  If not provided, defaults to lookup values (for lookup), "smilesN" (for smiles),
                  or names/indices from CDXML (for cdxml).
                  Ignored when lookup or smiles is a dictionary (ids come from dict keys).
-            codes: 3-letter PDB residue code(s) to use in the PDB file (e.g., "LIG").
-                   If not provided, defaults to lookup[:3].upper() (for lookup) or "LIG" (for smiles/cdxml).
+            codes: residue code(s) to carry on the compounds stream (e.g., "LIG").
+                   1-5 alphanumeric (extended CCD). If not provided, defaults to the
+                   lookup value (for lookup) or "LIG" (for smiles/cdxml).
             code: Code-only construction. `Ligand(code="ZIT")` builds a compounds
                   stream that merely names an existing HETATM residue code — no
                   download, no SMILES, no structures stream. The result is a
@@ -103,7 +117,6 @@ echo "=== Ligand ready ==="
             source: Force source ("rcsb" or "pubchem"). If None, auto-detects.
                     Ignored when using smiles or cdxml.
             local_folder: Custom local folder to check first (before ligands/). Default: None
-            output_format: Output format - "pdb" or "cif". Default: "pdb"
             smiles: SMILES string(s) for direct molecule input. Bypasses lookup entirely.
                     Can also be a dictionary mapping IDs to SMILES: {"lig1": "CCO", "lig2": "CC"}
                     Equivalent to Ligand(smiles=list(values), ids=list(keys))
@@ -121,12 +134,21 @@ echo "=== Ligand ready ==="
 
         Output:
             Streams: compounds (value-based csv: chemistry/metadata), structures
-                     (.pdb/.cif coordinate files; absent in code-only mode),
-                     images (.png, if generate_images=True)
+                     (SDF for download/SMILES; the input structure's own format for
+                     structures=... extract; absent in code-only mode), images
+                     (.png, if generate_images=True). For other coordinate formats
+                     run OpenBabel(compounds=lig, convert_3d="pdb"|"cif").
             Tables:
                 compounds: id | format | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path
                 failed: lookup | error_message | source | attempted_path
         """
+        if "output_format" in kwargs:
+            raise ValueError(
+                "output_format was removed from Ligand: the structures stream is "
+                "always SDF (download/SMILES) or the input structure's own format "
+                "(structures=... extract). For PDB/CIF coordinates run "
+                "OpenBabel(compounds=lig, convert_3d=\"pdb\"|\"cif\").")
+
         # Code-only construction: Ligand(code="ZIT"). Names an existing HETATM
         # residue code with no chemistry — produces a value-based compounds csv
         # (smiles empty) and no structures stream. Mutually exclusive with the
@@ -143,12 +165,8 @@ echo "=== Ligand ready ==="
                 code_list = list(code)
             if not code_list:
                 raise ValueError("code cannot be empty")
-            self.residue_codes = [c.upper() for c in code_list]
-            # Ligand is the sole validator of the code; enforce 1-3 alphanumeric.
-            for c in self.residue_codes:
-                if not re.match(r'^[A-Za-z0-9]{1,3}$', c):
-                    raise ValueError(
-                        f"Invalid ligand code {c!r}: must be 1-3 alphanumeric characters")
+            # Ligand is the sole validator of the code; enforce 1-5 alphanumeric.
+            self.residue_codes = [_validate_ccd_code(c) for c in code_list]
             # ids default to the codes themselves
             if ids is not None:
                 self.custom_ids = [ids] if isinstance(ids, str) else list(ids)
@@ -164,7 +182,8 @@ echo "=== Ligand ready ==="
             self.extract_structures_stream = None
             self.source = None
             self.local_folder = None
-            self.output_format = output_format if output_format in ("pdb", "cif") else "pdb"
+            # code-only names an existing HETATM: no coordinate file is written.
+            self.structures_format = None
             self.generate_images = generate_images
             super().__init__(**kwargs)
             return
@@ -202,10 +221,8 @@ echo "=== Ligand ready ==="
                 if codes is None:
                     raise ValueError("structures=... requires codes=... (the HETATM residue code(s) to extract) when no lookup/smiles is given")
                 self._structures_only = True
-                self.residue_codes = [codes.upper()] if isinstance(codes, str) else [c.upper() for c in codes]
-                for c in self.residue_codes:
-                    if not re.match(r'^[A-Za-z0-9]{1,3}$', c):
-                        raise ValueError(f"Invalid ligand code {c!r}: must be 1-3 alphanumeric characters")
+                code_src = [codes] if isinstance(codes, str) else list(codes)
+                self.residue_codes = [_validate_ccd_code(c) for c in code_src]
                 self.custom_ids = ([ids] if isinstance(ids, str) else list(ids)) if ids is not None else list(self.residue_codes)
                 if len(self.custom_ids) != len(self.residue_codes):
                     raise ValueError(
@@ -215,7 +232,10 @@ echo "=== Ligand ready ==="
                 self.file_smiles_ids = []
                 self.source = None
                 self.local_folder = None
-                self.output_format = output_format if output_format in ("pdb", "cif") else "pdb"
+                # Extract carves the bound HETATM block as-is, keeping crystal
+                # coords. The carver dispatches on each input file's extension
+                # (pdb/cif), so the output stream mirrors the input's format.
+                self.structures_format = self.extract_structures_stream.format or "pdb"
                 self.generate_images = generate_images
                 super().__init__(**kwargs)
                 if isinstance(structures, StandardizedOutput) and hasattr(structures, "config"):
@@ -312,8 +332,12 @@ echo "=== Ligand ready ==="
             else:
                 self.residue_codes = [c.upper() for c in codes]
         else:
-            # Default codes: lookup[:3].upper() for lookup, "LIG" for smiles/cdxml
-            self.residue_codes = [lv.upper()[:3] for lv in self.lookup_values]
+            # Default codes: the lookup value if it is itself a valid CCD code,
+            # else "LIG" (a SMILES/name lookup has no meaningful residue code).
+            self.residue_codes = [
+                lv.upper() if _CCD_CODE_RE.match(lv) else "LIG"
+                for lv in self.lookup_values
+            ]
             for _ in range(len(self.smiles_values)):
                 self.residue_codes.append("LIG")
 
@@ -330,18 +354,13 @@ echo "=== Ligand ready ==="
 
         self.local_folder = local_folder
 
-        # Validate and store output format
-        if output_format not in ["pdb", "cif"]:
-            raise ValueError(f"Invalid output_format: {output_format}. Must be 'pdb' or 'cif'")
-        self.output_format = output_format
+        # Download/SMILES paths emit SDF coordinates (native RCSB/RDKit form, no
+        # fixed-column width limit, so an extended code is never a problem).
+        self.structures_format = "sdf"
         self.generate_images = generate_images
 
-        # Warn about non-standard residue codes (standard PDB is 1-3 alphanumeric)
         for code in self.residue_codes:
-            if not code:
-                raise ValueError("Residue code cannot be empty")
-            if len(code) > 3 or not code.isalnum():
-                print(f"  Warning: Non-standard residue code '{code}'. Standard PDB uses 1-3 alphanumeric characters.")
+            _validate_ccd_code(code)
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -464,8 +483,9 @@ echo "=== Ligand ready ==="
 
         Returns: "ccd" (RCSB), "cid" (PubChem), "cas" (PubChem), or "name" (PubChem)
         """
-        # CCD codes: 1-3 uppercase alphanumeric characters
-        if re.match(r'^[A-Z0-9]{1,3}$', lookup.upper()) and not lookup.isdigit():
+        # CCD codes: 1-5 alphanumeric, canonically uppercase. A value carrying a
+        # lowercase letter (water, urea, aspirin) is a PubChem name, not a CCD.
+        if _CCD_CODE_RE.match(lookup) and not lookup.isdigit() and lookup == lookup.upper():
             return "ccd"
 
         # PubChem CID: purely numeric
@@ -575,7 +595,7 @@ echo "=== Ligand ready ==="
         if self.code_only:
             config_lines.append("MODE: code-only (names existing HETATM; no structures)")
             return config_lines
-        config_lines.append(f"FORMAT: {self.output_format.upper()}")
+        config_lines.append(f"FORMAT: {self.structures_format.upper()}")
         if self.extract_structures_stream is not None:
             config_lines.append(
                 f"COORDS: carved from {len(self.extract_structures_stream)} bound structure(s) "
@@ -626,7 +646,7 @@ echo "=== Ligand ready ==="
             "smiles_values": self.smiles_values,
             "source": self.source,
             "local_folder": self.local_folder,
-            "output_format": self.output_format,
+            "output_format": self.structures_format,
             "code_only": self.code_only,
             "repo_ligands_folder": repo_ligands_folder,
             # Coordinate files live on the structures stream; compounds.csv (the
@@ -671,7 +691,9 @@ python "{self.ligand_py}" --config "{self.config_file}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after ligand fetching."""
-        ext = self.output_format  # "pdb" or "cif"
+        # "sdf" (download/smiles) or the input's format (extract, possibly mixed).
+        # A mixed "pdb|cif" extract can't predict a single extension -> glob.
+        ext = "*" if "|" in (self.structures_format or "") else self.structures_format
 
         tables = {
             "compounds": TableInfo(
@@ -707,14 +729,14 @@ python "{self.ligand_py}" --config "{self.config_file}"
         # no structures stream. Otherwise the coordinate files live on the
         # structures stream (templated, with its own map_table).
         if self.code_only:
-            result["structures"] = DataStream.empty("structures", self.output_format)
+            result["structures"] = DataStream.empty("structures", "sdf")
         else:
             structures = DataStream(
                 name="structures",
                 ids=self.custom_ids.copy(),
                 files=[self.stream_path("structures", f"<id>.{ext}")],
                 map_table=self.structures_map,
-                format=self.output_format
+                format=self.structures_format
             )
             result["structures"] = structures
 
@@ -742,7 +764,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
                 "code_only": self.code_only,
                 "source": self.source,
                 "local_folder": self.local_folder,
-                "output_format": self.output_format,
+                "structures_format": self.structures_format,
                 "parsed_files": [fp for fp, _ in self.file_smiles_ids],
                 "generate_images": self.generate_images
             }

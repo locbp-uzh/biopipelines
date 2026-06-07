@@ -166,16 +166,28 @@ echo "=== PDB ready ==="
         drop an N-terminal segment, carrying the bound ligand (HETATM) along.
 
         Args:
-            selection: Residues to remove, as a PyMOL-style selection string or a
-                table column reference resolved per-structure at runtime.
+            selection: Residues to remove, as a selection string or a table column
+                reference resolved per-structure at runtime. A range-shaped token
+                (an optionally chain-qualified residue number or range) is a
+                residue-number range; any other token is a residue *name* (a HETATM
+                group, including digit-bearing CCD codes), and the two may mix.
                 - `"1-83"`              — residues 1-83 (any chain)
                 - `"1-83+90-95"`        — multiple ranges
                 - `"A1-83"`             — chain-qualified range
+                - `"NAP"`               — every residue named NAP (e.g. a cofactor)
+                - `"9DP"`               — a digit-bearing CCD code
+                - `"NAP+EDO"`           — several named residues (cofactor + solvent)
+                - `"NAP+A1-83"`         — mix a name with a range
                 - `tool.tables.x.col`   — a TableReference column (per-structure)
                 - `(TableInfo, "col")`  — equivalent (TableInfo, column) tuple
+                A `"B12"`-shaped token (one chain letter + digits) is ambiguous —
+                chain B residue 12, or the ligand named B12. If a residue of that
+                name is present in the structure it is removed as a name; otherwise
+                the token is read as a chain-qualified range (same precedence rule
+                as the selection grammar).
                 A column reference is matched to each structure by ID at runtime
-                (a single-row table broadcasts to all structures; an unmatched
-                structure is left unchanged).
+                (a single-row table broadcasts to all structures; an unmatched or
+                empty cell leaves that structure unchanged).
             remove_hetatm: When True (default), a HETATM (ligand/ion) whose residue
                 number falls inside the selected range is removed along with the
                 protein residues. Set False to remove only protein ATOM residues and
@@ -197,6 +209,9 @@ echo "=== PDB ready ==="
 
             # Per-structure truncation from an upstream table column
             PDB(docked, PDB.remove(rfd.tables.structures.flank))
+
+            # Strip a cofactor and a crystallization additive by name
+            PDB("3QWI", PDB.remove("NAP"), PDB.remove("EDO"))
         """
         return PDBOperation("remove", selection=_normalize_selection(selection),
                             remove_hetatm=remove_hetatm)

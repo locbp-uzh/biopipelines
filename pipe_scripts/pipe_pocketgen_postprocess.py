@@ -36,6 +36,7 @@ from typing import Dict, List, Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import step_id_from_table_path  # noqa: E402
+from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
 # Three-to-one letter code map (standard residues + a few common variants).
@@ -66,9 +67,9 @@ def parse_sequence_from_pdb(pdb_path: str) -> str:
             if not line.startswith("ATOM"):
                 continue
             try:
-                resname = line[17:20].strip()
-                chain = line[21:22].strip()
-                resnum = line[22:26].strip()
+                resname = field_res_name(line)
+                chain = field_chain(line)
+                resnum = field_res_seq(line)
                 icode = line[26:27].strip()
             except IndexError:
                 continue

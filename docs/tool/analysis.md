@@ -625,6 +625,10 @@ ds = DistanceSelector(structures=boltz, ligand=boltz, distance=8.0)
 # Atom-level reference: residues near a specific ligand atom.
 ds = DistanceSelector(structures=boltz, reference="LIG.O132", distance=6.0)
 
+# Multiple ligand atoms (union): residues near either boron atom. The
+# 'LIG.B' prefix form selects every atom whose name starts with B (e.g. B41, B42).
+ds = DistanceSelector(structures=boltz, reference="LIG.B41+LIG.B42", distance=5.0)
+
 # Top-K nearest residues to a ligand atom, ignoring cutoff.
 ds = DistanceSelector(structures=boltz, reference="LIG.O132", top_k=3, distance=None)
 

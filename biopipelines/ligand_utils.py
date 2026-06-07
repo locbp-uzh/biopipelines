@@ -6,16 +6,17 @@
 stream.
 
 Tools that consume a ligand `code` accept any compounds stream (Ligand, Boltz2,
-Load, custom), so the residue-code contract (1-3 alphanumeric) is re-checked
-here at the consumer boundary rather than trusting the producer. By default a
-single distinct code is required — a tool that genuinely supports several
-ligands passes ``allow_multiple=True`` and gets the full set back.
+Load, custom), so the residue-code contract (1-5 alphanumeric, extended CCD) is
+re-checked here at the consumer boundary rather than trusting the producer. By
+default a single distinct code is required — a tool that genuinely supports
+several ligands passes ``allow_multiple=True`` and gets the full set back.
 """
 
 import os
 import re
 
-_CODE_RE = re.compile(r'^[A-Za-z0-9]{1,3}$')
+# Extended CCD codes are 1-5 alphanumeric (matches Ligand's _CCD_CODE_RE).
+_CODE_RE = re.compile(r'^[A-Za-z0-9]{1,5}$')
 
 
 def _read_codes(ligand_json: str):
@@ -44,7 +45,7 @@ def _read_codes(ligand_json: str):
         raise ValueError("ligand compounds stream `code` column is empty")
     for c in codes:
         if not _CODE_RE.match(c):
-            raise ValueError(f"invalid ligand code {c!r}: a residue code must be 1-3 alphanumeric characters")
+            raise ValueError(f"invalid ligand code {c!r}: a residue code must be 1-5 alphanumeric characters")
     return codes
 
 

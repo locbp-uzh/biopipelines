@@ -31,6 +31,11 @@ import pandas as pd
 from pathlib import Path
 from collections import defaultdict
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from biopipelines.pdb_parser import (  # noqa: E402
+    field_atom_name, field_res_name, field_chain, field_res_seq, field_coords,
+)
+
 # Backbone atom names (coordinates preserved)
 BACKBONE_ATOMS = {'N', 'CA', 'C', 'O'}
 
@@ -102,15 +107,13 @@ class PDBAtom:
     def __init__(self, line):
         self.record = line[0:6].strip()
         self.serial = int(line[6:11].strip())
-        self.name = line[12:16].strip()
+        self.name = field_atom_name(line)
         self.altloc = line[16:17].strip()
-        self.resname = line[17:20].strip()
-        self.chain = line[21:22].strip()
-        self.resseq = int(line[22:26].strip())
+        self.resname = field_res_name(line)
+        self.chain = field_chain(line)
+        self.resseq = int(field_res_seq(line))
         self.icode = line[26:27].strip()
-        self.x = float(line[30:38].strip())
-        self.y = float(line[38:46].strip())
-        self.z = float(line[46:54].strip())
+        self.x, self.y, self.z = field_coords(line)
         self.occupancy = float(line[54:60].strip()) if line[54:60].strip() else 1.0
         self.tempfactor = float(line[60:66].strip()) if line[60:66].strip() else 0.0
         self.element = line[76:78].strip() if len(line) > 76 else self.name[0]

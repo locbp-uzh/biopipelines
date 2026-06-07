@@ -57,6 +57,37 @@ class Atom(NamedTuple):
     chain: str
     element: str = ""
 
+
+# ---------------------------------------------------------------------------
+# Fixed-column field accessors — single source of truth for the PDB layout.
+# Every pipe script reads ATOM/HETATM fields through these instead of inlining
+# offsets, so a future format change is a one-file edit, not a repo-wide sweep.
+# ---------------------------------------------------------------------------
+
+def field_atom_name(line: str) -> str:
+    """Atom name (cols 13-16)."""
+    return line[12:16].strip()
+
+
+def field_res_name(line: str) -> str:
+    """Residue / CCD code (cols 18-20 in fixed-column PDB)."""
+    return line[17:20].strip()
+
+
+def field_chain(line: str) -> str:
+    """Chain identifier (col 22)."""
+    return line[21:22].strip()
+
+
+def field_res_seq(line: str) -> str:
+    """Residue sequence number as a string (cols 23-26), icode excluded."""
+    return line[22:26].strip()
+
+
+def field_coords(line: str) -> Tuple[float, float, float]:
+    """(x, y, z) coordinates (cols 31-54)."""
+    return (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+
 def parse_pdb_file(pdb_path: str) -> List[Atom]:
     """
     Parse PDB file and extract atom information.
@@ -75,13 +106,11 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
             if line.startswith(('ATOM', 'HETATM')):
                 try:
                     # Parse PDB format according to specification
-                    atom_name = line[12:16].strip()
-                    res_name = line[17:20].strip()
-                    chain = line[21:22].strip()
-                    res_num = int(line[22:26].strip())
-                    x = float(line[30:38].strip())
-                    y = float(line[38:46].strip())
-                    z = float(line[46:54].strip())
+                    atom_name = field_atom_name(line)
+                    res_name = field_res_name(line)
+                    chain = field_chain(line)
+                    res_num = int(field_res_seq(line))
+                    x, y, z = field_coords(line)
                     element = line[76:78].strip() if len(line) > 76 else atom_name[0]
                     
                     atom = Atom(
@@ -355,6 +384,23 @@ def resolve_selection(selection: str, atoms: List[Atom]) -> List[Atom]:
     Returns:
         List of selected atoms
     """
+    # Multi-term union for atom-set references: 'LIG.B41+LIG.B42', 'LIG.O3+LIG.Cl'.
+    # Only when terms carry a '.' (atom/ligand refs); pure-number '+' (e.g. '1+-1',
+    # 'first+last') stays with the dedicated residue-number branch below.
+    if '+' in selection and '.' in selection:
+        seen = set()
+        union: List[Atom] = []
+        for term in selection.split('+'):
+            term = term.strip()
+            if not term:
+                continue
+            for atom in resolve_selection(term, atoms):
+                key = id(atom)
+                if key not in seen:
+                    seen.add(key)
+                    union.append(atom)
+        return union
+
     if '.' in selection:
         parts = selection.split('.', 1)
         prefix = parts[0]

@@ -100,6 +100,33 @@ def test_read_codes_empty_raises(tmp_path):
         resolve_ligand_code(js)
 
 
+@pytest.mark.parametrize("code", ["DROX", "A7ZK"])
+def test_resolve_ligand_code_accepts_extended_ccd(tmp_path, code, record_case):
+    """4-5 char (extended CCD) codes resolve at the consumer boundary, matching
+    Ligand's 1-5 acceptance — so an mmCIF-extracted or code=... extended ligand
+    flows into PLACER/PLIP/PocketGen/PoseBusters/ProLIF/XTB/LigandMPNN."""
+    from biopipelines.ligand_utils import resolve_ligand_code
+
+    js = _write_compounds_stream(
+        tmp_path, declared_ids=["x"], map_rows=[{"id": "x", "code": code, "smiles": ""}]
+    )
+    out = resolve_ligand_code(js)
+    record_case(input=f"resolve_ligand_code(code={code!r})",
+                expected=code, actual=out)
+    assert out == code
+
+
+def test_resolve_ligand_code_rejects_over_five_chars(tmp_path):
+    """A code longer than the extended-CCD limit is still rejected clearly."""
+    from biopipelines.ligand_utils import resolve_ligand_code
+
+    js = _write_compounds_stream(
+        tmp_path, declared_ids=["x"], map_rows=[{"id": "x", "code": "TOOLONG", "smiles": ""}]
+    )
+    with pytest.raises(ValueError, match="1-5 alphanumeric"):
+        resolve_ligand_code(js)
+
+
 # ── BaseConfig collects every input axis's missing table ──────────────────────
 
 class _FakeTableInfo:

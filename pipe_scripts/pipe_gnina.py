@@ -34,6 +34,7 @@ from rdkit.ML.Cluster import Butina
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, read_upstream_missing, MISSING_COLUMNS
+from biopipelines.pdb_parser import field_atom_name, field_res_name
 
 
 @contextmanager
@@ -126,14 +127,14 @@ def _clean_protein_pdb(input_pdb, output_pdb, crystal_ligand_pdb=None):
             if line.startswith("ATOM"):
                 chain_id = line[21]
                 chains.setdefault(chain_id, []).append(line)
-                if line[12:16].strip() == "CA":
-                    resname = line[17:20].strip()
+                if field_atom_name(line) == "CA":
+                    resname = field_res_name(line)
                     chain_seqs.setdefault(chain_id, []).append(resname)
                     coords = _parse_pdb_coords(line)
                     if coords:
                         chain_ca_coords.setdefault(chain_id, []).append(coords)
             elif line.startswith("HETATM"):
-                resname = line[17:20].strip()
+                resname = field_res_name(line)
                 if resname != "HOH":
                     hetatm_lines.append(line)
 

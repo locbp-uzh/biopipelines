@@ -39,7 +39,9 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
 from biopipelines.id_map_utils import get_mapped_ids
-from biopipelines.pdb_parser import Atom
+from biopipelines.pdb_parser import (
+    Atom, field_atom_name, field_res_name, field_chain, field_res_seq, field_coords,
+)
 
 # Backbone atom names for the "backbone" selection; "CA" uses just the alpha C.
 _BACKBONE = ("N", "CA", "C", "O")
@@ -66,15 +68,15 @@ def parse_models(pdb_path):
                 current = []
             elif line.startswith("ATOM"):
                 try:
+                    atom_name = field_atom_name(line)
+                    x, y, z = field_coords(line)
                     atom = Atom(
-                        x=float(line[30:38]),
-                        y=float(line[38:46]),
-                        z=float(line[46:54]),
-                        atom_name=line[12:16].strip(),
-                        res_name=line[17:20].strip(),
-                        res_num=int(line[22:26]),
-                        chain=line[21:22].strip(),
-                        element=line[76:78].strip() if len(line) > 76 else line[12:16].strip()[0],
+                        x=x, y=y, z=z,
+                        atom_name=atom_name,
+                        res_name=field_res_name(line),
+                        res_num=int(field_res_seq(line)),
+                        chain=field_chain(line),
+                        element=line[76:78].strip() if len(line) > 76 else atom_name[0],
                     )
                     current.append(atom)
                 except (ValueError, IndexError):

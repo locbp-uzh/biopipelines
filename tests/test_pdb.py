@@ -590,3 +590,173 @@ def test_pdb_chain_list_split_propagates_to_dict(record_case):
                 actual=(d["tool_params"]["chain"], d["tool_params"]["split_chains"]))
     assert d["tool_params"]["chain"] == ["A", "B"]
     assert d["tool_params"]["split_chains"] is True
+
+
+# ── remove-operation selection parsing ───────────────────────────────────────
+
+def _load_pipe_pdb():
+    import importlib.util
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(repo, "pipe_scripts", "pipe_pdb.py")
+    spec = importlib.util.spec_from_file_location("pipe_pdb", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_parse_residue_selection_ranges_and_names(record_case):
+    """Range-shaped tokens parse as ranges; the rest as residue names; they mix."""
+    pp = _load_pipe_pdb()
+    ranges, names = pp._parse_residue_selection("NAP+A1-83+EDO+90-95")
+    record_case(input="_parse_residue_selection('NAP+A1-83+EDO+90-95')",
+                expected=([("A", 1, 83), (None, 90, 95)], {"NAP", "EDO"}),
+                actual=(ranges, names))
+    assert ranges == [("A", 1, 83), (None, 90, 95)]
+    assert names == {"NAP", "EDO"}
+
+
+def test_parse_residue_selection_digit_bearing_names(record_case):
+    """A CCD code with digits ('9DP', 'A7ZK') is a residue name, not a range."""
+    pp = _load_pipe_pdb()
+    ranges, names = pp._parse_residue_selection("9DP+A7ZK+A1-83")
+    record_case(input="_parse_residue_selection('9DP+A7ZK+A1-83')",
+                expected=([("A", 1, 83)], {"9DP", "A7ZK"}),
+                actual=(ranges, names))
+    assert ranges == [("A", 1, 83)]
+    assert names == {"9DP", "A7ZK"}
+
+
+def test_apply_remove_operation_digit_bearing_name(record_case):
+    """PDB.remove('9DP') drops the digit-bearing CCD ligand by name."""
+    pp = _load_pipe_pdb()
+    pdb = (
+        "ATOM      1  CA  ALA A   1      11.0  11.0  11.0  1.00  0.00           C\n"
+        "HETATM    2  PA  9DP A 500      20.0  20.0  20.0  1.00  0.00           P\n"
+        "HETATM    3  C1  STI A 700      40.0  40.0  40.0  1.00  0.00           C\n"
+    )
+    out = pp.apply_remove_operation(pdb, "pdb", "9DP")
+    record_case(input="apply_remove_operation(pdb,'9DP')",
+                expected="9DP gone; ALA, STI kept", actual=out)
+    assert "9DP" not in out
+    assert "ALA" in out and "STI" in out
+
+
+def test_parse_residue_selection_b12_collision(record_case):
+    """'B12'-shaped token: a present residue name wins over the chain reading;
+    absent, it falls back to a chain-qualified range (B, 12, 12)."""
+    pp = _load_pipe_pdb()
+    as_name = pp._parse_residue_selection("B12", present_names={"B12"})
+    as_range = pp._parse_residue_selection("B12", present_names={"ALA"})
+    record_case(input="_parse_residue_selection('B12', present/absent)",
+                expected="present -> name {B12}; absent -> range (B,12,12)",
+                actual=(as_name, as_range))
+    assert as_name == ([], {"B12"})
+    assert as_range == ([("B", 12, 12)], set())
+
+
+def test_apply_remove_operation_b12_ligand_vs_chain(record_case):
+    """End to end: when B12 is a bound ligand it is removed as a name; the same
+    token against a structure with no B12 ligand removes chain-B residue 12."""
+    pp = _load_pipe_pdb()
+    # B12 present as a HETATM ligand -> name removal (the chain-A copy stays).
+    pdb_lig = (
+        "ATOM      1  CA  ALA A  12      11.0  11.0  11.0  1.00  0.00           C\n"
+        "HETATM    2  CO  B12 B 500      20.0  20.0  20.0  1.00  0.00          CO\n"
+    )
+    out_lig = pp.apply_remove_operation(pdb_lig, "pdb", "B12")
+    assert "B12" not in out_lig and "ALA" in out_lig
+
+    # No B12 ligand -> 'B12' reads as chain B residue 12 (the chain-A res 12 stays).
+    pdb_nolig = (
+        "ATOM      1  CA  ALA A  12      11.0  11.0  11.0  1.00  0.00           C\n"
+        "ATOM      2  CA  GLY B  12      20.0  20.0  20.0  1.00  0.00           C\n"
+    )
+    out_nolig = pp.apply_remove_operation(pdb_nolig, "pdb", "B12")
+    record_case(input="apply_remove_operation B12 ligand-vs-chain",
+                expected="ligand: B12 gone/ALA kept; no-ligand: chain-B res12 gone/chain-A kept",
+                actual=(out_lig, out_nolig))
+    kept = [l for l in out_nolig.split("\n") if l.startswith("ATOM")]
+    assert len(kept) == 1 and kept[0][21] == "A"
+
+
+def test_parse_residue_selection_pure_name(record_case):
+    """A bare residue name (the 3QWI case: PDB.remove('NAP')) parses, no crash."""
+    pp = _load_pipe_pdb()
+    ranges, names = pp._parse_residue_selection("NAP")
+    record_case(input="_parse_residue_selection('NAP')",
+                expected=([], {"NAP"}), actual=(ranges, names))
+    assert ranges == []
+    assert names == {"NAP"}
+
+
+def test_parse_residue_selection_unparseable_token_raises(record_case):
+    """A digit-bearing but malformed token gives a clear error (not int(''))."""
+    pp = _load_pipe_pdb()
+    with pytest.raises(ValueError, match="unparseable token"):
+        pp._parse_residue_selection("1-x")
+    record_case(input="_parse_residue_selection('1-x')",
+                expected="ValueError(unparseable token)",
+                actual="ValueError(unparseable token)")
+
+
+def test_apply_remove_operation_by_name(record_case):
+    """PDB.remove('NAP') drops the named HETATM group regardless of remove_hetatm,
+    while leaving protein and other ligands intact."""
+    pp = _load_pipe_pdb()
+    pdb = (
+        "ATOM      1  CA  ALA A   1      11.0  11.0  11.0  1.00  0.00           C\n"
+        "HETATM    2  PA  NAP A 500      20.0  20.0  20.0  1.00  0.00           P\n"
+        "HETATM    3  C1  EDO A 600      30.0  30.0  30.0  1.00  0.00           C\n"
+        "HETATM    4  C1  STI A 700      40.0  40.0  40.0  1.00  0.00           C\n"
+    )
+    # remove_hetatm=False would normally keep all HETATM, but a NAMED removal
+    # still drops NAP.
+    out = pp.apply_remove_operation(pdb, "pdb", "NAP", remove_hetatm=False)
+    record_case(input="apply_remove_operation(pdb,'NAP',remove_hetatm=False)",
+                expected="NAP gone; ALA, EDO, STI kept",
+                actual=out)
+    assert "NAP" not in out
+    assert "ALA" in out and "EDO" in out and "STI" in out
+
+    # Mixed name+name removal ('NAP+EDO') drops both.
+    out2 = pp.apply_remove_operation(pdb, "pdb", "NAP+EDO")
+    assert "NAP" not in out2 and "EDO" not in out2
+    assert "STI" in out2 and "ALA" in out2
+
+
+def test_apply_remove_operation_drops_dependent_records(record_case):
+    """Removing a residue also drops ANISOU/CONECT/LINK records that reference its
+    atoms: a CONECT keeping >=1 partner is rewritten; one left with only its base
+    serial (no bonded partner) is dropped, not emitted as a lone-base record."""
+    pp = _load_pipe_pdb()
+    pdb = (
+        "ATOM      1  CA  ALA A   1      11.0  11.0  11.0  1.00  0.00           C\n"
+        "ANISOU    1  CA  ALA A   1      100  100  100    0    0    0       C\n"
+        "HETATM    2  PA  NAP A 500      20.0  20.0  20.0  1.00  0.00           P\n"
+        "ANISOU    2  PA  NAP A 500      200  200  200    0    0    0       P\n"
+        "HETATM    3  C1  STI A 700      40.0  40.0  40.0  1.00  0.00           C\n"
+        "HETATM    4  C2  STI A 700      41.0  40.0  40.0  1.00  0.00           C\n"
+        "LINK         PA  NAP A 500                 C1  STI A 700     1555 1555  1.5\n"
+        "CONECT    2    3\n"      # base removed -> dropped
+        "CONECT    3    2    4\n"  # partner 2 removed, 4 survives -> rewritten
+        "CONECT    4    2\n"      # only partner removed, lone base left -> dropped
+    )
+    out = pp.apply_remove_operation(pdb, "pdb", "NAP")
+    lines = out.split("\n")
+    record_case(input="apply_remove_operation(pdb,'NAP') with deps",
+                expected="NAP atom+ANISOU+LINK gone; CONECT 2 & 4 dropped; CONECT 3 -> '3 4'",
+                actual=out)
+    # NAP's atom and its ANISOU are gone; serial-2 ANISOU gone.
+    assert not any(l.startswith(("ATOM", "HETATM", "ANISOU")) and pp.field_res_name(l).upper() == "NAP"
+                   for l in lines if len(l) > 20)
+    assert not any(l.startswith("ANISOU") and l[6:11].strip() == "2" for l in lines)
+    # LINK referencing NAP is dropped entirely.
+    assert not any(l.startswith("LINK") for l in lines)
+    # Only CONECT 3 survives, rewritten to drop serial 2 and keep serial 4.
+    conects = [l for l in lines if l.startswith("CONECT")]
+    assert len(conects) == 1
+    refs = [conects[0][i:i + 5].strip() for i in range(6, len(conects[0]), 5)]
+    refs = [r for r in refs if r]
+    assert refs == ["3", "4"]  # base + one surviving partner, no lone base, no dead serial 2
+    # The surviving STI atoms are untouched.
+    assert sum(1 for l in lines if l.startswith("HETATM") and pp.field_res_name(l) == "STI") == 2

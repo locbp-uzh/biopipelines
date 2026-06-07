@@ -185,7 +185,7 @@ def test_rfdiffusion_allatom_rejects_unsafe_contigs(local_config, isolated_cwd):
 
 def test_ligand_rejects_unsafe_code(local_config, isolated_cwd):
     """Ligand(code=...) reaches the generated bash; the residue-code contract
-    (1-3 alphanumeric) is enforced at construction, rejecting shell
+    (1-5 alphanumeric, extended CCD) is enforced at construction, rejecting shell
     metacharacters. This is where the former per-tool ligand_code injection
     check now lives — Ligand is the sole validator of the code."""
     from biopipelines.pipeline import Pipeline
