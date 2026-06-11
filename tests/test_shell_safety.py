@@ -183,6 +183,25 @@ def test_rfdiffusion_allatom_rejects_unsafe_contigs(local_config, isolated_cwd):
         RFdiffusionAllAtom(ligand=Ligand(code="LIG"), contigs="A1-50 `rm -rf /`")
 
 
+def test_rfdiffusion2_rejects_unsafe_contigs(local_config, isolated_cwd):
+    """RFdiffusion2.contigs is interpolated into an unquoted Hydra CLI arg.
+    Shell metas must be rejected at config time."""
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.rfdiffusion2 import RFdiffusion2
+    from biopipelines.datastream import DataStream
+    from biopipelines.ligand import Ligand
+
+    Pipeline(
+        project="TestSuite", job="rfd2",
+        on_the_fly=True, local_output=True, config="local",
+    )
+    pdb = DataStream(name="structures", ids=["x"], files=["<id>.pdb"],
+                     map_table="", format="pdb")
+    with pytest.raises(ValueError, match="contigs"):
+        RFdiffusion2(pdb=pdb, ligand=Ligand(code="LIG"),
+                     contigs="A1-50 `rm -rf /`")
+
+
 def test_ligand_rejects_unsafe_code(local_config, isolated_cwd):
     """Ligand(code=...) reaches the generated bash; the residue-code contract
     (1-5 alphanumeric, extended CCD) is enforced at construction, rejecting shell

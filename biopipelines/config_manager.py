@@ -50,6 +50,28 @@ def backup_file(path) -> str:
     return str(bak)
 
 
+def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge ``overlay`` onto a deep copy of ``base``.
+
+    Dicts merge key-by-key; any non-dict value in ``overlay`` (scalar, list,
+    None) replaces the base value outright. Neither input is mutated, and the
+    result shares no nested dict with ``base`` — so a caller that edits the
+    result in place (the config editor) never touches the base. Base-only
+    nested dicts are deep-copied too, not aliased.
+    """
+    import copy
+    out: Dict[str, Any] = {}
+    for key, bv in base.items():
+        out[key] = copy.deepcopy(bv) if isinstance(bv, dict) else bv
+    for key, ov in overlay.items():
+        bv = out.get(key)
+        if isinstance(bv, dict) and isinstance(ov, dict):
+            out[key] = _deep_merge(bv, ov)
+        else:
+            out[key] = copy.deepcopy(ov) if isinstance(ov, dict) else ov
+    return out
+
+
 def _autodetect_variant() -> str:
     """Pick a variant name based on the runtime environment.
 
@@ -181,6 +203,19 @@ class ConfigManager:
 
         return os.path.join(repo_root, f"config.{variant}.yaml")
 
+    @classmethod
+    def _get_overlay_path(cls, variant: Optional[str] = None) -> str:
+        """Path to the gitignored user-override file for a variant.
+
+        ``config.<v>.yaml`` ships committed defaults; ``.config.<v>.yaml`` holds
+        the user's local edits and is deep-merged on top at load time. All
+        ``bp-config`` writes (set / auto / edit) target this overlay so the
+        committed base stays pristine.
+        """
+        base = cls._get_config_path(variant)
+        d, name = os.path.split(base)
+        return os.path.join(d, f".{name}")
+
     def _load_config(self) -> Dict[str, Any]:
         """
         Load configuration from `config.<variant>.yaml`.
@@ -204,7 +239,19 @@ class ConfigManager:
         try:
             import yaml
             with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
+                config = yaml.safe_load(f) or {}
+
+            # Deep-merge the gitignored user overlay onto the committed base.
+            overlay_path = self._get_overlay_path()
+            if os.path.exists(overlay_path):
+                with open(overlay_path, 'r') as f:
+                    overlay = yaml.safe_load(f) or {}
+                if not isinstance(overlay, dict):
+                    raise ValueError(
+                        f"{os.path.basename(overlay_path)} must contain a YAML "
+                        f"mapping, got {type(overlay).__name__}"
+                    )
+                config = _deep_merge(config, overlay)
 
             # Validate required sections
             required_sections = ['folders']
@@ -372,6 +419,63 @@ class ConfigManager:
             Dictionary containing folder paths and settings
         """
         return self._config.get('folders', {})
+
+    def get_scripts_folder(self) -> Optional[str]:
+        """Resolved ``folders.infrastructure.scripts`` path, or None if unset.
+
+        The folder Scripting searches for a bare script filename. Placeholders
+        (``<biopipelines>`` etc.) are resolved here against the full folder map
+        so callers get an absolute path at configuration time without spinning
+        up a FolderManager (which would create output directories).
+        """
+        template = (self._config.get('folders') or {}).get('infrastructure', {}).get('scripts')
+        if not template:
+            return None
+        return self._resolve_folder_template(template)
+
+    def _resolve_folder_template(self, template: str) -> str:
+        """Resolve ``<placeholder>`` references in a folder template string.
+
+        Builds the same flat key→path map the runtime resolver uses (runtime
+        placeholders <username>/<cwd> plus every ``folders.*`` entry resolved in
+        section order), then substitutes iteratively. Read-only: no directories
+        are created.
+        """
+        import re
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try:
+            username = getpass.getuser()
+        except Exception:
+            username = ""
+        resolved: Dict[str, str] = {"username": username, "cwd": repo_root}
+
+        folder_config = self._config.get('folders') or {}
+        placeholder_re = re.compile(r'<([a-zA-Z_][a-zA-Z0-9_]*)>')
+        section_order = ['base', 'infrastructure', 'repositories', 'cache', 'derived', 'server']
+        for section_name in section_order:
+            section = folder_config.get(section_name) or {}
+            for key, path_template in section.items():
+                if not isinstance(path_template, str):
+                    continue
+                result = path_template
+                for _ in range(10):
+                    matches = placeholder_re.findall(result)
+                    if not matches:
+                        break
+                    for ph in matches:
+                        if ph in resolved:
+                            result = result.replace(f"<{ph}>", resolved[ph])
+                resolved[key] = result
+
+        out = template
+        for _ in range(10):
+            matches = placeholder_re.findall(out)
+            if not matches:
+                break
+            for ph in matches:
+                if ph in resolved:
+                    out = out.replace(f"<{ph}>", resolved[ph])
+        return out
 
     def get_environment(self, tool_name: str) -> Optional[str]:
         """

@@ -39,8 +39,8 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     The easiest way to use BioPipelines, especially if you don't write Python. Clone the repo on your computer and run an AI coding assistant (Claude Code, Codex, …) inside it; describe your protocol in plain language and let it author and run the pipeline. We recommend forking the repository prior to start working.
 
     ```bash
-    #git clone https://github.com/locbp-uzh/biopipelines
-    git clone https://github.com/<your-project>/biopipelines
+    #git clone https://github.com/<your-project>/biopipelines
+    git clone https://github.com/locbp-uzh/biopipelines
     cd biopipelines
     claude   # or: codex
     ```

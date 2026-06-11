@@ -10,7 +10,19 @@ for pose scoring, giving more accurate binding pose prediction than Vina alone.
 Supports single-ligand docking, compound-library screening, and multi-conformer
 docking with statistical analysis across independent runs.
 
-The binding box can be defined in three ways (checked in order):
+Three modes (``mode=``):
+  - "docking" (default): full Vina search + CNN rescore. The ligand 3-D pose is
+    built from chemistry (``compounds``); the binding box is defined by explicit
+    center+size, an autobox_ligand, or auto-detected crystal HETATM records.
+  - "score": no search — score the ligand exactly where it already sits in the
+    input complex (``gnina --score_only``). The ligand is extracted from each
+    complex's HETATM records (identified by the ``compounds`` residue code) and
+    bond-order-templated against its SMILES before scoring.
+  - "minimize": local energy minimization of the in-pocket pose, then score
+    (``gnina --minimize``). Same input shape as "score"; the refined pose is
+    emitted. In both no-search modes the box is autoboxed on the scored ligand.
+
+The docking binding box can be defined in three ways (checked in order):
   1. Explicit center + size parameters
   2. autobox_ligand — path or DataStream of a reference ligand
   3. Auto-detected from crystal ligand HETATM records already in the input PDB
@@ -165,6 +177,7 @@ fi
     helper_py = Path(lambda self: self.pipe_script_path("pipe_gnina.py"))
     docking_results_csv = Path(lambda self: self.table_path("docking_results"))
     docking_summary_csv = Path(lambda self: self.table_path("docking_summary"))
+    scores_csv = Path(lambda self: self.table_path("scores"))
     config_json = Path(lambda self: self.configuration_path("gnina_config.json"))
     structures_json = Path(lambda self: self.configuration_path("structures_ds.json"))
     compounds_json = Path(lambda self: self.configuration_path("compounds_ds.json"))
@@ -172,9 +185,12 @@ fi
     missing_csv = Path(lambda self: self.table_path("missing"))
     autobox_ds_json = Path(lambda self: self.configuration_path("autobox_ligand_ds.json"))
 
+    MODES = ("docking", "score", "minimize")
+
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
                  compounds: Union[DataStream, StandardizedOutput],
+                 mode: str = "docking",
                  autobox_ligand: Union[DataStream, StandardizedOutput, str, None] = None,
                  center: Optional[str] = None,
                  size: Union[float, str, None] = None,
@@ -200,9 +216,23 @@ fi
 
         Args:
             structures: Input protein structures as DataStream or StandardizedOutput.
+                In mode="score"/"minimize" these are complexes that already carry
+                the ligand as HETATM records (e.g. a Boltz2 co-fold or a crystal
+                complex).
             compounds: Input ligands as DataStream or StandardizedOutput. Accepts
                 output from Ligand(), CompoundLibrary(), or any tool that produces
-                a compounds stream (e.g. BoltzGen).
+                a compounds stream (e.g. BoltzGen). In mode="score"/"minimize" the
+                compounds stream must carry SMILES — it identifies which HETATM
+                residue to score (by code) and templates its bond orders before
+                scoring; a code-only Ligand (no SMILES) is rejected.
+            mode: One of "docking" (default, full Vina search + CNN rescore),
+                "score" (no search; score the in-pocket pose as-is via
+                --score_only), or "minimize" (local minimization of the in-pocket
+                pose then score, via --minimize). The docking-only parameters
+                (exhaustiveness, num_modes, num_runs, generate_conformers and the
+                conformer knobs, rmsd_threshold, explicit center/size/
+                autobox_ligand) must stay at their defaults when mode is not
+                "docking".
             autobox_ligand: Reference ligand for automatic binding box definition.
                 Accepts DataStream, StandardizedOutput, or a file path string.
                 If None and no center+size given, auto-detects from crystal ligand
@@ -259,12 +289,21 @@ fi
                 exhaustiveness. None or 0 disables the cap.
 
         Output:
-            Streams: structures (.pdb)
-            Tables:
-                docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity
-                docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
-                missing: id | removed_by | kind | cause
+            mode="docking":
+                Streams: structures (.pdb) — best-pose complexes.
+                Tables:
+                    docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity
+                    docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
+                    missing: id | removed_by | kind | cause
+            mode="score"/"minimize":
+                Streams: structures (.pdb) — the scored complex ("score" re-emits
+                    the input pose unchanged; "minimize" emits the refined pose).
+                Tables:
+                    scores: id | structures.id | compounds.id | vina_affinity | cnn_score | cnn_affinity | cnn_vs | cnn_affinity_variance
+                    missing: id | removed_by | kind | cause
         """
+        self.mode = mode
+
         # Keep original input for upstream missing table detection
         self.structures_input = structures
 
@@ -342,6 +381,9 @@ fi
 
     def validate_params(self):
         """Validate GNINA parameters."""
+        if self.mode not in self.MODES:
+            raise ValueError(f"mode must be one of {self.MODES}, got {self.mode!r}")
+
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
 
@@ -354,11 +396,14 @@ fi
         if not self.compounds_stream or len(self.compounds_stream) == 0:
             raise ValueError("compounds parameter is required and must not be empty")
 
-        has_explicit_box = self.center is not None and self.size is not None
-        has_autobox = self.autobox_ligand_path is not None or self.autobox_ligand_stream is not None
-        if not has_explicit_box and not has_autobox:
-            print("  Note: No explicit box defined. Will auto-detect from crystal "
-                  "ligand if available in the input PDB structure.")
+        if self.mode != "docking":
+            self._validate_no_search_mode()
+        else:
+            has_explicit_box = self.center is not None and self.size is not None
+            has_autobox = self.autobox_ligand_path is not None or self.autobox_ligand_stream is not None
+            if not has_explicit_box and not has_autobox:
+                print("  Note: No explicit box defined. Will auto-detect from crystal "
+                      "ligand if available in the input PDB structure.")
 
         if self.exhaustiveness <= 0:
             raise ValueError("exhaustiveness must be positive")
@@ -375,6 +420,35 @@ fi
         if self.num_conformers <= 0:
             raise ValueError("num_conformers must be positive")
 
+    def _validate_no_search_mode(self):
+        """Reject docking-only parameters set non-default in score/minimize mode.
+
+        These knobs drive the Vina search / conformer pipeline, which the
+        no-search modes skip entirely. Raising (rather than silently ignoring)
+        keeps a misconfigured score run from looking like it honored them.
+        """
+        docking_only = {
+            "center": (self.center, None),
+            "size": (self.size, None),
+            "autobox_ligand": (self.autobox_ligand_stream or self.autobox_ligand_path, None),
+            "exhaustiveness": (self.exhaustiveness, 8),
+            "num_modes": (self.num_modes, 9),
+            "num_runs": (self.num_runs, 1),
+            "generate_conformers": (self.generate_conformers, False),
+            "num_conformers": (self.num_conformers, 50),
+            "energy_window": (self.energy_window, 2.0),
+            "conformer_rmsd": (self.conformer_rmsd, 1.0),
+            "conformer_energies": (self.conformer_energies, None),
+            "rmsd_threshold": (self.rmsd_threshold, 2.0),
+        }
+        offenders = [name for name, (value, default) in docking_only.items()
+                     if value != default]
+        if offenders:
+            raise ValueError(
+                f"mode={self.mode!r} ignores docking-only parameters; remove "
+                f"{', '.join(sorted(offenders))} (these only apply to mode='docking')."
+            )
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files and folder paths."""
         self.folders = pipeline_folders
@@ -383,15 +457,21 @@ fi
         """Get GNINA configuration display lines."""
         config_lines = super().get_config_display()
         config_lines.extend([
+            f"MODE: {self.mode}",
             f"STRUCTURES: {len(self.structures_stream)} proteins",
             f"COMPOUNDS: {len(self.compounds_stream)} ligands",
-            f"EXHAUSTIVENESS: {self.exhaustiveness}",
-            f"NUM RUNS: {self.num_runs}",
-            f"NUM MODES: {self.num_modes}",
             f"SEED: {self.seed}",
             f"CNN SCORING: {self.cnn_scoring}",
-            f"CNN SCORE THRESHOLD: {self.cnn_score_threshold}",
         ])
+        if self.mode == "docking":
+            config_lines.extend([
+                f"EXHAUSTIVENESS: {self.exhaustiveness}",
+                f"NUM RUNS: {self.num_runs}",
+                f"NUM MODES: {self.num_modes}",
+                f"CNN SCORE THRESHOLD: {self.cnn_score_threshold}",
+            ])
+        else:
+            config_lines.append(f"AUTOBOX ADD: {self.autobox_add}")
         if self.center is not None:
             config_lines.append(f"BOX CENTER: {self.center}")
             config_lines.append(f"BOX SIZE: {self.size}")
@@ -433,6 +513,7 @@ fi
         upstream_missing = self._collect_upstream_missing_paths(self.structures_input, self.compounds_input)
 
         config = {
+            "mode": self.mode,
             "output_folder": self.execution_folder,
             "best_poses_dir": self.stream_folder("structures"),
             "gnina_binary": self.gnina_binary,
@@ -440,9 +521,12 @@ fi
             "compounds_json": self.compounds_json,
             "docking_results_csv": self.docking_results_csv,
             "docking_summary_csv": self.docking_summary_csv,
+            "scores_csv": self.scores_csv,
             "structures_map": self.structures_map,
             "upstream_missing": upstream_missing,
-            "missing_csv": self.missing_csv if upstream_missing else None,
+            # Score/minimize always emit the missing table to record local
+            # failures (no HETATM, SMILES mismatch); docking only on upstream.
+            "missing_csv": self.missing_csv if (upstream_missing or self.mode != "docking") else None,
             "box": box_config,
             "exhaustiveness": self.exhaustiveness,
             "num_modes": self.num_modes,
@@ -547,27 +631,40 @@ python {self.helper_py} {self.config_json}
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after GNINA execution."""
-        tables = {
-            "docking_results": TableInfo(
-                name="docking_results",
-                path=self.docking_results_csv,
-                columns=["id", "structures.id", "compounds.id", "conformer_id",
-                         "run", "pose", "vina_score", "cnn_score", "cnn_affinity"],
-                description="All accepted docked poses with Vina and CNN scores"
-            ),
-            "docking_summary": TableInfo(
-                name="docking_summary",
-                path=self.docking_summary_csv,
-                columns=["id", "structures.id", "compounds.id", "conformer_id",
-                         "best_vina", "mean_vina", "std_vina", "best_cnn_score",
-                         "mean_cnn_affinity", "std_cnn_affinity",
-                         "pose_consistency", "conformer_energy",
-                         "pseudo_binding_energy", "best_pose_file"],
-                description="Per-conformer aggregated docking statistics across runs"
-            ),
-        }
+        if self.mode == "docking":
+            tables = {
+                "docking_results": TableInfo(
+                    name="docking_results",
+                    path=self.docking_results_csv,
+                    columns=["id", "structures.id", "compounds.id", "conformer_id",
+                             "run", "pose", "vina_score", "cnn_score", "cnn_affinity"],
+                    description="All accepted docked poses with Vina and CNN scores"
+                ),
+                "docking_summary": TableInfo(
+                    name="docking_summary",
+                    path=self.docking_summary_csv,
+                    columns=["id", "structures.id", "compounds.id", "conformer_id",
+                             "best_vina", "mean_vina", "std_vina", "best_cnn_score",
+                             "mean_cnn_affinity", "std_cnn_affinity",
+                             "pose_consistency", "conformer_energy",
+                             "pseudo_binding_energy", "best_pose_file"],
+                    description="Per-conformer aggregated docking statistics across runs"
+                ),
+            }
+        else:
+            tables = {
+                "scores": TableInfo(
+                    name="scores",
+                    path=self.scores_csv,
+                    columns=["id", "structures.id", "compounds.id",
+                             "vina_affinity", "cnn_score", "cnn_affinity",
+                             "cnn_vs", "cnn_affinity_variance"],
+                    description=f"GNINA {self.mode} scores for the in-pocket ligand pose"
+                ),
+            }
 
-        if self._collect_upstream_missing_paths(self.structures_input, self.compounds_input):
+        if self.mode != "docking" or self._collect_upstream_missing_paths(
+                self.structures_input, self.compounds_input):
             tables["missing"] = self.missing_table_info(self.missing_csv)
 
         best_poses_dir = self.stream_folder("structures")
@@ -579,7 +676,8 @@ python {self.helper_py} {self.config_json}
             for prot in protein_ids
             for lig in ligand_ids
         ]
-        structure_files = [os.path.join(best_poses_dir, "<id>_best.pdb")]
+        suffix = "_best.pdb" if self.mode == "docking" else f"_{self.mode}.pdb"
+        structure_files = [os.path.join(best_poses_dir, f"<id>{suffix}")]
 
         structures = DataStream(
             name="structures",
@@ -600,6 +698,7 @@ python {self.helper_py} {self.config_json}
         base_dict = super().to_dict()
         base_dict.update({
             "gnina_params": {
+                "mode": self.mode,
                 "center": self.center,
                 "size": self.size,
                 "autobox_ligand": self.autobox_ligand_id or self.autobox_ligand_path,

@@ -161,7 +161,10 @@ def config():
         print("Commands:")
         print("  show                  Show full resolved configuration")
         print("  list                  List every config.<variant>.yaml in the repo")
-        print("  path [--variant V]    Print absolute path of active config YAML")
+        print("  path [--base] [--variant V]")
+        print("                        Print absolute path of the active config. Defaults")
+        print("                        to the user overlay (.config.<variant>.yaml, created")
+        print("                        empty if absent); --base prints the committed file")
         print("  edit [--variant V]    Open the config in an interactive TUI editor")
         print("                        (no --variant: pop a variant picker first)")
         print("  set <key> <value> [--variant V]")
@@ -267,19 +270,36 @@ def _parse_variant_flag(args):
 def _cmd_path(args):
     """Print the absolute path of the active config YAML.
 
+    Defaults to the user overlay (``.config.<variant>.yaml``) — the file your
+    edits live in and the one you'd open in an editor — creating it empty if it
+    doesn't exist yet, so ``$EDITOR "$(bp-config path)"`` always opens a real
+    file. Pass ``--base`` for the committed ``config.<variant>.yaml`` instead.
+
     Designed to be used in shells:
-      $EDITOR "$(biopipelines-config path)"
+      $EDITOR "$(bp-config path)"            # the overlay
+      $EDITOR "$(bp-config path --base)"     # the committed base
     """
     from .config_manager import ConfigManager
 
     args = list(args)
+    want_base = False
+    if "--base" in args:
+        args.remove("--base")
+        want_base = True
     variant = _parse_variant_flag(args)
     if args:
         print(f"Unexpected argument: {args[0]}", file=sys.stderr)
         sys.exit(2)
 
-    path = ConfigManager._get_config_path(variant=variant)
-    print(path)
+    if want_base:
+        print(ConfigManager._get_config_path(variant=variant))
+        return
+
+    overlay = ConfigManager._get_overlay_path(variant=variant)
+    if not os.path.exists(overlay):
+        with open(overlay, "w", encoding="utf-8") as f:
+            f.write("")
+    print(overlay)
 
 
 def _discover_variants():
@@ -461,10 +481,11 @@ def _cmd_edit(args):
             sys.exit(1)
 
     path = ConfigManager._get_config_path(variant=variant)
-    rc = run_editor(path)
+    overlay = ConfigManager._get_overlay_path(variant=variant)
+    rc = run_editor(path, overlay_path=overlay)
     # Tell the user which file they were editing on the way out, so the
     # variant choice is visible above any of the editor's own messages.
-    print(f"config has been set to {variant}: {path}")
+    print(f"config has been set to {variant}: edits saved to {overlay}")
     sys.exit(rc)
 
 
@@ -522,26 +543,26 @@ def _cmd_get(args):
 
 
 def _cmd_set(args):
-    """Set a dotted config key non-interactively and write it back.
+    """Set a dotted config key, writing it into the gitignored overlay.
 
     Usage: ``bp-config set <dotted.key> <value> [--variant V]``
 
-    Writes through ruamel round-trip (comments + key order preserved),
-    creating a ``.bak`` first — same on-disk semantics as the TUI editor's
-    save. Designed for scripted / notebook use where the full-screen ``edit``
-    TUI can't run (e.g. a Colab cell). The value's type is coerced to match
-    the existing leaf when one is present (bool/int/float), otherwise stored
-    as a string.
+    Edits land in ``.config.<v>.yaml`` (the overlay), never the committed
+    ``config.<v>.yaml`` base — so pulling new repo defaults never clobbers a
+    user's local settings. The overlay is created on first write and grows only
+    the keys the user actually changes; at load time it is deep-merged on top of
+    the base. No backup is made: the committed base is the safe fallback and the
+    overlay is small and disposable.
 
-    The dotted key must point at an existing leaf — we don't create new keys
-    or sections here (use ``edit`` for structural changes), so a typo fails
-    fast rather than silently writing a dead key.
+    The dotted key must point at an existing leaf in the *base* config — we
+    don't invent new keys or sections, so a typo fails fast. The value's type is
+    coerced to match the base leaf (bool/int/float), otherwise stored as string.
     """
     import io
-    import shutil
     from pathlib import Path
     from ruamel.yaml import YAML
-    from .config_manager import ConfigManager, reload_config, backup_file
+    from ruamel.yaml.comments import CommentedMap
+    from .config_manager import ConfigManager, reload_config
     from .config_editor import _coerce
 
     args = list(args)
@@ -555,37 +576,47 @@ def _cmd_set(args):
         print(f"Unexpected argument: {args[2]}", file=sys.stderr)
         sys.exit(2)
 
-    path = Path(ConfigManager._get_config_path(variant=variant))
-    if not path.exists():
-        print(f"Config file not found: {path}", file=sys.stderr)
+    base_path = Path(ConfigManager._get_config_path(variant=variant))
+    if not base_path.exists():
+        print(f"Config file not found: {base_path}", file=sys.stderr)
         sys.exit(1)
+    overlay_path = Path(ConfigManager._get_overlay_path(variant=variant))
 
     yaml = YAML()
     yaml.preserve_quotes = True
-    with path.open("r", encoding="utf-8") as f:
-        doc = yaml.load(f)
 
-    # Walk to the parent of the target leaf; every step must already exist.
-    # set only updates existing keys (structural changes go through 'edit').
-    node, leaf = _walk_to_leaf(doc, dotted.split("."))
-
+    # Validate the key against the base + coerce the value to the base leaf type.
+    with base_path.open("r", encoding="utf-8") as f:
+        base_doc = yaml.load(f)
+    keys = dotted.split(".")
+    base_node, leaf = _walk_to_leaf(base_doc, keys)
     try:
-        new_val = _coerce(value_str, node[leaf])
+        new_val = _coerce(value_str, base_node[leaf])
     except ValueError as e:
         print(f"invalid value: {e}", file=sys.stderr)
         sys.exit(1)
+    old_val = base_node[leaf]
 
-    old_val = node[leaf]
-    node[leaf] = new_val
+    # Load (or start) the overlay and set the nested key, creating sections.
+    if overlay_path.exists():
+        with overlay_path.open("r", encoding="utf-8") as f:
+            overlay = yaml.load(f) or CommentedMap()
+    else:
+        overlay = CommentedMap()
+    node = overlay
+    for k in keys[:-1]:
+        if not isinstance(node.get(k), (dict, CommentedMap)):
+            node[k] = CommentedMap()
+        node = node[k]
+    node[keys[-1]] = new_val
 
-    # Atomic write with a timestamped .bak alongside, mirroring save_to_disk.
-    from pathlib import Path as _Path
-    bak = _Path(backup_file(path))
+    # Atomic write into the overlay (no backup — the committed base is the
+    # fallback).
     buf = io.StringIO()
-    yaml.dump(doc, buf)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    yaml.dump(overlay, buf)
+    tmp = overlay_path.with_suffix(overlay_path.suffix + ".tmp")
     tmp.write_text(buf.getvalue(), encoding="utf-8")
-    os.replace(tmp, path)
+    os.replace(tmp, overlay_path)
 
     # Refresh the singleton so a same-process caller (e.g. a notebook that
     # imported biopipelines before this call) sees the new value.
@@ -594,7 +625,7 @@ def _cmd_set(args):
     except Exception:
         pass
 
-    print(f"{dotted}: {old_val!r} -> {new_val!r}  ({path}, backup: {bak.name})")
+    print(f"{dotted}: {old_val!r} -> {new_val!r}  (overlay: {overlay_path})")
 
 
 # ── bp-config auto ────────────────────────────────────────────────────────────
@@ -1091,22 +1122,33 @@ def _machine_for_write(new_machine, old_machine):
 
 
 def _read_machine_block(variant):
-    """Return the existing `machine` block for a variant (dict; {} if absent)."""
-    from .config_manager import ConfigManager
+    """Return the active `machine` block for a variant (base merged with overlay).
+
+    Returns ``(machine_dict, base_path)``; ``{}`` if neither file is present.
+    The diff pane in the auto picker compares discovered values against what is
+    actually active, so the overlay must be folded in here too.
+    """
+    from .config_manager import ConfigManager, _deep_merge
     from ruamel.yaml import YAML
     path = ConfigManager._get_config_path(variant=variant)
-    if not os.path.isfile(path):
-        return {}, path
+    overlay = ConfigManager._get_overlay_path(variant=variant)
     yaml = YAML()
     yaml.preserve_quotes = True
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            doc = yaml.load(f)
-    except Exception:
-        return {}, path
-    if doc is None:
-        return {}, path
-    return (doc.get("machine") or {}), path
+
+    def _machine(p):
+        if not os.path.isfile(p):
+            return {}
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                doc = yaml.load(f)
+        except Exception:
+            return {}
+        if doc is None:
+            return {}
+        return _ruamel_to_plain(doc.get("machine") or {})
+
+    merged = _deep_merge(_machine(path), _machine(overlay))
+    return merged, path
 
 
 def _yaml_value(value, indent=4):
@@ -1476,7 +1518,7 @@ def _cmd_auto(args):
     written straight into that variant (with a .bak). With
     ``--verbose`` / ``-v`` each probe step is streamed to stderr.
     """
-    from .config_manager import ConfigManager
+    from .config_manager import ConfigManager, _deep_merge
     from ruamel.yaml import YAML
 
     args = list(args)
@@ -1513,7 +1555,7 @@ def _cmd_auto(args):
     print()
     print("Probe sources:")
     for field, src in sources:
-        print(f"  {field:<18} ← {src}")
+        print(f"  {field:<18} <- {src}")
     print()
 
     if ctx.warnings:
@@ -1532,29 +1574,39 @@ def _cmd_auto(args):
             print("Exited without saving.")
             return
 
-    path = ConfigManager._get_config_path(variant=variant)
-    if not os.path.isfile(path):
-        print(f"Config file not found: {path}", file=sys.stderr)
+    base_path = ConfigManager._get_config_path(variant=variant)
+    if not os.path.isfile(base_path):
+        print(f"Config file not found: {base_path}", file=sys.stderr)
         sys.exit(1)
+    overlay_path = ConfigManager._get_overlay_path(variant=variant)
 
     yaml = YAML()
     yaml.preserve_quotes = True
-    with open(path, "r", encoding="utf-8") as f:
-        doc = yaml.load(f)
-    if doc is None:
-        from ruamel.yaml.comments import CommentedMap
-        doc = CommentedMap()
+    from ruamel.yaml.comments import CommentedMap
 
-    old_machine = doc.get("machine") or {}
-    new_machine_for_write = _machine_for_write(new_machine, old_machine)
+    # The diff (and the env_manager fallback) compares against the active
+    # machine block = base merged with any existing overlay. The write goes to
+    # the overlay only.
+    with open(base_path, "r", encoding="utf-8") as f:
+        base_doc = yaml.load(f) or CommentedMap()
+    if os.path.isfile(overlay_path):
+        with open(overlay_path, "r", encoding="utf-8") as f:
+            overlay_doc = yaml.load(f) or CommentedMap()
+    else:
+        overlay_doc = CommentedMap()
 
-    diffs = list(_diff_machine(_ruamel_to_plain(old_machine), new_machine_for_write))
+    base_machine = base_doc.get("machine") or {}
+    overlay_machine = overlay_doc.get("machine") or {}
+    active_machine = _deep_merge(_ruamel_to_plain(base_machine),
+                                 _ruamel_to_plain(overlay_machine))
+    new_machine_for_write = _machine_for_write(new_machine, active_machine)
+
+    diffs = list(_diff_machine(active_machine, new_machine_for_write))
     if not diffs:
-        print(f"config.{variant}.yaml already matches — nothing written.")
+        print(f"config.{variant}.yaml (incl. overlay) already matches — nothing written.")
         return
 
-    # Write through ruamel.yaml so comments / key ordering survive.
-    from ruamel.yaml.comments import CommentedMap
+    # Write the full machine block into the overlay (comments / order survive).
     machine_cm = CommentedMap()
     for k, v in new_machine_for_write.items():
         if isinstance(v, dict):
@@ -1564,13 +1616,11 @@ def _cmd_auto(args):
             machine_cm[k] = sub
         else:
             machine_cm[k] = v
-    doc["machine"] = machine_cm
+    overlay_doc["machine"] = machine_cm
 
-    from .config_manager import backup_file
-    bak = backup_file(path)
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(doc, f)
-    print(f"Wrote {path} (backup: {bak})")
+    with open(overlay_path, "w", encoding="utf-8") as f:
+        yaml.dump(overlay_doc, f)
+    print(f"Wrote overlay {overlay_path}")
 
 
 def _cmd_folder(args):

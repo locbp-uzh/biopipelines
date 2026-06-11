@@ -9,6 +9,9 @@ __pycache__/
 *.backup
 *.backup[0-9]*
 
+# Per-variant user config overrides (deep-merged onto the committed base)
+.config.*.yaml
+
 # Pipeline outputs
 *_[0-9]*/
 RunTime/
@@ -20,6 +23,13 @@ outputs/*
 # Personal pipelines
 my_pipelines/*
 !my_pipelines/README.md
+!my_pipelines/template.py
+!my_pipelines/template.ipynb
+
+# Scripting tool scripts folder (user-authored two-phase scripts)
+my_scripts/*
+!my_scripts/README.md
+!my_scripts/template.py
 
 # Ligands folder (cached ligand files)
 ligands/*

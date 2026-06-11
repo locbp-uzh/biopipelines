@@ -326,9 +326,14 @@ esm = ESMFold(sequences=seqs)
 
 ### Gnina
 
-Molecular docking with CNN-based pose scoring. Combines AutoDock Vina search with a convolutional neural network for more accurate binding pose prediction. Supports multi-run docking with statistical analysis across independent runs, optional conformer generation, and pose consistency analysis.
+Molecular docking and pose scoring with a CNN. Combines AutoDock Vina search with a convolutional neural network for more accurate binding pose prediction. Supports multi-run docking with statistical analysis across independent runs, optional conformer generation, and pose consistency analysis.
 
-The binding box is determined in order: explicit `center`+`size` > `autobox_ligand` > crystal ligand HETATM records in the input PDB.
+`mode` selects the search regime:
+- `"docking"` (default) — full Vina search + CNN rescore. The ligand 3-D pose is built from `compounds` chemistry; the binding box is determined in order: explicit `center`+`size` > `autobox_ligand` > crystal ligand HETATM records in the input PDB.
+- `"score"` — no search. Score the ligand exactly where it already sits in the input complex (`gnina --score_only`). Use this to get GNINA's Vina/CNN scores for an already-posed complex (a Boltz2 co-fold, a crystal pose, or a Gnina docking output) without re-docking.
+- `"minimize"` — local energy minimization of the in-pocket pose, then score (`gnina --minimize`). Same inputs as `"score"`; emits the refined pose.
+
+In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETATM records (identified by the `compounds` residue code), bond-order-templated against its SMILES, and autoboxed on its own location (`autobox_add` padding). The `compounds` stream **must carry SMILES** in these modes — a code-only `Ligand`/`ligand="LIG"` string is rejected (no chemistry to template bond orders from). The docking-only parameters (`center`, `size`, `autobox_ligand`, `exhaustiveness`, `num_modes`, `num_runs`, `generate_conformers` and the conformer knobs, `rmsd_threshold`) must stay at their defaults outside `"docking"` mode — setting one raises.
 
 **Resources**: GPU recommended (CPU fallback available but slow).
 
@@ -337,9 +342,10 @@ The binding box is determined in order: explicit `center`+`size` > `autobox_liga
 **Installation**: Downloads pre-built `gnina.1.3.2` binary from GitHub.
 
 **Parameters**:
-- `structures`: Union[DataStream, StandardizedOutput] (required) - Protein structures
-- `compounds`: Union[DataStream, StandardizedOutput] (required) - Ligands (from `Ligand()`, `CompoundLibrary()`, etc.)
-- `autobox_ligand`: Union[DataStream, StandardizedOutput, str, None] = None - Reference ligand for automatic box
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Protein structures. In `score`/`minimize` mode, complexes that already carry the ligand as HETATM.
+- `compounds`: Union[DataStream, StandardizedOutput] (required) - Ligands (from `Ligand()`, `CompoundLibrary()`, etc.). In `score`/`minimize` mode must carry SMILES.
+- `mode`: str = "docking" - One of `"docking"`, `"score"`, `"minimize"`.
+- `autobox_ligand`: Union[DataStream, StandardizedOutput, str, None] = None - Reference ligand for automatic box (docking only)
 - `center`: Optional[str] = None - Explicit box center as `"x,y,z"`
 - `size`: Union[float, str, None] = None - Box dimensions in Angstroms (single float = cubic, `"x,y,z"` = asymmetric)
 - `autobox_add`: float = 4.0 - Padding around autobox ligand (Angstroms)
@@ -358,9 +364,9 @@ The binding box is determined in order: explicit `center`+`size` > `autobox_liga
 - `protonate`: bool = True - Add hydrogens with OpenBabel before docking
 - `pH`: float = 7.4 - Protonation pH
 
-**Streams**: `structures` (combined protein+ligand PDB files of best poses)
+**Streams**: `structures` (combined protein+ligand PDB files; best poses in `docking` mode, the scored pose in `score`/`minimize` mode)
 
-**Tables**:
+**Tables** (`mode="docking"`):
 - `docking_results` - One row per accepted pose across all runs:
 
   | id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity |
@@ -378,6 +384,19 @@ The binding box is determined in order: explicit `center`+`size` > `autobox_liga
   - `pose_consistency`: fraction of runs whose best pose clusters together by RMSD. Measures reproducibility (1.0 = all runs converge).
   - `conformer_energy`: MMFF94 relative strain energy (only with `generate_conformers=True`).
   - `pseudo_binding_energy`: `best_vina + conformer_energy`. Penalizes Vina score by conformer strain. Only populated when conformer generation is enabled.
+
+**Tables** (`mode="score"` / `"minimize"`):
+- `scores` - One row per scored complex; empty cells where GNINA did not emit that term for the chosen `cnn_scoring`:
+
+  | id | structures.id | compounds.id | vina_affinity | cnn_score | cnn_affinity | cnn_vs | cnn_affinity_variance |
+  |----|---------------|--------------|---------------|-----------|--------------|--------|-----------------------|
+
+  - `vina_affinity`: GNINA's `minimizedAffinity` (kcal/mol; lower = stronger).
+  - `cnn_score`: CNN pose score (0-1).
+  - `cnn_affinity` / `cnn_affinity_variance`: CNN predicted affinity and its variance across the ensemble.
+  - `cnn_vs`: CNN virtual-screening score (`cnn_score × cnn_affinity`).
+
+- `missing` - IDs removed upstream or that failed locally (no HETATM with the ligand code, SMILES that doesn't match the extracted skeleton): | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -404,6 +423,14 @@ docked = Gnina(
     num_runs=10,
     exhaustiveness=64
 )
+
+# Score an already-posed complex without docking (e.g. a Boltz2 co-fold)
+boltz = Boltz2(proteins=poi, ligands=Ligand("STI"))
+scored = Gnina(structures=boltz, compounds=Ligand("STI"), mode="score")
+# scored.tables.scores -> vina_affinity | cnn_score | cnn_affinity | ...
+
+# Local minimization then score
+refined = Gnina(structures=boltz, compounds=Ligand("STI"), mode="minimize")
 ```
 
 ---

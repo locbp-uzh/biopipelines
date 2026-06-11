@@ -470,6 +470,8 @@ echo "=== Load ready ==="
             return set()
 
         if not os.path.exists(missing_path):
+            if not self.validate_files:
+                return set()
             raise FileNotFoundError(f"Missing table referenced but file not found: {missing_path}")
 
         missing_df = pd.read_csv(missing_path)

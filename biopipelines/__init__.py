@@ -19,6 +19,7 @@ from .file_paths import Path
 from .table_utils import get_table, get_table_path, list_tables, table_exists, get_indexed_table
 from .rfdiffusion import RFdiffusion
 from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
+from .rfdiffusion2 import RFdiffusion2
 from .rfdiffusion3 import RFdiffusion3
 from .protein_mpnn import ProteinMPNN
 from .frame2seq import Frame2Seq
@@ -76,6 +77,7 @@ from .gems import GEMS
 from .bioemu import BioEmu
 from .cabsflex import CABSflex
 from .ensemble_analysis import EnsembleAnalysis
+from .scripting import Scripting
 from .mutagenesis import Mutagenesis
 from .selection import Selection
 from .distance_selector import DistanceSelector
@@ -131,6 +133,7 @@ __all__ = [
     'RFdiffusion',
     'RFdiffusionAllAtom',
     'RFDAA_PrepareLigand',
+    'RFdiffusion2',
     'RFdiffusion3',
     'ProteinMPNN',
     'Frame2Seq',
@@ -191,6 +194,7 @@ __all__ = [
     'BioEmu',
     'CABSflex',
     'EnsembleAnalysis',
+    'Scripting',
     'Mutagenesis',
     'Selection',
     'DistanceSelector',

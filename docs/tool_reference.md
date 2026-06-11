@@ -15,6 +15,7 @@ Generate novel protein structures and pockets.
 - [BoltzGen](tool/structure_generation.md#boltzgen) — Protein/peptide/nanobody binder design
 - [PocketGen](tool/structure_generation.md#pocketgen) — Ligand-tailored pocket co-design
 - [RFdiffusion](tool/structure_generation.md#rfdiffusion) — Backbone generation
+- [RFdiffusion2](tool/structure_generation.md#rfdiffusion2) — Atomic active-site scaffolding
 - [RFdiffusion3](tool/structure_generation.md#rfdiffusion3) — Third-generation design
 - [RFdiffusionAllAtom](tool/structure_generation.md#rfdiffusionallatom) — All-atom with ligands
 
@@ -45,7 +46,7 @@ Predict protein and complex structures, and dock ligands.
 - [DiffDock](tool/structure_prediction.md#diffdock) — Blind diffusion docking
 - [DynamicBind](tool/structure_prediction.md#dynamicbind) — Flexible-backbone docking
 - [ESMFold](tool/structure_prediction.md#esmfold) — Single-sequence prediction (no MSA)
-- [Gnina](tool/structure_prediction.md#gnina) — Docking with CNN scoring
+- [Gnina](tool/structure_prediction.md#gnina) — Docking or no-search pose scoring (score/minimize) with CNN
 - [NeuralPLexer](tool/structure_prediction.md#neuralplexer) — Protein–ligand complex prediction
 - [PLACER](tool/structure_prediction.md#placer) — Ligand-pose ensemble in a bound pocket
 
@@ -140,6 +141,7 @@ Bring data into a pipeline and take results out.
 - [Plot](tool/inputs_io.md#plot) — Plots
 - [PyMOL](tool/inputs_io.md#pymol) — Session creation and rendering
 - [RCSB](tool/inputs_io.md#rcsb) — Search RCSB PDB and download
+- [Scripting](tool/inputs_io.md#scripting) — Run a custom two-phase script as a typed step
 - [Sequence](tool/inputs_io.md#sequence) — Create sequences from strings
 - [Table](tool/inputs_io.md#table) — Load an existing CSV/Excel table
 - [UniProt](tool/inputs_io.md#uniprot) — Fetch sequences and annotations

@@ -88,18 +88,228 @@ def field_coords(line: str) -> Tuple[float, float, float]:
     """(x, y, z) coordinates (cols 31-54)."""
     return (float(line[30:38]), float(line[38:46]), float(line[46:54]))
 
+def _tokenize_cif_line(line: str) -> List[str]:
+    """Split one mmCIF data line into tokens by CIF rules, not shell rules.
+
+    A quote opens a quoted value only at a token start (after whitespace); it
+    closes only when the matching quote is followed by whitespace or EOL. So an
+    unquoted ``O5'`` is a single literal token (the prime is not a closing quote),
+    which ``shlex`` would instead reject as an unterminated quote.
+    """
+    tokens: List[str] = []
+    i = 0
+    n = len(line)
+    while i < n:
+        if line[i].isspace():
+            i += 1
+            continue
+        ch = line[i]
+        if ch in ("'", '"'):
+            j = i + 1
+            while j < n:
+                if line[j] == ch and (j + 1 >= n or line[j + 1].isspace()):
+                    break
+                j += 1
+            tokens.append(line[i + 1:j])
+            i = j + 1
+        else:
+            j = i
+            while j < n and not line[j].isspace():
+                j += 1
+            tokens.append(line[i:j])
+            i = j
+    return tokens
+
+
+def _cif_value(rec: Dict[str, str], *keys: str) -> Optional[str]:
+    """First present, non-null value across ``keys`` for the auth->label fallback.
+
+    mmCIF nulls (``.`` inapplicable, ``?`` unknown) count as absent so a missing
+    ``auth_*`` value falls through to its ``label_*`` counterpart instead of
+    reaching ``int(".")`` and dropping the atom.
+    """
+    for k in keys:
+        v = rec.get(k)
+        if v is not None and v not in (".", "?"):
+            return v
+    return None
+
+
+def read_cif_loop(text: str, prefix: str) -> List[Dict[str, str]]:
+    """Parse a single mmCIF ``loop_`` into a list of column->value dicts.
+
+    ``prefix`` is the category tag (e.g. ``_atom_site.``). Tokens are split by
+    CIF rules (``_tokenize_cif_line``) so an unquoted prime-bearing atom id like
+    ``O5'`` stays one token. A single loop row may span several physical lines;
+    tokens accumulate until one full record (``len(columns)`` values) is complete.
+    """
+    columns = []
+    records = []
+    reading_data = False
+    pending: List[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith(prefix):
+            columns.append(s[len(prefix):])
+            reading_data = False
+            continue
+        if columns and not reading_data:
+            if not s or s.startswith("#") or s == "loop_" or s.startswith("data_"):
+                continue
+            reading_data = True
+        if reading_data:
+            if not s or s.startswith("_") or s.startswith("#") or s == "loop_" or s.startswith("data_"):
+                break
+            pending.extend(_tokenize_cif_line(s))
+            while len(pending) >= len(columns):
+                row = pending[:len(columns)]
+                del pending[:len(columns)]
+                records.append(dict(zip(columns, row)))
+    return records
+
+
+def parse_cif_file(cif_path: str) -> List[Atom]:
+    """Parse an mmCIF file's ``_atom_site`` loop into Atom objects.
+
+    Uses auth_* numbering (auth_asym_id / auth_seq_id) so deposited
+    crystallographic chain ids and residue numbers are preserved; falls back
+    to label_* only when the auth columns are absent.
+    """
+    with open(cif_path, 'r') as f:
+        text = f.read()
+
+    records = read_cif_loop(text, "_atom_site.")
+    atoms = []
+    for rec in records:
+        try:
+            atom_name = _cif_value(rec, "auth_atom_id", "label_atom_id")
+            res_name = _cif_value(rec, "label_comp_id")
+            chain = _cif_value(rec, "auth_asym_id", "label_asym_id") or ""
+            res_num = int(_cif_value(rec, "auth_seq_id", "label_seq_id"))
+            x = float(rec["Cartn_x"])
+            y = float(rec["Cartn_y"])
+            z = float(rec["Cartn_z"])
+            element = (_cif_value(rec, "type_symbol") or atom_name[0])
+            if atom_name is None or res_name is None:
+                continue
+        except (KeyError, ValueError, IndexError, TypeError):
+            continue
+        atoms.append(Atom(
+            x=x, y=y, z=z,
+            atom_name=atom_name,
+            res_name=res_name,
+            res_num=res_num,
+            chain=chain,
+            element=element,
+        ))
+    return atoms
+
+
+def _is_mmcif(path: str, head: str) -> bool:
+    """mmCIF detection: .cif extension or an ``_atom_site.`` loop in the head."""
+    return path.lower().endswith((".cif", ".mmcif")) or "_atom_site." in head
+
+
+def parse_models_file(path: str, records: Tuple[str, ...] = ("ATOM", "HETATM")) -> List[List[Atom]]:
+    """Parse a structure file into a list of models, each a ``List[Atom]``.
+
+    Handles multi-model ensembles for both formats: PDB MODEL/ENDMDL records and
+    mmCIF's ``_atom_site.pdbx_PDB_model_num`` column. A single-model file returns
+    a one-element list. ``records`` filters which record types to keep ("ATOM",
+    "HETATM"); pass ``("ATOM",)`` for protein-only ensembles.
+    """
+    keep_atom = "ATOM" in records
+    keep_hetatm = "HETATM" in records
+
+    with open(path, 'r') as f:
+        head = f.read(4096)
+    if _is_mmcif(path, head):
+        with open(path, 'r') as f:
+            text = f.read()
+        recs = read_cif_loop(text, "_atom_site.")
+        models: Dict[str, List[Atom]] = {}
+        order: List[str] = []
+        for rec in recs:
+            group = rec.get("group_PDB", "ATOM")
+            if group == "ATOM" and not keep_atom:
+                continue
+            if group == "HETATM" and not keep_hetatm:
+                continue
+            try:
+                atom_name = _cif_value(rec, "auth_atom_id", "label_atom_id")
+                res_name = _cif_value(rec, "label_comp_id")
+                chain = _cif_value(rec, "auth_asym_id", "label_asym_id") or ""
+                res_num = int(_cif_value(rec, "auth_seq_id", "label_seq_id"))
+                x = float(rec["Cartn_x"]); y = float(rec["Cartn_y"]); z = float(rec["Cartn_z"])
+                element = (_cif_value(rec, "type_symbol") or atom_name[0])
+                if atom_name is None or res_name is None:
+                    continue
+            except (KeyError, ValueError, IndexError, TypeError):
+                continue
+            model_key = rec.get("pdbx_PDB_model_num", "1")
+            if model_key not in models:
+                models[model_key] = []
+                order.append(model_key)
+            models[model_key].append(Atom(
+                x=x, y=y, z=z, atom_name=atom_name, res_name=res_name,
+                res_num=res_num, chain=chain, element=element,
+            ))
+        return [models[k] for k in order]
+
+    starts = tuple(records)
+    pdb_models: List[List[Atom]] = []
+    current: List[Atom] = []
+    seen_model_record = False
+    with open(path, 'r') as f:
+        for line in f:
+            if line.startswith("MODEL"):
+                seen_model_record = True
+                current = []
+            elif line.startswith("ENDMDL"):
+                if current:
+                    pdb_models.append(current)
+                current = []
+            elif line.startswith(starts):
+                try:
+                    atom_name = field_atom_name(line)
+                    x, y, z = field_coords(line)
+                    current.append(Atom(
+                        x=x, y=y, z=z,
+                        atom_name=atom_name,
+                        res_name=field_res_name(line),
+                        res_num=int(field_res_seq(line)),
+                        chain=field_chain(line),
+                        element=line[76:78].strip() if len(line) > 76 else atom_name[0],
+                    ))
+                except (ValueError, IndexError):
+                    continue
+    if current:
+        pdb_models.append(current)
+    if not seen_model_record and pdb_models:
+        return pdb_models[:1]
+    return pdb_models
+
+
 def parse_pdb_file(pdb_path: str) -> List[Atom]:
     """
-    Parse PDB file and extract atom information.
-    
+    Parse a structure file (PDB or mmCIF) into Atom objects.
+
+    mmCIF input (``.cif`` extension or a file carrying an ``_atom_site.`` loop)
+    is parsed via :func:`parse_cif_file`; everything else is read as
+    fixed-column PDB. Both return the same ``List[Atom]``.
+
     Args:
-        pdb_path: Path to PDB file
-        
+        pdb_path: Path to a PDB or mmCIF file
+
     Returns:
         List of Atom objects
     """
+    with open(pdb_path, 'r') as f:
+        head = f.read(4096)
+    if _is_mmcif(pdb_path, head):
+        return parse_cif_file(pdb_path)
+
     atoms = []
-    
     with open(pdb_path, 'r') as f:
         for line in f:
             # Only parse ATOM and HETATM records
@@ -112,7 +322,7 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
                     res_num = int(field_res_seq(line))
                     x, y, z = field_coords(line)
                     element = line[76:78].strip() if len(line) > 76 else atom_name[0]
-                    
+
                     atom = Atom(
                         x=x, y=y, z=z,
                         atom_name=atom_name,
@@ -122,11 +332,11 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
                         element=element
                     )
                     atoms.append(atom)
-                    
+
                 except (ValueError, IndexError) as e:
                     # Skip malformed lines
                     continue
-                    
+
     return atoms
 
 def get_protein_sequence(atoms: List[Atom]) -> Dict[str, str]:

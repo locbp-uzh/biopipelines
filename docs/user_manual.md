@@ -137,10 +137,12 @@ ipython kernel install --user --name biopipelines
 
 ### 2. Configuring your machine
 
-Each machine you run on (cluster, laptop, colab) is described by a `config.<variant>.yaml` at the repo root. The `bp-config` CLI manages those files:
+Each machine you run on (cluster, laptop, colab) is described by a `config.<variant>.yaml` at the repo root. The `bp-config` CLI manages those files.
+
+**Your edits go into an overlay, not the committed file.** `config.<variant>.yaml` ships committed defaults and stays pristine. Anything you change with `bp-config` (auto / edit / set) is written to a gitignored `.config.<variant>.yaml` — the *overlay* — alongside it. At load time the overlay is deep-merged on top of the base, so the active config is `base ⊕ your-edits`. Two consequences: a `git pull` that adds or changes repo defaults never clobbers your local settings, and your overlay carries only the keys you actually changed (the rest tracks the repo). The overlay is disposable — delete `.config.<variant>.yaml` to reset to the committed defaults. `bp-config show` prints the merged result.
 
 ```bash
-# Probe the host (env manager, scheduler, modules, container runtime, username, git email) and write the discovered values under `machine:` in the variant of your choice. Pop a picker, choose `cluster`, hit Enter.
+# Probe the host (env manager, scheduler, modules, container runtime, username, git email) and write the discovered values under `machine:` into the overlay of the variant of your choice. Pop a picker, choose `cluster`, hit Enter.
 bp-config auto
 ```
 
@@ -151,7 +153,7 @@ Once `machine.username` matches your Unix user, that variant becomes the auto-de
 bp-config edit
 ```
 
-In the editor:
+The editor shows the merged config (base + overlay), so you navigate the whole tree; on save it writes only your changes to the overlay. In the editor:
 
 - **Folders highlighted in red** still hold placeholder values — point
   them at real paths on the cluster (e.g. shared scratch, output dirs,
@@ -161,13 +163,18 @@ In the editor:
   BioPipelines activates the right env at execution time. Tools you
   haven't installed yet can stay at the default; `Tool.install()` will
   create them later.
+- **`folders.infrastructure.scripts`** — the folder the `Scripting` tool
+  searches for a bare script filename (default `<biopipelines>/my_scripts`).
+  Keep your `Scripting` scripts there and call `Scripting("my_step.py", …)`
+  without a path.
 
 Other useful `bp-config` subcommands:
 
 ```bash
-bp-config path             # absolute path of the active config — pipe into your editor
+bp-config path             # path of the overlay (created if absent); --base for the committed file
 bp-config list             # list every config.<variant>.yaml in the repo
-bp-config show             # print the resolved config
+bp-config show             # print the resolved config (base merged with overlay)
+bp-config set <key> <val>  # set one dotted key non-interactively (writes the overlay)
 bp-config folder <key>     # resolve one folder path
 bp-config env <Tool>       # the conda env configured for a tool
 ```

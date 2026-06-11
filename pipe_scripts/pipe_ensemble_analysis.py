@@ -39,55 +39,19 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
 from biopipelines.id_map_utils import get_mapped_ids
-from biopipelines.pdb_parser import (
-    Atom, field_atom_name, field_res_name, field_chain, field_res_seq, field_coords,
-)
+from biopipelines.pdb_parser import parse_models_file
 
 # Backbone atom names for the "backbone" selection; "CA" uses just the alpha C.
 _BACKBONE = ("N", "CA", "C", "O")
 
 
 def parse_models(pdb_path):
-    """Parse a PDB into a list of models, each a list of Atom.
+    """Parse a structure (PDB or mmCIF) into a list of models, each a list of Atom.
 
-    Splits on MODEL/ENDMDL records. A file with no MODEL records is returned as
-    a single model. ATOM records only (HETATM/waters excluded — RMSF is a
-    protein-residue metric and HETATM res_num collide across chains).
+    ATOM records only — HETATM/waters excluded, since RMSF is a protein-residue
+    metric and HETATM res_num collide across chains.
     """
-    models = []
-    current = []
-    seen_model_record = False
-    with open(pdb_path, "r") as f:
-        for line in f:
-            if line.startswith("MODEL"):
-                seen_model_record = True
-                current = []
-            elif line.startswith("ENDMDL"):
-                if current:
-                    models.append(current)
-                current = []
-            elif line.startswith("ATOM"):
-                try:
-                    atom_name = field_atom_name(line)
-                    x, y, z = field_coords(line)
-                    atom = Atom(
-                        x=x, y=y, z=z,
-                        atom_name=atom_name,
-                        res_name=field_res_name(line),
-                        res_num=int(field_res_seq(line)),
-                        chain=field_chain(line),
-                        element=line[76:78].strip() if len(line) > 76 else atom_name[0],
-                    )
-                    current.append(atom)
-                except (ValueError, IndexError):
-                    continue
-    # Trailing model with no ENDMDL, or a file with no MODEL records at all.
-    if current:
-        models.append(current)
-    if not seen_model_record and models:
-        # Single-model file: exactly one model.
-        return models[:1]
-    return models
+    return parse_models_file(pdb_path, records=("ATOM",))
 
 
 def select_coords(model, selection):

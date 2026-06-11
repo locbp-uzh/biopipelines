@@ -33,8 +33,12 @@ from rdkit.ML.Cluster import Butina
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, read_upstream_missing, MISSING_COLUMNS
+from biopipelines.biopipelines_io import (
+    load_datastream, iterate_files, iterate_values, load_table,
+    read_upstream_missing, MISSING_COLUMNS, step_id_from_table_path,
+)
 from biopipelines.pdb_parser import field_atom_name, field_res_name
+from biopipelines.ligand_utils import resolve_ligand_code, write_ligand_sdf
 
 
 @contextmanager
@@ -1100,6 +1104,176 @@ def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
 
 
 # ---------------------------------------------------------------------------
+# Score / minimize mode (no docking search)
+# ---------------------------------------------------------------------------
+
+def _load_template_smiles(compounds_ds, ligand_code):
+    """SMILES for the ligand identified by `ligand_code` (from the compounds map)."""
+    for _cid, values in iterate_values(compounds_ds, columns=["code", "smiles"]):
+        if str(values.get("code", "")).strip().upper() == ligand_code.upper():
+            smi = str(values.get("smiles", "")).strip()
+            if not smi or smi.lower() == "nan":
+                raise ValueError(f"compounds stream has no SMILES for code {ligand_code}")
+            return smi
+    raise ValueError(f"compounds stream has no row with code {ligand_code}")
+
+
+def _extract_ligand_hetatm(complex_pdb, ligand_code, out_pdb):
+    """Write the HETATM records whose residue name matches `ligand_code` to out_pdb.
+
+    Returns out_pdb if any were found, else None.
+    """
+    lines = []
+    with open(complex_pdb, 'r') as f:
+        for line in f:
+            if line.startswith("HETATM") and field_res_name(line).upper() == ligand_code.upper():
+                lines.append(line)
+    if not lines:
+        return None
+    with open(out_pdb, 'w') as f:
+        f.writelines(lines)
+        f.write("END\n")
+    return out_pdb
+
+
+# SDF property tags emitted by gnina 1.3.2 --score_only/--minimize (verified
+# against real output). CNN_VS is the CNN virtual-screening score; the affinity
+# variance is CNNaffinity_variance (NOT CNN_VS). No intramolecular-energy term
+# is written in these modes, so none is collected.
+_SCORE_TERMS = {
+    "vina_affinity": ("minimizedAffinity", "Affinity"),
+    "cnn_score": ("CNNscore",),
+    "cnn_affinity": ("CNNaffinity",),
+    "cnn_vs": ("CNN_VS",),
+    "cnn_affinity_variance": ("CNNaffinity_variance",),
+}
+
+
+def _parse_score_output(sdf_path):
+    """Parse the first molecule of a gnina --score_only/--minimize SDF.
+
+    Returns a dict of the available score terms (missing ones omitted) and the
+    RDKit mol (for emitting the scored pose), or (None, None) on failure.
+    """
+    if not os.path.exists(sdf_path):
+        return None, None
+    with _suppress_rdkit_warnings():
+        suppl = Chem.SDMolSupplier(sdf_path, removeHs=False)
+        mol = next((m for m in suppl if m is not None), None)
+    if mol is None:
+        return None, None
+    scores = {}
+    for col, prop_names in _SCORE_TERMS.items():
+        for prop in prop_names:
+            val = _get_prop(mol, prop)
+            if val is not None:
+                scores[col] = val
+                break
+    return scores, mol
+
+
+def run_score_mode(structures_ds, compounds_ds, config):
+    """Score (or locally minimize then score) the in-pocket ligand of each complex.
+
+    For each complex: strip it to a clean protein, extract the ligand HETATM
+    (identified by the compounds residue code), restore bond orders from the
+    SMILES template, then run gnina --score_only/--minimize autoboxed on that
+    ligand. Writes scores.csv, the scored-complex PDBs, and the structures map.
+    """
+    mode = config["mode"]
+    gnina_binary = config["gnina_binary"]
+    cnn_scoring = config["cnn_scoring"]
+    autobox_add = config.get("box", {}).get("autobox_add", 4.0)
+    dock_timeout = config.get("dock_timeout", 1800) or None
+    output_folder = config["output_folder"]
+    best_poses_dir = config["best_poses_dir"]
+    scores_csv = config["scores_csv"]
+    structures_map = config["structures_map"]
+
+    scratch = os.path.join(output_folder, "scoring")
+    os.makedirs(scratch, exist_ok=True)
+    os.makedirs(best_poses_dir, exist_ok=True)
+
+    ligand_code = resolve_ligand_code(config["compounds_json"])
+    template_smiles = _load_template_smiles(compounds_ds, ligand_code)
+    ligand_id = compounds_ds.ids_expanded[0]
+    step_id = step_id_from_table_path(scores_csv)
+
+    gnina_flag = "--score_only" if mode == "score" else "--minimize"
+
+    rows, map_rows, failed = [], [], []
+    for protein_id, complex_pdb in iterate_files(structures_ds):
+        out_id = f"{protein_id}_{ligand_id}"
+        try:
+            if not os.path.exists(complex_pdb):
+                raise RuntimeError(f"complex file not found: {complex_pdb}")
+
+            clean_protein = os.path.join(scratch, f"{protein_id}_protein.pdb")
+            _clean_protein_pdb(complex_pdb, clean_protein)
+
+            lig_pdb = os.path.join(scratch, f"{out_id}_lig.pdb")
+            if _extract_ligand_hetatm(complex_pdb, ligand_code, lig_pdb) is None:
+                raise RuntimeError(f"no HETATM records with code {ligand_code} in {complex_pdb}")
+
+            lig_sdf = os.path.join(scratch, f"{out_id}_lig.sdf")
+            write_ligand_sdf(lig_pdb, lig_sdf, smiles=template_smiles)
+
+            out_sdf = os.path.join(scratch, f"{out_id}_{mode}.sdf")
+            cmd = [
+                gnina_binary,
+                "-r", clean_protein,
+                "-l", lig_sdf,
+                gnina_flag,
+                "--autobox_ligand", lig_sdf,
+                "--autobox_add", str(autobox_add),
+                "--cnn_scoring", cnn_scoring,
+                "-o", out_sdf,
+            ]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=dock_timeout)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(f"gnina {mode} timed out (>{dock_timeout}s)")
+            if result.returncode != 0:
+                raise RuntimeError(f"gnina {mode} failed: {result.stderr[:300]}")
+
+            scores, scored_mol = _parse_score_output(out_sdf)
+            if scores is None:
+                raise RuntimeError(f"could not parse gnina output {out_sdf}")
+
+            # "score" leaves the pose untouched; re-emit the input ligand SDF so the
+            # complex reflects exactly what was scored. "minimize" emits the refined
+            # pose gnina wrote.
+            pose_sdf = lig_sdf if mode == "score" else out_sdf
+            dst_pdb = os.path.join(best_poses_dir, f"{out_id}_{mode}.pdb")
+            _write_complex_pdb(clean_protein, pose_sdf, 0, dst_pdb)
+
+            row = {"id": out_id, "structures.id": protein_id, "compounds.id": ligand_id}
+            for col in _SCORE_TERMS:
+                row[col] = scores.get(col, "")
+            rows.append(row)
+            map_rows.append({"id": out_id, "file": dst_pdb,
+                             "structures.id": protein_id, "compounds.id": ligand_id})
+            print(f"  {out_id}: " + ", ".join(f"{k}={scores[k]}" for k in scores))
+        except Exception as e:
+            print(f"WARNING: {out_id} {mode} failed: {e}", file=sys.stderr)
+            failed.append({"id": out_id, "removed_by": step_id, "kind": "failure",
+                           "cause": str(e)[:200]})
+
+    score_cols = ["id", "structures.id", "compounds.id"] + list(_SCORE_TERMS)
+    os.makedirs(os.path.dirname(scores_csv), exist_ok=True)
+    pd.DataFrame(rows, columns=score_cols).to_csv(scores_csv, index=False)
+    print(f"Wrote {len(rows)} scores to {scores_csv}")
+
+    if structures_map:
+        os.makedirs(os.path.dirname(structures_map), exist_ok=True)
+        pd.DataFrame(map_rows, columns=["id", "file", "structures.id", "compounds.id"]).to_csv(
+            structures_map, index=False)
+        print(f"Wrote structures map: {structures_map} ({len(map_rows)} rows)")
+
+    return failed
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1111,8 +1285,9 @@ def main():
     with open(sys.argv[1], 'r') as f:
         config = json.load(f)
 
+    mode = config.get("mode", "docking")
     print("=" * 60)
-    print("GNINA Docking Pipeline")
+    print(f"GNINA {mode} pipeline")
     print("=" * 60)
 
     structures_ds = load_datastream(config["structures_json"])
@@ -1139,6 +1314,20 @@ def main():
             print(f"  Skipping {len(comp_all) - len(comp_kept)} compound IDs from upstream missing table")
         compounds_ds.ids = comp_kept
         compounds_ds._ids_expanded = comp_kept
+
+    if mode in ("score", "minimize"):
+        print(f"\n--- GNINA {mode} (no docking search) ---")
+        failed = run_score_mode(structures_ds, compounds_ds, config)
+        all_missing = upstream_missing_rows + failed
+        missing_csv = config.get("missing_csv")
+        if missing_csv:
+            os.makedirs(os.path.dirname(missing_csv), exist_ok=True)
+            pd.DataFrame(all_missing, columns=MISSING_COLUMNS).to_csv(missing_csv, index=False)
+            print(f"Wrote missing manifest: {missing_csv} ({len(all_missing)} rows)")
+        print("\n" + "=" * 60)
+        print(f"GNINA {mode} pipeline complete")
+        print("=" * 60)
+        return
 
     print("\n--- Step 1: Protein Preparation ---")
     prepared_proteins = prepare_proteins(

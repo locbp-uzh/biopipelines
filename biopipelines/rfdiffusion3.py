@@ -62,6 +62,32 @@ class RFdiffusion3(BaseConfig):
             num_designs=20
         )
 
+        # Symmetric oligomer (C3) — symmetric noise auto-selects the symmetry sampler
+        oligomer = RFdiffusion3(length="100-120", symmetry="C3", num_designs=10)
+
+        # Diffused small-molecule binder: ligand placed (bound coords), buried,
+        # with CFG (paper Fig 3c). The ligand must carry coordinates — supply it
+        # as a bound structure; a bare code has nothing to place. A CCD code (e.g.
+        # "SAM") loads that component's reference chemistry. A CUSTOM ligand (a
+        # SMILES-derived molecule whose atom names won't match any CCD entry) must
+        # be coded "UNL" so RFD3 reads its atoms from the structure — see the
+        # select_buried note below.
+        binder = RFdiffusion3(
+            length="80-120", ligand=Ligand(code="SAM", structures=posed_sam),
+            select_buried="B1", cfg=True, cfg_scale=2.0,
+            step_scale=1.5, noise_scale=0.6, num_steps=200,
+        )
+
+        # Custom (non-CCD) ligand: rename its residue to UNL first, then bury it.
+        prepped = PDB(my_pose, PDB.rename("LIG", "UNL"))
+        binder2 = RFdiffusion3(
+            pdb=prepped, ligand=Ligand(code="UNL", structures=prepped),
+            contig="65-95,A84-182", select_buried="B1", cfg=True, cfg_scale=2.0,
+        )
+
+        # Enzyme atomic-motif scaffolding: unindexed catalytic tip atoms + substrate
+        enzyme = RFdiffusion3(pdb=motif, contig="80-150", unindex="A residues of the triad")
+
         # Advanced: Full JSON control
         config = {
             "design_1": {
@@ -109,13 +135,46 @@ class RFdiffusion3(BaseConfig):
             True=all atoms fixed, ""=none fixed, dict=specific atoms per <chain><resnum>.
             Example: {"B1": ""} to not fix any atoms of the ligand at chain B residue 1
         select_buried (str or dict): Atoms that should be buried in protein (RASA control).
-            Example: {"B1": "C1,C2,C3"} (ligand at B1) or "B1" for all its atoms
+            Example: {"B1": "C1,C2,C3"} (ligand at B1) or "B1" for all its atoms.
+            CUSTOM-LIGAND TRAP: a RASA selector also fails with "could not broadcast
+            ... (0,3)" when the ligand's residue CODE collides with a real CCD entry
+            (e.g. "LIG", "SAM") but its atoms are a custom molecule. RFD3/atomworks
+            then loads the canonical CCD conformer, whose atom names don't match the
+            structure, so the selection resolves to zero atoms. Code such a ligand
+            "UNL" (atomworks' DO_NOT_MATCH_CCD sentinel) so its atoms are read from
+            the structure: PDB(pose, PDB.rename("LIG","UNL")) + Ligand(code="UNL").
         select_exposed (str or dict): Atoms that should be solvent-exposed (RASA control).
             Example: {"B1": "O1,O2"} or "B1" for all atoms
         select_hbond_donor (dict): Hydrogen bond donor specification.
             Dict mapping <chain><resnum> to donor atoms. Example: {"B1": "N1,N2"}
         select_hbond_acceptor (dict): Hydrogen bond acceptor specification.
             Dict mapping <chain><resnum> to acceptor atoms. Example: {"B1": "O1,O2"}
+        select_partially_buried (str or dict): Third RASA label between buried and exposed.
+        unindex (str or dict): Unindexed motif components (no fixed sequence index) — the
+            atomic-motif enzyme path (catalytic tip atoms) and diffused nucleic-acid motifs.
+            Must not overlap with contig. Requires a contig or length alongside it.
+        select_unfixed_sequence (bool, str, or dict): Components whose sequence is freed
+            (diffused) rather than fixed. Excludes ligands/DNA (those keep fixed sequence).
+        redesign_motif_sidechains (bool or str): Fixed-backbone sequence design over the
+            motif when a contig is provided.
+        symmetry (str or dict): Symmetry group id ("C3", "D2", "T", "O", "I"); a string is
+            shorthand for {"id": ...}. A dict may also set is_unsym_motif (comma list of
+            contigs/ligands left unsymmetrized, e.g. DNA strands) and is_symmetric_motif.
+            Setting this auto-selects the symmetry sampler.
+        ori_token (list[float]): Explicit origin/center-of-mass coordinates.
+        infer_ori_strategy (str): COM-guidance strategy, "com" or "hotspots".
+        is_non_loopy (bool): Non-loopy global conditioning.
+        plddt_enhanced (bool): pLDDT enhancement (upstream default True).
+        partial_t (float): Angstroms of noise for partial diffusion (<=15 recommended).
+            Requires an input structure; length must not be set.
+        cfg (bool): Enable classifier-free guidance (improves adherence to ligand/H-bond
+            conditions; paper Fig 2d/3c).
+        cfg_scale (float): CFG guidance strength (paper uses 2.0 for diffused-ligand binders).
+        step_scale (float): Sampler step scale eta (paper 1.5; higher = less diverse, more designable).
+        noise_scale (float): Sampler gamma_0 noise (paper 0.6; 0.0 for ODE sampling).
+        num_steps (int): Number of denoising timesteps (paper 200).
+        center_option (str): Centering, "all", "motif", or "diffuse".
+        seed (int): Inference seed for reproducibility.
         json_config (str or dict): Override with full JSON configuration for advanced use
         design_startnum (int): Starting number for design numbering (default: 1)
 
@@ -141,7 +200,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.0"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -224,9 +283,26 @@ fi
                  select_hotspots: Union[str, Dict[str, str]] = None,
                  select_fixed_atoms: Union[bool, str, Dict[str, str]] = None,
                  select_buried: Union[str, Dict[str, str]] = None,
+                 select_partially_buried: Union[str, Dict[str, str]] = None,
                  select_exposed: Union[str, Dict[str, str]] = None,
                  select_hbond_donor: Dict[str, str] = None,
                  select_hbond_acceptor: Dict[str, str] = None,
+                 unindex: Union[str, Dict[str, str]] = None,
+                 select_unfixed_sequence: Union[bool, str, Dict[str, str]] = None,
+                 redesign_motif_sidechains: Union[bool, str] = None,
+                 symmetry: Union[str, Dict[str, Any]] = None,
+                 ori_token: Optional[List[float]] = None,
+                 infer_ori_strategy: str = None,
+                 is_non_loopy: bool = None,
+                 plddt_enhanced: bool = None,
+                 partial_t: float = None,
+                 cfg: bool = None,
+                 cfg_scale: float = None,
+                 step_scale: float = None,
+                 noise_scale: float = None,
+                 num_steps: int = None,
+                 center_option: str = None,
+                 seed: int = None,
                  json_config: Union[str, Dict] = None,
                  design_startnum: int = 1,
                  **kwargs):
@@ -297,9 +373,27 @@ fi
         self.select_hotspots = select_hotspots
         self.select_fixed_atoms = select_fixed_atoms
         self.select_buried = select_buried
+        self.select_partially_buried = select_partially_buried
         self.select_exposed = select_exposed
         self.select_hbond_donor = select_hbond_donor
         self.select_hbond_acceptor = select_hbond_acceptor
+        self.unindex = unindex
+        self.select_unfixed_sequence = select_unfixed_sequence
+        self.redesign_motif_sidechains = redesign_motif_sidechains
+        self.symmetry = symmetry
+        self.ori_token = ori_token
+        self.infer_ori_strategy = infer_ori_strategy
+        self.is_non_loopy = is_non_loopy
+        self.plddt_enhanced = plddt_enhanced
+        self.partial_t = partial_t
+        # Sampler overrides (emitted as Hydra inference_sampler.* args, not JSON).
+        self.cfg = cfg
+        self.cfg_scale = cfg_scale
+        self.step_scale = step_scale
+        self.noise_scale = noise_scale
+        self.num_steps = num_steps
+        self.center_option = center_option
+        self.seed = seed
         self.json_config = json_config
         self.design_startnum = design_startnum
 
@@ -319,9 +413,69 @@ fi
 
     def validate_params(self):
         """Validate RFdiffusion3-specific parameters."""
-        # Require either length, contig, or json_config
-        if not self.length and not self.contig and not self.json_config:
-            raise ValueError("Either length, contig, or json_config parameter is required")
+        # Require either length, contig, json_config, or an input that drives
+        # a composition (a PDB stream used by unindex/ligand/partial_t).
+        has_input = self.pdb_stream is not None or self.ligand_stream is not None
+        drives_input = bool(self.contig) or self.unindex is not None \
+            or self.ligand_stream is not None or self.partial_t is not None
+        if not self.length and not self.contig and not self.json_config \
+                and not (has_input and drives_input):
+            raise ValueError(
+                "Provide length, contig, json_config, or an input structure used "
+                "by unindex/ligand/partial_t"
+            )
+
+        # Partial diffusion: needs an input, and length must not be set (upstream rule).
+        if self.partial_t is not None:
+            if self.partial_t < 0:
+                raise ValueError("partial_t must be >= 0")
+            if self.length is not None:
+                raise ValueError("length must not be set during partial diffusion (partial_t)")
+            if self.pdb_stream is None:
+                raise ValueError("partial_t (partial diffusion) requires an input structure")
+
+        # A ligand is appended to an input atom array; foundry has nothing to
+        # append to when only a bare code is given with no input structure
+        # (de-novo length-only), and crashes in _append_ligand. The ligand must
+        # carry coordinates — supply it as a bound structure.
+        if self.ligand_stream is not None and self.pdb_stream is None:
+            raise ValueError(
+                "A ligand needs an input structure to be placed in. Provide the "
+                "ligand with bound coordinates (Ligand(code=..., structures=...)) "
+                "or pass pdb= with the ligand bound as HETATM. A bare ligand code "
+                "with length-only (de-novo) design has no structure to bind to."
+            )
+
+        # Selectors that resolve against atom coordinates need an input atom
+        # array. With a bare ligand code (no structures stream) and no PDB,
+        # foundry rejects them ("Atom array input must be provided before
+        # parsing selections"). Surface that at config time with a fix.
+        if self.pdb_stream is None:
+            coord_selectors = {
+                "select_fixed_atoms": self.select_fixed_atoms,
+                "select_unfixed_sequence": self.select_unfixed_sequence,
+                "select_buried": self.select_buried,
+                "select_partially_buried": self.select_partially_buried,
+                "select_exposed": self.select_exposed,
+                "select_hbond_donor": self.select_hbond_donor,
+                "select_hbond_acceptor": self.select_hbond_acceptor,
+                "select_hotspots": self.select_hotspots,
+            }
+            offending = [n for n, v in coord_selectors.items() if v is not None]
+            if offending:
+                raise ValueError(
+                    f"{', '.join(offending)} require an input structure to resolve "
+                    "against, but none was given. Provide pdb= (or a ligand with bound "
+                    "coordinates, e.g. Ligand(code=..., structures=...)). A bare ligand "
+                    "code has no coordinates for these selections."
+                )
+
+        if self.infer_ori_strategy is not None and self.infer_ori_strategy not in ("com", "hotspots"):
+            raise ValueError("infer_ori_strategy must be 'com' or 'hotspots'")
+        if self.center_option is not None and self.center_option not in ("all", "motif", "diffuse"):
+            raise ValueError("center_option must be 'all', 'motif', or 'diffuse'")
+        if self.symmetry is not None and not isinstance(self.symmetry, (str, dict)):
+            raise ValueError("symmetry must be a group-id string (e.g. 'C3') or dict")
 
         # Check for incorrect chain break syntax
         if self.contig and '/' in self.contig:
@@ -365,6 +519,10 @@ fi
             if not isinstance(self.select_buried, (str, dict)):
                 raise ValueError("select_buried must be str or dict")
 
+        if self.select_partially_buried is not None:
+            if not isinstance(self.select_partially_buried, (str, dict)):
+                raise ValueError("select_partially_buried must be str or dict")
+
         if self.select_exposed is not None:
             if not isinstance(self.select_exposed, (str, dict)):
                 raise ValueError("select_exposed must be str or dict")
@@ -376,6 +534,18 @@ fi
         if self.select_hbond_acceptor is not None:
             if not isinstance(self.select_hbond_acceptor, dict):
                 raise ValueError("select_hbond_acceptor must be dict")
+
+        if self.unindex is not None:
+            if not isinstance(self.unindex, (str, dict)):
+                raise ValueError("unindex must be str or dict")
+
+        if self.select_unfixed_sequence is not None:
+            if not isinstance(self.select_unfixed_sequence, (bool, str, dict)):
+                raise ValueError("select_unfixed_sequence must be bool, str, or dict")
+
+        if self.redesign_motif_sidechains is not None:
+            if not isinstance(self.redesign_motif_sidechains, (bool, str)):
+                raise ValueError("redesign_motif_sidechains must be bool or str")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files."""
@@ -439,12 +609,34 @@ fi
             entry["select_fixed_atoms"] = self.select_fixed_atoms
         if self.select_buried is not None:
             entry["select_buried"] = self.select_buried
+        if self.select_partially_buried is not None:
+            entry["select_partially_buried"] = self.select_partially_buried
         if self.select_exposed is not None:
             entry["select_exposed"] = self.select_exposed
         if self.select_hbond_donor is not None:
             entry["select_hbond_donor"] = self.select_hbond_donor
         if self.select_hbond_acceptor is not None:
             entry["select_hbond_acceptor"] = self.select_hbond_acceptor
+        if self.unindex is not None:
+            entry["unindex"] = self.unindex
+        if self.select_unfixed_sequence is not None:
+            entry["select_unfixed_sequence"] = self.select_unfixed_sequence
+        if self.redesign_motif_sidechains is not None:
+            entry["redesign_motif_sidechains"] = self.redesign_motif_sidechains
+        if self.symmetry is not None:
+            entry["symmetry"] = (
+                {"id": self.symmetry} if isinstance(self.symmetry, str) else self.symmetry
+            )
+        if self.ori_token is not None:
+            entry["ori_token"] = self.ori_token
+        if self.infer_ori_strategy is not None:
+            entry["infer_ori_strategy"] = self.infer_ori_strategy
+        if self.is_non_loopy is not None:
+            entry["is_non_loopy"] = self.is_non_loopy
+        if self.plddt_enhanced is not None:
+            entry["plddt_enhanced"] = self.plddt_enhanced
+        if self.partial_t is not None:
+            entry["partial_t"] = self.partial_t
 
         return entry
 
@@ -485,6 +677,20 @@ fi
 
         if self.select_hbond_donor is not None or self.select_hbond_acceptor is not None:
             config_lines.append("H-BOND CONSTRAINTS: defined")
+
+        if self.unindex is not None:
+            config_lines.append(f"UNINDEXED MOTIF: {self._format_constraint_display(self.unindex)}")
+
+        if self.symmetry is not None:
+            sym_id = self.symmetry if isinstance(self.symmetry, str) else self.symmetry.get("id")
+            config_lines.append(f"SYMMETRY: {sym_id}")
+
+        if self.partial_t is not None:
+            config_lines.append(f"PARTIAL DIFFUSION: t={self.partial_t}")
+
+        sampler = self._sampler_overrides()
+        if sampler:
+            config_lines.append(f"SAMPLER: {', '.join(sampler)}")
 
         config_lines.append(f"NUM DESIGNS: {self.num_designs}")
         config_lines.append(f"NUM MODELS: {self.num_models}")
@@ -551,13 +757,44 @@ echo "Using RFdiffusion3 JSON configuration: {self.json_file}"
 
 """
 
+    def _sampler_overrides(self) -> List[str]:
+        """Hydra dotted overrides for sampler/seed knobs (paper inference args).
+
+        These ride on the `rfd3 design` command line, separate from the inputs
+        JSON. Names are the paper's vocabulary mapped to foundry keys:
+        step_scale=η, noise_scale=γ₀ (inference_sampler.gamma_0), num_steps=
+        num_timesteps. Symmetry auto-selects the symmetry sampler (kind).
+        """
+        ov: List[str] = []
+        if self.symmetry is not None:
+            ov.append("inference_sampler.kind=symmetry")
+        if self.cfg is not None:
+            ov.append(f"inference_sampler.use_classifier_free_guidance={self.cfg}")
+        if self.cfg_scale is not None:
+            ov.append(f"inference_sampler.cfg_scale={self.cfg_scale}")
+        if self.step_scale is not None:
+            ov.append(f"inference_sampler.step_scale={self.step_scale}")
+        if self.noise_scale is not None:
+            ov.append(f"inference_sampler.gamma_0={self.noise_scale}")
+        if self.num_steps is not None:
+            ov.append(f"inference_sampler.num_timesteps={self.num_steps}")
+        if self.center_option is not None:
+            ov.append(f"inference_sampler.center_option={self.center_option}")
+        if self.seed is not None:
+            ov.append(f"seed={self.seed}")
+        return ov
+
     def generate_script_run_rfdiffusion3(self) -> str:
         """Generate RFdiffusion3 execution bash code.
 
-        No ``global_prefix`` is set: each design key in the inputs JSON is its
-        own name (the input pdb id in the multi-PDB case), so foundry names
-        outputs ``<key>_<design>_model_<model>``.
+        ``global_prefix=""`` makes foundry name outputs ``<jsonkey>_<batch>_
+        model_<model>`` (the documented "pipelines usage"). Without it foundry
+        prepends the inputs-JSON *filename* too, so the postprocess-derived id
+        gains a spurious ``_<jsonbasename>`` infix and no longer matches the ids
+        predicted in get_output_files. The jsonkey is each design's own name
+        (the input pdb id in the multi-PDB case, the de-novo prefix otherwise).
         """
+        sampler_args = "".join(f" \\\n    {a}" for a in self._sampler_overrides())
         return f"""echo "Starting RFdiffusion3"
 echo "JSON config: {self.json_file}"
 echo "Output folder: {self.output_folder}"
@@ -585,7 +822,8 @@ python -c "import torch; import torchvision" 2>/dev/null || true
     out_dir="{self.raw_output_folder}" \\
     inputs="{self.json_file}" \\
     n_batches={self.num_designs} \\
-    diffusion_batch_size={self.num_models}
+    diffusion_batch_size={self.num_models} \\
+    global_prefix=""{sampler_args}
 
 """
 
@@ -798,9 +1036,26 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 "select_hotspots": self.select_hotspots,
                 "select_fixed_atoms": self.select_fixed_atoms,
                 "select_buried": self.select_buried,
+                "select_partially_buried": self.select_partially_buried,
                 "select_exposed": self.select_exposed,
                 "select_hbond_donor": self.select_hbond_donor,
                 "select_hbond_acceptor": self.select_hbond_acceptor,
+                "unindex": self.unindex,
+                "select_unfixed_sequence": self.select_unfixed_sequence,
+                "redesign_motif_sidechains": self.redesign_motif_sidechains,
+                "symmetry": self.symmetry,
+                "ori_token": self.ori_token,
+                "infer_ori_strategy": self.infer_ori_strategy,
+                "is_non_loopy": self.is_non_loopy,
+                "plddt_enhanced": self.plddt_enhanced,
+                "partial_t": self.partial_t,
+                "cfg": self.cfg,
+                "cfg_scale": self.cfg_scale,
+                "step_scale": self.step_scale,
+                "noise_scale": self.noise_scale,
+                "num_steps": self.num_steps,
+                "center_option": self.center_option,
+                "seed": self.seed,
                 "has_json_config": self.json_config is not None,
                 "design_startnum": self.design_startnum,
                 "pdb_input_ids": self.pdb_stream.ids if self.pdb_stream else None

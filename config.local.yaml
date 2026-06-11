@@ -39,6 +39,7 @@ folders:
 
   infrastructure:
     pipe_scripts: "<biopipelines>/pipe_scripts"
+    scripts: "<biopipelines>/my_scripts"
     pdbs: "<biopipelines>/pdbs"
     ligands: "<biopipelines>/ligands"
     sequences: "<biopipelines>/sequences"

@@ -507,10 +507,20 @@ RFdiffusion:
 RFdiffusion3:
   files:
     - biopipelines/rfdiffusion3.py
+    - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
     - pipe_scripts/pipe_rfdiffusion3_postprocess.py
     - pipe_scripts/pipe_rfdiffusion3_table.py
-  current: "1.0"
-  history: []
+  current: "2.0"
+  history:
+    - version: "2.0"
+      date: "2026-06-10"
+      note: >-
+        Cover the full RFD3 paper example set: add symmetry, unindex
+        (atomic-motif enzyme), select_unfixed_sequence, select_partially_buried,
+        redesign_motif_sidechains, ori_token/infer_ori_strategy (COM),
+        is_non_loopy, plddt_enhanced, partial_t input-spec keys, plus
+        inference-sampler overrides cfg/cfg_scale/step_scale/noise_scale/
+        num_steps/center_option/seed.
 
 RFdiffusionAllAtom:
   files:

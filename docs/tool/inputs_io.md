@@ -232,8 +232,8 @@ proteins = PDB(["4ufc", "1aki"], ids=["POI1", "POI2"])
 # From folder
 proteins = PDB("/path/to/structures")
 
-# With ligand renaming
-pdb = PDB("structure.pdb", PDB.rename("LIG", ":L:"))
+# With ligand renaming (e.g. UNL for RFdiffusion3/atomworks custom-ligand compatibility)
+pdb = PDB("structure.pdb", PDB.rename("LIG", "UNL"))
 
 # Biological assembly
 pdb = PDB("4ufc", biological_assembly=True, remove_waters=False)
@@ -577,6 +577,67 @@ results = RCSB(
 
 # Use downstream
 af = AlphaFold(proteins=results)
+```
+
+---
+
+### Scripting
+
+Runs a user-authored script as a typed, two-phase pipeline step — an escape hatch for one-off glue logic that doesn't justify a full tool wrapper. The script declares its own outputs, so downstream tools consume its streams and tables like any other tool's output. The script implements two functions: `configuration(inputs)` runs at config time and is pure shape-prediction (no disk reads — the input files don't exist yet), returning the output streams/tables with ids derived from the input ids; `execution(inputs, outputs)` runs at execution time in the configured env, against real files.
+
+**The two phases run in different Python environments, so each imports what it needs *inside* its own function, never at module top level.** `configuration()` runs in the pipeline's own Python (the `biopipelines` env, at config time): import `Stream`/`Table` from `biopipelines.scripting_api` there. `execution()` runs later in the env named by `env`: import whatever that env provides (`numpy`, `torch`, a tool package) there. Keeping the top of the script import-free is the rule, not a style — the script's top-level code is executed in *both* phases' environments, so a top-level `import torch` crashes config-time pipeline-build (torch isn't in the `biopipelines` env) and a top-level `from biopipelines...` needlessly couples the execution env to the framework.
+
+**Environment**: user-specified via `env` (defaults to `biopipelines`). The tool does not create the env — it must already exist.
+
+**Parameters**:
+- `script`: str (required) — A `.py` file defining `configuration(inputs)` and `execution(inputs, outputs)`. A bare filename (`"my_step.py"`) is looked up in the configured scripts folder — `folders.infrastructure.scripts`, default `<biopipelines>/my_scripts` — so a script kept there needs no path. An existing path given as-is (absolute, or relative to the working directory) is used directly and always wins; a missing script raises, naming every place searched. On a cluster the file must be reachable on the runtime host (synced, not just local) — keeping it in the scripts folder, which lives under the repo, gets it synced with everything else.
+- `inputs`: Dict[str, ...] (required) — Maps a name to a `StandardizedOutput`, a `DataStream`, or a table-column reference (`tool.tables.x.col` or `(TableInfo, "col")`). A `StandardizedOutput` resolves to its single non-empty stream; pass an explicit `tool.streams.<name>` if it carries several.
+- `env`: str = None — Conda env the execution phase runs in.
+
+**Streams / Tables**: whatever `configuration()` declares — `Stream(format, ids)` for a stream (file-based when format is `pdb`/`cif`/`sdf`/...; value-based when format is `csv` and rows carry no `file` column), `Table(columns=[...])` for a standalone table.
+
+**Script API** (`from biopipelines.scripting_api import Stream, Table`):
+
+| In the script | At config time (`configuration`) | At execution time (`execution`) |
+|---|---|---|
+| `inputs["x"].ids` | declared input ids (lazy/pattern preserved) | full runtime ids |
+| `inputs["x"].iterate()` | — | `(id, file_path)` for file streams; `(id, value_dict)` for value streams |
+| `inputs["x"].value(id)` | — | per-id lookup for a table-reference input |
+| `outputs.file("stream", name)` | — | a path under the stream folder to write a per-id file into |
+| `outputs.row("table", mapping)` | — | append a row to a declared standalone table |
+| `return {...}` | a dict of `Stream`/`Table` | a dict of `{stream: rows}` → the stream map_tables |
+
+**Example**:
+```python
+from biopipelines.scripting import Scripting
+
+x = Scripting(
+    script="my_step.py",   # found in the scripts folder (default my_scripts/)
+    inputs={"structures": folded, "designed": rfd.tables.structures.designed},
+    env="myenv",
+)
+# x.streams.structures, x.tables.<name> — usable downstream
+```
+
+```python
+# path/to/script.py — note: no imports at top level
+
+def configuration(inputs):
+    from biopipelines.scripting_api import Stream, Table   # config-time env (biopipelines)
+    ids = inputs["structures"].ids               # output ids derived from input ids
+    return {"structures": Stream("pdb", ids),
+            "scores": Table(columns=["id", "rmsd"])}
+
+def execution(inputs, outputs):
+    import numpy as np                            # execution-time env (`env=`); import its packages HERE
+    rows = []
+    for sid, path in inputs["structures"].iterate():
+        positions = inputs["designed"].value(sid)  # per-id from the table reference
+        out = outputs.file("structures", f"{sid}.pdb")
+        ...                                         # write `out`
+        outputs.row("scores", {"id": sid, "rmsd": ...})
+        rows.append({"id": sid, "file": out})
+    return {"structures": rows}                     # -> structures map_table
 ```
 
 ---

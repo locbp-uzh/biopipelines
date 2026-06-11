@@ -37,6 +37,7 @@ folders:
 
   infrastructure:
     pipe_scripts: "<biopipelines>/pipe_scripts"
+    scripts: "<biopipelines>/my_scripts"
     pdbs: "<biopipelines>/pdbs"
     ligands: "<biopipelines>/ligands"
     sequences: "<biopipelines>/sequences"
@@ -66,6 +67,7 @@ folders:
     PocketGen: "<data>/PocketGen"
     ProteinMPNN: "<data>/ProteinMPNN"
     RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusion2: "<data>/RFdiffusion2"
     RFdiffusion3: "<data>/rfdiffusion3"
     RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
     RTMScore: "<data>/RTMScore"
@@ -143,6 +145,7 @@ environments:
   Reduce: "reduce"
   RF3: "modelforge"
   RFdiffusion: "SE3nv"
+  RFdiffusion2: "biopipelines"
   RFdiffusion3: "foundry"
   RFdiffusionAllAtom: "SE3nv"
   RTMScore: "rtmscore"

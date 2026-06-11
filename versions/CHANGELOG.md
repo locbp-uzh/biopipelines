@@ -37,6 +37,16 @@ matching bullet under `[unreleased] → Tools` here.
 
 ### Tools
 
+- RFdiffusion3 1.0 → 2.0: cover the full RFD3 paper example set. New
+  input-spec keys (`symmetry`, `unindex`, `select_unfixed_sequence`,
+  `select_partially_buried`, `redesign_motif_sidechains`, `ori_token`,
+  `infer_ori_strategy`, `is_non_loopy`, `plddt_enhanced`, `partial_t`) and
+  inference-sampler overrides (`cfg`, `cfg_scale`, `step_scale`,
+  `noise_scale`, `num_steps`, `center_option`, `seed`). Symmetry auto-selects
+  the symmetry sampler. Adds symmetric-oligomer, diffused-ligand+CFG,
+  protein-DNA, and atomic-motif enzyme design to the existing de-novo / binder
+  / rigid-ligand paths.
+
 ## [1.1.1] — 2026-04-30
 
 ### Framework

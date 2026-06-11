@@ -102,6 +102,35 @@ def test_pdb_loads_from_folder(
     assert ids == ["struct1", "struct2"]
 
 
+def test_pdb_single_file_path_id_is_basename_stem(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """PDB(pdbs=<single file path>) ids the structure by its basename stem.
+
+    A path-like source must not become the id verbatim — otherwise the
+    predicted output path embeds the whole path and a doubled extension
+    (".../structures//abs/path/M0584_1ldm.pdb.pdb"), which never matches the
+    actual fetched file and fails the completion check.
+    """
+    from biopipelines.pdb import PDB
+
+    pdb_file = isolated_cwd / "M0584_1ldm.pdb"
+    pdb_file.write_text("HEADER test\nEND\n")
+
+    pipeline = new_pipeline("pdb_single_file")
+    with pipeline:
+        p = PDB(pdbs=str(pdb_file))
+        pipeline.save()
+
+    ids = list(p.streams.structures.ids)
+    files = list(p.streams.structures.files)
+    record_case(input="PDB(pdbs='/abs/M0584_1ldm.pdb')",
+                expected=["M0584_1ldm"], actual=ids)
+    assert ids == ["M0584_1ldm"]
+    # predicted output path must be clean: no embedded source path, no .pdb.pdb
+    assert not any(".pdb.pdb" in f or str(pdb_file) in f for f in files)
+
+
 # ── convert option ───────────────────────────────────────────────────────────
 
 def test_pdb_convert_pdb(

@@ -148,8 +148,44 @@ def _render_value(v: Any) -> str:
     return str(v)
 
 
-def run_editor(file_path: str) -> int:
-    """Open file_path in the TUI editor. Returns shell exit code."""
+def _overlay_diff(merged: Any, base: Any) -> Any:
+    """Structural diff of an edited ``merged`` doc against ``base``.
+
+    Returns the minimal nested mapping of keys whose value in ``merged`` differs
+    from (or is absent in) ``base`` — this is what gets written to the overlay so
+    it carries only the user's deviations from the committed config. Dicts recurse;
+    any other type is compared by equality and taken whole when it differs. Keys
+    present in ``base`` but removed in ``merged`` are not represented (the overlay
+    only adds/overrides, never deletes a base key).
+    """
+    from ruamel.yaml.comments import CommentedMap
+
+    if not isinstance(merged, (dict, CommentedMap)):
+        return merged
+    out = CommentedMap()
+    base_map = base if isinstance(base, (dict, CommentedMap)) else {}
+    for key, mv in merged.items():
+        if key not in base_map:
+            out[key] = mv
+            continue
+        bv = base_map[key]
+        if isinstance(mv, (dict, CommentedMap)) and isinstance(bv, (dict, CommentedMap)):
+            sub = _overlay_diff(mv, bv)
+            if sub:
+                out[key] = sub
+        elif mv != bv:
+            out[key] = mv
+    return out
+
+
+def run_editor(file_path: str, overlay_path: Optional[str] = None) -> int:
+    """Open file_path in the TUI editor. Returns shell exit code.
+
+    When ``overlay_path`` is given, ``file_path`` is the committed base config:
+    the editor displays the base deep-merged with any existing overlay, but on
+    save writes only the diff-against-base into the overlay (the base is never
+    modified). Without it, the editor reads and writes ``file_path`` directly.
+    """
     from prompt_toolkit import Application
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import Layout, Window, HSplit, FormattedTextControl
@@ -158,6 +194,7 @@ def run_editor(file_path: str) -> int:
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.widgets import TextArea
     from ruamel.yaml import YAML
+    from .config_manager import _deep_merge
 
     path = Path(file_path)
     if not path.exists():
@@ -167,13 +204,26 @@ def run_editor(file_path: str) -> int:
     yaml = YAML()
     yaml.preserve_quotes = True
     with path.open("r", encoding="utf-8") as f:
-        doc = yaml.load(f)
+        base_doc = yaml.load(f)
 
-    if doc is None:
+    if base_doc is None:
         print(f"Config file is empty: {path}", file=sys.stderr)
         return 1
 
-    state = EditorState(file_path=path, doc=doc)
+    # Edit base merged with the overlay; _deep_merge returns a fresh structure
+    # so base_doc stays a pristine diff reference even with an empty overlay.
+    overlay = Path(overlay_path) if overlay_path else None
+    if overlay is not None:
+        if overlay.exists():
+            with overlay.open("r", encoding="utf-8") as f:
+                overlay_doc = yaml.load(f) or {}
+        else:
+            overlay_doc = {}
+        doc = _deep_merge(base_doc, overlay_doc)
+    else:
+        doc = base_doc
+
+    state = EditorState(file_path=overlay if overlay is not None else path, doc=doc)
     # Start with every branch collapsed so the user sees just the
     # top-level section names; they can expand the one they want.
     expanded: set = set()
@@ -387,16 +437,22 @@ def run_editor(file_path: str) -> int:
                 state.cursor = min(state.cursor, max(0, len(state.rows) - 1))
 
     def save_to_disk() -> None:
-        from .config_manager import backup_file
-        bak = Path(backup_file(state.file_path))
+        status = "saved"
+        if overlay is not None:
+            to_write = _overlay_diff(state.doc, base_doc)
+        else:
+            to_write = state.doc
+            from .config_manager import backup_file
+            if state.file_path.exists():
+                status = f"saved (backup: {Path(backup_file(state.file_path)).name})"
         # Atomic write: dump to a temp in the same dir, then replace.
         buf = io.StringIO()
-        yaml.dump(state.doc, buf)
+        yaml.dump(to_write, buf)
         tmp = state.file_path.with_suffix(state.file_path.suffix + ".tmp")
         tmp.write_text(buf.getvalue(), encoding="utf-8")
         os.replace(tmp, state.file_path)
         state.dirty = False
-        state.status = f"saved (backup: {bak.name})"
+        state.status = status
 
     # ---- inline edit prompt ------------------------------------------
     # Enter / Escape handlers for this textarea live on the app-level

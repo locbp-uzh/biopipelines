@@ -40,8 +40,8 @@ with Pipeline(project="Examples",
                                     ligands=ap5) # sequence pulled directly from RCSB
     
     adenylate_kinase_boltz_renamed = PDB(adenylate_kinase_boltz,
-                                         PDB.rename("LIG",":L:")) # RFdiffusion3 cannot handle ccd-like ligand codes
-    ligand_L = Ligand(code="L")  # names the renamed HETATM code for the code-consuming tools
+                                         PDB.rename("LIG","UNL")) # code UNL (atomworks DO_NOT_MATCH_CCD) so RFD3 reads atoms from the structure, not a CCD conformer
+    ligand_L = Ligand(code="UNL")  # names the renamed HETATM code for the code-consuming tools
 
     rfd3 = RFdiffusion3(pdb=adenylate_kinase_boltz_renamed, #RFdiffusion3 often needs some PDB cleanup. The easiest solution is to start from a Boltz prediction
                         ligand=ligand_L,
@@ -50,7 +50,7 @@ with Pipeline(project="Examples",
 
     #this generates a table showing for each structure id a pymol selection for residues within and beyond the distance from the ligand
     distances = DistanceSelector(structures=rfd3,
-                                  ligand=ligand_L,  # residue code "L" read from the compounds stream at runtime
+                                  ligand=ligand_L,  # residue code "UNL" read from the compounds stream at runtime
                                   distance=5,
                                   restrict_to=rfd3.tables.structures.designed)
     pmpnn = ProteinMPNN(structures=rfd3,

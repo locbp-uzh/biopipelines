@@ -100,7 +100,7 @@ class PDB(BaseConfig):
         # Fetch with ligand renaming (for RFdiffusion3 compatibility)
         pdb = PDB(
             pdbs="rifampicin.pdb",
-            PDB.rename("LIG", ":L:")
+            PDB.rename("LIG", "UNL")
         )
 
         # Multiple operations
@@ -142,17 +142,19 @@ echo "=== PDB ready ==="
         Rename a residue/ligand in the structure.
 
         Useful for renaming CCD ligand codes to non-CCD names for compatibility
-        with tools like RFdiffusion3 that have issues with certain CCD codes.
+        with tools like RFdiffusion3 that have issues with certain CCD codes. For
+        RFdiffusion3/atomworks specifically, use "UNL" (its DO_NOT_MATCH_CCD
+        sentinel) so the ligand's atoms are read from the structure.
 
         Args:
             old: Current residue name (e.g., "LIG", "ATP")
-            new: New residue name (e.g., ":L:", "ATP1")
+            new: New residue name (e.g., "UNL", "ATP1")
 
         Returns:
             PDBOperation for renaming
 
         Example:
-            PDB(pdbs="structure.pdb", PDB.rename("LIG", ":L:"))
+            PDB(pdbs="structure.pdb", PDB.rename("LIG", "UNL"))
         """
         return PDBOperation("rename", old=old, new=new)
 
@@ -300,7 +302,7 @@ echo "=== PDB ready ==="
                   a dictionary mapping IDs to PDB codes (e.g. {"POI": "4ufc", "POI2": "1abc"}),
                   a folder path (absolute or relative to PDBs folder),
                   or a tool output whose structures will be used at execution time.
-            *args: Operations to apply after loading (e.g., PDB.rename("LIG", ":L:"))
+            *args: Operations to apply after loading (e.g., PDB.rename("LIG", "UNL"))
             ids: Custom IDs for renaming. Can be single string or list of strings (e.g. "POI" or ["POI1","POI2"]). If None, uses pdbs as ids.
                  Ignored when pdbs is a dictionary (ids come from dict keys).
             convert: Target format to convert structures to - "pdb", "cif", or None (default).
@@ -399,9 +401,13 @@ echo "=== PDB ready ==="
                 raise ValueError(f"pdbs must be a string, list of strings, StandardizedOutput, or DataStream, got {type(pdbs)}")
             self.convert = convert.lower() if convert else None
 
-        # Handle custom IDs - default to pdb_ids if not provided
+        # Handle custom IDs - default to pdb_ids if not provided. A path-like
+        # entry (absolute/relative path or a *.pdb/*.cif filename) is kept as the
+        # lookup key in pdb_ids but must NOT become the output id verbatim — the
+        # id is the basename stem (e.g. "/x/M0584_1ldm.pdb" -> "M0584_1ldm"), or
+        # the predicted output path embeds the whole path and a double extension.
         if ids is None:
-            self.custom_ids = self.pdb_ids.copy()
+            self.custom_ids = [self._default_id_from_source(p) for p in self.pdb_ids]
         else:
             if isinstance(ids, str):
                 self.custom_ids = [ids]
@@ -477,6 +483,23 @@ echo "=== PDB ready ==="
             return True
 
         return False
+
+    @staticmethod
+    def _default_id_from_source(source: str) -> str:
+        """Output id for a pdb source string when no explicit id is given.
+
+        A bare RCSB code ("4ufc") is its own id. A path-like source — anything
+        with a path separator or a .pdb/.cif extension — yields its basename
+        stem ("/x/M0584_1ldm.pdb" -> "M0584_1ldm"), so the id never embeds the
+        full path or a duplicated extension.
+        """
+        if not isinstance(source, str):
+            return source
+        has_sep = ("/" in source) or ("\\" in source)
+        is_struct_file = source.lower().endswith((".pdb", ".cif"))
+        if has_sep or is_struct_file:
+            return os.path.splitext(os.path.basename(source))[0]
+        return source
 
     def _load_files_from_folder(self, folder_path: str) -> List[str]:
         """

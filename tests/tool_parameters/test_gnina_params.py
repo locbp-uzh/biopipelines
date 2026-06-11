@@ -13,6 +13,32 @@ from ._helpers import assert_substrings_in, read_all_emitted_artifacts
 pytestmark = pytest.mark.tool_parameters
 
 
+def _build_with_outputs(local_config, isolated_cwd, new_pipeline, **gnina_kwargs):
+    """Like _build but returns (content, StandardizedOutput) for output assertions."""
+    from biopipelines.mock import Mock
+    from biopipelines.gnina import Gnina
+
+    pipeline = new_pipeline("gnina_params")
+    with pipeline:
+        struct = Mock(
+            ids=["s1"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            map_table_strategy="config",
+        )
+        comp = Mock(
+            ids=["c1"],
+            streams={"compounds": {"format": "sdf", "file": "<id>.sdf"}},
+            map_table_strategy="config",
+        )
+        out = Gnina(
+            structures=struct.streams.structures,
+            compounds=comp.streams.compounds,
+            **gnina_kwargs,
+        )
+        script_path = pipeline.save()
+    return read_all_emitted_artifacts(script_path), out
+
+
 def _build(local_config, isolated_cwd, new_pipeline, **gnina_kwargs):
     from biopipelines.mock import Mock
     from biopipelines.gnina import Gnina
@@ -99,6 +125,37 @@ def test_box_center_size(local_config, isolated_cwd, new_pipeline):
     )
     assert "10" in content and "20" in content and "30" in content
     assert "18" in content
+
+
+def test_mode_default_is_docking(local_config, isolated_cwd, new_pipeline):
+    content, out = _build_with_outputs(local_config, isolated_cwd, new_pipeline)
+    assert '"mode": "docking"' in content
+    assert sorted(out.tables._tables.keys()) == ["docking_results", "docking_summary"]
+
+
+@pytest.mark.parametrize("mode", ["score", "minimize"])
+def test_score_modes_emit_scores_table(local_config, isolated_cwd, new_pipeline, mode):
+    content, out = _build_with_outputs(local_config, isolated_cwd, new_pipeline, mode=mode)
+    assert f'"mode": "{mode}"' in content
+    assert "scores" in out.tables._tables
+    assert "missing" in out.tables._tables
+    assert "docking_results" not in out.tables._tables
+    assert out.tables.scores.info.columns == [
+        "id", "structures.id", "compounds.id", "vina_affinity",
+        "cnn_score", "cnn_affinity", "cnn_vs", "cnn_affinity_variance",
+    ]
+    assert out.streams.structures.files[0].endswith(f"<id>_{mode}.pdb")
+
+
+def test_score_mode_rejects_docking_only_params(local_config, isolated_cwd, new_pipeline):
+    with pytest.raises(ValueError, match="docking-only parameters"):
+        _build_with_outputs(local_config, isolated_cwd, new_pipeline,
+                            mode="score", exhaustiveness=16)
+
+
+def test_invalid_mode_raises(local_config, isolated_cwd, new_pipeline):
+    with pytest.raises(ValueError, match="mode must be one of"):
+        _build_with_outputs(local_config, isolated_cwd, new_pipeline, mode="dock")
 
 
 def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):

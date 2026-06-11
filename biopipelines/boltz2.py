@@ -283,35 +283,11 @@ class Boltz2(BaseConfig):
 
     @staticmethod
     def _read_cif_loop(text, prefix):
-        """Parse a single mmCIF ``loop_`` into a list of column->value dicts.
-
-        ``prefix`` is the category tag (e.g. ``_chem_comp_atom.``). Quoted tokens
-        (prime-bearing atom ids like ``O5'``) are split with shlex so quotes are
-        stripped without dropping the prime.
-        """
-        import shlex
-
-        columns = []
-        records = []
-        reading_data = False
-        for line in text.splitlines():
-            s = line.strip()
-            if s.startswith(prefix):
-                columns.append(s[len(prefix):])
-                reading_data = False
-                continue
-            if columns and not reading_data:
-                if not s or s.startswith("#") or s == "loop_" or s.startswith("data_"):
-                    continue
-                reading_data = True
-            if reading_data:
-                if not s or s.startswith("_") or s.startswith("#") or s == "loop_" or s.startswith("data_"):
-                    break
-                parts = shlex.split(s)
-                if len(parts) != len(columns):
-                    continue
-                records.append(dict(zip(columns, parts)))
-        return records
+        try:
+            from .pdb_parser import read_cif_loop
+        except ImportError:
+            from pdb_parser import read_cif_loop
+        return read_cif_loop(text, prefix)
 
     @classmethod
     def _fetch_ccd_cif(cls, ccd_code):

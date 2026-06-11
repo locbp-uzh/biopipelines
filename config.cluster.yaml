@@ -77,6 +77,9 @@ folders:
   # Infrastructure paths
   infrastructure:
     pipe_scripts: "<biopipelines>/pipe_scripts"
+    # Folder Scripting searches for a bare script filename, so
+    # Scripting("foo.py") finds <scripts>/foo.py without an absolute path.
+    scripts: "<biopipelines>/my_scripts"
     pdbs: "<biopipelines>/pdbs"
     ligands: "<biopipelines>/ligands"
     sequences: "<biopipelines>/sequences"
@@ -106,6 +109,7 @@ folders:
     PocketGen: "<data>/PocketGen"
     ProteinMPNN: "<data>/ProteinMPNN"
     RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusion2: "<data>/RFdiffusion2"
     RFdiffusion3: "<data>/rfdiffusion3"
     RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
     RTMScore: "<data>/RTMScore"
@@ -194,6 +198,7 @@ environments:
   Reduce: "reduce"
   RF3: "modelforge"
   RFdiffusion: "SE3nv"
+  RFdiffusion2: "biopipelines"  # container mode: host env only runs the pandas/BioPython helpers; inference runs in the .sif
   RFdiffusion3: "foundry"
   RFdiffusionAllAtom: "SE3nv"
   RTMScore: "rtmscore"
@@ -212,6 +217,9 @@ environments:
 # When a container is configured for a tool, it will be used instead of the conda environment
 containers:
   PLIP: "<containers>/plip_3.0.0.simg"
+  # RFdiffusion2 ships its own Apptainer image (downloaded by setup.py during
+  # install). Point this at the .sif under the repo's rf_diffusion/exec/.
+  RFdiffusion2: "<RFdiffusion2>/rf_diffusion/exec/bakerlab_rf_diffusion_aa.sif"
 tool_overrides:
   gnina:
     modules:
