@@ -71,12 +71,6 @@ Each tool lists its references, the compute resources it uses, and the platforms
 <tr>
   <td><sub><b>RFdiffusion</b><br>Generate novel protein backbones for scaffolds, motifs, and target binders.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/RFdiffusion"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.nature.com/articles/s41586-023-06415-8"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
-  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"> <img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
-</tr>
-<tr>
-  <td><sub><b>RFdiffusion3</b><br>Latest RFdiffusion generation of protein backbones, scaffolds, and binders.</sub></td>
-  <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/foundry"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2024.11.13.623358v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
@@ -85,6 +79,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/RFdiffusion2"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2025.11.20.689494v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span></sub></td>
+</tr>
+<tr>
+  <td><sub><b>RFdiffusion3</b><br>Latest RFdiffusion generation of protein backbones, scaffolds, and binders.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/foundry"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2024.11.13.623358v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>RFdiffusionAllAtom</b><br>Generate protein backbones around small-molecule, metal, or cofactor ligands.</sub></td>

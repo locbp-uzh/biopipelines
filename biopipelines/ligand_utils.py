@@ -93,6 +93,22 @@ def resolve_ligand_codes(ligand_json: str):
     return _read_codes(ligand_json)
 
 
+def _clean(row, key) -> str:
+    """A compounds-row field, with serialized-NaN ('', 'nan', 'none') as empty."""
+    v = str(row.get(key, "") or "").strip()
+    return "" if v.lower() in ("", "nan", "none") else v
+
+
+def ligand_chemistry(row) -> dict:
+    """The chemistry representations a compounds row actually carries.
+
+    Returns ``{"ccd": <code or "">, "smiles": <smiles or "">}`` with serialized
+    NaN normalized to empty. The presence test for any chemistry-consuming tool:
+    a row has usable chemistry iff at least one value is non-empty.
+    """
+    return {"ccd": _clean(row, "ccd"), "smiles": _clean(row, "smiles")}
+
+
 def auth_ligand_field(row) -> tuple:
     """Pick whether a ligand should be expressed by CCD code or SMILES.
 
@@ -101,9 +117,13 @@ def auth_ligand_field(row) -> tuple:
     when the row's SMILES is known to differ from that CCD. RCSB-fetched ligands
     and streams marked ``format=ccd`` carry both from the same entry, so they
     correspond (use the CCD).
+
+    Raises with an actionable message when the row carries no chemistry — a
+    code-only ``Ligand(code=...)`` is a structural HETATM label, not chemistry;
+    fetch the CCD with ``Ligand("<code>")`` or pass ``smiles=`` instead.
     """
-    ccd = str(row.get("ccd", "") or "").strip()
-    smiles = str(row.get("smiles", "") or "").strip()
+    chem = ligand_chemistry(row)
+    ccd, smiles = chem["ccd"], chem["smiles"]
     source = str(row.get("source", "") or "").strip().lower()
     fmt = str(row.get("format", "") or "").strip().lower()
     if ccd and smiles:
@@ -112,7 +132,12 @@ def auth_ligand_field(row) -> tuple:
         return ("ccd", ccd)
     if smiles:
         return ("smiles", smiles)
-    raise ValueError(f"ligand row has neither ccd nor smiles: {dict(row)}")
+    code = str(row.get("code", "") or "").strip()
+    raise ValueError(
+        f"ligand {code or '?'!r} has no chemistry (no smiles, no ccd): a code-only "
+        f"Ligand(code=...) is a structural HETATM label, not a molecule. To give a "
+        f"tool real chemistry, fetch the CCD with Ligand({code or '<code>'!r}) or pass "
+        f"Ligand(smiles=...).")
 
 
 def templated_ligand_mol(coord_path: str, smiles: str = None):

@@ -9,7 +9,7 @@ Unified pipeline system for protein modeling workflows.
 Provides tool configurations, pipeline orchestration, and seamless integration.
 """
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 from .pipeline import Pipeline, Bundle, Each, Folder
 from .base_config import BaseConfig, ToolOutput, IndexedTableContainer

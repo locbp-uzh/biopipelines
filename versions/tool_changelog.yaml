@@ -172,7 +172,13 @@ DistanceSelector:
     - biopipelines/distance_selector.py
     - pipe_scripts/pipe_distance_selector.py
   current: "2.0"
-  history: []
+  history:
+    - version: "2.0"
+      date: "2026-05-08"
+      note: >-
+        Selection-based within/beyond references and per-structure
+        (TableInfo, column) references; excuses upstream-filtered ids in the
+        missing-manifest cascade.
 
 DNAEncoder:
   files:
@@ -338,7 +344,12 @@ OpenBabel:
     - biopipelines/openbabel.py
     - pipe_scripts/pipe_openbabel.py
   current: "1.1"
-  history: []
+  history:
+    - version: "1.1"
+      date: "2026-06-03"
+      note: >-
+        Read SMILES from the map_table when the compounds stream has no
+        files; accept structures input.
 
 OpenMM:
   files:
