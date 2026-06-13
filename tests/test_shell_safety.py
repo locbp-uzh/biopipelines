@@ -202,6 +202,24 @@ def test_rfdiffusion2_rejects_unsafe_contigs(local_config, isolated_cwd):
                      contigs="A1-50 `rm -rf /`")
 
 
+def test_hbdesigner_rejects_unsafe_guide_res(local_config, isolated_cwd):
+    """HBDesigner.guide_res literal reaches the generated bash through the
+    constraints resolver invocation. Shell metas must be rejected at config
+    time."""
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.hbdesigner import HBDesigner
+    from biopipelines.datastream import DataStream
+
+    Pipeline(
+        project="TestSuite", job="hbdes",
+        on_the_fly=True, local_output=True, config="local",
+    )
+    pdb = DataStream(name="structures", ids=["x"], files=["<id>.pdb"],
+                     map_table="", format="pdb")
+    with pytest.raises(ValueError, match="guide_res"):
+        HBDesigner(structures=pdb, guide_res="A12 `rm -rf /`")
+
+
 def test_ligand_rejects_unsafe_code(local_config, isolated_cwd):
     """Ligand(code=...) reaches the generated bash; the residue-code contract
     (1-5 alphanumeric, extended CCD) is enforced at construction, rejecting shell

@@ -556,7 +556,10 @@ fi
                       protein_atom, ligand_atom). `position` may be a residue index
                       or a selection string resolved per-structure against the chain's
                       sequence (e.g. "C in ILIPCH" finds the catalytic Cys regardless
-                      of renumbering); it must resolve to exactly one residue.
+                      of renumbering); it must resolve to exactly one residue, so the
+                      context must occur once in the sequence. If the target residue
+                      appears more than once in the context, the FIRST one is used
+                      (e.g. "S in FAMCSTSKV" selects the first S).
             contacts: List of contact constraints, each a dict with token1, token2,
                       optional max_distance (4-20A, default 6.0), optional force (bool).
                       Tokens are [chain_id, residue_index] for proteins or

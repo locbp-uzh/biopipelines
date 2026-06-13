@@ -15,9 +15,10 @@ Three modes (``mode=``):
     built from chemistry (``compounds``); the binding box is defined by explicit
     center+size, an autobox_ligand, or auto-detected crystal HETATM records.
   - "score": no search — score the ligand exactly where it already sits in the
-    input complex (``gnina --score_only``). The ligand is extracted from each
-    complex's HETATM records (identified by the ``compounds`` residue code) and
-    bond-order-templated against its SMILES before scoring.
+    input complex (``gnina --score_only``). Each complex is paired with the one
+    compound it carries (single-compound stream, else structures-map provenance);
+    that ligand's HETATM records are extracted and bond-order-templated against
+    its SMILES before scoring.
   - "minimize": local energy minimization of the in-pocket pose, then score
     (``gnina --minimize``). Same input shape as "score"; the refined pose is
     emitted. In both no-search modes the box is autoboxed on the scored ligand.
@@ -221,10 +222,13 @@ fi
                 complex).
             compounds: Input ligands as DataStream or StandardizedOutput. Accepts
                 output from Ligand(), CompoundLibrary(), or any tool that produces
-                a compounds stream (e.g. BoltzGen). In mode="score"/"minimize" the
-                compounds stream must carry SMILES — it identifies which HETATM
-                residue to score (by code) and templates its bond orders before
-                scoring; a code-only Ligand (no SMILES) is rejected.
+                a compounds stream (e.g. BoltzGen). In mode="score"/"minimize"
+                each complex is scored against the one compound it carries: a
+                single-compound stream broadcasts to every complex, otherwise the
+                complex→compound link is read from the structures-map provenance
+                (compounds.id). The paired compound's code locates the HETATM
+                residue and its SMILES templates that pose's bond orders, so each
+                compound must carry SMILES; a code-only Ligand is rejected.
             mode: One of "docking" (default, full Vina search + CNN rescore),
                 "score" (no search; score the in-pocket pose as-is via
                 --score_only), or "minimize" (local minimization of the in-pocket
@@ -669,13 +673,19 @@ python {self.helper_py} {self.config_json}
 
         best_poses_dir = self.stream_folder("structures")
         protein_ids = list(self.structures_stream.ids)
-        ligand_ids = list(self.compounds_stream.ids)
 
-        structure_ids = [
-            f"{prot}_{lig}"
-            for prot in protein_ids
-            for lig in ligand_ids
-        ]
+        if self.mode == "docking":
+            # Docking poses every ligand into every protein -> prot × lig.
+            ligand_ids = list(self.compounds_stream.ids)
+            structure_ids = [
+                f"{prot}_{lig}"
+                for prot in protein_ids
+                for lig in ligand_ids
+            ]
+        else:
+            # Score/minimize scores the one ligand each complex already carries,
+            # so the output keys on the complex's own id (one row per complex).
+            structure_ids = protein_ids
         suffix = "_best.pdb" if self.mode == "docking" else f"_{self.mode}.pdb"
         structure_files = [os.path.join(best_poses_dir, f"<id>{suffix}")]
 

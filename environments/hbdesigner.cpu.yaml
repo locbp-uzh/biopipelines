@@ -1,0 +1,12 @@
+# HBDesigner CPU environment (install device="cpu").
+# Vendored from Kuhlman-Lab/HBDesigner env_cpu.yaml (upstream name hbdesigner_cpu).
+# Conda layer is minimal (python 3.10 + pip); the heavy stack — torch 2.8+cpu,
+# the CPU PyG extension wheels, and pyrosetta — comes from the pip layer
+# (hbdesigner.cpu.pip.txt). The HBDesigner package itself is `pip install -e .`-ed
+# from the clone by the install script, after this env is created.
+name: hbdesigner
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip

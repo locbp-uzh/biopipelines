@@ -181,7 +181,7 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 ```
 
 **Parameters**:
-- `contigs`: str | (TableInfo, column) (required) - Contig specification (e.g., "A1-100", "10-20,A6-140"). May be a table column reference resolved per-input-PDB at runtime — useful when each input structure needs its own contig.
+- `contigs`: str | (TableInfo, column) - Contig specification (e.g., "A1-100", "10-20,A6-140"). Required for every mode except fold conditioning (which runs from a scaffold set). May be a table column reference resolved per-input-PDB at runtime — useful when each input structure needs its own contig.
 - `pdb`: Optional[Union[DataStream, StandardizedOutput]] = None - Input PDB template(s) (optional). **When the input stream holds multiple structures, RFdiffusion now runs once per input PDB** (a runtime loop over the input ids), producing `num_designs` designs for each — so an upstream pose ensemble (e.g. PLACER's models) propagates fully into design instead of only the first structure being used.
 - `inpaint`: str | (TableInfo, column) = "" - Inpainting specification (also accepts a per-PDB table column reference)
 - `inpaint_str`: str | (TableInfo, column) = "" - Secondary-structure inpainting specification (also accepts a per-PDB table column reference)
@@ -191,23 +191,59 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 - `partial_steps`: int = 0 - Partial diffusion steps
 - `reproducible`: bool = False - Use deterministic sampling
 - `design_startnum`: int = 1 - Starting number for design IDs
+- `hotspot_res`: Optional[List[str]] = None - Interface residues the binder should engage, e.g. `["A30","A33","A34"]` (`ppi.hotspot_res`). Binder design only; requires `pdb`.
+- `symmetry`: Optional[str] = None - Point group for symmetric-oligomer generation: a named group (`"tetrahedral"`, `"octahedral"`, `"icosahedral"`) or a cyclic/dihedral group (`"c4"`, `"d2"`). Switches to RFdiffusion's `symmetry` config; the run is unconditional, so `pdb` must not be set and `contigs` is the total assembly length. Pair with an `olig_contacts` guiding potential.
+- `guiding_potentials`: str | GuidingPotential | List = None - Guiding potential(s) (`potentials.guiding_potentials`). Use the typed builder `RFdiffusion.GuidingPotential.olig_contacts(...)` (or `monomer_ROG`, `binder_ncontacts`, …); a raw hydra string or a list is also accepted.
+- `guide_scale`: Optional[float] = None - Global multiplier on the guiding potential (`potentials.guide_scale`).
+- `guide_decay`: Optional[str] = None - Potential decay over the trajectory (`potentials.guide_decay`): `"constant"`/`"linear"`/`"quadratic"`/`"cubic"`.
+- `cyclic`: bool = False - Close the backbone into a macrocycle (`inference.cyclic`).
+- `cyc_chains`: Optional[str] = None - Chain letter(s) to cyclize (`inference.cyc_chains`); requires `cyclic=True`.
+- `provide_seq`: Optional[str] = None - Residue range(s) whose sequence is fixed during partial diffusion (`contigmap.provide_seq`); requires `partial_steps > 0`.
+- `noise_scale_ca` / `noise_scale_frame`: Optional[float] = None - Translational / rotational denoiser noise scale (`denoiser.noise_scale_ca` / `noise_scale_frame`); values < 1 (often 0) reduce diversity but raise quality, common for binder design.
+- `inpaint_str_helix` / `inpaint_str_strand`: Optional[str] = None - Residues whose secondary structure is masked and forced to helix / strand (`contigmap.inpaint_str_helix` / `inpaint_str_strand`).
+- `scaffold_dir`: Optional[str] = None - Directory of scaffold `_ss.pt` / `_adj.pt` files for fold conditioning (`scaffoldguided.scaffold_dir`); setting it (or `target_ss`/`target_adj`) turns on `scaffoldguided.scaffoldguided` and the run is driven by the scaffold set rather than `contigs`.
+- `target_ss` / `target_adj`: Optional[str] = None - Precomputed target secondary-structure / block-adjacency tensor files (`scaffoldguided.target_ss` / `target_adj`). These are small per-target `.pt` inputs produced by upstream `helper_scripts/make_secstruc_adj.py` — **not** model weights. Setting either implies `scaffoldguided.target_pdb=True`.
+- `target_path`: Optional[str] = None - Target structure for fold-conditioned binder design (`scaffoldguided.target_path`).
+- `mask_loops`: Optional[bool] = None - Allow input loops to be remodelled (`scaffoldguided.mask_loops`).
+- `sampled_insertion` / `sampled_N` / `sampled_C`: Optional[int] = None - Sampled scaffold length variation: total insertion, N-terminus, C-terminus (`scaffoldguided.sampled_insertion` / `sampled_N` / `sampled_C`).
 
-**Streams**: `structures`
+The guiding-potential types differ per RFdiffusion variant, so each tool exposes its own `Tool.GuidingPotential` whitelisting only the types that model implements. Base `RFdiffusion.GuidingPotential` covers `monomer_ROG`, `monomer_contacts`, `olig_contacts`, `binder_ROG`, `binder_ncontacts`, `interface_ncontacts`, `substrate_contacts`; `RFdiffusionAllAtom.GuidingPotential` allows only `ligand_ncontacts`. Calling an unsupported builder raises.
+
+**Streams**: `structures` (the `structures_map.csv` adds a `structures.id` parent-PDB provenance column in the PDB-conditioned case).
 
 **Tables**:
 - `structures`:
 
-  | id | source_id | pdb | fixed | designed | contigs | time | status |
-  |----|-----------|-----|-------|----------|---------|------|--------|
+  | id | pdb | fixed | designed | source_fixed | plddt_mean | status |
+  |----|-----|-------|----------|--------------|------------|--------|
 
-**Example**:
+  `fixed` / `designed` are chain-aware residue selections of the output; `source_fixed` is the motif's residues in the input PDB (motif scaffolding only). `plddt_mean` is RFdiffusion's own per-trajectory pLDDT averaged over residues at the final step (empty when the trb carries none).
+
+**Examples**:
 ```python
 from biopipelines.rfdiffusion import RFdiffusion
 
-rfd = RFdiffusion(
-    contigs="50-100",
-    num_designs=10
+# Unconditional / motif scaffolding
+rfd = RFdiffusion(contigs="50-100", num_designs=10)
+
+# Symmetric oligomer (the GitHub-issue case): C3 with inter/intra contacts
+rfd_sym = RFdiffusion(
+    contigs="240", symmetry="c3", num_designs=4,
+    guiding_potentials=RFdiffusion.GuidingPotential.olig_contacts(
+        weight_intra=1, weight_inter=0.1,
+        olig_intra_all=True, olig_inter_all=True),
+    guide_scale=2, guide_decay="quadratic",
 )
+
+# Binder design with interface hotspots (low noise)
+rfd_binder = RFdiffusion(
+    contigs="A17-29/0 50-50", pdb=target,
+    hotspot_res=["A23", "A26", "A27"],
+    noise_scale_ca=0, noise_scale_frame=0, num_designs=20,
+)
+
+# Fold conditioning from a scaffold set (no contigs)
+rfd_fold = RFdiffusion(scaffold_dir="./examples/ppi_scaffolds_subset", num_designs=10)
 ```
 
 ---
@@ -398,6 +434,51 @@ rfd3 = RFdiffusion3(
     pdb=dna_structure,
     contig="80-120",
     num_designs=100,
+)
+```
+
+---
+
+### HBDesigner
+
+Designs highly-connected hydrogen-bonding networks that satisfy the requested constraints onto an input protein backbone. For each input structure it samples candidate networks, packs and scores them with PyRosetta, and keeps the top-ranked designs.
+
+**References**: https://github.com/Kuhlman-Lab/HBDesigner — docs at https://rosettacommons.github.io/HBDesigner/
+
+**Installation**: `HBDesigner.install(device="gpu")` (default; pass `device="cpu"` for CPU) clones the repo into the `HBDesigner` data folder, creates the `hbdesigner` env from the device-matching vendored spec (`environments/hbdesigner.<device>.yaml` + `hbdesigner.<device>.pip.txt`, from the upstream `env_gpu.yaml` / `env_cpu.yaml`: torch 2.8 (+cu128 or +cpu), the matching PyG extension wheels, and PyRosetta), then `pip install -e .`-es the HBDesigner package from the clone — editable, because `run_hbdesigner` resolves its `model_weights/` relative to the package location, so it must import from the repo (which ships the weights), not a copy in site-packages. The env name is `hbdesigner` for both devices. HBDesigner depends on PyRosetta, which is free for academic use but requires a paid license for commercial use — installing accepts that license.
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Input backbone(s). **HBDesigner runs once per input structure** (a runtime loop over the input ids), so an upstream backbone ensemble propagates fully into design.
+- `n_res`: int = 2 - Hydrogen-bonding network size (2-6 residues).
+- `n_samples`: int = 100 - Unique samples generated before packing/scoring.
+- `top_k`: int = 5 - Designs retained per input after ranking, surfaced as `<parent>_<1..top_k>`. Use `top_k=1` for the single best design per input.
+- `design_model`: str = "design_020" - Model checkpoint: `"design_020"` (moderate noise) or `"design_002"` (low noise).
+- `guide_res`: Optional[str | (TableInfo, column)] = None - Residues to center the design around (PDB chain/resnum, e.g. `"A12,B13"`). String is broadcast to every input; a column reference is resolved per-input-id at runtime.
+- `guide_seq`: Optional[str | (TableInfo, column)] = None - Amino-acid types to constrain the network (`"X"` leaves a position free). Same string-or-column-reference forms as `guide_res`.
+- `anchor_res`: Optional[str | (TableInfo, column)] = None - Residues that must appear in every designed network. Same forms as `guide_res`.
+- `seed`: Optional[int] = None - Random seed for reproducibility.
+
+**Output**:
+- Streams:
+  - `structures` (.pdb) — the designed HBNet backbones.
+  - `sequences` (csv) — one-letter sequence per designed backbone (HBDesigner emits no FASTA; extracted from the PDB).
+- Tables:
+  - `sequences`: id | structures.id | sequence
+  - `summary`: id | structures.id | Scaffold | Output_PDB | Rank | HB_Score_full | HB_Score_hb | Avg_Burial | saturation | buried_heavy_unsats | buried_unsat_Hpol | network (one row per retained design; the metric columns mirror HBDesigner's per-run stats CSV)
+
+```python
+from biopipelines.hbdesigner import HBDesigner
+
+# Unconditional HBNet design on each input backbone, keep the single best per input
+hb = HBDesigner(structures=backbones, n_res=3, n_samples=200, top_k=1)
+
+# Keep the top 8 designs as a fan-out ensemble, centered on a guide residue
+hb = HBDesigner(
+    structures=backbones,
+    n_res=4,
+    top_k=8,
+    guide_res="A34,A38",
+    anchor_res="A34",
 )
 ```
 

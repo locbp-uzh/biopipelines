@@ -367,12 +367,17 @@ def get_protein_sequence(atoms: List[Atom]) -> Dict[str, str]:
                 chain_residues[atom.chain] = {}
             chain_residues[atom.chain][atom.res_num] = atom.res_name
     
-    # Convert to sequences
+    # Convert to sequences, padding gaps with 'X' so the string index stays
+    # aligned with residue number (a missing residue is one 'X', not a silent
+    # frame shift that breaks position-based lookups and downstream tools).
     for chain, residues in chain_residues.items():
-        sorted_residues = sorted(residues.items())
-        sequence = ''.join([aa_map[res_name] for _, res_name in sorted_residues])
+        nums = sorted(residues)
+        sequence = ''.join(
+            aa_map[residues[n]] if n in residues else 'X'
+            for n in range(nums[0], nums[-1] + 1)
+        )
         sequences[chain] = sequence
-    
+
     return sequences
 
 def select_atoms_by_ligand(atoms: List[Atom], ligand_name: str, atom_name: str = None) -> List[Atom]:
@@ -478,12 +483,19 @@ def select_atoms_by_residue_number(atoms: List[Atom], residue_numbers: List[int]
 def select_atoms_by_sequence_context(atoms: List[Atom], target_residue: str, sequence_context: str) -> List[Atom]:
     """
     Select atoms by finding residue in sequence context.
-    
+
+    Disambiguation: the context is matched against every occurrence in the
+    chain, and within each matched occurrence the FIRST instance of
+    target_residue is taken. So pick a context that occurs once in the sequence
+    (callers that need exactly one residue, e.g. covalent_linkage, enforce that),
+    and place the intended residue ahead of any other copy of the same letter in
+    the window (e.g. for the catalytic S in 'FAMCSTSKV', the first S is selected).
+
     Args:
         atoms: List of all atoms
         target_residue: Single letter amino acid code (e.g., 'D')
         sequence_context: Sequence context (e.g., 'IGDWG')
-        
+
     Returns:
         List of selected atoms
     """

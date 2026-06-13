@@ -1,0 +1,95 @@
+#!/bin/bash
+# Authors (2026): G. Quargnali & P. Rivera-Fuentes @ LOCBP (https://www.locbp.com/) University of Zurich Switzerland
+#
+# This software is freely available for use, modification, and redistribution.
+
+#
+# Daily update check for BioPipelines.
+#
+# Called by ./submit and ./run on the first invocation of the day. It asks the
+# public GitHub repository for the current HEAD of the release branch (main) and
+# checks whether that commit is an ancestor of this checkout's current HEAD. If
+# it is not, the release line has advanced past this copy and a friendly notice
+# is printed. It never fetches, never writes to the worktree, and always exits 0
+# — a notice must never block a job, so any failure (no git, no network) is
+# silent.
+#
+# Why test "is main's HEAD an ancestor of mine?" rather than compare branch shas:
+# the real question is "has the released code moved past me?". That is answered
+# by whether main's latest commit sits in the history behind our HEAD, which
+# stays correct even when the local branch has diverged for development (own
+# commits on top of a recent main still have main's HEAD as an ancestor). It
+# cannot misreport a diverged branch as behind, and needs no fetch. Ancestry
+# (not mere object presence) is required: a commit fetched but never merged
+# exists in the repo yet is not behind us, so it must still warn.
+#
+# Usage:
+#     ./check-updates
+#
+
+GITHUB_URL="https://github.com/locbp-uzh/biopipelines.git"
+RELEASE_BRANCH="main"   # the public release line this checkout should stay current with
+LS_REMOTE_TIMEOUT=5     # seconds; a slow/blocked network must not delay a job
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# git on PATH and a real repo, or nothing to do.
+command -v git >/dev/null 2>&1 || exit 0
+git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1 || exit 0
+GIT_DIR="$(git -C "$SCRIPT_DIR" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+
+# Throttle to once per day. The sentinel lives under .git/ so it stays out of
+# the worktree and survives a `git reset --hard` of the tracked tree.
+SENTINEL="$GIT_DIR/.bp-check-updates-day"
+TODAY="$(date +%Y-%m-%d)"
+if [ -f "$SENTINEL" ] && [ "$(cat "$SENTINEL" 2>/dev/null)" = "$TODAY" ]; then
+    exit 0
+fi
+# Record today BEFORE the network call: if ls-remote hangs or fails, we still
+# only try once today rather than on every submit.
+echo "$TODAY" > "$SENTINEL" 2>/dev/null || true
+
+# Ask GitHub for the release branch's HEAD sha without configuring a remote or
+# fetching. A non-zero exit, timeout, or empty result is treated as "can't
+# tell" and stays silent.
+RELEASE_SHA="$(timeout "$LS_REMOTE_TIMEOUT" git -C "$SCRIPT_DIR" \
+    ls-remote "$GITHUB_URL" "refs/heads/$RELEASE_BRANCH" 2>/dev/null | awk '{print $1}')"
+[ -n "$RELEASE_SHA" ] || exit 0  # branch absent upstream or network failure
+
+# Up to date only if that commit is an ANCESTOR of our current HEAD — i.e. it is
+# in the history behind where we actually are (possibly with local commits on
+# top). Mere presence of the object (e.g. fetched into FETCH_HEAD but never
+# merged) does not count. A missing/unrelated commit returns non-zero -> warn.
+if git -C "$SCRIPT_DIR" merge-base --is-ancestor "${RELEASE_SHA}^{commit}" HEAD 2>/dev/null; then
+    exit 0
+fi
+
+# We do not have main's current HEAD commit: a newer version is available. The
+# safe way to apply it depends on whether this checkout sits on the release
+# branch or on a separate (development) branch, so tailor the instruction —
+# never hand an inexperienced user a command that could discard their work.
+CURRENT_BRANCH="$(git -C "$SCRIPT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)"
+
+echo ""
+echo "────────────────────────────────────────────────────────────────────"
+echo " A newer version of BioPipelines is available on GitHub."
+echo " (github.com/locbp-uzh/biopipelines, branch $RELEASE_BRANCH)"
+echo ""
+if [ "$CURRENT_BRANCH" = "$RELEASE_BRANCH" ]; then
+    echo " To update your copy, run this from the BioPipelines folder:"
+    echo ""
+    echo "     git pull --ff-only"
+    echo ""
+    echo " This only adds the new official commits; it will not delete your work."
+    echo " If it says it cannot update because you have your own changes, do not"
+    echo " force it — ask for help so nothing you made gets lost."
+else
+    echo " Your copy is on your own branch (\"$CURRENT_BRANCH\"), not the official"
+    echo " \"$RELEASE_BRANCH\" branch, so there is no single safe command to update it"
+    echo " automatically. Ask for help bringing the new official changes into your"
+    echo " branch — do not force anything, so none of your work gets lost."
+fi
+echo "────────────────────────────────────────────────────────────────────"
+echo ""
+
+exit 0

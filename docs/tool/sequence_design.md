@@ -420,7 +420,7 @@ Combines a template sequence with two types of modifications: **substitutions** 
 **Parameters**:
 - `template`: Union[str, DataStream, StandardizedOutput] - Base sequence (raw string or tool output). Optional if using concatenation mode.
 - `substitutions`: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None - Position-to-position substitutions from equal-length sequences. For each position in the selection, the residue at that position in the substitution sequence replaces the residue at that position in the template.
-  - Keys: Position strings like `"11-19"` or `"11-19+31-44"`, or table references
+  - Keys: Position strings like `"11-19"` or `"11-19+31-44"`, table references, OR a **marker key** with no digits (e.g. `"X"`) — fills every template position whose residue is one of the marker chars from the source at the same index. Use this to repair gap-marked sequences (e.g. the `X` padding `get_protein_sequence` writes where a structure has missing residues) against a reference; a marked position the source can't fill (its residue is also a marker) is left as-is — the sequence is still kept and the unfilled positions are logged (not removed). The reference is matched by the template's own id.
   - Values: tool output with sequences (must be same length as template)
 - `indels`: Dict[str, Union[List[str], DataStream, StandardizedOutput]] = None - Segment replacements where each contiguous segment is replaced with the given sequence. Can change sequence length.
   - Keys: Position strings like `"50-55"` or `"6-7+9-10+17-18"`, or integers for concatenation mode
@@ -508,6 +508,12 @@ stitched = StitchSequences(
     }
 )
 # Output: 2 × 1 × 3 = 6 concatenated sequences
+
+# Marker fill: repair X-gapped sequences against a reference (matched by id)
+repaired = StitchSequences(
+    template=gapped,                 # sequences with 'X' where residues were missing
+    substitutions={"X": reference},  # fill each X from the reference at the same index
+)
 ```
 
 ---

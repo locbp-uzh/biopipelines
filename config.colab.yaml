@@ -54,6 +54,7 @@ folders:
     DynamicBind: "<data>/DynamicBind"
     GEMS: "<data>/GEMS"
     GhostFold: "<data>/ghostfold"
+    HBDesigner: "<data>/HBDesigner"
     # Gnina and P2Rank ship executables; kept local since Drive's FUSE mount
     # has no exec bit.
     Gnina: "/content/gnina"
@@ -115,6 +116,7 @@ environments:
   Fuse: "biopipelines"
   GEMS: "gems"
   Gnina: "gnina"
+  HBDesigner: "hbdesigner"
   Ligand: "biopipelines"
   LigandMPNN: "ligandmpnn_env"
   Load: "biopipelines"

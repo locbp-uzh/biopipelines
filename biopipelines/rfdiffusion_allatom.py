@@ -20,7 +20,7 @@ try:
     from .combinatorics import generate_multiplied_ids_pattern
     from .input_standardization import resolve_basic_input
     from .ligand import Ligand
-    from .guiding_potentials import GuidingPotential, render_guiding_potentials
+    from .guiding_potentials import RFdiffusionAllAtomGuidingPotential, render_guiding_potentials
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -31,7 +31,7 @@ except ImportError:
     from input_standardization import resolve_basic_input
     from biopipelines_io import Resolve, TableReference
     from ligand import Ligand
-    from guiding_potentials import GuidingPotential, render_guiding_potentials
+    from guiding_potentials import RFdiffusionAllAtomGuidingPotential, render_guiding_potentials
 
 
 def _normalize_selection_arg(name, value):
@@ -76,8 +76,8 @@ class RFdiffusionAllAtom(BaseConfig):
 
     # Typed builder for the guiding potential, e.g.
     #   RFdiffusionAllAtom.GuidingPotential.ligand_ncontacts(weight=3, r_0=8, d_0=4)
-    # Pass to guiding_potentials= instead of hand-writing the hydra string.
-    GuidingPotential = GuidingPotential
+    # Restricted to ligand_ncontacts (the only type AllAtom implements).
+    GuidingPotential = RFdiffusionAllAtomGuidingPotential
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

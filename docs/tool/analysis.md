@@ -591,7 +591,7 @@ distances = Distance(
 
 ### DistanceSelector
 
-Selects protein residues based on proximity to a reference — a ligand, a residue range, or any atom/atom-set expressible in the framework's selection grammar (e.g. `LIG.O132`, `LIG.Cl+LIG.O3`, `87.CA`, `A141.CB`, `first.CA`, `D in IGDWG`). Partitions residues into `within` / `beyond` by distance cutoff, a top-K cap, or both, and emits the per-residue distances as a `resi-csv` stream for downstream thresholding via [Selection](data_management.md#selection).
+Selects protein residues based on proximity to a reference — a ligand, a residue range, or any atom/atom-set expressible in the framework's selection grammar (e.g. `LIG.O132`, `LIG.Cl+LIG.O3`, `87.CA`, `A141.CB`, `first.CA`, `D in IGDWG`). For a sequence-context selection like `D in IGDWG`, the context is matched against the chain sequence and the **first** occurrence of the target residue within the matched window is taken — pick a context unique in the sequence, and put the intended residue ahead of any other copy of the same letter in the window. Partitions residues into `within` / `beyond` by distance cutoff, a top-K cap, or both, and emits the per-residue distances as a `resi-csv` stream for downstream thresholding via [Selection](data_management.md#selection).
 
 **Installation**: It requires an environment containing pandas (e.g. biopipelines).
 

@@ -104,6 +104,76 @@ def test_selection_n_residues_counts_residues(tmp_path):
     assert int(rows.iloc[0]["n_residues"]) == 6
 
 
+def test_selection_intersect_is_pairwise_not_union(tmp_path):
+    """intersect(A, B) keeps current ∩ A ∩ B, not current ∩ (A ∪ B).
+
+    current = A1-6; intersect against A2-5 and A4-8 must leave A4-5 (the
+    common residues). A union of the operands would wrongly leave A2-6.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+
+    lines = [
+        f"ATOM  {i:5d}  CA  ALA A{i:4d}      0.000   0.000   {i:.3f}  1.00  0.00           C"
+        for i in range(1, 11)
+    ] + ["END"]
+    pdb = tmp_path / "p.pdb"
+    pdb.write_text("\n".join(lines) + "\n")
+
+    ds = {"name": "structures", "ids": ["p"], "files": [str(pdb)],
+          "map_table": "", "format": "pdb"}
+    ds_json = tmp_path / "structures.json"
+    ds_json.write_text(json.dumps(ds))
+
+    tbl = tmp_path / "sel.csv"
+    pd.DataFrame([{"id": "p", "base": "A1-6", "a": "A2-5", "b": "A4-8"}]).to_csv(tbl, index=False)
+
+    out_csv = tmp_path / "out.csv"
+    config = {
+        "operations": [
+            {"op": "add", "refs": [{"table": str(tbl), "column": "base"}]},
+            {"op": "intersect", "refs": [
+                {"table": str(tbl), "column": "a"},
+                {"table": str(tbl), "column": "b"},
+            ]},
+        ],
+        "output_csv": str(out_csv),
+        "structures_json": str(ds_json),
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config))
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(repo_root, "pipe_scripts", "pipe_selection.py")
+    r = subprocess.run([sys.executable, script, str(cfg)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+    rows = pd.read_csv(out_csv)
+    assert rows.iloc[0]["selection"] == "A4-5"
+    assert int(rows.iloc[0]["n_residues"]) == 2
+
+
+def test_selection_empty_intersect_is_rejected(local_config, isolated_cwd, new_pipeline):
+    """Selection.intersect() with no operands fails validation, not silently
+    clears the running selection."""
+    import pytest
+    from biopipelines.mock import Mock
+    from biopipelines.selection import Selection
+
+    pipeline = new_pipeline("sel_empty_intersect")
+    with pytest.raises(ValueError, match="intersect"):
+        with pipeline:
+            m = Mock(
+                ids=["s1"],
+                streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+                tables={"sel": {"columns": ["within"], "fill": {"within": "A1-5"}}},
+            )
+            Selection(Selection.add(m.tables.sel.within), Selection.intersect(), structures=m)
+
+
 # ── DistanceSelector ligand reference: string vs compounds stream ─────────────
 
 def test_distance_selector_rejects_string_ligand(

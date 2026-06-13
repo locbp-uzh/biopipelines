@@ -29,6 +29,32 @@ from itertools import product
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.id_map_utils import get_mapped_ids
+from biopipelines.combinatorics import generate_multiplied_ids
+
+
+def _multiplied_id(template_id, indices):
+    """Output id for one combo of 1-based axis indices, via the shared helper.
+
+    indices=() -> the template id unchanged; otherwise <template_id>_<i_i_..>.
+    Routes id assembly through generate_multiplied_ids so runtime ids match the
+    config-time predictor exactly (no bespoke f-string that can drift)."""
+    if not indices:
+        return template_id
+    suffix = "_".join(str(i) for i in indices)
+    output_ids, _ = generate_multiplied_ids([template_id], [suffix])
+    return output_ids[0]
+
+
+def _is_marker_key(key: str) -> bool:
+    """A substitution key with no digits is a content marker (e.g. "X")."""
+    return isinstance(key, str) and key != "" and not any(c.isdigit() for c in key)
+
+
+def _position_key_str(position_key: Dict[str, Any]) -> str:
+    """The dict key apply_substitutions expects: position range or marker chars."""
+    if position_key.get("type") == "marker":
+        return position_key["markers"]
+    return position_key["positions"]
 
 
 def sele_to_list(s: str) -> List[int]:
@@ -93,18 +119,26 @@ def sele_to_segments(s: str) -> List[Tuple[int, int]]:
 
 
 def apply_substitutions(template: str, substitutions: Dict[str, str],
-                        debug_info: Dict[str, Any] = None) -> str:
+                        debug_info: Dict[str, Any] = None,
+                        unfilled: List[str] = None) -> str:
     """
     Apply position-to-position substitutions from equal-length sequences.
 
     For each position in the selection, copy the residue at that position from the
     substitution sequence to the template. Template and substitution must be same length.
 
+    A key with no digits (e.g. "X") is a *marker* key: fill every template
+    position whose residue is one of the marker chars from the source at the same
+    index. A marker position the source can't fill (its own residue is also a
+    marker, or out of range) is left as-is and appended to ``unfilled``.
+
     Args:
         template: Base sequence string
-        substitutions: Dict mapping position ranges to full replacement sequences.
-                       Positions are 1-indexed (PyMOL style).
+        substitutions: Dict mapping position ranges (or marker keys) to full
+                       replacement sequences. Positions are 1-indexed (PyMOL style).
         debug_info: Optional dict with IDs for debug output.
+        unfilled: Optional list; marker positions left unfilled are appended as
+                  "<marker>@<1-indexed pos>" strings.
 
     Returns:
         New sequence with substitutions applied
@@ -120,6 +154,28 @@ def apply_substitutions(template: str, substitutions: Dict[str, str],
         print(f"{'='*80}")
 
     for sub_idx, (pos_range, replacement_seq) in enumerate(substitutions.items()):
+        # Marker key (no digits, e.g. "X"): fill every template position whose
+        # residue is one of the marker chars, from replacement_seq at the same
+        # index. Equal length required; a position the source can't fill (its own
+        # residue is a marker, or out of range) is left as-is and recorded.
+        if _is_marker_key(pos_range):
+            markers = set(pos_range)
+            sub_id = debug_info.get(f'sub_{sub_idx}_id', 'N/A') if debug_info else 'N/A'
+            print(f"\n  Substitution {sub_idx + 1}: marker '{pos_range}' (source {sub_id})")
+            filled = left = 0
+            for idx in range(template_len):
+                if result[idx] not in markers:
+                    continue
+                if idx < len(replacement_seq) and replacement_seq[idx] not in markers:
+                    result[idx] = replacement_seq[idx]
+                    filled += 1
+                else:
+                    left += 1
+                    if unfilled is not None:
+                        unfilled.append(f"{result[idx]}@{idx + 1}")
+            print(f"    Marker positions: filled {filled}, left unfilled {left}")
+            continue
+
         # Warn if lengths mismatch
         if len(replacement_seq) != template_len:
             position_table_key = debug_info.get(f'sub_{sub_idx}_position_table_key') if debug_info else None
@@ -329,18 +385,22 @@ def load_sequences_from_info(info: Dict[str, Any]) -> Dict[str, str]:
 
 def group_sequences_by_template(
     sequences: Dict[str, str],
-    template_ids: List[str]
+    template_ids: List[str],
+    siblings_only: bool = True
 ) -> Dict[str, Dict[str, str]]:
     """
     Group sequences by template ID using BioPipelines' general ID-matching
     system (exact, provenance, child/parent, sibling).
+
+    siblings_only (default True): pair each template with its same-design
+    substitution sequences only (Panda_29_* with Panda_29_*), not every design's
+    — the sibling tier would otherwise return all and explode the Cartesian
+    product. Pass False for marker-fill against a reference that shares the
+    template's own id (exact match), which the siblings-only tier excludes.
     """
     seq_ids = list(sequences.keys())
-    # closest_siblings_only: pair each template with its same-design substitution
-    # sequences only (Panda_29_* with Panda_29_*), not every design's (the sibling
-    # tier would otherwise return all and the Cartesian product explodes).
     matches = get_mapped_ids(template_ids, seq_ids, unique=False,
-                             closest_siblings_only=True)
+                             closest_siblings_only=siblings_only)
 
     grouped = {}
     for template_id in template_ids:
@@ -399,9 +459,11 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
             'sequences': sequences
         })
 
-    # Determine stitching strategy
+    # Determine stitching strategy. Marker keys count as "fixed" here: their
+    # positions are computed from template content at apply time, not from a
+    # per-id table, so the raw path is correct when their source is also raw.
     all_positions_fixed = all(
-        sub['position_key']['type'] == 'fixed'
+        sub['position_key']['type'] in ('fixed', 'marker')
         for sub in substitutions
     ) if substitutions else True
     all_subs_raw = all(
@@ -475,7 +537,8 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         else:
             missing_df = pd.DataFrame(columns=['id', 'removed_by', 'kind', 'cause'])
         missing_df.to_csv(missing_csv_path, index=False)
-        print(f"Created missing.csv with {len(duplicate_entries)} duplicates, {len(upstream_rows)} upstream entries")
+        print(f"Created missing.csv with {len(duplicate_entries)} duplicates, "
+              f"{len(upstream_rows)} upstream entries")
 
     # Save results
     if results:
@@ -508,7 +571,7 @@ def stitch_with_raw_operations(
     sub_option_ids = []
     sub_pos_ranges = []
     for sub in substitutions:
-        sub_pos_ranges.append(sub['position_key']['positions'])
+        sub_pos_ranges.append(_position_key_str(sub['position_key']))
         seq_items = list(sub['sequences'].items())
         sub_option_ids.append([item[0] for item in seq_items])
         sub_option_lists.append([item[1] for item in seq_items])
@@ -537,6 +600,7 @@ def stitch_with_raw_operations(
 
             current_seq = template_seq
             debug_info = {'template_id': template_id}
+            unfilled = []
 
             # Apply substitutions first (position-to-position, same length)
             if sub_option_lists:
@@ -544,7 +608,8 @@ def stitch_with_raw_operations(
                 for i, idx in enumerate(sub_indices):
                     subs[sub_pos_ranges[i]] = sub_option_lists[i][idx - 1]
                     debug_info[f'sub_{i}_id'] = sub_option_ids[i][idx - 1]
-                current_seq = apply_substitutions(current_seq, subs, debug_info=debug_info)
+                current_seq = apply_substitutions(current_seq, subs, debug_info=debug_info,
+                                                  unfilled=unfilled)
 
             # Apply indels second (segment replacement, can change length)
             if indel_option_lists:
@@ -554,13 +619,14 @@ def stitch_with_raw_operations(
                     debug_info[f'indel_{i}_id'] = indel_option_ids[i][idx - 1]
                 current_seq = apply_indels(current_seq, indel_ops, debug_info=debug_info)
 
-            # Build output ID suffix
-            all_indices = list(sub_indices) + list(indel_indices)
-            if all_indices:
-                suffix = "_".join(str(idx) for idx in all_indices)
-                output_id = f"{template_id}_{suffix}"
-            else:
-                output_id = template_id
+            # Build output ID
+            output_id = _multiplied_id(template_id, list(sub_indices) + list(indel_indices))
+
+            if unfilled:
+                # Keep the sequence; leftover markers are a QC note, not a removal
+                # — must NOT go in missing.csv (Load drops every id there).
+                print(f"  WARNING: {output_id}: {len(unfilled)} marker position(s) "
+                      f"left unfilled (reference could not supply): {','.join(unfilled)}")
 
             results.append({'id': output_id, 'sequence': current_seq})
 
@@ -583,7 +649,11 @@ def stitch_matched_sequences(
     sub_grouped = []
     sub_position_maps = []
     for sub in substitutions:
-        grouped = group_sequences_by_template(sub['sequences'], all_template_ids)
+        # Marker-fill pairs with a reference sharing the template's own id, which
+        # the siblings-only tier excludes — match by exact/parent instead.
+        siblings_only = sub['position_key']['type'] != 'marker'
+        grouped = group_sequences_by_template(sub['sequences'], all_template_ids,
+                                              siblings_only=siblings_only)
         sub_grouped.append(grouped)
 
         pos_key = sub['position_key']
@@ -649,6 +719,9 @@ def stitch_matched_sequences(
         for pos_key, pos_map in sub_position_maps:
             if pos_key['type'] == 'fixed':
                 sub_positions_for_template.append(pos_key['positions'])
+                sub_position_table_keys.append(None)
+            elif pos_key['type'] == 'marker':
+                sub_positions_for_template.append(pos_key['markers'])
                 sub_position_table_keys.append(None)
             else:
                 # BioPipelines general ID matching (exact / provenance / child-parent / sibling)
@@ -717,6 +790,7 @@ def stitch_matched_sequences(
 
             current_seq = template_seq
             debug_info = {'template_id': template_id}
+            unfilled = []
 
             # Apply substitutions
             if sub_option_lists:
@@ -726,7 +800,8 @@ def stitch_matched_sequences(
                     subs[positions_str] = sub_option_lists[i][idx]
                     debug_info[f'sub_{i}_id'] = sub_option_ids[i][idx]
                     debug_info[f'sub_{i}_position_table_key'] = sub_position_table_keys[i]
-                current_seq = apply_substitutions(current_seq, subs, debug_info=debug_info)
+                current_seq = apply_substitutions(current_seq, subs, debug_info=debug_info,
+                                                  unfilled=unfilled)
 
             # Apply indels
             if indel_option_lists:
@@ -738,14 +813,15 @@ def stitch_matched_sequences(
                     debug_info[f'indel_{i}_position_table_key'] = indel_position_table_keys[i]
                 current_seq = apply_indels(current_seq, indel_ops, debug_info=debug_info)
 
-            # Build output ID
-            all_indices = list(sub_indices) + list(indel_indices)
-            if all_indices and (len(sub_option_lists) > 0 or len(indel_option_lists) > 0):
-                # Use 1-based indices for output
-                suffix = "_".join(str(idx + 1) for idx in all_indices)
-                output_id = f"{template_id}_{suffix}"
-            else:
-                output_id = template_id
+            # Build output ID (matched path uses 0-based indices -> 1-based)
+            output_id = _multiplied_id(
+                template_id, [idx + 1 for idx in list(sub_indices) + list(indel_indices)])
+
+            if unfilled:
+                # Keep the sequence; the leftover markers are a QC note, not a
+                # removal — must NOT go in missing.csv (Load drops every id there).
+                print(f"  WARNING: {output_id}: {len(unfilled)} marker position(s) "
+                      f"left unfilled (reference could not supply): {','.join(unfilled)}")
 
             results.append({'id': output_id, 'sequence': current_seq})
             template_combo_count += 1

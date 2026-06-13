@@ -323,9 +323,12 @@ Combines and modifies PyMOL-formatted selection strings using composable operati
 - `*ops`: Sequence of `SelectionOp` objects (from `Selection.add`, `Selection.subtract`, `Selection.expand`, `Selection.shrink`, `Selection.shift`, `Selection.invert`)
 - `structures`: StandardizedOutput = None - Required for structure-aware ops (expand, shrink, shift, invert)
 
+A bare column reference, stream, or selection string passed positionally is wrapped in `Selection.add(...)` implicitly, so `Selection(t.col, structures=...)` == `Selection(Selection.add(t.col), structures=...)`.
+
 **Operations**:
 - `Selection.add(*refs)` - Union of one or more column references
 - `Selection.subtract(*refs)` - Remove residues from running selection
+- `Selection.intersect(*refs)` - Keep only residues also present in the given references (set intersection)
 - `Selection.expand(n)` - Add n residues on each side
 - `Selection.shrink(n)` - Remove n residues from each side
 - `Selection.shift(n)` - Shift all intervals by n
@@ -355,4 +358,25 @@ fixed = Selection(
     Selection.invert(),
     structures=rfdaa,
 )
+```
+
+**Recall / precision of one residue set against another.** Two sets (a ground-truth pocket and a predicted pocket) overlap by intersecting them; the `n_residues` counts then give recall and precision directly — no `|truth| − |miss|` reconstruction:
+
+```python
+truth   = DistanceSelector(structures=poses, reference="A in <motif>", distance=5)
+pred    = DistanceSelector(structures=poses, reference="LIG.B", distance=5)
+
+truth_sel = Selection(truth.tables.selections.within, structures=poses)   # implicit add
+pred_sel  = Selection(pred.tables.selections.within, structures=poses)
+overlap   = Selection(truth.tables.selections.within,
+                      Selection.intersect(pred.tables.selections.within),
+                      structures=poses)
+
+scores = Panda(
+    tables=[truth_sel.tables.selections, pred_sel.tables.selections, overlap.tables.selections],
+    operations=[
+        Panda.merge(prefixes=["truth_", "pred_", "ovl_"]),
+        Panda.calculate({"recall":    "ovl_n_residues / truth_n_residues",
+                         "precision": "ovl_n_residues / pred_n_residues"}),
+    ])
 ```

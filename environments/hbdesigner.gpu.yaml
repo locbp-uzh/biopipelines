@@ -1,0 +1,12 @@
+# HBDesigner GPU environment (install device="gpu", the default).
+# Vendored from Kuhlman-Lab/HBDesigner env_gpu.yaml (upstream name hbdesigner_gpu).
+# Conda layer is minimal (python 3.10 + pip); the heavy stack — torch 2.8+cu128,
+# the PyG extension wheels, and pyrosetta — comes from the pip layer
+# (hbdesigner.gpu.pip.txt). The HBDesigner package itself is `pip install -e .`-ed
+# from the clone by the install script, after this env is created.
+name: hbdesigner
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip

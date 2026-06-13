@@ -17,6 +17,8 @@
 
 # Get the directory where run script is located (biopipelines root)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Warn (once/day) if the checkout is behind the public GitHub repo. Never fatal.
+[ -x "$SCRIPT_DIR/check-updates" ] && "$SCRIPT_DIR/check-updates" || true
 CONFIG_VARIANT="${BIOPIPELINES_CONFIG_VARIANT:-local}"
 CONFIG_FILE="$SCRIPT_DIR/config.${CONFIG_VARIANT}.yaml"
 if [ ! -f "$CONFIG_FILE" ]; then

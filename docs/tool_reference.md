@@ -13,6 +13,7 @@ mapping), see [tool_index.md](tool_index.md).
 Generate novel protein structures and pockets.
 
 - [BoltzGen](tool/structure_generation.md#boltzgen) — Protein/peptide/nanobody binder design
+- [HBDesigner](tool/structure_generation.md#hbdesigner) — Hydrogen-bond network design
 - [PocketGen](tool/structure_generation.md#pocketgen) — Ligand-tailored pocket co-design
 - [RFdiffusion](tool/structure_generation.md#rfdiffusion) — Backbone generation
 - [RFdiffusion2](tool/structure_generation.md#rfdiffusion2) — Atomic active-site scaffolding

@@ -38,7 +38,8 @@ from biopipelines.biopipelines_io import (
     read_upstream_missing, MISSING_COLUMNS, step_id_from_table_path,
 )
 from biopipelines.pdb_parser import field_atom_name, field_res_name
-from biopipelines.ligand_utils import resolve_ligand_code, write_ligand_sdf
+from biopipelines.ligand_utils import write_ligand_sdf
+from biopipelines.id_map_utils import get_mapped_ids
 
 
 @contextmanager
@@ -1107,15 +1108,22 @@ def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
 # Score / minimize mode (no docking search)
 # ---------------------------------------------------------------------------
 
-def _load_template_smiles(compounds_ds, ligand_code):
-    """SMILES for the ligand identified by `ligand_code` (from the compounds map)."""
-    for _cid, values in iterate_values(compounds_ds, columns=["code", "smiles"]):
-        if str(values.get("code", "")).strip().upper() == ligand_code.upper():
-            smi = str(values.get("smiles", "")).strip()
-            if not smi or smi.lower() == "nan":
-                raise ValueError(f"compounds stream has no SMILES for code {ligand_code}")
-            return smi
-    raise ValueError(f"compounds stream has no row with code {ligand_code}")
+def _load_score_chemistry(compounds_ds):
+    """Map each compound id to its (code, smiles).
+
+    The code locates the in-pocket HETATM residue to score; the SMILES restores
+    that pose's bond orders before scoring.
+    """
+    chem = {}
+    for cid, values in iterate_values(compounds_ds, columns=["code", "smiles"]):
+        code = str(values.get("code", "")).strip()
+        if not code or code.lower() == "nan":
+            raise ValueError(f"compound {cid} has no residue code to locate its in-pocket pose")
+        smi = str(values.get("smiles", "")).strip()
+        if not smi or smi.lower() == "nan":
+            raise ValueError(f"compound {cid} (code {code}) has no SMILES for bond-order templating")
+        chem[cid] = (code, smi)
+    return chem
 
 
 def _extract_ligand_hetatm(complex_pdb, ligand_code, out_pdb):
@@ -1194,31 +1202,50 @@ def run_score_mode(structures_ds, compounds_ds, config):
     os.makedirs(scratch, exist_ok=True)
     os.makedirs(best_poses_dir, exist_ok=True)
 
-    ligand_code = resolve_ligand_code(config["compounds_json"])
-    template_smiles = _load_template_smiles(compounds_ds, ligand_code)
-    ligand_id = compounds_ds.ids_expanded[0]
+    chem = _load_score_chemistry(compounds_ds)
     step_id = step_id_from_table_path(scores_csv)
+
+    # Pair each complex with the ONE compound it carries. A complex already holds
+    # a single posed ligand; scoring another compound's SMILES against those
+    # coordinates is meaningless. One compound broadcasts to every complex;
+    # otherwise the structure→compound link comes from the structures map's
+    # provenance (compounds.id), resolved by get_mapped_ids.
+    structure_ids = list(structures_ds.ids_expanded)
+    compound_ids = list(chem.keys())
+    if len(compound_ids) == 1:
+        structure_to_compound = {sid: compound_ids[0] for sid in structure_ids}
+    else:
+        structure_to_compound = get_mapped_ids(
+            source_ids=structure_ids,
+            target_ids=compound_ids,
+            map_table_paths=[structures_ds.map_table] if structures_ds.map_table else None,
+            unique=True,
+        )
 
     gnina_flag = "--score_only" if mode == "score" else "--minimize"
 
     rows, map_rows, failed = [], [], []
-    for protein_id, complex_pdb in iterate_files(structures_ds):
-        out_id = f"{protein_id}_{ligand_id}"
+    for structure_id, complex_pdb in iterate_files(structures_ds):
         try:
-            if not os.path.exists(complex_pdb):
-                raise RuntimeError(f"complex file not found: {complex_pdb}")
+            compound_id = structure_to_compound.get(structure_id)
+            if compound_id is None:
+                raise RuntimeError(
+                    f"no compound paired with complex {structure_id}; the structures map "
+                    f"carries no compounds.id provenance and the compounds stream has "
+                    f"{len(compound_ids)} compounds")
+            ligand_code, template_smiles = chem[compound_id]
 
-            clean_protein = os.path.join(scratch, f"{protein_id}_protein.pdb")
+            clean_protein = os.path.join(scratch, f"{structure_id}_protein.pdb")
             _clean_protein_pdb(complex_pdb, clean_protein)
 
-            lig_pdb = os.path.join(scratch, f"{out_id}_lig.pdb")
+            lig_pdb = os.path.join(scratch, f"{structure_id}_lig.pdb")
             if _extract_ligand_hetatm(complex_pdb, ligand_code, lig_pdb) is None:
                 raise RuntimeError(f"no HETATM records with code {ligand_code} in {complex_pdb}")
 
-            lig_sdf = os.path.join(scratch, f"{out_id}_lig.sdf")
+            lig_sdf = os.path.join(scratch, f"{structure_id}_lig.sdf")
             write_ligand_sdf(lig_pdb, lig_sdf, smiles=template_smiles)
 
-            out_sdf = os.path.join(scratch, f"{out_id}_{mode}.sdf")
+            out_sdf = os.path.join(scratch, f"{structure_id}_{mode}.sdf")
             cmd = [
                 gnina_binary,
                 "-r", clean_protein,
@@ -1244,19 +1271,19 @@ def run_score_mode(structures_ds, compounds_ds, config):
             # complex reflects exactly what was scored. "minimize" emits the refined
             # pose gnina wrote.
             pose_sdf = lig_sdf if mode == "score" else out_sdf
-            dst_pdb = os.path.join(best_poses_dir, f"{out_id}_{mode}.pdb")
+            dst_pdb = os.path.join(best_poses_dir, f"{structure_id}_{mode}.pdb")
             _write_complex_pdb(clean_protein, pose_sdf, 0, dst_pdb)
 
-            row = {"id": out_id, "structures.id": protein_id, "compounds.id": ligand_id}
+            row = {"id": structure_id, "structures.id": structure_id, "compounds.id": compound_id}
             for col in _SCORE_TERMS:
                 row[col] = scores.get(col, "")
             rows.append(row)
-            map_rows.append({"id": out_id, "file": dst_pdb,
-                             "structures.id": protein_id, "compounds.id": ligand_id})
-            print(f"  {out_id}: " + ", ".join(f"{k}={scores[k]}" for k in scores))
+            map_rows.append({"id": structure_id, "file": dst_pdb,
+                             "structures.id": structure_id, "compounds.id": compound_id})
+            print(f"  {structure_id} ({compound_id}): " + ", ".join(f"{k}={scores[k]}" for k in scores))
         except Exception as e:
-            print(f"WARNING: {out_id} {mode} failed: {e}", file=sys.stderr)
-            failed.append({"id": out_id, "removed_by": step_id, "kind": "failure",
+            print(f"WARNING: {structure_id} {mode} failed: {e}", file=sys.stderr)
+            failed.append({"id": structure_id, "removed_by": step_id, "kind": "failure",
                            "cause": str(e)[:200]})
 
     score_cols = ["id", "structures.id", "compounds.id"] + list(_SCORE_TERMS)

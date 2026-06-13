@@ -19,6 +19,8 @@ try:
     from .datastream import DataStream
     from .biopipelines_io import Resolve, TableReference
     from .combinatorics import generate_multiplied_ids_pattern
+    from .guiding_potentials import (RFdiffusionGuidingPotential,
+                                      render_guiding_potentials, guiding_potential_overrides)
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -27,6 +29,16 @@ except ImportError:
     from datastream import DataStream
     from biopipelines_io import Resolve, TableReference
     from combinatorics import generate_multiplied_ids_pattern
+    from guiding_potentials import (RFdiffusionGuidingPotential,
+                                    render_guiding_potentials, guiding_potential_overrides)
+
+
+# Point groups accepted by inference.symmetry. Cyclic/dihedral take a degree
+# (c4, d2, …); the polyhedral groups are fixed names.
+_SYMMETRY_NAMED = {"tetrahedral", "octahedral", "icosahedral"}
+
+# Decay schedules accepted by potentials.guide_decay.
+_GUIDE_DECAYS = {"constant", "linear", "quadratic", "cubic"}
 
 
 def _normalize_selection_arg(name, value):
@@ -67,6 +79,26 @@ def _selection_cli_arg(kind_token) -> str:
     return token
 
 
+def _normalize_symmetry(value):
+    """Normalize a symmetry spec to the token inference.symmetry expects.
+
+    Accepts a point-group name (``tetrahedral`` / ``octahedral`` / ``icosahedral``)
+    or a cyclic/dihedral group as ``c<N>`` / ``d<N>`` (also spelled ``cyclic_N`` /
+    ``C4`` etc.). Returns the lowercase token RFdiffusion wants (``c4``, ``d2``,
+    ``tetrahedral``). Raises ValueError on anything else.
+    """
+    s = str(value).strip().lower()
+    if s in _SYMMETRY_NAMED:
+        return s
+    s = s.replace("cyclic_", "c").replace("dihedral_", "d")
+    if (s.startswith("c") or s.startswith("d")) and s[1:].isdigit() and int(s[1:]) >= 1:
+        return s
+    raise ValueError(
+        f"symmetry must be one of {sorted(_SYMMETRY_NAMED)}, or a cyclic/dihedral "
+        f"group like 'c4' / 'd2', got {value!r}"
+    )
+
+
 class RFdiffusion(BaseConfig):
     """
     Configuration for RFdiffusion protein backbone generation.
@@ -81,9 +113,16 @@ class RFdiffusion(BaseConfig):
         - Motif scaffolding: hold a fixed structural motif in place and design
           the surrounding scaffold (pdb + contigs specifying the motif).
         - Binder design: design a new protein that binds to a target (pdb of
-          the target + contigs describing the binder length).
+          the target + contigs describing the binder length), optionally steered
+          to specific interface residues with ``hotspot_res``.
         - Partial diffusion: apply limited noise to an existing structure and
           re-diffuse, producing near-neighbour variants (partial_steps).
+        - Symmetric oligomers: build a point-group-symmetric assembly from a
+          single contigs length (``symmetry`` + optional ``olig_contacts``
+          guiding potential).
+        - Fold conditioning: condition diffusion on a target topology / scaffold
+          set (``scaffold_dir`` or ``target_ss`` + ``target_adj``).
+        - Cyclic peptides: close the backbone into a macrocycle (``cyclic``).
 
     Model checkpoints (see WEIGHTS / DEFAULT_WEIGHTS):
         By default only Base and Complex_base are downloaded (~2 GB). Add others
@@ -104,6 +143,11 @@ class RFdiffusion(BaseConfig):
 
     TOOL_NAME = "RFdiffusion"
     TOOL_VERSION = "1.0"
+
+    # Typed builder for guiding potentials, e.g.
+    #   RFdiffusion.GuidingPotential.olig_contacts(weight_intra=1, weight_inter=0.1)
+    # Restricted to the types base RFdiffusion implements (see the subclass).
+    GuidingPotential = RFdiffusionGuidingPotential
 
     # Mapping of weight name -> (url_hash, filename)
     WEIGHTS = {
@@ -248,7 +292,7 @@ fi
     contigs_reader_py = Path(lambda self: self.pipe_script_path("resolve_rfdiffusion_contigs.py"))
 
     def __init__(self,
-                 contigs: Union[str, TableReference, "tuple"],
+                 contigs: Union[str, TableReference, "tuple"] = "",
                  pdb: Optional[Union[DataStream, StandardizedOutput]] = None,
                  inpaint: Union[str, TableReference, "tuple"] = "",
                  inpaint_str: Union[str, TableReference, "tuple"] = "",
@@ -258,6 +302,26 @@ fi
                  partial_steps: int = 0,
                  reproducible: bool = False,
                  design_startnum: int = 1,
+                 hotspot_res: Optional[List[str]] = None,
+                 symmetry: Optional[str] = None,
+                 guiding_potentials: Union[str, "GuidingPotential", List, None] = None,
+                 guide_scale: Optional[float] = None,
+                 guide_decay: Optional[str] = None,
+                 cyclic: bool = False,
+                 cyc_chains: Optional[str] = None,
+                 provide_seq: Optional[str] = None,
+                 noise_scale_ca: Optional[float] = None,
+                 noise_scale_frame: Optional[float] = None,
+                 inpaint_str_helix: Optional[str] = None,
+                 inpaint_str_strand: Optional[str] = None,
+                 scaffold_dir: Optional[str] = None,
+                 target_ss: Optional[str] = None,
+                 target_adj: Optional[str] = None,
+                 target_path: Optional[str] = None,
+                 mask_loops: Optional[bool] = None,
+                 sampled_insertion: Optional[int] = None,
+                 sampled_N: Optional[int] = None,
+                 sampled_C: Optional[int] = None,
                  **kwargs):
         """
         Initialize RFdiffusion configuration.
@@ -307,6 +371,71 @@ fi
             design_startnum: Integer appended to the pipeline name to number
                              output files (e.g. design_startnum=1 → name_1.pdb).
                              Useful when continuing a previous run.
+            hotspot_res: Interface residues on the target the binder should
+                         engage, e.g. ``["A30", "A33", "A34"]``
+                         (``ppi.hotspot_res``). Binder design only — requires
+                         ``pdb``.
+            symmetry: Point group for symmetric-oligomer generation. A named
+                      group (``"tetrahedral"``, ``"octahedral"``,
+                      ``"icosahedral"``) or a cyclic/dihedral group
+                      (``"c4"``, ``"d2"``, …). Switches RFdiffusion to its
+                      ``symmetry`` config (``--config-name symmetry
+                      inference.symmetry=...``). Symmetric runs are
+                      unconditional, so ``pdb`` must not be set; ``contigs`` is
+                      the total length of the assembly (e.g. ``"360"`` for a
+                      tetrahedral 360-mer). Pair with an ``olig_contacts``
+                      guiding potential to enforce inter/intra-chain contacts.
+            guiding_potentials: Guiding potential(s) biasing the diffusion
+                      trajectory (``potentials.guiding_potentials``). Use the
+                      typed builder, e.g.
+                      ``RFdiffusion.GuidingPotential.olig_contacts(weight_intra=1,
+                      weight_inter=0.1, olig_intra_all=True, olig_inter_all=True)``;
+                      a raw hydra string or a list of builders is also accepted.
+            guide_scale: Global multiplier on the guiding potential
+                      (``potentials.guide_scale``).
+            guide_decay: How the potential decays over the trajectory
+                      (``potentials.guide_decay``): ``"constant"``, ``"linear"``,
+                      ``"quadratic"``, or ``"cubic"``.
+            cyclic: If True, close the designed backbone into a macrocycle
+                    (``inference.cyclic``). Use with ``cyc_chains``.
+            cyc_chains: Chain letter(s) to cyclize (``inference.cyc_chains``,
+                        e.g. ``"a"``). Only meaningful when ``cyclic=True``.
+            provide_seq: Residue range(s) whose sequence is kept fixed during
+                         partial diffusion (``contigmap.provide_seq``, e.g.
+                         ``"100-119"``). Requires ``partial_steps > 0``.
+            noise_scale_ca: Translational noise scale (``denoiser.noise_scale_ca``).
+                            Values < 1 reduce diversity but improve quality
+                            (binder design often uses ~0).
+            noise_scale_frame: Rotational noise scale
+                               (``denoiser.noise_scale_frame``). Same trade-off
+                               as ``noise_scale_ca``.
+            inpaint_str_helix: Residues whose secondary structure is masked and
+                               forced to helix (``contigmap.inpaint_str_helix``).
+            inpaint_str_strand: Residues whose secondary structure is masked and
+                                forced to strand (``contigmap.inpaint_str_strand``).
+            scaffold_dir: Directory of scaffold ``_ss.pt`` / ``_adj.pt`` files for
+                          fold conditioning (``scaffoldguided.scaffold_dir``).
+                          Setting it turns on ``scaffoldguided.scaffoldguided``.
+                          Fold conditioning runs from the scaffold set rather than
+                          ``contigs``.
+            target_ss: Precomputed target secondary-structure tensor file
+                       (``scaffoldguided.target_ss``, a ``.pt`` produced by
+                       upstream ``helper_scripts/make_secstruc_adj.py`` — a small
+                       per-target input, not a model weight). Implies
+                       ``scaffoldguided.target_pdb=True``.
+            target_adj: Precomputed target block-adjacency tensor file
+                        (``scaffoldguided.target_adj``, the companion ``.pt``).
+            target_path: Target structure for fold-conditioned binder design
+                         (``scaffoldguided.target_path``). Used with
+                         ``target_ss`` / ``target_adj``.
+            mask_loops: If False, keep input loops fixed; if True, allow loops to
+                        be remodelled (``scaffoldguided.mask_loops``).
+            sampled_insertion: Max residues to insert when sampling scaffold
+                               length variants (``scaffoldguided.sampled_insertion``).
+            sampled_N: Max residues to sample at the N terminus
+                       (``scaffoldguided.sampled_N``).
+            sampled_C: Max residues to sample at the C terminus
+                       (``scaffoldguided.sampled_C``).
 
         Output:
             Streams: structures (.pdb)
@@ -341,12 +470,42 @@ fi
         self.reproducible = reproducible
         self.design_startnum = design_startnum
 
+        self.hotspot_res = hotspot_res or []
+        self.symmetry = _normalize_symmetry(symmetry) if symmetry is not None else None
+        # Accept a GuidingPotential builder (or list), or a raw hydra string;
+        # render to the single bracketed string the shell emits. Some builder
+        # params (olig_*) are top-level potentials.* overrides, not token params.
+        self.guiding_potentials = render_guiding_potentials(guiding_potentials)
+        self._guiding_potential_overrides = guiding_potential_overrides(guiding_potentials)
+        self.guide_scale = guide_scale
+        self.guide_decay = guide_decay
+        self.cyclic = cyclic
+        self.cyc_chains = cyc_chains
+        self.provide_seq = provide_seq
+        self.noise_scale_ca = noise_scale_ca
+        self.noise_scale_frame = noise_scale_frame
+        self.inpaint_str_helix = inpaint_str_helix
+        self.inpaint_str_strand = inpaint_str_strand
+        # Fold/scaffold conditioning (scaffoldguided.*). scaffold_dir or a
+        # target_ss/target_adj pair turns the mode on.
+        self.scaffold_dir = scaffold_dir
+        self.target_ss = target_ss
+        self.target_adj = target_adj
+        self.target_path = target_path
+        self.mask_loops = mask_loops
+        self.sampled_insertion = sampled_insertion
+        self.sampled_N = sampled_N
+        self.sampled_C = sampled_C
+        self._scaffold_guided = bool(scaffold_dir or target_ss or target_adj)
+
         super().__init__(**kwargs)
 
     def validate_params(self):
         """Validate RFdiffusion-specific parameters."""
         contigs_kind, contigs_token = self._contigs_arg
-        if contigs_kind == "literal" and not contigs_token:
+        # Fold conditioning runs from a scaffold set (scaffoldguided.*), not from
+        # contigs; in that mode contigs is optional. Every other mode needs it.
+        if not self._scaffold_guided and contigs_kind == "literal" and not contigs_token:
             raise ValueError("contigs parameter is required")
 
         if self.num_designs <= 0:
@@ -357,6 +516,52 @@ fi
 
         if self.partial_steps < 0:
             raise ValueError("partial_steps cannot be negative")
+
+        # Symmetric generation uses RFdiffusion's `symmetry` config and builds
+        # the assembly from a contigs length — it is unconditional, so a pdb
+        # would be ignored. Reject the combination rather than silently drop it.
+        if self.symmetry is not None and self.pdb_stream is not None:
+            raise ValueError(
+                "symmetry generates an unconditional symmetric oligomer and "
+                "cannot be combined with a pdb input"
+            )
+
+        # Hotspots only mean something against a target structure.
+        if self.hotspot_res and self.pdb_stream is None:
+            raise ValueError("hotspot_res requires a pdb input (the binder target)")
+
+        # provide_seq fixes sequence during partial diffusion.
+        if self.provide_seq and self.partial_steps <= 0:
+            raise ValueError("provide_seq requires partial_steps > 0")
+
+        if self.cyc_chains is not None and not self.cyclic:
+            raise ValueError("cyc_chains requires cyclic=True")
+
+        # Fold conditioning is incompatible with symmetric generation (distinct
+        # hydra configs).
+        if self._scaffold_guided and self.symmetry is not None:
+            raise ValueError("scaffold conditioning cannot be combined with symmetry")
+
+        # Boundary checks on the typed params — catch invalid values here rather
+        # than after a slow job lands on a Hydra/model error.
+        if self.guide_decay is not None and self.guide_decay not in _GUIDE_DECAYS:
+            raise ValueError(
+                f"guide_decay must be one of {sorted(_GUIDE_DECAYS)}, got {self.guide_decay!r}"
+            )
+        for name in ("guide_scale", "noise_scale_ca", "noise_scale_frame"):
+            v = getattr(self, name)
+            if v is not None:
+                if not isinstance(v, (int, float)) or isinstance(v, bool):
+                    raise ValueError(f"{name} must be a number, got {type(v).__name__}")
+                if v < 0:
+                    raise ValueError(f"{name} must be non-negative, got {v}")
+        for name in ("sampled_insertion", "sampled_N", "sampled_C"):
+            v = getattr(self, name)
+            if v is not None:
+                if not isinstance(v, int) or isinstance(v, bool):
+                    raise ValueError(f"{name} must be an int, got {type(v).__name__}")
+                if v < 0:
+                    raise ValueError(f"{name} must be non-negative, got {v}")
 
         # A column reference is keyed by input-PDB id, so it needs PDBs to
         # match against.
@@ -375,6 +580,27 @@ fi
                                      ("inpaint_str", self._inpaint_str_arg)):
             if kind == "literal":
                 _validate_freeform_string(name, token)
+
+        # Free-form strings reaching bash as raw interpolation.
+        for i, res in enumerate(self.hotspot_res):
+            _validate_freeform_string(f"hotspot_res[{i}]", res)
+        for name in ("cyc_chains", "provide_seq", "guide_decay",
+                     "inpaint_str_helix", "inpaint_str_strand",
+                     "scaffold_dir", "target_ss", "target_adj", "target_path"):
+            _validate_freeform_string(name, getattr(self, name))
+
+        # guiding_potentials is a structured hydra value (commas, brackets,
+        # colons, double quotes) emitted single-quoted, so the generic freeform
+        # check would reject it. Forbid only what breaks single quoting.
+        if self.guiding_potentials is not None:
+            if not isinstance(self.guiding_potentials, str):
+                raise ValueError("guiding_potentials must be a string")
+            bad = set("'`$\\") & set(self.guiding_potentials)
+            if bad:
+                raise ValueError(
+                    f"guiding_potentials contains {sorted(bad)}, which would break the "
+                    "single-quoted shell argument."
+                )
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files."""
@@ -400,6 +626,16 @@ fi
             config_lines.append(f"PARTIAL STEPS: {self.partial_steps}")
         if self.reproducible:
             config_lines.append(f"REPRODUCIBLE: {self.reproducible}")
+        if self.symmetry is not None:
+            config_lines.append(f"SYMMETRY: {self.symmetry}")
+        if self.hotspot_res:
+            config_lines.append(f"HOTSPOTS: {','.join(self.hotspot_res)}")
+        if self.guiding_potentials is not None:
+            config_lines.append(f"GUIDING POTENTIALS: {self.guiding_potentials}")
+        if self.cyclic:
+            config_lines.append(f"CYCLIC: {self.cyclic}")
+        if self._scaffold_guided:
+            config_lines.append("FOLD CONDITIONING: scaffoldguided")
 
         return config_lines
 
@@ -424,18 +660,95 @@ fi
         script_content += self.generate_completion_check_footer()
         return script_content
 
-    def _common_rfd_options(self) -> str:
-        """Inference options shared by every input PDB (no contigs/pdb/prefix)."""
-        opts = f"inference.num_designs={self.num_designs}"
-        opts += f" inference.deterministic={self.reproducible}"
-        opts += f" inference.design_startnum={self.design_startnum}"
+    def _common_rfd_options(self) -> List[str]:
+        """Inference args shared across runs (no contigs/pdb/prefix).
+
+        Returned as a list of hydra tokens; each is emitted as one double-quoted
+        bash-array element (see _generate_script_run_rfdiffusion), so values that
+        carry brackets, commas, or colons (hotspot_res, guiding_potentials) need
+        no extra quoting and are never re-parsed by `eval`.
+        """
+        opts = [
+            f"inference.num_designs={self.num_designs}",
+            f"inference.deterministic={self.reproducible}",
+            f"inference.design_startnum={self.design_startnum}",
+        ]
         if self.steps != 50:
-            opts += f" diffuser.T={self.steps}"
+            opts.append(f"diffuser.T={self.steps}")
         if self.partial_steps > 0:
-            opts += f" diffuser.partial_T={self.partial_steps}"
+            opts.append(f"diffuser.partial_T={self.partial_steps}")
         if self.active_site:
-            opts += " inference.ckpt_override_path=models/ActiveSite_ckpt.pt"
+            opts.append("inference.ckpt_override_path=models/ActiveSite_ckpt.pt")
+
+        if self.symmetry is not None:
+            opts.append(f"inference.symmetry={self.symmetry}")
+        if self.hotspot_res:
+            opts.append(f"ppi.hotspot_res=[{','.join(self.hotspot_res)}]")
+
+        if self.guiding_potentials is not None:
+            opts.append(f"potentials.guiding_potentials={self.guiding_potentials}")
+        # olig_intra_all / olig_inter_all / olig_custom_contact are top-level
+        # potentials.* keys, not token params (RFdiffusion floats the token).
+        opts += self._guiding_potential_overrides
+        if self.guide_scale is not None:
+            opts.append(f"potentials.guide_scale={self.guide_scale}")
+        if self.guide_decay is not None:
+            opts.append(f"potentials.guide_decay={self.guide_decay}")
+
+        if self.cyclic:
+            opts.append("inference.cyclic=True")
+        if self.cyc_chains is not None:
+            opts.append(f"inference.cyc_chains={self.cyc_chains}")
+
+        if self.provide_seq:
+            opts.append(f"contigmap.provide_seq=[{self.provide_seq}]")
+        if self.inpaint_str_helix:
+            opts.append(f"contigmap.inpaint_str_helix=[{self.inpaint_str_helix}]")
+        if self.inpaint_str_strand:
+            opts.append(f"contigmap.inpaint_str_strand=[{self.inpaint_str_strand}]")
+
+        if self.noise_scale_ca is not None:
+            opts.append(f"denoiser.noise_scale_ca={self.noise_scale_ca}")
+        if self.noise_scale_frame is not None:
+            opts.append(f"denoiser.noise_scale_frame={self.noise_scale_frame}")
+
+        opts += self._scaffold_options()
         return opts
+
+    def _scaffold_options(self) -> List[str]:
+        """Fold-conditioning args (scaffoldguided.*); empty when unused."""
+        if not self._scaffold_guided:
+            return []
+        opts = ["scaffoldguided.scaffoldguided=True"]
+        if self.scaffold_dir is not None:
+            opts.append(f"scaffoldguided.scaffold_dir={self.scaffold_dir}")
+        # target_ss/target_adj describe a target topology -> target_pdb=True;
+        # scaffold_dir alone (no target) keeps target_pdb=False.
+        if self.target_ss is not None or self.target_adj is not None:
+            opts.append("scaffoldguided.target_pdb=True")
+            if self.target_path is not None:
+                opts.append(f"scaffoldguided.target_path={self.target_path}")
+            if self.target_ss is not None:
+                opts.append(f"scaffoldguided.target_ss={self.target_ss}")
+            if self.target_adj is not None:
+                opts.append(f"scaffoldguided.target_adj={self.target_adj}")
+        else:
+            opts.append("scaffoldguided.target_pdb=False")
+        if self.mask_loops is not None:
+            opts.append(f"scaffoldguided.mask_loops={self.mask_loops}")
+        if self.sampled_insertion is not None:
+            opts.append(f"scaffoldguided.sampled_insertion={self.sampled_insertion}")
+        if self.sampled_N is not None:
+            opts.append(f"scaffoldguided.sampled_N={self.sampled_N}")
+        if self.sampled_C is not None:
+            opts.append(f"scaffoldguided.sampled_C={self.sampled_C}")
+        return opts
+
+    def _config_name_args(self) -> List[str]:
+        """Leading --config-name args for modes that need a non-default config."""
+        if self.symmetry is not None:
+            return ["--config-name", "symmetry"]
+        return []
 
     def _generate_script_run_rfdiffusion(self) -> str:
         """Generate the RFdiffusion execution part of the script.
@@ -449,25 +762,56 @@ fi
         it. Without a PDB it is a single unconditional run named after the
         pipeline.
         """
-        common = self._common_rfd_options()
+        common_args = self._common_rfd_options()
+        # Bash-array elements: double-quote each so $VAR expands while brackets,
+        # commas, and literal " inside a value (guiding_potentials) survive
+        # without `eval` re-parsing them.
+        common_array = ' '.join('"' + a.replace('"', '\\"') + '"' for a in common_args)
+        config_name_array = ' '.join('"' + a + '"' for a in self._config_name_args())
         structures_dir = self.stream_folder("structures")
+        prefix = os.path.join(structures_dir, self.pipeline_name)
 
-        if not self.pdb_stream:
-            # Unconditional generation — single run, contigs is a literal
-            # (validate_params already rejected a table ref without pdb).
-            contigs = self._contigs_arg[1]
-            rfd_options = f"'contigmap.contigs=[{contigs}]'"
-            if self._inpaint_arg[1]:
-                rfd_options += f" 'contigmap.inpaint_seq=[{self._inpaint_arg[1]}]'"
-            if self._inpaint_str_arg[1]:
-                rfd_options += f" 'contigmap.inpaint_str=[{self._inpaint_str_arg[1]}]'"
-            prefix = os.path.join(structures_dir, self.pipeline_name)
-            rfd_options += f" inference.output_prefix={prefix} {common}"
-            return f"""echo "Starting RFdiffusion (unconditional)"
+        if self._scaffold_guided:
+            # Fold conditioning: no contigs, no input-pdb loop — the run is
+            # driven entirely by the scaffoldguided.* options in `common`.
+            return f"""echo "Starting RFdiffusion (fold conditioning)"
 echo "Output folder: {self.output_folder}"
 
 cd {self.folders["RFdiffusion"]}
-{self.container_prefix()}python {self.inference_py_file} {rfd_options}
+RFD_OPTIONS=(
+    {config_name_array}
+    "inference.output_prefix={prefix}"
+    {common_array}
+)
+{self.container_prefix()}python {self.inference_py_file} "${{RFD_OPTIONS[@]}}"
+
+"""
+
+        if not self.pdb_stream:
+            # Unconditional / symmetric generation — single run, contigs is a
+            # literal (validate_params already rejected a table ref without pdb).
+            # Inner single quotes keep each bracket entry a Hydra STRING — without
+            # them a numeric-only length (e.g. [90]) is parsed as an int and
+            # RFdiffusion's .strip() on it raises.
+            contigs = self._contigs_arg[1]
+            head = [f"contigmap.contigs=['{contigs}']"]
+            if self._inpaint_arg[1]:
+                head.append(f"contigmap.inpaint_seq=['{self._inpaint_arg[1]}']")
+            if self._inpaint_str_arg[1]:
+                head.append(f"contigmap.inpaint_str=['{self._inpaint_str_arg[1]}']")
+            head_array = ' '.join('"' + a + '"' for a in head)
+            mode = "symmetric" if self.symmetry is not None else "unconditional"
+            return f"""echo "Starting RFdiffusion ({mode})"
+echo "Output folder: {self.output_folder}"
+
+cd {self.folders["RFdiffusion"]}
+RFD_OPTIONS=(
+    {config_name_array}
+    {head_array}
+    "inference.output_prefix={prefix}"
+    {common_array}
+)
+{self.container_prefix()}python {self.inference_py_file} "${{RFD_OPTIONS[@]}}"
 
 """
 
@@ -490,17 +834,21 @@ for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
     CONTIGS=$(echo "$OPTS" | sed -n '1p')
     INPAINT_SEL=$(echo "$OPTS" | sed -n '2p')
     INPAINT_STR_SEL=$(echo "$OPTS" | sed -n '3p')
-    RFD_OPTIONS="'contigmap.contigs=[$CONTIGS]'"
+    RFD_OPTIONS=(
+        {config_name_array}
+        "contigmap.contigs=['$CONTIGS']"
+        "inference.input_pdb=$INPUT_PDB"
+        "inference.output_prefix={structures_dir}/$STRUCT_ID"
+        {common_array}
+    )
     if [ -n "$INPAINT_SEL" ]; then
-        RFD_OPTIONS="$RFD_OPTIONS 'contigmap.inpaint_seq=[$INPAINT_SEL]'"
+        RFD_OPTIONS+=("contigmap.inpaint_seq=['$INPAINT_SEL']")
     fi
     if [ -n "$INPAINT_STR_SEL" ]; then
-        RFD_OPTIONS="$RFD_OPTIONS 'contigmap.inpaint_str=[$INPAINT_STR_SEL]'"
+        RFD_OPTIONS+=("contigmap.inpaint_str=['$INPAINT_STR_SEL']")
     fi
-    RFD_OPTIONS="$RFD_OPTIONS inference.input_pdb=$INPUT_PDB"
-    RFD_OPTIONS="$RFD_OPTIONS inference.output_prefix={structures_dir}/$STRUCT_ID {common}"
     echo "Running RFdiffusion for $STRUCT_ID"
-    eval {self.container_prefix()}python {self.inference_py_file} $RFD_OPTIONS
+    {self.container_prefix()}python {self.inference_py_file} "${{RFD_OPTIONS[@]}}"
 done
 
 """
@@ -589,7 +937,27 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 "steps": self.steps,
                 "partial_steps": self.partial_steps,
                 "reproducible": self.reproducible,
-                "design_startnum": self.design_startnum
+                "design_startnum": self.design_startnum,
+                "hotspot_res": self.hotspot_res,
+                "symmetry": self.symmetry,
+                "guiding_potentials": self.guiding_potentials,
+                "guide_scale": self.guide_scale,
+                "guide_decay": self.guide_decay,
+                "cyclic": self.cyclic,
+                "cyc_chains": self.cyc_chains,
+                "provide_seq": self.provide_seq,
+                "noise_scale_ca": self.noise_scale_ca,
+                "noise_scale_frame": self.noise_scale_frame,
+                "inpaint_str_helix": self.inpaint_str_helix,
+                "inpaint_str_strand": self.inpaint_str_strand,
+                "scaffold_dir": self.scaffold_dir,
+                "target_ss": self.target_ss,
+                "target_adj": self.target_adj,
+                "target_path": self.target_path,
+                "mask_loops": self.mask_loops,
+                "sampled_insertion": self.sampled_insertion,
+                "sampled_N": self.sampled_N,
+                "sampled_C": self.sampled_C,
             }
         })
         return base_dict

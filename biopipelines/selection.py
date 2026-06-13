@@ -102,6 +102,8 @@ class Selection(BaseConfig):
         - ``Selection.add(ds, include="propensity>0.5")``  — union residues from per-residue stream
         - ``Selection.subtract(*refs)``                   — remove table columns from running selection
         - ``Selection.subtract(ds, include="propensity>0.5")`` — remove residues from per-residue stream
+        - ``Selection.intersect(*refs)``                  — keep only residues also in the given columns
+        - ``Selection.intersect(ds, include="propensity>0.5")`` — keep only residues also in the stream rows
         - ``Selection.expand(n, direction="nc")``  — PDB-aware: expand by *n* residues (n/c/nc)
         - ``Selection.shrink(n, direction="nc")``  — PDB-aware: shrink by *n* residues (n/c/nc)
         - ``Selection.dilate`` / ``Selection.erode``       — aliases for expand / shrink
@@ -200,6 +202,32 @@ class Selection(BaseConfig):
         if include is not None or exclude is not None:
             raise ValueError("Selection.subtract: include=/exclude= are only valid with a DataStream argument")
         return SelectionOp("subtract", refs=list(args))
+
+    @staticmethod
+    def intersect(*args, include: Optional[str] = None, exclude: Optional[str] = None) -> SelectionOp:
+        """Keep only residues also present in the given table refs or stream rows.
+
+        Intersection of the running selection with another residue set — the set
+        primitive for "how much do two selections overlap". Pair with two count
+        reads to get recall/precision of one set against another::
+
+            overlap = Selection(truth.tables.selections.within,
+                                Selection.intersect(pred.tables.selections.within),
+                                structures=poses)
+            # recall = overlap.n_residues / truth.n_residues
+            # precision = overlap.n_residues / pred.n_residues
+
+        Table-based (TableReference objects) or stream-based (a resi-csv
+        DataStream with include=/exclude=), mirroring add/subtract.
+        """
+        if len(args) == 1 and isinstance(args[0], DataStream):
+            if include is not None and exclude is not None:
+                raise ValueError("Selection.intersect: use either include= or exclude=, not both")
+            filter_expr = include if include is not None else exclude
+            return SelectionOp("intersect", stream=args[0], filter_expr=filter_expr)
+        if include is not None or exclude is not None:
+            raise ValueError("Selection.intersect: include=/exclude= are only valid with a DataStream argument")
+        return SelectionOp("intersect", refs=list(args))
 
     @staticmethod
     def expand(n: int, direction: str = "nc") -> SelectionOp:
@@ -338,9 +366,9 @@ class Selection(BaseConfig):
                 "(n_terminus, c_terminus, termini, all_residues, gaps)."
             )
 
-        # Each add/subtract must have either refs or a stream (not neither)
+        # Each add/subtract/intersect must have either refs or a stream (not neither)
         for op in self.operations:
-            if op.op_type in ("add", "subtract"):
+            if op.op_type in ("add", "subtract", "intersect"):
                 if not op.refs and op.stream is None:
                     raise ValueError(
                         f"Selection.{op.op_type}() requires either TableReference args or a DataStream"
@@ -368,7 +396,7 @@ class Selection(BaseConfig):
         # Summarise operations
         op_summaries = []
         for op in self.operations:
-            if op.op_type in ("add", "subtract"):
+            if op.op_type in ("add", "subtract", "intersect"):
                 if op.stream is not None:
                     op_summaries.append(f"{op.op_type}(stream, {op.filter_expr})")
                 else:

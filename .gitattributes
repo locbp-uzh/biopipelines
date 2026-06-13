@@ -2,3 +2,9 @@
 # CRLF working copy on Windows otherwise commits \r bytes that break execution
 # ($'\r' errors). Force LF for .sh regardless of core.autocrlf.
 *.sh text eol=lf
+
+# Extensionless entry-point scripts run on the cluster too — pin them to LF.
+submit text eol=lf
+run text eol=lf
+resubmit text eol=lf
+check-updates text eol=lf

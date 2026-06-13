@@ -378,7 +378,7 @@ def process_selections(config_path: str):
     ref_cache = {}
     ref_keymap = {}
     for op in operations:
-        if op["op"] in ("add", "subtract"):
+        if op["op"] in ("add", "subtract", "intersect"):
             for ref in op.get("refs", []):
                 key = (ref["table"], ref["column"])
                 if key not in ref_cache:
@@ -389,7 +389,7 @@ def process_selections(config_path: str):
     stream_cache = {}
     stream_keymap = {}
     for op in operations:
-        if op["op"] in ("add", "subtract") and op.get("stream_json"):
+        if op["op"] in ("add", "subtract", "intersect") and op.get("stream_json"):
             filter_expr = op.get("filter_expr")
             if filter_expr is None:
                 raise ValueError(
@@ -430,6 +430,16 @@ def process_selections(config_path: str):
                     key = (op["stream_json"], op["filter_expr"])
                     src = stream_keymap[key].get(design_id, design_id)
                     current -= stream_cache[key].get(src, set())
+
+            elif op_type == "intersect":
+                for ref in op.get("refs", []):
+                    k = (ref["table"], ref["column"])
+                    src = ref_keymap[k].get(design_id, design_id)
+                    current &= set(sele_to_list(ref_cache[k].get(src, "")))
+                if op.get("stream_json"):
+                    key = (op["stream_json"], op["filter_expr"])
+                    src = stream_keymap[key].get(design_id, design_id)
+                    current &= stream_cache[key].get(src, set())
 
             elif op_type in ("expand", "shrink", "shift", "invert"):
                 struct_id = id_to_struct.get(design_id) or design_id

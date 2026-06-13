@@ -12,7 +12,6 @@ sequences, generating all combinations (Cartesian product).
 import os
 import json
 from typing import Dict, List, Any, Union
-import re
 from itertools import product
 
 try:
@@ -28,6 +27,26 @@ except ImportError:
 
 # Import ID mapping utilities
 from biopipelines.id_map_utils import get_mapped_ids
+from biopipelines.combinatorics import generate_multiplied_ids
+
+
+def _raw_suffixes(axis_counts: List[int]) -> List[str]:
+    """Flat suffix list for the raw-ops Cartesian product over per-axis option
+    counts: e.g. [2, 3] -> ['1_1','1_2','1_3','2_1','2_2','2_3']. Empty axes ->
+    [''] (no suffix). Fed to generate_multiplied_ids so config-time and runtime
+    share one id-assembly path."""
+    counts = [c for c in axis_counts if c]
+    if not counts:
+        return [""]
+    return ["_".join(str(i) for i in combo)
+            for combo in product(*[range(1, c + 1) for c in counts])]
+
+
+def _is_marker_key(key) -> bool:
+    """A substitution key with no digits is a content marker (e.g. "X"): fill
+    every template position equal to one of its chars from the source at the
+    same index. A key with digits is a position range ("11-19")."""
+    return isinstance(key, str) and key != "" and not any(c.isdigit() for c in key)
 
 
 class StitchSequences(BaseConfig):
@@ -84,7 +103,14 @@ echo "=== StitchSequences ready ==="
             substitutions: Position-to-position substitutions from equal-length sequences.
                 For each position in the selection, the residue at that position in the
                 substitution sequence replaces the residue at that position in the template.
-                - Keys: Position strings like "11-19" or "11-19+31-44"
+                - Keys: Position strings like "11-19" or "11-19+31-44", OR a *marker*
+                  key with no digits (e.g. "X"): fill every template position whose
+                  residue is one of the marker chars from the source at the same
+                  index. Use this to repair gap-marked sequences (e.g. the 'X'
+                  padding from a structure with missing residues) against a
+                  reference. A marked position the source can't fill (its residue
+                  is also a marker) is left as-is; the sequence is still kept and
+                  the unfilled positions are logged (not removed via missing).
                 - Values: DataStream/StandardizedOutput with sequences (must be same length as template)
             indels: Segment replacements where each contiguous segment is replaced.
                 For example, "6-7+9-10": "GP" replaces both segments 6-7 and 9-10 with "GP".
@@ -162,16 +188,25 @@ echo "=== StitchSequences ready ==="
             raise ValueError("template is required")
 
         for pos_range, options in self.substitutions.items():
-            if isinstance(pos_range, str):
+            if isinstance(pos_range, str) and not _is_marker_key(pos_range):
                 self._parse_position_range(pos_range)
             if options is None:
                 raise ValueError(f"Substitution options for '{pos_range}' cannot be None")
+            # An empty option list predicts an output but produces none at runtime.
+            if isinstance(options, list) and len(options) == 0:
+                raise ValueError(f"Substitution options for '{pos_range}' cannot be empty")
 
         for pos_range, options in self.indels.items():
+            if _is_marker_key(pos_range):
+                raise ValueError(
+                    f"Marker key {pos_range!r} is only supported for substitutions, not indels"
+                )
             if isinstance(pos_range, str):
                 self._parse_position_range(pos_range)
             if options is None:
                 raise ValueError(f"Indel options for '{pos_range}' cannot be None")
+            if isinstance(options, list) and len(options) == 0:
+                raise ValueError(f"Indel options for '{pos_range}' cannot be empty")
 
     def _parse_position_range(self, pos_range: str) -> List[int]:
         """Parse position range string into list of positions."""
@@ -197,7 +232,10 @@ echo "=== StitchSequences ready ==="
         # Process substitutions - keys can be strings or table references
         self.substitution_infos = {}
         for pos_key, options in self.substitutions.items():
-            if isinstance(pos_key, str):
+            if _is_marker_key(pos_key):
+                key_info = {"type": "marker", "markers": pos_key}
+                key_str = f"marker:{pos_key}"
+            elif isinstance(pos_key, str):
                 key_info = {"type": "fixed", "positions": pos_key}
                 key_str = pos_key
             elif hasattr(pos_key, 'path') and hasattr(pos_key, 'column'):
@@ -214,6 +252,10 @@ echo "=== StitchSequences ready ==="
         # Process indels - keys can be strings or table references
         self.indel_infos = {}
         for pos_key, options in self.indels.items():
+            if _is_marker_key(pos_key):
+                raise ValueError(
+                    f"Marker key {pos_key!r} is only supported for substitutions, not indels"
+                )
             if isinstance(pos_key, str):
                 key_info = {"type": "fixed", "positions": pos_key}
                 key_str = pos_key
@@ -458,96 +500,85 @@ fi
 
     def _predict_output_sequence_ids(self) -> List[str]:
         """Predict output sequence IDs based on matched template IDs."""
-        # Get template sequence IDs
+        # Get template sequence IDs. A raw-string template is loaded at runtime
+        # as {"seq_1": ...} (load_sequences_from_info), so its id is "seq_1" — and
+        # the raw path appends the suffix without stripping. Match that exactly.
         if isinstance(self.template, str):
-            template_ids = ["seq"]
-        elif isinstance(self.template, list):
-            template_ids = [f"seq_{i+1}" for i in range(len(self.template))]
+            template_ids = ["seq_1"]
         elif self.template_stream:
             template_ids = list(self.template_stream.ids) or ["seq"]
         else:
             template_ids = ["seq"]
 
-        # Check if all substitutions and indels are raw lists with fixed positions
+        # A raw operation is one whose value is a raw string or a list of raw
+        # strings — mirrors the runtime, where _extract_sequence_info tags both
+        # as type raw/raw_list and routes them to stitch_with_raw_operations
+        # (which emits {template_id}_<index>, count 1 for a bare string).
+        def _is_raw(v):
+            return isinstance(v, (str, list))
+
+        def _raw_count(v):
+            return len(v) if isinstance(v, list) else 1
+
         all_sub_positions_fixed = all(isinstance(k, str) for k in self.substitutions.keys())
-        all_subs_raw = all(isinstance(v, list) for v in self.substitutions.values())
+        all_subs_raw = all(_is_raw(v) for v in self.substitutions.values())
         all_indel_positions_fixed = all(isinstance(k, str) for k in self.indels.keys())
-        all_indels_raw = all(isinstance(v, list) for v in self.indels.values())
+        all_indels_raw = all(_is_raw(v) for v in self.indels.values())
 
         if all_sub_positions_fixed and all_subs_raw and all_indel_positions_fixed and all_indels_raw:
-            # Raw operations with fixed positions - Cartesian product applies
-            substitution_counts = [len(v) for v in self.substitutions.values()]
-            indel_counts = [len(v) for v in self.indels.values()]
-            all_counts = substitution_counts + indel_counts
-
-            predicted_ids = []
-            for template_id in template_ids:
-                match = re.match(r'^(.+)_\d+$', template_id)
-                base_id = match.group(1) if match else template_id
-
-                if all_counts:
-                    index_ranges = [range(1, count + 1) for count in all_counts]
-                    for combo in product(*index_ranges):
-                        suffix = "_".join(str(idx) for idx in combo)
-                        predicted_ids.append(f"{base_id}_{suffix}")
-                else:
-                    predicted_ids.append(base_id)
-            return predicted_ids
+            # Raw operations with fixed positions - Cartesian product applies.
+            # Build the flat suffix list, then delegate id assembly to the shared
+            # generate_multiplied_ids (appends verbatim — same path as runtime).
+            counts = [_raw_count(v) for v in self.substitutions.values()]
+            counts += [_raw_count(v) for v in self.indels.values()]
+            suffixes = _raw_suffixes(counts)
+            if suffixes == [""]:
+                return list(template_ids)
+            output_ids, _ = generate_multiplied_ids(template_ids, suffixes)
+            return output_ids
         else:
             # Matched sequences from tool outputs - match IDs using id_map pattern
             return self._predict_matched_sequence_ids(template_ids)
 
     def _predict_matched_sequence_ids(self, template_ids: List[str]) -> List[str]:
-        """Predict output IDs when substitutions/indels come from tool outputs."""
-        # Get sequence_ids from each substitution source
-        sub_ids_list = []
-        for options in self.substitutions.values():
-            if isinstance(options, StandardizedOutput):
-                sub_ids_list.append(list(options.streams.sequences.ids) if options.streams.sequences else [])
-            elif isinstance(options, DataStream):
-                sub_ids_list.append(list(options.ids) or [])
+        """Predict output IDs when substitutions/indels come from tool outputs.
 
-        # Get sequence_ids from each indel source
-        indel_ids_list = []
-        for options in self.indels.values():
+        Mirror the runtime's per-axis id matching exactly: group_sequences_by_template
+        uses closest_siblings_only=True for normal substitutions/indels and False
+        only for marker substitutions. Using a different flag here over-counts
+        (e.g. includes a distant Panda_2_1) and leaves phantom predicted ids.
+        """
+        def _source_ids(options):
             if isinstance(options, StandardizedOutput):
-                indel_ids_list.append(list(options.streams.sequences.ids) if options.streams.sequences else [])
-            elif isinstance(options, DataStream):
-                indel_ids_list.append(list(options.ids) or [])
+                return list(options.streams.sequences.ids) if options.streams.sequences else []
+            if isinstance(options, DataStream):
+                return list(options.ids) or []
+            return []
+
+        # (source_ids, siblings_only) per axis — siblings_only is False only for
+        # marker substitution keys, matching the runtime grouping.
+        axes = [(_source_ids(v), not _is_marker_key(k)) for k, v in self.substitutions.items()]
+        axes += [(_source_ids(v), True) for v in self.indels.values()]
 
         predicted_ids = []
         for template_id in template_ids:
-            # Find matching IDs from each substitution source using get_mapped_ids
-            sub_matched = []
-            for sub_ids in sub_ids_list:
-                matches = get_mapped_ids([template_id], sub_ids, unique=False)
-                matched = matches.get(template_id, [])
-                sub_matched.append(matched)
+            matched_per_axis = []
+            for src_ids, siblings_only in axes:
+                m = get_mapped_ids([template_id], src_ids, unique=False,
+                                   closest_siblings_only=siblings_only)
+                matched_per_axis.append(m.get(template_id, []))
 
-            # Find matching IDs from each indel source using get_mapped_ids
-            indel_matched = []
-            for indel_ids in indel_ids_list:
-                matches = get_mapped_ids([template_id], indel_ids, unique=False)
-                matched = matches.get(template_id, [])
-                indel_matched.append(matched)
-
-            # Combine all matched ID lists
-            all_matched = sub_matched + indel_matched
-
-            # Check if any source has no matches
-            if any(len(m) == 0 for m in all_matched):
-                # Skip this template - no valid combinations possible
-                continue
-
-            if not all_matched:
+            if not matched_per_axis:
                 predicted_ids.append(template_id)
                 continue
+            # Any axis with no match -> no valid combination for this template.
+            if any(len(m) == 0 for m in matched_per_axis):
+                continue
 
-            # Generate cartesian product of indices (1-based)
-            index_ranges = [range(len(m)) for m in all_matched]
-            for index_combo in product(*index_ranges):
-                suffix = "_".join(str(idx + 1) for idx in index_combo)
-                predicted_ids.append(f"{template_id}_{suffix}")
+            # Cartesian product of 1-based axis indices, ids via the shared helper.
+            suffixes = _raw_suffixes([len(m) for m in matched_per_axis])
+            output_ids, _ = generate_multiplied_ids([template_id], suffixes)
+            predicted_ids.extend(output_ids)
 
         return predicted_ids
 

@@ -84,6 +84,17 @@ def main():
         print("ERROR: ligand source CSV has no 'id' column", file=sys.stderr)
         sys.exit(1)
 
+    # An empty source means the upstream Ligand produced no rows — e.g. RDKit
+    # failed to parse the SMILES, so the molecule was dropped. Fail here with
+    # that cause rather than the cryptic pandas error an empty df.apply raises.
+    if df.empty:
+        print(
+            "ERROR: ligand source has no rows — the upstream Ligand emitted an "
+            "empty compounds stream (commonly an unparseable SMILES that RDKit "
+            "dropped). Check the Ligand step's log for a 'Could not parse SMILES' "
+            "error.", file=sys.stderr)
+        sys.exit(1)
+
     out = pd.DataFrame()
     out["id"] = df["id"]
     out["format"] = df["format"] if "format" in df.columns else ""

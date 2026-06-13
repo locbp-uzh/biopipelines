@@ -18,6 +18,26 @@ A Python framework for automated computational protein design workflows that can
   </tr>
 </table>
 
+## Quick Start (LLM)
+
+**1. Install [Git](https://git-scm.com/downloads).**
+
+**2. Clone the repository.**
+
+```bash
+git clone https://github.com/locbp-uzh/biopipelines
+cd biopipelines
+```
+
+**3. Open an AI coding assistant inside the repo.** Install a coding agent like [Claude Code](https://claude.com/claude-code) or [Codex](https://openai.com/codex/). Start it from the repository root. The framework provides work contracts under the `llm/` folder: `pipelines.md` (writing workflows), `development.md` (extending the framework), `cluster.md` (automated runs on HPCs), `colab.md` (automated runs on Colab).
+
+```bash
+claude #or: codex
+> Read and follow `llm/pipelines.md`.
+```
+
+For framework development please fork the repository. For manual editing we recommend a visual IDE with autocompletion like [VS Code](http://code.visualstudio.com/).
+
 ## Google Colab Notebooks for example pipelines
 
 The **Open in Colab** badge launches the clean notebook to run yourself; the **preview** badge opens a pre-executed copy (outputs and plots already rendered).
@@ -60,6 +80,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>BoltzGen</b><sup><i>a</i></sup><br>Design protein, peptide, or nanobody binders against a chosen target.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/jwohlwend/boltz"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2025.06.14.659707v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+</tr>
+<tr>
+  <td><sub><b>HBDesigner</b><br>Design hydrogen-bond networks onto a protein backbone.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/Kuhlman-Lab/HBDesigner"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://rosettacommons.github.io/HBDesigner/"><img src="https://img.shields.io/badge/-docs-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="docs"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"> <img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"><sup><i>c</i></sup></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
@@ -538,7 +564,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
 
 </table>
 
-<sub><sup><i><b>a</b></i></sup> Only protein-small molecule protocol implemented <sup><i><b>b</b></i></sup> RBSDesigner2 outperforms RBSDesigner, but is not publicly available; shown for illustrative purposes. <sup><i><b>k</b></i></sup> On HPC, runs via the apptainer container. &nbsp; <sup><i><b>p</b></i></sup> On Colab requires a high-RAM runtime: the P2Rank JVM misreads the default runtime's cgroup memory limit and crashes the kernel. &nbsp; <sup><i><b>q</b></i></sup> On Colab runs on CPU; slower for large/many inputs. &nbsp; <sup><i><b>v</b></i></sup> Generates ESM-2 3B embeddings internally (~11 GB weights, downloaded lazily on first run); needs a GPU runtime — impractically slow on CPU. &nbsp; <sup><i><b>n</b></i></sup> On Colab needs a high-RAM runtime: the openfold attention + complex sampling OOM the free T4's 12 GB system RAM; verified end-to-end on an A100 high-RAM runtime.</sub>
+<sub><sup><i><b>a</b></i></sup> Only protein-small molecule protocol implemented <sup><i><b>b</b></i></sup> RBSDesigner2 outperforms RBSDesigner, but is not publicly available; shown for illustrative purposes. <sup><i><b>c</b></i></sup> A CPU environment (`HBDesigner.install(device="cpu")`) is provided, but only the GPU path has been tested; CPU inference is upstream-marked "not recommended" and is slow. <sup><i><b>k</b></i></sup> On HPC, runs via the apptainer container. &nbsp; <sup><i><b>p</b></i></sup> On Colab requires a high-RAM runtime: the P2Rank JVM misreads the default runtime's cgroup memory limit and crashes the kernel. &nbsp; <sup><i><b>q</b></i></sup> On Colab runs on CPU; slower for large/many inputs. &nbsp; <sup><i><b>v</b></i></sup> Generates ESM-2 3B embeddings internally (~11 GB weights, downloaded lazily on first run); needs a GPU runtime — impractically slow on CPU. &nbsp; <sup><i><b>n</b></i></sup> On Colab needs a high-RAM runtime: the openfold attention + complex sampling OOM the free T4's 12 GB system RAM; verified end-to-end on an A100 high-RAM runtime.</sub>
 
 
 ## Documentation
