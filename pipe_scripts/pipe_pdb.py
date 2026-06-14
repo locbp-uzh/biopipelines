@@ -1634,6 +1634,23 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         upstream_files = raw_upstream_files
     upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)  # Legacy, ignored
 
+    # Resolve upstream ids to real files via the map table's file_path column (table-only stages
+    # declare an <id>.pdb template that points at their own empty dir; the truth is in the map).
+    upstream_id_to_file = {}
+    _map = config_data.get('upstream_map_table')
+    if from_upstream and _map and os.path.exists(_map):
+        try:
+            import pandas as _pd
+            _df = _pd.read_csv(_map)
+            if 'id' in _df.columns and 'file_path' in _df.columns:
+                upstream_id_to_file = {
+                    str(r['id']): str(r['file_path'])
+                    for _, r in _df.iterrows()
+                    if str(r['file_path']) and str(r['file_path']) != 'nan'
+                }
+        except Exception as e:
+            print(f"  Warning: could not read upstream map table ({e}); falling back to file-list resolution")
+
     # Ids an upstream filter already dropped — their files are legitimately
     # absent and must NOT count as fetch failures (would otherwise hard-exit).
     # PDB owns tables/missing.csv: rows are re-keyed to THIS tool's id
@@ -1711,11 +1728,12 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
             continue
 
         if from_upstream:
-            # Resolve file from upstream tool output
-            if len(upstream_files) == len(pdb_ids):
-                source_path = upstream_files[i - 1]
-            else:
-                source_path = resolve_upstream_file(pdb_id, upstream_files, upstream_wildcards)
+            source_path = upstream_id_to_file.get(pdb_id)
+            if not source_path:
+                if len(upstream_files) == len(pdb_ids):
+                    source_path = upstream_files[i - 1]
+                else:
+                    source_path = resolve_upstream_file(pdb_id, upstream_files, upstream_wildcards)
 
             if source_path and os.path.exists(source_path):
                 # Detect source format from extension
