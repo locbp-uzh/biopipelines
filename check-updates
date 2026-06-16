@@ -49,6 +49,10 @@ fi
 # only try once today rather than on every submit.
 echo "$TODAY" > "$SENTINEL" 2>/dev/null || true
 
+# Printed only on the once-per-day run that actually reaches the network call,
+# so the up-to-5s ls-remote does not look like an unexplained stall.
+echo "Checking for BioPipelines updates..."
+
 # Ask GitHub for the release branch's HEAD sha without configuring a remote or
 # fetching. A non-zero exit, timeout, or empty result is treated as "can't
 # tell" and stays silent.

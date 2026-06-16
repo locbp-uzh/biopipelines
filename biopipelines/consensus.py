@@ -160,11 +160,20 @@ echo "=== Consensus ready ==="
         if isinstance(obj, DataStream):
             return obj
         if isinstance(obj, StandardizedOutput):
-            for name in ("sequences", "structures", "compounds"):
-                ds = obj.streams.get(name)
-                if ds is not None and len(ds) > 0:
-                    return ds
-            raise ValueError("groups: no non-empty sequences/structures/compounds stream found")
+            candidates = [ds for _, ds in obj.streams.items()
+                          if ds is not None and len(ds) > 0]
+            if not candidates:
+                raise ValueError("groups: no non-empty stream found in output")
+            # The group ids define the partition; streams sharing one id set
+            # yield the same grouping, so the pick is harmless. Differing id
+            # sets would change the result, so refuse to guess.
+            if len({tuple(ds.ids) for ds in candidates}) > 1:
+                raise ValueError(
+                    f"groups: output streams disagree on ids "
+                    f"({[(c.name, len(c)) for c in candidates]}); pass an explicit "
+                    f"stream (e.g. groups=tool.streams.structures)"
+                )
+            return candidates[0]
         raise ValueError(f"groups must be a DataStream or StandardizedOutput, got {type(obj)}")
 
     def validate_params(self):

@@ -177,18 +177,22 @@ echo "=== Scripting ready ==="
         return "stream", self.configuration_path(f"input_{name}.json"), stream
 
     def _pick_stream(self, name, output: StandardizedOutput) -> DataStream:
-        """Pick the single non-empty stream of a StandardizedOutput input."""
+        """Pick a non-empty stream of a StandardizedOutput input.
+
+        When the input name matches a non-empty stream name, that stream wins — the key disambiguates. Otherwise fall back to the single non-empty stream, erroring only when the choice is genuinely ambiguous."""
         candidates = []
-        for stream_name in ("structures", "sequences", "compounds", "msas", "images"):
-            stream = getattr(output.streams, stream_name, None)
+        for stream_name, stream in output.streams.items():
             if stream is not None and len(stream) > 0:
+                if stream_name == name:
+                    return stream
                 candidates.append(stream)
         if not candidates:
             raise ValueError(f"input '{name}': StandardizedOutput has no non-empty stream")
         if len(candidates) > 1:
             raise ValueError(
                 f"input '{name}': StandardizedOutput carries multiple streams "
-                f"({[c.name for c in candidates]}); pass an explicit stream "
+                f"({[c.name for c in candidates]}); name the input after the "
+                f"desired stream, or pass an explicit stream "
                 f"(e.g. tool.streams.structures)"
             )
         return candidates[0]
@@ -215,6 +219,11 @@ echo "=== Scripting ready ==="
             raise ValueError(f"configuration() must return a dict, got {type(declared).__name__}")
         self._declared = declared
         return declared
+
+    def _upstream_sources(self):
+        """StandardizedOutput inputs — the only ones that can carry a `missing` table."""
+        return [obj for obj in self.inputs_raw.values()
+                if isinstance(obj, StandardizedOutput)]
 
     def generate_script(self, script_path: str) -> str:
         declared = self._declare_outputs()
@@ -243,6 +252,10 @@ python "{self.runner_py}" \\
     --inputs "{self.inputs_json}" \\
     --outputs "{self.outputs_json}"
 """
+        # Excuse upstream-filtered ids: merge any upstream `missing` manifests
+        # into this tool's own tables/missing.csv so the completion check treats
+        # those ids' absent outputs as expected, not failures.
+        script_content += self.generate_missing_propagation(*self._upstream_sources())
         script_content += self.generate_completion_check_footer()
         return script_content
 
@@ -293,6 +306,11 @@ python "{self.runner_py}" \\
                     format=val.format,
                 )
             elif isinstance(val, _Table):
+                if key == "missing":
+                    raise ValueError(
+                        "configuration() declared a table named 'missing', which is "
+                        "reserved by the framework for upstream-filtered id propagation"
+                    )
                 result["tables"][key] = TableInfo(
                     name=key,
                     path=self.table_path(key),
@@ -304,4 +322,10 @@ python "{self.runner_py}" \\
                     f"configuration() returned {type(val).__name__} for '{key}'; "
                     f"expected Stream or Table"
                 )
+
+        # Excuse upstream-filtered ids: declare + own a `missing` table whenever
+        # an upstream input carries one, so the completion check treats those
+        # ids' absent outputs as expected. generate_missing_propagation fills it.
+        if self._collect_upstream_missing_paths(*self._upstream_sources()):
+            result["tables"]["missing"] = self.missing_table_info()
         return result

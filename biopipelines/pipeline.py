@@ -1453,9 +1453,9 @@ umask 002
                 from .datastream import DataStream
                 from .base_config import TableInfo
 
-                for key in ['structures', 'sequences', 'compounds', 'msas']:
-                    if key in output_structure and isinstance(output_structure[key], DataStream):
-                        output_structure[key] = output_structure[key].to_dict()
+                for key, value in list(output_structure.items()):
+                    if isinstance(value, DataStream):
+                        output_structure[key] = value.to_dict()
 
                 # Convert TableInfo objects to dictionaries for JSON serialization
                 if 'tables' in output_structure:
