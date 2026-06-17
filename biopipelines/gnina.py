@@ -612,8 +612,8 @@ fi
         if self.autobox_ligand_stream is None:
             return ""
 
-        return f"""# Resolve autobox ligand file at runtime
-AUTOBOX_LIGAND_ID={Resolve.stream_ids(self.autobox_ds_json, index=0)}
+        return f"""# Resolve autobox ligand file at runtime (valid_set skips filtered ids)
+AUTOBOX_LIGAND_ID={Resolve.stream_ids(self.autobox_ds_json, index=0, valid_set=True)}
 AUTOBOX_LIGAND={Resolve.stream_item(self.autobox_ds_json, '$AUTOBOX_LIGAND_ID')}
 echo "Resolved autobox ligand: $AUTOBOX_LIGAND"
 jq --arg path "$AUTOBOX_LIGAND" '.box.autobox_ligand = $path' "{self.config_json}" > "{self.config_json}.tmp" && mv "{self.config_json}.tmp" "{self.config_json}"

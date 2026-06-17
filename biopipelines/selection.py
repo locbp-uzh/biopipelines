@@ -57,13 +57,15 @@ class SelectionOp:
     def __init__(self, op_type: str, refs=None, value=None,
                  stream: Optional[DataStream] = None,
                  filter_expr: Optional[str] = None,
-                 direction: Optional[str] = None):
+                 direction: Optional[str] = None,
+                 plane: Optional[Dict[str, str]] = None):
         self.op_type = op_type      # "add" | "subtract" | "expand" | "shrink" | "shift" | "invert"
         self.refs = refs or []      # list of TableReference (for table-based add/subtract)
         self.value = value          # int (for expand/shrink/shift) or None
         self.stream = stream        # DataStream (for stream-based add/subtract)
         self.filter_expr = filter_expr    # e.g. "propensity>0.5", "rmsf<=0.3"
         self.direction = direction  # "n" | "c" | "nc" | None (for expand/shrink)
+        self.plane = plane          # {anchor, normal_from, normal_to, keep} for plane_side
 
     def to_dict(self) -> Dict[str, Any]:
         d = {"op": self.op_type}
@@ -83,9 +85,11 @@ class SelectionOp:
             d["filter_expr"] = self.filter_expr
         if self.direction is not None:
             d["direction"] = self.direction
+        if self.plane is not None:
+            d["plane"] = self.plane
         return d
 
-    PDB_AWARE_OPS = {"expand", "shrink", "shift", "invert",
+    PDB_AWARE_OPS = {"expand", "shrink", "shift", "invert", "plane_side",
                      "n_terminus", "c_terminus", "termini", "all_residues", "gaps"}
 
 
@@ -111,6 +115,7 @@ class Selection(BaseConfig):
         - ``Selection.open(n, direction="nc")``    — shrink then expand (removes protrusions <= *n*)
         - ``Selection.shift(n)``        — PDB-aware: shift intervals by *n* residues
         - ``Selection.invert()``        — PDB-aware: replace with complement
+        - ``Selection.plane_side(anchor, normal_from, normal_to, keep)`` — PDB-aware: keep residues on one side of a plane (through ``anchor`` atom, normal ``normal_from``→``normal_to``)
         - ``Selection.n_terminus(n=1)`` — PDB-aware: select first *n* residues of each chain
         - ``Selection.c_terminus(n=1)`` — PDB-aware: select last *n* residues of each chain
         - ``Selection.termini(n=1)``    — PDB-aware: select first and last *n* residues of each chain
@@ -272,6 +277,36 @@ class Selection(BaseConfig):
     @staticmethod
     def invert() -> SelectionOp:
         return SelectionOp("invert")
+
+    @staticmethod
+    def plane_side(normal_from: str, normal_to: str, anchor: str = "midpoint",
+                   keep: str = "positive") -> SelectionOp:
+        """Keep only residues on one side of a plane (PDB-aware).
+
+        The plane passes through the ``anchor``; its normal points from the
+        ``normal_from`` atom toward the ``normal_to`` atom. A residue is on the
+        ``"positive"`` side if its Cα·normal (relative to the anchor) is > 0, i.e.
+        toward ``normal_to``; ``"negative"`` keeps the other half-space.
+
+        ``normal_from``/``normal_to`` are selection-grammar atom references each
+        resolving to ONE atom (e.g. ``"LIG.B36"``, ``"LIG.B37"``, ``"A81.CA"``).
+        ``anchor`` is such a ref OR the default ``"midpoint"`` (midpoint of
+        from/to) — robust when no central atom is named (e.g. a dropped Si).
+
+        Bisect a pocket along a symmetric-ligand axis — keep the buried-warhead
+        side, drop the exposed-warhead side::
+
+            Selection(pocket.tables.selections.within,
+                      Selection.plane_side("LIG.B36", "LIG.B37"),  # keep B37 side
+                      structures=poses)
+        """
+        if keep not in ("positive", "negative"):
+            raise ValueError(f"keep must be 'positive' or 'negative', got '{keep}'")
+        return SelectionOp("plane_side", plane={
+            "anchor": anchor, "normal_from": normal_from,
+            "normal_to": normal_to, "keep": keep})
+
+    # plane_side default anchor "midpoint" needs no central atom (Si may be dropped).
 
     @staticmethod
     def n_terminus(n: int = 1) -> SelectionOp:

@@ -35,11 +35,57 @@ from typing import List, Tuple, Set
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
 from biopipelines.sele_utils import sele_to_list, list_to_sele
-from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES
+from biopipelines.pdb_parser import parse_pdb_file, resolve_selection, STANDARD_RESIDUES
 from biopipelines.id_map_utils import get_mapped_ids
 
 
 # ── PDB-aware helpers ──
+
+def plane_side_selection(residues, plane, pdb_path):
+    """Keep residues whose CA lies on the chosen side of a plane.
+
+    Plane passes through the ``anchor`` atom; normal points ``normal_from`` →
+    ``normal_to``. ``keep="positive"`` keeps residues toward ``normal_to``.
+    ``normal_from``/``normal_to`` are selection-grammar atom refs; ``anchor`` is
+    an atom ref or the literal ``"midpoint"`` (the midpoint of from/to — robust
+    when no central atom is named, e.g. a dropped silicon).
+    """
+    atoms = parse_pdb_file(pdb_path)
+
+    def one_atom(ref):
+        sel = resolve_selection(ref, atoms)
+        if not sel:
+            raise ValueError(f"plane_side: reference {ref!r} selected no atoms")
+        if len(sel) != 1:
+            raise ValueError(
+                f"plane_side: reference {ref!r} selected {len(sel)} atoms, expected "
+                "exactly one (a broad residue/ligand ref makes the plane depend on "
+                "atom order). Use a single-atom ref like 'LIG.SI81' or 'A141.CB'."
+            )
+        a = sel[0]
+        return (a.x, a.y, a.z)
+
+    fx, fy, fz = one_atom(plane["normal_from"])
+    tx, ty, tz = one_atom(plane["normal_to"])
+    if plane["anchor"] == "midpoint":
+        ax, ay, az = ((fx + tx) / 2, (fy + ty) / 2, (fz + tz) / 2)
+    else:
+        ax, ay, az = one_atom(plane["anchor"])
+    nx, ny, nz = (tx - fx, ty - fy, tz - fz)   # normal: from -> to
+
+    # CA coordinate per (chain, resnum)
+    ca = {(a.chain, a.res_num): (a.x, a.y, a.z)
+          for a in atoms if a.atom_name.strip() == "CA"}
+    keep_positive = plane.get("keep", "positive") == "positive"
+    kept = set()
+    for (chain, rnum) in residues:
+        c = ca.get((chain, rnum))
+        if c is None:
+            continue
+        dot = (c[0] - ax) * nx + (c[1] - ay) * ny + (c[2] - az) * nz
+        if (dot > 0) == keep_positive:
+            kept.add((chain, rnum))
+    return kept
 
 def get_protein_residues(pdb_path: str) -> Set[Tuple[str, int]]:
     """Get set of (chain, resnum) tuples from a PDB/CIF file."""
@@ -465,6 +511,19 @@ def process_selections(config_path: str):
                     current = shift_selection(current, n, valid)
                 elif op_type == "invert":
                     current = invert_selection(current, valid)
+
+            elif op_type == "plane_side":
+                struct_id = id_to_struct.get(design_id) or design_id
+                pdb_path = struct_map.get(struct_id)
+                if not pdb_path or not os.path.exists(pdb_path):
+                    print(f"Warning: No PDB found for '{design_id}', skipping plane_side")
+                    continue
+                if pdb_path not in pdb_residue_cache:
+                    pdb_residue_cache[pdb_path] = get_protein_residues(pdb_path)
+                # Remap chainless residues (e.g. "10-20" -> ("", 10)) to their real
+                # chain before the CA lookup, like the other PDB-aware ops.
+                current = remap_chainless_residues(current, pdb_residue_cache[pdb_path])
+                current = plane_side_selection(current, op["plane"], pdb_path)
 
             elif op_type in ("n_terminus", "c_terminus", "termini", "all_residues", "gaps"):
                 pdb_path = struct_map.get(design_id)

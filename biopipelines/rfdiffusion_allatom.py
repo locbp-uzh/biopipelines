@@ -759,7 +759,7 @@ class RFDAA_PrepareLigand(BaseConfig):
         script_content += "# RFDAA_PrepareLigand execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += f"""LIGAND_ID={Resolve.stream_ids(self.ligand_ds_json, index=0)}
+        script_content += f"""LIGAND_ID={Resolve.stream_ids(self.ligand_ds_json, index=0, valid_set=True)}
 LIGAND_FILE={Resolve.stream_item(self.ligand_ds_json, '$LIGAND_ID')}
 
 echo "Preparing ligand structure for RFdiffusion-AllAtom"

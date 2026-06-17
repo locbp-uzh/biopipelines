@@ -249,7 +249,7 @@ if [ -z "$(jq -r '.target_alignment' "{self.config_file}")" ]; then
     jq --arg v "not resn $SMP_LIGAND" '.target_alignment = $v' "{self.config_file}" > "{self.config_file}.tmp" && mv "{self.config_file}.tmp" "{self.config_file}"
 fi"""
 
-        return f"""REFERENCE_ID={Resolve.stream_ids(self.reference_ds_json, index=0)}
+        return f"""REFERENCE_ID={Resolve.stream_ids(self.reference_ds_json, index=0, valid_set=True)}
 REFERENCE_PDB={Resolve.stream_item(self.reference_ds_json, '$REFERENCE_ID')}
 {resolve_blocks}
 echo "Running pose distance analysis"

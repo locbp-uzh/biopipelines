@@ -294,10 +294,9 @@ fi
         fixed_param = self.fixed if self.fixed else "-"
         designed_param = self.redesigned if self.redesigned else "-"
 
-        # parse_multiple_chains.py wants a folder, not a file list — pick the
-        # first expanded ID's file and take its dirname. The index=0 form is
-        # the lazy-safe variant documented in developer_manual.md.
-        return f"""FIRST_ID={Resolve.stream_ids(self.structures_json, index=0)}
+        # parse_multiple_chains.py wants a folder — take the dirname of the first
+        # PRESENT file's id. valid_set skips filtered-out ids whose file is absent.
+        return f"""FIRST_ID={Resolve.stream_ids(self.structures_json, index=0, valid_set=True)}
 FIRST_FILE={Resolve.stream_item(self.structures_json, "$FIRST_ID")}
 INPUT_DIR=$(dirname "$FIRST_FILE")
 

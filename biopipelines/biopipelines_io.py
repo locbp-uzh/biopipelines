@@ -880,7 +880,7 @@ class Resolve:
         return f'$(resolve_stream_item "{ds_json}" "{item_id}")'
 
     @staticmethod
-    def stream_ids(ds_json: str, index: Optional[int] = None) -> str:
+    def stream_ids(ds_json: str, index: Optional[int] = None, valid_set: bool = False) -> str:
         """Bash expression that prints expanded IDs from a DataStream JSON, one per line.
 
         Handles lazy patterns by matching against map_table at runtime.
@@ -888,13 +888,19 @@ class Resolve:
         Args:
             ds_json: Path to the serialized DataStream JSON file
             index: If provided, return only the ID at this position (0-based).
+            valid_set: Restrict to ids whose file is present on disk. A filtered
+                Pool/Panda declares every original id but materializes only the
+                survivors, so ``index=0`` without this can return an absent id whose
+                file then fails to resolve. Use ``index=0, valid_set=True`` to sample
+                a real id.
         """
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "..", "pipe_scripts", "resolve_stream_ids.py")
+        flag = " --valid-set" if valid_set else ""
         if index is not None:
             n = index + 1  # head -n is 1-based
-            return f'$(python "{script}" "{ds_json}" | head -n{n} | tail -n1)'
-        return f'$(python "{script}" "{ds_json}")'
+            return f'$(python "{script}" "{ds_json}"{flag} | head -n{n} | tail -n1)'
+        return f'$(python "{script}" "{ds_json}"{flag})'
 
     @staticmethod
     def table_column(reference, item_id: str, env_name: str = "biopipelines") -> str:
