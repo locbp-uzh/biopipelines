@@ -333,10 +333,19 @@ def test_config_rejects_unsafe_env_manager(tmp_path, monkeypatch):
 
 def test_config_rejects_unknown_scheduler(tmp_path, monkeypatch):
     def mutate(cfg):
-        cfg["machine"]["scheduler"]["name"] = "pbs"
+        cfg["machine"]["scheduler"]["name"] = "cobalt"
     path = _write_config(tmp_path, mutate)
     with pytest.raises(ValueError, match="machine.scheduler.name"):
         _load_with_config_path(monkeypatch, path)
+
+
+@pytest.mark.parametrize("name", ["slurm", "lsf", "pbs", "colab", "none"])
+def test_config_accepts_known_schedulers(tmp_path, monkeypatch, name):
+    def mutate(cfg):
+        cfg["machine"]["scheduler"]["name"] = name
+    path = _write_config(tmp_path, mutate)
+    cm = _load_with_config_path(monkeypatch, path)
+    assert cm.get_scheduler() == name
 
 
 def test_config_accepts_safe_paths_with_spaces_and_placeholders(

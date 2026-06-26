@@ -21,13 +21,14 @@ machine:
     init:
     - 'eval "$(mamba shell hook --shell bash)"'
 
-  # Scheduler. `name` selects "slurm", "colab", or "none". `init` is a
-  # list of raw bash lines emitted at the very top of every batch script,
-  # before any GPU setup, module load, or per-tool activation — use it
-  # to bring host primitives into scope (e.g. source the lmod profile so
-  # `module` is available in non-login SLURM shells). `modules` is the
-  # list of environment modules to `module load` in batch scripts (only
-  # meaningful when name="slurm" and the cluster uses lmod / Tcl modules).
+  # Scheduler. `name` selects "slurm", "lsf", "pbs", "colab", or "none".
+  # `init` is a list of raw bash lines emitted at the very top of every
+  # batch script, before any GPU setup, module load, or per-tool
+  # activation — use it to bring host primitives into scope (e.g. source
+  # the lmod profile so `module` is available in non-login batch shells).
+  # `modules` is the list of environment modules to `module load` in batch
+  # scripts (meaningful for any batch scheduler that uses lmod / Tcl
+  # modules). `bp-config auto` detects the scheduler from sinfo/bsub/qsub.
   scheduler:
     name: "slurm"
     init:

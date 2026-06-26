@@ -24,6 +24,7 @@ from datetime import datetime
 from .folders import FolderManager
 from .config_manager import ConfigManager
 from ._layout import INTERNAL_FOLDER
+from .schedulers import get_backend, BATCH_SCHEDULERS
 try:
     from .base_config import BaseConfig, ToolOutput
     from .combinatorics import Bundle, Each
@@ -63,16 +64,8 @@ def _validate_identifier(field: str, value: str) -> None:
 # The canonical definition lives in base_config alongside _validate_freeform_string.
 from .base_config import _escape_for_double_quotes  # noqa: F401
 
-
-def _validate_sbatch_value(field: str, value: Any) -> None:
-    """Reject values that would inject extra lines or carriage"""
-    if value is None:
-        return
-    s = value if isinstance(value, str) else str(value)
-    if "\n" in s or "\r" in s:
-        raise ValueError(
-            f"{field!r}={value!r} contains a newline or carriage return. "
-        )
+# Directive-injection guard; canonical definition lives in schedulers.py.
+from .schedulers import _validate_directive_value
 
 
 # Module-level context variable to track active pipeline for auto-registration
@@ -86,7 +79,7 @@ class Pipeline:
     for automated protein modeling workflows.
     """
     
-    def __init__(self, project: str, job: str, description: str="Description missing", on_the_fly: Optional[bool]=None, local_output: Optional[bool]=None, config: Optional[str]=None, debug: bool=False):
+    def __init__(self, project: str, job: str, description: str="Description missing", on_the_fly: Optional[bool]=None, local_output: Optional[bool]=None, config: Optional[str]=None, debug: bool=False, otf: Optional[bool]=None):
         """
         Initialize a new pipeline instance.
 
@@ -99,6 +92,7 @@ class Pipeline:
                         with plain Python. Skips SLURM submission on exit.
                         If None (default), auto-detects: True when running in a Jupyter
                         notebook (.ipynb), False otherwise.
+            otf: Alias for on_the_fly. If set (not None), takes precedence over on_the_fly.
             local_output: If True, write output to ./outputs/ (current working
                         directory) instead of the config-defined path.
                         If None (default), follows on_the_fly.
@@ -126,6 +120,9 @@ class Pipeline:
         self.job = job
         self.description = description
         self.debug = bool(debug)
+
+        if otf is not None:
+            on_the_fly = otf
 
         if on_the_fly is None:
             if os.environ.get("BIOPIPELINES_OTF") == "1":
@@ -166,7 +163,7 @@ class Pipeline:
 
         # Script generation
         self.pipeline_script = ""
-        self.slurm_script = ""
+        self.job_script = ""
         self.scripts_generated = False
 
         # Batch and resource management
@@ -179,16 +176,29 @@ class Pipeline:
         # context manager populates this with multi-parent or shared-parent
         # values to express fan-out / fan-in.
         self.batch_parents = []  # type: List[List[int]]
+        # Parallel list of "after" (started, not afterok) parents per batch.
+        # Populated only by a Service block: the batch after the block waits
+        # for the service daemon to START, not finish (afterok would mean
+        # "wait for the long-running server to exit"). Emitted as a separate
+        # `after:` term in the same --dependency line.
+        self.batch_after_parents = []  # type: List[List[int]]
 
         # Parallel-block state. Set by `with Parallel():`; consumed by the
         # next Resources() call inside (sibling-with-shared-parent) and the
         # next Resources() call after the block exits (fan-in).
         self._parallel_anchor = None         # type: Optional[int]
         self._parallel_siblings = []         # type: List[int]
+        self._parallel_after_anchor = None   # type: Optional[int]
         self._pending_post_parents = None    # type: Optional[List[int]]
 
+        # Service-block state. Set on `with Service():` exit to the daemon's
+        # batch index; consumed by the NEXT Resources() call, which records it
+        # as an `after:` parent so that batch starts once the daemon is running.
+        self._service_anchor = None          # type: Optional[int]
+        self._pending_after_parent = None    # type: Optional[int]
+
         # External job dependencies
-        self.external_dependencies = []  # List of external SLURM job IDs to depend on
+        self.external_dependencies = []  # List of external scheduler job IDs to depend on
 
         # Context manager state
         self._explicit_save_called = False  # Track if Save() was explicitly called
@@ -244,11 +254,11 @@ class Pipeline:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
-        Exit context manager - auto-submit to SLURM or keep context alive.
+        Exit context manager - generate job scripts or keep context alive.
 
-        In normal mode: clears the active pipeline and auto-submits to SLURM.
-        In on_the_fly mode: keeps the pipeline active so subsequent notebook
-        cells can continue adding tools.
+        In normal mode: clears the active pipeline and generates the batch
+        job scripts. In on_the_fly mode: keeps the pipeline active so
+        subsequent notebook cells can continue adding tools.
 
         Args:
             exc_type: Exception type if an exception occurred
@@ -263,9 +273,9 @@ class Pipeline:
             return False
 
         try:
-            # Only auto-submit if no exception and Save() wasn't explicitly called
+            # Only generate scripts if no exception and Save() wasn't explicitly called
             if exc_type is None and not self._explicit_save_called:
-                self.slurm()
+                self.generate_job_scripts()
         finally:
             # Clear the active pipeline context
             _active_pipeline.set(None)
@@ -389,14 +399,14 @@ class Pipeline:
             ToolOutput object for the registered tool
         """
         # Ensure Resources() has been called before adding tools.
-        # Resource specs (gpu/memory/time/cpus) are only meaningful for
-        # schedulers that consume them (SLURM). In on-the-fly mode, or when
-        # the active config uses a non-SLURM scheduler (colab / none), we
+        # Resource specs (gpu/memory/time/cpus) are only meaningful for batch
+        # schedulers that consume them (slurm/lsf/pbs). In on-the-fly mode, or
+        # when the active config uses a non-batch scheduler (colab / none), we
         # auto-initialize an empty resource batch so users don't have to
         # type Resources() for local or Colab runs.
         if self.current_batch == -1:
             scheduler = ConfigManager().get_scheduler()
-            if self.on_the_fly or scheduler != "slurm":
+            if self.on_the_fly or scheduler not in BATCH_SCHEDULERS:
                 self.resources()
             else:
                 raise RuntimeError(
@@ -921,13 +931,13 @@ class Pipeline:
         with open(os.path.join(capture_root, "README.txt"), "w") as f:
             f.write(readme)
 
-    def slurm(self, email: str = "auto"):
+    def generate_job_scripts(self, email: str = "auto"):
         """
-        Generate SLURM job submission script(s).
+        Generate batch job submission script(s) for the active scheduler.
 
         If multiple batches exist (multiple Resources() calls), generates:
-        - Separate SLURM script for each batch
-        - Submission chain script that submits jobs with dependencies
+        - Separate batch script for each batch
+        - Dependency placeholders so the submit wrapper chains them
 
         Args:
             email: Email for job notifications. Options:
@@ -943,7 +953,7 @@ class Pipeline:
 
         # Validate that Resources() was called
         if self.current_batch == -1:
-            raise RuntimeError("Resources() must be called before generating SLURM scripts")
+            raise RuntimeError("Resources() must be called before generating job scripts")
 
         # Handle auto email detection
         if email == "auto":
@@ -954,103 +964,74 @@ class Pipeline:
                 print("Warning: No email configured. Disabling email notifications.")
                 print("Set the 'machine.email' field in your config file.")
 
-        email_line = "" if email == "" else f"""
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user={email}"""
+        email_line = self._backend().email_directive(email)
 
         num_batches = len(self.batch_resources)
 
         # Determine if single batch or multiple batches
         if num_batches == 1:
-            # Single batch - generate single SLURM script
-            self._generate_single_batch_slurm(email_line)
+            self._generate_single_batch(email_line)
         else:
-            # Multiple batches - generate chained SLURM scripts
-            self._generate_multi_batch_slurm(email_line, num_batches)
+            self._generate_multi_batch(email_line, num_batches)
 
-    def _generate_gpu_line(self, gpu_spec, gpus=1):
-        """Generate SBATCH GPU line(s) based on GPU specification and count.
+    def _backend(self):
+        """Scheduler backend used for script generation.
 
-        ``gpus`` is the number of GPUs to request (``#SBATCH --gpus=<n>``),
-        independent of the model/memory constraint encoded in ``gpu_spec``.
-        For a specific model spec (e.g. ``"A100"``) the count rides on the
-        ``--gpus=<model>:<n>`` form instead.
+        For a batch scheduler (slurm/lsf/pbs) this is its own backend. For
+        non-batch schedulers (colab/none) we still emit an inert script (the
+        submission step is skipped, and printing is suppressed) — fall back to
+        the SLURM backend so that script keeps its historical #SBATCH form.
         """
-        n = gpus if gpus else 1
-        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
-            return ""
-        elif gpu_spec == "high-memory":
-            return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
-        elif gpu_spec == "gpu" or gpu_spec == "any":
-            return f"#SBATCH --gpus={n}"
-        elif gpu_spec.startswith("!"):
-            excluded_model = gpu_spec[1:]
-            if excluded_model.upper() == "L4":
-                return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\""
-            else:
-                return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"~GPU{excluded_model}\""
-        elif gpu_spec in ["24GB", "32GB", "80GB", "96GB"] or "|" in gpu_spec:
-            if "|" in gpu_spec:
-                memory_options = gpu_spec.split("|")
-                constraint_parts = [f"GPUMEM{mem}" for mem in memory_options]
-                constraint = "|".join(constraint_parts)
-            else:
-                constraint = f"GPUMEM{gpu_spec}"
-            return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"{constraint}\""
-        else:
-            return f"#SBATCH --gpus={gpu_spec}:{n}"
+        name = ConfigManager().get_scheduler()
+        if name in BATCH_SCHEDULERS:
+            return get_backend(name)
+        return get_backend("slurm")
 
-    def _generate_gpu_setup(self, gpu_spec):
-        """Generate GPU setup script based on GPU specification."""
-        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
-            return ""
-        return """
-# Display GPU information
-gpu_type=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2>/dev/null || echo "Unknown")
-echo "GPU Type: $gpu_type"
-"""
+    def _is_batch_scheduler(self) -> bool:
+        return ConfigManager().get_scheduler() in BATCH_SCHEDULERS
 
-    def _generate_additional_sbatch_lines(self, slurm_options):
-        """Generate additional SBATCH lines from slurm_options dict."""
-        if not slurm_options:
-            return ""
-        sbatch_lines = []
-        for param, value in slurm_options.items():
-            # Defence-in-depth: resources() already validates, but values may
-            # also be merged in from inherited batches, so re-check at emit time.
-            _validate_sbatch_value(f"slurm_options[{param!r}]", value)
-            if param == "cpus":
-                slurm_param = "cpus-per-task"
-            else:
-                slurm_param = param.replace('_', '-')
-            sbatch_lines.append(f"#SBATCH --{slurm_param}={value}")
-        return "\n" + "\n".join(sbatch_lines)
+    def _scheduler_options_key(self) -> str:
+        """Resource-dict key for extra directive kwargs of the active scheduler.
 
-    def _generate_dependency_line(self, job_ids: List[str]) -> str:
-        """Generate SBATCH dependency line from list of job IDs."""
-        if not job_ids:
-            return ""
-        return f"\n#SBATCH --dependency=afterok:{':'.join(job_ids)}"
+        ``slurm_options`` / ``lsf_options`` / ``pbs_options``. Falls back to
+        ``slurm_options`` for non-batch schedulers (where it is never read).
+        """
+        if self._is_batch_scheduler():
+            return self._backend().options_key
+        return "slurm_options"
 
-    def _generate_single_batch_slurm(self, email_line):
-        """Generate single SLURM script for single batch pipeline."""
+    def _batch_script_name(self, batch_idx: Optional[int] = None) -> str:
+        """Generated script filename, stemmed by the active scheduler.
+
+        SLURM keeps the historical ``slurm.sh`` / ``slurm_batch{n}.sh`` names;
+        LSF/PBS use ``lsf.sh`` / ``pbs_batch{n}.sh`` etc. The submit wrapper
+        globs the matching stem per scheduler. Non-batch schedulers
+        (colab/none) reuse the ``slurm`` stem for their inert scripts.
+        """
+        name = ConfigManager().get_scheduler()
+        stem = name if name in BATCH_SCHEDULERS else "slurm"
+        if batch_idx is None:
+            return f"{stem}.sh"
+        return f"{stem}_batch{batch_idx + 1}.sh"
+
+    def _generate_single_batch(self, email_line):
+        """Generate single batch script for the active scheduler."""
+        backend = self._backend()
         resources = self.batch_resources[0]
-        _validate_sbatch_value("memory", resources["memory"])
-        _validate_sbatch_value("time", resources["time"])
-        gpu_line = self._generate_gpu_line(resources["gpu"], resources.get("gpus", 1))
-        gpu_setup = self._generate_gpu_setup(resources["gpu"])
-        additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
-        dependency_line = self._generate_dependency_line(self.external_dependencies)
+        _validate_directive_value("memory", resources["memory"])
+        _validate_directive_value("time", resources["time"])
+        gpu_line, gpu_warnings = backend.gpu_directive(resources["gpu"], resources.get("gpus", 1))
+        gpu_setup = backend.gpu_setup(resources["gpu"])
+        extra_directives = backend.extra_options(resources.get(backend.options_key, {}))
+        header = backend.header_directives(resources["memory"], resources["time"], "job.out")
+        dependency_line = backend.dependency_directive(list(self.external_dependencies), [])
         cm = ConfigManager()
         scheduler_init = cm.get_scheduler_init_block()
         module_load = cm.get_module_load_line()
 
-        slurm_content = f"""#!/usr/bin/bash
+        job_content = f"""#!/usr/bin/bash
 {gpu_line}
-#SBATCH --mem={resources["memory"]}
-#SBATCH --time={resources["time"]}
-#SBATCH --output=job.out
-#SBATCH --begin=now+0hour{additional_sbatch_lines}{dependency_line}
+{header}{extra_directives}{dependency_line}
 {email_line}
 
 # Make all files group-writable by default
@@ -1064,29 +1045,33 @@ umask 002
 # Execute pipeline
 {self.pipeline_script}
 """
-        slurm_path = os.path.join(self.folders["runtime"], "slurm.sh")
-        with open(slurm_path, 'w') as f:
-            f.write(slurm_content)
-        os.chmod(slurm_path, 0o755)
-        self.slurm_script = slurm_path
+        job_path = os.path.join(self.folders["runtime"], self._batch_script_name())
+        with open(job_path, 'w') as f:
+            f.write(job_content)
+        os.chmod(job_path, 0o755)
+        self.job_script = job_path
 
-        print(f"Slurm saved to: {slurm_path}")
+        # Batch scripts are meaningless without a real scheduler (Colab) — skip printing.
+        if not self._is_batch_scheduler():
+            return
+
+        for w in gpu_warnings:
+            print(f"Warning: {w}")
+        print(f"Job script saved to: {job_path}")
         print("="*30+"Job"+"="*30)
         print(f"{self.project}: {self.job} ({self.folder_manager.job_id})")
-        print("="*30+"Slurm Script"+"="*30)
-        for line in slurm_content.split('\n'):
+        print("="*30+"Job Script"+"="*30)
+        for line in job_content.split('\n'):
             if line != "":
                 print(line)
-        print("="*30+"SBATCH"+"="*30)
-        output_path = os.path.join(self.folders["runtime"], "slurm.out")
-        formatted_job_name = f"{self.project}: {self.job} ({self.folder_manager.job_id})"
-        print(f"sbatch --job-name=\"{formatted_job_name}\" --output {output_path} {slurm_path}")
 
-    def _generate_multi_batch_slurm(self, email_line, num_batches):
-        """Generate multiple SLURM scripts for multi-batch pipeline with <JOBID_BATCH_NNN> placeholders (one per parent in the dependency DAG)."""
+    def _generate_multi_batch(self, email_line, num_batches):
+        """Generate chained batch scripts with <JOBID_BATCH_NNN> dependency placeholders (one per parent in the DAG)."""
+        backend = self._backend()
         cm = ConfigManager()
         scheduler_init = cm.get_scheduler_init_block()
         module_load = cm.get_module_load_line()
+        warnings: List[str] = []
 
         # Determine batch ranges
         batch_ranges = []
@@ -1103,37 +1088,38 @@ umask 002
                 f.write(batch_script_content)
             os.chmod(batch_script_path, 0o755)
 
-        # Generate SLURM scripts for each batch
+        # Generate per-batch scheduler scripts
         for batch_idx in range(num_batches):
             resources = self.batch_resources[batch_idx]
-            _validate_sbatch_value("memory", resources["memory"])
-            _validate_sbatch_value("time", resources["time"])
-            gpu_line = self._generate_gpu_line(resources["gpu"], resources.get("gpus", 1))
-            gpu_setup = self._generate_gpu_setup(resources["gpu"])
-            additional_sbatch_lines = self._generate_additional_sbatch_lines(resources.get("slurm_options", {}))
+            _validate_directive_value("memory", resources["memory"])
+            _validate_directive_value("time", resources["time"])
+            gpu_line, gpu_warnings = backend.gpu_directive(resources["gpu"], resources.get("gpus", 1))
+            warnings.extend(gpu_warnings)
+            gpu_setup = backend.gpu_setup(resources["gpu"])
+            extra_directives = backend.extra_options(resources.get(backend.options_key, {}))
+            header = backend.header_directives(resources["memory"], resources["time"], f"job_batch{batch_idx + 1}.out")
 
-            # Add dependency line for batch 2+ (internal DAG) and batch 1 (external).
-            # Internal: emit one <JOBID_BATCH_NNN> placeholder per parent batch,
-            # joined with `:` for the SLURM afterok list. The submit script
-            # captures every batch's job id keyed by its 1-based number and
-            # substitutes each placeholder when the dependent batch is
-            # submitted (parents always have lower numbers, so they are
+            # Dependency directive for batch 2+ (internal DAG) and batch 1 (external).
+            # Internal: emit one <JOBID_BATCH_NNN> placeholder per parent batch.
+            # The submit script captures every batch's job id keyed by its
+            # 1-based number and substitutes each placeholder when the dependent
+            # batch is submitted (parents always have lower numbers, so they are
             # already in the captured map by the time we substitute).
             parents = self.batch_parents[batch_idx] if batch_idx < len(self.batch_parents) else []
-            if parents:
-                placeholders = [f"<JOBID_BATCH_{p + 1:03d}>" for p in parents]
-                dependency_line = "\n#SBATCH --dependency=afterok:" + ":".join(placeholders)
+            after_parents = self.batch_after_parents[batch_idx] if batch_idx < len(self.batch_after_parents) else []
+            if parents or after_parents:
+                afterok = [f"<JOBID_BATCH_{p + 1:03d}>" for p in parents]
+                # Service: start once the daemon is RUNNING (after:), not finished.
+                after = [f"<JOBID_BATCH_{p + 1:03d}>" for p in after_parents]
+                dependency_line = backend.dependency_directive(afterok, after)
             elif batch_idx == 0 and self.external_dependencies:
-                dependency_line = self._generate_dependency_line(self.external_dependencies)
+                dependency_line = backend.dependency_directive(list(self.external_dependencies), [])
             else:
                 dependency_line = ""
 
-            batch_slurm_content = f"""#!/usr/bin/bash
+            batch_job_content = f"""#!/usr/bin/bash
 {gpu_line}
-#SBATCH --mem={resources["memory"]}
-#SBATCH --time={resources["time"]}
-#SBATCH --output=job_batch{batch_idx + 1}.out
-#SBATCH --begin=now+0hour{additional_sbatch_lines}{dependency_line}
+{header}{extra_directives}{dependency_line}
 {email_line}
 
 # Make all files group-writable by default
@@ -1147,13 +1133,19 @@ umask 002
 # Execute pipeline batch {batch_idx + 1}
 {os.path.join(self.folders["runtime"], f"pipeline_batch{batch_idx + 1}.sh")}
 """
-            batch_slurm_path = os.path.join(self.folders["runtime"], f"slurm_batch{batch_idx + 1}.sh")
-            with open(batch_slurm_path, 'w') as f:
-                f.write(batch_slurm_content)
-            os.chmod(batch_slurm_path, 0o755)
+            batch_job_path = os.path.join(self.folders["runtime"], self._batch_script_name(batch_idx))
+            with open(batch_job_path, 'w') as f:
+                f.write(batch_job_content)
+            os.chmod(batch_job_path, 0o755)
 
-        self.slurm_script = os.path.join(self.folders["runtime"], "slurm_batch1.sh")
+        self.job_script = os.path.join(self.folders["runtime"], self._batch_script_name(0))
 
+        # Batches are meaningless without a real scheduler (Colab) — skip printing.
+        if not self._is_batch_scheduler():
+            return
+
+        for w in warnings:
+            print(f"Warning: {w}")
         # Print summary
         print(f"Generated {num_batches} batch job(s) with dependencies")
         print("="*30+"Job Batches"+"="*30)
@@ -1166,7 +1158,7 @@ umask 002
         print("="*30+"Manual Submission"+"="*30)
         print("# Submit batches manually (replace each <JOBID_BATCH_NNN> placeholder with the captured job ID for batch NNN):")
         for batch_idx in range(num_batches):
-            print(f"sbatch {os.path.join(self.folders['runtime'], f'slurm_batch{batch_idx + 1}.sh')}")
+            print(f"# {os.path.join(self.folders['runtime'], self._batch_script_name(batch_idx))}")
         print("="*30+"Automatic Submission"+"="*30)
         print(f"# Use submit script to automatically chain submissions")
 
@@ -1266,7 +1258,7 @@ umask 002
 
     def set_dependencies(self, job_ids: Union[str, List[str]]):
         """
-        Set external SLURM job dependencies.
+        Set external scheduler job dependencies.
 
         The first batch of this pipeline will wait for these jobs to complete
         successfully before starting.
@@ -1279,7 +1271,7 @@ umask 002
             job_ids = [job_ids]
         self.external_dependencies.extend(job_ids)
 
-    def resources(self, gpu: str = None, memory: str = None, time: str = None, cpus: int = None, gpus: int = None, **slurm_options):
+    def resources(self, gpu: str = None, memory: str = None, time: str = None, cpus: int = None, gpus: int = None, **scheduler_options):
         """
         Configure computational resources and start a new batch.
 
@@ -1302,10 +1294,14 @@ umask 002
             gpus: Number of GPUs → #SBATCH --gpus=<gpus> (combined with any
                 gpu= model/memory constraint). Default behaviour (None) is 1 GPU
                 whenever a gpu spec is set. Use gpus=2 to request two GPUs.
-            **slurm_options: Additional SLURM parameters. Examples:
+            **scheduler_options: Additional native directive parameters for the
+                active scheduler, stored under its options key (slurm_options /
+                lsf_options / pbs_options). On SLURM:
                 - nodes=1 → #SBATCH --nodes=1
                 - ntasks_per_node=1 → #SBATCH --ntasks-per-node=1
                 - partition="gpu" → #SBATCH --partition=gpu
+                On LSF/PBS the key/value is emitted as the scheduler's native
+                flag (e.g. LSF q="normal" → #BSUB -q normal).
 
         Examples:
             # Specific GPU model
@@ -1329,14 +1325,20 @@ umask 002
             # GPU with specific CPU allocation
             pipeline.resources(gpu="V100", memory="32GB", time="12:00:00", cpus=16)
         """
+        # Extra kwargs are native directive knobs for the active scheduler;
+        # store them under that scheduler's options key (slurm/lsf/pbs_options)
+        # so the matching backend emits them. Defaults to slurm_options for
+        # non-batch schedulers (colab/none), where it is never read.
+        options_key = self._scheduler_options_key()
+
         # Reject newline/CR before anything else — these would inject extra
-        # #SBATCH directives at script generation time.
-        _validate_sbatch_value("gpu", gpu)
-        _validate_sbatch_value("memory", memory)
-        _validate_sbatch_value("time", time)
-        _validate_sbatch_value("cpus", cpus)
-        for opt_key, opt_value in slurm_options.items():
-            _validate_sbatch_value(f"slurm_options[{opt_key!r}]", opt_value)
+        # directive lines at script generation time.
+        _validate_directive_value("gpu", gpu)
+        _validate_directive_value("memory", memory)
+        _validate_directive_value("time", time)
+        _validate_directive_value("cpus", cpus)
+        for opt_key, opt_value in scheduler_options.items():
+            _validate_directive_value(f"{options_key}[{opt_key!r}]", opt_value)
 
         if gpus is not None and (not isinstance(gpus, int) or gpus < 1):
             raise ValueError(f"gpus must be a positive integer, got {gpus!r}")
@@ -1345,27 +1347,54 @@ umask 002
         self.current_batch += 1
         self.batch_start_indices.append(len(self.tools))
 
-        # Determine the new batch's parents in the dependency DAG. Three
-        # cases, in priority order:
-        #   1. fan-in pending from a Parallel block that just exited:
-        #      consume _pending_post_parents and clear it.
-        #   2. inside a Parallel block: parent is the anchor (the batch
-        #      that was current when the block was entered). Record this
-        #      sibling for later fan-in.
-        #   3. chain default: parent is the previous batch ([] for batch 0).
+        # Determine the new batch's parents in the dependency DAG. Two
+        # orthogonal edge kinds are computed independently and may coexist
+        # (e.g. siblings of a Parallel block that follows a Service):
+        #
+        #   after_parents (SLURM `after:`): a batch that follows a Service
+        #     waits for the daemon to START, not finish. For a plain batch
+        #     this is the single _pending_after_parent. For a Parallel block
+        #     that follows a Service, EVERY sibling gets the edge, carried on
+        #     _parallel_after_anchor. The daemon must never also be an afterok
+        #     parent, so it is excluded from new_parents below.
+        #
+        #   new_parents (SLURM `afterok:`), in priority order:
+        #     1. fan-in pending from a Parallel block that just exited.
+        #     2. inside a Parallel block: parent is the anchor (the batch
+        #        current when the block was entered). Record this sibling for
+        #        later fan-in. An anchor that is the service daemon is dropped
+        #        — that edge is expressed via after_parents instead.
+        #     3. chain default: parent is the previous batch ([] for batch 0).
+        after_parents = []  # type: List[int]
+        if self._parallel_anchor is not None:
+            if self._parallel_after_anchor is not None:
+                after_parents = [self._parallel_after_anchor]
+        elif self._pending_after_parent is not None:
+            after_parents = [self._pending_after_parent]
+            self._pending_after_parent = None
+
         if self._pending_post_parents is not None:
             new_parents = list(self._pending_post_parents)
             self._pending_post_parents = None
         elif self._parallel_anchor is not None:
-            new_parents = [self._parallel_anchor] if self._parallel_anchor >= 0 else []
             self._parallel_siblings.append(self.current_batch)
+            if self._parallel_anchor >= 0 and self._parallel_anchor not in after_parents:
+                new_parents = [self._parallel_anchor]
+            else:
+                new_parents = []
+        elif after_parents:
+            # Plain (non-parallel) batch after a Service: daemon is its only
+            # predecessor via after:, so no afterok parent of its own.
+            new_parents = []
         else:
             new_parents = [self.current_batch - 1] if self.current_batch > 0 else []
         self.batch_parents.append(new_parents)
+        self.batch_after_parents.append(after_parents)
 
-        # Fold first-class cpus into slurm_options (it maps to --cpus-per-task)
+        # Fold first-class cpus into the options dict (maps to --cpus-per-task
+        # on SLURM; passed through verbatim on other schedulers).
         if cpus is not None:
-            slurm_options = {**slurm_options, "cpus": cpus}
+            scheduler_options = {**scheduler_options, "cpus": cpus}
 
         # Determine resources for this batch
         if self.current_batch == 0:
@@ -1375,14 +1404,14 @@ umask 002
                 "gpus": gpus if gpus is not None else 1,
                 "memory": memory if memory is not None else "15GB",
                 "time": time if time is not None else "24:00:00",
-                "slurm_options": slurm_options if slurm_options else {}
+                options_key: scheduler_options if scheduler_options else {}
             }
         else:
             # Subsequent batches: inherit from previous if not specified
             prev_res = self.batch_resources[self.current_batch - 1]
-            prev_opts = prev_res.get("slurm_options", {})
-            if slurm_options:
-                merged_opts = {**prev_opts, **slurm_options}
+            prev_opts = prev_res.get(options_key, {})
+            if scheduler_options:
+                merged_opts = {**prev_opts, **scheduler_options}
             else:
                 merged_opts = prev_opts
             batch_res = {
@@ -1390,7 +1419,7 @@ umask 002
                 "gpus": gpus if gpus is not None else prev_res.get("gpus", 1),
                 "memory": memory if memory is not None else prev_res["memory"],
                 "time": time if time is not None else prev_res["time"],
-                "slurm_options": merged_opts
+                options_key: merged_opts
             }
 
         self.batch_resources.append(batch_res)
@@ -1598,7 +1627,7 @@ def Resources(**kwargs):
         gpu: GPU memory ("T4", "L4", "V100", "A100", "H100", "H200", "16GB", "24GB", "32GB", "80GB", "96GB", "32GB|80GB|96GB", "!L4", "gpu", "high-memory", None))
         memory: System RAM (e.g., "16GB", "32GB")
         time: Wall time limit (e.g., "24:00:00", "2:00:00", "1-00:00:00")
-        cpus: CPUs per SLURM task (maps to --cpus-per-task)
+        cpus: CPUs per task (SLURM --cpus-per-task; translated per scheduler)
 
     Example:
         with Pipeline("Test", "Job", "Description"):
@@ -1649,7 +1678,7 @@ def Suffix(suffix: str = ""):
 
 def Save():
     """
-    Save pipeline configuration without submitting to SLURM.
+    Save pipeline configuration without generating job scripts.
 
     Must be called within a Pipeline context manager. Useful if you want
     to save the pipeline but not submit it immediately.
@@ -1676,7 +1705,7 @@ def Save():
 
 def Dependencies(job_ids: Union[str, List[str]]):
     """
-    Set external SLURM job dependencies for the active pipeline.
+    Set external scheduler job dependencies for the active pipeline.
 
     The first batch of this pipeline will wait for the specified jobs to
     complete successfully before starting.
@@ -1716,6 +1745,10 @@ def Dependencies(job_ids: Union[str, List[str]]):
             "(fan-in) dependencies; an explicit Dependencies() call would "
             "be ambiguous. Move the Dependencies() call outside the block."
         )
+    if pipeline._service_anchor is not None:
+        raise RuntimeError(
+            "Dependencies() cannot be called inside a `with Service():` block."
+        )
     pipeline.set_dependencies(job_ids)
 
 
@@ -1723,7 +1756,7 @@ class Parallel:
     """Context manager that runs the batches inside it as parallel siblings.
 
     Use it to express a fan-out / fan-in pattern. Every Resources() call
-    inside the block opens a SLURM batch whose only dependency is the
+    inside the block opens a batch whose only dependency is the
     batch that was current immediately before the block (the "anchor"),
     so the sibling batches run in parallel rather than chained. The first
     Resources() call after the block exits opens a fan-in batch that
@@ -1770,6 +1803,11 @@ class Parallel:
             )
         pipeline._parallel_anchor = pipeline.current_batch
         pipeline._parallel_siblings = []
+        # If this block immediately follows a Service, every sibling waits for
+        # the daemon to START via after: (not afterok on the anchor). Absorb
+        # the single-use service edge so all siblings share it.
+        pipeline._parallel_after_anchor = pipeline._pending_after_parent
+        pipeline._pending_after_parent = None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -1777,13 +1815,94 @@ class Parallel:
         if pipeline is None:
             return False
         siblings = list(pipeline._parallel_siblings)
+        after_anchor = pipeline._parallel_after_anchor
         pipeline._parallel_anchor = None
         pipeline._parallel_siblings = []
-        # Empty block: no siblings opened. Fall back to chain default
-        # (the next batch will depend on whatever was current before the
-        # block, which is exactly the chain default behaviour).
+        pipeline._parallel_after_anchor = None
         if siblings:
             pipeline._pending_post_parents = siblings
+        else:
+            # Empty block: a transparent no-op. Restore the pending service
+            # after: edge it absorbed in __enter__ so the next batch still
+            # waits for the daemon. Otherwise fall back to chain default.
+            if after_anchor is not None:
+                pipeline._pending_after_parent = after_anchor
+        return False  # don't suppress exceptions
+
+
+class Service:
+    """Context manager that launches its single batch as a detached daemon.
+
+    Use it for a long-running service (e.g. an MSA server) that a later step
+    consumes while it is still running. The block must contain exactly one
+    batch (one ``Resources()`` + the daemon tool). That batch keeps its normal
+    upstream ``afterok`` dependency, but it is NOT waited on by the chain: the
+    first batch AFTER the block gets an ``after:`` dependency on it (SLURM
+    naming; translated per scheduler) — "start once the daemon is RUNNING",
+    not "after it finishes". ``afterok``
+    would be wrong here, since the daemon only exits on its own idle-timeout.
+
+    This removes the scheduling race where a separately-submitted server sits
+    queued behind low priority while the client's allocation wall-clock runs
+    out: with ``after:`` the client is not scheduled until the server is up.
+
+    Example
+    -------
+    ::
+
+        with Pipeline(...):
+            Resources(...)
+            seqs = LigandMPNN(...)            # batch A
+            with Service():
+                Resources(memory="900GB", cpus=32, time="24:00:00")
+                MMseqs2Server(mode="cpu")     # batch B (daemon), afterok:A
+            Resources(memory="16GB")
+            msas = MMseqs2(sequences=seqs)    # batch C, after:B
+            Resources(gpu="A100")
+            Boltz2(..., msas=msas)            # batch D, afterok:C
+
+    Notes
+    -----
+    * Exactly one batch inside the block (one ``Resources()`` + daemon tool).
+    * The daemon is fully detached: nothing ``afterok``-waits on it, so the
+      pipeline's success never hinges on its exit code. It self-terminates via
+      its own idle-timeout once the consuming step has drained its queue.
+    * Cannot be nested, cannot contain ``Dependencies()``, and cannot be used
+      inside a ``Parallel()`` block.
+    """
+
+    def __enter__(self):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is None:
+            raise RuntimeError(
+                "Service() must be used within a Pipeline context. "
+                "Use: with Pipeline(...): with Service(): ..."
+            )
+        if pipeline._service_anchor is not None:
+            raise RuntimeError("Nested Service() blocks are not supported.")
+        if pipeline._parallel_anchor is not None:
+            raise RuntimeError("Service() cannot be used inside a Parallel() block.")
+        # Remember how many batches existed on entry, to enforce exactly one.
+        pipeline._service_anchor = pipeline.current_batch
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is None:
+            return False
+        anchor = pipeline._service_anchor
+        pipeline._service_anchor = None
+        if exc_type is not None:
+            return False  # don't mask an in-block exception
+        opened = pipeline.current_batch - anchor
+        if opened != 1:
+            raise RuntimeError(
+                "A Service() block must contain exactly one batch (one "
+                f"Resources() + the daemon tool); it opened {opened}."
+            )
+        # The daemon is the batch opened inside the block; the next batch
+        # after the block gets an after: edge to it.
+        pipeline._pending_after_parent = pipeline.current_batch
         return False  # don't suppress exceptions
 
 

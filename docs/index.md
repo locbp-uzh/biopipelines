@@ -1,12 +1,12 @@
 # BioPipelines
 
-A Python framework for automated computational protein design workflows on SLURM clusters and Jupyter notebooks.
+A Python framework for automated computational protein design workflows on HPC clusters (SLURM, LSF, PBS) and Jupyter notebooks.
 
 ---
 
 ## What is BioPipelines?
 
-BioPipelines provides standardized interfaces to connect bioinformatics tools into reproducible workflows. It does not execute computations directly -- instead, it generates bash scripts and predicts output file paths, which are then executed on SLURM clusters or interactively in notebooks.
+BioPipelines provides standardized interfaces to connect bioinformatics tools into reproducible workflows. It does not execute computations directly -- instead, it generates bash scripts and predicts output file paths, which are then executed on HPC clusters (SLURM, LSF, PBS) or interactively in notebooks.
 
 <figure markdown>
   ![Ubiquitin inverse folding pipeline](images/figure1_ubiquitin_pipeline.png){ width="800" }
@@ -22,7 +22,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
 **70+ integrated tools** -- Structure generation (RFdiffusion, BoltzGen), sequence design (ProteinMPNN, LigandMPNN), structure prediction (AlphaFold, Boltz2), analysis, and more.
 
-**Three ways to run** -- Let an AI coding assistant author and run pipelines for you, submit to SLURM clusters with `biopipelines-submit`, or run interactively in Jupyter/Colab notebooks with on-the-fly execution.
+**Three ways to run** -- Let an AI coding assistant author and run pipelines for you, submit to HPC clusters (SLURM, LSF, PBS) with `biopipelines-submit`, or run interactively in Jupyter/Colab notebooks with on-the-fly execution.
 
 **Combinatorics** -- Cartesian products (`Each`) and grouping (`Bundle`) to systematically explore protein-ligand combinations.
 

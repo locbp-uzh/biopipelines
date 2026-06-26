@@ -7,6 +7,7 @@
 - [Usage with an AI coding assistant](#usage-with-an-ai-coding-assistant)
 - [Installation](#installation)
 - [Google Colab](#google-colab)
+- [Local](#installation-local--linux--macos--windows)
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
   - [Configuration and Execution Time](#configuration-and-execution-time)
@@ -26,7 +27,7 @@
 
 ## What is BioPipelines?
 
-BioPipelines is a Python framework for writing and executing protein engineering workflows that run with the same syntax on SLURM HPC clusters, Jupyter, and Google Colab.
+BioPipelines is a Python framework for writing and executing protein engineering workflows that run with the same syntax on HPC clusters (SLURM, LSF, PBS), Jupyter, and Google Colab.
 
 BioPipelines was designed to maximize pipeline clarity and conciseness, as shown in the following example:
 
@@ -54,10 +55,11 @@ with Pipeline(project="Examples",
 There are three ways to use BioPipelines, in increasing order of hands-on effort:
 
 1. **With an AI coding assistant (recommended for non-programmers).** You clone the repo and on your computer and run an AI coding assistant (Claude Code, Codex, …) inside it. The assistant reads the framework's prompts under `llm/`, interviews you about your biological problem, and writes and runs the pipeline for you. You never write Python yourself — you describe the protocol you want in plain language. This is the easiest entry point and the one most users should start with. See [Usage with an AI coding assistant](#usage-with-an-ai-coding-assistant).
-2. **On a SLURM cluster.** You write pipeline scripts yourself and submit them with `biopipelines-submit`. Best for large production runs on institutional compute. See [Installation (Slurm HPC)](#installation-slurm-hpc).
+2. **On an HPC cluster (SLURM, LSF, or PBS/Torque).** You write pipeline scripts yourself and submit them with `biopipelines-submit`. Best for large production runs on institutional compute. See [Installation (Slurm HPC)](#installation-slurm-hpc).
 3. **On Google Colab.** You write pipeline cells in a notebook and run them inline with a Colab GPU, no SLURM needed. Best for quick interactive prototyping. See [Installation (Google Colab)](#installation-google-colab).
+4. **Locally (Linux / macOS / Windows).** You run pipelines inline on your own machine if they only comprise lightweight base-environment tools. On Windows, use WSL. See [Installation (Local)](#installation-local--linux--macos--windows).
 
-The three are not mutually exclusive: a common pattern is to let an AI assistant author a pipeline (mode 1) and then submit the resulting script to a cluster (mode 2) or run it on Colab (mode 3).
+These are not mutually exclusive: a common pattern is to let an AI assistant author a pipeline (mode 1) and then submit the resulting script to a cluster (mode 2) or run it on Colab (mode 3).
 
 ---
 
@@ -115,6 +117,8 @@ After that, the assistant can push the pipeline, submit it, tail the logs, and r
 ---
 
 ## Installation (Slurm HPC)
+
+This section walks through a SLURM cluster as the worked example. LSF and PBS/Torque clusters install identically — only the `machine.scheduler` block differs (set `name` to `lsf` or `pbs`, or let `bp-config auto` detect it). See [Other batch schedulers (LSF, PBS/Torque)](#other-batch-schedulers-lsf-pbstorque) under Job Submission.
 
 ### 1. Setting up BioPipelines
 
@@ -202,10 +206,10 @@ with Pipeline("Setup", "install", description="Install tools"):
 After activating the biopipelines environment:
 
 ```bash
-# Cluster: generate scripts and submit them to SLURM
+# Cluster: generate scripts and submit them to the scheduler (SLURM/LSF/PBS)
 bp-submit example_pipelines/<pipeline>.py
 
-# Laptop / interactive: run inline (no SLURM); each tool's bash script
+# Laptop / interactive: run inline (no scheduler); each tool's bash script
 # executes immediately as the tool is added (need resources on node)
 bp-run example_pipelines/<pipeline>.py
 ```
@@ -239,7 +243,7 @@ BioPipelines automatically detects the Colab environment and loads `colab.yaml` 
 
 - Each tool gets its own isolated conda environment (same as on the cluster)
 - Tool installation uses `micromamba` to create environments from YAML specs
-- SLURM-related settings are disabled
+- Scheduler-related settings are disabled
 
 ### 2. Installing tools
 
@@ -276,10 +280,30 @@ af = AlphaFold(proteins=pmpnn)
 | | Cluster | Google Colab |
 |---|---|---|
 | **Environment manager** | mamba/conda/micromamba | micromamba (hardcoded) |
-| **Execution** | SLURM or on-the-fly | On-the-fly only |
+| **Execution** | Batch scheduler (SLURM/LSF/PBS) or on-the-fly | On-the-fly only |
 | **GPU** | Configured via `Resources()` | Colab's assigned GPU |
 
 Colab sessions are ephemeral. Installed tools and generated outputs are lost when the runtime disconnects. Mount Google Drive or download results before the session ends.
+
+---
+
+## Installation (Local — Linux / macOS / Windows)
+
+You can run pipelines with only lightweight tools (input preparation, table transforms, and small analyses) locally. On Windows, do this inside [WSL](https://learn.microsoft.com/windows/wsl/) (`wsl --install -d Ubuntu`).
+
+Install into a virtualenv with Python `>=3.10,<3.13` (only the base deps — pandas, numpy, biopython, rdkit; no conda):
+
+```bash
+cd /path/to/biopipelines
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+```
+
+The `local` config variant (`env_manager: pip`, `scheduler: none`) is the default when no batch scheduler is present; check with `bp-config machine`. Then run a script with `bp-run`:
+
+```bash
+bp-run my_pipeline.py # or: BIOPIPELINES_OTF=1 python my_pipeline.py
+```
 
 ---
 
@@ -312,6 +336,21 @@ DataStream types accessed via `tool.streams.<name>`:
 - `streams.compounds` - value-based CSV (the ligand's chemistry/identity: `smiles`, `code`)
 - `streams.msas` - A3M or CSV files
 - `streams.images` - PNG files
+
+In notebooks and on-the-fly runs, a tool has finished by the time the next
+Python line runs. Use `records()` to inspect the materialized items in a stream:
+
+```python
+for pdb in af.streams.structures.records():
+    print(pdb.id, pdb.file)
+
+for compound in lig.streams.compounds.records(columns=["smiles", "code"]):
+    print(compound.id, compound.smiles, compound.code)
+```
+
+`records()` is for inspecting results after they exist. To pass stream items to
+another BioPipelines tool during pipeline construction, pass the stream itself
+or iterate the stream as single-item DataStreams.
 
 **Tables (TableInfo)** - Rich metadata about CSV files. They do not track IDs.
 
@@ -625,7 +664,7 @@ Key differences from normal mode:
 - `Resources()` is **optional** and ignored for execution purposes
 - Tools run sequentially as they are added — each tool finishes before the next one starts
 - stdout/stderr is streamed in real-time (visible in notebooks and terminals)
-- SLURM submission is skipped
+- Scheduler submission is skipped
 - Output is written to `./BioPipelines/` (current directory) instead of shared storage
 - The completion check mechanism is preserved, so re-running a notebook skips already-completed steps
 - Re-running the cell that creates the `Pipeline()` starts a new pipeline
@@ -634,7 +673,7 @@ Key differences from normal mode:
 
 ## Job Submission
 
-**Submit to SLURM**:
+**Submit to SLURM, LSF or PBS/Torque**:
 ```bash
 biopipelines-submit /path/to/pipeline.py
 biopipelines-submit /path/to/pipeline.ipynb   # directly from a notebook
@@ -653,13 +692,24 @@ For interactive / inline execution (no SLURM), construct the
 directly. Each tool's bash script is generated and executed inline as
 the corresponding wrapper is called.
 
+### Notes on LSF and PBS/Torque schedulers
+
+`Resources(gpu=, memory=, time=, cpus=)` is portable across schedulers; the active backend translates it best-effort into native directives. Because clusters vary, two caveats:
+
+- **LSF** — `memory` is converted to MB and emitted as `#BSUB -M <MB>` plus a matching `#BSUB -R "rusage[mem=<MB>]"`; `time` is converted to LSF's `[HH:]MM` form (`"24:00:00"` → `"24:00"`). If your site uses different memory units (`LSF_UNIT_FOR_LIMITS`) or queue conventions, override with `lsf_options` (e.g. `Resources(q="normal")` → `#BSUB -q normal`).
+- **PBS/Torque** — `mem`, `walltime`, `ncpus`, and `ngpus` are emitted as separate `#PBS -l` requests, which Torque and OpenPBS accept. Sites (often PBS Pro) that require a single chunk like `select=1:ncpus=4:ngpus=1:mem=16gb` should pass it via `pbs_options` (`Resources(select="1:ncpus=4:ngpus=1:mem=16gb")`).
+
+A constraint-style GPU spec with no native equivalent (e.g. `high-memory`, `80GB|96GB`) falls back to a plain GPU-count request and prints a warning. Any other `Resources(**options)` kwargs are stored under the active scheduler's options key (`slurm_options` / `lsf_options` / `pbs_options`) and emitted verbatim.
+
+Generated scripts are stemmed by scheduler: `slurm_batch*.sh`, `lsf_batch*.sh`, `pbs_batch*.sh`.
+
 **Resubmit** existing job:
 
 ```bash
-./resubmit /path/to/job/RunTime/slurm.sh
+./resubmit /path/to/job/RunTime/slurm_batch1.sh   # or lsf_batch1.sh / pbs_batch1.sh
 ```
 
-**External dependencies** - Wait for other SLURM jobs:
+**External dependencies** - Wait for other scheduler jobs:
 
 ```python
 with Pipeline("Project", "Job", "Description"):

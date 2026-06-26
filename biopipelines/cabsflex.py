@@ -19,14 +19,14 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids_pattern
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
     from combinatorics import generate_multiplied_ids_pattern
 
 
@@ -407,6 +407,7 @@ python "{self.helper_script}" \\
     --output_dir "{self.execution_folder}" \\
     --rmsf_all_csv "{self.rmsf_all_csv}" \\
     --structures_map "{self.structures_map}" \\
+    --rmsf_map "{self.rmsf_map}" \\
     --num_models {self.num_models} \\
     --work_root "{self.execution_folder}" \\
     --structures_dir "{self.stream_folder('structures')}" \\
@@ -458,9 +459,7 @@ fi
         )
 
         # --- Output RMSF stream: one CSV per input structure ---
-        rmsf_columns = ["id", "chain", "resi", "rmsf"]
         rmsf_files = [self.stream_path("rmsf", "<id>_RMSF.csv")]
-        create_map_table(self.rmsf_map, list(input_ids), files=rmsf_files)
         rmsf_stream = DataStream(
             name="rmsf",
             ids=list(input_ids),
@@ -480,7 +479,7 @@ fi
             "rmsf_all": TableInfo(
                 name="rmsf_all",
                 path=self.rmsf_all_csv,
-                columns=rmsf_columns,
+                columns=["id", "chain", "resi", "rmsf"],
                 description="Per-residue RMSF from all input structures (merged)"
             )
         }

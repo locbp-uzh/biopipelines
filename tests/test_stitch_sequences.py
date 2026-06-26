@@ -270,7 +270,75 @@ def test_matched_prediction_excludes_distant_sibling(local_config, isolated_cwd,
     script = os.path.join(_repo_root(), "pipe_scripts", "pipe_stitch_sequences.py")
     subprocess.run([sys.executable, script, "--config", str(cf)], capture_output=True, text=True)
     runtime = sorted(pd.read_csv(o)["id"])
-    assert predicted == runtime == ["Panda_29_1_1", "Panda_29_1_2"]
+    # Single tool-output axis -> output id is the matched source id itself
+    # (provenance-carrying); distant sibling Panda_2_1 stays excluded.
+    assert predicted == runtime == ["Panda_29_2", "Panda_29_3"]
+
+
+def test_two_tool_axes_emit_plus_id_and_provenance(local_config, isolated_cwd, tmp_path):
+    """Two tool-output substitution axes -> +-joined id carrying provenance, plus
+    one sequences_k.id column per axis. Predictor and runtime agree, and each
+    output id resolves back to the correct per-axis source id respectively."""
+    import json, subprocess, sys
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.stitch_sequences import StitchSequences
+    from biopipelines.datastream import DataStream
+    from biopipelines.id_map_utils import get_mapped_ids
+
+    tmpl = tmp_path / "tmpl.csv"
+    pd.DataFrame([{"id": "pdb_1_0", "sequence": "A" * 12}]).to_csv(tmpl, index=False)
+    # Same id namespace across both axes — the case the +-id alone can't
+    # disambiguate, so the provenance columns are what tells them apart.
+    ax1 = tmp_path / "ax1.csv"
+    pd.DataFrame([{"id": "pdb_1_1", "sequence": "C" * 12},
+                  {"id": "pdb_1_2", "sequence": "D" * 12}]).to_csv(ax1, index=False)
+    ax2 = tmp_path / "ax2.csv"
+    pd.DataFrame([{"id": "pdb_1_1", "sequence": "E" * 12},
+                  {"id": "pdb_1_2", "sequence": "F" * 12}]).to_csv(ax2, index=False)
+
+    pipeline = Pipeline(project="TestSuite", job="stitch_two_axes",
+                        on_the_fly=False, local_output=True, config="local")
+    with pipeline:
+        t = DataStream(name="sequences", ids=["pdb_1_0"], files=[],
+                       map_table=str(tmpl), format="csv")
+        s1 = DataStream(name="sequences", ids=["pdb_1_1", "pdb_1_2"], files=[],
+                        map_table=str(ax1), format="csv")
+        s2 = DataStream(name="sequences", ids=["pdb_1_1", "pdb_1_2"], files=[],
+                        map_table=str(ax2), format="csv")
+        out = StitchSequences(template=t, substitutions={"1-3": s1, "7-9": s2})
+    predicted = sorted(out.streams.sequences.ids)
+    assert out.tables.sequences.info.columns == [
+        "id", "sequence", "sequences_1.id", "sequences_2.id"]
+
+    o = tmp_path / "o.csv"; m = tmp_path / "m.csv"
+    cfg = {"template": {"type": "tool_output", "sequences_file": str(tmpl),
+                        "source_name": "t", "sequence_ids": ["pdb_1_0"]},
+           "substitutions": {
+               "1-3": {"position_key": {"type": "fixed", "positions": "1-3"},
+                       "sequences": {"type": "tool_output", "sequences_file": str(ax1),
+                                     "source_name": "s1",
+                                     "sequence_ids": ["pdb_1_1", "pdb_1_2"]}},
+               "7-9": {"position_key": {"type": "fixed", "positions": "7-9"},
+                       "sequences": {"type": "tool_output", "sequences_file": str(ax2),
+                                     "source_name": "s2",
+                                     "sequence_ids": ["pdb_1_1", "pdb_1_2"]}}},
+           "indels": {}, "remove_duplicates": False, "output_csv": str(o),
+           "missing_csv": str(m), "step_tool_name": "StitchSequences",
+           "upstream_missing_paths": []}
+    cf = tmp_path / "c.json"; cf.write_text(json.dumps(cfg))
+    script = os.path.join(_repo_root(), "pipe_scripts", "pipe_stitch_sequences.py")
+    subprocess.run([sys.executable, script, "--config", str(cf)], capture_output=True, text=True)
+    df = pd.read_csv(o)
+
+    assert predicted == sorted(df["id"]) == [
+        "pdb_1_1+pdb_1_1", "pdb_1_1+pdb_1_2", "pdb_1_2+pdb_1_1", "pdb_1_2+pdb_1_2"]
+    assert list(df.columns) == ["id", "sequence", "sequences_1.id", "sequences_2.id"]
+    # Provenance columns disambiguate the same-namespace axes by fixed position.
+    row = df[df["id"] == "pdb_1_1+pdb_1_2"].iloc[0]
+    assert row["sequences_1.id"] == "pdb_1_1"  # axis 1 source
+    assert row["sequences_2.id"] == "pdb_1_2"  # axis 2 source
+    # The +-id itself resolves to each axis's source id respectively.
+    assert get_mapped_ids(["pdb_1_1+pdb_1_2"], ["pdb_1_1"])["pdb_1_1+pdb_1_2"] == "pdb_1_1"
 
 
 def test_empty_option_list_rejected(local_config, isolated_cwd):

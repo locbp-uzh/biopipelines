@@ -5,16 +5,15 @@
 # tested: 
 
 from biopipelines.pipeline import *
-from biopipelines import ProteinMPNN, AlphaFold, ConformationalChange, Panda, DNAEncoder
+from biopipelines import SolubleMPNN, AlphaFold, ConformationalChange, Panda, DNAEncoder
 
 
 with Pipeline(project="Ubiquitin", job="InverseFolding"):
     Resources(gpu="A100", time="4:00:00", memory="16GB")
     ubiquitin = PDB("4LCD",
                     chain="E")
-    sequences = ProteinMPNN(structures=ubiquitin,
-                            num_sequences=10,
-                            soluble_model=True)
+    sequences = SolubleMPNN(structures=ubiquitin,
+                            num_sequences=10)
     folded = AlphaFold(proteins=sequences)
     dna = DNAEncoder(sequences=sequences, 
                      organism="EC")

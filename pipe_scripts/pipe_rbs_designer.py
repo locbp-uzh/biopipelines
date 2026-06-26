@@ -753,12 +753,8 @@ def main():
 
     sequences_df = pd.read_csv(sequences_csv)
 
-    if "dna_sequence" in sequences_df.columns:
-        seq_col = "dna_sequence"
-    elif "sequence" in sequences_df.columns:
-        seq_col = "sequence"
-    else:
-        raise ValueError("Input CSV must have 'dna_sequence' or 'sequence' column")
+    if "sequence" not in sequences_df.columns:
+        raise ValueError("Input CSV must have 'sequence' column")
 
     if "id" not in sequences_df.columns:
         raise ValueError("Input CSV must have 'id' column")
@@ -770,7 +766,7 @@ def main():
     results = []
     for idx, row in sequences_df.iterrows():
         seq_id = row["id"]
-        cds_dna = row[seq_col].upper()
+        cds_dna = row["sequence"].upper()
 
         if add_start_codon:
             cds_dna = "ATG" + cds_dna
@@ -784,7 +780,7 @@ def main():
         converged = abs(result["dg_total"] - target_dg) < SA_CONVERGENCE_THRESHOLD
         results.append({
             "id": seq_id,
-            "dna_sequence": cds_dna,
+            "sequence": cds_dna,
             "rbs_sequence": result["rbs_dna"],
             "full_gene": full_gene,
             "converged": converged,

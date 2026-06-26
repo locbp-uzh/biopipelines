@@ -229,6 +229,12 @@ def create_output_table(output_pdb: str, output_csv: str):
     print(f"Created output table: {output_csv}")
 
 
+def create_structures_map(output_pdb: str, structures_map: str):
+    """Write the structures stream map_table (id | file)."""
+    pd.DataFrame({'id': ['prepared_ligand'], 'file': [output_pdb]}).to_csv(structures_map, index=False)
+    print(f"Created structures map: {structures_map}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Prepare ligand structure for RFdiffusion-AllAtom by adding dummy peptide'
@@ -236,6 +242,7 @@ def main():
     parser.add_argument('--ligand_pdb', required=True, help='Input ligand PDB file')
     parser.add_argument('--output_pdb', required=True, help='Output combined PDB file')
     parser.add_argument('--output_csv', required=True, help='Output structures CSV file')
+    parser.add_argument('--structures_map', required=True, help='Output structures map_table CSV')
     parser.add_argument('--pdbs_folder', required=True, help='PDBs folder for caching 1PEF')
 
     args = parser.parse_args()
@@ -252,8 +259,9 @@ def main():
         # Combine structures
         combine_structures(args.ligand_pdb, peptide_pdb, args.output_pdb)
 
-        # Create output table
+        # Create output table + stream map_table
         create_output_table(args.output_pdb, args.output_csv)
+        create_structures_map(args.output_pdb, args.structures_map)
 
         print("\nSuccess! Ligand prepared for RFdiffusion-AllAtom")
 

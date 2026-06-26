@@ -53,11 +53,13 @@ touch "$INSTALL_SUCCESS"
 echo "=== DNAEncoder ready ==="
 """
 
-    # Lazy path descriptors
-    dna_csv = Path(lambda self: self.table_path("dna"))
-    dna_excel = Path(lambda self: os.path.join(self.extras_folder, "dna_sequences.xlsx"))
+    # Content-bearing: the stream CSV doubles as the map_table.
+    sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    dna_excel = Path(lambda self: os.path.join(self.extras_folder, "encoded_sequences.xlsx"))
     info_txt = Path(lambda self: os.path.join(self.extras_folder, "dna_info.txt"))
     config_file = Path(lambda self: self.configuration_path("dna_encoder_config.json"))
+    sequences_json = Path(lambda self: self.configuration_path(".input_sequences.json"))
+    sequences_csv_path = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     encoder_py = Path(lambda self: self.pipe_script_path("pipe_dna_encoder.py"))
 
     def __init__(self,
@@ -81,9 +83,9 @@ echo "=== DNAEncoder ready ==="
             **kwargs: Additional parameters
 
         Output:
-            Streams: sequences (.dna)
+            Streams: sequences (content-bearing; map_table is the table below)
             Tables:
-                dna: id | protein_sequence | dna_sequence | organism | method
+                sequences: id | sequence (DNA) | protein_sequence | organism | method
         """
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):
@@ -130,9 +132,14 @@ echo "=== DNAEncoder ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to perform DNA encoding."""
+        self.sequences_stream.save_json(self.sequences_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# DNAEncoder execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.generate_filtered_map_table_block(
+            self.sequences_json, self.sequences_csv_path, required_columns=["id", "sequence"]
+        )
         script_content += self.activate_environment()
         script_content += self.generate_script_run_encoding()
         script_content += self.generate_completion_check_footer()
@@ -144,9 +151,9 @@ echo "=== DNAEncoder ready ==="
         import json
 
         config_data = {
-            "sequences_csv": self.sequences_stream.map_table,
+            "sequences_csv": self.sequences_csv_path,
             "organism": self.organism,
-            "dna_output": self.dna_csv,
+            "dna_output": self.sequences_csv,
             "excel_output": self.dna_excel,
             "info_output": self.info_txt
         }
@@ -155,7 +162,6 @@ echo "=== DNAEncoder ready ==="
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Encoding protein sequences to DNA"
-echo "Input sequences: {self.sequences_stream.map_table}"
 echo "Target organism(s): {self.organism}"
 echo "Output folder: {self.output_folder}"
 
@@ -172,15 +178,15 @@ python "{self.encoder_py}" --config "{self.config_file}"
             name="sequences",
             ids=sequence_ids,
             files=[],
-            map_table=self.dna_csv,
-            format="dna"
+            map_table=self.sequences_csv,
+            format="csv"
         )
 
         tables = {
-            "dna": TableInfo(
-                name="dna",
-                path=self.dna_csv,
-                columns=["id", "protein_sequence", "dna_sequence", "organism", "method"],
+            "sequences": TableInfo(
+                name="sequences",
+                path=self.sequences_csv,
+                columns=["id", "sequence", "protein_sequence", "organism", "method"],
                 description="DNA sequences with thresholded weighted codon optimization"
             )
         }

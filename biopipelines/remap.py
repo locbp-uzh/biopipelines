@@ -35,13 +35,13 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
 
 
 class ReMap(BaseConfig):
@@ -558,18 +558,9 @@ echo "=== ReMap ready ==="
             else:
                 new_files = []
 
-            # Create map_table for this stream (co-located with its files).
+            # map_table is written at runtime by pipe_remap.py (remaps the source
+            # map's ids); config time only declares the stream.
             map_table_path = self.stream_map_path(stream_info["name"])
-
-            # Build provenance: trace new IDs back to old IDs
-            provenance = {stream_key: old_ids}
-
-            create_map_table(
-                map_table_path,
-                ids=new_ids,
-                files=new_files if new_files else None,
-                provenance=provenance,
-            )
 
             output[stream_key] = DataStream(
                 name=stream_info["name"],

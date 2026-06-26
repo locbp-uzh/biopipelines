@@ -27,7 +27,7 @@ except ImportError:
 
 # Import ID mapping utilities
 from biopipelines.id_map_utils import get_mapped_ids
-from biopipelines.combinatorics import generate_multiplied_ids
+from biopipelines.combinatorics import generate_multiplied_ids, assemble_provenance_id
 
 
 def _raw_suffixes(axis_counts: List[int]) -> List[str]:
@@ -289,12 +289,15 @@ echo "=== StitchSequences ready ==="
             }
 
         elif isinstance(source, DataStream):
+            # Carry the id patterns; the runtime selects matching map_table rows
+            # (id_patterns.select_ids), which honors any upstream filter.
             if source.map_table:
                 return {
                     "type": "tool_output",
                     "sequences_file": source.map_table,
                     "source_name": "DataStream",
-                    "sequence_ids": list(source.ids) or []
+                    "sequence_ids": list(source.ids) or [],
+                    "id_patterns": list(source.ids) or [],
                 }
             elif source.files:
                 sequences_file = (source.files if source.is_shared_file
@@ -303,7 +306,8 @@ echo "=== StitchSequences ready ==="
                     "type": "tool_output",
                     "sequences_file": sequences_file,
                     "source_name": "DataStream",
-                    "sequence_ids": list(source.ids) or []
+                    "sequence_ids": list(source.ids) or [],
+                    "id_patterns": list(source.ids) or [],
                 }
             else:
                 raise ValueError(f"{name}: DataStream has no files or map_table")
@@ -323,11 +327,14 @@ echo "=== StitchSequences ready ==="
             else:
                 raise ValueError(f"{name}: tables.sequences must have path or be string")
 
+            seq_stream = source.streams.sequences
+            seq_patterns = list(seq_stream.ids) if seq_stream else []
             result = {
                 "type": "tool_output",
                 "sequences_file": sequences_file,
                 "source_name": source.__class__.__name__,
-                "sequence_ids": list(source.streams.sequences.ids) if source.streams.sequences else []
+                "sequence_ids": seq_patterns,
+                "id_patterns": seq_patterns,
             }
 
             # Include structure files if available (for PDB residue number mapping)
@@ -469,11 +476,22 @@ fi
         """Get expected output files after sequence stitching."""
         predicted_ids = self._predict_output_sequence_ids()
 
+        # One sequences_k.id provenance column per tool-output variant axis
+        # (substitutions then indels); raw literal axes and marker substitutions
+        # contribute no provenance column.
+        n_tool_axes = sum(
+            not isinstance(v, (str, list)) and not _is_marker_key(k)
+            for k, v in self.substitutions.items()
+        ) + sum(
+            not isinstance(v, (str, list)) for v in self.indels.values()
+        )
+        prov_columns = [f"sequences_{k}.id" for k in range(1, n_tool_axes + 1)]
+
         tables = {
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
-                columns=["id", "sequence"],
+                columns=["id", "sequence"] + prov_columns,
                 description="Stitched sequences with segment substitutions"
             ),
             "missing": TableInfo(
@@ -543,11 +561,19 @@ fi
     def _predict_matched_sequence_ids(self, template_ids: List[str]) -> List[str]:
         """Predict output IDs when substitutions/indels come from tool outputs.
 
-        Mirror the runtime's per-axis id matching exactly: group_sequences_by_template
-        uses closest_siblings_only=True for normal substitutions/indels and False
-        only for marker substitutions. Using a different flag here over-counts
-        (e.g. includes a distant Panda_2_1) and leaves phantom predicted ids.
+        Mirror the runtime's id assembly exactly: tool-output axes contribute
+        their matched source id (+-joined, provenance-carrying); raw axes (a raw
+        string or list) contribute a 1-based index appended as a "_"-tail. The
+        per-axis match uses closest_siblings_only=True for normal substitutions/
+        indels and False only for marker substitutions — a different flag here
+        over-counts (e.g. a distant Panda_2_1) and leaves phantom predicted ids.
         """
+        def _is_raw(v):
+            return isinstance(v, (str, list))
+
+        def _raw_count(v):
+            return len(v) if isinstance(v, list) else 1
+
         def _source_ids(options):
             if isinstance(options, StandardizedOutput):
                 return list(options.streams.sequences.ids) if options.streams.sequences else []
@@ -555,30 +581,47 @@ fi
                 return list(options.ids) or []
             return []
 
-        # (source_ids, siblings_only) per axis — siblings_only is False only for
-        # marker substitution keys, matching the runtime grouping.
-        axes = [(_source_ids(v), not _is_marker_key(k)) for k, v in self.substitutions.items()]
-        axes += [(_source_ids(v), True) for v in self.indels.values()]
+        # (value, siblings_only, is_marker) per axis — siblings_only is False only
+        # for marker substitution keys, matching the runtime grouping. A marker
+        # axis is a 1:1 same-id repair, not a combinatorial axis: it contributes a
+        # 1-based index, never a +-component or provenance column.
+        axes = [(v, not _is_marker_key(k), _is_marker_key(k)) for k, v in self.substitutions.items()]
+        axes += [(v, True, False) for v in self.indels.values()]
 
         predicted_ids = []
         for template_id in template_ids:
-            matched_per_axis = []
-            for src_ids, siblings_only in axes:
-                m = get_mapped_ids([template_id], src_ids, unique=False,
+            # Per axis: tool-output variant -> matched source ids; raw/marker ->
+            # 1-based index strings. Carries the index-only flag for id assembly.
+            axis_options = []  # (is_raw, [option_token, ...]) in axis order
+            skip = False
+            for value, siblings_only, is_marker in axes:
+                if _is_raw(value):
+                    axis_options.append((True, [str(i) for i in range(1, _raw_count(value) + 1)]))
+                    continue
+                m = get_mapped_ids([template_id], _source_ids(value), unique=False,
                                    closest_siblings_only=siblings_only)
-                matched_per_axis.append(m.get(template_id, []))
+                matched = m.get(template_id, [])
+                if not matched:
+                    skip = True  # axis with no match -> no valid combination
+                    break
+                # Marker: matched count drives index count, but emit indices not ids.
+                if is_marker:
+                    axis_options.append((True, [str(i) for i in range(1, len(matched) + 1)]))
+                else:
+                    axis_options.append((False, matched))
 
-            if not matched_per_axis:
+            if skip:
+                continue
+            if not axis_options:
                 predicted_ids.append(template_id)
                 continue
-            # Any axis with no match -> no valid combination for this template.
-            if any(len(m) == 0 for m in matched_per_axis):
-                continue
 
-            # Cartesian product of 1-based axis indices, ids via the shared helper.
-            suffixes = _raw_suffixes([len(m) for m in matched_per_axis])
-            output_ids, _ = generate_multiplied_ids([template_id], suffixes)
-            predicted_ids.extend(output_ids)
+            for combo in product(*[opts for _, opts in axis_options]):
+                axis_source_ids = [tok for (is_raw, _), tok in zip(axis_options, combo) if not is_raw]
+                raw_indices = [tok for (is_raw, _), tok in zip(axis_options, combo) if is_raw]
+                predicted_ids.append(
+                    assemble_provenance_id(template_id, axis_source_ids, raw_indices)
+                )
 
         return predicted_ids
 

@@ -124,11 +124,20 @@ echo "=== MMseqs2 ready ==="
         super().__init__(**kwargs)
 
     def _get_input_sequences_path(self) -> str:
-        """Get path to input sequences CSV file."""
-        if self.sequences_source_file:
-            return self.sequences_source_file
+        """Get path to input sequences CSV file.
+
+        For a stream input, this points at a configuration-local CSV that is
+        materialized at runtime from the stream JSON (honoring an upstream id
+        filter), not the raw upstream map_table.
+        """
+        if self.sequences_stream is not None:
+            return self.configuration_path(".input_sequences.csv")
         # Raw-sequences path: place the synthesized CSV under configuration/.
         return self.configuration_path("input_sequences.csv")
+
+    @property
+    def sequences_json(self) -> str:
+        return self.configuration_path(".input_sequences.json")
 
     def validate_params(self):
         """Validate MMseqs2-specific parameters."""
@@ -188,6 +197,12 @@ echo "=== MMseqs2 ready ==="
         script_content = "#!/bin/bash\n"
         script_content += "# MMseqs2 client script\n"
         script_content += self.generate_completion_check_header()
+        if self.sequences_stream is not None:
+            self.sequences_stream.save_json(self.sequences_json)
+            script_content += self.generate_filtered_map_table_block(
+                self.sequences_json, self.input_sequences_csv,
+                required_columns=["id", "sequence"],
+            )
         script_content += self.activate_environment()
         script_content += self._generate_script_run_mmseqs2()
         script_content += self.generate_completion_check_footer()

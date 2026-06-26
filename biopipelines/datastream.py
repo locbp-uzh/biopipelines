@@ -22,6 +22,20 @@ from . import id_patterns
 
 
 @dataclass
+class StreamRecord:
+    """Materialized record from a DataStream."""
+
+    id: str
+    file: Optional[str] = None
+    values: Dict[str, Any] = field(default_factory=dict)
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self.values:
+            return self.values[name]
+        raise AttributeError(name)
+
+
+@dataclass
 class DataStream:
     """
     Unified container for any data type flowing between tools.
@@ -239,6 +253,59 @@ class DataStream:
                     format=self.format,
                     _runtime_mode=self._runtime_mode
                 )
+
+    def _records_stream(self) -> 'DataStream':
+        if self.is_lazy and not self._runtime_mode:
+            if self.map_table and os.path.exists(self.map_table):
+                return DataStream(
+                    name=self.name,
+                    ids=self.ids.copy(),
+                    files=self.files if isinstance(self.files, str) else self.files.copy(),
+                    map_table=self.map_table,
+                    format=self.format,
+                    metadata=self.metadata.copy(),
+                    _runtime_mode=True,
+                )
+            raise ValueError(
+                f"Cannot iterate records for lazy DataStream '{self.name}' before "
+                "its map_table is materialized."
+            )
+        return self
+
+    def records(self, columns: Optional[Union[str, List[str]]] = None) -> Iterator[StreamRecord]:
+        """
+        Iterate materialized stream records for notebook/result inspection.
+
+        File-based streams yield records with ``id`` and ``file``. Value-based
+        streams (``files=[]``) read ``map_table`` and yield records whose table
+        columns are available through ``record.values`` and dot access.
+        """
+        ds = self._records_stream()
+
+        if isinstance(columns, str):
+            requested_columns = [columns]
+        else:
+            requested_columns = columns
+
+        if ds.files:
+            from .biopipelines_io import iterate_files
+
+            for item_id, file_path in iterate_files(ds):
+                yield StreamRecord(id=item_id, file=file_path)
+            return
+
+        if not ds.map_table:
+            raise ValueError(
+                f"Cannot iterate records for value-based DataStream '{ds.name}': "
+                "no map_table configured."
+            )
+        if not os.path.exists(ds.map_table):
+            raise FileNotFoundError(f"map_table not found: {ds.map_table}")
+
+        from .biopipelines_io import iterate_values
+
+        for item_id, values in iterate_values(ds, columns=requested_columns):
+            yield StreamRecord(id=item_id, values=values)
 
     def __getitem__(self, index):
         """Get item by index or slice.
@@ -553,9 +620,11 @@ def create_map_table(
     Returns:
         Path to created CSV file
     """
-    # Expand pattern-based ids (skip if lazy — lazy IDs are expanded at runtime)
+    # Expand deterministic slots. Lazy ids keep their [...] brackets (concrete
+    # values arrive in the runtime map_table); a config-time write of a lazy
+    # stream is a placeholder the pipe script overwrites at runtime.
     if any(id_patterns.is_lazy(s) for s in ids):
-        expanded_ids, _ = id_patterns.try_expand_ids(ids)
+        expanded_ids = id_patterns.partial_expand_ids(ids)
     elif any(id_patterns.contains_pattern(s) for s in ids):
         expanded_ids = id_patterns.expand_ids(ids)
     else:

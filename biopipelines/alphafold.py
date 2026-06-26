@@ -164,6 +164,7 @@ fi
     queries_csv = Path(lambda self: self.configuration_path(f"{self.pipeline_name}_queries.csv"))
     queries_fasta = Path(lambda self: self.configuration_path(f"{self.pipeline_name}_queries.fasta"))
     combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
+    sequences_json = Path(lambda self: self.configuration_path(".input_sequences.json"))
     confidence_csv = Path(lambda self: self.table_path("confidence"))
     folding_folder = Path(lambda self: self.execution_folder)
     msas_folder = Path(lambda self: self.stream_folder("msas"))
@@ -341,24 +342,23 @@ python {self.alphafold_queries_py} \\
         # Check if we need to convert from FASTA folder to CSV
         # Only treat as ProteinMPNN seqs folder if it ends with /seqs or is a directory
         if source_file.endswith("seqs") and not source_file.endswith(".csv"):
-            # ProteinMPNN output - convert .fa files to CSV
+            # ProteinMPNN seqs folder - convert .fa files to CSV. Pass the stream
+            # JSON so an upstream id filter gates which .fa files are converted
+            # (fa_to_csv builds the allowed-basename set from ids_expanded).
+            self.sequences_stream.save_json(self.sequences_json)
             return f"""echo "Converting ProteinMPNN .fa files to queries CSV"
-python {self.fa_to_csv_fasta_py} {source_file} {self.queries_csv} {self.queries_fasta}
+python {self.fa_to_csv_fasta_py} {source_file} {self.queries_csv} {self.queries_fasta} --ds-json "{self.sequences_json}"
 
 """
         else:
-            # Direct CSV or FASTA file - copy with error checking
-            return f"""echo "Using sequences from: {source_file}"
-if [ -f "{source_file}" ]; then
-    cp "{source_file}" "{self.queries_csv}"
-    echo "Successfully copied sequences file"
-else
-    echo "ERROR: Sequence file not found: {source_file}"
-    echo "This usually means the previous step failed to generate the expected output"
-    exit 1
-fi
-
-"""
+            # Direct CSV/FASTA stream - materialize a filtered queries CSV (honors
+            # an upstream id filter), then re-activate the AlphaFold env.
+            self.sequences_stream.save_json(self.sequences_json)
+            block = self.generate_filtered_map_table_block(
+                self.sequences_json, self.queries_csv, required_columns=["id", "sequence"]
+            )
+            block += self.activate_environment()
+            return block
 
     def _generate_msa_copy_section(self) -> str:
         """Generate script section to copy pre-computed MSA files to Folding directory."""

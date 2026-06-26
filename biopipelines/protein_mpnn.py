@@ -160,7 +160,7 @@ fi
                  chain: str = "auto",
                  sampling_temp: float = 0.1,
                  model_name: str = "v_48_020",
-                 soluble_model: bool = True,
+                 soluble_model: bool = False,
                  remove_duplicates: bool = True,
                  fill_gaps: str = "G",
                  bias_AA_jsonl: str = "",
@@ -183,7 +183,7 @@ fi
             chain: Chain to apply fixed positions to ("auto" detects from input structure)
             sampling_temp: Sampling temperature for sequence generation
             model_name: ProteinMPNN model variant
-            soluble_model: Use soluble protein model
+            soluble_model: Use soluble protein model (default False; see SolubleMPNN)
             remove_duplicates: Remove duplicate sequences from output (default True)
             fill_gaps: Amino acid to replace X (unknown/gap residues) with (default "G" for glycine).
                        Empty string means no filling (X is kept as-is).
@@ -498,3 +498,41 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             }
         })
         return base_dict
+
+
+class SolubleMPNN(ProteinMPNN):
+    """ProteinMPNN restricted to the soluble model. Shares ProteinMPNN's repo/env/identity."""
+
+    def __init__(self,
+                 structures: Union[DataStream, StandardizedOutput],
+                 num_sequences: int = 1,
+                 fixed: Union[str, Tuple['TableInfo', str]] = "",
+                 redesigned: Union[str, Tuple['TableInfo', str]] = "",
+                 chain: str = "auto",
+                 sampling_temp: float = 0.1,
+                 model_name: str = "v_48_020",
+                 remove_duplicates: bool = True,
+                 fill_gaps: str = "G",
+                 bias_AA_jsonl: str = "",
+                 omit_AA_jsonl: str = "",
+                 seed: int = 0,
+                 ca_noise_std: float = 0.0,
+                 **kwargs):
+        """ProteinMPNN with soluble_model locked to True. See ProteinMPNN for argument details."""
+        super().__init__(
+            structures=structures,
+            num_sequences=num_sequences,
+            fixed=fixed,
+            redesigned=redesigned,
+            chain=chain,
+            sampling_temp=sampling_temp,
+            model_name=model_name,
+            soluble_model=True,
+            remove_duplicates=remove_duplicates,
+            fill_gaps=fill_gaps,
+            bias_AA_jsonl=bias_AA_jsonl,
+            omit_AA_jsonl=omit_AA_jsonl,
+            seed=seed,
+            ca_noise_std=ca_noise_std,
+            **kwargs,
+        )

@@ -31,8 +31,11 @@ import os
 import json
 import pandas as pd
 
-# Load optional ID map
+# Load optional ID map. When built from a DataStream JSON, its keys also gate
+# which .fa files are converted, so a filtered upstream stream (ids restricted
+# at runtime via ids_expanded) does not pull in filtered-out structures.
 id_map = None
+allowed_bases = None
 if args.ds_json and os.path.exists(args.ds_json):
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -42,6 +45,7 @@ if args.ds_json and os.path.exists(args.ds_json):
     for struct_id, pdb_path in iterate_files(ds):
         pdb_base = os.path.splitext(os.path.basename(pdb_path))[0]
         id_map[pdb_base] = struct_id
+    allowed_bases = set(id_map.keys())
 elif args.id_map and os.path.exists(args.id_map):
     with open(args.id_map, 'r') as f:
         id_map = json.load(f)
@@ -51,6 +55,8 @@ seen_sequences = {}  # sequence -> first_seen_id
 duplicate_entries = []  # list of {id, removed_by, kind, cause} dicts
 for fa in fa_files:
     if fa.endswith(".fa"):
+        if allowed_bases is not None and fa[:-3] not in allowed_bases:
+            continue
         data = []
         with open(os.path.join(args.FA_FOLDER,fa),"r") as file:
             lines = [line.strip() for line in file.readlines()]

@@ -4,10 +4,10 @@
 # This software is freely available for use, modification, and redistribution.
 
 #
-# SLURM Submission Script for BioPipelines
+# Batch Submission Script for BioPipelines
 #
-# This script submits a BioPipelines job to SLURM, mimicking the functionality
-# of going to job composer and running the job with the suggested job name.
+# This script submits a BioPipelines job to the configured batch scheduler
+# (SLURM, LSF, or PBS/Torque), capturing job ids to chain dependent batches.
 #
 # Usage:
 #     ./submit.sh <pipeline_script>
@@ -20,12 +20,22 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Locate config file. The submit script targets the cluster variant by default;
 # users on a different machine variant should set BIOPIPELINES_CONFIG_VARIANT.
 CONFIG_VARIANT="${BIOPIPELINES_CONFIG_VARIANT:-cluster}"
+# Export it so the launched python sees the SAME variant. Otherwise bash parses
+# config.<CONFIG_VARIANT>.yaml here while ConfigManager autodetects independently
+# (possibly a different variant), generating scripts for the wrong scheduler.
+export BIOPIPELINES_CONFIG_VARIANT="$CONFIG_VARIANT"
 CONFIG_FILE="$SCRIPT_DIR/config.${CONFIG_VARIANT}.yaml"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: config file not found: $CONFIG_FILE"
     echo "Set BIOPIPELINES_CONFIG_VARIANT=<variant> if you use a non-default config name."
     exit 1
 fi
+# The gitignored user overlay (.config.<variant>.yaml) is deep-merged on top of
+# the committed base by the Python loader. We mirror that here so submit reads
+# the same scheduler/modules/init the pipeline generation step used. Empty if no
+# overlay exists.
+OVERLAY_FILE="$SCRIPT_DIR/.config.${CONFIG_VARIANT}.yaml"
+[ -f "$OVERLAY_FILE" ] || OVERLAY_FILE=""
 # Read machine config (before Python is available).
 #
 # The schema has machine.env_manager and machine.scheduler as nested
@@ -35,7 +45,7 @@ fi
 #   * scheduler.init         -> sourced verbatim into this shell
 #                               (typically: source /etc/profile.d/lmod.sh
 #                               so `module` is available below)
-#   * scheduler.modules      -> $SLURM_MODULES, passed to `module load`
+#   * scheduler.modules      -> $SCHEDULER_MODULES, passed to `module load`
 #
 # Each helper awk extracts a `name:` key inside a parent block, or a
 # bash-string list under an `init:` / `modules:` key inside that block.
@@ -71,15 +81,27 @@ _yaml_name_in() {
     if [ "$_YAML_BACKEND" = "python" ]; then
         "$_PYTHON3" -c "
 import sys, yaml
+def _merge(b, o):
+    if isinstance(b, dict) and isinstance(o, dict):
+        r = dict(b)
+        for k, v in o.items():
+            r[k] = _merge(r[k], v) if k in r else v
+        return r
+    return o
 with open('$CONFIG_FILE') as f:
     d = yaml.safe_load(f) or {}
+if '$OVERLAY_FILE':
+    with open('$OVERLAY_FILE') as f:
+        d = _merge(d, yaml.safe_load(f) or {})
 v = (((d.get('machine') or {}).get('$parent') or {}).get('name'))
 if v is not None:
     print(v)
 "
         return
     fi
-    "$_AWK" -v parent="$parent" '
+    # awk can't deep-merge; read the overlay first (bp-config writes the whole
+    # machine.<parent> block there) and fall back to base only if absent.
+    local _awk_name='
         /^machine:/ { in_machine = 1; next }
         in_machine && $0 ~ "^[[:space:]]+" parent ":" { in_parent = 1; next }
         in_parent && /^[[:space:]]+name:/ {
@@ -90,7 +112,11 @@ if v is not None:
             exit
         }
         in_parent && /^[[:space:]]{0,2}[^ ]/ { exit }
-    ' "$CONFIG_FILE"
+    '
+    local _out=""
+    [ -n "$OVERLAY_FILE" ] && _out=$("$_AWK" -v parent="$parent" "$_awk_name" "$OVERLAY_FILE")
+    [ -z "$_out" ] && _out=$("$_AWK" -v parent="$parent" "$_awk_name" "$CONFIG_FILE")
+    [ -n "$_out" ] && printf '%s\n' "$_out"
 }
 
 # Extract a list of strings under `machine.<parent>.<key>`. One value per
@@ -101,15 +127,25 @@ _yaml_list_in() {
     if [ "$_YAML_BACKEND" = "python" ]; then
         "$_PYTHON3" -c "
 import sys, yaml
+def _merge(b, o):
+    if isinstance(b, dict) and isinstance(o, dict):
+        r = dict(b)
+        for k, v in o.items():
+            r[k] = _merge(r[k], v) if k in r else v
+        return r
+    return o
 with open('$CONFIG_FILE') as f:
     d = yaml.safe_load(f) or {}
+if '$OVERLAY_FILE':
+    with open('$OVERLAY_FILE') as f:
+        d = _merge(d, yaml.safe_load(f) or {})
 xs = (((d.get('machine') or {}).get('$parent') or {}).get('$key')) or []
 for x in xs:
     print(x)
 "
         return
     fi
-    "$_AWK" -v parent="$parent" -v key="$key" '
+    local _awk_list='
         function indent_of(s,    i) {
             for (i = 1; i <= length(s); i++) {
                 if (substr(s, i, 1) != " ") return i - 1
@@ -165,7 +201,23 @@ for x in xs:
             exit
         }
         END { flush() }
-    ' "$CONFIG_FILE"
+    '
+    # awk can't deep-merge; fall back per KEY (not per block). Read the list
+    # from the overlay only if the overlay actually defines machine.<parent>.<key>
+    # (e.g. bp-config auto writes the whole block); otherwise read base, so a
+    # leaf-only overlay (bp-config set machine.scheduler.name lsf) doesn't wipe
+    # the base's init/modules.
+    local _src="$CONFIG_FILE"
+    if [ -n "$OVERLAY_FILE" ] && \
+       "$_AWK" -v parent="$parent" -v key="$key" '
+           /^machine:/ { m=1; next }
+           m && $0 ~ "^[[:space:]]+" parent ":" { p=1; next }
+           p && $0 ~ "^[[:space:]]+" key ":" { found=1 }
+           p && /^[[:space:]]{0,2}[^ ]/ { p=0 }
+           END { exit !found }' "$OVERLAY_FILE"; then
+        _src="$OVERLAY_FILE"
+    fi
+    "$_AWK" -v parent="$parent" -v key="$key" "$_awk_list" "$_src"
 }
 
 # Read every YAML value we need up front, before any eval / module load
@@ -174,8 +226,9 @@ for x in xs:
 # PyYAML), which would silently break later reads. By doing all parsing
 # now, the bootstrap is immune to whatever the user's init does to PATH.
 ENV_MANAGER=$(_yaml_name_in env_manager)
+SCHEDULER=$(_yaml_name_in scheduler)
 SCHEDULER_INIT=$(_yaml_list_in scheduler init)
-SLURM_MODULES=$(_yaml_list_in scheduler modules | xargs)
+SCHEDULER_MODULES=$(_yaml_list_in scheduler modules | xargs)
 ENV_MANAGER_INIT=$(_yaml_list_in env_manager init)
 
 if [ -z "$ENV_MANAGER" ]; then
@@ -183,6 +236,24 @@ if [ -z "$ENV_MANAGER" ]; then
     echo "Please add the dict-form env_manager block under 'machine:'."
     exit 1
 fi
+
+if [ -z "$SCHEDULER" ]; then
+    echo "ERROR: machine.scheduler.name not found in $CONFIG_FILE"
+    echo "Please add the dict-form scheduler block under 'machine:'."
+    exit 1
+fi
+
+case "$SCHEDULER" in
+    slurm) ;;
+    lsf|pbs)
+        echo "WARNING: $SCHEDULER support is new. If a job is rejected or mis-scheduled, override with ${SCHEDULER}_options in Resources() and open an issue at https://github.com/locbp-uzh/biopipelines/issues"
+        ;;
+    *)
+        echo "ERROR: machine.scheduler.name='$SCHEDULER' is not a batch scheduler."
+        echo "$0 submits to a batch scheduler (slurm/lsf/pbs); for '$SCHEDULER' run pipelines inline with bp-run instead."
+        exit 1
+        ;;
+esac
 
 # Source the scheduler.init lines first so `module` (and any other host
 # primitives the user named) are on PATH before we try `module load`.
@@ -193,11 +264,11 @@ if [ -n "$SCHEDULER_INIT" ]; then
     done <<< "$SCHEDULER_INIT"
 fi
 
-# Load SLURM modules from scheduler.modules. If modules are configured
+# Load environment modules from scheduler.modules. If modules are configured
 # but `module` isn't on PATH after scheduler.init, abort with a useful
 # message — otherwise the next failure ("mamba: command not found",
 # etc.) is opaque and hard to trace back to a missing lmod source.
-if [ -n "$SLURM_MODULES" ]; then
+if [ -n "$SCHEDULER_MODULES" ]; then
     if ! command -v module >/dev/null 2>&1 && ! type module >/dev/null 2>&1; then
         echo "ERROR: 'module' command not found, but machine.scheduler.modules is non-empty."
         echo "Check machine.scheduler.init in $CONFIG_FILE — it should source"
@@ -205,7 +276,7 @@ if [ -n "$SLURM_MODULES" ]; then
         echo "tries to load modules."
         exit 1
     fi
-    module load $SLURM_MODULES
+    module load $SCHEDULER_MODULES
 fi
 
 # Source the env-manager init lines (typically the shell-hook eval).
@@ -242,7 +313,7 @@ fi
 usage() {
     echo "Usage: $0 [-v|--verbose] <pipeline_script>"
     echo ""
-    echo "Run a BioPipelines script and submit the generated job to SLURM"
+    echo "Run a BioPipelines script and submit the generated job to the configured scheduler (SLURM/LSF/PBS)"
     echo ""
     echo "Options:"
     echo "  -v, --verbose    Show full pipeline generation output"
@@ -258,7 +329,50 @@ usage() {
     echo ""
 }
 
-# Function to run pipeline and execute sbatch commands
+# Glob pattern (basename) for per-batch scheduler scripts, stemmed by scheduler.
+batch_glob() { echo "${SCHEDULER}_batch*.sh"; }
+# Single-batch script basename, stemmed by scheduler.
+single_script_name() { echo "${SCHEDULER}.sh"; }
+
+# Submit one script and echo the captured job id on success, or print an
+# error and return 1. Scheduler-specific: SLURM sbatch --parsable, LSF bsub
+# (parse "Job <NNN> is submitted"), PBS qsub (prints the bare job id).
+# Args: <script> <job_name> <output_path>
+submit_one() {
+    local script="$1" job_name="$2" output_path="$3"
+    local out exit_code jid
+    case "$SCHEDULER" in
+        slurm)
+            out=$(sbatch --parsable --job-name="$job_name" --output="$output_path" "$script" 2>&1)
+            exit_code=$?
+            jid="$out"
+            ;;
+        lsf)
+            # bsub reads the script from stdin; -J name, -o output.
+            out=$(bsub -J "$job_name" -o "$output_path" < "$script" 2>&1)
+            exit_code=$?
+            # "Job <12345> is submitted to queue <normal>."
+            jid=$(echo "$out" | sed -n 's/.*Job <\([0-9][0-9]*\)>.*/\1/p' | head -1)
+            ;;
+        pbs)
+            # qsub prints the job id (e.g. "12345.headnode") on stdout.
+            out=$(qsub -N "$job_name" -o "$output_path" "$script" 2>&1)
+            exit_code=$?
+            jid=$(echo "$out" | head -1 | tr -d '[:space:]')
+            ;;
+        *)
+            echo "✗ Unknown scheduler '$SCHEDULER' — cannot submit" >&2
+            return 1
+            ;;
+    esac
+    if [ $exit_code -ne 0 ] || [ -z "$jid" ] || echo "$out" | grep -qi "error\|invalid\|failed"; then
+        echo "✗ Submission failed ($SCHEDULER): $out" >&2
+        return 1
+    fi
+    echo "$jid"
+}
+
+# Function to run pipeline and execute submission commands
 run_pipeline_and_submit() {
     local pipeline_script="$1"
     local verbose="$2"
@@ -300,31 +414,7 @@ run_pipeline_and_submit() {
 
     if [ -z "$runtime_dirs" ]; then
         echo "No runtime directories found in pipeline output"
-        # Fall back to checking for sbatch commands (backward compatibility)
-        local sbatch_commands=$(echo "$pipeline_output" | grep "^sbatch ")
-        if [ -n "$sbatch_commands" ]; then
-            echo ""
-            echo "Submitting jobs..."
-            echo "=========================================="
-            echo ""
-
-            local job_count=0
-            while IFS= read -r sbatch_cmd; do
-                if [ -n "$sbatch_cmd" ]; then
-                    job_count=$((job_count + 1))
-                    echo "Job $job_count:"
-                    echo "$sbatch_cmd"
-                    eval "$sbatch_cmd" || true
-                    echo ""
-                fi
-            done <<< "$sbatch_commands"
-
-            echo "=========================================="
-            echo "All jobs submitted. Total: $job_count"
-            return 0
-        else
-            return 1
-        fi
+        return 1
     fi
 
     #echo ""
@@ -346,8 +436,8 @@ run_pipeline_and_submit() {
         echo "Runtime directory: $runtime_dir"
         #echo ""
 
-        # Check for batch files (multi-batch pipeline)
-        local batch_files=$(ls "$runtime_dir"/slurm_batch*.sh 2>/dev/null | sort -V)
+        # Check for batch files (multi-batch pipeline), stemmed by scheduler.
+        local batch_files=$(ls "$runtime_dir"/$(batch_glob) 2>/dev/null | sort -V)
 
         if [ -n "$batch_files" ]; then
             # Multi-batch pipeline
@@ -357,7 +447,7 @@ run_pipeline_and_submit() {
             #echo ""
 
             local job_count=0
-            # Per-batch job-id map: batch number (zero-padded 3-digit) -> SLURM job id.
+            # Per-batch job-id map: batch number (zero-padded 3-digit) -> scheduler job id.
             # Populated as each batch is submitted; consulted to substitute every
             # <JOBID_BATCH_NNN> placeholder remaining in the next batch's script.
             # Batches emit in numeric order (sort -V above) and parents always have
@@ -402,22 +492,18 @@ run_pipeline_and_submit() {
                 echo "  Job name: $job_name"
                 echo "  Output: $output_path"
                 local resolved_dep
-                resolved_dep=$(grep -o "afterok:[0-9:]*" "$batch_file" | head -1)
+                resolved_dep=$(grep -o "\(afterok\|after\):[0-9:]*\|done([0-9]*)\|started([0-9]*)" "$batch_file" | head -1)
                 if [ -n "$resolved_dep" ]; then
                     echo "  Dependency: $resolved_dep"
                 fi
 
-                local submit_output=$(sbatch --parsable --job-name="$job_name" --output="$output_path" "$batch_file" 2>&1)
-                local submit_exit=$?
-
-                # Check for both exit code and error messages in output
-                if [ $submit_exit -eq 0 ] && ! echo "$submit_output" | grep -qi "error\|invalid\|failed"; then
-                    batch_job_id[$batch_key]="$submit_output"
-                    echo "✓ Batch $batch_num submitted: Job ID $submit_output"
+                local submit_jid
+                if submit_jid=$(submit_one "$batch_file" "$job_name" "$output_path"); then
+                    batch_job_id[$batch_key]="$submit_jid"
+                    echo "✓ Batch $batch_num submitted: Job ID $submit_jid"
                     total_jobs_submitted=$((total_jobs_submitted + 1))
                 else
                     echo "✗ Failed to submit batch $batch_num"
-                    echo "   Error: $submit_output"
                     return 1
                 fi
                 #echo ""
@@ -426,9 +512,9 @@ run_pipeline_and_submit() {
             echo "Pipeline $pipeline_name: $job_count batch(es) submitted"
             #echo ""
         else
-            # Single batch pipeline - look for slurm.sh
-            local slurm_script="$runtime_dir/slurm.sh"
-            if [ -f "$slurm_script" ]; then
+            # Single batch pipeline - look for the scheduler's single script.
+            local job_script="$runtime_dir/$(single_script_name)"
+            if [ -f "$job_script" ]; then
                 echo "Detected single-batch pipeline"
                 echo "Submitting job..."
                 echo "------------------------------------------"
@@ -440,22 +526,18 @@ run_pipeline_and_submit() {
                     job_name="$pipeline_name"
                 fi
 
-                local output_path="$runtime_dir/slurm.out"
-                local submit_output=$(sbatch --job-name="$job_name" --output "$output_path" --parsable "$slurm_script" 2>&1)
-                local submit_exit=$?
-
-                # Check for both exit code and error messages in output
-                if [ $submit_exit -eq 0 ] && ! echo "$submit_output" | grep -qi "error\|invalid\|failed"; then
-                    echo "✓ Job submitted: Job ID $submit_output"
+                local output_path="$runtime_dir/${SCHEDULER}.out"
+                local submit_jid
+                if submit_jid=$(submit_one "$job_script" "$job_name" "$output_path"); then
+                    echo "✓ Job submitted: Job ID $submit_jid"
                     total_jobs_submitted=$((total_jobs_submitted + 1))
                 else
                     echo "✗ Failed to submit job"
-                    echo "   Error: $submit_output"
                     return 1
                 fi
                 #echo ""
             else
-                echo "Warning: No slurm script found in $runtime_dir"
+                echo "Warning: No $SCHEDULER script found in $runtime_dir"
                 #echo ""
             fi
         fi
@@ -469,10 +551,6 @@ run_pipeline_and_submit() {
 main() {
     local verbose=0
     local pipeline_script=""
-
-    #echo "BioPipelines SLURM Submission Script"
-    #echo "===================================="
-    #echo ""
 
     # Parse arguments
     while [ $# -gt 0 ]; do

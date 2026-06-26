@@ -35,14 +35,23 @@ import pandas as pd
 _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines')
 sys.path.insert(0, _biopipelines_dir)
 from combinatorics import CombinatoricsConfig, predict_single_output_id  # noqa: E402
+import id_patterns  # noqa: E402
 
 
-def _load_id_to_seq(path):
-    """Load an {id: sequence} map from a sequences CSV (columns: id, sequence)."""
-    df = pd.read_csv(path)
+def _load_id_to_seq(path, patterns=None):
+    """Load an {id: sequence} map from a sequences CSV (columns: id, sequence).
+
+    When ``patterns`` is given, select the rows the patterns cover
+    (``id_patterns.select_ids``) — the map_table rows are the source of truth, so
+    this honors any upstream filter. Returns selected ids in row order."""
+    df = pd.read_csv(path, dtype={'id': str})
     if 'id' not in df.columns or 'sequence' not in df.columns:
         raise ValueError(f"sequences CSV {path} must have 'id' and 'sequence' columns")
-    return {str(r['id']): str(r['sequence']).strip() for _, r in df.iterrows()}
+    present = {str(r['id']): str(r['sequence']).strip() for _, r in df.iterrows()}
+    if not patterns:
+        return present
+    selected = id_patterns.select_ids([str(p) for p in patterns], list(present.keys()))
+    return {i: present[i] for i in selected}
 
 
 def _ordered_sources(axis):
@@ -71,10 +80,13 @@ def build_queries(config_path, output_csv):
         path = src.get("path")
         if not path or not os.path.exists(path):
             raise ValueError(f"sequences source not found: {path}")
-        id_to_seq = _load_id_to_seq(path)
+        patterns = src.get("ids")
+        id_to_seq = _load_id_to_seq(path, patterns=patterns)
+        # Selected ids in row order (id_to_seq is already restricted + ordered).
+        ids = list(id_to_seq.keys())
         loaded.append({
             "id_to_seq": id_to_seq,
-            "ids": list(id_to_seq.keys()),
+            "ids": ids,
             "iterate": bool(src.get("iterate", True)),
         })
 

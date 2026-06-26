@@ -1029,14 +1029,23 @@ def _probe_container_executor(ctx: _ProbeContext) -> tuple:
 def _probe_scheduler(ctx: _ProbeContext) -> tuple:
     """Return ({name, init, modules}, source_label) for machine.scheduler.
 
-    `modules` is the list of cluster modules to `module load` in
-    SLURM batch scripts. We populate it from whatever modules the
-    env-manager and container probes resolved to (since those are the
-    binaries each batch script needs available).
+    Detects the batch scheduler by probing for a signature binary on PATH:
+    SLURM (``sinfo``), LSF (``bsub``), PBS/Torque (``qsub``), in that order.
+    Falls back to ``none`` when none is present.
+
+    `modules` is the list of cluster modules to `module load` in batch
+    scripts. We populate it from whatever modules the env-manager and
+    container probes resolved to (since those are the binaries each batch
+    script needs available).
     """
-    sinfo, _ = _which("sinfo")
-    if not sinfo:
-        return {"name": "none", "init": [], "modules": []}, "no sinfo on PATH"
+    # (scheduler name, signature binary). First hit wins.
+    for name, binary in (("slurm", "sinfo"), ("lsf", "bsub"), ("pbs", "qsub")):
+        found, _ = _which(binary)
+        if found:
+            label = f"{binary} present"
+            break
+    else:
+        return {"name": "none", "init": [], "modules": []}, "no batch scheduler on PATH"
 
     init = _scheduler_init_lines(ctx)
 
@@ -1062,10 +1071,10 @@ def _probe_scheduler(ctx: _ProbeContext) -> tuple:
             modules.append(m)
 
     return {
-        "name": "slurm",
+        "name": name,
         "init": init,
         "modules": modules,
-    }, "sinfo present"
+    }, label
 
 
 def _build_machine_block(ctx: _ProbeContext) -> tuple:
@@ -1676,7 +1685,7 @@ def _cmd_machine(args):
         "env_manager": config_manager.get_env_manager(),
         "scheduler": config_manager.get_scheduler(),
         "container_executor": config_manager.get_container_executor(),
-        "slurm_modules": " ".join(config_manager.get_slurm_modules()),
+        "scheduler_modules": " ".join(config_manager.get_scheduler_modules()),
         "shell_hook": config_manager.get_shell_hook_command(),
         "module_load": config_manager.get_module_load_line(),
         "activate": config_manager.get_activate_command("ENV_NAME"),

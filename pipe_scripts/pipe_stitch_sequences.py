@@ -29,7 +29,8 @@ from itertools import product
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.id_map_utils import get_mapped_ids
-from biopipelines.combinatorics import generate_multiplied_ids
+from biopipelines.combinatorics import generate_multiplied_ids, assemble_provenance_id
+from biopipelines import id_patterns
 
 
 def _multiplied_id(template_id, indices):
@@ -318,7 +319,7 @@ def load_sequences_from_csv(csv_path: str) -> Dict[str, str]:
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Sequences file not found: {csv_path}")
 
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, dtype={'id': str})
 
     if 'id' not in df.columns or 'sequence' not in df.columns:
         raise ValueError(f"Expected 'id' and 'sequence' columns in {csv_path}. Found: {list(df.columns)}")
@@ -341,7 +342,7 @@ def load_positions_from_table(table_path: str, column_name: str) -> Dict[str, st
     if not os.path.exists(table_path):
         raise FileNotFoundError(f"Table file not found: {table_path}")
 
-    df = pd.read_csv(table_path)
+    df = pd.read_csv(table_path, dtype=str)
     if column_name not in df.columns:
         raise ValueError(f"Column '{column_name}' not found. Available: {list(df.columns)}")
 
@@ -377,7 +378,16 @@ def load_sequences_from_info(info: Dict[str, Any]) -> Dict[str, str]:
         csv_path = info.get("sequences_file")
         if not csv_path:
             raise ValueError("tool_output source missing sequences_file")
-        return load_sequences_from_csv(csv_path)
+        sequences = load_sequences_from_csv(csv_path)
+        # Select rows the stream's id patterns cover. The map_table is the source
+        # of truth, so this honors any upstream filter (fewer rows → fewer match).
+        patterns = info.get("id_patterns")
+        if patterns:
+            selected = id_patterns.select_ids(
+                [str(p) for p in patterns], list(sequences.keys())
+            )
+            sequences = {i: sequences[i] for i in selected}
+        return sequences
 
     else:
         raise ValueError(f"Unknown source type: {source_type}")
@@ -439,7 +449,8 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         substitutions.append({
             'key_str': key_str,
             'position_key': pos_key_info,
-            'sequences': sequences
+            'sequences': sequences,
+            'seq_type': seq_info.get('type')
         })
 
     # Load indel options and positions for each region
@@ -456,7 +467,8 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
         indels.append({
             'key_str': key_str,
             'position_key': pos_key_info,
-            'sequences': sequences
+            'sequences': sequences,
+            'seq_type': seq_info.get('type')
         })
 
     # Determine stitching strategy. Marker keys count as "fixed" here: their
@@ -543,6 +555,12 @@ def stitch_sequences_from_config(config_data: Dict[str, Any]) -> None:
     # Save results
     if results:
         df = pd.DataFrame(results)
+        # Order columns: id, sequence, then sequences_1.id, sequences_2.id, ...
+        prov_cols = sorted(
+            (c for c in df.columns if c.startswith('sequences_') and c.endswith('.id')),
+            key=lambda c: int(c[len('sequences_'):-len('.id')])
+        )
+        df = df[['id', 'sequence'] + prov_cols]
         output_dir = os.path.dirname(output_csv)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
@@ -779,6 +797,20 @@ def stitch_matched_sequences(
             indel_option_ids.append([item[0] for item in seq_items])
             indel_option_lists.append([item[1] for item in seq_items])
 
+        # Per-axis index-only flag (substitutions then indels), parallel to the
+        # index combo below. A tool-output variant axis contributes its source id
+        # to the +-id and a sequences_k.id provenance column; raw axes and marker
+        # substitutions (a 1:1 same-id repair, not a combinatorial axis) instead
+        # contribute a 1-based index appended as a "_"-tail.
+        axis_is_raw = [
+            sub.get('seq_type') in ('raw', 'raw_list')
+            or sub['position_key']['type'] == 'marker'
+            for sub in substitutions
+        ] + [
+            indel.get('seq_type') in ('raw', 'raw_list')
+            for indel in indels
+        ]
+
         # Generate index ranges for Cartesian product
         sub_index_ranges = [range(len(opts)) for opts in sub_option_lists] if sub_option_lists else [range(1)]
         indel_index_ranges = [range(len(opts)) for opts in indel_option_lists] if indel_option_lists else [range(1)]
@@ -813,9 +845,22 @@ def stitch_matched_sequences(
                     debug_info[f'indel_{i}_position_table_key'] = indel_position_table_keys[i]
                 current_seq = apply_indels(current_seq, indel_ops, debug_info=debug_info)
 
-            # Build output ID (matched path uses 0-based indices -> 1-based)
-            output_id = _multiplied_id(
-                template_id, [idx + 1 for idx in list(sub_indices) + list(indel_indices)])
+            # Build output ID. Tool-output axes contribute their matched source
+            # id (+-joined, carrying provenance); raw axes contribute a 1-based
+            # index appended as a "_"-tail. Per-axis source ids are already in
+            # debug_info as sub_{i}_id / indel_{i}_id.
+            combo_indices = [idx + 1 for idx in list(sub_indices) + list(indel_indices)]
+            combo_source_ids = (
+                [sub_option_ids[i][idx] for i, idx in enumerate(sub_indices)]
+                + [indel_option_ids[i][idx] for i, idx in enumerate(indel_indices)]
+            )
+            axis_source_ids = [
+                sid for sid, is_raw in zip(combo_source_ids, axis_is_raw) if not is_raw
+            ]
+            raw_indices = [
+                idx for idx, is_raw in zip(combo_indices, axis_is_raw) if is_raw
+            ]
+            output_id = assemble_provenance_id(template_id, axis_source_ids, raw_indices)
 
             if unfilled:
                 # Keep the sequence; the leftover markers are a QC note, not a
@@ -823,7 +868,11 @@ def stitch_matched_sequences(
                 print(f"  WARNING: {output_id}: {len(unfilled)} marker position(s) "
                       f"left unfilled (reference could not supply): {','.join(unfilled)}")
 
-            results.append({'id': output_id, 'sequence': current_seq})
+            row = {'id': output_id, 'sequence': current_seq}
+            # One sequences_k.id provenance column per tool-output axis, 1-based.
+            for k, sid in enumerate(axis_source_ids, start=1):
+                row[f'sequences_{k}.id'] = sid
+            results.append(row)
             template_combo_count += 1
 
         print(f"    Generated {template_combo_count} combinations")

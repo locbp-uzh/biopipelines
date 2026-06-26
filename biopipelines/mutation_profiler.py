@@ -89,6 +89,10 @@ fi
     sequence_logo_counts_png = Path(lambda self: self.stream_path("plots", "sequence_logo_counts.png"))
     config_file = Path(lambda self: self.configuration_path("mutation_profiler_config.json"))
     profiler_py = Path(lambda self: self.pipe_script_path("pipe_mutation_profiler.py"))
+    original_json = Path(lambda self: self.configuration_path(".input_original.json"))
+    original_csv = Path(lambda self: self.configuration_path(".input_original.csv"))
+    mutants_json = Path(lambda self: self.configuration_path(".input_mutants.json"))
+    mutants_csv = Path(lambda self: self.configuration_path(".input_mutants.csv"))
 
     VALID_COLOR_PALETTES = ("okabe-ito", "standard")
 
@@ -175,9 +179,18 @@ fi
     
     def generate_script(self, script_path: str) -> str:
         """Generate MutationProfiler execution script."""
+        self.original_stream.save_json(self.original_json)
+        self.mutants_stream.save_json(self.mutants_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# MutationProfiler execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.generate_filtered_map_table_block(
+            self.original_json, self.original_csv, required_columns=["id", "sequence"]
+        )
+        script_content += self.generate_filtered_map_table_block(
+            self.mutants_json, self.mutants_csv, required_columns=["id", "sequence"]
+        )
         script_content += self.activate_environment()
         script_content += self.generate_script_run_profiler()
         script_content += self.generate_completion_check_footer()
@@ -189,8 +202,8 @@ fi
         import json
 
         config_data = {
-            "original_sequences": self.original_stream.map_table,
-            "mutants_sequences": self.mutants_stream.map_table,
+            "original_sequences": self.original_csv,
+            "mutants_sequences": self.mutants_csv,
             "include_original": self.include_original,
             "positions": self.positions,
             "color_palette": self.color_palette,
@@ -214,8 +227,6 @@ fi
         # invalid backend at import. Force a headless backend (correct on HPC too).
         return f"""export MPLBACKEND=Agg
 echo "Analyzing mutation patterns"
-echo "Original sequences: {self.original_stream.map_table}"
-echo "Mutant sequences: {self.mutants_stream.map_table}"
 echo "Output folder: {self.output_folder}"
 
 python "{self.profiler_py}" --config "{self.config_file}"

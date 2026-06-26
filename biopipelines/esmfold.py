@@ -114,6 +114,7 @@ fi
     # ---------------------------------------------------------------------------
 
     sequences_ds_json  = Path(lambda self: self.configuration_path(".input_sequences.json"))
+    sequences_csv      = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     predictions_folder = Path(lambda self: self.stream_folder("structures"))
     structures_map     = Path(lambda self: self.stream_map_path("structures"))
     confidence_csv     = Path(lambda self: self.table_path("confidence"))
@@ -214,12 +215,17 @@ fi
         # Serialize DataStream for use by post-processing helper at runtime
         self.sequences_stream.save_json(self.sequences_ds_json)
 
-        # The sequences CSV (map_table) is the source of id,sequence pairs
-        sequences_csv = self.sequences_stream.map_table
+        # id-aware source of id,sequence pairs (honors an upstream id filter)
+        sequences_csv = self.sequences_csv
 
         script_content = "#!/bin/bash\n"
         script_content += "# ESMFold structure prediction script\n"
         script_content += self.generate_completion_check_header()
+
+        # Phase 0: materialize filtered sequences CSV (biopipelines env)
+        script_content += self.generate_filtered_map_table_block(
+            self.sequences_ds_json, sequences_csv, required_columns=["id", "sequence"]
+        )
 
         # Phase 1: inference under esmfold env
         script_content += self.activate_environment()  # esmfold (primary env)

@@ -114,6 +114,18 @@ minimum to understand and use the codebase.
    the binary genuinely refuses the original schema, and say so in a
    comment.
 
+   **One exception is mandatory, not optional: a filtered stream.** A
+   `map_table` is the full warehouse; a filtered stream narrows `ids` but
+   leaves the table intact. A consumer that reads the raw `map_table`
+   (`cp`, `read_csv`, `os.listdir`) ignores the filter and reprocesses
+   every row. So: if the consumer resolves through the DataStream at
+   runtime (`load_datastream` + `iterate_files` / `iterate_values` /
+   `Resolve.*`) it is filtered by construction — prefer that. Only if the
+   binary needs a concrete CSV does the tool bypass datastream resolution,
+   and then it **must** emit `self.generate_filtered_map_table_block(...)`
+   before the consumer step instead of feeding the raw table. See
+   `developer_manual.md` → "Filtered streams vs. the raw map_table".
+
 4. Then present **a single concrete sketch** in one message — class name,
    input streams, output streams, key parameters with each marked
    **implemented** or **deferred** — and ask the user to confirm or

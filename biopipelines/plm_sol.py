@@ -113,6 +113,7 @@ fi
     # ------------------------------------------------------------------
 
     sequences_json = Path(lambda self: self.configuration_path("sequences.json"))
+    sequences_csv_path = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     solubility_csv = Path(lambda self: self.table_path("solubility"))
     missing_csv = Path(lambda self: self.table_path("missing"))
     helper_py = Path(lambda self: self.pipe_script_path("pipe_plm_sol.py"))
@@ -165,13 +166,16 @@ fi
     def generate_script(self, script_path: str) -> str:
         self.sequences_stream.save_json(self.sequences_json)
 
-        # Content-bearing sequences CSV (id, sequence) — same source ESMFold/VespaG use.
-        sequences_csv = self.sequences_stream.map_table
+        # id-aware content-bearing sequences CSV (id, sequence), honors an upstream filter.
+        sequences_csv = self.sequences_csv_path
         repo_dir = self.folders.get("PLM_Sol", "")
 
         script = "#!/bin/bash\n"
         script += "# PLM_Sol solubility-scoring script\n"
         script += self.generate_completion_check_header()
+        script += self.generate_filtered_map_table_block(
+            self.sequences_json, sequences_csv, required_columns=["id", "sequence"]
+        )
         script += self.activate_environment()  # plm_sol env
 
         script += f"""echo "Running PLM_Sol on {len(self.sequences_stream)} sequence(s)"

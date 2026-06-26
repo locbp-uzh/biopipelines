@@ -173,6 +173,43 @@ def _unpack_input(name: str, value: Any) -> Tuple[Any, str, Optional[str]]:
     return value, name, None
 
 
+def _source_entry(stream: Any) -> Dict[str, Any]:
+    """
+    Build a source entry {path, ids} for a DataStream.
+
+    The map_table does not exist at config time (upstream runs later), so we
+    carry the stream's id *patterns* (``stream.ids``, possibly deterministic
+    and/or lazy). At runtime the consumer reads the map_table as the source of
+    truth and selects the rows the patterns cover (:func:`id_patterns.select_ids`).
+    This honors upstream filtering without a config-time flag: a filtered stream
+    simply has fewer rows, so fewer are selected.
+    """
+    return {"path": stream.map_table, "ids": list(stream.ids)}
+
+
+def _extract_source_entries(source: Any, stream_name: str) -> List[Dict[str, Any]]:
+    """Like :func:`_extract_source_paths` but returns {path, ids?} dicts."""
+    if source is None:
+        return []
+    if isinstance(source, str):
+        return [{"path": source}] if source.endswith('.csv') else []
+    if isinstance(source, list):
+        entries: List[Dict[str, Any]] = []
+        for item in source:
+            entries.extend(_extract_source_entries(item, stream_name))
+        return entries
+    if hasattr(source, 'map_table') and hasattr(source, 'ids'):
+        if source.map_table:
+            return [_source_entry(source)]
+        raise ValueError(f"DataStream for stream '{stream_name}' has no map_table")
+    if hasattr(source, 'streams'):
+        stream = getattr(source.streams, stream_name, None)
+        if stream and hasattr(stream, 'map_table') and stream.map_table:
+            return [_source_entry(stream)]
+        raise ValueError(f"Source for '{stream_name}' stream must have {stream_name} with map_table")
+    raise ValueError(f"Cannot extract source paths from {type(source)} for stream '{stream_name}'")
+
+
 def _extract_source_paths(source: Any, stream_name: str) -> List[str]:
     """
     Extract CSV file paths from a source (StandardizedOutput, ToolOutput, DataStream, etc.).
@@ -225,7 +262,11 @@ def _unwrap_sources(value: Any, stream_name: str) -> tuple:
 
     Returns:
         (mode: str, sources: list) where mode is "bundle" or "each"
-        sources is a list of dicts: [{"path": str, "iterate": bool}]
+        sources is a list of dicts: [{"path": str, "iterate": bool, "ids"?: [...]}]
+
+    Each source carries the stream's expanded ``ids`` so a filtered upstream
+    stream contributes only its selected ids; runtime consumers intersect the
+    source CSV rows with these ids.
 
     For Bundle(Each(library), cofactor):
     - mode = "bundle" (preserves the bundle semantics)
@@ -239,13 +280,13 @@ def _unwrap_sources(value: Any, stream_name: str) -> tuple:
             if isinstance(src, Each):
                 # Each inside Bundle - these are iterated
                 for sub_src in src.sources:
-                    for path in _extract_source_paths(sub_src, stream_name):
-                        sources_with_iterate.append({"path": path, "iterate": True, "order": order})
+                    for entry in _extract_source_entries(sub_src, stream_name):
+                        sources_with_iterate.append({**entry, "iterate": True, "order": order})
                         order += 1
             else:
                 # Bare source inside Bundle - static (bundled with each iteration)
-                for path in _extract_source_paths(src, stream_name):
-                    sources_with_iterate.append({"path": path, "iterate": False, "order": order})
+                for entry in _extract_source_entries(src, stream_name):
+                    sources_with_iterate.append({**entry, "iterate": False, "order": order})
                     order += 1
 
         return ("bundle", sources_with_iterate)
@@ -254,8 +295,8 @@ def _unwrap_sources(value: Any, stream_name: str) -> tuple:
         # Each iterates - all sources are iterated
         sources_with_iterate = []
         for src in value.sources:
-            for path in _extract_source_paths(src, stream_name):
-                sources_with_iterate.append({"path": path, "iterate": True})
+            for entry in _extract_source_entries(src, stream_name):
+                sources_with_iterate.append({**entry, "iterate": True})
         return ("each", sources_with_iterate)
 
     elif isinstance(value, list):
@@ -266,15 +307,15 @@ def _unwrap_sources(value: Any, stream_name: str) -> tuple:
                 _, sub_sources = _unwrap_sources(item, stream_name)
                 sources_with_iterate.extend(sub_sources)
             else:
-                for path in _extract_source_paths(item, stream_name):
-                    sources_with_iterate.append({"path": path, "iterate": True})
+                for entry in _extract_source_entries(item, stream_name):
+                    sources_with_iterate.append({**entry, "iterate": True})
         return ("each", sources_with_iterate)
 
     else:
         # Bare value defaults to Each - iterated
         sources_with_iterate = []
-        for path in _extract_source_paths(value, stream_name):
-            sources_with_iterate.append({"path": path, "iterate": True})
+        for entry in _extract_source_entries(value, stream_name):
+            sources_with_iterate.append({**entry, "iterate": True})
         return ("each", sources_with_iterate)
 
 
@@ -358,16 +399,24 @@ def get_mode(value: Any) -> str:
 
 def load_ids_from_sources(sources: List[Union[str, Dict]], iterate_only: bool = False) -> List[str]:
     """
-    Load IDs from CSV source files at configuration time.
+    Select source ids by reading each source map_table as the source of truth.
+
+    Each source's ``ids`` (if present) are patterns that *select* among the
+    actual rows (:func:`id_patterns.select_ids`); a source without ``ids`` takes
+    every row. The map_table must exist, so this runs at execution time.
 
     Args:
-        sources: List of CSV file paths or dicts with {"path": str, "iterate": bool}
+        sources: List of CSV file paths or dicts with {"path": str, "iterate": bool, "ids"?: [...]}
         iterate_only: If True, only load IDs from sources with iterate=True
 
     Returns:
-        List of IDs from the 'id' column of the CSVs
+        List of selected ids in row order.
     """
     import pandas as pd
+    try:
+        from . import id_patterns
+    except ImportError:
+        import id_patterns
 
     all_ids = []
     for source in sources:
@@ -382,10 +431,15 @@ def load_ids_from_sources(sources: List[Union[str, Dict]], iterate_only: bool = 
 
         if not source_path or not os.path.exists(source_path):
             continue
+        patterns = source.get("ids") if isinstance(source, dict) else None
         try:
-            df = pd.read_csv(source_path)
+            df = pd.read_csv(source_path, dtype={'id': str})
             if 'id' in df.columns:
-                all_ids.extend(df['id'].tolist())
+                row_ids = [str(v) for v in df['id'].tolist()]
+                if patterns:
+                    all_ids.extend(id_patterns.select_ids([str(p) for p in patterns], row_ids))
+                else:
+                    all_ids.extend(row_ids)
         except Exception as e:
             print(f"Warning: Could not load IDs from {source_path}: {e}")
     return all_ids
@@ -414,6 +468,9 @@ def _collect_iterated_ids_from_value(value: Any, stream_name: str, iterate_only:
             stream = getattr(src.streams, stream_name, None)
             if stream:
                 return list(stream.ids)
+        if hasattr(src, 'ids') and hasattr(src, 'map_table'):
+            # Bare DataStream passed directly (e.g. a filtered .filter_by_ids() view)
+            return list(src.ids)
         if isinstance(src, str):
             return [stream_name]
         return []
@@ -753,6 +810,27 @@ def predict_single_output_id(
         return parts[0]
 
     return "+".join(parts)
+
+
+def assemble_provenance_id(
+    template_id: str,
+    axis_source_ids: List[str],
+    raw_indices: List[int],
+) -> str:
+    """Assemble a stitched output id that carries its own per-axis provenance.
+
+    Tool-output axes contribute their full matched source id, joined with "+"
+    (the multi-axis separator id_map_utils splits on first). Raw literal axes
+    have no source id, so their 1-based indices are appended as a "_"-tail.
+
+    With no tool-output axes the result is the classic "<template>_<i>_<j>";
+    with no raw axes it is the pure "+"-joined block. Single source of truth so
+    the runtime and the config-time predictor cannot drift.
+    """
+    base = "+".join(axis_source_ids) if axis_source_ids else template_id
+    if raw_indices:
+        base = base + "_" + "_".join(str(i) for i in raw_indices)
+    return base
 
 
 def generate_multiplied_ids(

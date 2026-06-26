@@ -133,6 +133,7 @@ fi
     # ------------------------------------------------------------------
 
     sequences_json = Path(lambda self: self.configuration_path("sequences.json"))
+    sequences_csv_path = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     fitness_csv = Path(lambda self: self.table_path("fitness"))
     missing_csv = Path(lambda self: self.table_path("missing"))
     helper_py = Path(lambda self: self.pipe_script_path("pipe_vespag.py"))
@@ -194,13 +195,16 @@ fi
     def generate_script(self, script_path: str) -> str:
         self.sequences_stream.save_json(self.sequences_json)
 
-        # Content-bearing sequences CSV (id, sequence) — same source ESMFold uses.
-        sequences_csv = self.sequences_stream.map_table
+        # id-aware content-bearing sequences CSV (id, sequence), honors an upstream filter.
+        sequences_csv = self.sequences_csv_path
         repo_dir = self.folders.get("VespaG", "")
 
         script = "#!/bin/bash\n"
         script += "# VespaG fitness-scoring script\n"
         script += self.generate_completion_check_header()
+        script += self.generate_filtered_map_table_block(
+            self.sequences_json, sequences_csv, required_columns=["id", "sequence"]
+        )
         script += self.activate_environment()  # vespag env
 
         mutations_arg = _mutations_arg(self.mutations)

@@ -298,7 +298,7 @@ def test_multi_batch_config_display_labels_internal_and_public(
         Resources()
         LigandMPNN(structures=s, ligand="STI", num_sequences=1)
         p.save()
-        p.slurm()
+        p.generate_job_scripts()
 
     runtime = Path(p.folders["runtime"])
     text = "".join(c.read_text(encoding="utf-8") for c in runtime.glob("config_batch*.sh"))

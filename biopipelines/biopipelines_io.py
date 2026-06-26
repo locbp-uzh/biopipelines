@@ -14,6 +14,7 @@ Functions:
     load_datastream: Load DataStream from JSON file or dict
     iterate_files: Iterate (id, resolved_file_path) for file-based streams
     iterate_values: Iterate (id, value_dict) for value-based streams
+    write_filtered_map_table: Materialize a map_table projected to ds.ids_expanded
     resolve_file: Resolve single file for an ID (handles wildcards)
     get_value: Get single value from map_table for an ID
     get_all_values: Get all values from map_table for an ID
@@ -54,6 +55,7 @@ Example usage:
 import glob
 import json
 import os
+import shutil
 import sys
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -350,6 +352,84 @@ def iterate_values(
         row = id_to_row[item_id]
         values = {col: row[col] for col in include_cols}
         yield (item_id, values)
+
+
+def write_filtered_map_table(
+    ds: DataStream,
+    out_csv: str,
+    columns: Optional[List[str]] = None,
+    required_columns: Optional[List[str]] = None,
+) -> str:
+    """
+    Materialize a map_table projected to the stream's expanded ids.
+
+    Reads ``ds.map_table``, keeps only rows whose ``id`` is in ``ds.ids_expanded``
+    (preserving ids_expanded order), and writes ``out_csv``. This is the id-aware
+    replacement for bulk ``cp map_table`` / ``read_csv(map_table)`` consumption:
+    a filtered stream restricts ``ids`` but keeps the full ``map_table``, so a
+    consumer that reads the raw table would reprocess filtered-out rows.
+
+    Args:
+        ds: source DataStream (sequences, compounds, msas, or any id-keyed table)
+        out_csv: destination CSV path
+        columns: optional column subset to write (``id`` always included); None = all
+        required_columns: columns that must exist in the source map_table
+
+    Returns:
+        out_csv
+
+    Raises:
+        ValueError: map_table not configured
+        FileNotFoundError: map_table file missing
+        KeyError: required/requested column missing, or an expanded id absent
+    """
+    if not ds.map_table:
+        raise ValueError(f"DataStream '{ds.name}' has no map_table to materialize")
+    if not os.path.exists(ds.map_table):
+        raise FileNotFoundError(f"map_table not found: {ds.map_table}")
+
+    df = pd.read_csv(ds.map_table, dtype={'id': str})
+    if 'id' not in df.columns:
+        raise KeyError(f"map_table for '{ds.name}' must contain an 'id' column")
+
+    if required_columns:
+        missing = set(required_columns) - set(df.columns)
+        if missing:
+            raise KeyError(
+                f"map_table for '{ds.name}' missing required columns {sorted(missing)}; "
+                f"available: {list(df.columns)}"
+            )
+    if columns:
+        missing = set(columns) - set(df.columns)
+        if missing:
+            raise KeyError(
+                f"map_table for '{ds.name}' missing requested columns {sorted(missing)}; "
+                f"available: {list(df.columns)}"
+            )
+
+    keep_ids = [str(i) for i in ds.ids_expanded]
+    source_ids = df['id'].tolist()
+
+    # Fast path: ids already match the table exactly → byte-for-byte copy.
+    if not columns and source_ids == keep_ids:
+        os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or '.', exist_ok=True)
+        shutil.copyfile(ds.map_table, out_csv)
+        return out_csv
+
+    id_to_row = {row['id']: row for _, row in df.iterrows()}
+    missing_ids = [i for i in keep_ids if i not in id_to_row]
+    if missing_ids:
+        raise KeyError(
+            f"ids absent from map_table for '{ds.name}': {missing_ids[:10]}"
+            f"{' ...' if len(missing_ids) > 10 else ''}"
+        )
+
+    out_columns = ['id'] + [c for c in (columns or list(df.columns)) if c != 'id']
+    rows = [{c: id_to_row[i][c] for c in out_columns} for i in keep_ids]
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or '.', exist_ok=True)
+    pd.DataFrame(rows, columns=out_columns).to_csv(out_csv, index=False)
+    return out_csv
 
 
 def resolve_file(ds: DataStream, item_id: str) -> str:
@@ -901,6 +981,29 @@ class Resolve:
             n = index + 1  # head -n is 1-based
             return f'$(python "{script}" "{ds_json}"{flag} | head -n{n} | tail -n1)'
         return f'$(python "{script}" "{ds_json}"{flag})'
+
+    @staticmethod
+    def filtered_map_table(
+        ds_json: str,
+        out_csv: str,
+        columns: Optional[List[str]] = None,
+        required_columns: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Bash command that materializes a filtered map_table at runtime.
+
+        Projects the stream's map_table to its expanded ids (in stream order)
+        and writes ``out_csv``. Run this before a consumer that would otherwise
+        read the raw upstream map_table and reprocess filtered-out ids.
+        """
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "pipe_scripts", "materialize_filtered_map_table.py")
+        cmd = f'python "{script}" "{ds_json}" "{out_csv}"'
+        if columns:
+            cmd += f' --columns "{",".join(columns)}"'
+        if required_columns:
+            cmd += f' --require "{",".join(required_columns)}"'
+        return cmd
 
     @staticmethod
     def table_column(reference, item_id: str, env_name: str = "biopipelines") -> str:

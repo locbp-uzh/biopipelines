@@ -15,7 +15,7 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
     from .biopipelines_io import Resolve, TableReference
     from .combinatorics import generate_multiplied_ids_pattern
     from .input_standardization import resolve_basic_input
@@ -26,7 +26,7 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
     from combinatorics import generate_multiplied_ids_pattern
     from input_standardization import resolve_basic_input
     from biopipelines_io import Resolve, TableReference
@@ -705,6 +705,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     #   ligand_ds_json  — config-time input DataStream serialization.
     prepared_pdb = Path(lambda self: self.stream_path("structures", "prepared_ligand.pdb"))
     structures_csv = Path(lambda self: self.table_path("structures"))
+    structures_map = Path(lambda self: self.stream_map_path("structures"))
     helper_script = Path(lambda self: self.pipe_script_path("pipe_rfdaa_prepare_ligand.py"))
     ligand_ds_json = Path(lambda self: self.configuration_path("input_ligand.json"))
 
@@ -770,6 +771,7 @@ python "{self.helper_script}" \\
   --ligand_pdb "$LIGAND_FILE" \\
   --output_pdb "{self.prepared_pdb}" \\
   --output_csv "{self.structures_csv}" \\
+  --structures_map "{self.structures_map}" \\
   --pdbs_folder "{self.folders['pdbs']}"
 
 if [ $? -eq 0 ]; then
@@ -789,14 +791,11 @@ fi
         structure_ids = ["prepared_ligand"]
         structure_files = [self.prepared_pdb]
 
-        structures_map = self.stream_map_path("structures")
-        create_map_table(structures_map, structure_ids, files=structure_files)
-
         structures = DataStream(
             name="structures",
             ids=structure_ids,
             files=structure_files,
-            map_table=structures_map,
+            map_table=self.structures_map,
             format="pdb"
         )
 

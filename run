@@ -20,6 +20,8 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Warn (once/day) if the checkout is behind the public GitHub repo. Never fatal.
 [ -x "$SCRIPT_DIR/check-updates" ] && "$SCRIPT_DIR/check-updates" || true
 CONFIG_VARIANT="${BIOPIPELINES_CONFIG_VARIANT:-local}"
+# Export it so the launched python autodetects the SAME variant we parse here.
+export BIOPIPELINES_CONFIG_VARIANT="$CONFIG_VARIANT"
 CONFIG_FILE="$SCRIPT_DIR/config.${CONFIG_VARIANT}.yaml"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: config file not found: $CONFIG_FILE"

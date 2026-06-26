@@ -68,12 +68,16 @@ echo "=== Mutagenesis ready ==="
     # sequences/ (sequences.csv IS the content + map_table); standalone
     # missing table lives in tables/.
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
+    sequences_input_json = Path(lambda self: self.configuration_path(".input_sequences.json"))
+    sequences_input_csv = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     missing_csv = Path(lambda self: self.table_path("missing"))
     mutagenesis_helper_py = Path(lambda self: self.pipe_script_path("pipe_mutagenesis.py"))
 
     # MSA propagation (only used when msas= is provided)
     msas_folder = Path(lambda self: self.stream_folder("msas"))
     msas_csv = Path(lambda self: self.stream_map_path("msas"))
+    msas_input_json = Path(lambda self: self.configuration_path(".input_msas.json"))
+    msas_input_csv = Path(lambda self: self.configuration_path(".input_msas.csv"))
     msa_helper_py = Path(lambda self: self.pipe_script_path("pipe_mutagenesis_msa.py"))
 
     def __init__(self,
@@ -235,9 +239,20 @@ echo "=== Mutagenesis ready ==="
 
     def generate_script(self, script_path: str) -> str:
         """Generate Mutagenesis execution script."""
+        self.sequences_stream.save_json(self.sequences_input_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# Mutagenesis execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.generate_filtered_map_table_block(
+            self.sequences_input_json, self.sequences_input_csv,
+            required_columns=["id", "sequence"],
+        )
+        if self.msas_stream is not None:
+            self.msas_stream.save_json(self.msas_input_json)
+            script_content += self.generate_filtered_map_table_block(
+                self.msas_input_json, self.msas_input_csv,
+            )
         script_content += self.activate_environment()
 
         script_content += self._generate_script_run_sdm()
@@ -271,7 +286,7 @@ echo "Exclude: {self.exclude}"
 
 # Run Mutagenesis generation
 python {self.mutagenesis_helper_py} \\
-    --sequences "{self.sequences_stream.map_table}" \\
+    --sequences "{self.sequences_input_csv}" \\
 {position_line}    --mode {self.mode} \\
 {mutate_to_line}    --include-original {str(self.include_original).lower()} \\
     --exclude "{self.exclude}" \\
@@ -299,13 +314,11 @@ echo "Generated sequences saved to: {self.sequences_csv}"
         if self.msas_stream is None:
             return ""
 
-        self.msas_stream.save_json(self.configuration_path(".input_msas.json"))
-
         return f"""echo "Propagating MSAs to mutants (query-row substitution)"
 
 python {self.msa_helper_py} \\
     --mutants "{self.sequences_csv}" \\
-    --input-msas "{self.msas_stream.map_table}" \\
+    --input-msas "{self.msas_input_csv}" \\
     --output-folder "{self.msas_folder}" \\
     --output "{self.msas_csv}"
 

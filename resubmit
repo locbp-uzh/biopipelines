@@ -3,8 +3,9 @@
 #
 # This software is freely available for use, modification, and redistribution.
 
-# Resubmit a SLURM job with correct output path and incremental naming
-# Usage: resubmit.sh <path_to_slurm.sh>
+# Resubmit a batch job with correct output path and incremental naming.
+# Scheduler (slurm/lsf/pbs) is detected from the directives in the script.
+# Usage: resubmit.sh <path_to_job_script.sh>
 
 if [ $# -eq 0 ]; then
     echo "Error: No SLURM script provided"
@@ -23,28 +24,40 @@ fi
 SCRIPT_DIR=$(dirname "$SLURM_SCRIPT")
 SCRIPT_DIR=$(cd "$SCRIPT_DIR" && pwd)  # Get absolute path
 
-# Extract job name from SLURM script (#SBATCH --job-name=...)
-JOB_NAME=$(grep "^#SBATCH.*--job-name=" "$SLURM_SCRIPT" | head -1 | sed 's/.*--job-name=\([^ ]*\).*/\1/')
-
-# If no job name found in script, use the parent folder name
-if [ -z "$JOB_NAME" ]; then
-    JOB_NAME=$(basename "$(dirname "$SCRIPT_DIR")")
+# Detect the scheduler from the directives present in the script.
+if grep -q "^#SBATCH" "$SLURM_SCRIPT"; then
+    SCHEDULER="slurm"
+elif grep -q "^#BSUB" "$SLURM_SCRIPT"; then
+    SCHEDULER="lsf"
+elif grep -q "^#PBS" "$SLURM_SCRIPT"; then
+    SCHEDULER="pbs"
+else
+    echo "Error: no #SBATCH/#BSUB/#PBS directives in $SLURM_SCRIPT — cannot tell the scheduler"
+    exit 1
 fi
 
-# Find next available slurm_N.out number
+# Use the parent folder name as the job name.
+JOB_NAME=$(basename "$(dirname "$SCRIPT_DIR")")
+
+# Find next available <scheduler>_N.out number
 N=1
-while [ -f "$SCRIPT_DIR/slurm_$N.out" ]; do
+while [ -f "$SCRIPT_DIR/${SCHEDULER}_$N.out" ]; do
     N=$((N + 1))
 done
 
-OUTPUT_FILE="$SCRIPT_DIR/slurm_$N.out"
+OUTPUT_FILE="$SCRIPT_DIR/${SCHEDULER}_$N.out"
 
 # Submit job with output redirected to the script's directory
 echo "Submitting job from: $SLURM_SCRIPT"
+echo "Scheduler: $SCHEDULER"
 echo "Job name: $JOB_NAME"
 echo "Output will be written to: $OUTPUT_FILE"
 
-sbatch --job-name="$JOB_NAME" --output="$OUTPUT_FILE" "$SLURM_SCRIPT"
+case "$SCHEDULER" in
+    slurm) sbatch --job-name="$JOB_NAME" --output="$OUTPUT_FILE" "$SLURM_SCRIPT" ;;
+    lsf)   bsub -J "$JOB_NAME" -o "$OUTPUT_FILE" < "$SLURM_SCRIPT" ;;
+    pbs)   qsub -N "$JOB_NAME" -o "$OUTPUT_FILE" "$SLURM_SCRIPT" ;;
+esac
 
 if [ $? -eq 0 ]; then
     echo "Job submitted successfully"

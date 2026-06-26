@@ -9,9 +9,9 @@ Unified pipeline system for protein modeling workflows.
 Provides tool configurations, pipeline orchestration, and seamless integration.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
-from .pipeline import Pipeline, Bundle, Each, Folder
+from .pipeline import Pipeline, Bundle, Each, Folder, Resources, Suffix, Save, Dependencies, Parallel, Service
 from .base_config import BaseConfig, ToolOutput, IndexedTableContainer
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .datastream import DataStream, create_map_table
@@ -22,7 +22,7 @@ from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .rfdiffusion2 import RFdiffusion2
 from .rfdiffusion3 import RFdiffusion3
 from .hbdesigner import HBDesigner
-from .protein_mpnn import ProteinMPNN
+from .protein_mpnn import ProteinMPNN, SolubleMPNN
 from .frame2seq import Frame2Seq
 from .alphafold import AlphaFold
 from .ligand import Ligand
@@ -101,6 +101,12 @@ __all__ = [
     # Core pipeline components
     'Pipeline',
     'Folder',
+    'Resources',
+    'Suffix',
+    'Save',
+    'Dependencies',
+    'Parallel',
+    'Service',
     'BaseConfig',
     'ToolOutput',
     'FolderManager',
@@ -138,6 +144,7 @@ __all__ = [
     'RFdiffusion3',
     'HBDesigner',
     'ProteinMPNN',
+    'SolubleMPNN',
     'Frame2Seq',
     'AlphaFold',
     'Ligand',

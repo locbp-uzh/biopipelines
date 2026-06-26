@@ -113,15 +113,19 @@ def postprocess(struct_id, work_root, structures_dir, images_dir, rmsf_dir, num_
         print(f"Warning: No RMSF.csv found for {struct_id}")
 
 
-def build_outputs(structures_ds, structures_dir, rmsf_dir, num_models, rmsf_all_csv, structures_map):
-    """Build merged RMSF table and structures map from per-ID artefacts."""
-    # Merge per-ID RMSF CSVs
+def build_outputs(structures_ds, structures_dir, rmsf_dir, num_models, rmsf_all_csv, structures_map, rmsf_map):
+    """Build merged RMSF table, structures map, and rmsf map from per-ID artefacts."""
+    # Merge per-ID RMSF CSVs; record the rmsf-stream map (one CSV per input id)
     rmsf_frames = []
+    rmsf_rows = []
     for struct_id in structures_ds.ids_expanded:
         rmsf_path = os.path.join(rmsf_dir, f"{struct_id}_RMSF.csv")
         if os.path.exists(rmsf_path):
             df = pd.read_csv(rmsf_path)
             rmsf_frames.append(df)
+            rmsf_rows.append({"id": struct_id, "file": rmsf_path, "structures.id": struct_id})
+        else:
+            print(f"  Warning: Expected RMSF CSV not found: {rmsf_path}")
 
     if rmsf_frames:
         rmsf_all = pd.concat(rmsf_frames, ignore_index=True)
@@ -151,6 +155,9 @@ def build_outputs(structures_ds, structures_dir, rmsf_dir, num_models, rmsf_all_
     df.to_csv(structures_map, index=False)
     print(f"Structures map written: {structures_map} ({len(rows)} models)")
 
+    pd.DataFrame(rmsf_rows, columns=["id", "file", "structures.id"]).to_csv(rmsf_map, index=False)
+    print(f"RMSF map written: {rmsf_map} ({len(rmsf_rows)} structures)")
+
 
 def main():
     parser = argparse.ArgumentParser(description="CABS-Flex post-processor")
@@ -161,6 +168,7 @@ def main():
     parser.add_argument("--output_dir", help="Tool output folder (also used as work_root fallback)")
     parser.add_argument("--rmsf_all_csv", help="Output merged RMSF CSV path")
     parser.add_argument("--structures_map", help="Output structures map CSV path")
+    parser.add_argument("--rmsf_map", help="Output rmsf map CSV path")
     parser.add_argument("--num_models", type=int, default=10, help="Number of models per structure")
     parser.add_argument("--work_root", default=None,
                         help="Folder containing per-structure CABSflex work dirs (default: output_dir)")
@@ -179,7 +187,7 @@ def main():
         emit_worklist(args.structures, args.worklist)
         return
 
-    required = ["output_dir", "rmsf_all_csv", "structures_map"]
+    required = ["output_dir", "rmsf_all_csv", "structures_map", "rmsf_map"]
     missing = ["--{0}".format(r) for r in required if getattr(args, r) is None]
     if missing:
         parser.error("missing required arguments for post-processing: {0}".format(", ".join(missing)))
@@ -202,7 +210,7 @@ def main():
 
     print("\n=== Building final outputs ===")
     build_outputs(structures_ds, structures_dir, rmsf_dir, args.num_models,
-                  args.rmsf_all_csv, args.structures_map)
+                  args.rmsf_all_csv, args.structures_map, args.rmsf_map)
 
 
 if __name__ == "__main__":

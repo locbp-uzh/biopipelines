@@ -27,14 +27,14 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
-    from .datastream import DataStream, create_map_table
+    from .datastream import DataStream
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
-    from datastream import DataStream, create_map_table
+    from datastream import DataStream
     from biopipelines_io import Resolve
 
 
@@ -310,9 +310,7 @@ fi
         )
 
         # Per-residue aggregation profile: one resi-csv per input structure.
-        aggregation_columns = ["id", "chain", "resi", "score"]
         aggregation_files = [self.stream_path("aggregation", "<id>_A3D.csv")]
-        create_map_table(self.aggregation_map, input_ids, files=aggregation_files)
         aggregation_stream = DataStream(
             name="aggregation",
             ids=input_ids,
@@ -342,7 +340,7 @@ fi
             "aggregation_all": TableInfo(
                 name="aggregation_all",
                 path=self.aggregation_all_csv,
-                columns=aggregation_columns,
+                columns=["id", "chain", "resi", "score"],
                 description="Per-residue A3D aggregation scores from all input structures (merged)",
             ),
         }

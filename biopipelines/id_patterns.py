@@ -55,22 +55,54 @@ def strip_brackets(s: str) -> str:
     return _BRACKET_RE.sub('', s)
 
 
-def try_expand(s: str) -> Tuple[List[str], bool]:
-    """Expand the deterministic prefix of a pattern.
+def partial_expand(s: str) -> List[str]:
+    """Expand the deterministic, out-of-bracket ``<..>`` slots, keep ``[...]`` verbatim.
 
-    Returns:
-        (ids, is_complete) where:
-        - If no brackets: ids = full expansion, is_complete = True
-        - If brackets: ids = expansion of prefix only, is_complete = False
+    A pattern is just an id with unresolved slots; ``[...]`` segments stay
+    unresolved (their values live in a runtime map_table). Expanding only the
+    deterministic slots keeps the lazy bracket intact, so each result is still a
+    valid lazy pattern, not a fabricated concrete id.
+
+    'prot_<0..2>'                → ['prot_0', 'prot_1', 'prot_2']
+    'a_<1 2>[_<N>]'              → ['a_1[_<N>]', 'a_2[_<N>]']
+    'a_<1 2>[_<N>]_5<A S>'       → ['a_1[_<N>]_5A', 'a_1[_<N>]_5S',
+                                    'a_2[_<N>]_5A', 'a_2[_<N>]_5S']
+    'base[_<N>]'                 → ['base[_<N>]']
+    """
+    bracket_spans = [(m.start(), m.end()) for m in _BRACKET_RE.finditer(s)]
+    slots = [m for m in _find_slots(s)
+             if not any(b0 <= m.start() < b1 for b0, b1 in bracket_spans)]
+    if not slots:
+        return [s]
+    slot_values = [_parse_slot(m.group(1)) for m in slots]
+    results = []
+    for combo in product(*slot_values):
+        result = s
+        for m, val in zip(reversed(slots), reversed(combo)):
+            result = result[:m.start()] + val + result[m.end():]
+        results.append(result)
+    return results
+
+
+def partial_expand_ids(ids: List[str]) -> List[str]:
+    """Apply :func:`partial_expand` to each pattern and concatenate."""
+    result = []
+    for s in ids:
+        result.extend(partial_expand(s))
+    return result
+
+
+def try_expand(s: str) -> Tuple[List[str], bool]:
+    """Partially expand a pattern, reporting whether the result is concrete.
+
+    Returns ``(ids, is_complete)``: ``is_complete`` is False when ``[...]``
+    brackets remain (the ids are still lazy patterns, not concrete). Brackets
+    are preserved, not stripped.
 
     'prot_<0..2>'                → (['prot_0', 'prot_1', 'prot_2'], True)
-    'prot_<0..1>[_<N><A V>]'     → (['prot_0', 'prot_1'], False)
-    'base[_<N><A V>]'            → (['base'], False)
+    'a_<1 2>[_<N>]'              → (['a_1[_<N>]', 'a_2[_<N>]'], False)
     """
-    if not is_lazy(s):
-        return expand_pattern(s), True
-    prefix = strip_brackets(s)
-    return expand_pattern(prefix), False
+    return partial_expand(s), not is_lazy(s)
 
 
 def glob_from_lazy(s: str) -> str:
@@ -97,6 +129,38 @@ def glob_from_lazy_ids(ids: List[str]) -> List[str]:
         globbed = glob_from_lazy(s)          # [...] → *
         result.extend(expand_pattern(globbed))  # expand <..> slots (no brackets left)
     return result
+
+
+def select_ids(patterns: List[str], row_ids: List[str]) -> List[str]:
+    """Select the row ids a pattern set covers, in row order.
+
+    The row ids (read from a runtime map_table) are the source of truth; the
+    patterns only *select* among them. Deterministic ``<..>`` slots and literals
+    match exactly; ``[...]`` brackets become ``*`` and match by glob. Ids the
+    patterns do not cover are dropped; patterns never fabricate ids absent from
+    the rows. This honors upstream filtering automatically — a filtered stream
+    simply has fewer rows.
+
+    patterns=['a_<1 2>[_<N>]'], rows=['a_1_x','a_2_y','b_1'] → ['a_1_x','a_2_y']
+    patterns=['a_<0..2>'],      rows=['a_0','a_2']           → ['a_0','a_2']
+    """
+    from fnmatch import fnmatchcase
+    globs = glob_from_lazy_ids(patterns)
+    return [rid for rid in row_ids if any(fnmatchcase(rid, g) for g in globs)]
+
+
+def resolve_pattern_ids(patterns: List[str], map_table: str) -> List[str]:
+    """Runtime: select the ids of one map_table that a pattern set covers.
+
+    Reads ``map_table``'s ``id`` column as the authoritative row set and returns
+    :func:`select_ids` over it. Multi-source consumers call this once per source
+    and concatenate.
+    """
+    import pandas as pd
+    df = pd.read_csv(map_table, dtype={'id': str})
+    if 'id' not in df.columns:
+        raise KeyError(f"map_table {map_table} has no 'id' column")
+    return select_ids(patterns, [str(v) for v in df['id'].tolist()])
 
 
 def contains_pattern(s: str) -> bool:
@@ -204,18 +268,13 @@ def expand_ids(ids: List[str]) -> List[str]:
 
 
 def try_expand_ids(ids: List[str]) -> Tuple[List[str], bool]:
-    """Expand deterministic prefixes of all IDs.
+    """Partially expand all IDs, preserving ``[...]`` brackets.
 
     Returns:
-        (expanded_ids, is_complete) — is_complete is False if any ID had brackets.
+        (expanded_ids, is_complete) — is_complete is False if any ID is still lazy.
     """
-    result = []
-    complete = True
-    for s in ids:
-        expanded, is_complete = try_expand(s)
-        result.extend(expanded)
-        if not is_complete:
-            complete = False
+    result = partial_expand_ids(ids)
+    complete = not any(is_lazy(s) for s in ids)
     return result, complete
 
 

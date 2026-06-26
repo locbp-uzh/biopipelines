@@ -570,6 +570,36 @@ echo "=============================="
 {resolve_source}
 """
 
+    def generate_filtered_map_table_block(
+        self,
+        ds_json: str,
+        out_csv: str,
+        columns: Optional[List[str]] = None,
+        required_columns: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Bash block that materializes a filtered map_table under the biopipelines env.
+
+        Projects the stream's map_table to its expanded ids (honoring an upstream
+        id filter) and writes ``out_csv``. The materializer imports biopipelines,
+        so it must run in the biopipelines env — not the tool env. Emit this
+        before activating the tool env for the consumer step.
+        """
+        from .biopipelines_io import Resolve
+
+        block = "# Materialize filtered input CSV (biopipelines env)\n"
+        block += self.activate_environment(name="biopipelines")
+        block += Resolve.filtered_map_table(
+            ds_json, out_csv, columns=columns, required_columns=required_columns
+        ) + "\n"
+        block += """if [ $? -ne 0 ]; then
+    echo "Error: could not materialize filtered input CSV"
+    exit 1
+fi
+
+"""
+        return block
+
     @abstractmethod
     def validate_params(self):
         """Validate tool-specific parameters. Override in subclasses."""
@@ -1650,7 +1680,53 @@ class StandardizedOutput:
             return TableContainer(table_infos)
         else:
             return TableContainer({})
-    
+
+    def __matmul__(self, column: str) -> 'TableReference':
+        """Column lookup sugar: ``output @ "col"`` finds the table declaring
+        ``col`` and returns its ``TableReference``, same object as
+        ``output.tables.<name>.col``.
+
+        Errors fast: raises if no declared table has the column, if more than
+        one does (caller must use ``output.tables.<name>.col``), or if the only
+        match is a per-ID ``IndexedTableContainer`` (caller must index by ID
+        first, then access the column).
+        """
+        if not isinstance(column, str):
+            raise TypeError(
+                f"Column lookup expects a string, got {type(column).__name__}"
+            )
+
+        matches = []
+        indexed_only = []
+        for name, entry in self.tables._tables.items():
+            if isinstance(entry, IndexedTableContainer):
+                if column in entry.columns:
+                    indexed_only.append(name)
+                continue
+            if column in entry.info.columns:
+                matches.append(name)
+
+        if len(matches) == 1:
+            return getattr(self.tables._tables[matches[0]], column)
+        if len(matches) > 1:
+            raise ValueError(
+                f"Column '{column}' is declared in tables {matches}; "
+                f"use output.tables.<name>.{column} to disambiguate."
+            )
+        if indexed_only:
+            raise ValueError(
+                f"Column '{column}' belongs to per-ID indexed table(s) {indexed_only}; "
+                f"index by ID first, e.g. output.tables.{indexed_only[0]}[id].{column}."
+            )
+        declared = {
+            name: (entry.columns if isinstance(entry, IndexedTableContainer)
+                   else entry.info.columns)
+            for name, entry in self.tables._tables.items()
+        }
+        raise ValueError(
+            f"No declared table has a column '{column}'. Declared columns: {declared}"
+        )
+
     def __getitem__(self, key: str):
         """
         ID-based selection: ``output["CP1"]`` returns a new ``StandardizedOutput``

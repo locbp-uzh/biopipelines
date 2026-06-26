@@ -36,6 +36,24 @@ def _build(local_config, isolated_cwd, new_pipeline, **pmpnn_kwargs):
     return read_pipeline_sh(script_path)
 
 
+def _build_soluble(local_config, isolated_cwd, new_pipeline, **kwargs):
+    """Run a single Mock → SolubleMPNN pipeline and return pipeline.sh content."""
+    from biopipelines.mock import Mock
+    from biopipelines.protein_mpnn import SolubleMPNN
+
+    pipeline = new_pipeline("soluble_mpnn_params")
+    with pipeline:
+        m = Mock(
+            ids=["d1", "d2"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            map_table_strategy="config",
+        )
+        SolubleMPNN(structures=m.streams.structures, **kwargs)
+        script_path = pipeline.save()
+
+    return read_pipeline_sh(script_path)
+
+
 def test_num_sequences(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, num_sequences=7)
     assert_kwarg_emitted(content, "num_sequences", 7, flag="--num_seq_per_target 7")
@@ -115,6 +133,32 @@ def test_soluble_model_off(local_config, isolated_cwd, new_pipeline):
 def test_soluble_model_on(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, soluble_model=True)
     assert "--use_soluble_model" in content
+
+
+def test_soluble_model_default_off(local_config, isolated_cwd, new_pipeline):
+    """Omitting soluble_model uses the vanilla model (default is now False)."""
+    content = _build(local_config, isolated_cwd, new_pipeline)
+    assert "--use_soluble_model" not in content
+
+
+def test_soluble_mpnn_emits_flag(local_config, isolated_cwd, new_pipeline):
+    """SolubleMPNN locks the soluble model on without being asked."""
+    content = _build_soluble(local_config, isolated_cwd, new_pipeline)
+    assert "--use_soluble_model" in content
+
+
+def test_soluble_mpnn_shares_proteinmpnn_identity():
+    """SolubleMPNN keeps ProteinMPNN's TOOL_NAME so it reuses its repo/env/install."""
+    from biopipelines.protein_mpnn import ProteinMPNN, SolubleMPNN
+
+    assert issubclass(SolubleMPNN, ProteinMPNN)
+    assert SolubleMPNN.TOOL_NAME == ProteinMPNN.TOOL_NAME == "ProteinMPNN"
+
+
+def test_soluble_mpnn_rejects_flag_override(local_config, isolated_cwd, new_pipeline):
+    """Passing soluble_model to SolubleMPNN is a TypeError (it's not a free kwarg)."""
+    with pytest.raises(TypeError):
+        _build_soluble(local_config, isolated_cwd, new_pipeline, soluble_model=False)
 
 
 def test_chain(local_config, isolated_cwd, new_pipeline):

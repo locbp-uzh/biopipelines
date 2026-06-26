@@ -54,9 +54,9 @@ def test_expand_ids_lazy_raises(record_case):
 # ── try_expand ────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("pattern, expected_ids, expected_complete", [
-    ("base_<0..2>",              ["base_0", "base_1", "base_2"], True),
-    ("prot_<0..1>[_<N><A V>]",   ["prot_0", "prot_1"],            False),
-    ("base[_<N><A V>]",          ["base"],                        False),
+    ("base_<0..2>",              ["base_0", "base_1", "base_2"],     True),
+    ("prot_<0..1>[_<N><A V>]",   ["prot_0[_<N><A V>]", "prot_1[_<N><A V>]"], False),
+    ("base[_<N><A V>]",          ["base[_<N><A V>]"],                 False),
 ])
 def test_try_expand(record_case, pattern, expected_ids, expected_complete):
     ids, complete = idp.try_expand(pattern)
@@ -68,9 +68,40 @@ def test_try_expand(record_case, pattern, expected_ids, expected_complete):
 
 def test_try_expand_ids_mixed(record_case):
     ids = ["a_<0..1>", "b[_<N><X>]"]
-    expected = (["a_0", "a_1", "b"], False)
+    expected = (["a_0", "a_1", "b[_<N><X>]"], False)
     actual = idp.try_expand_ids(ids)
     record_case(input=ids, expected=expected, actual=actual)
+    assert actual == expected
+
+
+@pytest.mark.parametrize("pattern, expected", [
+    ("base_<0..2>",          ["base_0", "base_1", "base_2"]),
+    ("a_<1 2>[_<N>]",        ["a_1[_<N>]", "a_2[_<N>]"]),
+    ("a_<1 2>[_<N>]_5<A S>", ["a_1[_<N>]_5A", "a_1[_<N>]_5S", "a_2[_<N>]_5A", "a_2[_<N>]_5S"]),
+    ("base[_<N>]",           ["base[_<N>]"]),
+    ("base[_<N><A V>]",      ["base[_<N><A V>]"]),  # slots inside [...] stay lazy
+])
+def test_partial_expand_preserves_brackets(record_case, pattern, expected):
+    actual = idp.partial_expand(pattern)
+    record_case(input=pattern, expected=expected, actual=actual)
+    assert actual == expected
+    # Each result is still a valid lazy pattern when the source was lazy.
+    if idp.is_lazy(pattern):
+        assert all(idp.is_lazy(s) for s in actual)
+        for s in actual:
+            with pytest.raises(idp.LazyPatternError):
+                idp.expand_pattern(s)
+
+
+@pytest.mark.parametrize("patterns, rows, expected", [
+    (["a_<1 2>[_<N>]"], ["a_1_x", "a_2_y", "b_1"], ["a_1_x", "a_2_y"]),
+    (["a_<0..2>"],      ["a_0", "a_2"],            ["a_0", "a_2"]),  # missing a_1 simply absent
+    (["a_1[_<N>]"],     ["a_1_p", "a_1_q", "a_2"], ["a_1_p", "a_1_q"]),
+    (["lig1", "lig3"],  ["lig1", "lig2", "lig3"],  ["lig1", "lig3"]),  # literals exact
+])
+def test_select_ids(record_case, patterns, rows, expected):
+    actual = idp.select_ids(patterns, rows)
+    record_case(input=(patterns, rows), expected=expected, actual=actual)
     assert actual == expected
 
 

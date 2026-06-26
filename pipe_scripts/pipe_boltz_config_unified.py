@@ -31,6 +31,7 @@ _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..
 sys.path.insert(0, _biopipelines_dir)
 from combinatorics import predict_single_output_id, CombinatoricsConfig
 from ligand_utils import auth_ligand_field
+import id_patterns
 
 
 # Custom YAML representer for inline list formatting in constraints
@@ -123,10 +124,12 @@ def load_axis_data(axis_config: Dict) -> tuple:
 
     for source in sources:
         # Handle both old string format and new dict format
+        keep_ids = None
         if isinstance(source, dict):
             source_path = source.get('path')
             is_iterate = source.get('iterate', True)
             order = source.get('order', 0)
+            keep_ids = source.get('ids')
         else:
             source_path = source
             is_iterate = True
@@ -136,8 +139,14 @@ def load_axis_data(axis_config: Dict) -> tuple:
             print(f"Warning: Source file not found: {source_path}")
             continue
         try:
-            df = pd.read_csv(source_path)
+            df = pd.read_csv(source_path, dtype={'id': str})
             records = df.to_dict('records')
+            if keep_ids:
+                by_id = {str(r['id']): r for r in records if 'id' in r}
+                selected = id_patterns.select_ids(
+                    [str(p) for p in keep_ids], list(by_id.keys())
+                )
+                records = [by_id[i] for i in selected]
             if is_iterate:
                 iterated_data.extend(records)
                 min_iterated_order = min(min_iterated_order, order)

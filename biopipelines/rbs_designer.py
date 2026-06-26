@@ -86,6 +86,8 @@ fi
     rbs_csv = Path(lambda self: self.table_path("rbs"))
     info_txt = Path(lambda self: os.path.join(self.extras_folder, "rbs_info.txt"))
     config_file = Path(lambda self: self.configuration_path("rbs_designer_config.json"))
+    sequences_json = Path(lambda self: self.configuration_path(".input_sequences.json"))
+    sequences_csv_path = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     designer_py = Path(lambda self: self.pipe_script_path("pipe_rbs_designer.py"))
 
     def __init__(self,
@@ -113,7 +115,7 @@ fi
         Output:
             Streams: sequences (.dna)
             Tables:
-                rbs: id | dna_sequence | rbs_sequence | full_gene | converged | dg_total | tir_predicted | target_tir | target_dg | min_achievable_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby
+                rbs: id | sequence | rbs_sequence | full_gene | converged | dg_total | tir_predicted | target_tir | target_dg | min_achievable_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby
         """
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):
@@ -188,9 +190,14 @@ fi
 
     def generate_script(self, script_path: str) -> str:
         """Generate script to perform RBS design."""
+        self.sequences_stream.save_json(self.sequences_json)
+
         script_content = "#!/bin/bash\n"
         script_content += "# RBSDesigner execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += self.generate_filtered_map_table_block(
+            self.sequences_json, self.sequences_csv_path, required_columns=["id", "sequence"]
+        )
         script_content += self.activate_environment()
         script_content += self._generate_script_run_design()
         script_content += self.generate_completion_check_footer()
@@ -202,7 +209,7 @@ fi
         import json
 
         config_data = {
-            "sequences_csv": self.sequences_stream.map_table,
+            "sequences_csv": self.sequences_csv_path,
             "tir": self.tir,
             "pre_sequence": self.pre_sequence,
             "add_start_codon": self.add_start_codon,
@@ -214,7 +221,6 @@ fi
             json.dump(config_data, f, indent=2)
 
         return f"""echo "Designing RBS sequences"
-echo "Input sequences: {self.sequences_stream.map_table}"
 echo "Target TIR: {self.tir}"
 echo "Output folder: {self.output_folder}"
 
@@ -239,7 +245,7 @@ python "{self.designer_py}" --config "{self.config_file}"
                 name="rbs",
                 path=self.rbs_csv,
                 columns=[
-                    "id", "dna_sequence", "rbs_sequence", "full_gene",
+                    "id", "sequence", "rbs_sequence", "full_gene",
                     "converged", "dg_total", "tir_predicted", "target_tir", "target_dg",
                     "min_achievable_dg", "spacing", "dg_mrna_rrna", "dg_start", "dg_spacing",
                     "dg_mrna", "dg_standby",

@@ -232,8 +232,8 @@ def main():
 
         results.append({
             'id': seq_id,
+            'sequence': dna_seq,  # canonical sequence column = the encoded DNA
             'protein_sequence': protein_seq,
-            'dna_sequence': dna_seq,
             'organism': target_organism,
             'method': 'thresholded_weighted'
         })
@@ -270,7 +270,7 @@ def main():
             ws.cell(row=row_idx, column=4, value=row['method'])
 
             # Split DNA into codons
-            dna_seq = row['dna_sequence']
+            dna_seq = row['sequence']
             codons = [dna_seq[i:i + 3] for i in range(0, len(dna_seq), 3)]
 
             # Write individual codons with color coding

@@ -19,9 +19,9 @@ Reverse-translates protein sequences to DNA with organism-specific codon optimiz
   - Combinations: "EC&HS", "EC&SC", "HS&SC", "EC&HS&SC"
 
 **Tables**:
-- `dna`:
+- `sequences`:
 
-  | id | protein_sequence | dna_sequence | organism | method |
+  | id | sequence | protein_sequence | organism | method |
   |----|------------------|--------------|----------|--------|
 
 - Excel file with color-coded codons (red <5‰, orange 5-10‰, black ≥10‰)
@@ -320,7 +320,7 @@ git clone https://github.com/dauparas/ProteinMPN
 - `chain`: str = "auto" - Chain to apply fixed positions ("auto" detects from input structure)
 - `sampling_temp`: float = 0.1 - Sampling temperature
 - `model_name`: str = "v_48_020" - ProteinMPNN model variant
-- `soluble_model`: bool = True - Use soluble protein model
+- `soluble_model`: bool = False - Use the soluble protein model (see `SolubleMPNN` for a convenience wrapper that locks this on)
 - `remove_duplicates`: bool = True - Drop duplicate sequences from the output
 - `fill_gaps`: str = "G" - Fill gaps in the protein with an amino acid (default glycine).
 - `bias_AA_jsonl`: str = "" - Path to a ProteinMPNN amino-acid bias JSONL
@@ -352,6 +352,19 @@ pmpnn = ProteinMPNN(
 
 ---
 
+### SolubleMPNN
+
+`ProteinMPNN` with the soluble model locked on. Identical to `ProteinMPNN` in every other respect — same parameters (minus `soluble_model`), same environment and output. Use it instead of `ProteinMPNN(..., soluble_model=True)` when designing for soluble expression.
+
+**Example**:
+```python
+from biopipelines import SolubleMPNN
+
+seqs = SolubleMPNN(structures=rfd, num_sequences=10)
+```
+
+---
+
 ### RBSDesigner
 
 Designs synthetic ribosome binding sites (RBS) to control protein expression in bacteria. Uses the Salis thermodynamic model to predict translation initiation rates and a simulated annealing optimizer to design RBS sequences matching a target expression level. Requires ViennaRNA for RNA free energy calculations.
@@ -379,10 +392,10 @@ RBSDesigner.install()
 **Tables**:
 - `rbs`:
 
-  | id | dna_sequence | rbs_sequence | full_gene | dg_total | tir_predicted | target_tir | target_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby |
+  | id | sequence | rbs_sequence | full_gene | dg_total | tir_predicted | target_tir | target_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby |
   |----|-------------|--------------|-----------|----------|---------------|------------|-----------|---------|-------------|----------|------------|---------|------------|
 
-  - `full_gene` = `pre_sequence` + `rbs_sequence` + `dna_sequence` (complete DNA ready for synthesis)
+  - `full_gene` = `pre_sequence` + `rbs_sequence` + `sequence` (complete DNA ready for synthesis)
 
 **Example**:
 ```python

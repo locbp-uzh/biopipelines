@@ -76,19 +76,26 @@ def _autodetect_variant() -> str:
     """Pick a variant name based on the runtime environment.
 
     Selection order:
-      1. If running inside Google Colab, return ``"colab"``.
-      2. Otherwise, scan every repo-root ``config.<variant>.yaml`` (excluding
+      1. If ``BIOPIPELINES_CONFIG_VARIANT`` is set, return it. This is the
+         same env var the ``submit`` wrapper reads, so the bash and Python
+         sides always agree on which ``config.<variant>.yaml`` is active.
+      2. If running inside Google Colab, return ``"colab"``.
+      3. Otherwise, scan every repo-root ``config.<variant>.yaml`` (excluding
          ``config.colab.yaml``) and classify each by its ``machine.username``:
            - **match**: ``username`` equals the current Unix user.
            - **wildcard**: ``username`` is absent or empty.
          If exactly one match exists, return it. If no match exists but at
          least one wildcard does, return the first wildcard (alphabetical).
-      3. Fall back to ``"cluster"``.
+      4. Fall back to ``"cluster"``.
 
     Raises:
         RuntimeError: If two or more variants claim the same ``username``
             (ambiguous — the user must select one explicitly).
     """
+    env_variant = os.environ.get("BIOPIPELINES_CONFIG_VARIANT")
+    if env_variant:
+        return env_variant
+
     try:
         import google.colab  # noqa: F401
         return "colab"
@@ -341,7 +348,7 @@ class ConfigManager:
         if isinstance(machine, dict):
             _NAME_ENUMS = {
                 'env_manager': ('mamba', 'conda', 'micromamba', 'pip'),
-                'scheduler':   ('slurm', 'colab', 'none'),
+                'scheduler':   ('slurm', 'lsf', 'pbs', 'colab', 'none'),
             }
             for key, allowed in _NAME_ENUMS.items():
                 block = machine.get(key)
@@ -585,7 +592,7 @@ class ConfigManager:
         return list(block.get('init', []) or [])
 
     def get_scheduler(self) -> str:
-        """Get configured scheduler ("slurm", "colab", or "none")."""
+        """Get configured scheduler ("slurm", "lsf", "pbs", "colab", or "none")."""
         return self._machine_block('scheduler')['name']
 
     def get_scheduler_init(self) -> List[str]:
@@ -631,8 +638,12 @@ class ConfigManager:
         """
         return ['base', 'infrastructure', 'cache']
 
-    def get_slurm_modules(self) -> List[str]:
-        """Modules to load in SLURM batch scripts (machine.scheduler.modules)."""
+    def get_scheduler_modules(self) -> List[str]:
+        """Modules to load in batch scripts (machine.scheduler.modules).
+
+        Applies to any batch scheduler (slurm/lsf/pbs); lmod modules exist on
+        LSF and PBS clusters too.
+        """
         block = self._machine_block('scheduler')
         # 'modules' is optional; an empty list is fine.
         modules = block.get('modules')
@@ -691,8 +702,8 @@ class ConfigManager:
         return f'$({mgr} run -n {env_name} {py})'
 
     def get_module_load_line(self) -> str:
-        """Get the full 'module load ...' line for SLURM scripts, or empty string if none."""
-        modules = self.get_slurm_modules()
+        """Get the full 'module load ...' line for batch scripts, or empty string if none."""
+        modules = self.get_scheduler_modules()
         if not modules:
             return ""
         return "module load " + " ".join(modules)

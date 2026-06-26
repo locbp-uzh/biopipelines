@@ -302,3 +302,95 @@ def test_create_map_table_shared_file(tmp_path, record_case):
     assert len(df) == 3
     assert df["file"].tolist() == ["/tmp/s.fa"] * 3
     assert df["id"].tolist() == ["a", "b", "c"]
+
+
+# ── materialized records() iterator ────────────────────────────────────────
+
+def test_datastream_records_file_stream(tmp_path, record_case):
+    pdb_a = tmp_path / "a.pdb"
+    pdb_b = tmp_path / "b.pdb"
+    pdb_a.write_text("ATOM\n")
+    pdb_b.write_text("ATOM\n")
+    ds = DataStream(
+        name="structures",
+        ids=["a", "b"],
+        files=[str(pdb_a), str(pdb_b)],
+        format="pdb",
+    )
+
+    records = list(ds.records())
+    actual = [(record.id, record.file, record.values) for record in records]
+    expected = [("a", str(pdb_a), {}), ("b", str(pdb_b), {})]
+    record_case(input="file stream records", expected=expected, actual=actual)
+    assert actual == expected
+
+
+def test_datastream_records_value_stream(tmp_path, record_case):
+    import pandas as pd
+
+    table = tmp_path / "compounds.csv"
+    pd.DataFrame(
+        [
+            {"id": "lig1", "smiles": "CCO", "code": "ETH"},
+            {"id": "lig2", "smiles": "CCN", "code": "ETN"},
+        ]
+    ).to_csv(table, index=False)
+    ds = DataStream(
+        name="compounds",
+        ids=["lig1", "lig2"],
+        files=[],
+        map_table=str(table),
+        format="csv",
+    )
+
+    records = list(ds.records(columns=["smiles", "code"]))
+    actual = [(record.id, record.smiles, record.code) for record in records]
+    expected = [("lig1", "CCO", "ETH"), ("lig2", "CCN", "ETN")]
+    record_case(input="value stream records", expected=expected, actual=actual)
+    assert actual == expected
+
+
+def test_datastream_records_shared_file_stream(tmp_path, record_case):
+    fasta = tmp_path / "shared.fa"
+    fasta.write_text(">a\nAAA\n>b\nBBB\n")
+    ds = DataStream(name="fasta", ids=["a", "b"], files=str(fasta), format="fasta")
+
+    actual = [(record.id, record.file) for record in ds.records()]
+    expected = [("a", str(fasta)), ("b", str(fasta))]
+    record_case(input="shared file records", expected=expected, actual=actual)
+    assert actual == expected
+
+
+def test_datastream_records_lazy_requires_materialized_map(record_case):
+    ds = DataStream(name="structures", ids=["prot[_<A B>]"], files=["<id>.pdb"])
+    record_case(input="lazy records before map_table", expected="ValueError", actual="ValueError")
+    with pytest.raises(ValueError, match="before its map_table is materialized"):
+        list(ds.records())
+
+
+def test_datastream_records_lazy_uses_materialized_map(tmp_path, record_case):
+    import pandas as pd
+
+    pdb_a = tmp_path / "prot_A.pdb"
+    pdb_b = tmp_path / "prot_B.pdb"
+    pdb_a.write_text("ATOM\n")
+    pdb_b.write_text("ATOM\n")
+    table = tmp_path / "structures_map.csv"
+    pd.DataFrame(
+        [
+            {"id": "prot_A", "file": str(pdb_a), "value": ""},
+            {"id": "prot_B", "file": str(pdb_b), "value": ""},
+        ]
+    ).to_csv(table, index=False)
+    ds = DataStream(
+        name="structures",
+        ids=["prot[_<A B>]"],
+        files=[str(tmp_path / "<id>.pdb")],
+        map_table=str(table),
+        format="pdb",
+    )
+
+    actual = [(record.id, record.file) for record in ds.records()]
+    expected = [("prot_A", str(pdb_a)), ("prot_B", str(pdb_b))]
+    record_case(input="lazy records after map_table", expected=expected, actual=actual)
+    assert actual == expected

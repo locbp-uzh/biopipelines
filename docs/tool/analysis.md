@@ -1216,16 +1216,19 @@ sasa.tables.sasa  # delta-SASA per structure
 
 Predicted change in fold stability (ddG) upon point mutation, from structure. ThermoMPNN is a lightweight GNN built on the ProteinMPNN backbone, trained on the Megascale stability dataset. For each input structure it scores every position × 19 substitutions in a single forward pass — materially faster than physics-based ddG estimation. Negative `ddG_pred` = predicted stabilising (lower folding free energy). Complements VespaG: ThermoMPNN scores fold *stability* from structure, VespaG scores functional *fitness* from sequence.
 
+**Single point mutations only.** ThermoMPNN predicts the ddG of *one* substitution at a time. Every value it produces — whether in the `ddg` table or the `profile` resi-csv — is an independent single-mutant ddG measured against the wildtype. It does **not** model the combined stability of several simultaneous mutations: summing per-mutation ddGs ignores epistasis and will mis-estimate a real multi-mutant. In the `mutations=` filter, each `+`-joined token is scored separately (it is a selection of single mutants, not a combined variant). For genuine double-mutant ddG (additive and epistatic) use the separate [ThermoMPNN-D](https://github.com/Kuhlman-Lab/ThermoMPNN-D) model; to judge the overall stability of a full multi-mutation design, fold it and compare a global metric to the wildtype.
+
 **Environment**: `thermompnn`
 
 **Installation**: `ThermoMPNN.install()` clones `Kuhlman-Lab/ThermoMPNN` (the default model checkpoint ships with the repo, so no weights download) and creates a torch env. Runs on CPU; a GPU speeds up large/many inputs.
 
 **Parameters**:
-- `structures`: Union[DataStream, StandardizedOutput] (required) — Input backbone/complex PDBs.
+- `structures`: Union[DataStream, StandardizedOutput] (required) — Wildtype backbone/complex PDBs. ThermoMPNN runs its site-saturation pass on these; they define `wildtype`/`resi` per position and serve as the reference for `sequences=`.
 - `chain`: str = `"A"` — Chain to score.
-- `mutations`: Union[str, (TableInfo, column)] = `""` — Optional. Empty (default) runs site-saturation over all positions of `chain`. Otherwise scores only the named point mutations, given as `+`-joined wildtype-position-mutant tokens (e.g. `"A42G+L50V"`, 1-indexed), or a table column reference whose per-structure cell holds such a string. In explicit mode the native saturation pass still runs and is then filtered to the requested mutants; any requested mutation absent from the output (e.g. a wildtype/position mismatch) is reported in `missing`.
+- `mutations`: Union[str, (TableInfo, column)] = `""` — Optional. Empty (default) runs site-saturation over all positions of `chain`. Otherwise scores only the named point mutations, given as `+`-joined wildtype-position-mutant tokens (e.g. `"A42G+L50V"`, 1-indexed), or a table column reference whose per-structure cell holds such a string. In explicit mode the native saturation pass still runs and is then filtered to the requested mutants; any requested mutation absent from the output (e.g. a wildtype/position mismatch) is reported in `missing`. Each token is an independent single mutant. Mutually exclusive with `sequences=`.
+- `sequences`: Union[DataStream, StandardizedOutput] = `None` — Optional. A stream of designed sequences (e.g. from `ProteinMPNN`/`LigandMPNN`) to profile against the wildtype. Each sequence is matched to its wildtype structure by the framework's id-matching (the same partition `groups=` tools use: designs `3KZY_<1..10>` match wildtype `3KZY`), diffed against that structure's chain, and emitted as one resi-csv giving, per residue, `0.0` where the design keeps the wildtype residue, else the single-mutant ddG of the wildtype→design substitution at that position. Switches the output from the `ddg` table to the `profile` resi-csv stream. Mutually exclusive with `mutations=`.
 
-**Tables**:
+**Tables** (when `sequences=` is not given):
 - `ddg`:
 
   | id | structures.id | chain | position | wildtype | mutation | ddG_pred |
@@ -1235,9 +1238,18 @@ Predicted change in fold stability (ddG) upon point mutation, from structure. Th
 
 - `missing`: `id | removed_by | cause`
 
+**Streams** (when `sequences=` is given):
+- `profile`: resi-csv, one CSV per design id (e.g. `3KZY_1 … 3KZY_10`).
+
+  | id | chain | resi | wildtype | design_aa | ddG_pred |
+  |----|-------|------|----------|-----------|----------|
+
+  One row per residue of the scored chain. `ddG_pred = 0.0` where `design_aa == wildtype` (position unchanged), else the single-mutant ddG for that substitution. Feed it to `Consensus(groups=...)` to roll the per-design profiles up into one per-wildtype summary.
+
 **Example**:
 ```python
 from biopipelines.thermompnn import ThermoMPNN
+from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.panda import Panda
 
 target = PDB("1AKI", convert="pdb")
@@ -1251,8 +1263,12 @@ stabilising = Panda(
     operations=[Panda.filter("ddG_pred < 0")],
 )
 
-# Score a specific shortlist instead
+# Score a specific shortlist instead (each token is an independent single mutant)
 ddg_subset = ThermoMPNN(structures=target, chain="A", mutations="A42G+L50V")
+
+# Profile a set of designs against the wildtype: one resi-csv per design,
+# 0 where the design kept the wildtype residue, else the per-mutation ddG.
+profiles = ThermoMPNN(structures=target, sequences=ProteinMPNN(target, num_sequences=10))
 ```
 
 **Reference**: Dieckhaus et al. (2024) Transfer learning to leverage larger datasets for improved prediction of protein stability changes. *PNAS* 121, e2314853121. https://github.com/Kuhlman-Lab/ThermoMPNN

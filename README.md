@@ -5,7 +5,7 @@
 
 ## Overview
 
-A Python framework for computational protein and ligand design workflows that can run in Jupyter/Colab notebooks as well as on SLURM-based computing clusters. BioPipelines provides standardized interfaces to connect bioinformatics tools.
+A Python framework for computational protein and ligand design workflows that can run in Jupyter/Colab notebooks as well as on HPC computing clusters (SLURM, LSF, PBS). BioPipelines provides standardized interfaces to connect bioinformatics tools.
 
 <table>
   <tr>

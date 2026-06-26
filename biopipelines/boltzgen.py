@@ -110,6 +110,8 @@ fi
     boltzgen_helper_py = Path(lambda self: self.pipe_script_path("pipe_boltzgen.py"))
     boltzgen_config_py = Path(lambda self: self.pipe_script_path("pipe_boltzgen_config.py"))
     target_ds_json = Path(lambda self: self.configuration_path("target_structure.json"))
+    compounds_input_json = Path(lambda self: self.configuration_path(".input_compounds.json"))
+    compounds_input_csv = Path(lambda self: self.configuration_path(".input_compounds.csv"))
 
     def __init__(self,
                  # Design specification - Option 1: Manual YAML/dict
@@ -238,6 +240,7 @@ fi
 
         # Track inputs from previous tools
         self.ligand_compounds_csv = None  # Path to compounds.csv from Ligand tool
+        self.compounds_stream = None  # Source compounds stream for runtime id filtering
         self.target_structure_path = None  # Raw path string (when given directly)
         self.target_stream = None  # DataStream for runtime resolution
         self.target_input_id = None  # ID of target structure
@@ -289,12 +292,14 @@ fi
         if isinstance(ligand, StandardizedOutput):
             if ligand.streams.compounds and len(ligand.streams.compounds) > 0:
                 # compounds is a DataStream, get map_table
+                self.compounds_stream = ligand.streams.compounds
                 self.ligand_compounds_csv = ligand.streams.compounds.map_table
             elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
                 self.ligand_compounds_csv = ligand.tables.compounds.info.path
             else:
                 raise ValueError("Ligand StandardizedOutput has no compounds attribute")
         elif isinstance(ligand, DataStream):
+            self.compounds_stream = ligand
             self.ligand_compounds_csv = ligand.map_table
         else:
             raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
@@ -633,6 +638,15 @@ fi
         if self.target_stream:
             self.target_stream.save_json(self.target_ds_json)
 
+        # Filtered compounds CSV materialized at runtime (honors an upstream filter)
+        compounds_block = ""
+        if self.compounds_stream is not None:
+            self.compounds_stream.save_json(self.compounds_input_json)
+            self.ligand_compounds_csv = self.compounds_input_csv
+            compounds_block = self.generate_filtered_map_table_block(
+                self.compounds_input_json, self.compounds_input_csv,
+            )
+
         # Parse binder spec
         binder_min, binder_max = self._parse_binder_spec()
 
@@ -680,6 +694,7 @@ fi
         script_content = "#!/bin/bash\n"
         script_content += "# BoltzGen execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += compounds_block
         script_content += self.activate_environment()
         script_content += f"""
 echo "Running BoltzGen binder design"
@@ -1324,6 +1339,10 @@ echo "=== BoltzGenImport ready ==="
 
     # Lazy path descriptors
     import_helper_py = Path(lambda self: self.pipe_script_path("pipe_boltzgen_import.py"))
+    sequences_input_json = Path(lambda self: self.configuration_path(".input_sequences.json"))
+    sequences_input_csv = Path(lambda self: self.configuration_path(".input_sequences.csv"))
+    compounds_input_json = Path(lambda self: self.configuration_path(".input_compounds.json"))
+    compounds_input_csv = Path(lambda self: self.configuration_path(".input_compounds.csv"))
     # Imported tree is written directly into the step folder, mirroring the
     # flattened BoltzGen layout so a downstream BoltzGen(reuse=imported)
     # finds intermediate_designs/, intermediate_designs_inverse_folded/ etc.
@@ -1381,7 +1400,9 @@ echo "=== BoltzGenImport ready ==="
         self.design_structures = []  # List of PDB/CIF paths
         self.design_ids = []  # List of structure IDs
         self.sequences_csv = None    # Path to sequences CSV
+        self.sequences_stream = None  # Source sequences stream for runtime id filtering
         self.ligand_compounds_csv = None  # Path to ligand compounds CSV
+        self.compounds_stream = None  # Source compounds stream for runtime id filtering
 
         # Resolve inputs
         self._resolve_designs_input(designs)
@@ -1428,8 +1449,10 @@ echo "=== BoltzGenImport ready ==="
                             self.sequences_csv = info.info.path
                             break
             if not self.sequences_csv and sequences.sequences and len(sequences.sequences) > 0:
+                self.sequences_stream = sequences.sequences
                 self.sequences_csv = sequences.sequences.map_table
         elif isinstance(sequences, DataStream):
+            self.sequences_stream = sequences
             self.sequences_csv = sequences.map_table
         else:
             raise ValueError(f"sequences must be DataStream or StandardizedOutput, got {type(sequences)}")
@@ -1447,10 +1470,12 @@ echo "=== BoltzGenImport ready ==="
 
         if isinstance(ligand, StandardizedOutput):
             if ligand.streams.compounds and len(ligand.streams.compounds) > 0:
+                self.compounds_stream = ligand.streams.compounds
                 self.ligand_compounds_csv = ligand.streams.compounds.map_table
             elif hasattr(ligand, 'tables') and hasattr(ligand.tables, 'compounds'):
                 self.ligand_compounds_csv = ligand.tables.compounds.info.path
         elif isinstance(ligand, DataStream):
+            self.compounds_stream = ligand
             self.ligand_compounds_csv = ligand.map_table
         else:
             raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
@@ -1512,6 +1537,22 @@ echo "=== BoltzGenImport ready ==="
 
         # Parse binder spec
         binder_min, binder_max = self._parse_binder_spec()
+
+        # Filtered input CSVs materialized at runtime (honor an upstream id filter).
+        filter_block = ""
+        if self.sequences_stream is not None:
+            self.sequences_stream.save_json(self.sequences_input_json)
+            self.sequences_csv = self.sequences_input_csv
+            filter_block += self.generate_filtered_map_table_block(
+                self.sequences_input_json, self.sequences_input_csv,
+                required_columns=["id", "sequence"],
+            )
+        if self.compounds_stream is not None:
+            self.compounds_stream.save_json(self.compounds_input_json)
+            self.ligand_compounds_csv = self.compounds_input_csv
+            filter_block += self.generate_filtered_map_table_block(
+                self.compounds_input_json, self.compounds_input_csv,
+            )
 
         # Build structures list file — config-time artefact.
         structures_list_file = self.configuration_path(".input_structures.txt")
@@ -1623,6 +1664,7 @@ echo "Molecule pickle generation complete (temp files preserved in $TEMP_MOL_DIR
         script_content = "#!/bin/bash\n"
         script_content += "# BoltzGenImport execution script\n"
         script_content += self.generate_completion_check_header()
+        script_content += filter_block
         script_content += self.activate_environment()
         script_content += f"""
 echo "Importing structures into BoltzGen format"

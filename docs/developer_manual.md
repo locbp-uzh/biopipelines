@@ -239,18 +239,21 @@ Bracket `[...]` segments mark parts of an ID that depend on runtime data and **c
 prot[_<N><S A L K>]
 ```
 
-Here `prot` is the deterministic prefix, and `[_<N><S A L K>]` is a lazy suffix whose actual values come from an upstream tool's output (which doesn't exist yet at config time). Lazy IDs expand at runtime by matching patterns against IDs found in the DataStream's `map_table` CSV.
+Here `prot` is the deterministic prefix, and `[_<N><S A L K>]` is a lazy suffix whose actual values come from an upstream tool's output (which doesn't exist yet at config time). Lazy IDs resolve at runtime by **selecting** the rows of the DataStream's `map_table` CSV that the pattern covers — the map_table is the source of truth, the pattern is the selector.
 
-At configuration time, `ids_expanded` on a lazy DataStream returns only the deterministic prefix:
+A pattern is just an id with unresolved slots. There is no separate "partially expanded" concept: `ids` already holds patterns that may mix deterministic `<..>` slots and lazy `[...]` brackets. At configuration time, `ids_expanded` on a lazy DataStream expands the deterministic slots **and keeps the brackets**, so each element is still a valid lazy pattern:
 ```python
-ds.ids_expanded  # → ["prot"] (incomplete)
+# ds.ids == ["prot_<1 2>[_<N>]"]
+ds.ids_expanded  # → ["prot_1[_<N>]", "prot_2[_<N>]"] (still lazy, not concrete)
 ```
 
-At execution time (with `_runtime_mode=True`, as set by `load_datastream()`), `ids_expanded` reads the full set of IDs from the map_table:
+At execution time (with `_runtime_mode=True`, as set by `load_datastream()`), `ids_expanded` reads the full set of concrete IDs straight from the map_table:
 ```python
 ds = load_datastream("structures.json")
-ds.ids_expanded  # → ["prot_1S", "prot_2A", "prot_3L", ...] (complete)
+ds.ids_expanded  # → ["prot_1_1S", "prot_2_2A", ...] (concrete rows)
 ```
+
+To select map_table rows against a pattern at runtime (the shared, one-map helper used by combinatorics, stitch, and any bulk consumer), use `id_patterns.select_ids(patterns, row_ids)` (deterministic slots match exactly, `[...]` matches by glob) or `id_patterns.resolve_pattern_ids(patterns, map_table)`. Because the rows are the source of truth, this honors any upstream filter automatically — a filtered stream simply has fewer rows.
 
 ### The Rule
 
@@ -259,6 +262,24 @@ ds.ids_expanded  # → ["prot_1S", "prot_2A", "prot_3L", ...] (complete)
 Instead:
 - **Serialize the DataStream** to JSON via `save_json()` at config time
 - **Expand IDs at runtime** inside the generated bash script using `Resolve.stream_ids()` or inside pipe scripts using `load_datastream()` + `ids_expanded` / `iterate_files()`
+
+`DataStream.records()` is the exception by intent: it is a notebook/result
+inspection helper for streams whose outputs have already been materialized. It
+returns `StreamRecord` objects with `record.id`, `record.file` for file-backed
+streams, and requested map-table columns via `record.values` or dot access for
+value-backed streams:
+
+```python
+for record in output.streams.structures.records():
+    print(record.id, record.file)
+
+for record in ligand.streams.compounds.records(columns=["smiles"]):
+    print(record.id, record.smiles)
+```
+
+Do not use `records()` from tool wrappers to generate scripts or predict
+outputs. Tool wrappers still serialize streams and defer expansion to generated
+bash or pipe scripts as described below.
 
 ### How to Iterate Structures in Generated Bash
 
@@ -356,6 +377,33 @@ for struct_id, pdb_path in iterate_files(ds):
     process(struct_id, pdb_path)
 ```
 
+### Filtered streams vs. the raw map_table
+
+A stream's `map_table` is the full **warehouse** of rows an upstream tool produced. A stream's `ids` are a **view** over it. Filtering a stream (`output["CP1"]`, slicing, `filter_by_ids()`) narrows the `ids` but leaves the `map_table` untouched — the filtered-out rows are still physically in the CSV.
+
+So the hazard is: **a consumer that reads the raw `map_table` directly (`cp map_table`, `pd.read_csv(map_table)`, `os.listdir` of an upstream folder) gets the whole warehouse and silently ignores the filter** — it reprocesses every row, not just the selected ids.
+
+The rule has one branch:
+
+- **If the consumer resolves through the DataStream at runtime** — `load_datastream()` + `iterate_files()` / `iterate_values()` / `Resolve.stream_ids()` — it iterates `ids_expanded`, so it is **filtered by construction**. This is the default transport; prefer it whenever the runtime script can consume a DataStream.
+- **If and only if the consumer bypasses datastream resolution** — its binary needs a concrete CSV / FASTA / native file and reads the table directly — it **must materialize the filtered table first**. Never feed the raw `map_table` to such a consumer.
+
+Materialize the filtered CSV with the shared `BaseConfig` block, emitted *before* the consumer step:
+
+```python
+# In generate_script(), before activating the tool env:
+script += self.generate_filtered_map_table_block(
+    self.sequences_json,            # stream JSON saved at config time
+    self.filtered_sequences_csv,    # runtime-materialized, filtered CSV
+    required_columns=["id", "sequence"],
+)
+# ... then activate the tool env and pass self.filtered_sequences_csv to the binary
+```
+
+The block runs `materialize_filtered_map_table.py` (which calls `write_filtered_map_table()`) under the **biopipelines** env — it imports `biopipelines`, so it cannot run in the tool env. It projects the `map_table` to `ids_expanded` in stream order; an unfiltered stream gets a byte-for-byte copy (fast path). `write_filtered_map_table` is representation-agnostic (ids + columns only) — any FASTA/format conversion the binary needs is derived from this CSV in the tool's own pipe script, not in `biopipelines_io`.
+
+Combinatorics consumers (the unified Boltz/AlphaFold config builder) are the same rule seen from the other side: they don't use datastream resolution either, so they carry the filter as `ids` in the combinatorics config and the runtime loader intersects the source rows with them. Either way, *some* explicit filter step is applied — the only consumer that needs none is the datastream-resolving one.
+
 ### Summary Table
 
 | Operation | Config time | Execution time |
@@ -368,6 +416,7 @@ for struct_id, pdb_path in iterate_files(ds):
 | Iterate in Python | — | `iterate_files(ds)` |
 | Resolve one file in Python | — | `resolve_file(ds, id)` |
 | Build per-ID data | **Don't** | Do it in pipe scripts |
+| Feed a raw CSV to a binary | `generate_filtered_map_table_block(...)` | materializes filtered CSV |
 
 ---
 
@@ -647,6 +696,8 @@ File templates with `<id>` are the preferred form for the declared stream — co
 
 **Rule:** if a tool returns a DataStream with a `map_table` path, that CSV **must exist and be accurate** by the time the tool's script finishes. Downstream tools will read it.
 
+**The one exception: `Load`.** The config-time ban exists because a normal tool's outputs do not exist yet — its ids are predictions, so writing a map at config time would record rows that have not been produced. `Load` is the inverse: it imports data that **already exists on disk** when the pipeline is authored, so its ids are genuinely known at config time (it globs the real files and reads any `missing` table in `get_output_files()`). For `Load`, resolving concrete ids — and writing a map_table — at config time is correct, because the map records data that is actually there. The discriminator is not the phase but the question *"does the data this map describes exist at the moment the map is written?"* For a producing tool the answer is no until its run finishes (→ runtime only); for `Load` it is yes (→ config time is fine).
+
 ### Install Scripts and the `$INSTALL_SUCCESS` Contract
 
 Every tool exposes a classmethod `_install_script(cls, folders, env_manager, force_reinstall, **kwargs)` that returns the bash for `Tool.install()`. The framework wraps this script in a `_Installer` step that exports a single env var, `$INSTALL_SUCCESS`, pointing at a sentinel file under the install step's output folder. The completion check then surfaces the install as **COMPLETED** or **FAILED** based on whether that file exists.
@@ -711,7 +762,7 @@ Four layers, all enforced before any bash is written:
 
 2. **Pipeline description** — escaped at emission (`_escape_for_double_quotes` in `pipeline.py`) so a stray `"`, `` ` ``, `$`, or `\` can't break the surrounding `echo` literal. Validation happens at emission rather than at `__init__`, so the stored `self.description` stays the user's original text for logs and metadata.
 
-3. **Config file (`config.<variant>.yaml`)** — `biopipelines/config_manager.py` (`_validate_shell_safety`, called from `_load_config`). Covers `folders.*.*`, `containers.*`, `machine.{username, slurm_modules}`. Denylists `"`, `` ` ``, `$`, `\`. The three enum-shaped machine fields (`env_manager`, `scheduler`, `container_executor`) use an **allowlist**, not a denylist, because they are interpolated *unquoted* inside `eval "$(<mgr> shell hook ...)"` where a `;` would suffice to smuggle a command.
+3. **Config file (`config.<variant>.yaml`)** — `biopipelines/config_manager.py` (`_validate_shell_safety`, called from `_load_config`). Covers `folders.*.*`, `containers.*`, `machine.{username, scheduler.modules}`. Denylists `"`, `` ` ``, `$`, `\`. The three enum-shaped machine fields (`env_manager`, `scheduler`, `container_executor`) use an **allowlist**, not a denylist, because they are interpolated *unquoted* inside `eval "$(<mgr> shell hook ...)"` where a `;` would suffice to smuggle a command.
 
 4. **Per-tool free-form strings** — each tool's `validate_params()` calls `_validate_freeform_string` (defined in `biopipelines/base_config.py`) on every user-supplied string param that reaches bash. Same `" \` $ \\` denylist.
 
@@ -1145,6 +1196,7 @@ What the suite covers:
 | `test_folders.py`             | Filesystem-layout prediction and folder resolution.                                                                                                                                    |
 | `test_remap.py`               | ID remapping rules.                                                                                                                                                                    |
 | `test_panda.py`               | Table transformations, filter/sort/head/tail/sample rename paths.                                                                                                                      |
+| `test_id_filter_audit.py`     | Filtered-stream consumers: `write_filtered_map_table` (subset, order, byte-identical fast path, missing/required columns), combinatorics carrying filtered ids, the runtime materializer pipe script, and stitch/Boltz loaders honoring an id filter. |
 
 All tests use the pip-mode fixture `tests/fixtures/config.local.yaml` (no conda, no containers, no SLURM), so CI and local runs need only `pip install -e ".[test]"`.
 
