@@ -23,7 +23,7 @@ from typing import Dict, List, Any, Optional, Tuple
 # Import unified I/O utilities for runtime DataStream expansion
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
-from biopipelines.id_map_utils import get_mapped_ids, prune_redundant_provenance_columns
+from biopipelines.id_map_utils import get_mapped_ids, map_table_ids_to_ids, prune_redundant_provenance_columns
 
 # Mirror of biopipelines.panda.Panda.SOURCE — kept inline to avoid a
 # config-time import dependency in pipe scripts.
@@ -240,12 +240,15 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
     - ``on`` is None: biopipelines ID matching via get_mapped_ids
     """
     on = params.get("on")
-    how = params.get("how", "outer")
+    how = params.get("how")
     prefixes = params.get("prefixes", [])
     map_table_paths = params.get("map_table_paths", [])
+    grain = params.get("grain", "finest")
 
     # --- Path A: explicit column merge (on is not None) ---
     if on is not None:
+        if how is None:
+            how = "outer"
         # Normalise `on` to a per-table list of column names.
         if isinstance(on, list):
             on_per_table = on
@@ -294,7 +297,14 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
 
     # --- Path B: ID matching merge (on is None) ---
     merge_key = "id"
-    print(f"  Merge (ID matching): how={how}, merge_key={merge_key}")
+    # Derive the join type from grain when not set: both 'finest' and 'coarsest'
+    # use a left join so the chosen driver keeps EXACTLY its rows. An outer join
+    # would resurrect driver-unmatched rows from the other table with a null id
+    # (a coarse design with no fine child, or a dropped fine sibling). Use an
+    # explicit how='outer' if you really want those rows.
+    if how is None:
+        how = "left" if grain in ("finest", "coarsest") else "outer"
+    print(f"  Merge (ID matching): how={how}, grain={grain}, merge_key={merge_key}")
     if map_table_paths:
         print(f"    Using {len(map_table_paths)} map_table(s) for provenance")
 
@@ -304,7 +314,32 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
             raise ValueError(f"Dataframe {i} has no '{merge_key}' column. "
                              f"Use on=<column> for explicit column merge.")
 
-    # Start with first dataframe
+    # Pick which table drives the output row set by grain. Grain is a table's
+    # depth in the provenance hierarchy (d_1_1 derives from d_1 derives from d),
+    # NOT its row count — a coarse table can have more rows than a fine one
+    # (many designs, few refolded structures). Rank by the max ID depth, with
+    # unique-ID count as a tiebreak and original order as the final tiebreak, so
+    # "finest" always lands on the deepest table. Reorder dataframes + their
+    # prefixes together so the prefix-to-table correspondence survives.
+    order = list(range(len(dataframes)))
+    if grain in ("finest", "coarsest"):
+        def _depth(df):
+            return max((len(map_table_ids_to_ids(i, {"*": "*_<S>"}))
+                        for i in df[merge_key].astype(str)), default=0)
+        depths = [_depth(df) for df in dataframes]
+        counts = [df[merge_key].astype(str).nunique() for df in dataframes]
+        sign = 1 if grain == "finest" else -1
+        driver = max(range(len(dataframes)),
+                     key=lambda i: (sign * depths[i], sign * counts[i], -i))
+        order = [driver] + [i for i in range(len(dataframes)) if i != driver]
+        if driver != 0:
+            print(f"    Grain '{grain}': dataframe {driver} drives rows "
+                  f"(depth {depths[driver]}, {counts[driver]} IDs)")
+    dataframes = [dataframes[i] for i in order]
+    prefixes = ([prefixes[i] for i in order]
+                if prefixes and len(prefixes) == len(order) else prefixes)
+
+    # Start with first (driver) dataframe
     result = dataframes[0].copy()
     if prefixes and len(prefixes) > 0 and prefixes[0]:
         prefix = prefixes[0]
@@ -324,34 +359,51 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
         matched = get_mapped_ids(result_ids, df_i_ids, unique=True,
                                  map_table_paths=map_table_paths)
 
-        # Build reverse_map: df_i_id -> result_id (so we can rewrite df_i's IDs)
-        reverse_map = {}
-        for res_id, df_i_id in matched.items():
-            if df_i_id is not None:
-                reverse_map[df_i_id] = res_id
+        # Warn when this fold drops sibling rows: one result row matching many
+        # incoming rows means the unique match silently discards the rest. This
+        # only happens when the incoming table is finer than the driver (e.g.
+        # grain='coarsest'); grain='finest' picks the finest driver so every
+        # fold is a coarse->fine broadcast with nothing dropped.
+        multi = get_mapped_ids(result_ids, df_i_ids, unique=False,
+                               map_table_paths=map_table_paths)
+        dropped = sum(max(0, len(v) - 1) for v in multi.values() if v)
+        if dropped:
+            print(f"    WARNING: dataframe {i} sits at a finer grain than the "
+                  f"driver; {dropped} row(s) dropped to keep one match per "
+                  f"driver row. Set grain='finest' or aggregate this table "
+                  f"first to keep them.")
 
         n_matched = sum(1 for v in matched.values() if v is not None)
         print(f"    ID matching df {i}: {n_matched}/{len(result_ids)} result IDs matched")
 
-        # Replace df_i's merge key values using reverse_map
-        df_i[merge_key] = df_i[merge_key].astype(str).map(
-            lambda x: reverse_map.get(x, x))
+        # Attach each driver row's matched incoming-id as a temp join key, then
+        # merge on it. This broadcasts: many driver rows sharing one coarse id
+        # all pick up that coarse row's columns (pure rewrite-then-merge would
+        # collapse them, since the id->id map is many-to-one).
+        join_key = "__merge_join_key__"
+        result[join_key] = result[merge_key].astype(str).map(
+            lambda x: matched.get(x))
+        df_i[join_key] = df_i[merge_key].astype(str)
 
-        # Apply prefix
+        # Apply prefix (never to the merge key or the temp join key)
         if prefixes and i < len(prefixes) and prefixes[i]:
             prefix = prefixes[i]
-            rename_dict = {col: f"{prefix}{col}" for col in df_i.columns if col != merge_key}
+            rename_dict = {col: f"{prefix}{col}" for col in df_i.columns
+                           if col not in (merge_key, join_key)}
             df_i = df_i.rename(columns=rename_dict)
             print(f"    Applied prefix '{prefix}' to dataframe {i}")
 
-        # Handle overlapping columns
-        overlap = set(result.columns) & set(df_i.columns) - {merge_key}
+        # Drop the incoming merge key so the driver's id survives the broadcast;
+        # then drop any other overlapping columns.
+        df_i = df_i.drop(columns=[merge_key])
+        overlap = (set(result.columns) & set(df_i.columns)) - {join_key}
         if overlap:
             print(f"    Warning: Overlapping columns: {overlap}")
             df_i = df_i.drop(columns=list(overlap))
 
         before_rows = len(result)
-        result = pd.merge(result, df_i, on=merge_key, how=how)
+        result = pd.merge(result, df_i, on=join_key, how=how)
+        result = result.drop(columns=[join_key])
         print(f"    Merged dataframe {i+1}: {before_rows} -> {len(result)} rows")
 
     return result

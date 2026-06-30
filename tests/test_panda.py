@@ -807,3 +807,73 @@ def test_panda_pool_chained_rename_preserves_full_lineage(
         assert parent != "ENT", (
             f"immediate parent is grandparent (shift failed) for {rid}"
         )
+
+
+# ── Panda.merge: grain (cross-fan-out level selection) ────────────────────────
+
+def _load_execute_merge():
+    """Import execute_merge from the pipe script without a package install."""
+    import importlib.util
+    path = os.path.join(_repo_root(), "pipe_scripts", "pipe_panda.py")
+    spec = importlib.util.spec_from_file_location("_pipe_panda_grain", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.execute_merge
+
+
+def _grain_frames():
+    import pandas as pd
+    coarse = pd.DataFrame({"id": ["d_1", "d_2"], "mean_plddt": [70.0, 80.0]})
+    fine = pd.DataFrame(
+        {"id": ["d_1_1", "d_1_2", "d_2_1"], "plddt": [85.0, 90.0, 60.0]}
+    )
+    return coarse, fine
+
+
+@pytest.mark.parametrize("coarse_first", [True, False])
+def test_merge_grain_finest_is_order_independent_and_lossless(coarse_first):
+    """grain='finest' broadcasts the coarse value onto every fine row, and the
+    result is identical regardless of input table order."""
+    execute_merge = _load_execute_merge()
+    coarse, fine = _grain_frames()
+    tables = [coarse, fine] if coarse_first else [fine, coarse]
+    out = execute_merge([t.copy() for t in tables], {"on": None, "grain": "finest"})
+
+    assert sorted(out["id"]) == ["d_1_1", "d_1_2", "d_2_1"]
+    assert out["id"].notna().all()  # no resurrected null-id rows
+    by_id = out.set_index("id")
+    # Both siblings of design d_1 carry d_1's mean_plddt (broadcast, not collapsed).
+    assert by_id.loc["d_1_1", "mean_plddt"] == 70.0
+    assert by_id.loc["d_1_2", "mean_plddt"] == 70.0
+    assert by_id.loc["d_2_1", "mean_plddt"] == 80.0
+    assert by_id.loc["d_1_1", "plddt"] == 85.0
+    assert by_id.loc["d_1_2", "plddt"] == 90.0
+
+
+@pytest.mark.parametrize("coarse_first", [True, False])
+def test_merge_grain_finest_picks_deepest_not_largest(coarse_first):
+    """The finest driver is the table whose IDs are deepest in the provenance
+    hierarchy, NOT the one with the most rows. A coarse table with more rows
+    than the fine one (many designs, few refolded) must not become the driver,
+    and unmatched coarse rows must not leak in as null-id rows."""
+    import pandas as pd
+    execute_merge = _load_execute_merge()
+    coarse = pd.DataFrame({"id": ["d_1", "d_2", "d_3"], "mean_plddt": [1.0, 2.0, 3.0]})
+    fine = pd.DataFrame({"id": ["d_1_1"], "plddt": [9.0]})  # 1 row, but deeper
+    tables = [coarse, fine] if coarse_first else [fine, coarse]
+    out = execute_merge([t.copy() for t in tables], {"on": None, "grain": "finest"})
+
+    assert list(out["id"]) == ["d_1_1"]
+    assert out.set_index("id").loc["d_1_1", "mean_plddt"] == 1.0
+
+
+def test_merge_grain_coarsest_keeps_one_row_per_coarse_id(capsys):
+    """grain='coarsest' drives rows from the coarse table, drops fine siblings,
+    warns about the drop, and never leaks a null-id row back in."""
+    execute_merge = _load_execute_merge()
+    coarse, fine = _grain_frames()
+    out = execute_merge([fine.copy(), coarse.copy()], {"on": None, "grain": "coarsest"})
+
+    assert sorted(out["id"]) == ["d_1", "d_2"]
+    assert out["id"].notna().all()
+    assert "WARNING" in capsys.readouterr().out

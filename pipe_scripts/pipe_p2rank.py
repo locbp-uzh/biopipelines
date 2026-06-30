@@ -30,7 +30,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path  # noqa: E402
+from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path, container_argv_prefix  # noqa: E402
 from biopipelines.sele_utils import chain_aware_sele  # noqa: E402
 
 
@@ -65,10 +65,11 @@ def _residue_tokens_to_sele(residue_ids: str):
 
 
 def run_prank(pdb_path: str, config: str, work_dir: str,
-              threads: int = 1, visualizations: bool = False) -> str:
+              threads: int = 1, visualizations: bool = False,
+              container_prefix: str = "") -> str:
     """Run `prank predict` and return the output directory."""
     os.makedirs(work_dir, exist_ok=True)
-    cmd = ["prank", "predict", "-f", pdb_path, "-c", config,
+    cmd = container_argv_prefix(container_prefix) + ["prank", "predict", "-f", pdb_path, "-c", config,
            "-o", work_dir,
            "-threads", str(threads),
            "-visualizations", "1" if visualizations else "0"]
@@ -133,6 +134,7 @@ def main():
     p.add_argument("--residues-map-csv", required=True)
     p.add_argument("--summary-csv", required=True)
     p.add_argument("--missing-csv", required=True)
+    p.add_argument("--container-prefix", default="")
     p.add_argument("--upstream-missing", default=None)
     args = p.parse_args()
 
@@ -147,7 +149,8 @@ def main():
         try:
             work_dir = os.path.join(args.scratch_dir, sid)
             run_prank(pdb_path, args.config, work_dir,
-                      threads=args.threads, visualizations=bool(args.visualizations))
+                      threads=args.threads, visualizations=bool(args.visualizations),
+                      container_prefix=args.container_prefix)
         except Exception as e:
             print(f"WARNING: {sid} P2Rank failed: {e}", file=sys.stderr)
             missing_rows.append({"id": sid, "removed_by": step_id, "kind": "failure", "cause": str(e)[:200]})

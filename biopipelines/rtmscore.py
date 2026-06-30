@@ -63,7 +63,7 @@ class RTMScore(BaseConfig):
     """
 
     TOOL_NAME = "RTMScore"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -252,6 +252,7 @@ python "{self.helper_py}" \\
     --cutoff {self.cutoff} \\
     --scratch-dir "{self.extras_path()}" \\
     --scores-csv "{self.scores_csv}" \\
+    --container-prefix "{self.container_prefix()}" \\
     --missing-csv "{self.missing_csv}"{upstream_missing_flag}
 """
         script += self.generate_completion_check_footer()

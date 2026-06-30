@@ -10,6 +10,7 @@ and all-atom generation capabilities.
 """
 
 import os
+import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -72,7 +73,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # Typed builder for the guiding potential, e.g.
     #   RFdiffusionAllAtom.GuidingPotential.ligand_ncontacts(weight=3, r_0=8, d_0=4)
@@ -150,6 +151,7 @@ fi
     substrate_json = Path(lambda self: self.configuration_path("input_substrate.json"))
     # Per-PDB contig resolution (see RFdiffusion for the contract).
     contigs_json = Path(lambda self: self.configuration_path("contig_options.json"))
+    contig_args_json = Path(lambda self: self.configuration_path("contig_args.json"))
     contigs_py = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_contigs.py"))
     contigs_reader_py = Path(lambda self: self.pipe_script_path("resolve_rfdiffusion_contigs.py"))
 
@@ -559,8 +561,17 @@ cd {repo_dir}
         inpaint_str_arg = _selection_cli_arg(self._inpaint_str_arg)
         structures_dir = self.stream_folder("structures")
 
+        with open(self.contig_args_json, "w") as f:
+            json.dump({
+                "structures_json": str(self.pdb_ds_json),
+                "contigs": contigs_arg,
+                "inpaint": inpaint_arg,
+                "inpaint_str": inpaint_str_arg,
+                "output_json": str(self.contigs_json),
+            }, f, indent=2)
+
         return f"""{ligand_snippet}echo "Resolving per-PDB contig options"
-python {self.contigs_py} "{self.pdb_ds_json}" "{contigs_arg}" "{inpaint_arg}" "{inpaint_str_arg}" "{self.contigs_json}"
+python {self.contigs_py} "{self.contig_args_json}"
 
 echo "Starting RFdiffusion-AllAtom ({mode} mode)"
 echo "Output folder: {self.output_folder}"
@@ -697,7 +708,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # Lazy path descriptors
     #   prepared_pdb    — the single output PDB, lives in structures/.

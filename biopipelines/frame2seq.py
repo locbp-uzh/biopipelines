@@ -78,7 +78,7 @@ class Frame2Seq(BaseConfig):
     """
 
     TOOL_NAME = "Frame2Seq"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -235,6 +235,7 @@ fi
         script += "# Frame2Seq design script\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()  # frame2seq env
+        script += self.warn_container_unsupported()
 
         optional_flags = ""
         if self.omit_aa:

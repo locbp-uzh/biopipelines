@@ -76,7 +76,7 @@ class BioEmu(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, md=True, **kwargs):
@@ -221,6 +221,7 @@ fi
         script += "# BioEmu equilibrium-ensemble sampling script\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()
+        script += self.warn_container_unsupported()
         script += f"""echo "Sampling ensembles for {len(self.sequences_stream)} sequence(s), {self.num_samples} each"
 python "{self.helper_py}" \\
     --sequences-json "{self.sequences_json}" \\

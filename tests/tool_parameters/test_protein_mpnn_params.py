@@ -11,7 +11,7 @@ import pytest
 from ._helpers import (
     assert_kwarg_emitted,
     assert_substrings_in,
-    read_pipeline_sh,
+    read_all_emitted_artifacts,
 )
 
 
@@ -33,7 +33,7 @@ def _build(local_config, isolated_cwd, new_pipeline, **pmpnn_kwargs):
         ProteinMPNN(structures=m.streams.structures, **pmpnn_kwargs)
         script_path = pipeline.save()
 
-    return read_pipeline_sh(script_path)
+    return read_all_emitted_artifacts(script_path)
 
 
 def _build_soluble(local_config, isolated_cwd, new_pipeline, **kwargs):
@@ -51,7 +51,7 @@ def _build_soluble(local_config, isolated_cwd, new_pipeline, **kwargs):
         SolubleMPNN(structures=m.streams.structures, **kwargs)
         script_path = pipeline.save()
 
-    return read_pipeline_sh(script_path)
+    return read_all_emitted_artifacts(script_path)
 
 
 def test_num_sequences(local_config, isolated_cwd, new_pipeline):

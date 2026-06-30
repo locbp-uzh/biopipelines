@@ -44,7 +44,7 @@ class Prodigy(BaseConfig):
     """
 
     TOOL_NAME = "Prodigy"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -116,6 +116,7 @@ fi
         script += "# Prodigy affinity script\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()
+        script += self.warn_container_unsupported()
         upstream_missing_flag = self.upstream_missing_flag(self.structures)
         script += f"""echo "Running Prodigy on {len(self.structures_stream)} complex(es)"
 python "{self.helper_py}" \\

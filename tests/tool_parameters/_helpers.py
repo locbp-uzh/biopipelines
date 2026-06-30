@@ -1,12 +1,10 @@
 """Helpers for the tool_parameters test suite.
 
 Each test in this suite drives a single-tool ``Pipeline`` at config time and
-asserts that user-facing kwargs land in the emitted artifacts. We rely
-entirely on string-grep against ``pipeline.sh``: every wrapper either inlines
-its CLI flags into the bash script directly, or emits a runtime call to a
-``pipe_<tool>.py`` runner with the kwarg values serialised on the command
-line. In both cases the kwarg value appears verbatim in ``pipeline.sh``, so
-that's the single artifact we read.
+asserts that user-facing kwargs land in the emitted artifacts. Most wrappers
+inline CLI flags into generated shell scripts, while others serialize runtime
+helper arguments into configuration files. The helpers below support grepping
+either surface depending on what a wrapper emits.
 """
 
 import os

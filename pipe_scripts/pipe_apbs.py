@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path  # noqa: E402
+from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path, container_argv_prefix  # noqa: E402
 from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
@@ -29,8 +29,12 @@ BASIC = {"ARG", "LYS", "HIS"}
 ACIDIC = {"ASP", "GLU"}
 
 
+_CONTAINER_PREFIX = ""
+
+
 def run(cmd, cwd=None):
-    res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    full = container_argv_prefix(_CONTAINER_PREFIX) + cmd
+    res = subprocess.run(full, capture_output=True, text=True, cwd=cwd)
     if res.returncode != 0:
         raise RuntimeError(f"{cmd[0]} failed: {res.stderr.strip() or res.stdout.strip()}")
     return res
@@ -142,8 +146,11 @@ def main():
     p.add_argument("--solver", default="lpbe")
     p.add_argument("--electrostatics-csv", required=True)
     p.add_argument("--missing-csv", required=True)
+    p.add_argument("--container-prefix", default="")
     p.add_argument("--upstream-missing", default=None)
     args = p.parse_args()
+    global _CONTAINER_PREFIX
+    _CONTAINER_PREFIX = args.container_prefix
 
     os.makedirs(args.pqr_dir, exist_ok=True)
     os.makedirs(args.grid_dir, exist_ok=True)

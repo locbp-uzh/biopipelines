@@ -3,7 +3,7 @@
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
 
-import argparse
+import json
 import os
 import sys
 
@@ -12,21 +12,21 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.pdb_parser import parse_pdb_file
 from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
-parser = argparse.ArgumentParser(description='Establish residues for which to generate a sequence with ProteinMPNN. Can read from RFdiffusion table or use direct selections.')
-parser.add_argument('structures_json', type=str, help="Path to DataStream JSON file with input structures")
-parser.add_argument('FIXED', type=str, help="Selection for fixed positions or '-'")
-parser.add_argument('DESIGNED', type=str, help="Selection for designed positions or '-'")
-parser.add_argument('FIXED_CHAIN', type=str, help="A or B or whatever")
-parser.add_argument('fixed_jsonl_file', type=str, help="output file")
-parser.add_argument('sele_csv_file', type=str, help="output file with selections of fixed and mobile parts")
-# Parse the arguments
-args = parser.parse_args()
-structures_json=args.structures_json
-FIXED=args.FIXED
-DESIGNED=args.DESIGNED
-FIXED_CHAIN=args.FIXED_CHAIN
-fixed_jsonl_file=args.fixed_jsonl_file
-sele_csv_file=args.sele_csv_file
+# Establish residues for which to generate a sequence with ProteinMPNN.
+# <config_json> keys: structures_json, FIXED, DESIGNED, FIXED_CHAIN,
+# fixed_jsonl_file, sele_csv_file. FIXED/DESIGNED are a selection or '-'.
+if len(sys.argv) != 2:
+    print("Usage: python pipe_pmpnn_fixed_positions.py <config_json>", file=sys.stderr)
+    sys.exit(1)
+
+with open(sys.argv[1]) as _cfg_f:
+    cfg = json.load(_cfg_f)
+structures_json = cfg["structures_json"]
+FIXED = cfg["FIXED"]
+DESIGNED = cfg["DESIGNED"]
+FIXED_CHAIN = cfg["FIXED_CHAIN"]
+fixed_jsonl_file = cfg["fixed_jsonl_file"]
+sele_csv_file = cfg["sele_csv_file"]
 
 from biopipelines.sele_utils import sele_to_list as _sele_to_list_chain_aware, list_to_sele
 

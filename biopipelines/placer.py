@@ -111,7 +111,7 @@ class PLACER(BaseConfig):
     """
 
     TOOL_NAME = "PLACER"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     RERANK_CHOICES = ("prmsd", "plddt", "plddt_pde")
 
@@ -372,6 +372,7 @@ fi
         script = "#!/bin/bash\n"
         script += "# PLACER execution script\n"
         script += self.generate_completion_check_header()
+        script += self.warn_container_unsupported()
 
         # Phase 1: run PLACER per input via our own driver (placer env). The
         # driver imports the upstream PLACER package from the clone at runtime

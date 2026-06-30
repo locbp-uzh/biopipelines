@@ -70,7 +70,7 @@ class ESMFold(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -244,7 +244,7 @@ fi
         if self.cpu_only:
             optional_flags += " --cpu-only"
 
-        script_content += f"""python "{self.inference_script}" \\
+        script_content += f"""{self.container_prefix()}python "{self.inference_script}" \\
     --sequences-csv "{sequences_csv}" \\
     --output-dir "{self.predictions_folder}" \\
     --num-recycles {self.num_recycles} \\

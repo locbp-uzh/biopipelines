@@ -98,7 +98,7 @@ class Panda(BaseConfig):
     """
 
     TOOL_NAME = "Panda"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # Internal column name used to track which input table a row came from
     # when concat runs over multiple inputs. Auto-added before the operation
@@ -373,8 +373,8 @@ echo "=== Panda ready ==="
         return Operation(type="fillna", params={"value": value, "column": column})
 
     @staticmethod
-    def merge(on: Optional[Union[str, List[str]]] = None, how: str = "outer",
-              prefixes: Optional[List[str]] = None) -> Operation:
+    def merge(on: Optional[Union[str, List[str]]] = None, how: Optional[str] = None,
+              prefixes: Optional[List[str]] = None, grain: str = "finest") -> Operation:
         """
         Merge multiple tables horizontally (like SQL JOIN).
 
@@ -390,7 +390,24 @@ echo "=== Panda ready ==="
                 - A list of strings (one per table): each table is joined on its
                   own column, which is renamed to the first entry before merging
                   (e.g., ["id", "id", "structures.id"])
-            how: Join type ("inner", "outer", "left", "right")
+            grain: Which input decides the output row level when tables sit at
+                different fan-out levels (e.g. one design has many sequences).
+                Only applies to ID matching (on=None).
+                - "finest" (default): the table at the deepest provenance ID level
+                  drives the rows (ID count breaks ties); coarser tables broadcast
+                  their values onto each fine-grain row (one design's mean_plddt
+                  repeats across its sequences). Order-independent and lossless — the
+                  natural choice for plotting.
+                - "coarsest": the table at the shallowest provenance ID level drives
+                  the rows (ID count breaks ties); finer tables collapse to one match
+                  per coarse row. Aggregate the finer table first if you don't want
+                  siblings dropped — a WARNING is emitted whenever rows are dropped.
+            how: Join type ("inner", "outer", "left", "right"). Decides what happens
+                to non-overlapping keys once the grain is fixed; rarely needs setting.
+                Default None derives it from grain: a "left" join for both finest and
+                coarsest so the driver keeps exactly its rows (unmatched rows from the
+                other table are not resurrected with a null id). Pass how="outer"
+                explicitly to keep them. For on=<column> it falls back to "outer".
             prefixes: List of prefixes for each table's columns (prevents name collisions)
 
         Returns:
@@ -401,7 +418,7 @@ echo "=== Panda ready ==="
             Panda.merge(on=["id", "id", "structures.id"])
         """
         return Operation(type="merge", params={
-            "on": on, "how": how, "prefixes": prefixes
+            "on": on, "how": how, "prefixes": prefixes, "grain": grain
         })
 
     @staticmethod

@@ -9,9 +9,9 @@ Position determination for LigandMPNN from tables or direct specifications.
 This script processes a DataStream JSON file to create a JSON file with LigandMPNN position arguments.
 
 Usage:
-    python pipe_lmpnn_runtime_positions.py <structures_json> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file> [default_chain]
+    python pipe_lmpnn_runtime_positions.py <config_json>
 
-Arguments:
+<config_json> is a JSON object with keys:
     structures_json: Path to DataStream JSON file with input structures
     input_source: "table" (e.g. RFdiffusion table), "selection" (use direct positions), or "ligand" (ligand-based)
     input_table: Path to table file (or "-" if not using table)
@@ -231,19 +231,21 @@ def write_positions_json(positions_data, output_file, default_chain="A"):
 
 
 def main():
-    if len(sys.argv) < 9 or len(sys.argv) > 10:
-        print("Usage: python pipe_lmpnn_runtime_positions.py <structures_json> <input_source> <input_table> <fixed_positions> <designed_positions> <ligand> <design_within> <output_file> [default_chain]")
+    if len(sys.argv) != 2:
+        print("Usage: python pipe_lmpnn_runtime_positions.py <config_json>")
         sys.exit(1)
 
-    structures_json = sys.argv[1]
-    input_source = sys.argv[2]
-    input_table = sys.argv[3]
-    fixed_positions = sys.argv[4]
-    designed_positions = sys.argv[5]
-    ligand_json = sys.argv[6]  # compounds-stream JSON; `code` read from it below
-    design_within = float(sys.argv[7])
-    output_file = sys.argv[8]
-    default_chain = sys.argv[9] if len(sys.argv) > 9 else "A"
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    structures_json = cfg["structures_json"]
+    input_source = cfg["input_source"]
+    input_table = cfg["input_table"]
+    fixed_positions = cfg["fixed_positions"]
+    designed_positions = cfg["designed_positions"]
+    ligand_json = cfg["ligand"]  # compounds-stream JSON; `code` read from it below
+    design_within = float(cfg["design_within"])
+    output_file = cfg["output_file"]
+    default_chain = cfg.get("default_chain", "A")
 
     # Load DataStream and get (id, file) pairs
     structures_ds = load_datastream(structures_json)

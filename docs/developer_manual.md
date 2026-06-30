@@ -605,6 +605,36 @@ done
     return script_content
 ```
 
+### Containerization (develop with it in mind)
+
+Wherever possible, write a tool so it can switch between **environment execution** (the binary runs in an activated conda env) and **container execution** (the binary runs inside an Apptainer/Singularity `.sif`) without any code change — the choice is purely config-driven. The seam is `BaseConfig.container_prefix()`: it returns `"<executor> exec --nv -B <binds> <image> "` when a `containers: <ToolName>: <image>` entry is configured, and `""` otherwise. A tool opts in by prefixing the line that runs the heavy binary:
+
+```python
+# Direct-in-bash heavy command (preferred shape):
+script += f'{self.container_prefix()}python "{self.inference_script}" --in "{x}" ...'
+```
+
+When a container is configured the command runs in the `.sif`; when not, the prefix is empty and it runs in the activated host env. The `.sif` only needs the tool's own binary/model — not biopipelines — so keep host-side orchestration (stream IO, CSV assembly, pre/post helpers that `import biopipelines`) **outside** the prefix, in the host env.
+
+**Activation still happens in container mode.** `container_prefix()` wraps only the binary command — it does not replace `activate_environment()`. A container-mode script both activates the host env and prefixes the binary: `activate host env → {container_prefix}binary`. This is deliberate, because the surrounding helper/orchestration Python (which imports biopipelines, pandas, BioPython) runs in the activated host env while only the binary runs in the image. For a tool that runs fully in a container, set its env-map entry to a lightweight host env that just satisfies the helpers — e.g. `RFdiffusion2: "biopipelines"` and `PLIP: "biopipelines"` rather than the heavy model env, since inference happens in the `.sif`.
+
+**Two architectures:**
+
+- **Heavy command emitted directly in bash** (RFdiffusion, ESMFold, NeuralPLexer, DiffDock): the wrapper's `generate_script` writes the model/binary invocation as its own bash line. Prefix that line — done. This is the shape to aim for in new tools.
+- **Binary invoked inside a host helper** (`python "{self.helper_py}"` where the helper imports biopipelines and `subprocess.run`s the binary): you cannot prefix the `python "{helper}"` line — that would force the biopipelines-importing orchestrator into the image. Instead pass the prefix down to the helper (a `--container-prefix "{self.container_prefix()}"` CLI arg or a config-JSON key) and have the helper prepend it to the binary command with `container_argv_prefix()` from `biopipelines_io`:
+
+```python
+from biopipelines.biopipelines_io import container_argv_prefix
+cmd = container_argv_prefix(args.container_prefix) + ["mytool", "-i", pdb, ...]
+subprocess.run(cmd, ...)
+```
+
+If the helper resolves the binary off the host PATH (`shutil.which`) or sets host-env-specific variables (e.g. `BABEL_LIBDIR`), skip that resolution when a prefix is present — inside the image the binary is on the container PATH and the host paths/vars are wrong.
+
+**When containerization is impractical:** a tool that runs its model **in-process** (`import torch; model.run(...)`) in the same script that imports biopipelines, or that dispatches multiple host-env sub-Pythons (each resolved from a conda env path), has no single binary boundary to wrap. Either split it into a standalone, biopipelines-free model-runner the wrapper calls with `{self.container_prefix()}` directly (the ESMFold two-script pattern), or — if that refactor isn't worth it — emit a warning when `self.uses_container()` is true stating container execution isn't supported for this tool, and run in env mode. BP-native pure-Python tools (Selection, Panda, Pool, …) run in the biopipelines env and never containerize.
+
+**Per-iteration overhead (known limitation).** A helper that loops over a stream and prefixes the binary inside the loop pays one `apptainer exec` startup per iteration (SIF mount + namespace + `--nv` GPU probe, ~0.3–2 s each). For heavy models run a handful of times this is noise; for a light binary (mkdssp, fpocket, reduce, xtb) over hundreds of inputs it can dominate. The current helpers accept this cost — none has a container image wired up today, so it is hypothetical. If a light looping tool ever gets a real image and the overhead bites, the escape hatch is a **persistent container instance** rather than restructuring the host loop: `apptainer instance start <image> <name>` once before the loop, run each iteration as `apptainer exec instance://<name> <binary> ...` (namespaces already set up — cheap), and `apptainer instance stop <name>` after. This keeps the biopipelines-importing loop on the host while amortizing container startup across all iterations.
+
 ### Output Prediction
 
 Return standardized output structure. Use compact `ids` patterns (not expanded) and `<id>` file templates:

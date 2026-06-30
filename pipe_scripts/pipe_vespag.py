@@ -38,6 +38,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import (  # noqa: E402
     load_datastream, load_table, lookup_table_value, step_id_from_table_path,
+    container_argv_prefix,
 )
 
 OUTPUT_COLUMNS = ["id", "sequences.id", "position", "wildtype", "mutation", "fitness"]
@@ -99,6 +100,7 @@ def main():
                          "load_model finds model_weights/v2/esm2.pt (resolved via Path.cwd()).")
     ap.add_argument("--fitness-csv", required=True)
     ap.add_argument("--missing-csv", required=True)
+    ap.add_argument("--container-prefix", default="")
     args = ap.parse_args()
 
     # Loaded for validation/ID provenance; the CSV is the sequence source.
@@ -130,8 +132,10 @@ def main():
             for seq_id, seq in sequences:
                 fh.write(f">{seq_id}\n{seq}\n")
 
-        cmd = [sys.executable, "-m", "vespag", "predict",
-               "-i", fasta_path, "-o", work, "--single-csv"]
+        pre = container_argv_prefix(args.container_prefix)
+        py = "python" if pre else sys.executable
+        cmd = pre + [py, "-m", "vespag", "predict",
+                     "-i", fasta_path, "-o", work, "--single-csv"]
 
         # Explicit-mutation mode: write a VespaG mutation file
         # (rows of protein_id,mutation_id). VespaG defaults to 1-indexed

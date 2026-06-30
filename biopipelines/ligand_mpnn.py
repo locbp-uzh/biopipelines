@@ -7,6 +7,7 @@ LigandMPNN configuration for ligand-aware sequence design.
 """
 
 import os
+import json
 from typing import Dict, List, Any, Union, Tuple, Optional
 
 try:
@@ -35,7 +36,7 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -87,6 +88,7 @@ fi
     queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
     structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
     positions_json = Path(lambda self: self.configuration_path("lmpnn_positions.json"))
+    positions_args_json = Path(lambda self: self.configuration_path("lmpnn_positions_args.json"))
 
     missing_csv = Path(lambda self: self.table_path("missing"))
 
@@ -262,11 +264,24 @@ fi
         # The ligand `code` is read from the compounds stream inside the script.
         self.ligand_stream.save_json(self.ligand_json)
 
+        with open(self.positions_args_json, "w") as f:
+            json.dump({
+                "structures_json": str(self.structures_json),
+                "input_source": input_source,
+                "input_table": input_table,
+                "fixed_positions": fixed_param,
+                "designed_positions": designed_param,
+                "ligand": str(self.ligand_json),
+                "design_within": self.design_within,
+                "output_file": str(self.positions_json),
+                "default_chain": self.chain,
+            }, f, indent=2)
+
         return f"""echo "Setting up LigandMPNN position constraints"
 
 # Create positions JSON for runtime lookup
 echo "Computing position constraints..."
-python {self.runtime_positions_py} "{self.structures_json}" "{input_source}" "{input_table}" "{fixed_param}" "{designed_param}" "{self.ligand_json}" "{self.design_within}" "{self.positions_json}" "{self.chain}"
+python {self.runtime_positions_py} "{self.positions_args_json}"
 
 """
 

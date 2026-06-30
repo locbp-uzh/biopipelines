@@ -11,6 +11,7 @@ diffusion. See https://github.com/RosettaCommons/RFdiffusion for full documentat
 """
 
 import os
+import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -142,7 +143,7 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # Typed builder for guiding potentials, e.g.
     #   RFdiffusion.GuidingPotential.olig_contacts(weight_intra=1, weight_inter=0.1)
@@ -288,6 +289,7 @@ fi
     #   contigs_py         — that resolver (one pass over all ids → JSON).
     #   contigs_reader_py  — per-id reader the bash loop calls for each PDB.
     contigs_json = Path(lambda self: self.configuration_path("contig_options.json"))
+    contig_args_json = Path(lambda self: self.configuration_path("contig_args.json"))
     contigs_py = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_contigs.py"))
     contigs_reader_py = Path(lambda self: self.pipe_script_path("resolve_rfdiffusion_contigs.py"))
 
@@ -821,8 +823,17 @@ RFD_OPTIONS=(
         inpaint_arg = _selection_cli_arg(self._inpaint_arg)
         inpaint_str_arg = _selection_cli_arg(self._inpaint_str_arg)
 
+        with open(self.contig_args_json, "w") as f:
+            json.dump({
+                "structures_json": str(self.pdb_ds_json),
+                "contigs": contigs_arg,
+                "inpaint": inpaint_arg,
+                "inpaint_str": inpaint_str_arg,
+                "output_json": str(self.contigs_json),
+            }, f, indent=2)
+
         return f"""echo "Resolving per-PDB contig options"
-python {self.contigs_py} "{self.pdb_ds_json}" "{contigs_arg}" "{inpaint_arg}" "{inpaint_str_arg}" "{self.contigs_json}"
+python {self.contigs_py} "{self.contig_args_json}"
 
 echo "Starting RFdiffusion"
 echo "Output folder: {self.output_folder}"

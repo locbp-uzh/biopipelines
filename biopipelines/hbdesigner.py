@@ -26,6 +26,7 @@ Reference:
 """
 
 import os
+import json
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -105,7 +106,7 @@ class HBDesigner(BaseConfig):
     """
 
     TOOL_NAME = "HBDesigner"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     DESIGN_MODELS = ("design_002", "design_020")
 
@@ -215,6 +216,7 @@ fi
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     structures_json = Path(lambda self: self.configuration_path("input_structures.json"))
     constraints_json = Path(lambda self: self.configuration_path("constraints.json"))
+    constraints_args_json = Path(lambda self: self.configuration_path("constraints_args.json"))
     collect_py = Path(lambda self: self.pipe_script_path("pipe_hbdesigner.py"))
     constraints_py = Path(lambda self: self.pipe_script_path("pipe_hbdesigner_constraints.py"))
     constraints_reader_py = Path(lambda self: self.pipe_script_path("resolve_hbdesigner_constraints.py"))
@@ -357,12 +359,17 @@ fi
         fixed = self._fixed_options()
         exec_root = self.execution_path()
 
+        with open(self.constraints_args_json, "w") as f:
+            json.dump({
+                "structures_json": str(self.structures_json),
+                "guide_res": self._guide_res_arg[1] or "-",
+                "guide_seq": self._guide_seq_arg[1] or "-",
+                "anchor_res": self._anchor_res_arg[1] or "-",
+                "output_json": str(self.constraints_json),
+            }, f, indent=2)
+
         return f"""echo "Resolving per-input constraints"
-python {self.constraints_py} "{self.structures_json}" \\
-    "{self._guide_res_arg[1] or '-'}" \\
-    "{self._guide_seq_arg[1] or '-'}" \\
-    "{self._anchor_res_arg[1] or '-'}" \\
-    "{self.constraints_json}"
+python {self.constraints_py} "{self.constraints_args_json}"
 
 echo "Starting HBDesigner"
 echo "Output folder: {self.output_folder}"

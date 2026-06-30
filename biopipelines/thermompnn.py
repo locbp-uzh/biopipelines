@@ -72,7 +72,7 @@ class ThermoMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ThermoMPNN"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -237,6 +237,7 @@ python "{self.helper_py}" \\
     --chain "{self.chain}" \\
     --mutations "{mutations_arg}" \\
     --ddg-csv "{self.ddg_csv}" \\
+    --container-prefix "{self.container_prefix()}" \\
     --missing-csv "{self.missing_csv}"
 
 if [ $? -ne 0 ]; then

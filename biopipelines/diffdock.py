@@ -67,7 +67,7 @@ class DiffDock(BaseConfig):
     """
 
     TOOL_NAME = "DiffDock"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -344,7 +344,7 @@ export HOME="{self.folders["DiffDock"]}/esm/model_weights"
 mkdir -p "$HOME" data
 
 # ESM embedding prep (FASTA from protein_ligand csv)
-python datasets/esm_embedding_preparation.py \\
+{self.container_prefix()}python datasets/esm_embedding_preparation.py \\
     --protein_ligand_csv "{self.input_csv}" \\
     --out_file data/prepared_for_esm.fasta
 if [ $? -ne 0 ]; then
@@ -353,7 +353,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # ESM2 embedding extraction (writes data/esm2_output/<id>.pt files)
-python esm/scripts/extract.py esm2_t33_650M_UR50D \\
+{self.container_prefix()}python esm/scripts/extract.py esm2_t33_650M_UR50D \\
     data/prepared_for_esm.fasta data/esm2_output \\
     --repr_layers 33 --include per_tok --truncation_seq_length 30000
 if [ $? -ne 0 ]; then
@@ -362,7 +362,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # DiffDock inference proper
-python -m inference \\
+{self.container_prefix()}python -m inference \\
     --protein_ligand_csv "{self.input_csv}" \\
     --out_dir "{self.raw_out_folder}" \\
     --samples_per_complex {self.samples_per_complex} \\

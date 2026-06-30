@@ -74,7 +74,7 @@ class VespaG(BaseConfig):
     """
 
     TOOL_NAME = "VespaG"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -217,6 +217,7 @@ python "{self.helper_py}" \\
     --mutations "{mutations_arg}" \\
     --repo-dir "{repo_dir}" \\
     --fitness-csv "{self.fitness_csv}" \\
+    --container-prefix "{self.container_prefix()}" \\
     --missing-csv "{self.missing_csv}"
 
 if [ $? -ne 0 ]; then

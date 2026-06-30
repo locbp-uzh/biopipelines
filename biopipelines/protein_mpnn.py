@@ -7,6 +7,7 @@ ProteinMPNN configuration for sequence design from protein structures.
 """
 
 import os
+import json
 from typing import Dict, List, Any, Union, Tuple
 
 try:
@@ -31,7 +32,7 @@ class ProteinMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ProteinMPNN"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
@@ -131,6 +132,7 @@ fi
     #   tables/         — standalone TableInfo CSVs (missing, proteinmpnn_results).
     parsed_pdbs_jsonl = Path(lambda self: self.configuration_path("parsed_pdbs.jsonl"))
     fixed_jsonl = Path(lambda self: self.configuration_path("fixed_pos.jsonl"))
+    fixed_args_json = Path(lambda self: self.configuration_path("fixed_pos_args.json"))
     sele_csv = Path(lambda self: self.configuration_path("fixed_designed.csv"))
     # ProteinMPNN's CLI creates seqs/<id>.fa inside --out_folder.
     # Point --out_folder at execution/ so the raw .fa dumps live there.
@@ -294,6 +296,16 @@ fi
         fixed_param = self.fixed if self.fixed else "-"
         designed_param = self.redesigned if self.redesigned else "-"
 
+        with open(self.fixed_args_json, "w") as f:
+            json.dump({
+                "structures_json": str(self.structures_json),
+                "FIXED": fixed_param,
+                "DESIGNED": designed_param,
+                "FIXED_CHAIN": self.chain,
+                "fixed_jsonl_file": str(self.fixed_jsonl),
+                "sele_csv_file": str(self.sele_csv),
+            }, f, indent=2)
+
         # parse_multiple_chains.py wants a folder — take the dirname of the first
         # PRESENT file's id. valid_set skips filtered-out ids whose file is absent.
         return f"""FIRST_ID={Resolve.stream_ids(self.structures_json, index=0, valid_set=True)}
@@ -301,7 +313,7 @@ FIRST_FILE={Resolve.stream_item(self.structures_json, "$FIRST_ID")}
 INPUT_DIR=$(dirname "$FIRST_FILE")
 
 echo "Determining fixed positions"
-python {self.fixed_py} "{self.structures_json}" "{fixed_param}" "{designed_param}" "{self.chain}" "{self.fixed_jsonl}" "{self.sele_csv}"
+python {self.fixed_py} "{self.fixed_args_json}"
 
 echo "Parsing multiple PDBs"
 python {self.parse_py} --input_path $INPUT_DIR --output_path {self.parsed_pdbs_jsonl}

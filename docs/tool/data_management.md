@@ -60,7 +60,7 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 | `sample(n, frac)` | `Panda.sample(n=100)` |
 | `rank(by, prefix)` | `Panda.rank(by="score")` |
 | `drop_duplicates(subset)` | `Panda.drop_duplicates(subset="sequence")` |
-| `merge(on, how, prefixes)` | `Panda.merge(prefixes=["a_", "b_"])` |
+| `merge(on, how, prefixes, grain)` | `Panda.merge(prefixes=["a_", "b_"])`; `grain="finest"` (default, deepest provenance ID level) broadcasts coarse columns onto fine rows across fan-out levels, `"coarsest"` (shallowest level) collapses to one row per coarse id |
 | `concat(fill)` | `Panda.concat(fill="")` (auto-tags rows with `Panda.SOURCE` when >1 inputs) |
 | `calculate(exprs)` | `Panda.calculate({"delta": "a - b", "k2": "cos(angle) ** 2"})` |
 | `zscore(columns, by, sign)` | `Panda.zscore(["plddt","aggr"], sign={"aggr":-1})` — standardize to `<col>_z` for scale-fair combining (optional per-group `by=`, sign flip for lower-is-better) |
@@ -115,6 +115,22 @@ merged = Panda(
         Panda.calculate({"delta": "holo_affinity - apo_affinity"})
     ]
 )
+
+# Merge across fan-out levels (one design has many sequences). The `grain`
+# argument decides which table sets the output row level; argument order does
+# not matter. grain="finest" (default) drives rows from the table at the deepest
+# provenance ID level (ID count only breaks ties) and broadcasts coarser columns
+# onto each fine row — exactly what you want to plot per-sequence AF2 plddt
+# against the parent design's RFdiffusion mean_plddt. Every sequence row keeps
+# its design's mean_plddt; nothing is dropped.
+plot_table = Panda(
+    tables=[af2.tables.plddt, rfd.tables.design_metrics],  # sequence-level + design-level
+    operations=[Panda.merge()]  # grain="finest"
+)
+# grain="coarsest" does the opposite — one row per design, collapsing the fine
+# table to a single match per design (siblings are dropped, with a WARNING).
+# Aggregate the fine table first (Panda.groupby) if you want a real per-design
+# summary rather than an arbitrary representative.
 
 # Tip: when both tables share a literal `id` column with no auto-rename
 # in between, prefer Panda.merge(on="id") — it skips the suffix / provenance

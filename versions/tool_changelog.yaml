@@ -26,591 +26,731 @@
 
 ADMETAI:
   files:
-    - biopipelines/admet_ai.py
-    - pipe_scripts/pipe_admet_ai.py
+  - biopipelines/admet_ai.py
+  - pipe_scripts/pipe_admet_ai.py
   current: "1.0"
   history: []
 
 AF2BIND:
   files:
-    - biopipelines/af2bind.py
-    - pipe_scripts/pipe_af2bind.py
-  current: "1.0"
-  history: []
+  - biopipelines/af2bind.py
+  - pipe_scripts/pipe_af2bind.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 Aggrescan3D:
   files:
-    - biopipelines/aggrescan3d.py
-    - pipe_scripts/pipe_aggrescan3d.py
+  - biopipelines/aggrescan3d.py
+  - pipe_scripts/pipe_aggrescan3d.py
   current: "1.0"
   history: []
 
 AlphaFold:
   files:
-    - biopipelines/alphafold.py
-    - pipe_scripts/pipe_alphafold_confidence.py
-    - pipe_scripts/pipe_alphafold_msas.py
+  - biopipelines/alphafold.py
+  - pipe_scripts/pipe_alphafold_confidence.py
+  - pipe_scripts/pipe_alphafold_msas.py
   current: "1.0"
   history: []
 
 APBS:
   files:
-    - biopipelines/apbs.py
-    - pipe_scripts/pipe_apbs.py
-  current: "1.0"
-  history: []
+  - biopipelines/apbs.py
+  - pipe_scripts/pipe_apbs.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 Angle:
   files:
-    - biopipelines/angle.py
-    - pipe_scripts/pipe_angle.py
+  - biopipelines/angle.py
+  - pipe_scripts/pipe_angle.py
   current: "1.0"
   history: []
 
 BayesianAdjuster:
   files:
-    - biopipelines/bayesian_adjuster.py
-    - pipe_scripts/pipe_bayesian_adjuster.py
+  - biopipelines/bayesian_adjuster.py
+  - pipe_scripts/pipe_bayesian_adjuster.py
   current: "1.0"
   history: []
 
 BioEmu:
   files:
-    - biopipelines/bioemu.py
-    - pipe_scripts/pipe_bioemu.py
-  current: "1.0"
-  history: []
+  - biopipelines/bioemu.py
+  - pipe_scripts/pipe_bioemu.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 Boltz2:
   files:
-    - biopipelines/boltz2.py
-    - pipe_scripts/pipe_boltz_config_unified.py
-    - pipe_scripts/pipe_boltz_direct_sequence_config.py
-    - pipe_scripts/pipe_boltz_msa_copy.py
-    - pipe_scripts/pipe_boltz_postprocessing.py
-    - pipe_scripts/pipe_boltz_results.py
+  - biopipelines/boltz2.py
+  - pipe_scripts/pipe_boltz_config_unified.py
+  - pipe_scripts/pipe_boltz_direct_sequence_config.py
+  - pipe_scripts/pipe_boltz_msa_copy.py
+  - pipe_scripts/pipe_boltz_postprocessing.py
+  - pipe_scripts/pipe_boltz_results.py
   current: "1.0"
   history: []
 
 BoltzGen:
   files:
-    - biopipelines/boltzgen.py
-    - pipe_scripts/pipe_boltzgen.py
-    - pipe_scripts/pipe_boltzgen_config.py
+  - biopipelines/boltzgen.py
+  - pipe_scripts/pipe_boltzgen.py
+  - pipe_scripts/pipe_boltzgen_config.py
   current: "1.0"
   history: []
 
 BoltzGenImport:
   files:
-    - biopipelines/boltzgen.py
-    - pipe_scripts/pipe_boltzgen_import.py
+  - biopipelines/boltzgen.py
+  - pipe_scripts/pipe_boltzgen_import.py
   current: "1.0"
   history: []
 
 BoltzGenMerge:
   files:
-    - biopipelines/boltzgen.py
-    - pipe_scripts/pipe_boltzgen_merge.py
+  - biopipelines/boltzgen.py
+  - pipe_scripts/pipe_boltzgen_merge.py
   current: "1.0"
   history: []
 
 CABSflex:
   files:
-    - biopipelines/cabsflex.py
-    - pipe_scripts/pipe_cabsflex.py
+  - biopipelines/cabsflex.py
+  - pipe_scripts/pipe_cabsflex.py
   current: "1.0"
   history: []
 
 CompoundLibrary:
   files:
-    - biopipelines/compound_library.py
-    - pipe_scripts/pipe_compound_library.py
-    - pipe_scripts/pipe_compound_images.py
-    - pipe_scripts/pipe_smiles_library.py
-    - pipe_scripts/pipe_smiles_properties.py
+  - biopipelines/compound_library.py
+  - pipe_scripts/pipe_compound_library.py
+  - pipe_scripts/pipe_compound_images.py
+  - pipe_scripts/pipe_smiles_library.py
+  - pipe_scripts/pipe_smiles_properties.py
   current: "1.0"
   history: []
 
 ConformationalChange:
   files:
-    - biopipelines/conformational_change.py
-    - pipe_scripts/pipe_conformational_change.py
+  - biopipelines/conformational_change.py
+  - pipe_scripts/pipe_conformational_change.py
   current: "1.0"
   history: []
 
 Consensus:
   files:
-    - biopipelines/consensus.py
-    - pipe_scripts/pipe_consensus.py
+  - biopipelines/consensus.py
+  - pipe_scripts/pipe_consensus.py
   current: "1.0"
   history: []
 
 Contacts:
   files:
-    - biopipelines/contacts.py
-    - pipe_scripts/pipe_contacts.py
+  - biopipelines/contacts.py
+  - pipe_scripts/pipe_contacts.py
   current: "1.0"
   history: []
 
 DiffDock:
   files:
-    - biopipelines/diffdock.py
-    - pipe_scripts/pipe_diffdock_build_csv.py
-    - pipe_scripts/pipe_diffdock_postprocess.py
-  current: "1.0"
-  history: []
+  - biopipelines/diffdock.py
+  - pipe_scripts/pipe_diffdock_build_csv.py
+  - pipe_scripts/pipe_diffdock_postprocess.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 Distance:
   files:
-    - biopipelines/distance.py
-    - pipe_scripts/pipe_distance.py
+  - biopipelines/distance.py
+  - pipe_scripts/pipe_distance.py
   current: "1.0"
   history: []
 
 DistanceSelector:
   files:
-    - biopipelines/distance_selector.py
-    - pipe_scripts/pipe_distance_selector.py
+  - biopipelines/distance_selector.py
+  - pipe_scripts/pipe_distance_selector.py
   current: "2.0"
   history:
-    - version: "2.0"
-      date: "2026-05-08"
-      note: >-
-        Selection-based within/beyond references and per-structure
-        (TableInfo, column) references; excuses upstream-filtered ids in the
-        missing-manifest cascade.
+  - version: "2.0"
+    date: "2026-05-08"
+    note: >-
+      Selection-based within/beyond references and per-structure
+      (TableInfo, column) references; excuses upstream-filtered ids in the
+      missing-manifest cascade.
 
 DNAEncoder:
   files:
-    - biopipelines/dna_encoder.py
-    - pipe_scripts/pipe_dna_encoder.py
+  - biopipelines/dna_encoder.py
+  - pipe_scripts/pipe_dna_encoder.py
   current: "1.0"
   history: []
 
 DSSP:
   files:
-    - biopipelines/dssp.py
-    - pipe_scripts/pipe_dssp.py
-  current: "1.0"
-  history: []
+  - biopipelines/dssp.py
+  - pipe_scripts/pipe_dssp.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 DynamicBind:
   files:
-    - biopipelines/dynamicbind.py
-    - pipe_scripts/pipe_dynamicbind_build_csv.py
-    - pipe_scripts/pipe_dynamicbind_movie.py
-    - pipe_scripts/pipe_dynamicbind_postprocess.py
-  current: "1.0"
-  history: []
+  - biopipelines/dynamicbind.py
+  - pipe_scripts/pipe_dynamicbind_build_csv.py
+  - pipe_scripts/pipe_dynamicbind_movie.py
+  - pipe_scripts/pipe_dynamicbind_postprocess.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 EnsembleAnalysis:
   files:
-    - biopipelines/ensemble_analysis.py
-    - pipe_scripts/pipe_ensemble_analysis.py
+  - biopipelines/ensemble_analysis.py
+  - pipe_scripts/pipe_ensemble_analysis.py
   current: "1.0"
   history: []
 
 ESMFold:
   files:
-    - biopipelines/esmfold.py
-    - pipe_scripts/pipe_esmfold_inference.py
-    - pipe_scripts/pipe_esmfold_postprocessing.py
-  current: "1.0"
-  history: []
+  - biopipelines/esmfold.py
+  - pipe_scripts/pipe_esmfold_inference.py
+  - pipe_scripts/pipe_esmfold_postprocessing.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 ExtractMetrics:
   files:
-    - biopipelines/extract_metrics.py
-    - pipe_scripts/pipe_extract_metrics.py
+  - biopipelines/extract_metrics.py
+  - pipe_scripts/pipe_extract_metrics.py
   current: "1.0"
   history: []
 
 FPocket:
   files:
-    - biopipelines/fpocket.py
-    - pipe_scripts/pipe_fpocket.py
-  current: "1.0"
-  history: []
+  - biopipelines/fpocket.py
+  - pipe_scripts/pipe_fpocket.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 Frame2Seq:
   files:
-    - biopipelines/frame2seq.py
-    - pipe_scripts/pipe_frame2seq.py
-  current: "1.0"
-  history: []
+  - biopipelines/frame2seq.py
+  - pipe_scripts/pipe_frame2seq.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 Fuse:
   files:
-    - biopipelines/fuse.py
-    - pipe_scripts/pipe_fuse_queries.py
+  - biopipelines/fuse.py
+  - pipe_scripts/pipe_fuse_queries.py
   current: "1.0"
   history: []
 
 GEMS:
   files:
-    - biopipelines/gems.py
-    - pipe_scripts/pipe_gems.py
-  current: "1.0"
-  history: []
+  - biopipelines/gems.py
+  - pipe_scripts/pipe_gems.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 Gnina:
   files:
-    - biopipelines/gnina.py
-    - pipe_scripts/pipe_gnina.py
-  current: "1.0"
-  history: []
+  - biopipelines/gnina.py
+  - pipe_scripts/pipe_gnina.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 Ligand:
   files:
-    - biopipelines/ligand.py
-    - pipe_scripts/pipe_ligand.py
+  - biopipelines/ligand.py
+  - pipe_scripts/pipe_ligand.py
   current: "1.0"
   history: []
 
 LigandMPNN:
   files:
-    - biopipelines/ligand_mpnn.py
-    - pipe_scripts/pipe_lmpnn_runtime_positions.py
-    - pipe_scripts/resolve_lmpnn_positions.py
-  current: "1.0"
-  history: []
+  - biopipelines/ligand_mpnn.py
+  - pipe_scripts/pipe_lmpnn_runtime_positions.py
+  - pipe_scripts/resolve_lmpnn_positions.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.
 
 Load:
   files:
-    - biopipelines/load.py
+  - biopipelines/load.py
   current: "1.0"
   history: []
 
 MMseqs2:
   files:
-    - biopipelines/mmseqs2.py
-    - pipe_scripts/pipe_mmseqs2_sequences.py
-    - pipe_scripts/mmseqs2_client.sh
+  - biopipelines/mmseqs2.py
+  - pipe_scripts/pipe_mmseqs2_sequences.py
+  - pipe_scripts/mmseqs2_client.sh
   current: "1.0"
   history: []
 
 MMseqs2Server:
   files:
-    - biopipelines/mmseqs2.py
-    - pipe_scripts/mmseqs2_server_gpu.sh
+  - biopipelines/mmseqs2.py
+  - pipe_scripts/mmseqs2_server_gpu.sh
   current: "1.0"
   history: []
 
 Mock:
   files:
-    - biopipelines/mock.py
-    - pipe_scripts/pipe_mock.py
+  - biopipelines/mock.py
+  - pipe_scripts/pipe_mock.py
   current: "1.0"
   history: []
 
 MSA:
   files:
-    - biopipelines/msa.py
-    - pipe_scripts/pipe_msa.py
+  - biopipelines/msa.py
+  - pipe_scripts/pipe_msa.py
   current: "1.0"
   history: []
 
 Mutagenesis:
   files:
-    - biopipelines/mutagenesis.py
-    - pipe_scripts/pipe_mutagenesis.py
+  - biopipelines/mutagenesis.py
+  - pipe_scripts/pipe_mutagenesis.py
   current: "1.0"
   history: []
 
 MutationComposer:
   files:
-    - biopipelines/mutation_composer.py
-    - pipe_scripts/pipe_mutation_composer.py
+  - biopipelines/mutation_composer.py
+  - pipe_scripts/pipe_mutation_composer.py
   current: "1.0"
   history: []
 
 MutationProfiler:
   files:
-    - biopipelines/mutation_profiler.py
-    - pipe_scripts/pipe_mutation_profiler.py
+  - biopipelines/mutation_profiler.py
+  - pipe_scripts/pipe_mutation_profiler.py
   current: "1.0"
   history: []
 
 NeuralPLexer:
   files:
-    - biopipelines/neuralplexer.py
-    - pipe_scripts/pipe_neuralplexer_postprocess.py
-    - pipe_scripts/pipe_neuralplexer_stage.py
-  current: "1.0"
-  history: []
+  - biopipelines/neuralplexer.py
+  - pipe_scripts/pipe_neuralplexer_postprocess.py
+  - pipe_scripts/pipe_neuralplexer_stage.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 OpenBabel:
   files:
-    - biopipelines/openbabel.py
-    - pipe_scripts/pipe_openbabel.py
+  - biopipelines/openbabel.py
+  - pipe_scripts/pipe_openbabel.py
   current: "1.1"
   history:
-    - version: "1.1"
-      date: "2026-06-03"
-      note: >-
-        Read SMILES from the map_table when the compounds stream has no
-        files; accept structures input.
+  - version: "1.1"
+    date: "2026-06-03"
+    note: >-
+      Read SMILES from the map_table when the compounds stream has no
+      files; accept structures input.
 
 OpenMM:
   files:
-    - biopipelines/openmm.py
-    - pipe_scripts/pipe_openmm.py
-  current: "1.0"
-  history: []
+  - biopipelines/openmm.py
+  - pipe_scripts/pipe_openmm.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 P2Rank:
   files:
-    - biopipelines/p2rank.py
-    - pipe_scripts/pipe_p2rank.py
-  current: "1.0"
-  history: []
+  - biopipelines/p2rank.py
+  - pipe_scripts/pipe_p2rank.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 Panda:
   files:
-    - biopipelines/panda.py
-    - pipe_scripts/pipe_panda.py
-  current: "1.0"
-  history: []
+  - biopipelines/panda.py
+  - pipe_scripts/pipe_panda.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Panda.merge gains a `grain` parameter (finest/coarsest) selecting which input's provenance level drives the output rows; `how` now defaults to None (derived from grain).
 
 PDB:
   files:
-    - biopipelines/pdb.py
-    - pipe_scripts/pipe_pdb.py
+  - biopipelines/pdb.py
+  - pipe_scripts/pipe_pdb.py
   current: "1.0"
   history: []
 
 PLACER:
   files:
-    - biopipelines/placer.py
-    - pipe_scripts/pipe_placer_driver.py
-    - pipe_scripts/pipe_placer_postprocess.py
-  current: "1.0"
-  history: []
+  - biopipelines/placer.py
+  - pipe_scripts/pipe_placer_driver.py
+  - pipe_scripts/pipe_placer_postprocess.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 PLIP:
   files:
-    - biopipelines/plip.py
-    - pipe_scripts/pipe_plip.py
+  - biopipelines/plip.py
+  - pipe_scripts/pipe_plip.py
   current: "1.0"
   history: []
 
 PLM_Sol:
   files:
-    - biopipelines/plm_sol.py
-    - pipe_scripts/pipe_plm_sol.py
-  current: "1.0"
-  history: []
+  - biopipelines/plm_sol.py
+  - pipe_scripts/pipe_plm_sol.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 Plot:
   files:
-    - biopipelines/plot.py
-    - pipe_scripts/pipe_plot.py
+  - biopipelines/plot.py
+  - pipe_scripts/pipe_plot.py
   current: "1.0"
   history: []
 
 PocketGen:
   files:
-    - biopipelines/pocketgen.py
-    - pipe_scripts/pipe_pocketgen_driver.py
-    - pipe_scripts/pipe_pocketgen_postprocess.py
-    - pipe_scripts/pipe_pocketgen_stage.py
-  current: "1.0"
-  history: []
+  - biopipelines/pocketgen.py
+  - pipe_scripts/pipe_pocketgen_driver.py
+  - pipe_scripts/pipe_pocketgen_postprocess.py
+  - pipe_scripts/pipe_pocketgen_stage.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 Pool:
   files:
-    - biopipelines/pool.py
-    - pipe_scripts/pipe_pool.py
+  - biopipelines/pool.py
+  - pipe_scripts/pipe_pool.py
   current: "1.0"
   history: []
 
 PoseBusters:
   files:
-    - biopipelines/posebusters.py
-    - pipe_scripts/pipe_posebusters.py
+  - biopipelines/posebusters.py
+  - pipe_scripts/pipe_posebusters.py
   current: "1.0"
   history: []
 
 PoseChange:
   files:
-    - biopipelines/pose_change.py
-    - pipe_scripts/pipe_pose_change.py
+  - biopipelines/pose_change.py
+  - pipe_scripts/pipe_pose_change.py
   current: "1.0"
   history: []
 
 Prodigy:
   files:
-    - biopipelines/prodigy.py
-    - pipe_scripts/pipe_prodigy.py
-  current: "1.0"
-  history: []
+  - biopipelines/prodigy.py
+  - pipe_scripts/pipe_prodigy.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 ProLIF:
   files:
-    - biopipelines/prolif.py
-    - pipe_scripts/pipe_prolif.py
-  current: "1.0"
-  history: []
+  - biopipelines/prolif.py
+  - pipe_scripts/pipe_prolif.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
 ProteinMPNN:
   files:
-    - biopipelines/protein_mpnn.py
-    - pipe_scripts/pipe_pmpnn_fixed_positions.py
-    - pipe_scripts/pipe_pmpnn_table.py
-  current: "1.0"
-  history: []
+  - biopipelines/protein_mpnn.py
+  - pipe_scripts/pipe_pmpnn_fixed_positions.py
+  - pipe_scripts/pipe_pmpnn_table.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.
 
 PyMOL:
   files:
-    - biopipelines/pymol.py
-    - pipe_scripts/pipe_pymol.py
+  - biopipelines/pymol.py
+  - pipe_scripts/pipe_pymol.py
   current: "1.0"
   history: []
 
 RBSDesigner:
   files:
-    - biopipelines/rbs_designer.py
-    - pipe_scripts/pipe_rbs_designer.py
+  - biopipelines/rbs_designer.py
+  - pipe_scripts/pipe_rbs_designer.py
   current: "1.0"
   history: []
 
 RCSB:
   files:
-    - biopipelines/rcsb.py
+  - biopipelines/rcsb.py
   current: "1.0"
   history: []
 
 RDKit:
   files:
-    - biopipelines/rdkit_descriptors.py
-    - pipe_scripts/pipe_rdkit_descriptors.py
+  - biopipelines/rdkit_descriptors.py
+  - pipe_scripts/pipe_rdkit_descriptors.py
   current: "1.0"
   history: []
 
 ReMap:
   files:
-    - biopipelines/remap.py
-    - pipe_scripts/pipe_remap.py
+  - biopipelines/remap.py
+  - pipe_scripts/pipe_remap.py
   current: "1.0"
   history: []
 
 Reduce:
   files:
-    - biopipelines/reduce.py
-    - pipe_scripts/pipe_reduce.py
-  current: "1.0"
-  history: []
+  - biopipelines/reduce.py
+  - pipe_scripts/pipe_reduce.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 RFDAA_PrepareLigand:
   files:
-    - biopipelines/rfdiffusion_allatom.py
-    - pipe_scripts/pipe_rfdaa_prepare_ligand.py
-  current: "1.0"
-  history: []
+  - biopipelines/rfdiffusion_allatom.py
+  - pipe_scripts/pipe_rfdaa_prepare_ligand.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.
 
 RFdiffusion:
   files:
-    - biopipelines/rfdiffusion.py
-    - pipe_scripts/pipe_rfdiffusion_table.py
-  current: "1.0"
-  history: []
+  - biopipelines/rfdiffusion.py
+  - pipe_scripts/pipe_rfdiffusion_table.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.
 
 RFdiffusion3:
   files:
-    - biopipelines/rfdiffusion3.py
-    - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
-    - pipe_scripts/pipe_rfdiffusion3_postprocess.py
-    - pipe_scripts/pipe_rfdiffusion3_table.py
+  - biopipelines/rfdiffusion3.py
+  - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
+  - pipe_scripts/pipe_rfdiffusion3_postprocess.py
+  - pipe_scripts/pipe_rfdiffusion3_table.py
   current: "2.0"
   history:
-    - version: "2.0"
-      date: "2026-06-10"
-      note: >-
-        Cover the full RFD3 paper example set: add symmetry, unindex
-        (atomic-motif enzyme), select_unfixed_sequence, select_partially_buried,
-        redesign_motif_sidechains, ori_token/infer_ori_strategy (COM),
-        is_non_loopy, plddt_enhanced, partial_t input-spec keys, plus
-        inference-sampler overrides cfg/cfg_scale/step_scale/noise_scale/
-        num_steps/center_option/seed.
+  - version: "2.0"
+    date: "2026-06-10"
+    note: >-
+      Cover the full RFD3 paper example set: add symmetry, unindex
+      (atomic-motif enzyme), select_unfixed_sequence, select_partially_buried,
+      redesign_motif_sidechains, ori_token/infer_ori_strategy (COM),
+      is_non_loopy, plddt_enhanced, partial_t input-spec keys, plus
+      inference-sampler overrides cfg/cfg_scale/step_scale/noise_scale/
+      num_steps/center_option/seed.
 
 RFdiffusionAllAtom:
   files:
-    - biopipelines/rfdiffusion_allatom.py
-  current: "1.0"
-  history: []
+  - biopipelines/rfdiffusion_allatom.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.
 
 RTMScore:
   files:
-    - biopipelines/rtmscore.py
-    - pipe_scripts/pipe_rtmscore.py
-  current: "1.0"
-  history: []
+  - biopipelines/rtmscore.py
+  - pipe_scripts/pipe_rtmscore.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 SASA:
   files:
-    - biopipelines/sasa.py
-    - pipe_scripts/pipe_sasa.py
+  - biopipelines/sasa.py
+  - pipe_scripts/pipe_sasa.py
   current: "1.0"
   history: []
 
 Selection:
   files:
-    - biopipelines/selection.py
-    - pipe_scripts/pipe_selection.py
+  - biopipelines/selection.py
+  - pipe_scripts/pipe_selection.py
   current: "1.0"
   history: []
 
 Sequence:
   files:
-    - biopipelines/sequence.py
-    - pipe_scripts/pipe_sequence.py
+  - biopipelines/sequence.py
+  - pipe_scripts/pipe_sequence.py
   current: "1.0"
   history: []
 
 SequenceMetricCorrelation:
   files:
-    - biopipelines/sequence_metric_correlation.py
-    - pipe_scripts/pipe_sequence_metric_correlation.py
+  - biopipelines/sequence_metric_correlation.py
+  - pipe_scripts/pipe_sequence_metric_correlation.py
   current: "1.0"
   history: []
 
 StitchSequences:
   files:
-    - biopipelines/stitch_sequences.py
-    - pipe_scripts/pipe_stitch_sequences.py
+  - biopipelines/stitch_sequences.py
+  - pipe_scripts/pipe_stitch_sequences.py
   current: "1.0"
   history: []
 
 Table:
   files:
-    - biopipelines/table.py
+  - biopipelines/table.py
   current: "1.0"
   history: []
 
 ThermoMPNN:
   files:
-    - biopipelines/thermompnn.py
-    - pipe_scripts/pipe_thermompnn.py
-  current: "1.0"
-  history: []
+  - biopipelines/thermompnn.py
+  - pipe_scripts/pipe_thermompnn.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 UniProt:
   files:
-    - biopipelines/uniprot.py
-    - pipe_scripts/pipe_uniprot.py
+  - biopipelines/uniprot.py
+  - pipe_scripts/pipe_uniprot.py
   current: "1.0"
   history: []
 
 VespaG:
   files:
-    - biopipelines/vespag.py
-    - pipe_scripts/pipe_vespag.py
-  current: "1.0"
-  history: []
+  - biopipelines/vespag.py
+  - pipe_scripts/pipe_vespag.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
 XTB:
   files:
-    - biopipelines/xtb.py
-    - pipe_scripts/pipe_xtb.py
-  current: "1.0"
-  history: []
+  - biopipelines/xtb.py
+  - pipe_scripts/pipe_xtb.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
+RFdiffusion2:
+  files:
+  - biopipelines/rfdiffusion2.py
+  current: '1.1'
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.
+HBDesigner:
+  files:
+  - biopipelines/hbdesigner.py
+  - pipe_scripts/pipe_hbdesigner.py
+  - pipe_scripts/pipe_hbdesigner_constraints.py
+  current: '1.1'
+  history:
+  - version: '1.1'
+    date: '2026-06-30'
+    note: >-
+      Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.

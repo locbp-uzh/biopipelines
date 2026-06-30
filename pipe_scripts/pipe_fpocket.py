@@ -17,7 +17,7 @@ from collections import defaultdict
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path  # noqa: E402
+from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path, container_argv_prefix  # noqa: E402
 from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
@@ -67,13 +67,14 @@ def parse_residues(pocket_pdb: str):
 
 
 def run_fpocket(pdb_path: str, work_dir: str, min_alpha_spheres: int,
-                min_radius: float, max_radius: float, clustering_distance: float) -> str:
+                min_radius: float, max_radius: float, clustering_distance: float,
+                container_prefix: str = "") -> str:
     """Run fpocket and return the path to the *_out directory."""
     os.makedirs(work_dir, exist_ok=True)
     work_pdb = os.path.join(work_dir, os.path.basename(pdb_path))
     shutil.copyfile(pdb_path, work_pdb)
 
-    cmd = ["fpocket", "-f", work_pdb,
+    cmd = container_argv_prefix(container_prefix) + ["fpocket", "-f", work_pdb,
            "-i", str(min_alpha_spheres),
            "-m", str(min_radius),
            "-M", str(max_radius),
@@ -98,6 +99,7 @@ def main():
     p.add_argument("--pockets-csv", required=True)
     p.add_argument("--summary-csv", required=True)
     p.add_argument("--missing-csv", required=True)
+    p.add_argument("--container-prefix", default="")
     p.add_argument("--upstream-missing", default=None)
     args = p.parse_args()
 
@@ -111,7 +113,8 @@ def main():
         try:
             work_dir = os.path.join(args.scratch_dir, sid)
             out_dir = run_fpocket(pdb_path, work_dir, args.min_alpha_spheres,
-                                  args.min_radius, args.max_radius, args.clustering_distance)
+                                  args.min_radius, args.max_radius, args.clustering_distance,
+                                  args.container_prefix)
         except Exception as e:
             print(f"WARNING: {sid} FPocket failed: {e}", file=sys.stderr)
             missing_rows.append({"id": sid, "removed_by": step_id, "kind": "failure", "cause": str(e)[:200]})

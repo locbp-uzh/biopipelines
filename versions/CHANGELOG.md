@@ -11,9 +11,22 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ## [unreleased]
 
+A patch release on top of `1.3.0`: opt-in container/environment execution switching for external tools, a JSON-config refactor of the resolver-script argument passing, and a `grain` parameter for `Panda.merge`. Framework version `1.3.1`.
+
 ### Framework
 
+**Container ⇆ environment execution switching**
+
+- New `biopipelines_io.container_argv_prefix(prefix)` splits a tool's `container_prefix()` string into argv tokens for a helper to prepend to a binary subprocess, so the external binary runs inside the configured `.sif` while the helper's own (biopipelines-importing) Python keeps running in the activated host env.
+- New `BaseConfig.warn_container_unsupported()` emits a runtime warning when a container is configured for a tool that runs its model in-process or dispatches host-env sub-processes and therefore cannot use it; such a tool falls back to environment mode instead of silently ignoring the setting.
+- The developer manual gains a "Containerization" section: the `container_prefix()` seam and the two tool architectures (heavy command emitted directly in bash vs. binary invoked inside a host helper), that environment activation still happens in container mode (the prefix wraps only the binary), the ESMFold-style split / warn fallback for in-process tools, and the per-iteration container-startup caveat with the persistent-instance (`apptainer instance start/exec/stop`) escape hatch.
+
 ### Tools
+
+- **Container-mode execution** added (heavy binary runs in the `.sif` when a container image is configured, host env otherwise): **ESMFold**, **NeuralPLexer**, **DiffDock**, **PocketGen** (heavy command emitted directly in bash); **XTB**, **APBS**, **DSSP**, **FPocket**, **P2Rank**, **Reduce**, **VespaG**, **RTMScore**, **ThermoMPNN** (prefix threaded into the helper and prepended to the binary subprocess). All 1.0 → 1.1.
+- **Container-configured warning** added for tools that run their model in-process or dispatch host-env sub-processes and do not support container execution: **AF2BIND**, **BioEmu**, **OpenMM**, **ProLIF**, **Prodigy**, **Frame2Seq**, **PLM_Sol**, **PLACER**, **DynamicBind**, **Gnina**, **GEMS**. All 1.0 → 1.1.
+- **LigandMPNN**, **ProteinMPNN**, **RFdiffusion**, **RFdiffusionAllAtom**, **RFDAA_PrepareLigand**, **RFdiffusion2**, **HBDesigner** (1.0 → 1.1) — resolver-script arguments moved from positional CLI into a JSON config file; generated bash changed, no user-facing parameter change. RFdiffusion2 and HBDesigner are newly tracked in `tool_changelog.yaml`.
+- **Panda** (1.0 → 1.1) — `Panda.merge` gains a `grain` parameter (`finest`/`coarsest`) selecting which input's provenance level drives the output rows; `how` now defaults to `None` (derived from `grain`).
 
 ## [1.3.0] — 2026-06-26
 

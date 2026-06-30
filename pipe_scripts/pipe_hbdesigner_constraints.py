@@ -15,10 +15,12 @@ and writes a JSON mapping ``{id: {guide_res, guide_seq, anchor_res}}`` that the
 generated bash loop reads one id at a time. It writes data only (a JSON).
 
 Usage:
-    python pipe_hbdesigner_constraints.py <structures_json> <guide_res> <guide_seq> <anchor_res> <output_json>
+    python pipe_hbdesigner_constraints.py <config_json>
 
-Each of <guide_res>/<guide_seq>/<anchor_res> is a literal string, a
-``TABLE_REFERENCE:...`` token, or ``-`` (treated as empty / unset).
+<config_json> is a JSON object with keys ``structures_json``, ``guide_res``,
+``guide_seq``, ``anchor_res``, ``output_json``. Each of ``guide_res`` /
+``guide_seq`` / ``anchor_res`` is a literal string, a ``TABLE_REFERENCE:...``
+token, or ``-`` (treated as empty / unset).
 """
 
 import sys
@@ -62,17 +64,18 @@ def resolve_arg(arg, struct_id):
 
 
 def main():
-    if len(sys.argv) != 6:
-        print("Usage: python pipe_hbdesigner_constraints.py "
-              "<structures_json> <guide_res> <guide_seq> <anchor_res> <output_json>",
+    if len(sys.argv) != 2:
+        print("Usage: python pipe_hbdesigner_constraints.py <config_json>",
               file=sys.stderr)
         sys.exit(1)
 
-    structures_json = sys.argv[1]
-    guide_res_arg = sys.argv[2]
-    guide_seq_arg = sys.argv[3]
-    anchor_res_arg = sys.argv[4]
-    output_json = sys.argv[5]
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    structures_json = cfg["structures_json"]
+    guide_res_arg = cfg["guide_res"]
+    guide_seq_arg = cfg["guide_seq"]
+    anchor_res_arg = cfg["anchor_res"]
+    output_json = cfg["output_json"]
 
     ds = load_datastream(structures_json)
     struct_ids = [sid for sid, _ in iterate_files(ds)]

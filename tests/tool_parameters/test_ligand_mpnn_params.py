@@ -5,7 +5,7 @@ import pytest
 from ._helpers import (
     assert_kwarg_emitted,
     assert_substrings_in,
-    read_pipeline_sh,
+    read_all_emitted_artifacts,
 )
 
 
@@ -29,7 +29,7 @@ def _build(local_config, isolated_cwd, new_pipeline, **lmpnn_kwargs):
         LigandMPNN(structures=m.streams.structures, ligand=Ligand(code=ligand_code), **lmpnn_kwargs)
         script_path = pipeline.save()
 
-    return read_pipeline_sh(script_path)
+    return read_all_emitted_artifacts(script_path)
 
 
 def test_ligand(local_config, isolated_cwd, new_pipeline):

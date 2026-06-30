@@ -58,7 +58,7 @@ class GEMS(BaseConfig):
     """
 
     TOOL_NAME = "GEMS"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -200,6 +200,7 @@ fi
         script += "# GEMS protein-ligand affinity prediction\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()
+        script += self.warn_container_unsupported()
         script += f"""echo "Predicting affinity for {len(self.structures_stream)} x {len(self.ligands_stream)} pair(s)"
 python "{self.helper_py}" \\
     --structures-json "{self.structures_json}" \\

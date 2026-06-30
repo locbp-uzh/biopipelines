@@ -84,7 +84,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -585,6 +585,7 @@ fi
         script_content += "# GNINA docking execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
+        script_content += self.warn_container_unsupported()
 
         modules = self._get_gnina_modules()
         if modules:

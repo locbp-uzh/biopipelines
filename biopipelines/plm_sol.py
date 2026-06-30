@@ -55,7 +55,7 @@ class PLM_Sol(BaseConfig):
     """
 
     TOOL_NAME = "PLM_Sol"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -177,6 +177,7 @@ fi
             self.sequences_json, sequences_csv, required_columns=["id", "sequence"]
         )
         script += self.activate_environment()  # plm_sol env
+        script += self.warn_container_unsupported()
 
         script += f"""echo "Running PLM_Sol on {len(self.sequences_stream)} sequence(s)"
 

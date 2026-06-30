@@ -41,7 +41,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import (  # noqa: E402
     load_datastream, iterate_files, load_table, lookup_table_value,
-    step_id_from_table_path,
+    step_id_from_table_path, container_argv_prefix,
 )
 
 OUTPUT_COLUMNS = ["id", "structures.id", "chain", "position",
@@ -89,7 +89,7 @@ def resolve_mutations_arg(arg: str, struct_id: str) -> Optional[Set[Tuple[str, i
     return parse_mutation_tokens(arg)
 
 
-def run_inference(repo_dir: str, pdb_file: str, chain: str, out_dir: str) -> str:
+def run_inference(repo_dir: str, pdb_file: str, chain: str, out_dir: str, container_prefix: str = "") -> str:
     """Run custom_inference.py and return the path to the CSV it wrote.
 
     Invokes the script with its own directory as cwd (its checkpoint auto-search
@@ -102,8 +102,10 @@ def run_inference(repo_dir: str, pdb_file: str, chain: str, out_dir: str) -> str
         raise FileNotFoundError(f"custom_inference.py not found at {script}")
 
     before = set(f for f in os.listdir(out_dir) if f.endswith(".csv"))
-    cmd = [
-        sys.executable, script,
+    pre = container_argv_prefix(container_prefix)
+    py = "python" if pre else sys.executable
+    cmd = pre + [
+        py, script,
         "--pdb", os.path.abspath(pdb_file),
         "--chain", chain,
         "--out_dir", os.path.abspath(out_dir),
@@ -132,6 +134,7 @@ def main():
                     help="'-' for site-saturation, a '+'-joined token list, or a TABLE_REFERENCE")
     ap.add_argument("--ddg-csv", required=True)
     ap.add_argument("--missing-csv", required=True)
+    ap.add_argument("--container-prefix", default="")
     args = ap.parse_args()
 
     structures = load_datastream(args.structures_json)
@@ -147,7 +150,7 @@ def main():
 
                 struct_work = os.path.join(work, struct_id)
                 os.makedirs(struct_work, exist_ok=True)
-                csv_path = run_inference(args.repo_dir, pdb_file, args.chain, struct_work)
+                csv_path = run_inference(args.repo_dir, pdb_file, args.chain, struct_work, args.container_prefix)
 
                 df = pd.read_csv(csv_path)
                 # Upstream columns: Model, Dataset, ddG_pred, position,

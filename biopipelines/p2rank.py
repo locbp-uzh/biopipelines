@@ -62,7 +62,7 @@ class P2Rank(BaseConfig):
     """
 
     TOOL_NAME = "P2Rank"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     _CONFIGS = ("default", "alphafold", "conservation")
 
@@ -208,6 +208,7 @@ python "{self.helper_py}" \\
     --residues-dir "{self.stream_folder('residues')}" \\
     --residues-map-csv "{self.residues_map}" \\
     --summary-csv "{self.summary_csv}" \\
+    --container-prefix "{self.container_prefix()}" \\
     --missing-csv "{self.missing_csv}"{upstream_missing_flag}
 """
         script += self.generate_completion_check_footer()

@@ -81,7 +81,7 @@ class AF2BIND(BaseConfig):
     """
 
     TOOL_NAME = "AF2BIND"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -230,6 +230,7 @@ fi
         script += "# AF2BIND binding-site prediction script\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()
+        script += self.warn_container_unsupported()
         # ColabDesign imports matplotlib; Colab's inherited MPLBACKEND crashes it.
         script += f"""export MPLBACKEND=Agg
 echo "Running AF2BIND on {len(self.structures_stream)} structure(s) (chain={self.chain})"

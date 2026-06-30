@@ -107,7 +107,7 @@ class RFdiffusion2(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion2"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -173,6 +173,7 @@ fi
     ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
     # Per-PDB contig resolution (shared with the RFdiffusion family).
     contigs_json = Path(lambda self: self.configuration_path("contig_options.json"))
+    contig_args_json = Path(lambda self: self.configuration_path("contig_args.json"))
     contigs_py = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_contigs.py"))
     contigs_reader_py = Path(lambda self: self.pipe_script_path("resolve_rfdiffusion_contigs.py"))
 
@@ -431,8 +432,17 @@ done
         contigs_cli = contigs_arg if contigs_arg else "-"
         structures_dir = self.stream_folder("structures")
 
+        with open(self.contig_args_json, "w") as f:
+            json.dump({
+                "structures_json": str(self.pdb_ds_json),
+                "contigs": contigs_cli,
+                "inpaint": "-",
+                "inpaint_str": "-",
+                "output_json": str(self.contigs_json),
+            }, f, indent=2)
+
         return f"""{ligand_snippet}echo "Resolving per-PDB contig options"
-python {self.contigs_py} "{self.pdb_ds_json}" "{contigs_cli}" "-" "-" "{self.contigs_json}"
+python {self.contigs_py} "{self.contig_args_json}"
 
 echo "Starting RFdiffusion2 ({mode} mode)"
 echo "Output folder: {self.output_folder}"

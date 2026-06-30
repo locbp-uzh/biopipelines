@@ -16,10 +16,12 @@ resolves each argument for every pdb id in one pass, and writes a JSON mapping
 one id at a time. It writes data only (a JSON) — never bash.
 
 Usage:
-    python pipe_rfdiffusion_contigs.py <structures_json> <contigs> <inpaint> <inpaint_str> <output_json>
+    python pipe_rfdiffusion_contigs.py <config_json>
 
-Each of <contigs>/<inpaint>/<inpaint_str> is a literal string, a
-``TABLE_REFERENCE:...`` token, or ``-`` (treated as empty / unset).
+<config_json> is a JSON object with keys ``structures_json``, ``contigs``,
+``inpaint``, ``inpaint_str``, ``output_json``. Each of ``contigs`` /
+``inpaint`` / ``inpaint_str`` is a literal string, a ``TABLE_REFERENCE:...``
+token, or ``-`` (treated as empty / unset).
 """
 
 import sys
@@ -52,17 +54,18 @@ def resolve_arg(arg, pdb_id):
 
 
 def main():
-    if len(sys.argv) != 6:
-        print("Usage: python pipe_rfdiffusion_contigs.py "
-              "<structures_json> <contigs> <inpaint> <inpaint_str> <output_json>",
+    if len(sys.argv) != 2:
+        print("Usage: python pipe_rfdiffusion_contigs.py <config_json>",
               file=sys.stderr)
         sys.exit(1)
 
-    structures_json = sys.argv[1]
-    contigs_arg = sys.argv[2]
-    inpaint_arg = sys.argv[3]
-    inpaint_str_arg = sys.argv[4]
-    output_json = sys.argv[5]
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    structures_json = cfg["structures_json"]
+    contigs_arg = cfg["contigs"]
+    inpaint_arg = cfg["inpaint"]
+    inpaint_str_arg = cfg["inpaint_str"]
+    output_json = cfg["output_json"]
 
     ds = load_datastream(structures_json)
     pdb_ids = [pdb_id for pdb_id, _ in iterate_files(ds)]

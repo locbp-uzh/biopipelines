@@ -25,7 +25,7 @@ def _build(local_config, isolated_cwd, new_pipeline, contigs="100-200", **kwargs
 
 def test_contigs(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, contigs="50-100")
-    assert "contigmap.contigs=[50-100]" in content
+    assert "contigmap.contigs=['50-100']" in content
 
 
 def test_num_designs(local_config, isolated_cwd, new_pipeline):
@@ -55,12 +55,12 @@ def test_active_site(local_config, isolated_cwd, new_pipeline):
 
 def test_inpaint_seq(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, inpaint="A10-20")
-    assert "contigmap.inpaint_seq=[A10-20]" in content
+    assert "contigmap.inpaint_seq=['A10-20']" in content
 
 
 def test_inpaint_str(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, inpaint_str="A30-40")
-    assert "contigmap.inpaint_str=[A30-40]" in content
+    assert "contigmap.inpaint_str=['A30-40']" in content
 
 
 def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):
@@ -74,7 +74,7 @@ def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):
         active_site=False,
     )
     assert_substrings_in(content, [
-        "contigmap.contigs=[A1-50/30-50]",
+        "contigmap.contigs=['A1-50/30-50']",
         "inference.num_designs=4",
         "diffuser.T=30",
         "inference.deterministic=True",

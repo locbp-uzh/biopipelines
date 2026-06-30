@@ -786,6 +786,17 @@ def step_id_from_table_path(table_path: str) -> str:
     return os.path.basename(tool_folder)
 
 
+def container_argv_prefix(prefix: Optional[str]) -> List[str]:
+    """Split a tool's container-exec prefix string into argv tokens to prepend to a binary command.
+
+    The wrapper passes ``BaseConfig.container_prefix()`` (e.g. ``apptainer exec --nv -B a,b <image> `` or ``""``) down to the helper. The helper builds its binary command as ``container_argv_prefix(prefix) + cmd`` so the external binary runs inside the ``.sif`` when a container is configured, or unchanged in the host env when the prefix is empty. Only the binary subprocess is containerized — the helper's own Python (which imports biopipelines) keeps running in the host env.
+    """
+    import shlex
+    if not prefix or not prefix.strip():
+        return []
+    return shlex.split(prefix)
+
+
 def read_upstream_missing(paths) -> List[Dict[str, Any]]:
     """Merge every upstream ``missing`` manifest into one list of row dicts.
 

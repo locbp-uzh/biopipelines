@@ -82,7 +82,7 @@ class PocketGen(BaseConfig):
     """
 
     TOOL_NAME = "PocketGen"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -271,7 +271,7 @@ fi
         # cloned repo at runtime — no upstream patching.
         script += "# --- PocketGen inference (pocketgen env, our driver) ---\n"
         script += self.activate_environment()  # pocketgen
-        script += f"""python "{self.driver_py}" \\
+        script += f"""{self.container_prefix()}python "{self.driver_py}" \\
     --pocketgen-repo "{self.folders["PocketGen"]}" \\
     --config "{self.pg_default_config}" \\
     --checkpoint "{self.pg_checkpoint}" \\

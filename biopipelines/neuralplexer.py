@@ -67,7 +67,7 @@ class NeuralPLexer(BaseConfig):
     """
 
     TOOL_NAME = "NeuralPLexer"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -404,7 +404,7 @@ for pair_dir in "{self.staging_folder}"/*/; do
 
     echo "  [run]  NeuralPLexer on $pair_id"
     set +e
-    neuralplexer-inference --task=batched_structure_sampling \\
+    {self.container_prefix()}neuralplexer-inference --task=batched_structure_sampling \\
         --input-receptor "$receptor" \\
         --input-ligand "$ligand" \\
         --out-path "$out_path" \\

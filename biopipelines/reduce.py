@@ -38,7 +38,7 @@ class Reduce(BaseConfig):
     """
 
     TOOL_NAME = "Reduce"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -103,6 +103,7 @@ fi
 python "{self.helper_py}" \\
     --structures-json "{self.structures_json}" \\
     --output-dir "{self.stream_folder('structures')}" \\
+    --container-prefix "{self.container_prefix()}" \\
     --map-csv "{self.structures_map}"
 """
         script += self.generate_completion_check_footer()

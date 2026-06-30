@@ -18,11 +18,11 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, iterate_files  # noqa: E402
+from biopipelines.biopipelines_io import load_datastream, iterate_files, container_argv_prefix  # noqa: E402
 
 
-def run_reduce(pdb_in: str, pdb_out: str) -> None:
-    cmd = ["reduce", "-BUILD", "-NUClear", "-Quiet", pdb_in]
+def run_reduce(pdb_in: str, pdb_out: str, container_prefix: str = "") -> None:
+    cmd = container_argv_prefix(container_prefix) + ["reduce", "-BUILD", "-NUClear", "-Quiet", pdb_in]
     with open(pdb_out, "w") as f:
         res = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, text=True)
     if res.returncode not in (0, 1) or not os.path.getsize(pdb_out):
@@ -34,6 +34,7 @@ def main():
     p.add_argument("--structures-json", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--map-csv", required=True)
+    p.add_argument("--container-prefix", default="")
     args = p.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -43,7 +44,7 @@ def main():
     for sid, pdb_path in iterate_files(ds):
         try:
             out_path = os.path.join(args.output_dir, f"{sid}.pdb")
-            run_reduce(pdb_path, out_path)
+            run_reduce(pdb_path, out_path, args.container_prefix)
             rows.append({"id": sid, "file": out_path})
             print(f"  {sid}: -> {out_path}")
         except Exception as e:

@@ -16,7 +16,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, iterate_values, read_upstream_missing, step_id_from_table_path  # noqa: E402
+from biopipelines.biopipelines_io import load_datastream, iterate_files, iterate_values, read_upstream_missing, step_id_from_table_path, container_argv_prefix  # noqa: E402
 # Shared coordinate-ligand -> sanitized SDF (bond-order template) — single
 # implementation, also used by OpenBabel and the other ligand-consuming tools.
 from biopipelines.ligand_utils import write_ligand_sdf  # noqa: E402
@@ -68,11 +68,11 @@ def _find_babel_libdir():
     return None
 
 
-def run_rtmscore(rtm_script, model_path, prot_pdb, lig_sdf, cutoff, work_dir):
+def run_rtmscore(rtm_script, model_path, prot_pdb, lig_sdf, cutoff, work_dir, container_prefix=""):
     """Invoke rtmscore.py --gen_pocket; return the path to its output CSV."""
     os.makedirs(work_dir, exist_ok=True)
     out_prefix = os.path.join(work_dir, "scores")
-    cmd = [
+    cmd = container_argv_prefix(container_prefix) + [
         "python", rtm_script,
         "-p", prot_pdb,
         "-l", lig_sdf,
@@ -90,9 +90,12 @@ def run_rtmscore(rtm_script, model_path, prot_pdb, lig_sdf, cutoff, work_dir):
     # dlopen ABI-incompatible plugins (undefined-symbol -> no PDB written ->
     # "graph of pocket cannot be generated").
     env = dict(os.environ)
-    babel_libdir = _find_babel_libdir()
-    if babel_libdir:
-        env["BABEL_LIBDIR"] = babel_libdir
+    # In container mode the .sif supplies its own openbabel; a host BABEL_LIBDIR
+    # would point at the wrong plugin dir inside the image.
+    if not container_prefix.strip():
+        babel_libdir = _find_babel_libdir()
+        if babel_libdir:
+            env["BABEL_LIBDIR"] = babel_libdir
     # RTMScore imports MDAnalysis.analysis.dihedrals -> matplotlib.pyplot. On
     # Colab the inherited MPLBACKEND=module://matplotlib_inline.backend_inline is
     # invalid in this env and crashes the import. Force a headless backend.
@@ -118,6 +121,7 @@ def main():
     p.add_argument("--scratch-dir", required=True)
     p.add_argument("--scores-csv", required=True)
     p.add_argument("--missing-csv", required=True)
+    p.add_argument("--container-prefix", default="")
     p.add_argument("--upstream-missing", nargs="*", default=None)
     args = p.parse_args()
 
@@ -148,7 +152,8 @@ def main():
                 prot_clean = os.path.join(work, f"{prot_id}_protein.pdb")
                 prepare_protein_pdb(prot_pdb, prot_clean)
                 out_csv = run_rtmscore(args.rtmscore_script, args.model_path,
-                                       prot_clean, lig_sdf, args.cutoff, work)
+                                       prot_clean, lig_sdf, args.cutoff, work,
+                                       args.container_prefix)
                 df = pd.read_csv(out_csv)
                 # rtmscore.py writes columns id,score where id is the
                 # SDF molecule name (pose label).

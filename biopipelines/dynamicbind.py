@@ -84,7 +84,7 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # ------------------------------------------------------------------
     # Install
@@ -303,6 +303,7 @@ fi
         script = "#!/bin/bash\n"
         script += "# DynamicBind execution script\n"
         script += self.generate_completion_check_header()
+        script += self.warn_container_unsupported()
 
         # Phase 1: build per-protein ligand CSVs (biopipelines env).
         script += "# --- Build per-protein ligand CSVs (biopipelines env) ---\n"

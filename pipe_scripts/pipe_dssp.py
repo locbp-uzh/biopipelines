@@ -15,7 +15,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path  # noqa: E402
+from biopipelines.biopipelines_io import load_datastream, iterate_files, step_id_from_table_path, container_argv_prefix  # noqa: E402
 from biopipelines.pdb_parser import relative_accessibility  # noqa: E402
 
 
@@ -34,20 +34,23 @@ SS_MAP = {
 }
 
 
-def find_dssp_binary() -> str:
+def find_dssp_binary(container_prefix: str = "") -> str:
+    if container_prefix.strip():
+        return "mkdssp"  # binary lives inside the container, not on host PATH
     for name in ("mkdssp", "dssp"):
         if shutil.which(name):
             return name
     raise RuntimeError("Neither mkdssp nor dssp found on PATH")
 
 
-def run_dssp(binary: str, pdb_path: str, out_path: str):
+def run_dssp(binary: str, pdb_path: str, out_path: str, container_prefix: str = ""):
     """Try modern mkdssp invocation first; fall back to legacy positional form."""
-    cmd1 = [binary, "--output-format", "dssp", pdb_path, out_path]
+    pre = container_argv_prefix(container_prefix)
+    cmd1 = pre + [binary, "--output-format", "dssp", pdb_path, out_path]
     res = subprocess.run(cmd1, capture_output=True, text=True)
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
         return
-    cmd2 = [binary, pdb_path, out_path]
+    cmd2 = pre + [binary, pdb_path, out_path]
     res = subprocess.run(cmd2, capture_output=True, text=True)
     if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
         return
@@ -99,12 +102,13 @@ def main():
     p.add_argument("--secondary-csv", required=True)
     p.add_argument("--summary-csv", required=True)
     p.add_argument("--missing-csv", required=True)
+    p.add_argument("--container-prefix", default="")
     p.add_argument("--upstream-missing", default=None)
     args = p.parse_args()
 
     os.makedirs(args.dssp_dir, exist_ok=True)
     os.makedirs(args.ss_dir, exist_ok=True)
-    binary = find_dssp_binary()
+    binary = find_dssp_binary(args.container_prefix)
     ds = load_datastream(args.structures_json)
 
     sec_rows, sum_rows, dssp_rows, ss_rows, missing_rows = [], [], [], [], []
@@ -112,7 +116,7 @@ def main():
     for sid, pdb_path in iterate_files(ds):
         try:
             out_path = os.path.join(args.dssp_dir, f"{sid}.dssp")
-            run_dssp(binary, pdb_path, out_path)
+            run_dssp(binary, pdb_path, out_path, args.container_prefix)
             residues = parse_dssp_classic(out_path)
             if not residues:
                 raise RuntimeError("DSSP output produced no residue rows")

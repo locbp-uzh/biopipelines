@@ -462,6 +462,22 @@ class BaseConfig(ABC):
         bind_arg = f"-B {','.join(binds)} " if binds else ""
         return f"{executor} exec --nv {bind_arg}{image} "
 
+    def warn_container_unsupported(self) -> str:
+        """Bash that warns when a container is configured for a tool that can't use it.
+
+        Some tools run their model in-process alongside biopipelines imports, or
+        dispatch host-env sub-processes, so they have no single binary boundary to
+        wrap and ignore a configured container. They call this in generate_script
+        so a user who sets one gets feedback instead of silent env-mode execution.
+        Returns '' when no container is configured.
+        """
+        if not self.uses_container():
+            return ""
+        return (
+            f'echo "WARNING: a container is configured for {self.TOOL_NAME}, but this '
+            f'tool does not support container execution; running in environment mode."\n'
+        )
+
     def _resolve_env_placeholders(self, env_name: str) -> str:
         """Substitute ``<folder>`` placeholders in an env value against the
         resolved folder map.

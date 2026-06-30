@@ -18,7 +18,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, iterate_files, read_upstream_missing, step_id_from_table_path  # noqa: E402
+from biopipelines.biopipelines_io import load_datastream, iterate_files, read_upstream_missing, step_id_from_table_path, container_argv_prefix  # noqa: E402
 from biopipelines.ligand_utils import resolve_ligand_code  # noqa: E402
 
 import MDAnalysis as mda  # noqa: E402
@@ -52,10 +52,10 @@ def split_complex(pdb_path: str, ligand_code: str, out_dir: str) -> tuple:
 
 
 def run_xtb_sp(pdb_path: str, charge: int, method: str, solvent: str,
-               opt: bool, scratch_dir: str) -> float:
+               opt: bool, scratch_dir: str, container_prefix: str = "") -> float:
     """Run an xtb single-point (or optimisation) and return total energy in kJ/mol."""
     method_flag = {"gfn2": "--gfn2", "gfn1": "--gfn1", "gfnff": "--gfnff"}[method]
-    cmd = ["xtb", pdb_path, method_flag, "--chrg", str(charge)]
+    cmd = container_argv_prefix(container_prefix) + ["xtb", pdb_path, method_flag, "--chrg", str(charge)]
     if solvent:
         cmd += ["--alpb", solvent]
     if opt:
@@ -104,6 +104,7 @@ def main():
     p.add_argument("--scratch-dir", required=True)
     p.add_argument("--interaction-csv", required=True)
     p.add_argument("--missing-csv", required=True)
+    p.add_argument("--container-prefix", default="")
     p.add_argument("--upstream-missing", nargs="*", default=None)
     args = p.parse_args()
 
@@ -124,11 +125,11 @@ def main():
             prot_q = args.charge - lig_q
 
             e_lig = run_xtb_sp(lig_pdb, lig_q, args.method, args.solvent,
-                               args.opt, _mkdir(work, "lig"))
+                               args.opt, _mkdir(work, "lig"), args.container_prefix)
             e_prot = run_xtb_sp(prot_pdb, prot_q, args.method, args.solvent,
-                                args.opt, _mkdir(work, "prot"))
+                                args.opt, _mkdir(work, "prot"), args.container_prefix)
             e_cpx = run_xtb_sp(pdb_path, args.charge, args.method, args.solvent,
-                               args.opt, _mkdir(work, "cpx"))
+                               args.opt, _mkdir(work, "cpx"), args.container_prefix)
             e_int_kj = e_cpx - e_prot - e_lig
             rows.append({
                 "id": sid,
