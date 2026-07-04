@@ -121,6 +121,64 @@ fused = Fuse(
 
 ---
 
+### LASErMPNN
+
+Ligand-conditioned inverse folding with all-atom sidechain packing. LASErMPNN redesigns a protein sequence around a bound ligand and packs the sidechains in a single pass, emitting full-atom complex PDBs (designed sequence + rotamers + ligand). Unlike LigandMPNN it reads the ligand straight from the input PDB's HETATM records — there is no ligand-code argument — and it controls fixed vs designed positions through the input B-factor column (`fixed`/`redesigned` are stamped as B-factors at runtime and run with `--fix_beta`). Output IDs follow the multiplier convention `<structure_id>_<n>`.
+
+**References**: https://github.com/polizzilab/LASErMPNN
+
+**Environment**: `lasermpnn`
+
+**Installation**: `LASErMPNN.install()` clones the repo (weights ship in-repo, no download) and creates the `lasermpnn` env from the vendored spec (`environments/lasermpnn.<device>.yaml` + `.pip.txt`: torch, the matching PyG extension wheels, ProDy, pydssp). The repo has no `setup.py`; it is run as a module (`python -m LASErMPNN.run_batch_inference`) from the clone's parent directory. Pass `device="cpu"` for a CPU-only install (default `"gpu"`). Requires a GPU for practical runtimes; falls back to CPU when no GPU is present.
+
+**Parameters** (defaults match the upstream `run_batch_inference` defaults):
+- `structures`: DataStream | StandardizedOutput (required) — Input complexes. PDB-only; the ligand is read from HETATM.
+- `num_sequences`: int = 1 — Designs to generate per input (upstream `designs_per_input`).
+- `temperature`: float | None = None — Sequence sampling temperature (`--sequence_temp`). None uses the model's built-in temperature.
+- `first_shell_temperature`: float | None = None — Temperature for binding-site residues (`--first_shell_sequence_temp`).
+- `chi_temperature`: float | None = None — Rotamer sampling temperature (`--chi_temp`).
+- `model`: str = "default" — Weights: `"default"` (`laser_weights_0p1A_nothing_heldout`), `"ligandmpnn_split"`, or `"soluble"`.
+- `designs_per_batch`: int = 30 — Designs per GPU batch (tune for GPU memory).
+- `inputs_per_pass`: int = 5 — Input files processed per GPU pass.
+- `disabled_residues`: str = "X,C" — Comma-separated one-letter codes to forbid (upstream default omits Cys).
+- `fixed`: str | (TableInfo, column) = "" — Positions to hold at their input identity. Stamped as B-factor 1.0 with `--fix_beta`. Mutually exclusive with `redesigned`.
+- `redesigned`: str | (TableInfo, column) = "" — Positions to design; everything else on `chain` is held fixed.
+- `chain`: str = "A" — Default chain for chainless position input.
+- `repack_only`: bool = False — Keep the input sequence, only repack sidechains (`--repack_only_input_sequence`).
+- `repack_all`: bool = False — Repack all residues, including fixed ones (`--repack_all`).
+- `ignore_ligand`: bool = False — Ignore the ligand during design (`--ignore_ligand`).
+- `constrain_ala_gly`: bool = False — Cap Ala/Gly over-sampling in exposed non-secondary-structure regions (`-c`). Upstream flags this as generally helpful for realistic designs.
+- `ala_budget`: int = 4 — Max Ala in the constrained region.
+- `gly_budget`: int = 0 — Max Gly in the constrained region.
+
+**Streams**: `structures` (full-atom designed complexes), `sequences`
+
+**Tables**:
+- `sequences`:
+
+  | id | structures.id | sequence | score |
+  |----|---------------|----------|-------|
+
+  `score` is LASErMPNN's per-design mean log-probability.
+
+- `missing`: | id | removed_by | kind | cause |
+
+**Example**:
+```python
+from biopipelines.lasermpnn import LASErMPNN
+
+# Design the pocket around the bound ligand, everything else fixed
+laser = LASErMPNN(
+    structures=rfdaa,
+    num_sequences=8,
+    temperature=0.1,
+    redesigned=rfdaa.tables.structures.designed,
+    constrain_ala_gly=True,
+)
+```
+
+---
+
 ### LigandMPNN
 
 Designs protein sequences optimized for ligand binding. Specialized version of ProteinMPNN that considers protein-ligand interactions during sequence design.

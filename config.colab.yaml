@@ -55,6 +55,7 @@ folders:
     GEMS: "<data>/GEMS"
     GhostFold: "<data>/ghostfold"
     HBDesigner: "<data>/HBDesigner"
+    LASErMPNN: "<data>/LASErMPNN"
     # Gnina and P2Rank ship executables; kept local since Drive's FUSE mount
     # has no exec bit.
     Gnina: "/content/gnina"
@@ -117,6 +118,7 @@ environments:
   GEMS: "gems"
   Gnina: "gnina"
   HBDesigner: "hbdesigner"
+  LASErMPNN: "lasermpnn"
   Ligand: "biopipelines"
   LigandMPNN: "ligandmpnn_env"
   Load: "biopipelines"

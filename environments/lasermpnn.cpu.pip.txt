@@ -1,0 +1,12 @@
+--find-links https://data.pyg.org/whl/torch-2.8.0+cpu.html
+torch==2.8.0
+torch-scatter==2.1.2
+torch-cluster==1.6.3
+numpy<2.0.0
+scipy
+pandas
+scikit-learn
+h5py
+pydssp
+prody
+tqdm

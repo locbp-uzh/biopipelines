@@ -29,6 +29,7 @@ Design and manipulate sequences.
 - [DNAEncoder](tool/sequence_design.md#dnaencoder) — Codon optimization
 - [Frame2Seq](tool/sequence_design.md#frame2seq) — Fast inverse folding
 - [Fuse](tool/sequence_design.md#fuse) — Fusion proteins with linkers
+- [LASErMPNN](tool/sequence_design.md#lasermpnn) — Ligand-conditioned inverse folding + sidechain packing
 - [LigandMPNN](tool/sequence_design.md#ligandmpnn) — Ligand-aware sequence design
 - [Mutagenesis](tool/sequence_design.md#mutagenesis) — Systematic substitutions
 - [MutationComposer](tool/sequence_design.md#mutationcomposer) — Combinatorial mutants

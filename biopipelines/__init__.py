@@ -28,6 +28,7 @@ from .alphafold import AlphaFold
 from .ligand import Ligand
 from .sequence import Sequence
 from .ligand_mpnn import LigandMPNN
+from .lasermpnn import LASErMPNN
 from .boltz2 import Boltz2
 from .boltzgen import BoltzGen, BoltzGenMerge
 from .compound_library import CompoundLibrary
@@ -150,6 +151,7 @@ __all__ = [
     'Ligand',
     'Sequence',
     'LigandMPNN',
+    'LASErMPNN',
     'Boltz2',
     'BoltzGen',
     'BoltzGenMerge',
