@@ -1196,7 +1196,8 @@ fi
             description="IDs removed by upstream tools (or local failures) with removal reason",
         )
 
-    def generate_missing_propagation(self, *input_sources, missing_csv: Optional[str] = None) -> str:
+    def generate_missing_propagation(self, *input_sources, missing_csv: Optional[str] = None,
+                                     local_missing: Optional[str] = None) -> str:
         """Bash that propagates the union of upstream `missing` manifests.
 
         The single inheritable propagation block: collects every input axis's
@@ -1205,7 +1206,10 @@ fi
         ``tables/missing.csv``. The tool OWNS the resulting file rather than
         pointing downstream at an upstream path, so it survives the upstream
         folder being cleaned or moved. Returns "" when no upstream manifest
-        exists (the tool then declares no `missing` table).
+        exists AND no ``local_missing`` is given (the tool then declares no
+        `missing` table).
+
+        ``local_missing`` is a path to rows this tool produced itself (e.g. a Scripting step's ``outputs.drop()`` ids); it is merged in alongside the upstream manifests, so a tool can excuse ids it filtered internally even with no upstream manifest.
 
         Rows are propagated in the UPSTREAM (input-axis) id space; mapping them
         into this tool's output id space (for products / ``_N`` multipliers /
@@ -1213,18 +1217,19 @@ fi
         excuses missing files — so every tool propagates raw rows uniformly.
         """
         paths = self._collect_upstream_missing_paths(*input_sources)
-        if not paths:
+        if not paths and not local_missing:
             return ""
         out_csv = missing_csv or self.table_path("missing")
         propagate_py = self.pipe_script_path("pipe_propagate_missing.py")
-        folders = " ".join(f'"{os.path.dirname(p)}"' for p in paths)
+        folders = " ".join(f'"{os.path.dirname(p)}"' for p in paths) or '""'
+        local_arg = f' --local-missing "{local_missing}"' if local_missing else ""
         return f"""
 # Propagate `missing` manifest(s) from upstream tools — writes tables/missing.csv.
 echo "Propagating upstream missing manifest(s)"
 python "{propagate_py}" \\
     --upstream-folders {folders} \\
     --output-folder "{self.output_folder}" \\
-    --missing-csv "{out_csv}"
+    --missing-csv "{out_csv}"{local_arg}
 
 """
 

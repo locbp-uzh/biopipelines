@@ -60,6 +60,39 @@ def test_missing_script_raises_listing_candidates(scripts_folder):
     assert os.path.basename(str(scripts_folder)) in msg
 
 
+def _standardized_output(streams):
+    from biopipelines.base_config import StandardizedOutput, StreamContainer
+    o = StandardizedOutput.__new__(StandardizedOutput)
+    o.streams = StreamContainer(streams)
+    return o
+
+
+def _ds(name, n_ids):
+    from biopipelines.datastream import DataStream
+    ids = [f"{name}_{i}" for i in range(n_ids)]
+    return DataStream(name=name, ids=ids, files=[f"{i}.pdb" for i in ids], format="pdb")
+
+
+def test_pick_stream_exact_key_match():
+    s = Scripting.__new__(Scripting)
+    out = _standardized_output({"structures": _ds("structures", 2), "sequences": None})
+    assert s._pick_stream("structures", out).name == "structures"
+
+
+def test_pick_stream_single_stream_fallback():
+    # Key does not match a stream name, but there's exactly one non-empty stream.
+    s = Scripting.__new__(Scripting)
+    out = _standardized_output({"sequences": _ds("sequences", 3), "structures": None})
+    assert s._pick_stream("seqs", out).name == "sequences"
+
+
+def test_pick_stream_ambiguous_raises():
+    s = Scripting.__new__(Scripting)
+    out = _standardized_output({"structures": _ds("structures", 2), "sequences": _ds("sequences", 2)})
+    with pytest.raises(ValueError, match="multiple non-empty streams"):
+        s._pick_stream("nope", out)
+
+
 def test_absolute_path_used_directly(tmp_path, monkeypatch):
     # No scripts folder configured; an absolute path to an existing file works.
     monkeypatch.setattr(ConfigManager, "get_scripts_folder", lambda self: None)

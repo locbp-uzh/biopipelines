@@ -585,27 +585,34 @@ af = AlphaFold(proteins=results)
 
 Runs a user-authored script as a typed, two-phase pipeline step — an escape hatch for one-off glue logic that doesn't justify a full tool wrapper. The script declares its own outputs, so downstream tools consume its streams and tables like any other tool's output. The script implements two functions: `configuration(inputs)` runs at config time and is pure shape-prediction (no disk reads — the input files don't exist yet), returning the output streams/tables with ids derived from the input ids; `execution(inputs, outputs)` runs at execution time in the configured env, against real files.
 
-**The two phases run in different Python environments, so each imports what it needs *inside* its own function, never at module top level.** `configuration()` runs in the pipeline's own Python (the `biopipelines` env, at config time): import `Stream`/`Table` from `biopipelines.scripting_api` there. `execution()` runs later in the env named by `env`: import whatever that env provides (`numpy`, `torch`, a tool package) there. Keeping the top of the script import-free is the rule, not a style — the script's top-level code is executed in *both* phases' environments, so a top-level `import torch` crashes config-time pipeline-build (torch isn't in the `biopipelines` env) and a top-level `from biopipelines...` needlessly couples the execution env to the framework.
+**Keep imports inside the two functions, never at module top level** — the script's top-level code runs in both phases. `configuration()` runs in the pipeline's own Python (the `biopipelines` env, at config time): import `Stream`/`Table` from `biopipelines.scripting_api` there. `execution()` runs later in the env named by `env`: import whatever that env provides (`numpy`, `torch`, a tool package) there. A top-level `import torch` would crash config-time pipeline-build (torch isn't in the `biopipelines` env). `execution()` **may** import biopipelines itself (e.g. `get_mapped_ids`, `DataStream`) when its env carries biopipelines' deps — the default `biopipelines` env does, and a custom env does after `pip install -e ".[scripting]"` (see *Using the biopipelines API* below).
 
 **Environment**: user-specified via `env` (defaults to `biopipelines`). The tool does not create the env — it must already exist.
 
 **Parameters**:
 - `script`: str (required) — A `.py` file defining `configuration(inputs)` and `execution(inputs, outputs)`. A bare filename (`"my_step.py"`) is looked up in the configured scripts folder — `folders.infrastructure.scripts`, default `<biopipelines>/my_scripts` — so a script kept there needs no path. An existing path given as-is (absolute, or relative to the working directory) is used directly and always wins; a missing script raises, naming every place searched. On a cluster the file must be reachable on the runtime host (synced, not just local) — keeping it in the scripts folder, which lives under the repo, gets it synced with everything else.
-- `inputs`: Dict[str, ...] (required) — Maps a name to a `StandardizedOutput`, a `DataStream`, or a table-column reference (`tool.tables.x.col` or `(TableInfo, "col")`). A `StandardizedOutput` resolves to its single non-empty stream; pass an explicit `tool.streams.<name>` if it carries several.
+- `inputs`: Dict[str, ...] (required) — Maps a name to a `StandardizedOutput`, a `DataStream`, a whole table (`tool.tables.x` / a `TableInfo`, giving `.row(id)`/`.rows()`/`.columns`), or a table-column reference (`tool.tables.x.col` or `(TableInfo, "col")`, giving `.value(id)`). A `StandardizedOutput` resolves by preferring an exact match on the input key (`inputs={"structures": tool}` → `tool.streams.structures`), falling back to its single non-empty stream when the key doesn't match a stream name (`inputs={"seqs": seq_tool}` → the lone `sequences` stream). It errors only on a genuine ambiguity — no name match and several non-empty streams — in which case pass an explicit stream (`tool.streams.structures`).
 - `env`: str = None — Conda env the execution phase runs in.
 
 **Streams / Tables**: whatever `configuration()` declares — `Stream(format, ids)` for a stream (file-based when format is `pdb`/`cif`/`sdf`/...; value-based when format is `csv` and rows carry no `file` column), `Table(columns=[...])` for a standalone table.
 
-**Script API** (`from biopipelines.scripting_api import Stream, Table`):
+**Script API** (`from biopipelines.scripting_api import Stream, Table`). `execution()` returns nothing; every output is filled through its `outputs[name]` handle, where `name` is a key the `configuration` dict declared:
 
 | In the script | At config time (`configuration`) | At execution time (`execution`) |
 |---|---|---|
 | `inputs["x"].ids` | declared input ids (lazy/pattern preserved) | full runtime ids |
+| `inputs["x"].name` / `.format` / `.map_table` / `.metadata` | stream metadata (all `None`/empty for table inputs) | same, resolved |
 | `inputs["x"].iterate()` | — | `(id, file_path)` for file streams; `(id, value_dict)` for value streams |
-| `inputs["x"].value(id)` | — | per-id lookup for a table-reference input |
-| `outputs.file("stream", name)` | — | a path under the stream folder to write a per-id file into |
-| `outputs.row("table", mapping)` | — | append a row to a declared standalone table |
-| `return {...}` | a dict of `Stream`/`Table` | a dict of `{stream: rows}` → the stream map_tables |
+| `inputs["x"].value(id)` | — | per-id lookup for a table-column input |
+| `inputs["x"].row(id)` / `.rows()` / `.columns` / `.value(id, col)` | — | whole-table input (passed as `tool.tables.x` / a `TableInfo`) |
+| `outputs["s"].file(id, name)` | — | file stream: allocate a path under the stream folder + record the `{id, file}` row |
+| `outputs["t"].row(mapping)` | — | append one row (must include `id`) to a value stream or a table |
+| `outputs["t"].add(id=, file=, value=, **cols)` | — | append a row with any of file/value/extra columns |
+| `outputs["t"].dataframe(df)` | — | hand over a whole DataFrame as the output's rows |
+| `outputs["t"] = "path.csv"` | — | adopt an existing CSV as the output (copied into place) |
+| `outputs.drop(id, cause="")` | — | mark an id intentionally filtered out (its absent outputs are then excused, not failed) |
+
+`file()` is file-stream-only; `row`/`add`/`dataframe` fill value-based streams and standalone tables alike (both are id-keyed CSVs).
 
 **Example**:
 ```python
@@ -630,15 +637,25 @@ def configuration(inputs):
 
 def execution(inputs, outputs):
     import numpy as np                            # execution-time env (`env=`); import its packages HERE
-    rows = []
     for sid, path in inputs["structures"].iterate():
         positions = inputs["designed"].value(sid)  # per-id from the table reference
-        out = outputs.file("structures", f"{sid}.pdb")
-        ...                                         # write `out`
-        outputs.row("scores", {"id": sid, "rmsd": ...})
-        rows.append({"id": sid, "file": out})
-    return {"structures": rows}                     # -> structures map_table
+        if positions is None:
+            outputs.drop(sid, cause="no designed positions")   # excuse this id downstream
+            continue
+        out = outputs["structures"].file(sid, f"{sid}.pdb")     # path + {id, file} row
+        ...                                                     # write `out`
+        outputs["scores"].row({"id": sid, "rmsd": ...})         # a table row
 ```
+
+**Environment requirements.** The runner (`pipe_scripting.py`) resolves the input streams through the framework before handing them to `execution`, so it imports `pandas` and `biopipelines` itself. Any `env` you name must therefore carry biopipelines' runtime deps — even a script that only touches the `inputs`/`outputs` proxies. The default `biopipelines` env has them. For a custom `env`, install them once into it (this is also what lets `execution` call framework helpers like `get_mapped_ids` / `DataStream` directly):
+
+```bash
+conda activate myenv
+cd <biopipelines-repo>
+pip install -e ".[scripting]"
+```
+
+The `[scripting]` extra pulls biopipelines' full runtime, so both the runner and (optionally) `import biopipelines` in your script work in that env. This install is required for **any** custom `env` — even a proxy-only script — because the runner itself imports the framework; it is not optional based on what the script imports.
 
 ---
 

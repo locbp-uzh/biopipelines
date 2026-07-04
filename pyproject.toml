@@ -25,6 +25,12 @@ test = ["pytest>=7"]
 # Colab base-Python deps: conda-only packages from biopipelines.yaml that have
 # no `openbabel`-named PyPI build. Installed via `pip install -e ".[colab]"`.
 colab = ["openbabel-wheel"]
+# A Scripting step run in a custom `env` needs biopipelines' deps in that env:
+# the runner (pipe_scripting.py) imports the framework to resolve inputs, so the
+# requirement holds even for a proxy-only script — not just when execution()
+# imports biopipelines. `pip install -e ".[scripting]"` in the custom env pulls
+# the full runtime (base deps come with -e .; openbabel matches what tools expect).
+scripting = ["openbabel-wheel"]
 all = ["pytest>=7", "openbabel-wheel"]
 
 [project.scripts]

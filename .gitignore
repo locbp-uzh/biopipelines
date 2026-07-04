@@ -29,7 +29,8 @@ my_pipelines/*
 # Scripting tool scripts folder (user-authored two-phase scripts)
 my_scripts/*
 !my_scripts/README.md
-!my_scripts/template.py
+!my_scripts/count_atoms.py
+!my_scripts/filter_structures.py
 
 # Ligands folder (cached ligand files)
 ligands/*

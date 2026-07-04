@@ -67,30 +67,34 @@ def propagate_missing_table(
     upstream_folders: List[str],
     output_folder: str,
     missing_csv_path: Optional[str] = None,
+    local_missing: Optional[str] = None,
 ) -> List[str]:
     """Merge upstream missing tables (rows as-is) into this tool's missing.csv.
 
-    Reads every upstream missing.csv across ``upstream_folders``, merges them,
-    and de-dupes by id (last wins). Rows stay in the upstream (input-axis) id
-    space; the completion check maps them to output ids when excusing files.
-    Always writes the destination — even empty — so the completion check finds
-    the path it expects.
+    Reads every upstream missing.csv across ``upstream_folders`` plus an optional
+    ``local_missing`` file this tool produced itself, merges them, and de-dupes
+    by id (last wins). Rows stay in the upstream (input-axis) id space; the
+    completion check maps them to output ids when excusing files. Always writes
+    the destination — even empty — so the completion check finds the path it
+    expects.
     """
     columns = ['id', 'removed_by', 'kind', 'cause']
     output_missing_csv = missing_csv_path or os.path.join(output_folder, "missing.csv")
     os.makedirs(os.path.dirname(output_missing_csv), exist_ok=True)
 
-    upstream_csvs = find_upstream_missing_csvs(upstream_folders)
+    source_csvs = find_upstream_missing_csvs(upstream_folders)
+    if local_missing and os.path.exists(local_missing):
+        source_csvs.append(local_missing)
     dfs = []
-    for path in upstream_csvs:
+    for path in source_csvs:
         try:
             df = pd.read_csv(path)
         except Exception as e:
-            print(f"Warning: Could not read upstream missing.csv {path}: {e}")
+            print(f"Warning: Could not read missing.csv {path}: {e}")
             continue
         if not df.empty:
             dfs.append(df)
-            print(f"  Merging {len(df)} upstream missing entries from {path}")
+            print(f"  Merging {len(df)} missing entries from {path}")
 
     if dfs:
         merged = pd.concat(dfs, ignore_index=True)
@@ -115,6 +119,8 @@ if __name__ == "__main__":
                        help="Current tool's output folder")
     parser.add_argument("--missing-csv", default=None,
                        help="Explicit destination for missing.csv")
+    parser.add_argument("--local-missing", default=None,
+                       help="A missing.csv this tool produced itself, merged in alongside upstream")
 
     args = parser.parse_args()
 
@@ -122,6 +128,7 @@ if __name__ == "__main__":
         upstream_folders=args.upstream_folders,
         output_folder=args.output_folder,
         missing_csv_path=args.missing_csv,
+        local_missing=args.local_missing,
     )
 
     if missing_ids:

@@ -33,24 +33,24 @@ except ImportError:
 class _ConfigInput:
     """Config-time view of one input handed to the user's ``configuration``.
 
-    Exposes the declared ids only — no disk access — so the script can derive
-    output ids without reading files that don't exist yet.
+    Exposes the stream's declared metadata — ``ids``, ``name``, ``format``, ``map_table`` path, and ``metadata`` dict (all ``None``/empty for table inputs) — but never touches disk, so the script can derive output ids and validate input shape without reading files that don't exist yet.
     """
 
-    def __init__(self, ids):
+    def __init__(self, ids, name=None, format=None, map_table=None, metadata=None):
         self.ids = list(ids)
+        self.name = name
+        self.format = format
+        self.map_table = map_table
+        self.metadata = metadata or {}
 
 
 class Scripting(BaseConfig):
     """Run a user script as a typed, two-phase pipeline step.
 
     Args:
-        script: Path to a .py file defining ``configuration(inputs)`` and
-            ``execution(inputs, outputs)``.
-        inputs: Dict mapping a name to a StandardizedOutput, DataStream, or a
-            table-column reference (``tool.tables.x.col`` or ``(TableInfo, "col")``).
-        env: Conda env the execution phase runs in. Defaults to the
-            biopipelines env. The tool does not create it.
+        script: Path to a .py file defining ``configuration(inputs)`` and ``execution(inputs, outputs)``.
+        inputs: Dict mapping a name to a StandardizedOutput, DataStream, a whole table (``tool.tables.x`` / a TableInfo), or a table-column reference (``tool.tables.x.col`` or ``(TableInfo, "col")``). A StandardizedOutput prefers an exact key match (``{"structures": tool}`` → ``tool.streams.structures``), else falls back to its single non-empty stream; pass ``tool.streams.<name>`` to disambiguate.
+        env: Conda env the execution phase runs in. Defaults to the biopipelines env. The tool does not create it. The script's ``execution`` may import biopipelines when that env carries biopipelines' deps — the default env does, and a custom env does after ``pip install -e ".[scripting]"``.
 
     Output:
         Streams/tables are whatever the script's ``configuration`` declares.
@@ -69,6 +69,7 @@ echo "=== Scripting ready ==="
 
     inputs_json = Path(lambda self: self.configuration_path("scripting_inputs.json"))
     outputs_json = Path(lambda self: self.configuration_path("scripting_outputs.json"))
+    dropped_csv = Path(lambda self: self.configuration_path("scripting_dropped.csv"))
     runner_py = Path(lambda self: self.pipe_script_path("pipe_scripting.py"))
 
     def __init__(self,
@@ -154,9 +155,12 @@ echo "=== Scripting ready ==="
     def _resolve_input(self, name, obj):
         """Return (kind, payload, stream_or_None) for one input.
 
-        kind="stream": payload is the input JSON path; stream is the DataStream.
-        kind="table":  payload is a TABLE_REFERENCE string; stream is None.
+        kind="stream":     payload is the input JSON path; stream is the DataStream.
+        kind="table":      payload is a TABLE_REFERENCE string (one column); stream is None.
+        kind="table_full": payload is a table CSV path (all columns); stream is None.
         """
+        if isinstance(obj, TableInfo):
+            return "table_full", obj.info.path, None
         if isinstance(obj, TableReference):
             return "table", str(obj), None
         if isinstance(obj, tuple) and len(obj) == 2 and isinstance(obj[1], str):
@@ -171,31 +175,30 @@ echo "=== Scripting ready ==="
             stream = obj
         else:
             raise ValueError(
-                f"input '{name}' must be a StandardizedOutput, DataStream, or table reference, "
-                f"got {type(obj).__name__}"
+                f"input '{name}' must be a StandardizedOutput, DataStream, a whole "
+                f"table (TableInfo / tool.tables.x), or a table-column reference "
+                f"(tool.tables.x.col), got {type(obj).__name__}"
             )
         return "stream", self.configuration_path(f"input_{name}.json"), stream
 
     def _pick_stream(self, name, output: StandardizedOutput) -> DataStream:
-        """Pick a non-empty stream of a StandardizedOutput input.
+        """Pick a stream of a StandardizedOutput input.
 
-        When the input name matches a non-empty stream name, that stream wins — the key disambiguates. Otherwise fall back to the single non-empty stream, erroring only when the choice is genuinely ambiguous."""
-        candidates = []
-        for stream_name, stream in output.streams.items():
-            if stream is not None and len(stream) > 0:
-                if stream_name == name:
-                    return stream
-                candidates.append(stream)
+        An exact match on the input key wins: ``inputs={"structures": tool}`` takes ``tool.streams.structures``. Otherwise, if the output carries exactly one non-empty stream, that stream is used (so ``inputs={"seqs": seq_tool}`` resolves to the lone ``sequences`` stream). Only a genuine ambiguity — no name match and several non-empty streams — raises."""
+        named = output.streams.get(name)
+        if named is not None and len(named) > 0:
+            return named
+        candidates = [(n, s) for n, s in output.streams.items()
+                      if s is not None and len(s) > 0]
         if not candidates:
             raise ValueError(f"input '{name}': StandardizedOutput has no non-empty stream")
         if len(candidates) > 1:
             raise ValueError(
-                f"input '{name}': StandardizedOutput carries multiple streams "
-                f"({[c.name for c in candidates]}); name the input after the "
-                f"desired stream, or pass an explicit stream "
-                f"(e.g. tool.streams.structures)"
+                f"input '{name}': StandardizedOutput carries multiple non-empty streams "
+                f"({[n for n, _ in candidates]}); name the input after the desired stream, "
+                f"or pass an explicit stream (e.g. tool.streams.structures)."
             )
-        return candidates[0]
+        return candidates[0][1]
 
     def _declare_outputs(self):
         """Call the user's configuration() with config-time input proxies."""
@@ -205,9 +208,13 @@ echo "=== Scripting ready ==="
         proxies = {}
         for name, spec in self.input_specs.items():
             if spec["kind"] == "stream":
-                proxies[name] = _ConfigInput(self.input_streams[name].ids)
+                stream = self.input_streams[name]
+                proxies[name] = _ConfigInput(
+                    stream.ids, name=stream.name, format=stream.format,
+                    map_table=stream.map_table, metadata=stream.metadata,
+                )
             else:
-                proxies[name] = _ConfigInput([])  # table inputs expose no ids
+                proxies[name] = _ConfigInput([])  # table inputs expose no stream metadata
         try:
             declared = self._user_module.configuration(proxies)
         except Exception as e:
@@ -252,10 +259,12 @@ python "{self.runner_py}" \\
     --inputs "{self.inputs_json}" \\
     --outputs "{self.outputs_json}"
 """
-        # Excuse upstream-filtered ids: merge any upstream `missing` manifests
-        # into this tool's own tables/missing.csv so the completion check treats
-        # those ids' absent outputs as expected, not failures.
-        script_content += self.generate_missing_propagation(*self._upstream_sources())
+        # Excuse filtered ids: merge upstream `missing` manifests AND the script's
+        # own outputs.drop() rows (scripting_dropped.csv) into tables/missing.csv,
+        # so the completion check treats those ids' absent outputs as expected.
+        script_content += self.generate_missing_propagation(
+            *self._upstream_sources(), local_missing=self.dropped_csv
+        )
         script_content += self.generate_completion_check_footer()
         return script_content
 
@@ -263,6 +272,7 @@ python "{self.runner_py}" \\
         from .scripting_api import Stream as _Stream, Table as _Table
         streams = {}
         tables = {}
+        manifest_meta = {"tool_name": self.TOOL_NAME, "missing_csv": self.dropped_csv}
         for key, val in declared.items():
             if isinstance(val, _Stream):
                 streams[key] = {
@@ -280,7 +290,7 @@ python "{self.runner_py}" \\
                     f"configuration() returned {type(val).__name__} for '{key}'; "
                     f"expected Stream or Table"
                 )
-        return {"streams": streams, "tables": tables}
+        return {"streams": streams, "tables": tables, **manifest_meta}
 
     def get_output_files(self) -> Dict[str, Any]:
         from .scripting_api import Stream as _Stream, Table as _Table
@@ -323,9 +333,8 @@ python "{self.runner_py}" \\
                     f"expected Stream or Table"
                 )
 
-        # Excuse upstream-filtered ids: declare + own a `missing` table whenever
-        # an upstream input carries one, so the completion check treats those
-        # ids' absent outputs as expected. generate_missing_propagation fills it.
-        if self._collect_upstream_missing_paths(*self._upstream_sources()):
-            result["tables"]["missing"] = self.missing_table_info()
+        # Always own a `missing` table: it collects both upstream-filtered ids and
+        # the script's own outputs.drop() rows, so the completion check treats
+        # those ids' absent outputs as expected. generate_missing_propagation fills it.
+        result["tables"]["missing"] = self.missing_table_info()
         return result
