@@ -10,3 +10,9 @@ h5py
 pydssp
 prody
 tqdm
+logomaker
+matplotlib
+seaborn
+plotly
+pykeops
+rdkit

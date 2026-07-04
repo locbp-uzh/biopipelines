@@ -394,13 +394,18 @@ python {self.positions_py} resolve "{self.positions_args_json}"
 """
 
     def _run_options(self) -> str:
-        """run_batch_inference flags shared by every input (no positionals/device)."""
+        """run_batch_inference flags shared by every input (no positionals/device).
+
+        Values are unquoted: the pipe script shlex-splits this string into an
+        argv list for subprocess.run (no shell), so embedding bash quotes here
+        would pass literal quote characters through to the binary.
+        """
         weights = os.path.join(self.repo_dir, "model_weights", MODEL_WEIGHTS[self.model])
         opts = (
-            f'--model_weights_path "{weights}"'
+            f"--model_weights_path {weights}"
             f" --designs_per_batch {self.designs_per_batch}"
             f" --inputs_processed_simultaneously {self.inputs_per_pass}"
-            f' --disabled_residues "{self.disabled_residues}"'
+            f" --disabled_residues {self.disabled_residues}"
             f" --output_fasta"
         )
         if self.temperature is not None:

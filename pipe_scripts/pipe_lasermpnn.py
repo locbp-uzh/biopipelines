@@ -25,6 +25,7 @@ import os
 import re
 import glob
 import json
+import shlex
 import shutil
 import argparse
 import subprocess
@@ -78,6 +79,9 @@ def run_inference(repo_parent, list_txt, out_dir, num_sequences, device, run_opt
     os.makedirs(out_dir, exist_ok=True)
     env = os.environ.copy()
     env["PYTHONPATH"] = repo_parent + os.pathsep + env.get("PYTHONPATH", "")
+    # LASErMPNN imports logomaker/matplotlib at module load; force a headless
+    # backend so Colab's inline backend (exported via MPLBACKEND) can't crash it.
+    env["MPLBACKEND"] = "Agg"
     cmd = (
         [sys.executable, "-m", "LASErMPNN.run_batch_inference",
          list_txt, out_dir, str(num_sequences), "-d", device]
@@ -203,7 +207,7 @@ def main():
     list_txt, stem_to_id = prepare_inputs(entries, prepared_dir, args.positions_json, args.fix_beta)
 
     out_dir = os.path.join(args.exec_root, "designs")
-    run_options = args.run_options.split()
+    run_options = shlex.split(args.run_options)
     if args.fix_beta:
         run_options = run_options + ["--fix_beta"]
     run_inference(args.repo_parent, list_txt, out_dir, args.num_sequences,
