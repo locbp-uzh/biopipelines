@@ -495,7 +495,7 @@ fi
                  ssRNA: Optional[Union[DataStream, StandardizedOutput]] = None,
                  dsRNA: Optional[Union[DataStream, StandardizedOutput]] = None,
                  ligands: Optional[Union[DataStream, StandardizedOutput]] = None,
-                 msas: Optional[StandardizedOutput] = None,
+                 msas: Optional[Union[DataStream, StandardizedOutput]] = None,
                  # Core prediction parameters
                  affinity: bool = True,
                  output_format: str = "pdb",
@@ -535,10 +535,10 @@ fi
             ssRNA: Single-stranded RNA sequences (one chain per sequence)
             dsRNA: Double-stranded RNA sequences (two chains per sequence, reverse complement auto-generated)
             ligands: DataStream or StandardizedOutput with a compounds stream (e.g. Ligand, CompoundLibrary)
-            msas: Precomputed MSAs (StandardizedOutput with an msas table, e.g. from
-                MMseqs2 or a previous Boltz2 run). When provided, the public MSA
-                server is not queried. When omitted, MSAs are generated via the
-                public MSA server.
+            msas: Precomputed MSAs as an msas DataStream or a StandardizedOutput
+                carrying one (e.g. from MMseqs2 or a previous Boltz2 run). When
+                provided, the public MSA server is not queried. When omitted, MSAs
+                are generated via the public MSA server.
             affinity: Whether to calculate binding affinity
             output_format: Output format ("pdb" or "mmcif")
             recycling_steps: Number of recycling steps
@@ -586,6 +586,9 @@ fi
                 missing: id | removed_by | kind | cause
         """
         self.config = config
+
+        if msas is not None and not isinstance(msas, DataStream):
+            msas = msas.streams.msas
         self.msas = msas
 
         # Store raw inputs for combinatorics config generation
@@ -797,26 +800,12 @@ fi
 
     def _supplied_msa_format(self) -> str:
         """Format of the upstream msas stream (csv/a3m); defaults to csv."""
-        try:
-            return self.msas.streams.msas.format or "csv"
-        except Exception:
-            return "csv"
+        return (self.msas.format if self.msas else None) or "csv"
 
     def _get_msa_table_flag(self) -> str:
         """Get the MSA table flag for the config generator."""
-        if not self.msas:
-            return ""
-
-        if hasattr(self.msas, 'tables'):
-            if hasattr(self.msas.tables, '_tables') and 'msas' in self.msas.tables._tables:
-                msa_table_path = self.msas.tables._tables['msas'].info.path
-                return f'--msa-table "{msa_table_path}"'
-            elif hasattr(self.msas.tables, 'msas'):
-                msa_table = self.msas.tables.msas
-                if hasattr(msa_table, 'info'):
-                    return f'--msa-table "{msa_table.info.path}"'
-
-        return ""
+        path = self.msas.map_table if self.msas and self.msas.map_table else ""
+        return f'--msa-table "{path}"' if path else ""
 
     def generate_script(self, script_path: str) -> str:
         """Generate bash script for Boltz2 execution."""
@@ -943,16 +932,7 @@ mkdir -p {self.config_files_dir}
         if not self.msas:
             return ""
 
-        # Get MSA table path from msas input
-        msa_table_path = None
-        if hasattr(self.msas, 'tables'):
-            if hasattr(self.msas.tables, '_tables') and 'msas' in self.msas.tables._tables:
-                msa_table_path = self.msas.tables._tables['msas'].info.path
-            elif hasattr(self.msas.tables, 'msas'):
-                msa_table = self.msas.tables.msas
-                if hasattr(msa_table, 'info'):
-                    msa_table_path = msa_table.info.path
-
+        msa_table_path = self.msas.map_table if self.msas and self.msas.map_table else ""
         if msa_table_path:
             return f"""
 echo "Recycling MSAs from previous prediction"
