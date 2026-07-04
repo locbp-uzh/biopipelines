@@ -304,6 +304,18 @@ Gnina:
     note: >-
       Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
+LASErMPNN:
+  files:
+  - biopipelines/lasermpnn.py
+  - pipe_scripts/pipe_lasermpnn.py
+  - pipe_scripts/pipe_lasermpnn_bfactor.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-07-04'
+    note: >-
+      Initial LASErMPNN wrapper: ligand-conditioned inverse folding with all-atom sidechain packing (polizzilab/LASErMPNN). Ligand read from input HETATM; fixed/redesigned positions stamped into B-factors and run with --fix_beta; full-atom designed complexes plus a content-bearing sequences stream. Colab-verified on T4.
+
 Ligand:
   files:
   - biopipelines/ligand.py

@@ -141,6 +141,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
+  <td><sub><b>LASErMPNN</b><br>Ligand-conditioned inverse folding with all-atom sidechain packing.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/polizzilab/LASErMPNN"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC-2C3E50?style=flat-square&logo=linux&logoColor=white" alt="HPC ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+</tr>
+<tr>
   <td><sub><b>LigandMPNN</b><br>Design sequences around bound ligands, nucleic acids, and metal ions.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/dauparas/LigandMPNN"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2023.12.22.573103v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
