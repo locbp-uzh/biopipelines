@@ -111,6 +111,7 @@ environments:
   DSSP: "dssp"
   DynamicBind: "dynamicbind"
   ESMFold: "esmfold"
+  ESMFold2: "esmfold2"
   ExtractMetrics: "biopipelines"
   FPocket: "fpocket"
   Frame2Seq: "frame2seq"

@@ -324,6 +324,53 @@ esm = ESMFold(sequences=seqs)
 
 ---
 
+### ESMFold2
+
+Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antibody scFvs as multi-chain proteins) from sequence, building on ESMC representations through a recurrent folding stack and a diffusion module. Folds MSA-free in the single-sequence regime, or recycles a precomputed MSA per protein chain. Reports per-atom pLDDT, pTM, interface pTM (ipTM), and optionally PAE. Inference-time scaling is a first-class control: more folding loops, diffusion samples, or seeds raise quality, with best-of-N selection by ipTM (complex) / pLDDT (monomer).
+
+**References**: https://github.com/evolutionaryscale/esm — "Language Modeling Materializes a World Model of Protein Biology" (bioRxiv 2026). MIT-licensed; weights `biohub/ESMFold2` on HuggingFace.
+
+**Resources**: GPU, large memory (built on ESMC-scale representations); set e.g. `memory="64GB"` and an explicit `gpu="A100"` / `gpu="H100"` rather than `gpu="any"`.
+
+**Environment**: `esmfold2`
+
+**Installation**: `ESMFold2.install()` creates the env and pip-installs the `esm` package (which pulls the transformers fork carrying the ESMFold2 model). Verifies by importing `ESMFold2Model`.
+
+**Parameters**:
+- `proteins`: DataStream | StandardizedOutput = None — Protein sequences.
+- `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: DataStream | StandardizedOutput = None — Nucleic-acid sequences (double-stranded axes add the reverse-complement chain automatically).
+- `ligands`: DataStream | StandardizedOutput = None — Compounds stream (`Ligand` / `CompoundLibrary`); folded by CCD code (SMILES ligands supported too).
+- `msas`: StandardizedOutput = None — Precomputed MSAs to recycle per protein chain (e.g. from MMseqs2 or a previous run). Omit for single-sequence folding.
+- `num_loops`: int = 10 — Recurrent folding loops (inference-time scaling).
+- `num_sampling_steps`: int = 100 — Diffusion sampling steps.
+- `num_diffusion_samples`: int = 1 — Diffusion samples per seed.
+- `num_seeds`: int = 1 — Independent seeds; the best by ipTM (complex) / pLDDT (monomer) is kept.
+- `msa_max_depth`: int = 1024 — MSA subsampling depth per loop.
+- `include_pae`: bool = False — Also predict and tabulate PAE (adds `max_pae` to the confidence table).
+- `top_only`: bool = True — Keep only the best sample per complex. When False, surface every diffusion sample as `<id>_1..N` (pair with `num_diffusion_samples=N`).
+- `model_name`: str = "biohub/ESMFold2" — HuggingFace checkpoint id (e.g. a Fast variant).
+
+**Streams**: `structures` (mmCIF), `compounds` (ligand passthrough when ligands are folded)
+
+**Tables**:
+- `structures`: | id | file | *(+ {axis}.id provenance)* |
+- `confidence`: | id | file | plddt | ptm | iptm | *(max_pae if `include_pae`)* |
+
+**Example**:
+```python
+from biopipelines.esmfold2 import ESMFold2
+from biopipelines.combinatorics import Each
+
+# Fold each designed binder against a fixed receptor, 4 seeds, keep best by ipTM
+rec = Sequence(["MIEIKDKQLTGLRFIDLFAGLGGFRLALES..."], ids=["EGFR"])
+cplx = ESMFold2(proteins=Each(rec, binders), num_seeds=4)
+
+# Protein + ligand complex with recycled MSAs and PAE
+holo = ESMFold2(proteins=rec, ligands=Ligand("ATP"), msas=prev_run, include_pae=True)
+```
+
+---
+
 ### Gnina
 
 Molecular docking and pose scoring with a CNN. Combines AutoDock Vina search with a convolutional neural network for more accurate binding pose prediction. Supports multi-run docking with statistical analysis across independent runs, optional conformer generation, and pose consistency analysis.

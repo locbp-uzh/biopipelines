@@ -60,6 +60,7 @@ from .neuralplexer import NeuralPLexer
 from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
 from .esmfold import ESMFold
+from .esmfold2 import ESMFold2
 from .uniprot import UniProt
 from .rdkit_descriptors import RDKit
 from .openbabel import OpenBabel
@@ -186,6 +187,7 @@ __all__ = [
     'PoseBustersTool',
     'ADMETAI',
     'ESMFold',
+    'ESMFold2',
     'UniProt',
     'RDKit',
     'OpenBabel',

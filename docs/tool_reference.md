@@ -48,6 +48,7 @@ Predict protein and complex structures, and dock ligands.
 - [DiffDock](tool/structure_prediction.md#diffdock) — Blind diffusion docking
 - [DynamicBind](tool/structure_prediction.md#dynamicbind) — Flexible-backbone docking
 - [ESMFold](tool/structure_prediction.md#esmfold) — Single-sequence prediction (no MSA)
+- [ESMFold2](tool/structure_prediction.md#esmfold2) — All-atom complex prediction (proteins/NA/ligands), inference-time scaling
 - [Gnina](tool/structure_prediction.md#gnina) — Docking or no-search pose scoring (score/minimize) with CNN
 - [NeuralPLexer](tool/structure_prediction.md#neuralplexer) — Protein–ligand complex prediction
 - [PLACER](tool/structure_prediction.md#placer) — Ligand-pose ensemble in a bound pocket

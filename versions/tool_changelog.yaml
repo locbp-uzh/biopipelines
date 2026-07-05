@@ -246,6 +246,18 @@ ESMFold:
     note: >-
       Container-mode execution: the heavy binary now runs inside the configured .sif via container_prefix() when a container image is set, or in the host env otherwise; host-side orchestration stays in the activated env.
 
+ESMFold2:
+  files:
+  - biopipelines/esmfold2.py
+  - pipe_scripts/pipe_esmfold2_inference.py
+  - pipe_scripts/pipe_esmfold2_postprocessing.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-07-05'
+    note: >-
+      Initial ESMFold2 wrapper: all-atom biomolecular complex prediction (EvolutionaryScale, github.com/evolutionaryscale/esm). Folds proteins / ssDNA / dsDNA / ssRNA / dsRNA / ligands with Bundle/Each combinatorics, per-protein-chain a3m MSA recycling, and inference-time scaling (num_loops / num_diffusion_samples / num_seeds, best-of-N by ipTM/pLDDT). Emits an mmCIF structures stream and a confidence table (plddt, ptm, iptm, optional max_pae). Cluster and Colab share one code path; Colab-verified on A100 across the full usage matrix.
+
 ExtractMetrics:
   files:
   - biopipelines/extract_metrics.py
