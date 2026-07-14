@@ -42,7 +42,7 @@ try:
     from .datastream import DataStream
 except ImportError:
     import sys
-    sys.path.insert(0, os.path.dirname(__file__))
+    sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput
     from file_paths import Path
     from datastream import DataStream
@@ -85,7 +85,7 @@ class Consensus(BaseConfig):
     """
 
     TOOL_NAME = "Consensus"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

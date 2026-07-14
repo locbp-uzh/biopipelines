@@ -208,7 +208,7 @@ def main():
 
     step_id = step_id_from_table_path(args.missing_csv)
     missing_rows = [
-        {"id": sid, "removed_by": step_id, "kind": "no_prediction",
+        {"id": sid, "removed_by": step_id, "kind": "failure",
          "cause": "no solubility prediction returned"}
         for sid, _ in pairs if sid not in scored_ids
     ]

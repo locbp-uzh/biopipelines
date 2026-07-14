@@ -213,3 +213,154 @@ def write_ligand_sdf(src_path: str, dst_sdf: str, smiles: str = None) -> None:
     writer = Chem.SDWriter(dst_sdf)
     writer.write(mol)
     writer.close()
+
+
+def posed_ligand_mol(coord_path: str, smiles: str = None):
+    """Read a posed ligand from any supported coordinate format and return a
+    sanitized, H-complete RDKit mol keeping its coordinates. Extends
+    templated_ligand_mol to sdf/mol (which already carry bond orders) and adds
+    the hydrogens a force field needs, placed on the existing heavy-atom frame.
+    """
+    from rdkit import Chem
+
+    ext = os.path.splitext(coord_path)[1].lower()
+    if ext in (".sdf", ".mol"):
+        mol = Chem.MolFromMolFile(coord_path, removeHs=False)
+        if mol is None:
+            raise RuntimeError(f"RDKit could not read ligand {coord_path}")
+        if smiles:
+            from rdkit.Chem import AllChem
+            template = Chem.MolFromSmiles(smiles)
+            if template is None:
+                raise ValueError(f"RDKit failed to parse template SMILES: {smiles!r}")
+            mol = AllChem.AssignBondOrdersFromTemplate(template, mol)
+    else:
+        mol = templated_ligand_mol(coord_path, smiles)
+
+    return Chem.AddHs(mol, addCoords=True)
+
+
+# The rotatable-bond definition used to pick which torsions to restrain.
+_ROTATABLE_SMARTS = "[!$(*#*)&!D1]-&!@[!$(*#*)&!D1]"
+
+
+def _rotatable_bonds(mol):
+    from rdkit import Chem
+    patt = Chem.MolFromSmarts(_ROTATABLE_SMARTS)
+    return [tuple(m) for m in mol.GetSubstructMatches(patt)]
+
+
+def _named_bonds(mol, atom_name_pairs):
+    """Resolve (atom_name, atom_name) pairs against the mol's PDB atom names."""
+    by_name = {}
+    for atom in mol.GetAtoms():
+        info = atom.GetPDBResidueInfo()
+        if info is not None:
+            by_name.setdefault(info.GetName().strip(), atom.GetIdx())
+
+    bonds = []
+    for a_name, b_name in atom_name_pairs:
+        if a_name not in by_name or b_name not in by_name:
+            raise ValueError(
+                f"restrain_bonds atom name not found in structure: {a_name!r}-{b_name!r} "
+                f"(available: {sorted(by_name)})")
+        i, j = by_name[a_name], by_name[b_name]
+        if mol.GetBondBetweenAtoms(i, j) is None:
+            raise ValueError(f"restrain_bonds pair {a_name!r}-{b_name!r} is not a bond")
+        bonds.append((i, j))
+    return bonds
+
+
+def _torsion_for_bond(mol, i, j):
+    """Pick a heavy-atom torsion (h, i, j, k) spanning the bond i-j."""
+    def _neighbor(center, exclude):
+        cands = [n.GetIdx() for n in mol.GetAtomWithIdx(center).GetNeighbors()
+                 if n.GetIdx() != exclude and n.GetAtomicNum() > 1]
+        if not cands:
+            cands = [n.GetIdx() for n in mol.GetAtomWithIdx(center).GetNeighbors()
+                     if n.GetIdx() != exclude]
+        return cands[0] if cands else None
+
+    h = _neighbor(i, j)
+    k = _neighbor(j, i)
+    if h is None or k is None:
+        return None
+    return (h, i, j, k)
+
+
+def _force_field(mol, ff: str):
+    """Build a force field for `mol`, returning (ff_object_factory, engine_name).
+
+    The factory is called to (re)build a field on the same mol — needed because a
+    restrained minimisation must be scored on a field WITHOUT the restraint term.
+    """
+    from rdkit.Chem import AllChem
+
+    if ff in ("auto", "mmff"):
+        props = AllChem.MMFFGetMoleculeProperties(mol)
+        if props is not None:
+            return (lambda m: AllChem.MMFFGetMoleculeForceField(m, AllChem.MMFFGetMoleculeProperties(m)),
+                    "MMFF")
+        if ff == "mmff":
+            raise RuntimeError("MMFF cannot type this molecule (MMFFGetMoleculeProperties returned None)")
+
+    field = AllChem.UFFGetMoleculeForceField(mol)
+    if field is None:
+        raise RuntimeError("UFF cannot type this molecule")
+    return (lambda m: AllChem.UFFGetMoleculeForceField(m), "UFF")
+
+
+def conformer_strain(mol, restrain_bonds=None, ff: str = "auto", max_iters: int = 2000):
+    """Torsional strain of a posed conformer, in kcal/mol.
+
+    The reference state is a TORSION-RESTRAINED minimum, not the pose itself.
+    Predicted/docked coordinates carry bond lengths and angles that differ from
+    force-field ideals; scoring the raw pose charges every ligand the same large
+    constant for that mismatch (tens of kcal/mol) and buries the conformational
+    signal. Restraining the rotatable torsions at their posed values lets bonds
+    and angles relax while the conformation is held, so the difference against a
+    free local minimisation from the same coordinates isolates torsional strain.
+    The relaxed reference is deliberately the NEAREST local minimum — a global
+    conformer search would add a constant bulk offset to every pose.
+
+    Returns (e_pose, e_relaxed, strain, ff_engine).
+    """
+    from rdkit import Chem
+    from rdkit.Chem import rdMolTransforms
+
+    make_ff, engine = _force_field(mol, ff)
+
+    bonds = _named_bonds(mol, restrain_bonds) if restrain_bonds else _rotatable_bonds(mol)
+
+    restrained = Chem.Mol(mol)
+    field = make_ff(restrained)
+    conf = restrained.GetConformer()
+    for i, j in bonds:
+        torsion = _torsion_for_bond(restrained, i, j)
+        if torsion is None:
+            continue
+        angle = rdMolTransforms.GetDihedralDeg(conf, *torsion)
+        if engine == "MMFF":
+            field.MMFFAddTorsionConstraint(*torsion, False, angle, angle, 1000.0)
+        else:
+            field.UFFAddTorsionConstraint(*torsion, False, angle, angle, 1000.0)
+    _minimize(field, max_iters, "restrained")
+    # Score without the restraint term: rebuild a clean field on the minimised mol.
+    e_pose = make_ff(restrained).CalcEnergy()
+
+    relaxed = Chem.Mol(mol)
+    relaxed_field = make_ff(relaxed)
+    _minimize(relaxed_field, max_iters, "free")
+    e_relaxed = relaxed_field.CalcEnergy()
+
+    return float(e_pose), float(e_relaxed), float(e_pose - e_relaxed), engine
+
+
+def _minimize(field, max_iters: int, which: str) -> None:
+    """Minimize to convergence. RDKit returns non-zero when it hits max_iters, and the
+    energy at that point is not a minimum — so the difference of the two would not be a
+    strain. Raise rather than emit an unreliable score."""
+    if field.Minimize(maxIts=max_iters) != 0:
+        raise RuntimeError(
+            f"{which} minimisation did not converge in {max_iters} iterations; "
+            f"strain would be unreliable (raise max_iters if the molecule is large)")

@@ -154,8 +154,12 @@ Consensus:
   files:
   - biopipelines/consensus.py
   - pipe_scripts/pipe_consensus.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-07-09'
+    note: >-
+      Out-of-env import fallback uses sys.path.append instead of sys.path.insert(0, ...), matching every other wrapper; no behaviour change in package-import mode.
 
 Contacts:
   files:
@@ -239,8 +243,12 @@ ESMFold:
   - biopipelines/esmfold.py
   - pipe_scripts/pipe_esmfold_inference.py
   - pipe_scripts/pipe_esmfold_postprocessing.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-07-09'
+    note: >-
+      Out-of-env import fallback uses sys.path.append instead of sys.path.insert(0, ...), matching every other wrapper; no behaviour change in package-import mode.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -490,8 +498,12 @@ PLM_Sol:
   files:
   - biopipelines/plm_sol.py
   - pipe_scripts/pipe_plm_sol.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-07-08'
+    note: >-
+      Records ids with no solubility prediction as kind="failure" (was the non-standard "no_prediction", which the completion check does not recognize) so their absent output is correctly flagged; reason stays in the cause column.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -596,8 +608,12 @@ RDKit:
   files:
   - biopipelines/rdkit_descriptors.py
   - pipe_scripts/pipe_rdkit_descriptors.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-07-14'
+    note: >-
+      Adds an optional structures= input scoring each posed ligand's torsional strain against a torsion-restrained reference state, emitted as a new `strain` table (id | smiles | e_pose | e_relaxed | strain | ff_engine). The bond-order template comes from smiles= or the compounds stream, whose id is matched to the pose id through the structures map's compounds.id provenance. A minimisation that fails to converge raises instead of emitting an unreliable score.
 
 ReMap:
   files:
@@ -689,8 +705,12 @@ Selection:
   files:
   - biopipelines/selection.py
   - pipe_scripts/pipe_selection.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-07-09'
+    note: >-
+      Out-of-env import fallback uses sys.path.append instead of sys.path.insert(0, ...), matching every other wrapper; no behaviour change in package-import mode.
 
 Sequence:
   files:

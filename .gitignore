@@ -61,6 +61,7 @@ site/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 docs/.claude/
+CLAUDE.md
 
 # LLM workflow — user-local artefacts
 llm/resources.md

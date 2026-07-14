@@ -44,7 +44,7 @@ try:
     from .biopipelines_io import TableReference
 except ImportError:
     import sys
-    sys.path.insert(0, os.path.dirname(__file__))
+    sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
@@ -136,7 +136,7 @@ class Selection(BaseConfig):
     """
 
     TOOL_NAME = "Selection"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

@@ -293,6 +293,53 @@ class BaseConfig(ABC):
         )
 
     @classmethod
+    def _container_pull_block(cls, folders: Dict[str, str], force_reinstall: bool = False) -> str:
+        """Bash that pulls the tool's container image to the configured path, if a container is configured.
+
+        Returns "" (nothing to pull) unless BOTH sides are present: a DESTINATION ``.sif`` path configured for this tool (``container:<TOOL_NAME>`` in folders) AND a SOURCE for ``cls.TOOL_NAME`` in ``environments/_containers.yaml``. Two source forms are supported: a registry URI (``docker://...``), fetched with ``<executor> pull``; or a direct ``http(s)://`` link to a ``.sif``, fetched with ``wget`` (it is already an image, nothing to convert). Skips when the destination exists unless ``force_reinstall``. A container tool calls this from its ``_install_script`` alongside (or instead of) the conda-env block; the same destination path then drives execution via ``container_prefix()``.
+        """
+        image = folders.get(f"container:{cls.TOOL_NAME}")
+        if not image:
+            return ""
+        executor = ConfigManager().get_container_executor()
+        if executor in (None, "none", ""):
+            return ""
+        source = cls._container_source(folders)
+        if not source:
+            return f'echo "WARNING: {cls.TOOL_NAME} has a container path configured but no source in environments/_containers.yaml; cannot pull."\n'
+        # A registry URI is converted by the executor; a plain http(s) .sif is already an image — just fetch it.
+        # `pull` refuses to overwrite an existing file, so force_reinstall needs --force (wget -O already overwrites).
+        if source.startswith(("http://", "https://")):
+            fetch = f'wget -O "{image}" "{source}"\n'
+        else:
+            force_flag = "--force " if force_reinstall else ""
+            fetch = f'{executor} pull {force_flag}"{image}" "{source}"\n'
+        pull = f'mkdir -p "$(dirname "{image}")"\n{fetch}'
+        if force_reinstall:
+            body = pull
+        else:
+            body = (
+                f'if [ -f "{image}" ]; then\n'
+                f'    echo "Container image already present: {image}"\n'
+                f'else\n'
+                + "".join(f"    {line}\n" for line in pull.splitlines())
+                + 'fi\n'
+            )
+        return f'echo "=== Pulling {cls.TOOL_NAME} container image ==="\n{body}'
+
+    @classmethod
+    def _container_source(cls, folders: Dict[str, str]) -> Optional[str]:
+        """The pull source URI for this tool from environments/_containers.yaml (keyed by TOOL_NAME), or None."""
+        biopipelines = folders.get("biopipelines", "")
+        path = os.path.join(biopipelines, "environments", "_containers.yaml")
+        if not os.path.isfile(path):
+            return None
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        return data.get(cls.TOOL_NAME)
+
+    @classmethod
     def install(cls, force_reinstall: bool = False, **kwargs):
         """Add an installation step for this tool to the active pipeline.
 

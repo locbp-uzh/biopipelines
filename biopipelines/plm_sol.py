@@ -55,7 +55,7 @@ class PLM_Sol(BaseConfig):
     """
 
     TOOL_NAME = "PLM_Sol"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     # ------------------------------------------------------------------
     # Install

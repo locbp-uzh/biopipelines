@@ -24,7 +24,7 @@ try:
     from .datastream import DataStream
 except ImportError:
     import sys
-    sys.path.insert(0, os.path.dirname(__file__))
+    sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
@@ -70,7 +70,7 @@ class ESMFold(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

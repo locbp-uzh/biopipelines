@@ -56,6 +56,11 @@ minimum to understand and use the codebase.
 
 ### Order of operations for a new tool
 
+**Further readings**:
+- biopipelines/_TEMPLATE.py
+- biopipelines/_TEMPLATE_CHECKLIST.md
+- pipe_scripts/_pipe_template.py
+
 1. **Settle the branch decision first** — see "Branch and PR
    conventions" below. Default to proposing a dedicated `tool-<name>`
    branch; do not touch any file until the user has chosen.

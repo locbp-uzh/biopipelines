@@ -224,8 +224,17 @@ environments:
 containers:
   PLIP: "<containers>/plip_3.0.0.simg"
   # RFdiffusion2 ships its own Apptainer image (downloaded by setup.py during
-  # install). Point this at the .sif under the repo's rf_diffusion/exec/.
+  # install). This already points at the .sif under the repo's directory.
   RFdiffusion2: "<RFdiffusion2>/rf_diffusion/exec/bakerlab_rf_diffusion_aa.sif"
+  # Container-ready tools (their generated command already threads container_prefix()).
+  # Uncomment a DESTINATION line to:
+  # - run that tool from a .sif instead of its conda env
+  # - pull the image from the SOURCE in environments/_containers.yaml when installing the tool. 
+  # Gnina: "<containers>/gnina.sif"
+  # RFdiffusion: "<containers>/rfdiffusion.sif"
+  # ProteinMPNN: "<containers>/proteinmpnn.sif"
+  # LigandMPNN: "<containers>/ligandmpnn.sif"
+  # DiffDock: "<containers>/diffdock.sif"
 tool_overrides:
   gnina:
     modules:
@@ -233,16 +242,10 @@ tool_overrides:
     - "cudnn/9.8.0.87-12"
     ld_library_path: "/apps/u24/opt/x86_64_v3/cuda-12.6.3-ok2c7hqa5kefkh3iyolgxrajfpepvh6h/targets/x86_64-linux/lib"
   mmseqs2server:
-    # Which MMseqs2 server a client auto-starts when none is running: "cpu"
-    # (default) runs colabfold_search on a large-RAM CPU node with the DBs
-    # resident in RAM; "gpu" uses the GPU-padded DBs + gpuserver. A server of
-    # either mode that is already up is reused regardless of this setting.
+    # Which MMseqs2 server a client auto-starts when none is running: "cpu" (GPU not implemented)
     mode: "cpu"
-    # Size of the server pool the auto-start launches (default 1). The single
-    # client that wins the submit lock submits this many identical server jobs;
-    # they all drain the one shared queue (each query is claimed atomically, so
-    # no two servers process the same one). >1 trades cluster allocation for
-    # throughput under many concurrent queries. The user can also launch extra
+    # Size of the server pool the auto-start launches (default 1). 
+    # The user can also launch extra
     # servers manually at any time.
     num_servers: 1
 
