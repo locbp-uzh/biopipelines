@@ -1,0 +1,49 @@
+# BioPipelines — generic single-node GPU container
+# Builds an image that can run any BioPipelines tool on-the-fly on one GPU node.
+# Tested pattern (Modal A100); the same recipe works on RunPod / Vast / plain Docker.
+#
+# Build:  docker build -f Dockerfile.container -t biopipelines .
+# Run:    docker run --gpus all -v /host/persist:/workspace \
+#             -e BIOPIPELINES_CONFIG_VARIANT=container \
+#             -e BIOPIPELINES_OTF=1 \
+#             -e BIOPIPELINES_LOCAL_OUTPUT=0 \
+#             biopipelines bp-warm Boltz2
+#
+# Mount a PERSISTENT volume at /workspace (matches config.container.yaml `root:`)
+# so the per-tool micromamba envs and model weights survive between runs.
+
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# build-essential/gcc are REQUIRED: several tools (Boltz-2 via Triton, cuda ops)
+# JIT-compile a CUDA/C helper at import and fail without a C compiler on PATH.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git wget bzip2 ca-certificates build-essential gcc g++ \
+        python3.11 python3.11-venv python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CC=gcc CXX=g++
+
+# micromamba: the env_manager the container/colab/cluster configs expect.
+RUN wget -qO- https://micro.mamba.pm/api/micromamba/linux-64/latest \
+        | tar -xvj -C /usr/local bin/micromamba
+ENV MAMBA_ROOT_PREFIX=/workspace/micromamba
+
+# BioPipelines itself. `.[colab]` pulls the micromamba-based extras
+# (openbabel-wheel etc.) used by the non-SLURM backends.
+WORKDIR /opt
+RUN git clone --depth 1 https://github.com/locbp-uzh/biopipelines.git
+WORKDIR /opt/biopipelines
+RUN pip install --no-cache-dir -e '.[colab]'
+
+# Default to the generic single-node container behavior.
+ENV BIOPIPELINES_CONFIG_VARIANT=container \
+    BIOPIPELINES_OTF=1 \
+    BIOPIPELINES_LOCAL_OUTPUT=0 \
+    MPLBACKEND=Agg
+
+# First run should warm the tools you need onto the /workspace mount, e.g.:
+#   bp-warm Boltz2 ProteinMPNN
+# then run pipelines with:  python my_pipeline.py
+CMD ["bash"]
