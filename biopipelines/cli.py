@@ -110,6 +110,19 @@ def run():
     _run_script("run")
 
 
+def warm():
+    """Entry point for bp-warm.
+
+    Install-only warm-up: opens a Pipeline context and calls Tool.install()
+    for each named tool so per-tool environments and weights are built once
+    onto persistent storage. Forces on-the-fly so installs execute inline.
+    """
+    import os
+    os.environ.setdefault("BIOPIPELINES_OTF", "1")
+    from biopipelines.warm import main
+    main()
+
+
 def _resolve_folders():
     """Resolve all folder paths from config.yaml without creating directories."""
     from .config_manager import ConfigManager
