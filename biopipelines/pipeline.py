@@ -132,12 +132,20 @@ class Pipeline:
         self.on_the_fly = on_the_fly
 
         if local_output is None:
-            # Auto-enable local output for interactive/notebook runs, which usually
-            # lack shared storage. EXCEPT on Colab: there the config's
-            # biopipelines_output is deliberately repointed at mounted Drive for
-            # persistence, and forcing local_output would overwrite it with the
-            # ephemeral cwd/outputs (lost on runtime recycle). Let the config win.
-            local_output = on_the_fly and ConfigManager().get_scheduler() != "colab"
+            # Explicit override wins: single-node container backends (Modal, RunPod,
+            # a plain Docker GPU box, ...) repoint biopipelines_output at a persistent
+            # mount and must set BIOPIPELINES_LOCAL_OUTPUT=0 so results are NOT
+            # diverted to the ephemeral cwd/outputs and lost on teardown.
+            env_lo = os.environ.get("BIOPIPELINES_LOCAL_OUTPUT")
+            if env_lo is not None:
+                local_output = env_lo == "1"
+            else:
+                # Auto-enable local output for interactive/notebook runs, which usually
+                # lack shared storage. EXCEPT on Colab: there the config's
+                # biopipelines_output is deliberately repointed at mounted Drive for
+                # persistence, and forcing local_output would overwrite it with the
+                # ephemeral cwd/outputs (lost on runtime recycle). Let the config win.
+                local_output = on_the_fly and ConfigManager().get_scheduler() != "colab"
         self.local_output = local_output
 
         self.folder_manager = FolderManager(project, job, local_output=local_output)

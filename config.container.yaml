@@ -1,0 +1,198 @@
+# BioPipelines Configuration — generic single-node container variant
+# ---------------------------------------------------------------------------
+# For running BioPipelines inside ONE GPU container/VM with a persistent mount:
+# Modal, RunPod, Vast.ai, a plain Docker GPU box, an interactive Slurm GPU
+# shell — anything that is a single node with a writable persistent directory
+# and NO batch scheduler.
+#
+# Selection:  export BIOPIPELINES_CONFIG_VARIANT=container   (or Pipeline(config="container"))
+# Execution:  export BIOPIPELINES_OTF=1                      (run tools inline, no submission)
+# Output:     export BIOPIPELINES_LOCAL_OUTPUT=0             (honor biopipelines_output below,
+#                                                             NOT the ephemeral cwd/outputs)
+#
+# >>> THE ONLY LINE YOU NORMALLY EDIT IS `root:` BELOW. <<<
+# Point it at your persistent mount; every other path derives from it via <root>.
+# Put the micromamba env root and the model-weight caches under <root> too, so the
+# first job pays the install/download cost and every later job reuses it.
+# ---------------------------------------------------------------------------
+
+machine:
+  username: ""
+  email: ""
+
+  # Isolated micromamba env per tool (same model as cluster/colab).
+  env_manager:
+    name: "micromamba"
+    init:
+    - 'eval "$(micromamba shell hook --shell bash)"'
+
+  # No batch scheduler: tools execute inline as the pipeline runs (with OTF=1).
+  scheduler:
+    name: "none"
+    init: []
+    modules: []
+
+  container_executor: "none"
+
+folders:
+  base:
+    # ▼▼▼ EDIT THIS ONE LINE to your persistent mount. Everything derives from it. ▼▼▼
+    root: "/workspace"
+    # ▲▲▲
+    home: "<root>"
+    data: "<root>/data"
+    scratch: "<root>/scratch"
+    biopipelines: "<cwd>"
+    biopipelines_output: "<root>/outputs"
+
+  infrastructure:
+    pipe_scripts: "<biopipelines>/pipe_scripts"
+    scripts: "<biopipelines>/my_scripts"
+    pdbs: "<biopipelines>/pdbs"
+    ligands: "<biopipelines>/ligands"
+    sequences: "<biopipelines>/sequences"
+    tables: "<biopipelines>/tables"
+    cache: "<root>/cache"
+    containers: "<root>/containers"
+
+  repositories:
+    AF2BIND: "<data>/af2bind"
+    AlphaFold: "<data>/localcolabfold"
+    Boltz: "<data>/boltz"
+    BoltzGen: "<data>/boltzgen"
+    DiffDock: "<data>/DiffDock"
+    DynamicBind: "<data>/DynamicBind"
+    GEMS: "<data>/GEMS"
+    GhostFold: "<data>/ghostfold"
+    HBDesigner: "<data>/HBDesigner"
+    LASErMPNN: "<data>/LASErMPNN"
+    Gnina: "<root>/gnina"
+    LigandMPNN: "<data>/LigandMPNN"
+    MMseqs2: "<data>/mmseqs"
+    ModelForge: "<data>/modelforge"
+    NeuralPLexer: "<data>/NeuralPLexer"
+    P2Rank: "<root>/p2rank"
+    PLACER: "<data>/PLACER"
+    PLM_Sol: "<data>/PLM_Sol"
+    PocketGen: "<data>/PocketGen"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusion2: "<data>/RFdiffusion2"
+    RFdiffusion3: "<data>/rfdiffusion3"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RTMScore: "<data>/RTMScore"
+    ThermoMPNN: "<data>/ThermoMPNN"
+    VespaG: "<data>/VespaG"
+
+  cache:
+    BoltzCache: "<cache>/Boltz"
+    BoltzGenCache: "<cache>/BoltzGen"
+    ColabFoldDatabases: "<cache>/colabfold_databases"
+    MMseqs2Databases: "<ColabFoldDatabases>"
+    AlphaFoldParams: "<cache>/alphafold_params"
+
+  server:
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
+
+# Default Environments
+# Same as the cluster config — micromamba creates isolated envs per tool
+environments:
+  ADMETAI: "admet_ai"
+  AF2BIND: "af2bind"
+  Aggrescan3D: "Aggrescan3D"
+  AlphaFold: "biopipelines"
+  APBS: "apbs"
+  BayesianAdjuster: "MutationEnv"
+  BioEmu: "bioemu"
+  Boltz2: "Boltz2Env"
+  BoltzGen: "boltzgen"
+  BoltzGenImport: "boltzgen"
+  BoltzGenMerge: "boltzgen"
+  CABSflex: "CABSflex"
+  CompoundLibrary: "biopipelines"
+  ConformationalChange: "ProteinEnv"
+  Contacts: "ProteinEnv"
+  DiffDock: "diffdock"
+  Distance: "biopipelines"
+  DistanceSelector: "biopipelines"
+  DNAEncoder: "biopipelines"
+  DSSP: "dssp"
+  DynamicBind: "dynamicbind"
+  ESMFold: "esmfold"
+  ESMFold2: "esmfold2"
+  ExtractMetrics: "biopipelines"
+  FPocket: "fpocket"
+  Frame2Seq: "frame2seq"
+  Fuse: "biopipelines"
+  GEMS: "gems"
+  Gnina: "gnina"
+  HBDesigner: "hbdesigner"
+  LASErMPNN: "lasermpnn"
+  Ligand: "biopipelines"
+  LigandMPNN: "ligandmpnn_env"
+  Load: "biopipelines"
+  MMseqs2: "biopipelines"
+  MMseqs2Server: "biopipelines"
+  Mutagenesis: "MutationEnv"
+  MutationComposer: "MutationEnv"
+  MutationProfiler: "MutationEnv"
+  NeuralPLexer: "neuralplexer"
+  OpenBabel: "biopipelines"
+  OpenMM: "openmm"
+  P2Rank: "p2rank"
+  Panda: "biopipelines"
+  PDB: "biopipelines"
+  PLACER: "placer"
+  PLIP: "plip"
+  PLM_Sol: "plm_sol"
+  Plot: "biopipelines"
+  PocketGen: "pocketgen"
+  PoseBusters: "posebusters"
+  PoseChange: "ProteinEnv"
+  Prodigy: "prodigy"
+  ProLIF: "prolif"
+  ProteinMPNN: "SE3nv"
+  PyMOL: "ProteinEnv"
+  RBSDesigner: "rbs_designer"
+  RDKit: "biopipelines"
+  Reduce: "reduce"
+  RF3: "modelforge"
+  RFdiffusion: "SE3nv"
+  RFdiffusion2: "biopipelines"
+  RFdiffusion3: "foundry"
+  RFdiffusionAllAtom: "SE3nv"
+  RTMScore: "rtmscore"
+  SASA: "ProteinEnv"
+  Selection: "ProteinEnv"
+  Sequence: "biopipelines"
+  SequenceMetricCorrelation: "MutationEnv"
+  StitchSequences: "biopipelines"
+  ThermoMPNN: "thermompnn"
+  UniProt: "biopipelines"
+  VespaG: "vespag"
+  XTB: "xtb"
+
+renderers:
+  streams:
+    _default: renderers/streams.py
+    _metadata: renderers/streams.py
+    pdb: renderers/structures.py
+    cif: renderers/structures.py
+    "pdb|cif": renderers/structures.py
+    pqr: renderers/structures.py
+    dx: renderers/grids.py
+    png: renderers/images.py
+    jpg: renderers/images.py
+    jpeg: renderers/images.py
+    svg: renderers/images.py
+    gif: renderers/images.py
+    bmp: renderers/images.py
+    tiff: renderers/images.py
+    webp: renderers/images.py
+    plots: renderers/plots.py
+    fasta: renderers/fasta.py
+    fa: renderers/fasta.py
+  tables:
+    _default: renderers/tables.py
+
+# Machine / Site Configuration

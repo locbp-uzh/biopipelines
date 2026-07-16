@@ -37,9 +37,11 @@ all = ["pytest>=7", "openbabel-wheel"]
 bp-submit = "biopipelines.cli:submit"
 bp-config = "biopipelines.cli:config"
 bp-run = "biopipelines.cli:run"
+bp-warm = "biopipelines.cli:warm"
 biopipelines-submit = "biopipelines.cli:submit"
 biopipelines-config = "biopipelines.cli:config"
 biopipelines-run = "biopipelines.cli:run"
+biopipelines-warm = "biopipelines.cli:warm"
 
 [tool.setuptools.packages.find]
 include = ["biopipelines*"]
