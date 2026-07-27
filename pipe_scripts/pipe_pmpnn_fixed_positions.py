@@ -272,6 +272,29 @@ for design_id in design_ids:
         else:
             fixed_dict[design_id][ch] = []
 
+# ProteinMPNN indexes a mask sized to the chain's residue COUNT:
+#     fixed_position_mask = np.ones(chain_length)
+#     fixed_position_mask[np.array(fixed_pos_list)-1] = 0.0
+# so a position is the residue's 1-based rank within its chain, not its PDB number. The two
+# coincide only for a chain numbered 1..N with no gaps, which is what Boltz2/RFD3 emit — hence
+# this never bit until a trimmed chain arrived numbered 35-174. Translate here, from the parsed
+# residue order, so offsets AND gaps are both handled.
+# The summary CSV reports residue numbers, so keep them before converting.
+fixed_resnums = {d: dict(chains) for d, chains in fixed_dict.items()}
+
+for design_id in design_ids:
+    pdb_path = design_files[design_id]
+    for ch, positions in fixed_dict[design_id].items():
+        if not positions:
+            continue
+        rank = {resnum: i + 1 for i, resnum in enumerate(get_residues_in_chain(pdb_path, ch))}
+        converted = [rank[p] for p in positions if p in rank]
+        dropped = [p for p in positions if p not in rank]
+        if dropped:
+            print(f"Warning: {design_id} chain {ch}: {len(dropped)} fixed position(s) "
+                  f"absent from the structure, ignored: {dropped[:10]}")
+        fixed_dict[design_id][ch] = converted
+
 with open(fixed_jsonl_file,"w") as jsonl_file:
     #Python converts dictionaries to string having keys inside '', json only recognises ""
     jsonl_file.write(str(fixed_dict).replace("\'","\""))
@@ -279,7 +302,7 @@ with open(fixed_jsonl_file,"w") as jsonl_file:
 with open(sele_csv_file,"w") as csv_file:
     csv_file.write("id,fixed,mobile")
     for id in fixed_dict.keys():
-        fixed = list_to_sele(fixed_dict[id][FIXED_CHAIN]) if FIXED_CHAIN in fixed_dict[id].keys() else ""
+        fixed = list_to_sele(fixed_resnums[id][FIXED_CHAIN]) if FIXED_CHAIN in fixed_dict[id].keys() else ""
         mobile = list_to_sele(mobile_dict[id][FIXED_CHAIN]) if FIXED_CHAIN in fixed_dict[id].keys() else ""
         csv_file.write("\n")
         csv_file.write(f"{id},{fixed},{mobile}")
