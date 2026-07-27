@@ -204,7 +204,10 @@ fi
                 sequences: id | structures.id | source_pdb | sequence | score | seq_recovery | gaps
                 missing: id | removed_by | kind | cause
         """
-        # Resolve input to DataStream
+        # Resolve input to DataStream. Keep the original object too: a DataStream carries
+        # no `tables`, so the upstream missing manifest can only be found on the
+        # StandardizedOutput it came from.
+        self.structures_input = structures
         if isinstance(structures, StandardizedOutput):
             self.structures_stream: DataStream = structures.streams.structures
         elif isinstance(structures, DataStream):
@@ -421,7 +424,7 @@ done
 
         # Check for upstream missing table
         upstream_missing_path = self._get_upstream_missing_table_path(
-            self.structures_stream
+            self.structures_input
         )
         upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
 
