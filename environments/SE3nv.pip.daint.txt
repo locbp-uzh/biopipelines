@@ -2,3 +2,4 @@
 # env needs no container: verified torch 2.13.0+cu130 with cuda True on a GH200.
 torch
 numpy
+pandas>=2.2

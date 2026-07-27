@@ -59,6 +59,37 @@ def test_num_sequences(local_config, isolated_cwd, new_pipeline):
     assert_kwarg_emitted(content, "num_sequences", 7, flag="--num_seq_per_target 7")
 
 
+def test_environment_boundaries(
+    local_config, isolated_cwd, new_pipeline, monkeypatch,
+):
+    from biopipelines.protein_mpnn import ProteinMPNN
+
+    monkeypatch.setattr(
+        ProteinMPNN,
+        "activate_environment",
+        lambda self, name=None: f"# ENV:{name or self.TOOL_NAME}\n",
+    )
+    content = _build(local_config, isolated_cwd, new_pipeline)
+
+    start = content.index("# ProteinMPNN execution script")
+    prepare = content.index('echo "Determining fixed positions"', start)
+    parse = content.index('echo "Parsing multiple PDBs"', start)
+    postprocess = content.index('echo "Creating results table and queries files"', start)
+    completion = content.index(
+        'echo "Checking outputs and creating completion status..."', start,
+    )
+
+    first_base = content.index("# ENV:biopipelines", start)
+    tool = content.index("# ENV:ProteinMPNN", start)
+    second_base = content.index("# ENV:biopipelines", first_base + 1)
+    footer_base = content.index("# ENV:biopipelines", second_base + 1)
+
+    assert (
+        first_base < prepare < tool < parse
+        < second_base < postprocess < footer_base < completion
+    )
+
+
 def test_fasta_stream_is_shared_per_sequence(local_config, isolated_cwd, new_pipeline):
     """ProteinMPNN exposes postprocessed FASTA as one shared file with
     per-sequence record IDs, not raw per-parent execution FASTA dumps."""

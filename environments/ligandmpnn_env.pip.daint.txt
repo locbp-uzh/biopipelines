@@ -6,6 +6,7 @@
 # (headers + gcc) rather than a login-node venv.
 torch
 numpy>=1.26,<2
+pandas>=2.2
 prody
 ml-collections
 dm-tree

@@ -1242,7 +1242,9 @@ fi
         with open(expected_outputs_file, 'w') as f:
             json.dump(expected_outputs_wrapped, f, indent=2)
 
-        return f"""
+        completion_environment = self.activate_environment(name="biopipelines")
+
+        return f"""{completion_environment}
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
 

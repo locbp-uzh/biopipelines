@@ -280,9 +280,11 @@ fi
         script_content = "#!/bin/bash\n"
         script_content += "# ProteinMPNN execution script\n"
         script_content += self.generate_completion_check_header()
-        script_content += self.activate_environment()
+        script_content += self.activate_environment(name="biopipelines")
         script_content += self._generate_script_prepare_inputs()
+        script_content += self.activate_environment()
         script_content += self._generate_script_run_proteinmpnn()
+        script_content += self.activate_environment(name="biopipelines")
         script_content += self._generate_script_create_table()
         script_content += self.generate_completion_check_footer()
         return script_content
@@ -316,9 +318,6 @@ INPUT_DIR=$(dirname "$FIRST_FILE")
 echo "Determining fixed positions"
 python {self.fixed_py} "{self.fixed_args_json}"
 
-echo "Parsing multiple PDBs"
-python {self.parse_py} --input_path $INPUT_DIR --output_path {self.parsed_pdbs_jsonl}
-
 """
 
     def _generate_script_run_proteinmpnn(self) -> str:
@@ -351,7 +350,10 @@ python {self.parse_py} --input_path $INPUT_DIR --output_path {self.parsed_pdbs_j
 
         per_pdb_dir = os.path.join(self.execution_folder, "per_pdb")
 
-        return f"""echo "Running model (per-PDB loop)"
+        return f"""echo "Parsing multiple PDBs"
+python {self.parse_py} --input_path $INPUT_DIR --output_path {self.parsed_pdbs_jsonl}
+
+echo "Running model (per-PDB loop)"
 echo "Options: {pmpnn_options}"
 echo "Output folder: {self.output_folder}"
 echo "ProteinMPNN --out_folder (execution/): {self.pmpnn_out_folder}"
