@@ -119,7 +119,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify installation
-if {env_manager} run -n esmfold2 python -c "from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model" >/dev/null 2>&1; then
+if {cls._env_run("esmfold2", env_manager)}python -c "from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ESMFold2 installation complete ==="
 else

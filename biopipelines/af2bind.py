@@ -128,7 +128,7 @@ fi
         # MPLBACKEND=Agg: ColabDesign imports matplotlib, and Colab's inherited
         # MPLBACKEND=module://matplotlib_inline.backend_inline crashes the import
         # in this isolated env (no matplotlib_inline here).
-        cd_check = f'MPLBACKEND=Agg {env_manager} run -n af2bind python -c "import colabdesign" >/dev/null 2>&1'
+        cd_check = f'MPLBACKEND=Agg {cls._env_run("af2bind", env_manager)}python -c "import colabdesign" >/dev/null 2>&1'
         skip = "" if force_reinstall else f"""# Check if already installed
 if {cd_check} && {weights_check}; then
     echo "AF2BIND already installed, skipping. Use force_reinstall=True to reinstall."
@@ -144,7 +144,7 @@ fi
         # --find-links provides the cuda11 jaxlib wheel for jax[cuda11_pip].
         # scipy<1.13: jax 0.4.23 imports scipy.linalg.tril, removed in scipy 1.13.
         pip_block = (
-            f'{env_manager} run -n af2bind pip install '
+            f'{cls._env_run("af2bind", env_manager)}pip install '
             f'--find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html '
             f'"jax[cuda11_pip]==0.4.23" "scipy<1.13" "dm-haiku==0.0.10" "chex==0.1.7" '
             f'"optax==0.1.7" "{COLABDESIGN_SPEC}"'

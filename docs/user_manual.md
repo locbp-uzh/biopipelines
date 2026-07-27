@@ -7,6 +7,7 @@
 - [Usage with an AI coding assistant](#usage-with-an-ai-coding-assistant)
 - [Installation](#installation)
 - [Google Colab](#google-colab)
+- [CSCS Alps / Daint](#installation-cscs-alps--daint)
 - [Local](#installation-local--linux--macos--windows)
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
@@ -284,6 +285,59 @@ af = AlphaFold(proteins=pmpnn)
 | **GPU** | Configured via `Resources()` | Colab's assigned GPU |
 
 Colab sessions are ephemeral. Installed tools and generated outputs are lost when the runtime disconnects. Mount Google Drive or download results before the session ends.
+
+---
+
+## Installation (CSCS Alps / Daint)
+
+Daint needs its own variant because three of its properties break the assumptions the SLURM install above makes:
+
+- **aarch64 (GH200)** — x86-64 conda builds and `.sif` images do not apply.
+- **No lmod modules, no apptainer** — GPU tools run through the CSCS Container Engine.
+- **Per-project billing** — a job without an account is rejected.
+
+### 1. Setting up BioPipelines
+
+Use a venv, not conda, and put it on `$SCRATCH`. `$STORE` is backed up and shared with your project, but its quota allows only 150,000 files, and Python environments exhaust that long before the 1 TB of space — 13 tools' venvs come to ~101,000 files for 15 GB. Scratch has 1M inodes; the cost is its 30-day access-time purge, so a tool left unused for a month needs reinstalling.
+
+```bash
+git clone https://gitlab.uzh.ch/locbp/public/biopipelines-locbp
+cd biopipelines-locbp
+
+# There is no `python` on the login nodes — only python3 (3.6) and python3.11.
+/usr/bin/python3.11 -m venv $SCRATCH/venvs/biopipelines
+source $SCRATCH/venvs/biopipelines/bin/activate
+
+# aarch64 wheels; the conda yaml's rdkit/openbabel/py3dmol are pip packages here.
+pip install -r environments/biopipelines.pip.daint.txt
+pip install -e .
+```
+
+Activating the venv is what supplies a `python` on PATH, which the generated tool scripts call.
+
+### 2. Configuring your machine
+
+```bash
+bp-config set machine.billing_account <your-project> --variant daint
+```
+
+This becomes `#SBATCH --account=`, and CSCS rejects jobs without it. It is the *project* charged for compute, not your username. As with any variant, your edit lands in the gitignored overlay `.config.daint.yaml`, not the committed file.
+
+### 3. Running
+
+```bash
+BIOPIPELINES_CONFIG_VARIANT=daint biopipelines-submit my_pipeline.py
+```
+
+### GPU tools
+
+GPU tools do not use a conda env. Each is mapped in `config.daint.yaml`'s `edf:` block to an Environment Definition File, and its whole script runs via `srun --environment=<edf>`. The image comes from NVIDIA NGC, which publishes GH200-native PyTorch, so torch and CUDA arrive prebuilt rather than being ported. A tool's venv is layered on the image with `--system-site-packages` and must be built inside the same container.
+
+Not every tool is available. Tools needing conda binaries (PyMOL, mkdssp) or x86-64-only container images (ProteinMPNN, RFdiffusion — the RosettaCommons images have no arm64 build) do not run on Daint. `config.daint.yaml`'s `environments:` block lists what is supported; see `llm/daint.md` for the evidence behind each.
+
+### Nodes are billed whole
+
+Every GPU partition is `OverSubscribe=EXCLUSIVE`, and every node is 4× GH200 / 288 CPUs / 870 GB. A job requesting one GPU is allocated and billed for the entire node, so splitting a sweep into many single-GPU jobs wastes 4× on GPUs and 288× on CPUs. There are no A100s — `Resources(gpu="A100")` has no meaning here.
 
 ---
 
@@ -606,6 +660,36 @@ with Pipeline("Project", "Job"):
 ```
 
 Each iteration must call `Resources()` to open its own sibling batch. `Dependencies()` and nested `Parallel()` are disallowed inside the block.
+
+**Packing a node**: on a machine that allocates whole nodes (`machine.node_exclusive`, e.g. CSCS Daint, where every job gets all 4 GPUs and 288 CPUs whether or not it asks), one sibling job per iteration wastes most of each node. `Parallel(pack=N)` instead submits a single job whose siblings are concurrent job steps, N per node:
+
+```python
+with Pipeline("Project", "Job"):
+    with Parallel(pack=4):
+        Resources(gpu="gh", time="6:00:00")   # the allocation, shared by all tasks
+        for lig in ligands:
+            with Run():                       # one task
+                poses = Boltz2(ligand=lig, ...)
+                PoseBusters(structures=poses)
+```
+
+`Resources()` is called once and describes the whole allocation; `Run()` delimits one task. `pack` is tasks per node, so the node count is derived — 10 tasks at `pack=4` requests 3 nodes. Tools inside a `Run()` run in order and may mix containerized and plain tools freely; tasks run concurrently. Each task gets a proportional share of the node's cores and memory unless `Run(cpus=..., memory=...)` says otherwise. Explicit memory is useful for asymmetric layouts such as a large in-memory database server beside smaller GPU workers.
+
+`Run()` outside a packed block raises, as does a second `Resources()` inside one.
+
+**Splitting a stream across tasks**: iterating a DataStream yields one stream per id, which is too fine when the work is meant to be shared between a few workers. `chunks()` groups instead:
+
+```python
+with Parallel(pack=4):
+    Resources(gpu="gh", time="6:00:00")
+    for chunk in designs.chunks(4):        # 4 chunks; sizes derived
+        with Run():
+            Boltz2(structures=chunk, ...)
+```
+
+`chunks(4)` gives 4 chunks with any remainder spread over the leading ones (10 items → 3/3/2/2); `chunks(size=50)` fixes the items per chunk and derives the count. Chunks carry the stream's name, format, and files, and a shared-file stream keeps every chunk pointing at the same artifact.
+
+Lazy ids split on their deterministic outer axis and keep their `[...]` suffix, so a stream of `prot_<0..9>[_<N><A V>]` chunks into groups of `prot_N[_<N><A V>]` whose runtime fan-out is still deferred — you do not need to wait for a stream to be fully expanded to split it. An id that is lazy at the top level has no such axis and raises.
 
 ---
 

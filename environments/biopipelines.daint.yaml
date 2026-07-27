@@ -1,0 +1,7 @@
+# BioPipelines base environment - CSCS Daint (aarch64/GH200) variant.
+# venv, not conda: the interpreter is the host python3.11 and every dependency
+# comes from biopipelines.pip.daint.txt. See that file for why.
+name: biopipelines
+dependencies:
+  - python=3.11
+  - pip

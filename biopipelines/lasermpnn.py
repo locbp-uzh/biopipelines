@@ -111,7 +111,7 @@ class LASErMPNN(BaseConfig):
         repo_check = f'[ -d "{repo_dir}/.git" ]'
         weights_check = f'[ -f "{repo_dir}/model_weights/{MODEL_WEIGHTS["default"]}" ]'
         import_check = (
-            f'PYTHONPATH="{parent_dir}" {env_manager} run -n lasermpnn '
+            f'PYTHONPATH="{parent_dir}" {cls._env_run("lasermpnn", env_manager)}'
             f'python -c "import LASErMPNN"'
         )
         # Env name is shared across devices, so the skip must also match the
@@ -144,7 +144,7 @@ if [ $? -ne 0 ]; then
     echo "ERROR: Failed to create lasermpnn environment."
     exit 1
 fi
-{env_manager} run -n lasermpnn pip install -r "{env_pip}"
+{cls._env_run("lasermpnn", env_manager)}pip install -r "{env_pip}"
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to install lasermpnn pip layer."
     exit 1

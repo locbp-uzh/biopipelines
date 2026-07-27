@@ -66,7 +66,7 @@ fi
 {env_block}
 
 # Verify installation
-if {env_manager} run -n boltzgen python -c "import boltzgen" >/dev/null 2>&1; then
+if {cls._env_run("boltzgen", env_manager)}python -c "import boltzgen" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== BoltzGen installation complete ==="
 else

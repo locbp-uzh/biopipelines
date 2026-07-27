@@ -17,9 +17,41 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Warn (once/day) if the checkout is behind the public GitHub repo. Never fatal.
 [ -x "$SCRIPT_DIR/check-updates" ] && "$SCRIPT_DIR/check-updates" || true
-# Locate config file. The submit script targets the cluster variant by default;
-# users on a different machine variant should set BIOPIPELINES_CONFIG_VARIANT.
-CONFIG_VARIANT="${BIOPIPELINES_CONFIG_VARIANT:-cluster}"
+# Locate config file. Without an explicit variant, pick the one whose
+# machine.username (usually set in the gitignored overlay) matches this user, so
+# a host shipping several configs does not need the variant spelled out. Pure
+# bash + awk: this runs before any env is active, and the system python3 may be
+# too old to import biopipelines. Ambiguity or no match falls back to cluster,
+# which is the historical default.
+CONFIG_VARIANT="${BIOPIPELINES_CONFIG_VARIANT:-}"
+if [ -z "$CONFIG_VARIANT" ]; then
+    _me="$(whoami 2>/dev/null)"
+    _hits=""
+    for _f in "$SCRIPT_DIR"/config.*.yaml; do
+        [ -f "$_f" ] || continue
+        _v="$(basename "$_f")"; _v="${_v#config.}"; _v="${_v%.yaml}"
+        [ "$_v" = "colab" ] && continue
+        # Overlay wins over the committed base, as in the Python loader.
+        _u=""
+        for _c in "$SCRIPT_DIR/.config.$_v.yaml" "$_f"; do
+            [ -f "$_c" ] || continue
+            _u="$(awk '
+                /^machine:/ { m = 1; next }
+                m && /^[[:space:]]+username:[[:space:]]*/ {
+                    sub(/^[[:space:]]+username:[[:space:]]*/, "")
+                    gsub(/["'\'']/, ""); sub(/[[:space:]]*$/, ""); print; exit
+                }
+                m && /^[^[:space:]#]/ { exit }
+            ' "$_c")"
+            [ -n "$_u" ] && break
+        done
+        [ -n "$_u" ] && [ "$_u" = "$_me" ] && _hits="$_hits $_v"
+    done
+    # Exactly one match wins; zero or several fall back rather than guessing.
+    _n=$(printf '%s\n' $_hits | grep -c . || true)
+    [ "$_n" = "1" ] && CONFIG_VARIANT="$(printf '%s' $_hits)"
+    [ -z "$CONFIG_VARIANT" ] && CONFIG_VARIANT="cluster"
+fi
 # Export it so the launched python sees the SAME variant. Otherwise bash parses
 # config.<CONFIG_VARIANT>.yaml here while ConfigManager autodetects independently
 # (possibly a different variant), generating scripts for the wrong scheduler.
@@ -76,6 +108,48 @@ fi
 # When the python backend is chosen, errors propagate (not redirected) so
 # malformed YAML or schema mismatches surface immediately instead of
 # returning empty and breaking the bootstrap downstream.
+# Like _yaml_name_in but for an arbitrary scalar key under machine.<parent>.
+_yaml_key_in() {
+    local parent="$1" key="$2"
+    if [ "$_YAML_BACKEND" = "python" ]; then
+        "$_PYTHON3" -c "
+import sys, yaml
+def _merge(b, o):
+    if isinstance(b, dict) and isinstance(o, dict):
+        r = dict(b)
+        for k, v in o.items():
+            r[k] = _merge(r[k], v) if k in r else v
+        return r
+    return o
+with open('$CONFIG_FILE') as f:
+    d = yaml.safe_load(f) or {}
+if '$OVERLAY_FILE':
+    with open('$OVERLAY_FILE') as f:
+        d = _merge(d, yaml.safe_load(f) or {})
+v = (((d.get('machine') or {}).get('$parent') or {}).get('$key'))
+if v is not None:
+    print(v)
+"
+        return
+    fi
+    local _awk_key='
+        /^machine:/ { in_machine = 1; next }
+        in_machine && $0 ~ "^[[:space:]]+" parent ":" { in_parent = 1; next }
+        in_parent && $0 ~ "^[[:space:]]+" key ":" {
+            sub("^[[:space:]]+" key ":[[:space:]]*", "")
+            gsub(/["'\'']/, "")
+            sub(/[[:space:]]*$/, "")
+            print
+            exit
+        }
+        in_parent && /^[[:space:]]{0,2}[^ ]/ { exit }
+    '
+    local _out=""
+    [ -n "$OVERLAY_FILE" ] && _out=$("$_AWK" -v parent="$parent" -v key="$key" "$_awk_key" "$OVERLAY_FILE")
+    [ -z "$_out" ] && _out=$("$_AWK" -v parent="$parent" -v key="$key" "$_awk_key" "$CONFIG_FILE")
+    [ -n "$_out" ] && printf '%s\n' "$_out"
+}
+
 _yaml_name_in() {
     local parent="$1"
     if [ "$_YAML_BACKEND" = "python" ]; then
@@ -295,6 +369,24 @@ set -e  # Exit on any error
 # manually) and skip the check.
 if [ "$ENV_MANAGER" = "pip" ]; then
     echo "Using pip env_manager — assuming biopipelines is importable in the current python."
+elif [ "$ENV_MANAGER" = "venv" ]; then
+    # venv has no registry: the env is a path under venv_root.
+    # Read venv_root from the YAML rather than through biopipelines: this runs
+    # before any env is active, and the system python3 may be too old to import it.
+    BP_VENV_ROOT="$(_yaml_key_in env_manager venv_root)"
+    BP_SCRATCH="${SCRATCH:-/capstor/scratch/cscs/$(whoami)}"
+    BP_VENV_ROOT="${BP_VENV_ROOT//<scratch>/$BP_SCRATCH}"
+    BP_VENV_ROOT="${BP_VENV_ROOT//<home>/$HOME}"
+    BP_VENV_ROOT="${BP_VENV_ROOT//<username>/$(whoami)}"
+    BP_VENV="$BP_VENV_ROOT/biopipelines"
+    if [ -n "$BP_VENV" ] && [ -f "$BP_VENV/bin/activate" ]; then
+        echo "Activating biopipelines venv at $BP_VENV"
+        . "$BP_VENV/bin/activate"
+    else
+        echo "ERROR: biopipelines venv not found at ${BP_VENV:-<unresolved>}."
+        echo "Create it with: bash llm/daint_install.sh biopipelines"
+        exit 1
+    fi
 elif $ENV_MANAGER env list | grep -qw "biopipelines"; then
     echo "Activating biopipelines environment..."
     $ENV_MANAGER activate biopipelines

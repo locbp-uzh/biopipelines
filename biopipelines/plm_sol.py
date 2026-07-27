@@ -75,7 +75,7 @@ class PLM_Sol(BaseConfig):
         env_check = cls._env_exists_check("plm_sol", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {weight_check} \\
-   && {env_manager} run -n plm_sol python -c "import torch, transformers" >/dev/null 2>&1; then
+   && {cls._env_run("plm_sol", env_manager)}python -c "import torch, transformers" >/dev/null 2>&1; then
     echo "plm_sol environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -99,7 +99,7 @@ fi
 
 # Verify: deps importable AND committed checkpoint present in the clone.
 if {weight_check} \\
-   && {env_manager} run -n plm_sol python -c "import torch, transformers" >/dev/null 2>&1; then
+   && {cls._env_run("plm_sol", env_manager)}python -c "import torch, transformers" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PLM_Sol installation complete ==="
 else

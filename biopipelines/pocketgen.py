@@ -111,7 +111,7 @@ class PocketGen(BaseConfig):
         ckpt_check = f'[ -f "{ckpt_path}" ]'
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {env_check} && {ckpt_check} \\
-   && {env_manager} run -n pocketgen python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
+   && {cls._env_run("pocketgen", env_manager)}python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
     echo "PocketGen already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -129,7 +129,7 @@ fi"""
         ckpt_block = f"""# Fetch pretrained checkpoint (~hundreds of MB) from Google Drive.
 mkdir -p "$(dirname {ckpt_path})"
 if [ ! -f "{ckpt_path}" ]; then
-    {env_manager} run -n pocketgen gdown --id {POCKETGEN_CKPT_GDRIVE_ID} -O "{ckpt_path}"
+    {cls._env_run("pocketgen", env_manager)}gdown --id {POCKETGEN_CKPT_GDRIVE_ID} -O "{ckpt_path}"
 fi"""
 
         return f"""echo "=== Installing PocketGen ==="
@@ -146,7 +146,7 @@ fi
 
 # Verify installation
 if {repo_check} && {ckpt_check} \\
-   && {env_manager} run -n pocketgen python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
+   && {cls._env_run("pocketgen", env_manager)}python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PocketGen installation complete ==="
 else

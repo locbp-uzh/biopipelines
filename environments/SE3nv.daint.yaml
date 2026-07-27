@@ -1,0 +1,8 @@
+# ProteinMPNN on Daint (aarch64/GH200).
+# The cluster's SE3nv pins 200+ exact x86-64 conda builds (cudatoolkit=11.7,
+# pytorch=2.0.1, dgl-cuda11.7) and cannot be transplanted. ProteinMPNN itself is
+# pure PyTorch with no CUDA extensions, so torch + numpy is the whole dependency set.
+name: SE3nv
+dependencies:
+  - python=3.11
+  - pip

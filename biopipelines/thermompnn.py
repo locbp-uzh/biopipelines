@@ -98,7 +98,7 @@ class ThermoMPNN(BaseConfig):
 
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {ckpt_check} && {env_check} \\
-   && {env_manager} run -n thermompnn python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
+   && {cls._env_run("thermompnn", env_manager)}python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
     echo "ThermoMPNN already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -141,7 +141,7 @@ fi
 # pytorch_lightning, torch — wandb is a real inference dep, not training-only).
 if {{ [ -f "{ckpt_ckpt}" ] || [ -f "{ckpt_pt}" ]; }} \\
    && [ -f "{repo_dir}/vanilla_model_weights/v_48_020.pt" ] \\
-   && {env_manager} run -n thermompnn python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
+   && {cls._env_run("thermompnn", env_manager)}python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ThermoMPNN installation complete ==="
 else

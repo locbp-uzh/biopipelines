@@ -85,7 +85,7 @@ class P2Rank(BaseConfig):
         # probe install state is slow and, on memory-constrained runtimes like
         # Colab, can crash the kernel. The jar + launcher existing is sufficient.
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_check} && [ -f "{prank_dir}/bin/p2rank.jar" ] && [ -x "$(dirname "$({env_manager} run -n p2rank which java)")/prank" ]; then
+if {env_check} && [ -f "{prank_dir}/bin/p2rank.jar" ] && [ -x "$(dirname "$({cls._env_run("p2rank", env_manager)}which java)")/prank" ]; then
     echo "P2Rank already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -113,7 +113,7 @@ fi
 # through a symlink resolves to the env bin (no p2rank.jar there) and crashes
 # with ClassNotFoundException. Write a thin wrapper that execs the real
 # launcher by absolute path so its BASH_SOURCE points at the real install.
-ENV_BIN="$(dirname "$({env_manager} run -n p2rank which java)")"
+ENV_BIN="$(dirname "$({cls._env_run("p2rank", env_manager)}which java)")"
 # Constrain the JVM via JAVA_OPTS (the prank launcher appends its own -Xmx2048m
 # AFTER $JAVA_OPTS, and the last -Xmx wins, so we keep 2g and add the rest).
 # On Colab the JVM logs "Cgroup memory controller path seems to have moved...

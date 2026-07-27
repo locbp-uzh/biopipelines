@@ -93,7 +93,7 @@ class Frame2Seq(BaseConfig):
         env_check = cls._env_exists_check("frame2seq", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} \\
-   && {env_manager} run -n frame2seq python -c "import frame2seq, torch" >/dev/null 2>&1; then
+   && {cls._env_run("frame2seq", env_manager)}python -c "import frame2seq, torch" >/dev/null 2>&1; then
     echo "frame2seq environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -110,7 +110,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify installation (frame2seq + torch importable)
-if {env_manager} run -n frame2seq python -c "import frame2seq, torch" >/dev/null 2>&1; then
+if {cls._env_run("frame2seq", env_manager)}python -c "import frame2seq, torch" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Frame2Seq installation complete ==="
 else

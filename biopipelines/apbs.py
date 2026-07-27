@@ -78,7 +78,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n apbs apbs --version 2>&1 | grep -q "APBS" && {env_manager} run -n apbs pdb2pqr --help >/dev/null 2>&1; then
+if {cls._env_run("apbs", env_manager)}apbs --version 2>&1 | grep -q "APBS" && {cls._env_run("apbs", env_manager)}pdb2pqr --help >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== APBS installation complete ==="
 else

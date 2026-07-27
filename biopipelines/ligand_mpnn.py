@@ -15,7 +15,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
-    from .biopipelines_io import Resolve
+    from .biopipelines_io import Resolve, TableReference
     from .input_standardization import resolve_basic_input
     from .ligand import Ligand
 except ImportError:
@@ -25,7 +25,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
-    from biopipelines_io import Resolve
+    from biopipelines_io import Resolve, TableReference
     from input_standardization import resolve_basic_input
     from ligand import Ligand
 
@@ -53,6 +53,15 @@ fi
 """
         remove_block = cls._env_remove_block("ligandmpnn_env", env_manager) if force_reinstall else ""
         env_block = cls._env_install_block("ligandmpnn_env", env_manager, biopipelines)
+        if env_manager == "venv":
+            # requirements.txt pins torch 2.2.1 + x86 nvidia-*-cu12 wheels that do not
+            # resolve on aarch64; the env's own pip file supplies these instead.
+            req_block = ""
+            verify_py = "python"
+        else:
+            req_block = ('# LigandMPNN\'s own pinned requirements (lives in the cloned repo)\n'
+                         f'{cls._env_run("ligandmpnn_env", env_manager)}pip install -r "{repo_dir}/requirements.txt"')
+            verify_py = f'{cls._env_run("ligandmpnn_env", env_manager)}python'
         return f"""echo "=== Installing LigandMPNN ==="
 {skip}mkdir -p "{parent_dir}"
 cd "{parent_dir}"
@@ -64,11 +73,12 @@ bash get_model_params.sh "./model_params"
 
 {remove_block}
 {env_block}
-# LigandMPNN's own pinned requirements (lives in the cloned repo)
-{env_manager} run -n ligandmpnn_env pip install -r "{repo_dir}/requirements.txt"
+{req_block}
+# The vendored openfold snapshot predates numpy 1.24, which removed the np.int alias.
+sed -i 's/np\\.int)/int)/g; s/np\\.int,/int,/g; s/np\\.int\\]/int]/g' "{repo_dir}/openfold/np/residue_constants.py"
 
 # Verify installation
-if [ -d "{repo_dir}/model_params" ] && {env_manager} run -n ligandmpnn_env python -c "import torch" >/dev/null 2>&1; then
+if [ -d "{repo_dir}/model_params" ] && {verify_py} -c "import torch" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== LigandMPNN installation complete ==="
 else
@@ -247,8 +257,12 @@ fi
 
     def _generate_script_setup_positions(self) -> str:
         """Generate the position setup part — produces positions JSON."""
-        resolved_fixed = self.fixed if self.fixed else ""
-        resolved_redesigned = self.redesigned if self.redesigned else ""
+        resolved_fixed = (str(self.fixed)
+                          if isinstance(self.fixed, TableReference)
+                          else (self.fixed or ""))
+        resolved_redesigned = (str(self.redesigned)
+                               if isinstance(self.redesigned, TableReference)
+                               else (self.redesigned or ""))
 
         # Determine input source for positions
         if resolved_fixed or resolved_redesigned:
@@ -403,8 +417,10 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "ligand_ids": list(self.ligand_stream.ids) if self.ligand_stream else [],
                 "num_sequences": self.num_sequences,
                 "num_batches": self.num_batches,
-                "fixed": self.fixed,
-                "redesigned": self.redesigned,
+                "fixed": str(self.fixed) if isinstance(self.fixed, TableReference) else self.fixed,
+                "redesigned": (str(self.redesigned)
+                               if isinstance(self.redesigned, TableReference)
+                               else self.redesigned),
                 "design_within": self.design_within,
                 "chain": self.chain,
                 "model": self.model,

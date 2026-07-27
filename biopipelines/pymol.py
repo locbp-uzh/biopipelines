@@ -85,7 +85,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify installation
-if {env_manager} run -n ProteinEnv python -c "import pymol" >/dev/null 2>&1; then
+if {cls._env_run("ProteinEnv", env_manager)}python -c "import pymol" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PyMOL (ProteinEnv) installation complete ==="
 else

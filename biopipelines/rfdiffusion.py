@@ -218,7 +218,7 @@ class RFdiffusion(BaseConfig):
         # weights-file test on top so we don't skip when checkpoints are missing.
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] \\
-   && {env_manager} run -n SE3nv python -c "import rfdiffusion" >/dev/null 2>&1; then
+   && {cls._env_run("SE3nv", env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1; then
     echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -253,16 +253,16 @@ if [ $? -ne 0 ]; then
 fi
 
 # Install DGL from pre-built wheel (special --find-links syntax)
-{env_manager} run -n SE3nv pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
+{cls._env_run("SE3nv", env_manager)}pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
 
 # Install SE3Transformer and RFdiffusion (editable)
 cd env/SE3Transformer
-{env_manager} run -n SE3nv pip install --no-deps .
+{cls._env_run("SE3nv", env_manager)}pip install --no-deps .
 cd ../..
-{env_manager} run -n SE3nv pip install -e .
+{cls._env_run("SE3nv", env_manager)}pip install -e .
 
 # Verify installation
-if {env_manager} run -n SE3nv python -c "import rfdiffusion" >/dev/null 2>&1 || [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
+if {cls._env_run("SE3nv", env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1 || [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
     touch "$INSTALL_SUCCESS"
     echo "=== RFdiffusion installation complete ==="
 else

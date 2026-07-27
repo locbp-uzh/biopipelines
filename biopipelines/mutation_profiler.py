@@ -67,7 +67,7 @@ fi
 # MutationEnv.yaml and is actually imported by pipe_mutation_profiler.py;
 # the previous `import torch` check failed on fresh envs (e.g. Colab) since
 # torch is not part of MutationEnv and isn't used by the profiler.
-if MPLBACKEND=Agg {env_manager} run -n MutationEnv python -c "import logomaker" >/dev/null 2>&1; then
+if MPLBACKEND=Agg {cls._env_run("MutationEnv", env_manager)}python -c "import logomaker" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== MutationEnv installation complete ==="
 else

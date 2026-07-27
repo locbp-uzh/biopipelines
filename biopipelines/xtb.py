@@ -77,7 +77,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n xtb xtb --version >/dev/null 2>&1; then
+if {cls._env_run("xtb", env_manager)}xtb --version >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== XTB installation complete ==="
 else

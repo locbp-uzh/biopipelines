@@ -1,0 +1,20 @@
+# BioEmu on Daint: KEPT BUT NOT WORKING. bioemu imports and sees the GH200, but
+# a real sampling run dies in get_colabfold_embeds, which builds its own
+# ColabFold venv pinning colabfold==1.5.4 and x86-64 nvidia-*-cu12 wheels and
+# resolving tensorflow-cpu, none of which exist for aarch64. See llm/daint.md.
+# This file records the deps that DO resolve, so the remaining work is only the
+# patched-ColabFold problem.
+# The bioemu[md] extra cannot resolve here: it pins openmm==8.2.0, and aarch64
+# has only 8.5.2, while newer bioemu versions want tensorflow-cpu, which
+# publishes no aarch64 wheel at all (plain tensorflow does). Neither is an
+# architecture wall — installing the md dependencies unpinned gives the same
+# capability. Verified on a GH200: openmm 8.5.2 with bioemu.sidechain_relax
+# importable, so reconstruct_sidechains=True works.
+bioemu
+openmm
+pdbfixer
+# pipe_bioemu.py imports these directly; the conda yaml lists them, so a pip-only
+# env has to carry them too.
+mdanalysis>=2.7
+pandas
+numpy

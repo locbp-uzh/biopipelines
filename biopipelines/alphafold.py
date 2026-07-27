@@ -108,6 +108,49 @@ else
     exit 1
 fi
 """
+        if env_manager == "venv":
+            # install_colabbatch_linux.sh is x86-64 only: it fetches
+            # Mambaforge-Linux-x86_64.sh and jax[cuda11_pip], neither of which
+            # has an aarch64 build. Both halves exist as aarch64 wheels, so the
+            # env is built directly from environments/alphafold.pip.<variant>.txt.
+            cf = f"{repo_dir}/colabfold-conda"
+            biopipelines = folders.get("biopipelines", "")
+            variant = ConfigManager().get_variant()
+            pip_file = f"{biopipelines}/environments/alphafold.pip.{variant}.txt"
+            skip = "" if force_reinstall else f"""# Check if already installed
+if [ -x "{cf}/bin/colabfold_search" ]; then
+    echo "AlphaFold already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
+    exit 0
+fi
+"""
+            return f"""echo "=== Installing AlphaFold (LocalColabFold, venv) ==="
+{skip}mkdir -p "{parent_dir}"
+python -m venv "{cf}"
+"{cf}/bin/pip" install -q -r "{pip_file}"
+
+# colabfold_search shells out to `mmseqs`, which the pip package does not ship.
+# Reuse the one MMseqs2 already installs rather than fetching a second copy.
+if ! [ -x "{cf}/bin/mmseqs" ]; then
+    MMSEQS_BIN=$(command -v mmseqs 2>/dev/null)
+    if [ -n "$MMSEQS_BIN" ]; then
+        ln -sf "$MMSEQS_BIN" "{cf}/bin/mmseqs"
+    else
+        echo "NOTE: no mmseqs on PATH. MMseqs2Server needs it next to colabfold_search;"
+        echo "      install MMseqs2 first, or symlink a binary into {cf}/bin/mmseqs."
+    fi
+fi
+
+# Verify installation
+if [ -x "{cf}/bin/colabfold_search" ] && "{cf}/bin/python" -c "import colabfold" >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== AlphaFold installation complete ==="
+else
+    echo "ERROR: AlphaFold verification failed (colabfold_search missing or colabfold not importable)"
+    exit 1
+fi
+"""
+
         # Skip only if the install dir AND a working colabfold-conda env are
         # present — a bare dir (or one whose env was clobbered, e.g. by a
         # downstream tool upgrading jax) must not read as "installed".

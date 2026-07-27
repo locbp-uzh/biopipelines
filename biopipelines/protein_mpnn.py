@@ -15,7 +15,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
-    from .biopipelines_io import Resolve
+    from .biopipelines_io import Resolve, TableReference
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -23,7 +23,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
-    from biopipelines_io import Resolve
+    from biopipelines_io import Resolve, TableReference
 
 
 class ProteinMPNN(BaseConfig):
@@ -56,7 +56,7 @@ class ProteinMPNN(BaseConfig):
         # The torch import probe is the load-bearing check (env + package).
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] \\
-   && {env_manager} run -n {pmpnn_env} python -c "import torch" >/dev/null 2>&1; then
+   && {cls._env_run(pmpnn_env, env_manager)}python -c "import torch" >/dev/null 2>&1; then
     echo "ProteinMPNN already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -94,7 +94,7 @@ fi
 
 # Verify installation (repo cloned + torch importable in the shared env)
 if [ -f "{repo_dir}/protein_mpnn_run.py" ] \\
-   && {env_manager} run -n {pmpnn_env} python -c "import torch" >/dev/null 2>&1; then
+   && {cls._env_run(pmpnn_env, env_manager)}python -c "import torch" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ProteinMPNN installation complete ==="
 else
@@ -111,10 +111,10 @@ fi
 {remove_block}
 # Create dedicated ProteinMPNN environment
 {env_manager} create --name {pmpnn_env} -y || echo "WARNING: environment '{pmpnn_env}' may already exist, continuing"
-{env_manager} run -n {pmpnn_env} conda install pytorch torchvision torchaudio cudatoolkit={cudatoolkit} -c pytorch -y || echo "WARNING: PyTorch install failed, skipping"
+{cls._env_run(pmpnn_env, env_manager)}conda install pytorch torchvision torchaudio cudatoolkit={cudatoolkit} -c pytorch -y || echo "WARNING: PyTorch install failed, skipping"
 
 # Verify installation
-if [ -f "{repo_dir}/protein_mpnn_run.py" ] && {env_manager} run -n {pmpnn_env} python -c "import torch" >/dev/null 2>&1; then
+if [ -f "{repo_dir}/protein_mpnn_run.py" ] && {cls._env_run(pmpnn_env, env_manager)}python -c "import torch" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ProteinMPNN installation complete ==="
 else
@@ -293,8 +293,9 @@ fi
         # Serialize DataStream to JSON file (proper way to pass ids + files to pipe_script)
         self.structures_stream.save_json(self.structures_json)
 
-        fixed_param = self.fixed if self.fixed else "-"
-        designed_param = self.redesigned if self.redesigned else "-"
+        fixed_param = str(self.fixed) if isinstance(self.fixed, TableReference) else (self.fixed or "-")
+        designed_param = (str(self.redesigned) if isinstance(self.redesigned, TableReference)
+                          else (self.redesigned or "-"))
 
         with open(self.fixed_args_json, "w") as f:
             json.dump({
@@ -496,8 +497,10 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         base_dict.update({
             "mpnn_params": {
                 "num_sequences": self.num_sequences,
-                "fixed": self.fixed,
-                "redesigned": self.redesigned,
+                "fixed": str(self.fixed) if isinstance(self.fixed, TableReference) else self.fixed,
+                "redesigned": (str(self.redesigned)
+                               if isinstance(self.redesigned, TableReference)
+                               else self.redesigned),
                 "chain": self.chain,
                 "sampling_temp": self.sampling_temp,
                 "model_name": self.model_name,

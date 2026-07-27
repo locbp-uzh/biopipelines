@@ -95,7 +95,7 @@ class VespaG(BaseConfig):
         env_check = cls._env_exists_check("vespag", env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {weight_check} \\
-   && {env_manager} run -n vespag python -c "import vespag, torch" >/dev/null 2>&1; then
+   && {cls._env_run("vespag", env_manager)}python -c "import vespag, torch" >/dev/null 2>&1; then
     echo "vespag environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -119,7 +119,7 @@ fi
 
 # Verify: package importable AND committed FNN weights present in the clone.
 if {weight_check} \\
-   && {env_manager} run -n vespag python -c "import vespag, torch" >/dev/null 2>&1; then
+   && {cls._env_run("vespag", env_manager)}python -c "import vespag, torch" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== VespaG installation complete ==="
 else

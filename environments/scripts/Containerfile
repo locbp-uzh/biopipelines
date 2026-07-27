@@ -1,0 +1,34 @@
+# Bake one BioPipelines environment into a container image.
+#
+# Built by environments/scripts/build_image.sh, which passes ENV_NAME and mounts
+# this directory as the build context so environments/<ENV_NAME>.yaml is visible.
+#
+# The env lands at /opt/<ENV_NAME> rather than being activated, because the CSCS
+# Container Engine REPLACES the environment rather than extending it: the EDF's
+# PATH is what puts the env on PATH, and any ENV set here is dropped. See
+# llm/daint.md.
+
+ARG BASE=docker.io/condaforge/miniforge3:latest
+FROM ${BASE}
+
+ARG ENV_NAME
+ARG SPEC=${ENV_NAME}.yaml
+RUN test -n "${ENV_NAME}" || (echo "ENV_NAME build-arg is required" >&2; exit 1)
+
+COPY ${SPEC} /tmp/env.yaml
+
+# --prefix, not --name: the EDF addresses the env by path, and a named env would
+# additionally depend on conda's registry being reachable at run time.
+RUN mamba env create --prefix /opt/${ENV_NAME} --file /tmp/env.yaml --yes \
+    && mamba clean --all --yes \
+    && rm -f /tmp/env.yaml
+
+# A pip layer on top, when the env has one. Same <env>.pip[.<variant>].txt
+# convention the venv installer uses, so one spec serves both routes. The build
+# script always stages a file at this path, empty when the env has no pip layer,
+# because COPY fails on a missing source.
+COPY pip-requirements.txt /tmp/requirements.txt
+RUN if [ -s /tmp/requirements.txt ]; then \
+        /opt/${ENV_NAME}/bin/pip install --no-cache-dir -r /tmp/requirements.txt; \
+    fi \
+    && rm -f /tmp/requirements.txt

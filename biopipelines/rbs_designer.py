@@ -73,7 +73,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify installation
-if {env_manager} run -n rbs_designer python -c "import RNA" >/dev/null 2>&1; then
+if {cls._env_run("rbs_designer", env_manager)}python -c "import RNA" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== RBSDesigner installation complete ==="
 else

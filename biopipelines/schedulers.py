@@ -95,7 +95,8 @@ class SchedulerBackend:
     def header_directives(self, memory: str, time: str, output_name: str) -> str:
         raise NotImplementedError
 
-    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1) -> Tuple[str, List[str]]:
+    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1,
+                      single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         """Return ``(directive_text, warnings)`` for a GPU request."""
         raise NotImplementedError
 
@@ -111,6 +112,15 @@ class SchedulerBackend:
         raise NotImplementedError
 
     def email_directive(self, email: str) -> str:
+        raise NotImplementedError
+
+    def account_directive(self, account: str) -> str:
+        """Native directive charging the job to a project/allocation.
+
+        Returns "" when unset, so sites without per-project accounting emit
+        nothing. Applies to the batch header only: job steps (``srun``)
+        inherit the allocation's account.
+        """
         raise NotImplementedError
 
     def gpu_setup(self, gpu_spec: Optional[str]) -> str:
@@ -141,10 +151,15 @@ class SlurmBackend(SchedulerBackend):
             f"#SBATCH --begin=now+0hour"
         )
 
-    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1) -> Tuple[str, List[str]]:
+    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1,
+                      single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         n = gpus if gpus else 1
         if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
             return "", []
+        # A single-GPU-type site has no model to select on, and its GRES is the
+        # untyped `gpu:N` — a typed request there is rejected outright.
+        if single_gpu_type:
+            return f"#SBATCH --gres=gpu:{n}", []
         elif gpu_spec == "high-memory":
             return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\"", []
         elif gpu_spec == "gpu" or gpu_spec == "any":
@@ -194,6 +209,12 @@ class SlurmBackend(SchedulerBackend):
             return ""
         return f"\n#SBATCH --mail-type=END,FAIL\n#SBATCH --mail-user={email}"
 
+    def account_directive(self, account: str) -> str:
+        if not account:
+            return ""
+        _validate_directive_value("billing_account", account)
+        return f"\n#SBATCH --account={account}"
+
 
 class LsfBackend(SchedulerBackend):
     """LSF (``bsub``/``#BSUB``).
@@ -226,7 +247,8 @@ class LsfBackend(SchedulerBackend):
             f"#BSUB -o {output_name}"
         )
 
-    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1) -> Tuple[str, List[str]]:
+    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1,
+                      single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         n = gpus if gpus else 1
         warnings: List[str] = []
         if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
@@ -276,6 +298,12 @@ class LsfBackend(SchedulerBackend):
         # -N notify at end, -B at begin; -u recipient. END+FAIL ~ -N.
         return f"\n#BSUB -N\n#BSUB -u {email}"
 
+    def account_directive(self, account: str) -> str:
+        if not account:
+            return ""
+        _validate_directive_value("billing_account", account)
+        return f"\n#BSUB -P {account}"
+
 
 class PbsBackend(SchedulerBackend):
     """PBS/Torque (``qsub``/``#PBS``).
@@ -300,7 +328,8 @@ class PbsBackend(SchedulerBackend):
             f"#PBS -o {output_name}"
         )
 
-    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1) -> Tuple[str, List[str]]:
+    def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1,
+                      single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         n = gpus if gpus else 1
         warnings: List[str] = []
         if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
@@ -350,6 +379,12 @@ class PbsBackend(SchedulerBackend):
         if email == "":
             return ""
         return f"\n#PBS -m ae\n#PBS -M {email}"
+
+    def account_directive(self, account: str) -> str:
+        if not account:
+            return ""
+        _validate_directive_value("billing_account", account)
+        return f"\n#PBS -A {account}"
 
 
 _BACKENDS = {

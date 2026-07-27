@@ -71,7 +71,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n prolif python -c "import prolif" >/dev/null 2>&1; then
+if {cls._env_run("prolif", env_manager)}python -c "import prolif" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ProLIF installation complete ==="
 else

@@ -164,7 +164,24 @@ class BaseConfig(ABC):
 
         Use as: ``if {check}; then ...`` or ``if ! {check}; then ...``.
         """
+        if env_manager == "venv":
+            return f'"{ConfigManager().get_venv_path(env_name)}/bin/python" -c "" >/dev/null 2>&1'
         return f'{env_manager} run -n {env_name} python -c "" >/dev/null 2>&1'
+
+    @staticmethod
+    def _env_run(env_name: str, env_manager: str) -> str:
+        """Prefix that runs the next command inside ``env_name``.
+
+        ``<mgr> run -n <env>`` for the conda family; venv has no such
+        subcommand, so its env is addressed by path instead.
+
+        Use as: ``f"{cls._env_run(env, mgr)}pip install ..."`` — note no space,
+        the venv form resolves to ``<path>/bin/pip``. Every command the tools
+        wrap this way (python, pip, mkdssp, xtb, …) lives in that bin/.
+        """
+        if env_manager == "venv":
+            return f'{ConfigManager().get_venv_path(env_name)}/bin/'
+        return f'{env_manager} run -n {env_name} '
 
     @classmethod
     def _env_remove_block(cls, env_name: str, env_manager: str) -> str:
@@ -177,6 +194,15 @@ class BaseConfig(ABC):
         ``env remove`` on a non-existent env aborting the script under set -e.
         """
         check = cls._env_exists_check(env_name, env_manager)
+        # venv has no registry and no `env remove`; the env IS its directory.
+        if env_manager == "venv":
+            path = ConfigManager().get_venv_path(env_name)
+            return (
+                f'if [ -d "{path}" ]; then\n'
+                f'    echo "Removing existing {env_name} env for reinstall"\n'
+                f'    rm -rf "{path}"\n'
+                f'fi'
+            )
         return (
             f'if {check}; then\n'
             f'    echo "Removing existing {env_name} env for reinstall"\n'
@@ -214,13 +240,70 @@ class BaseConfig(ABC):
         env_yaml_variant = f"{env_dir}/{env_name}.{variant}.yaml"
         env_yaml_shared = f"{env_dir}/{env_name}.yaml"
 
-        env_block = (
-            f'if [ -f "{env_yaml_variant}" ]; then\n'
-            f'    {env_manager} env create -f "{env_yaml_variant}" -y\n'
-            f'else\n'
-            f'    {env_manager} env create -f "{env_yaml_shared}" -y\n'
-            f'fi\n'
-        )
+        if env_manager == "venv":
+            import yaml as _yaml
+            src = env_yaml_variant if os.path.isfile(env_yaml_variant) else env_yaml_shared
+            try:
+                with open(src, encoding="utf-8") as f:
+                    _y = _yaml.safe_load(f) or {}
+                deps = _y.get("dependencies", []) or []
+                channels = _y.get("channels", []) or []
+            except OSError:
+                deps, channels = [], []
+            extra = [d for d in deps if isinstance(d, str)
+                     and re.split(r"[=<>\s]", d, 1)[0] not in ("python", "pip")]
+            cm = ConfigManager()
+            conda_for_venv = cm.get_conda_for_venv()
+            if extra and not conda_for_venv:
+                raise ValueError(
+                    f"{env_name}: env_manager 'venv' cannot install conda packages "
+                    f"{extra} from {os.path.basename(src)}. Move them to a pip file, "
+                    f"or supply them via the tool's EDF image."
+                )
+            venv_path = cm.get_venv_path(env_name)
+            # A package with no wheel for this platform compiles, and a login node
+            # may ship no python3-dev. Point CPATH at borrowed headers if the
+            # config provides them; harmless when every dependency is a wheel.
+            hdrs = (cm.get_folder_config().get("infrastructure") or {}).get("python_headers", "")
+            cpath = f'export CPATH="{cm._resolve_folder_template(hdrs)}"\n' if hdrs else ""
+            if extra:
+                # Conda packages with no wheel (pymol, mkdssp, …). Build a conda
+                # env for them, then a venv created BY its python: that inherits
+                # them via --system-site-packages and supplies the bin/activate
+                # the framework sources. Binaries are not inherited — a tool
+                # needing one symlinks it in its own install script.
+                mamba = cm.get_conda_for_venv()
+                prefix = f"{cm.get_conda_env_root()}/{env_name}"
+                chan = " ".join(f"-c {c}" for c in channels) or "-c conda-forge"
+                pyspec = next((d for d in deps if isinstance(d, str)
+                               and re.split(r"[=<>\s]", d, 1)[0] == "python"), "python")
+                env_block = (
+                    cpath +
+                    f'if [ ! -x "{prefix}/bin/python" ]; then\n'
+                    f'    "{mamba}" create -y -q -p "{prefix}" {chan} "{pyspec}" '
+                    f'{" ".join(chr(34) + d + chr(34) for d in extra)}\n'
+                    f'fi\n'
+                    f'if [ ! -d "{venv_path}" ]; then\n'
+                    f'    "{prefix}/bin/python" -m venv --system-site-packages "{venv_path}"\n'
+                    f'fi\n'
+                    f'source "{venv_path}/bin/activate"\n'
+                )
+            else:
+                env_block = (
+                    cpath +
+                    f'if [ ! -d "{venv_path}" ]; then\n'
+                    f'    python -m venv --system-site-packages "{venv_path}"\n'
+                    f'fi\n'
+                    f'source "{venv_path}/bin/activate"\n'
+                )
+        else:
+            env_block = (
+                f'if [ -f "{env_yaml_variant}" ]; then\n'
+                f'    {env_manager} env create -f "{env_yaml_variant}" -y\n'
+                f'else\n'
+                f'    {env_manager} env create -f "{env_yaml_shared}" -y\n'
+                f'fi\n'
+            )
 
         # Discover numbered pip files in phase order. Variant-specific
         # (<env>.pip.<variant>.<N>.txt) takes precedence; if none exist we
@@ -276,7 +359,10 @@ class BaseConfig(ABC):
                 print(f"Warning: could not read pip marker header {path!r}: {exc}",
                       file=sys.stderr)
             flag_str = (" " + " ".join(flags)) if flags else ""
-            return f'{env_manager} run -n {env_name} pip install{flag_str} -r "{path}"'
+            return f'{pip} install{flag_str} -r "{path}"'
+
+        # venv's env_block already activated the env; the conda family has not.
+        pip = "pip" if env_manager == "venv" else f'{env_manager} run -n {env_name} pip'
 
         if numbered:
             pip_block = "\n".join(_pip_line(p) for _, p in numbered)
@@ -286,9 +372,9 @@ class BaseConfig(ABC):
         pip_txt_shared = f"{env_dir}/{env_name}.pip.txt"
         return env_block + (
             f'if [ -f "{pip_txt_variant}" ]; then\n'
-            f'    {env_manager} run -n {env_name} pip install -r "{pip_txt_variant}"\n'
+            f'    {pip} install -r "{pip_txt_variant}"\n'
             f'elif [ -f "{pip_txt_shared}" ]; then\n'
-            f'    {env_manager} run -n {env_name} pip install -r "{pip_txt_shared}"\n'
+            f'    {pip} install -r "{pip_txt_shared}"\n'
             f'fi'
         )
 
@@ -477,6 +563,11 @@ class BaseConfig(ABC):
             self.environments = []
             return
 
+        if env_config == "":
+            # Explicit empty: the tool's EDF image supplies the interpreter.
+            self.environments = []
+            return
+
         if env_config is None:
             # Default to biopipelines if not configured
             self.environments = ["biopipelines"]
@@ -579,6 +670,12 @@ class BaseConfig(ABC):
         if config_manager.get_env_manager() == "pip":
             return f"# pip mode: no environment activation needed\n{resolve_source}\n"
 
+        # An empty `environments:` entry alongside an `edf:` one means the image
+        # supplies the interpreter on PATH, so there is nothing to activate.
+        if not self.environments and config_manager.get_edf(self.TOOL_NAME):
+            return (f"# environment provided by the tool's EDF image\n"
+                    f'echo "Python: $(which python)"\n{resolve_source}\n')
+
         # Container mode still activates a host env: the tool's configured env
         # (or the biopipelines fallback from _load_environments) handles any
         # host-side helper scripts that run outside container_prefix.
@@ -620,13 +717,18 @@ class BaseConfig(ABC):
         shell_hook = config_manager.get_shell_hook_command()
         activate_cmd = config_manager.get_activate_command(env_name)
 
+        # venv sets VIRTUAL_ENV, not the CONDA_* pair.
+        if config_manager.get_env_manager() == "venv":
+            env_report = 'echo "Environment: $VIRTUAL_ENV"'
+        else:
+            env_report = 'echo "Environment: $CONDA_DEFAULT_ENV"\necho "Location: $CONDA_PREFIX"'
+
         return f"""# Activate environment: {env_name}
 echo "=== Activating Environment ==="
 echo "Requested: {env_name}"
 {shell_hook}
 {activate_cmd}
-echo "Environment: $CONDA_DEFAULT_ENV"
-echo "Location: $CONDA_PREFIX"
+{env_report}
 echo "Python: $(which python)"
 echo "Python version: $(python --version 2>&1)"
 echo "=============================="
@@ -1908,6 +2010,50 @@ class StandardizedOutput:
                 )
             single_streams["output_folder"] = self.output_folder
             yield StandardizedOutput(single_streams)
+
+    def chunks(self, count: Optional[int] = None, *, size: Optional[int] = None
+               ) -> List['StandardizedOutput']:
+        """Split aligned streams into groups of ``StandardizedOutput`` objects.
+
+        Every stream must carry the same expanded IDs in the same order. Use a
+        specific ``DataStream.chunks()`` when an output contains independent ID
+        axes.
+        """
+        from .datastream import DataStream
+
+        streams = [
+            (name, ds) for name, ds in self.streams.items()
+            if isinstance(ds, DataStream)
+        ]
+        if not streams:
+            raise ValueError(
+                "Cannot chunk StandardizedOutput: it contains no streams."
+            )
+
+        reference_name, reference_ds = streams[0]
+        reference_ids = list(reference_ds.ids_expanded)
+        for name, ds in streams[1:]:
+            ids = list(ds.ids_expanded)
+            if ids != reference_ids:
+                raise ValueError(
+                    "Cannot chunk StandardizedOutput: streams have mismatched IDs. "
+                    f"'{reference_name}' has {len(reference_ids)} IDs, "
+                    f"'{name}' has {len(ids)} IDs. "
+                    f"Chunk a specific stream instead (e.g., "
+                    f"output.streams.{reference_name}.chunks(...))."
+                )
+
+        chunked = [
+            (name, ds.chunks(count, size=size)) for name, ds in streams
+        ]
+        n_chunks = len(chunked[0][1])
+        result = []
+        for index in range(n_chunks):
+            chunk_data = self._data.copy()
+            for name, chunks in chunked:
+                chunk_data[name] = chunks[index]
+            result.append(StandardizedOutput(chunk_data))
+        return result
     
     def keys(self):
         """Get all available keys."""

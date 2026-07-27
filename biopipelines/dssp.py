@@ -72,7 +72,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n dssp mkdssp --help >/dev/null 2>&1 || {env_manager} run -n dssp dssp --help >/dev/null 2>&1; then
+if {cls._env_run("dssp", env_manager)}mkdssp --help >/dev/null 2>&1 || {cls._env_run("dssp", env_manager)}dssp --help >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== DSSP installation complete ==="
 else

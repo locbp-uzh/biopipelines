@@ -254,6 +254,60 @@ class DataStream:
                     _runtime_mode=self._runtime_mode
                 )
 
+    def chunks(self, count: Optional[int] = None, *, size: Optional[int] = None) -> List['DataStream']:
+        """Split into groups, for fanning a stream across parallel tasks.
+
+        ``__iter__`` yields one single-item stream per id, which is the wrong
+        granularity when the work is meant to be shared between a handful of
+        workers::
+
+            with Parallel(pack=4):
+                Resources(...)
+                for chunk in designs.chunks(4):
+                    with Run():
+                        Boltz2(structures=chunk, ...)
+
+        ``count`` is the number of chunks; ``size`` is the number of items per
+        chunk, with the other derived. Exactly one must be given. With
+        ``count``, a remainder is spread over the leading chunks (10 into 4 is
+        3/3/2/2) rather than left as a stunted tail. Chunks that would be empty
+        are dropped, so asking for more chunks than items yields fewer.
+
+        Lazy ids split on their deterministic outer axis and keep their
+        ``[...]`` suffix, so ``prot_<0..9>[_<N><A V>]`` chunks into groups of
+        ``prot_N[_<N><A V>]`` whose runtime fan-out is still deferred. An id
+        that is lazy at the top level has no such axis and raises.
+        """
+        if (count is None) == (size is None):
+            raise ValueError("chunks() takes exactly one of 'count' or 'size'.")
+        for label, value in (("count", count), ("size", size)):
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 1):
+                raise ValueError(f"chunks({label}=) must be a positive integer, got {value!r}.")
+
+        ids = self.ids_expanded
+        if not ids:
+            return []
+        if len(ids) == 1 and id_patterns.is_lazy(ids[0]) and id_patterns.strip_brackets(ids[0]) == "":
+            raise ValueError(
+                f"Cannot chunk DataStream '{self.name}': its id {ids[0]!r} is lazy at the top "
+                "level, so it has no config-time axis to split on. Chunk a stream whose ids "
+                "have a deterministic prefix, or split downstream of the tool that expands it."
+            )
+
+        n = len(ids)
+        if size is not None:
+            bounds = [(i, min(i + size, n)) for i in range(0, n, size)]
+        else:
+            base, extra = divmod(n, count)
+            bounds = []
+            start = 0
+            for i in range(count):
+                stop = start + base + (1 if i < extra else 0)
+                if stop > start:
+                    bounds.append((start, stop))
+                start = stop
+        return [self[start:stop] for start, stop in bounds]
+
     def _records_stream(self) -> 'DataStream':
         if self.is_lazy and not self._runtime_mode:
             if self.map_table and os.path.exists(self.map_table):

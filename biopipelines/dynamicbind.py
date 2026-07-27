@@ -110,8 +110,8 @@ class DynamicBind(BaseConfig):
 
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {inf_check} && {relax_check} && {workdir_check} \\
-   && {env_manager} run -n dynamicbind python -c "import torch" >/dev/null 2>&1 \\
-   && {env_manager} run -n dynamicbind_relax python -c "import openmm" >/dev/null 2>&1; then
+   && {cls._env_run("dynamicbind", env_manager)}python -c "import torch" >/dev/null 2>&1 \\
+   && {cls._env_run("dynamicbind_relax", env_manager)}python -c "import openmm" >/dev/null 2>&1; then
     echo "DynamicBind already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -159,8 +159,8 @@ fi
 
 # Verify installation
 if {repo_check} && {workdir_check} \\
-   && {env_manager} run -n dynamicbind python -c "import torch" >/dev/null 2>&1 \\
-   && {env_manager} run -n dynamicbind_relax python -c "import openmm" >/dev/null 2>&1; then
+   && {cls._env_run("dynamicbind", env_manager)}python -c "import torch" >/dev/null 2>&1 \\
+   && {cls._env_run("dynamicbind_relax", env_manager)}python -c "import openmm" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== DynamicBind installation complete ==="
 else

@@ -72,7 +72,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n fpocket fpocket -h >/dev/null 2>&1; then
+if {cls._env_run("fpocket", env_manager)}fpocket -h >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== FPocket installation complete ==="
 else

@@ -143,7 +143,7 @@ class HBDesigner(BaseConfig):
         env_check = cls._env_exists_check("hbdesigner", env_manager)
         repo_check = f'[ -d "{repo_dir}/.git" ]'
         entry_check = (
-            f'{env_manager} run -n hbdesigner '
+            f'{cls._env_run("hbdesigner", env_manager)}'
             f'python -c "import shutil,sys; sys.exit(0 if shutil.which(\'run_hbdesigner\') else 1)"'
         )
         # Env name is shared across devices, so the skip must also match the
@@ -176,7 +176,7 @@ if [ $? -ne 0 ]; then
     echo "ERROR: Failed to create hbdesigner environment."
     exit 1
 fi
-{env_manager} run -n hbdesigner pip install -r "{env_pip}"
+{cls._env_run("hbdesigner", env_manager)}pip install -r "{env_pip}"
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to install hbdesigner pip layer."
     exit 1
@@ -184,7 +184,7 @@ fi
 
 # Editable: run_hbdesigner resolves model_weights/ relative to the package, which must be the repo.
 cd "{repo_dir}"
-{env_manager} run -n hbdesigner pip install -e .
+{cls._env_run("hbdesigner", env_manager)}pip install -e .
 
 # Verify: the run_hbdesigner entry point resolves inside the env.
 if {entry_check} >/dev/null 2>&1; then

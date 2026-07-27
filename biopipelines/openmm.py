@@ -78,7 +78,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n openmm python -c "import openmm; import openmm.app" >/dev/null 2>&1; then
+if {cls._env_run("openmm", env_manager)}python -c "import openmm; import openmm.app" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== OpenMM installation complete ==="
 else

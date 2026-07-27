@@ -42,6 +42,16 @@ def _configured_server_mode() -> str:
     return str(mode).strip().lower()
 
 
+def _machine_use_shm() -> bool:
+    """machine.mmseqs2_use_shm: stage the UniRef index into /dev/shm and search
+    from tmpfs. True on Daint (Lustre page-cache cap), absent/false elsewhere."""
+    try:
+        machine = ConfigManager()._config.get('machine', {}) or {}
+        return bool(machine.get('mmseqs2_use_shm', False))
+    except Exception:
+        return False
+
+
 class MMseqs2(BaseConfig):
     """
     Configuration for MMseqs2 client - processes sequences through server.
@@ -78,6 +88,7 @@ echo "=== MMseqs2 ready ==="
                  output_format: str = "csv",
                  timeout: int = 3600,
                  mask: Union[str, tuple] = "",
+                 server_url: str = "",
                  **kwargs):
         """
         Initialize MMseqs2 configuration.
@@ -86,6 +97,16 @@ echo "=== MMseqs2 ready ==="
             sequences: Input sequences - can be sequence string, list, DataStream or StandardizedOutput
             output_format: Output format ("csv" or "a3m", default: csv)
             timeout: Timeout in seconds for server response
+            server_url: ColabFold-protocol MSA server to query over HTTP (e.g.
+                  "https://api.colabfold.com"). When set, no local MMseqs2 server
+                  is started and no databases are needed — the search runs on the
+                  remote host. Credentials for an endpoint behind basic auth are
+                  read from MMSEQS2_SERVER_USER / MMSEQS2_SERVER_PASSWORD, never
+                  passed here, so they stay out of pipeline files and generated
+                  scripts. Keep them in a mode-600 file you source rather than
+                  exporting interactively (shell history), and note that sbatch
+                  propagates your environment to the compute node. Credentials
+                  are refused over plain http.
             mask: Positions to mask in MSA (excluding query sequence)
                   - String format: "10-20+30-40" (PyMOL selection style)
                   - Tuple format: (TableInfo, "column_name") for per-sequence masking
@@ -120,6 +141,7 @@ echo "=== MMseqs2 ready ==="
         self.output_format = output_format
         self.timeout = timeout
         self.mask_positions = mask
+        self.server_url = server_url
 
         super().__init__(**kwargs)
 
@@ -220,7 +242,7 @@ echo "=== MMseqs2 ready ==="
         This is because MMseqs2 requires interaction with pre-existing server
         infrastructure rather than generating new computational workflows.
         """
-        server_dir = self.folders.get("MMseqs2Server", "")
+        server_dir = self.folders["MMseqs2Server"]
 
         # Sequences the upstream tool already dropped: forward its missing.csv so
         # the helper seeds those rows and excludes those ids before searching.
@@ -230,6 +252,11 @@ echo "=== MMseqs2 ready ==="
         upstream_flag = (
             f' \\\n    --upstream_missing "{upstream_missing_path}"'
             if upstream_missing_path else ""
+        )
+
+        url_flag = (
+            f' \\\n    --server_url "{self.server_url}"'
+            if self.server_url else ""
         )
 
         return f"""echo "Starting MMseqs2 MSA generation"
@@ -245,7 +272,7 @@ python {self.helper_script} \\
     "{self.output_msa_csv}" \\
     "{self.client_script}" \\
     --output_format {self.output_format} \\
-    --server_dir "{server_dir}" \\
+    --server_dir "{server_dir}"{url_flag} \\
     --missing_csv "{self.missing_csv}"{upstream_flag}{self._generate_mask_arguments()}
 
 echo "MMseqs2 processing completed"
@@ -302,7 +329,7 @@ echo "MMseqs2 processing completed"
             "msas": TableInfo(
                 name="msas",
                 path=self.output_msa_csv,
-                columns=["id", "sequences.id", "sequence", "msa_file"],
+                columns=["id", "sequences.id", "sequence", "msa_file", "file"],
                 description="MSA files for sequence alignment"
             ),
             "missing": TableInfo(
@@ -418,7 +445,6 @@ fi
         # Trust the config: a missing folder key raises KeyError at config time,
         # which is the framework's intended "no fallbacks" behavior.
         db_dir = folders["ColabFoldDatabases"]
-        mmseqs_dir = folders["MMseqs2"]
         setup_script = os.path.join(folders["pipe_scripts"], "colabfold_setup_databases.sh")
 
         if step == "databases":
@@ -433,6 +459,8 @@ touch "$INSTALL_SUCCESS"
 """
 
         # step == "build": build into a per-mode subfolder, sharing the downloads.
+        # Only the build stage needs the standalone mmseqs binary directory.
+        mmseqs_dir = folders["MMseqs2"]
         # The downloads (tarballs, pdb/ mmCIF, download markers) stay at DB_DIR root
         # and are symlinked into DB_DIR/<mode>/ so setup_databases.sh — which builds
         # in its WORKDIR and reads the tarballs from there — finds them without
@@ -456,6 +484,18 @@ DB_DIR="{db_dir}"
 MMSEQS_DIR="{mmseqs_dir}"
 BUILD_DIR="$DB_DIR/cpu"
 mkdir -p "$BUILD_DIR"
+
+# On Lustre, set the directory's default stripe layout BEFORE building so every
+# index file colabfold_search writes inherits it. CSCS recommends stripe-count
+# 32 / stripe-size 4M for large sequentially-read files; the ~720GB .idx set is
+# single-OST-bound at stripe-count 1 (~670MB/s) vs ~2GB/s striped. Layout is
+# fixed at file-create time, so this must run before the build — restriping a
+# built DB means recopying 720GB. No-op off Lustre (lfs absent).
+if command -v lfs >/dev/null 2>&1; then
+    lfs setstripe --stripe-count 32 --stripe-size 4M "$BUILD_DIR" 2>/dev/null \
+        && echo "Set Lustre stripe layout (count=32, size=4M) on $BUILD_DIR" \
+        || echo "Note: lfs setstripe failed on $BUILD_DIR (non-Lustre or unsupported); continuing"
+fi
 
 if [ ! -f "$DB_DIR/DOWNLOADS_READY" ]; then
     echo "ERROR: downloads not present at $DB_DIR (no DOWNLOADS_READY)."
@@ -511,6 +551,14 @@ DB_DIR="{db_dir}"
 MMSEQS_DIR="{mmseqs_dir}"
 BUILD_DIR="$DB_DIR/gpu"
 mkdir -p "$BUILD_DIR"
+
+# Stripe the build dir before writing (see the CPU build for rationale); no-op
+# off Lustre.
+if command -v lfs >/dev/null 2>&1; then
+    lfs setstripe --stripe-count 32 --stripe-size 4M "$BUILD_DIR" 2>/dev/null \
+        && echo "Set Lustre stripe layout (count=32, size=4M) on $BUILD_DIR" \
+        || echo "Note: lfs setstripe failed on $BUILD_DIR (non-Lustre or unsupported); continuing"
+fi
 
 if [ ! -f "$DB_DIR/DOWNLOADS_READY" ]; then
     echo "ERROR: downloads not present at $DB_DIR (no DOWNLOADS_READY)."
@@ -723,6 +771,9 @@ touch "$INSTALL_SUCCESS"
             # Built databases live in the cpu/ subfolder of the DB root (see
             # MMseqs2Server.install(step="build", mode="cpu")).
             f"export MMSEQS2_DB_DIR={os.path.join(self.folders.get('MMseqs2Databases', ''), 'cpu')}",
+            # machine.mmseqs2_use_shm (Daint): stage UniRef into /dev/shm and search
+            # there instead of vmtouch-mlocking off Lustre. See config.daint.yaml.
+            f"export MMSEQS2_USE_SHM={1 if _machine_use_shm() else 0}",
             f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}",
             # LocalColabFold install: provides colabfold_search AND the CPU mmseqs
             # binary the server uses (colabfold-conda/bin). No separate MMseqs2

@@ -34,6 +34,17 @@ RESULTS_DIR="$MMSEQS2_SHARED_FOLDER/results"
 DB_DIR=$(require_folder "${MMSEQS2_DB_DIR:-}" "MMSEQS2_DB_DIR" "MMseqs2Databases")
 DATA_DIR=$(require_folder "${BIOPIPELINES_DATA_DIR:-}" "BIOPIPELINES_DATA_DIR" "data")
 
+# tmpfs-staging mode (Daint). Default 0 = the shared-cluster path below is
+# unchanged (vmtouch-mlock, both DBs, --db-load-mode 2 off Lustre/NFS). When the
+# Daint config sets MMSEQS2_USE_SHM=1, the UniRef .idx is copied into /dev/shm
+# (anonymous RAM, uncapped) and searched from there: Daint's Lustre client
+# page-cache cap (~80GB) otherwise pins mmap residency at ~10% no matter how it
+# is warmed, whereas tmpfs mmap runs at full RAM speed (a query drops from
+# minutes to ~16s). tmpfs on a compute node is 334GB, so UniRef (~266GB) fits but
+# the environmental DB does not — shm mode is UniRef-only.
+USE_SHM="${MMSEQS2_USE_SHM:-0}"
+SHM_DB_DIR="/dev/shm/mmseqs_db_${USER}"
+
 TMP_DIR="$MMSEQS2_SHARED_FOLDER/tmp"
 # colabfold_search searches both UniRef30 (--db1) and the environmental DB
 # (--db3). Both are read directly from /shares; the page cache holds the
@@ -259,7 +270,40 @@ lock_indices_in_ram() {
   free -h | sed 's/^/    /'
   "$VMTOUCH_BIN" "$UNIREF_PATH".idx "$ENVDB_PATH".idx 2>/dev/null | sed 's/^/    /' || true
 }
-lock_indices_in_ram
+
+# Daint path: copy the UniRef DB into /dev/shm (tmpfs = anonymous RAM, not the
+# ~80GB-capped Lustre page cache) and repoint DB_DIR there. --db-load-mode 2
+# mmaps tmpfs at full RAM speed. Only the .idx (self-contained for mode 2) and
+# the small descriptor files are staged — the ~117GB _seq/_seq_h data is not read
+# via .idx and would overflow the 334GB tmpfs. Queries run --use-env 0 (UniRef
+# only) because the environmental DB does not fit alongside UniRef in tmpfs.
+stage_uniref_to_shm() {
+  rm -rf "$SHM_DB_DIR"; mkdir -p "$SHM_DB_DIR"
+  local start end f
+  start=$(date +%s)
+  log "Staging UniRef into tmpfs at $SHM_DB_DIR (Daint: bypasses the Lustre cache cap)..."
+  cp "$UNIREF_PATH.idx" "$SHM_DB_DIR/" &
+  for f in "$UNIREF_PATH".idx.* "$UNIREF_PATH" "$UNIREF_PATH".dbtype "$UNIREF_PATH".index \
+           "$UNIREF_PATH"_h.* "$UNIREF_PATH"_aln* \
+           "$UNIREF_PATH"_seq.index "$UNIREF_PATH"_seq.dbtype \
+           "$UNIREF_PATH"_seq_h.index "$UNIREF_PATH"_seq_h.dbtype \
+           "$UNIREF_PATH"_mapping "$UNIREF_PATH"_taxonomy; do
+    [[ -f "$f" ]] && cp "$f" "$SHM_DB_DIR/" &
+  done
+  wait
+  [[ -s "$SHM_DB_DIR/$UNIREF_DB.idx" ]] || { log "  ERROR: UniRef .idx did not stage into $SHM_DB_DIR"; exit 1; }
+  DB_DIR="$SHM_DB_DIR"
+  UNIREF_PATH="$DB_DIR/$UNIREF_DB"
+  end=$(date +%s)
+  log "Staged UniRef into tmpfs in $(( end - start ))s:"
+  df -h /dev/shm | sed 's/^/    /'
+}
+
+if [[ "$USE_SHM" == "1" ]]; then
+  stage_uniref_to_shm
+else
+  lock_indices_in_ram
+fi
 
 # Now the index is resident: advertise the server as ready and release the
 # submission lock. Order matters — write CPU_SERVER first, then clear
@@ -290,6 +334,9 @@ cleanup() {
   fi
   # Belt-and-braces: any stray vmtouch of ours against these indices.
   pkill -u "$USER" -f "vmtouch.*mmseqs2_databases" 2>/dev/null || true
+  # Free the tmpfs staging copy (Daint) — otherwise ~266GB stays pinned in RAM
+  # for the life of the node allocation, not just this process.
+  [[ "$USE_SHM" == "1" ]] && rm -rf "$SHM_DB_DIR" 2>/dev/null || true
   rm -f "$PID_FILE"
   # Remove timestamp file on shutdown
   rm -f "$SERVER_TIMESTAMP_FILE"
@@ -456,9 +503,14 @@ while true; do
       ext="a3m"; [[ "$output_format" == "csv" ]] && ext="csv"
 
       log "Running colabfold_search (CPU) over $nseq queries"
+      # shm mode stages UniRef only (the env DB does not fit in tmpfs), so search
+      # UniRef alone. Shared-cluster mode searches both DBs (default --use-env 1).
+      cf_extra=()
+      [[ "$USE_SHM" == "1" ]] && cf_extra+=(--use-env 0)
       if ! colabfold_search "$fasta" "$DB_DIR" "$cf_out" \
         --mmseqs "$MMSEQS_BIN" \
         --db-load-mode 2 \
+        "${cf_extra[@]}" \
         --threads "$SEARCH_THREADS"; then
         log "colabfold_search failed for job $job_id"
         echo -e "FAILED\nSearch failed" > "$RESULTS_DIR/$job_id.status"

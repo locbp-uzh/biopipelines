@@ -8,7 +8,7 @@ ADMET endpoint predictions for compound libraries via the ADMET-AI Chemprop-RDKi
 
 **Environment**: `admet_ai`
 
-**Installation**: `ADMETAI.install()` creates a dedicated conda env (Python 3.10) and installs `admet-ai` via pip. Verification instantiates `ADMETModel`, which downloads the bundled weights and warms the cache.
+**Installation**: `ADMETAI.install()` creates a dedicated conda env (Python 3.10) and installs `admet-ai` via pip. Verification instantiates `ADMETModel`, which downloads the bundled weights and warms the cache. On Daint the env is a plain venv on the host Python 3.11 and `admet-ai` is pinned below 2.0 — see `llm/daint.md`.
 
 **Parameters**:
 - `compounds`: Union[DataStream, StandardizedOutput] (required) — Input compounds. SMILES are read from the `smiles` column of the compounds map_table.

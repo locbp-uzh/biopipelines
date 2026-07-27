@@ -57,7 +57,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n reduce reduce -version 2>&1 | grep -q '^reduce'; then
+if {cls._env_run("reduce", env_manager)}reduce -version 2>&1 | grep -q '^reduce'; then
     touch "$INSTALL_SUCCESS"
     echo "=== Reduce installation complete ==="
 else

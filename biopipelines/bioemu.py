@@ -85,7 +85,7 @@ class BioEmu(BaseConfig):
         (reconstruct_sidechains=True); pass ``BioEmu.install(md=False)`` to skip
         the heavier MD/sidechain dependencies."""
         biopipelines = folders.get("biopipelines", "")
-        bioemu_check = f'{env_manager} run -n bioemu python -c "import bioemu.sample" >/dev/null 2>&1'
+        bioemu_check = f'{cls._env_run("bioemu", env_manager)}python -c "import bioemu.sample" >/dev/null 2>&1'
 
         # Reuse the shared AF2-params cache instead of letting BioEmu download
         # its own ~3.5 GB copy. Populate the shared cache if absent (so this
@@ -126,10 +126,12 @@ fi
         env_block = cls._env_install_block("bioemu", env_manager, biopipelines)
         # The bioemu[md] extra (sidechain reconstruction) is installed on top of
         # the base env when md=True so it can be toggled off at install time.
+        # venv envs get the md dependencies from their own pip file: the extra
+        # pins openmm==8.2.0, which has no aarch64 build, though openmm itself does.
         md_block = (
             f'echo "Installing bioemu[md] extra (sidechain reconstruction)"\n'
-            f'{env_manager} run -n bioemu pip install "bioemu[md]"\n'
-            if md else ""
+            f'{cls._env_run("bioemu", env_manager)}pip install "bioemu[md]"\n'
+            if md and env_manager != "venv" else ""
         )
         # Create the env only if absent (force_reinstall removed it above). The
         # params wiring then runs unconditionally below so a persisted env with

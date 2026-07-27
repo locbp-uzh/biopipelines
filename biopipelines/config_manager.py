@@ -126,6 +126,15 @@ def _autodetect_variant() -> str:
                 data = yaml.safe_load(f) or {}
         except Exception:
             continue
+        # The username usually lives in the gitignored overlay, since a committed
+        # one would claim the same Unix name on every machine that ships a config.
+        overlay = os.path.join(repo_root, f".config.{variant}.yaml")
+        if os.path.isfile(overlay):
+            try:
+                with open(overlay, "r") as f:
+                    data = _deep_merge(data, yaml.safe_load(f) or {})
+            except Exception:
+                pass
         username = (data.get("machine") or {}).get("username") or ""
         if username and current_user and username == current_user:
             matches.append(variant)
@@ -347,7 +356,7 @@ class ConfigManager:
         machine = config.get('machine') or config.get('cluster') or {}
         if isinstance(machine, dict):
             _NAME_ENUMS = {
-                'env_manager': ('mamba', 'conda', 'micromamba', 'pip'),
+                'env_manager': ('mamba', 'conda', 'micromamba', 'pip', 'venv'),
                 'scheduler':   ('slurm', 'lsf', 'pbs', 'colab', 'none'),
             }
             for key, allowed in _NAME_ENUMS.items():
@@ -677,11 +686,109 @@ class ConfigManager:
         """
         return "\n".join(self.get_scheduler_init())
 
+    def get_billing_account(self) -> str:
+        """Project/allocation that compute is charged to, or "" if unset.
+
+        Distinct from ``machine.username``: this is the *project* the
+        scheduler bills (SLURM ``-A``/``--account``, LSF ``-P``), not the
+        user. Sites that don't do per-project accounting leave it empty.
+        """
+        return self._get_machine_config().get('billing_account') or ""
+
+    def get_edf(self, tool_name: str) -> Optional[str]:
+        """EDF for ``tool_name`` under the CSCS Container Engine, else None.
+
+        Unlike ``containers:`` (an apptainer image wrapped around a single
+        command), an EDF names a job-step environment: the whole tool script
+        runs inside it via ``srun --environment=``.
+
+        ``<folder>`` placeholders resolve against the folder map, so an EDF can
+        live on shared storage and be referenced by every project member. A
+        bare name (no ``/``) is passed through for srun to resolve against
+        ``~/.edf``.
+        """
+        edf_map = self._config.get('edf') or {}
+        value = edf_map.get(tool_name)
+        if not value:
+            return None
+        return self._resolve_folder_template(value)
+
+    def get_cores_per_node(self) -> Optional[int]:
+        """CPU cores on one compute node, or None if the machine doesn't say.
+
+        Only used to divide a node between the tasks of a packed
+        ``Parallel(pack=N)`` block; a step given no explicit
+        ``--cpus-per-task`` gets a single core.
+        """
+        value = self._get_machine_config().get('cores_per_node')
+        return int(value) if value else None
+
+    def get_gpus_per_node(self) -> Optional[int]:
+        """GPUs on one compute node, or None if the machine doesn't say."""
+        value = self._get_machine_config().get('gpus_per_node')
+        return int(value) if value else None
+
+    def get_node_exclusive(self) -> bool:
+        """True when the scheduler allocates whole nodes to a job.
+
+        Packing tasks onto a node is what makes such a machine economical;
+        elsewhere it is at best neutral, so ``Parallel(pack=)`` refuses to
+        engage unless this is set.
+        """
+        return bool(self._get_machine_config().get('node_exclusive'))
+
+    def get_conda_for_venv(self) -> str:
+        """Path to a conda/micromamba binary the ``venv`` manager may fall back on.
+
+        Some tools need packages with no wheel for the platform (pymol, mkdssp).
+        With this set, such an env is built with conda and wrapped in a venv;
+        without it, an env yaml naming conda packages is an error.
+        """
+        val = self._machine_block('env_manager').get('conda_binary')
+        return self._resolve_folder_template(val) if val else ""
+
+    def get_conda_env_root(self) -> str:
+        """Where the ``venv`` manager puts the conda envs it wraps.
+
+        Defaults next to venv_root so both land on the same filesystem.
+        """
+        val = self._machine_block('env_manager').get('conda_env_root')
+        if val:
+            return self._resolve_folder_template(val)
+        return f"{self.get_venv_root().rstrip('/')}-conda"
+
+    def get_venv_root(self) -> str:
+        """Directory holding per-tool venvs, for the ``venv`` env manager.
+
+        venv has no name registry, so an ``environments:`` entry like
+        ``Boltz2: "Boltz2Env"`` only becomes a path via this root.
+        """
+        val = self._machine_block('env_manager').get('venv_root')
+        if not val:
+            config_name = os.path.basename(self._get_config_path())
+            raise KeyError(
+                f"{config_name}: machine.env_manager.venv_root is required "
+                f"when name is 'venv'."
+            )
+        return self._resolve_folder_template(val)
+
+    def get_venv_path(self, env_name: str) -> str:
+        """Absolute path of ``env_name``'s venv. Absolute names pass through.
+
+        Joined with '/' rather than os.path.join: the result is emitted into
+        bash, never used as a host path.
+        """
+        if env_name.startswith('/'):
+            return env_name
+        return f"{self.get_venv_root().rstrip('/')}/{env_name}"
+
     def get_activate_command(self, env_name: str) -> str:
         """Get the activate command for a specific environment."""
         mgr = self.get_env_manager()
         if mgr == "pip":
             return ""
+        if mgr == "venv":
+            return f'source "{self.get_venv_path(env_name)}/bin/activate"'
         return f'{mgr} activate {env_name}'
 
     def get_env_python_command(self, env_name: str) -> str:
@@ -699,6 +806,8 @@ class ConfigManager:
         py = 'python -c "import sys; print(sys.executable)"'
         if mgr == "pip":
             return f'$({py})'
+        if mgr == "venv":
+            return f'"{self.get_venv_path(env_name)}/bin/python"'
         return f'$({mgr} run -n {env_name} {py})'
 
     def get_module_load_line(self) -> str:

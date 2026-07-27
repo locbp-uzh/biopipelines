@@ -2,7 +2,7 @@ machine:
   # Unix username used for variant auto-detection. If the current user
   # (getpass.getuser()) matches this value, the loader picks this variant
   # without needing Pipeline(config="cluster"). Leave empty to opt out.
-  username: "gquarg"
+  username: ""
 
   # Notification email used by SLURM submissions with email="auto".
   # Empty ("") disables email notifications (the default — avoids spam).
@@ -91,6 +91,7 @@ folders:
   # Installation files
   repositories:
     AF2BIND: "<data>/af2bind"
+    AiZynthFinder: "<data>/aizynthfinder"
     AlphaFold: "<data>/localcolabfold"
     Boltz: "<data>/boltz"
     BoltzGen: "<data>/boltzgen"
@@ -145,6 +146,7 @@ folders:
 environments:
   ADMETAI: "admet_ai"
   AF2BIND: "af2bind"
+  AiZynthFinder: "aizynthfinder"
   Aggrescan3D: "Aggrescan3D"
   AlphaFold: "biopipelines"
   APBS: "apbs"

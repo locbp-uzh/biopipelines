@@ -63,14 +63,35 @@ fi
 """
         remove_block = cls._env_remove_block("admet_ai", env_manager) if force_reinstall else ""
         env_block = cls._env_install_block("admet_ai", env_manager, biopipelines)
+        env_python = f'{cls._env_run("admet_ai", env_manager)}python'
+        # descriptastorus imports dbm at module scope. Some distributions (SUSE
+        # on Daint) split it out of the stdlib into a package we cannot install,
+        # leaving an _import_failed stub. dbm.dumb is pure python and dbm's
+        # backend imports are individually guarded, so vendoring these two files
+        # is enough — the dbm-backed store is never instantiated here anyway.
+        # sysconfig purelib, not site.getsitepackages()[0]: the latter's first
+        # entry is a system prefix the job cannot write to.
+        dbm_shim = f"""
+if ! {env_python} -c "import dbm" >/dev/null 2>&1; then
+    echo "stdlib dbm missing from this interpreter; vendoring the pure-python part"
+    DBM_DIR="$({env_python} -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")/dbm"
+    mkdir -p "$DBM_DIR" || exit 1
+    for f in __init__ dumb; do
+        curl -sSL -o "$DBM_DIR/$f.py" \\
+            "https://raw.githubusercontent.com/python/cpython/3.11/Lib/dbm/$f.py" || exit 1
+    done
+    {env_python} -c "import dbm, dbm.dumb" || exit 1
+fi
+"""
         return f"""echo "=== Installing ADMET-AI ==="
 {skip}{remove_block}
 {env_block}
+{dbm_shim}
 
 # Verify installation — instantiating ADMETModel downloads the bundled
 # Chemprop-RDKit weights, so a successful import + construction is the
 # right verification (and pre-warms the model cache for the first run).
-if MPLBACKEND=agg {env_manager} run -n admet_ai python -c "from admet_ai import ADMETModel; ADMETModel()" >/dev/null 2>&1; then
+if MPLBACKEND=agg {cls._env_run("admet_ai", env_manager)}python -c "from admet_ai import ADMETModel; ADMETModel()" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ADMET-AI installation complete ==="
 else

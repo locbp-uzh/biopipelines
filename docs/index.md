@@ -83,6 +83,37 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     biopipelines-submit ubiquitin.py
     ```
 
+=== "CSCS Alps/Daint (venv)"
+
+    Daint is aarch64 (GH200) with no lmod modules and no apptainer, so the conda
+    recipe above does not apply. Use a venv on `$SCRATCH`: the project's `$STORE`
+    quota allows only 150k files and Python environments exhaust it long before
+    the 1 TB of space. Scratch purges after 30 days of no access, so a tool left
+    unused needs reinstalling.
+
+    ```bash
+    git clone https://gitlab.uzh.ch/locbp/public/biopipelines-locbp
+    cd biopipelines-locbp
+    /usr/bin/python3.11 -m venv $SCRATCH/venvs/biopipelines
+    source $SCRATCH/venvs/biopipelines/bin/activate
+    pip install -r environments/biopipelines.pip.daint.txt
+    pip install -e .
+    ```
+
+    There is no `python` on the login nodes (only `python3` and `python3.11`);
+    activating the venv supplies one.
+
+    Set `machine.billing_account` in `config.daint.yaml` to your project (jobs
+    without it are rejected), then run with:
+
+    ```bash
+    BIOPIPELINES_CONFIG_VARIANT=daint biopipelines-submit my_pipeline.py
+    ```
+
+    GPU tools run in containers through the CSCS Container Engine rather than a
+    conda env — see `references/daint_backend.md` (or `llm/daint.md`) for the EDF
+    setup and which tools are supported.
+
 === "Google Colab"
 
     Run these two cells at the top of your Colab notebook:

@@ -95,7 +95,7 @@ class NeuralPLexer(BaseConfig):
 
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {env_check} && {ckpt_check} \\
-   && {env_manager} run -n neuralplexer python -c "import neuralplexer" >/dev/null 2>&1; then
+   && {cls._env_run("neuralplexer", env_manager)}python -c "import neuralplexer" >/dev/null 2>&1; then
     echo "NeuralPLexer already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -127,7 +127,7 @@ fi"""
         # Phase 3 has already downgraded setuptools<81 by the time this runs.
         openfold_dir = os.path.join(parent_dir, "openfold_build")
         openfold_block = f"""echo "--- build + install openfold (CUDA extension) ---"
-{env_manager} run -n neuralplexer bash -c '
+{cls._env_run("neuralplexer", env_manager)}bash -c '
 set -e
 rm -rf "{openfold_dir}"
 git clone --filter=blob:none --quiet https://github.com/aqlaboratory/openfold.git "{openfold_dir}"
@@ -150,7 +150,7 @@ pip install . --no-build-isolation --no-deps
 
         # NeuralPLexer is the package itself; install editable from the clone.
         pkg_install = f"""echo "--- pip install -e NeuralPLexer ---"
-{env_manager} run -n neuralplexer pip install -e "{repo_dir}" --no-deps"""
+{cls._env_run("neuralplexer", env_manager)}pip install -e "{repo_dir}" --no-deps"""
 
         # The Zenodo bundle is ~8.7 GB; over a cluster compute-node proxy the
         # download is prone to truncation, and a partial zip then fails extract
@@ -222,7 +222,7 @@ fi
 # which loads the compiled attn_core_inplace_cuda — so this import also proves
 # the CUDA extension built and loads.
 if {repo_check} && {ckpt_check} \\
-   && {env_manager} run -n neuralplexer python -c "import torch; import neuralplexer" >/dev/null 2>&1; then
+   && {cls._env_run("neuralplexer", env_manager)}python -c "import torch; import neuralplexer" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== NeuralPLexer installation complete ==="
 else

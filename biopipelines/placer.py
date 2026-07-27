@@ -145,7 +145,7 @@ class PLACER(BaseConfig):
         # success — importing them explicitly makes that fail loudly. The
         # imports are echoed (no >/dev/null) so a failure is visible in the log.
         import_check = (
-            f'{env_manager} run -n placer python -c '
+            f'{cls._env_run("placer", env_manager)}python -c '
             f'"import torch, dgl, e3nn; import sys; sys.path.insert(0, \'{repo_dir}\'); import PLACER; '
             f'print(\'PLACER verify OK; torch\', torch.__version__)"'
         )

@@ -106,7 +106,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n plip python -c "import plip" >/dev/null 2>&1; then
+if {cls._env_run("plip", env_manager)}python -c "import plip" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PLIP installation complete ==="
 else

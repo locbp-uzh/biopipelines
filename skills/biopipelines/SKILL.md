@@ -41,8 +41,10 @@ duplicate their content into your own notes — point at them:
 - `llm/pipelines.md` — how to author a `Pipeline`, the tool/data-stream model, ID tracking.
 - `llm/development.md` — conventions, gotchas, how tools are structured.
 - `llm/cluster.md`, `llm/colab.md` — the two backends the repo ships natively.
+- `llm/daint.md` — CSCS Alps/Daint: access, storage, and the verified findings behind `config.daint.yaml`.
 - `docs/tool_index.md`, `docs/tool_reference.md` — the full tool catalog and per-tool signatures.
 - `references/container_backend.md` (in this skill) — the generic single-node GPU backend.
+- `references/daint_backend.md` (in this skill) — the CSCS Alps/Daint backend (aarch64, venv, Container Engine).
 
 ## The API in one screen
 

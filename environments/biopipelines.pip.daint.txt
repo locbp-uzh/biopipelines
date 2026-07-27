@@ -1,0 +1,17 @@
+# BioPipelines base dependencies for Daint (aarch64/GH200), pip rather than conda.
+# Every package here has a working linux-aarch64 wheel — verified by import and
+# use on a GH200 node, not just by pip resolving them.
+# `openbabel-wheel` is the PyPI name for conda's `openbabel`; `yaml` (the C lib)
+# is not needed because PyYAML's wheel bundles it.
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.8
+pyyaml>=6.0
+requests>=2.31
+biopython>=1.84
+rdkit>=2024.03
+openbabel-wheel
+openpyxl>=3.1
+py3dmol>=2.4
+prompt_toolkit>=3
+ruamel.yaml>=0.17

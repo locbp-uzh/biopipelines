@@ -119,6 +119,48 @@ def new_pipeline():
 
 
 @pytest.fixture
+def slurm_packed_config(monkeypatch, tmp_path):
+    """SLURM config declaring exclusive whole-node allocation, so
+    ``Parallel(pack=N)`` engages and emits job steps."""
+    from biopipelines.config_manager import ConfigManager
+
+    config_path = FIXTURES_DIR / "config.slurm_packed.yaml"
+    assert config_path.exists(), f"Missing fixture: {config_path}"
+
+    ConfigManager._instance = None
+    ConfigManager._config = None
+    ConfigManager._variant = None
+
+    monkeypatch.setattr(
+        ConfigManager, "_get_config_path",
+        classmethod(lambda cls, variant=None: str(config_path)),
+    )
+
+    yield config_path
+
+    ConfigManager._instance = None
+    ConfigManager._config = None
+    ConfigManager._variant = None
+
+
+@pytest.fixture
+def new_packed_pipeline():
+    """Factory for a Pipeline on the packed SLURM fixture."""
+    from biopipelines.pipeline import Pipeline
+
+    def _make(job: str):
+        return Pipeline(
+            project="TestSuite",
+            job=job,
+            description=f"Smoke test: {job}",
+            on_the_fly=False,
+            local_output=True,
+            config="slurm_packed",
+        )
+    return _make
+
+
+@pytest.fixture
 def new_slurm_pipeline():
     """Factory for a minimal SLURM-config Pipeline. Needs ``slurm_local_config``
     to be active so ConfigManager loads the SLURM-flavoured fixture."""

@@ -78,7 +78,7 @@ class Aggrescan3D(BaseConfig):
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         biopipelines = folders.get("biopipelines", "")
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_manager} run -n Aggrescan3D python -c "import aggrescan" >/dev/null 2>&1; then
+if {cls._env_run("Aggrescan3D", env_manager)}python -c "import aggrescan" >/dev/null 2>&1; then
     echo "Aggrescan3D already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -91,7 +91,7 @@ fi
 {env_block}
 
 # Verify installation
-if {env_manager} run -n Aggrescan3D python -c "import aggrescan" >/dev/null 2>&1; then
+if {cls._env_run("Aggrescan3D", env_manager)}python -c "import aggrescan" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Aggrescan3D installation complete ==="
 else

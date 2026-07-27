@@ -11,7 +11,7 @@ Provides tool configurations, pipeline orchestration, and seamless integration.
 
 __version__ = "1.3.1"
 
-from .pipeline import Pipeline, Bundle, Each, Folder, Resources, Suffix, Save, Dependencies, Parallel, Service
+from .pipeline import Pipeline, Bundle, Each, Folder, Resources, Suffix, Save, Dependencies, Parallel, Run, Service
 from .base_config import BaseConfig, ToolOutput, IndexedTableContainer
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .datastream import DataStream, create_map_table
@@ -59,6 +59,7 @@ from .dynamicbind import DynamicBind
 from .neuralplexer import NeuralPLexer
 from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
+from .aizynthfinder import AiZynthFinder
 from .esmfold import ESMFold
 from .esmfold2 import ESMFold2
 from .uniprot import UniProt
@@ -186,6 +187,7 @@ __all__ = [
     'PoseBusters',
     'PoseBustersTool',
     'ADMETAI',
+    'AiZynthFinder',
     'ESMFold',
     'ESMFold2',
     'UniProt',

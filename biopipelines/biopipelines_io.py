@@ -671,7 +671,8 @@ def lookup_table_value(
     item_id: str,
     column: str,
     id_column: str = "id",
-    pdb_column: str = "pdb"
+    pdb_column: str = "pdb",
+    map_table_paths: Optional[List[str]] = None,
 ) -> Any:
     """
     Look up a value from a table for a given ID, using the framework's standard
@@ -684,6 +685,15 @@ def lookup_table_value(
         column: Column name to retrieve value from
         id_column: Column holding the ids to match against (default: "id";
                    falls back to ``pdb_column`` if no id column exists).
+        map_table_paths: map_table CSVs of the stream ``item_id`` comes from.
+                   Required whenever an upstream tool may have renamed ids: the
+                   ``<stream>.id`` provenance columns there are what relate the
+                   caller's id to this table's id space, and without them only
+                   string-suffix matching remains (``Panda_1`` vs ``design_3``
+                   has no string relationship, so the lookup raises). Pass the
+                   consumed stream's ``map_table`` — NOT this table's path,
+                   whose own provenance records where its rows came from rather
+                   than where its ids were later renamed to.
 
     Returns:
         Value from the specified column
@@ -710,11 +720,18 @@ def lookup_table_value(
     stripped = [i[:-4] if i.endswith(".pdb") else i for i in table_ids]
 
     from biopipelines.id_map_utils import get_mapped_ids
-    matched = get_mapped_ids([item_id], stripped, unique=True).get(item_id)
+    matched = get_mapped_ids(
+        [item_id], stripped, unique=True, map_table_paths=map_table_paths
+    ).get(item_id)
     if matched is None:
+        hint = "" if map_table_paths else (
+            " No map_table provenance was supplied, so only string-suffix "
+            "matching was tried; if an upstream tool renamed ids, pass the "
+            "consumed stream's map_table via map_table_paths."
+        )
         raise KeyError(
             f"ID '{item_id}' not found in table (col '{key_col}'). "
-            f"Available: {table_ids[:10]}{'...' if len(table_ids) > 10 else ''}"
+            f"Available: {table_ids[:10]}{'...' if len(table_ids) > 10 else ''}.{hint}"
         )
     # Map the stripped match back to the actual table row.
     row_idx = stripped.index(matched)
@@ -726,7 +743,8 @@ def iterate_table_values(
     item_ids: List[str],
     column: str,
     id_column: str = "id",
-    pdb_column: str = "pdb"
+    pdb_column: str = "pdb",
+    map_table_paths: Optional[List[str]] = None,
 ) -> Iterator[Tuple[str, Any]]:
     """
     Iterate over (id, value) pairs from a table for a list of IDs.
@@ -750,7 +768,8 @@ def iterate_table_values(
             print(f"{struct_id}: {positions}")
     """
     for item_id in item_ids:
-        value = lookup_table_value(table, item_id, column, id_column, pdb_column)
+        value = lookup_table_value(table, item_id, column, id_column, pdb_column,
+                                   map_table_paths=map_table_paths)
         yield (item_id, value)
 
 
@@ -1017,7 +1036,8 @@ class Resolve:
         return cmd
 
     @staticmethod
-    def table_column(reference, item_id: str, env_name: str = "biopipelines") -> str:
+    def table_column(reference, item_id: str, env_name: str = "biopipelines",
+                     map_table: str = "") -> str:
         """
         Bash expression to resolve a table value inline (slow — spawns Python).
 
@@ -1039,6 +1059,8 @@ class Resolve:
             reference: TableReference object or TABLE_REFERENCE:path:column string
             item_id: ID of the item to look up
             env_name: Conda environment name (default: "biopipelines")
+            map_table: Consumed stream's map_table, so an id an upstream tool
+                renamed still resolves against the table's original id space
 
         Returns:
             Bash subshell expression calling resolve_table_column.py
@@ -1053,9 +1075,12 @@ class Resolve:
         # biopipelines` would fail. Pip mode is the same case. In both, emit a
         # plain `python` call — the activated tool env already has biopipelines
         # importable via the script's sys.path bootstrap.
+        map_arg = f' "{map_table}"' if map_table else ""
         if mgr == "pip" or cfg.get_scheduler() == "colab":
-            return f'$(python "{script}" "{reference}" "{item_id}")'
-        return f'$({mgr} run -n {env_name} --no-banner python "{script}" "{reference}" "{item_id}")'
+            return f'$(python "{script}" "{reference}" "{item_id}"{map_arg})'
+        if mgr == "venv":
+            return f'$("{cfg.get_venv_path(env_name)}/bin/python" "{script}" "{reference}" "{item_id}"{map_arg})'
+        return f'$({mgr} run -n {env_name} --no-banner python "{script}" "{reference}" "{item_id}"{map_arg})'
 
 
 class TableReference:

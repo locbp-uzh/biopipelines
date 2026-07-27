@@ -65,7 +65,7 @@ def _validate_identifier(field: str, value: str) -> None:
 from .base_config import _escape_for_double_quotes  # noqa: F401
 
 # Directive-injection guard; canonical definition lives in schedulers.py.
-from .schedulers import _validate_directive_value
+from .schedulers import _memory_to_mb, _validate_directive_value
 
 
 # Module-level context variable to track active pipeline for auto-registration
@@ -198,6 +198,16 @@ class Pipeline:
         self._parallel_siblings = []         # type: List[int]
         self._parallel_after_anchor = None   # type: Optional[int]
         self._pending_post_parents = None    # type: Optional[List[int]]
+
+        # Packed-Parallel state. In a `with Parallel(pack=N):` block the
+        # siblings are job steps inside ONE batch rather than separate jobs,
+        # so they are collected here instead of in batch_parents.
+        self._parallel_pack = None           # type: Optional[int]
+        self._pack_runs = None               # type: Optional[List[dict]]
+        self._active_run = None
+        self._packed_resources_seen = False
+        # batch index -> {"pack": N, "runs": [...]}; consumed at emission.
+        self._packed_batches = {}            # type: Dict[int, dict]
 
         # Service-block state. Set on `with Service():` exit to the daemon's
         # batch index; consumed by the NEXT Resources() call, which records it
@@ -720,7 +730,9 @@ class Pipeline:
             "echo"
         ]
 
-        # Add each tool execution (each tool handles its own environment activation)
+        # Tool scripts are written for every tool; only the invocation lines
+        # differ when the batch is a packed Parallel block.
+        packed = self._packed_batches.get(0) if len(self.batch_resources) == 1 else None
         for tool in self.tools:
             # Generate tool-specific script
             tool_script_path = os.path.join(self.folders["runtime"], f"{tool.script_basename}.sh")
@@ -744,15 +756,21 @@ class Pipeline:
                 # This is expected - files don't exist until execution
                 print(f"Debug: Could not determine output files for {tool.TOOL_NAME} during script generation: {e}")
             
+            if packed:
+                continue  # invocation emitted per-task below
+
             # Add tool execution following notebook pattern
             log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
             tool_folder_log = os.path.join(tool.output_folder, "_log")
             script_lines.extend([
                 f"echo {tool.TOOL_NAME}",
-                f"{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}",
+                f"{self._edf_prefix(tool)}{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}",
                 "echo"
             ])
-        
+
+        if packed:
+            script_lines.extend(self._packed_body_lines(packed, self.batch_resources[0]))
+
         # Final steps
         script_lines.extend([
             "echo",
@@ -841,12 +859,16 @@ class Pipeline:
 
         if env_manager == "pip":
             lines.append(f'  ( pip freeze ) > "{envs_dir}/pip.txt" 2>&1 || echo "pip not available" > "{envs_dir}/pip.txt"')
+        elif env_manager == "venv":
+            for env in envs:
+                env_py = f'{cm.get_venv_path(env)}/bin/python'
+                lines.append(f'  ( "{env_py}" -m pip freeze ) > "{envs_dir}/{env}.pip.txt" 2>&1 || echo "pip freeze failed for {env}" > "{envs_dir}/{env}.pip.txt"')
         else:
             for env in envs:
                 env_yaml = f'{envs_dir}/{env}.yaml'
                 env_pip = f'{envs_dir}/{env}.pip.txt'
                 lines.append(f'  ( {env_manager} env export --no-builds -n {env} ) > "{env_yaml}" 2>&1 || echo "env export failed for {env}" > "{env_yaml}"')
-                lines.append(f'  ( {env_manager} run -n {env} pip freeze ) > "{env_pip}" 2>&1 || echo "pip freeze failed for {env}" > "{env_pip}"')
+                lines.append(f'  ( {cls._env_run(env, env_manager)}pip freeze ) > "{env_pip}" 2>&1 || echo "pip freeze failed for {env}" > "{env_pip}"')
 
         lines.append('  echo "Debug capture complete."')
         lines.append('fi')
@@ -972,7 +994,10 @@ class Pipeline:
                 print("Warning: No email configured. Disabling email notifications.")
                 print("Set the 'machine.email' field in your config file.")
 
-        email_line = self._backend().email_directive(email)
+        backend = self._backend()
+        # Batch header only: job steps inherit the allocation's account.
+        email_line = (backend.email_directive(email)
+                      + backend.account_directive(ConfigManager().get_billing_account()))
 
         num_batches = len(self.batch_resources)
 
@@ -981,6 +1006,167 @@ class Pipeline:
             self._generate_single_batch(email_line)
         else:
             self._generate_multi_batch(email_line, num_batches)
+
+    def _edf_prefix(self, tool) -> str:
+        """``srun --environment=`` prefix running a tool's script in a container.
+
+        Empty unless the config maps this tool to an EDF. The whole tool script
+        is wrapped, not just its python call: the CSCS Container Engine defines
+        a *job step*, so an inner prefix would leave the env activation outside
+        the container it is meant to apply to. No ``-A`` here — the step
+        inherits the batch job's account.
+        """
+        # An install step's venv binds to its tool's image python, so it builds in that container.
+        name = getattr(tool, "_parent_tool_name", None) or tool.TOOL_NAME
+        edf = ConfigManager().get_edf(name)
+        if not edf:
+            return ""
+        return f"srun --environment={edf} "
+
+    def _register_packed_batch(self, pack: int, runs: List[dict]):
+        """Record a `Parallel(pack=N)` block's tasks against its batch."""
+        self._packed_batches[self.current_batch] = {"pack": pack, "runs": runs}
+        self._packed_resources_seen = False
+
+    def _pack_step_prefix(
+        self,
+        tool,
+        cpus: Optional[int],
+        gpus: int,
+        memory_mb: Optional[int],
+        memory_per_cpu_mb: Optional[int],
+    ) -> str:
+        """``srun`` prefix for one tool as a job step inside a packed batch.
+
+        Every tool gets a step, not just containerized ones: the step is what
+        carries the task's slice of the node. ``--exclusive`` makes concurrent
+        steps partition rather than collide, while ``--exact`` prevents each
+        step from claiming all CPUs left in the allocation.  An explicit
+        ``--cpus-per-task`` is what stops each step getting a single core.
+        Nesting a container step inside an outer task step fails to bind CPUs,
+        so the container flag goes on this same step (see llm/daint.md).
+        """
+        # --nodes=1: without it a single-task step inherits the allocation's
+        # node count and warns "can't run 1 processes on N nodes".
+        parts = ["srun --exclusive --exact --nodes=1 --ntasks=1"]
+        # A zero-valued --gpus-per-task does not override an allocation-level
+        # GRES request on Slurm: the step inherits every GPU instead.  Explicitly
+        # suppress GRES for CPU-only siblings so GPU steps can start beside them.
+        parts.append(f"--gpus-per-task={gpus}" if gpus else "--gres=none")
+        if cpus:
+            parts.append(f"--cpus-per-task={cpus}")
+        if memory_mb:
+            parts.append(f"--mem={memory_mb}M")
+        elif memory_per_cpu_mb:
+            parts.append(f"--mem-per-cpu={memory_per_cpu_mb}M")
+        name = getattr(tool, "_parent_tool_name", None) or tool.TOOL_NAME
+        edf = ConfigManager().get_edf(name)
+        if edf:
+            parts.append(f"--environment={edf}")
+        return " ".join(parts) + " "
+
+    def _packed_task_cpus(self, pack: int, override: Optional[int]) -> Optional[int]:
+        """Per-task CPU share: explicit, else the node's cores divided by pack."""
+        if override:
+            return override
+        cores = ConfigManager().get_cores_per_node()
+        if not cores:
+            return None
+        return max(1, cores // pack)
+
+    def _packed_body_lines(self, packed: dict, resources: dict) -> List[str]:
+        """Emit a packed batch: one backgrounded subshell per task.
+
+        Tools inside a task run in sequence (each ``srun`` blocks); tasks run
+        concurrently. Exit codes are collected rather than left to `wait`, so
+        one failed task neither takes the batch down nor passes silently.
+        """
+        pack = packed["pack"]
+        runs = packed["runs"]
+        total_memory_mb = _memory_to_mb(resources.get("memory", ""))
+        cores_per_node = ConfigManager().get_cores_per_node()
+        memory_per_cpu_mb = (
+            max(1, total_memory_mb // cores_per_node)
+            if total_memory_mb and cores_per_node
+            else None
+        )
+        lines = [
+            f"# Packed Parallel block: {len(runs)} tasks, {pack} per node",
+            "_pack_pids=()",
+            "_pack_names=()",
+            "",
+        ]
+        for idx, run in enumerate(runs):
+            cpus = self._packed_task_cpus(pack, run["cpus"])
+            names = "+".join(t.TOOL_NAME for t in run["tools"])
+            lines.append(f"# task {idx + 1}/{len(runs)}: {names}")
+            lines.append("(")
+            for tool in run["tools"]:
+                tool_script_path = os.path.join(self.folders["runtime"], f"{tool.script_basename}.sh")
+                log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
+                tool_folder_log = os.path.join(tool.output_folder, "_log")
+                prefix = self._pack_step_prefix(
+                    tool,
+                    cpus,
+                    run["gpus"],
+                    _memory_to_mb(run["memory"]) if run["memory"] else None,
+                    memory_per_cpu_mb,
+                )
+                lines.append(f"  echo {tool.TOOL_NAME}")
+                lines.append(f"  {prefix}{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}")
+            lines.append(") &")
+            lines.append("_pack_pids+=($!)")
+            lines.append(f'_pack_names+=("{names}")')
+            lines.append("")
+        lines.extend([
+            "_pack_failed=0",
+            'for _i in "${!_pack_pids[@]}"; do',
+            '  if ! wait "${_pack_pids[$_i]}"; then',
+            '    echo "Task failed: ${_pack_names[$_i]}"',
+            "    _pack_failed=$((_pack_failed + 1))",
+            "  fi",
+            "done",
+            'if [ "$_pack_failed" -gt 0 ]; then',
+            '  echo "$_pack_failed of ${#_pack_pids[@]} packed tasks failed"',
+            "fi",
+            "echo",
+        ])
+        return lines
+
+    def _packed_header(self, batch_idx: int) -> str:
+        """``--nodes``/``--ntasks`` directives for a packed batch, else "".
+
+        The node count is derived, not requested: ``pack`` is tasks per node,
+        so 10 tasks at pack=4 spread 4/4/2 over 3 nodes. GPUs are asked for as
+        ``--gpus-per-task`` rather than a total, which would let the scheduler
+        satisfy the count with a different node spread.
+        """
+        packed = self._packed_batches.get(batch_idx)
+        if not packed or self._backend().name != "slurm":
+            return ""
+        pack = packed["pack"]
+        runs = packed["runs"]
+        ntasks = len(runs)
+        nodes = -(-ntasks // pack)  # ceil
+        gpus = max(r["gpus"] for r in runs)
+        cm = ConfigManager()
+        per_node = cm.get_gpus_per_node()
+        lines = [
+            f"#SBATCH --nodes={nodes}",
+            f"#SBATCH --ntasks={ntasks}",
+            f"#SBATCH --ntasks-per-node={min(pack, ntasks)}",
+        ]
+        # --gpus-per-task multiplies by task count, so packing more tasks than the
+        # node has GPUs is rejected outright — a CPU-only task alongside four GPU
+        # ones asks for five. On a node-exclusive site the whole node is allocated
+        # anyway, so request its GPUs once and let each step claim what it needs.
+        if gpus and cm.get_node_exclusive() and per_node:
+            lines.append(f"#SBATCH --gres=gpu:{per_node}")
+        else:
+            lines.append(f"#SBATCH --gpus-per-task={gpus}")
+        # Pin the default so a site-level change can't turn 4/4/2 into 4/3/3.
+        lines.append("#SBATCH --distribution=block")
+        return "\n" + "\n".join(lines)
 
     def _backend(self):
         """Scheduler backend used for script generation.
@@ -1028,7 +1214,8 @@ class Pipeline:
         resources = self.batch_resources[0]
         _validate_directive_value("memory", resources["memory"])
         _validate_directive_value("time", resources["time"])
-        gpu_line, gpu_warnings = backend.gpu_directive(resources["gpu"], resources.get("gpus", 1))
+        gpu_line, gpu_warnings = backend.gpu_directive(resources["gpu"], resources.get("gpus", 1),
+                                                  single_gpu_type=ConfigManager().get_node_exclusive())
         gpu_setup = backend.gpu_setup(resources["gpu"])
         extra_directives = backend.extra_options(resources.get(backend.options_key, {}))
         header = backend.header_directives(resources["memory"], resources["time"], "job.out")
@@ -1037,9 +1224,13 @@ class Pipeline:
         scheduler_init = cm.get_scheduler_init_block()
         module_load = cm.get_module_load_line()
 
+        packed_header = self._packed_header(0)
+        if packed_header:
+            gpu_line = ""  # --gpus-per-task supersedes the batch-level --gpus
+
         job_content = f"""#!/usr/bin/bash
 {gpu_line}
-{header}{extra_directives}{dependency_line}
+{header}{extra_directives}{packed_header}{dependency_line}
 {email_line}
 
 # Make all files group-writable by default
@@ -1101,7 +1292,8 @@ umask 002
             resources = self.batch_resources[batch_idx]
             _validate_directive_value("memory", resources["memory"])
             _validate_directive_value("time", resources["time"])
-            gpu_line, gpu_warnings = backend.gpu_directive(resources["gpu"], resources.get("gpus", 1))
+            gpu_line, gpu_warnings = backend.gpu_directive(resources["gpu"], resources.get("gpus", 1),
+                                                  single_gpu_type=ConfigManager().get_node_exclusive())
             warnings.extend(gpu_warnings)
             gpu_setup = backend.gpu_setup(resources["gpu"])
             extra_directives = backend.extra_options(resources.get(backend.options_key, {}))
@@ -1125,9 +1317,13 @@ umask 002
             else:
                 dependency_line = ""
 
+            packed_header = self._packed_header(batch_idx)
+            if packed_header:
+                gpu_line = ""  # --gpus-per-task supersedes the batch-level --gpus
+
             batch_job_content = f"""#!/usr/bin/bash
 {gpu_line}
-{header}{extra_directives}{dependency_line}
+{header}{extra_directives}{packed_header}{dependency_line}
 {email_line}
 
 # Make all files group-writable by default
@@ -1248,14 +1444,20 @@ umask 002
             "echo"
         ]
 
-        # Add each tool execution (each tool handles its own environment activation)
-        for tool in batch_tools:
-            # Tool script path
-            tool_script_path = os.path.join(self.folders["runtime"], f"{tool.script_basename}.sh")
-            log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
-            tool_folder_log = os.path.join(tool.output_folder, "_log")
+        packed = self._packed_batches.get(batch_idx)
+        if packed:
+            script_lines.extend(
+                self._packed_body_lines(packed, self.batch_resources[batch_idx])
+            )
+        else:
+            # Add each tool execution (each tool handles its own environment activation)
+            for tool in batch_tools:
+                # Tool script path
+                tool_script_path = os.path.join(self.folders["runtime"], f"{tool.script_basename}.sh")
+                log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
+                tool_folder_log = os.path.join(tool.output_folder, "_log")
 
-            script_lines.extend([f"echo {tool.TOOL_NAME}", f"{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}", "echo"])
+                script_lines.extend([f"echo {tool.TOOL_NAME}", f"{self._edf_prefix(tool)}{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}", "echo"])
 
         # Final steps
         script_lines.extend(["echo", f"echo Batch {batch_idx + 1} done"])
@@ -1380,6 +1582,14 @@ umask 002
         elif self._pending_after_parent is not None:
             after_parents = [self._pending_after_parent]
             self._pending_after_parent = None
+
+        if self._parallel_pack is not None:
+            if self._packed_resources_seen:
+                raise RuntimeError(
+                    "Parallel(pack=N) takes a single Resources() call: it describes the "
+                    "one allocation the tasks share. Per-task resources go on Run()."
+                )
+            self._packed_resources_seen = True
 
         if self._pending_post_parents is not None:
             new_parents = list(self._pending_post_parents)
@@ -1796,7 +2006,37 @@ class Parallel:
     * Dependencies() inside the block raises — the structural rules
       already determine all dependencies.
     * Nesting Parallel() blocks is not supported in this version.
+
+    Packing (``pack=N``)
+    -------------------
+    On a machine whose nodes are allocated whole (``machine.node_exclusive``,
+    e.g. CSCS Daint), one sibling per job wastes the rest of the node. ``pack=N``
+    instead emits ONE job whose siblings are concurrent job steps, N per node::
+
+        with Parallel(pack=4):
+            Resources(gpu="gh", time="06:00:00")   # the allocation
+            for lig in ligands:
+                with Run():                        # one task in it
+                    Boltz2(ligand=lig, ...)
+
+    ``N`` is tasks per node, so the node count is derived: 10 iterations at
+    ``pack=4`` gives ``--nodes=3 --ntasks=10 --ntasks-per-node=4`` (4/4/2).
+    Each ``Run()`` becomes a backgrounded subshell and each tool inside it its
+    own ``srun`` step, so per-tool container selection still applies and a
+    ``Run()`` may mix containerized and plain tools.
+
+    Inside a packed block ``Resources()`` describes the allocation and is
+    called ONCE; ``Run()`` delimits a task. See llm/daint.md for the probes
+    that fixed this shape.
     """
+
+    def __init__(self, pack: Optional[int] = None):
+        if pack is not None:
+            if not isinstance(pack, int) or isinstance(pack, bool) or pack < 1:
+                raise ValueError(
+                    f"Parallel(pack=) must be a positive integer (tasks per node), got {pack!r}."
+                )
+        self.pack = pack
 
     def __enter__(self):
         pipeline = Pipeline.get_active_pipeline()
@@ -1811,6 +2051,8 @@ class Parallel:
             )
         pipeline._parallel_anchor = pipeline.current_batch
         pipeline._parallel_siblings = []
+        pipeline._parallel_pack = self.pack
+        pipeline._pack_runs = [] if self.pack else None
         # If this block immediately follows a Service, every sibling waits for
         # the daemon to START via after: (not afterok on the anchor). Absorb
         # the single-use service edge so all siblings share it.
@@ -1821,6 +2063,22 @@ class Parallel:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pipeline = Pipeline.get_active_pipeline()
         if pipeline is None:
+            return False
+        if self.pack is not None:
+            runs = pipeline._pack_runs or []
+            pipeline._parallel_pack = None
+            pipeline._pack_runs = None
+            pipeline._parallel_anchor = None
+            pipeline._parallel_siblings = []
+            after_anchor = pipeline._parallel_after_anchor
+            pipeline._parallel_after_anchor = None
+            if not runs:
+                if after_anchor is not None:
+                    pipeline._pending_after_parent = after_anchor
+                return False
+            # One batch, not N: the siblings are job steps inside it, so the
+            # chain default already makes the next batch depend on it.
+            pipeline._register_packed_batch(self.pack, runs)
             return False
         siblings = list(pipeline._parallel_siblings)
         after_anchor = pipeline._parallel_after_anchor
@@ -1836,6 +2094,92 @@ class Parallel:
             if after_anchor is not None:
                 pipeline._pending_after_parent = after_anchor
         return False  # don't suppress exceptions
+
+
+class Run:
+    """Context manager delimiting one task inside a ``Parallel(pack=N)`` block.
+
+    Every tool in the block becomes its own ``srun`` job step, run in sequence
+    inside a backgrounded subshell. Tasks therefore run concurrently with each
+    other while the tools within a task stay ordered, and per-tool container
+    selection is preserved — a ``Run()`` may freely mix containerized and
+    plain tools.
+
+    ``cpus`` overrides the per-task CPU share, which otherwise divides the
+    node's cores by ``pack``. ``memory`` overrides the proportional memory
+    share derived from the allocation. This matters for asymmetric layouts
+    such as a large in-memory database server beside smaller GPU workers.
+
+    Example
+    -------
+    ::
+
+        with Parallel(pack=4):
+            Resources(gpu="gh", time="06:00:00")
+            for lig in ligands:
+                with Run():
+                    poses = Boltz2(ligand=lig, ...)
+                    PoseBusters(structures=poses)
+    """
+
+    def __init__(
+        self,
+        cpus: Optional[int] = None,
+        gpus: int = 1,
+        memory: Optional[str] = None,
+    ):
+        if memory is not None:
+            _validate_directive_value("memory", memory)
+            if _memory_to_mb(memory) is None:
+                raise ValueError(
+                    f"Run(memory=) must be a memory value such as '20GB', got {memory!r}."
+                )
+        self.cpus = cpus
+        self.gpus = gpus
+        self.memory = memory
+
+    def __enter__(self):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is None:
+            raise RuntimeError(
+                "Run() must be used within a Pipeline context."
+            )
+        if getattr(pipeline, "_parallel_pack", None) is None:
+            raise RuntimeError(
+                "Run() is only valid inside a `with Parallel(pack=N):` block — "
+                "a task has no meaning without an allocation to sit in. "
+                "Use Resources() to open a normal batch instead."
+            )
+        if pipeline._active_run is not None:
+            raise RuntimeError("Nested Run() blocks are not supported.")
+        if pipeline.current_batch < 0 or not pipeline._packed_resources_seen:
+            raise RuntimeError(
+                "Parallel(pack=N) needs a Resources() call before the first Run(): "
+                "it describes the allocation the tasks share."
+            )
+        pipeline._active_run = self
+        self._start_idx = len(pipeline.tools)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pipeline = Pipeline.get_active_pipeline()
+        if pipeline is None:
+            return False
+        pipeline._active_run = None
+        if exc_type is not None:
+            return False
+        tools = pipeline.tools[self._start_idx:]
+        if not tools:
+            raise RuntimeError("Run() block added no tools.")
+        pipeline._pack_runs.append(
+            {
+                "tools": tools,
+                "cpus": self.cpus,
+                "gpus": self.gpus,
+                "memory": self.memory,
+            }
+        )
+        return False
 
 
 class Service:

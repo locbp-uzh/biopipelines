@@ -427,7 +427,7 @@ fi
 {env_block}
 
 # Verify installation
-if {env_manager} run -n Boltz2Env python -c "import boltz" >/dev/null 2>&1; then
+if {cls._env_run("Boltz2Env", env_manager)}python -c "import boltz" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Boltz2 installation complete ==="
 else
@@ -499,6 +499,7 @@ fi
                  # Core prediction parameters
                  affinity: bool = True,
                  output_format: str = "pdb",
+                 single_sequence: bool = False,
                  # Advanced prediction parameters
                  recycling_steps: Optional[int] = None,
                  diffusion_samples: Optional[int] = None,
@@ -586,6 +587,9 @@ fi
                 missing: id | removed_by | kind | cause
         """
         self.config = config
+        self.single_sequence = single_sequence
+        if single_sequence and msas is not None:
+            raise ValueError("single_sequence=True cannot be combined with supplied msas")
 
         if msas is not None and not isinstance(msas, DataStream):
             msas = msas.streams.msas
@@ -811,7 +815,7 @@ fi
         """Generate bash script for Boltz2 execution."""
         boltz_cache_folder = self.folders["BoltzCache"]
         # Query the public MSA server only when no MSAs were supplied.
-        msa_option = "" if self.msas is not None else " --use_msa_server"
+        msa_option = "" if self.msas is not None or self.single_sequence else " --use_msa_server"
 
         script_content = "#!/bin/bash\n"
         script_content += "# Boltz2 execution script\n"
@@ -915,6 +919,8 @@ mkdir -p {self.config_files_dir}
 
         if self.affinity:
             cmd_parts.append('--affinity')
+        if self.single_sequence:
+            cmd_parts.append('--single-sequence')
 
         cmd_parts.append(f'--sequences-csv "{self.sequences_csv}"')
 
@@ -1058,7 +1064,7 @@ python {self.boltz_compounds_py} \\
         msa_fmt = self._supplied_msa_format() if self.msas is not None else "csv"
         msa_files = [self.stream_path("msas", f"<id>.{msa_fmt}")]
 
-        msas = DataStream(
+        msas = DataStream.empty("msas", msa_fmt) if self.single_sequence else DataStream(
             name="msas",
             ids=predicted_ids,
             files=msa_files,
@@ -1109,13 +1115,14 @@ python {self.boltz_compounds_py} \\
                 columns=["id", "sequence"],
                 description="Input protein sequences"
             ),
-            "msas": TableInfo(
+        }
+        if not self.single_sequence:
+            tables["msas"] = TableInfo(
                 name="msas",
                 path=self.msas_csv,
                 columns=["id", "sequences.id", "sequence", "msa_file"],
                 description="MSA files for recycling"
             )
-        }
 
         if self.affinity:
             tables["affinity"] = TableInfo(

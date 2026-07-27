@@ -72,7 +72,7 @@ class RTMScore(BaseConfig):
         # Verify the env can actually import the heavy deps (dgl/torch), not
         # just that the env directory exists — a half-built or ABI-broken env
         # must not be mistaken for a working install.
-        import_check = (f'{env_manager} run -n rtmscore python -c '
+        import_check = (f'{cls._env_run("rtmscore", env_manager)}python -c '
                         f'"import torch, dgl, rdkit, torch_scatter" >/dev/null 2>&1')
         repo_check = f'[ -d "{repo_dir}/RTMScore" ]'
         model_check = f'[ -f "{repo_dir}/trained_models/rtmscore_model1.pth" ]'
@@ -116,7 +116,7 @@ fi"""
         # breaks `import dgl`'s graphbolt), so force 0.9.0 (--no-deps leaves
         # torch untouched; 0.9.0 still ships datapipes).
         pip_block = (
-            f'{env_manager} run -n rtmscore pip install --no-deps "torchdata==0.9.0"'
+            f'{cls._env_run("rtmscore", env_manager)}pip install --no-deps "torchdata==0.9.0"'
         )
         return f"""echo "=== Installing RTMScore ==="
 {skip}{clone_block}

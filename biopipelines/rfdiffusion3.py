@@ -228,13 +228,13 @@ fi
 # Download model weights (skip if checkpoint dir already populated)
 mkdir -p {repo_dir}
 if [ -z "$(ls -A "{repo_dir}" 2>/dev/null)" ]; then
-    {env_manager} run -n foundry foundry install rfd3 --checkpoint-dir {repo_dir}
+    {cls._env_run("foundry", env_manager)}foundry install rfd3 --checkpoint-dir {repo_dir}
 else
     echo "Checkpoint dir {repo_dir} already populated, skipping weight download."
 fi
 
 # Verify installation
-if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {env_manager} run -n foundry python -c "import foundry" >/dev/null 2>&1; then
+if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {cls._env_run("foundry", env_manager)}python -c "import foundry" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== RFdiffusion3 installation complete ==="
 else
@@ -843,9 +843,21 @@ python -c "import torch; import torchvision" 2>/dev/null || true
         # Output structure ids are keyed by the foundry design key (the input
         # pdb id per entry), so no single --prefix is passed; the postprocess
         # derives each id from the produced filename.
+        # On Daint the postprocess runs INSIDE the RFD3 container, where the
+        # activated biopipelines venv resolves to the container's python 3.12 —
+        # not the host venv's 3.11 that carries biopython. A container-visible
+        # biopython (pip --target into a mounted scratch dir) is exposed via
+        # RFDIFFUSION3_POSTPROCESS_PYLIBS; add it to PYTHONPATH when set. Unset /
+        # empty (Colab, x86-64 where the venv python already has Bio) → no-op.
+        pylibs_block = (
+            'if [ -n "${RFDIFFUSION3_POSTPROCESS_PYLIBS:-}" ]; then\n'
+            '    export PYTHONPATH="$RFDIFFUSION3_POSTPROCESS_PYLIBS:${PYTHONPATH:-}"\n'
+            'fi'
+        )
         return f"""echo "Post-processing RFdiffusion3 outputs"
 
 {activate_biopipelines}
+{pylibs_block}
 # Process CIF.gz files: decompress, convert to PDB, extract metrics and sequences.
 # --output_folder is the PDB destination (structures/ stream folder).
 python "{self.postprocess_py_file}" \\

@@ -82,7 +82,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n templatetool python -c "import sys" >/dev/null 2>&1; then
+if {cls._env_run("templatetool", env_manager)}python -c "import sys" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== TemplateTool installation complete ==="
 else

@@ -1,0 +1,9 @@
+# LocalColabFold on Daint (aarch64/GH200).
+# The upstream install_colabbatch_linux.sh cannot be used here: it fetches
+# Mambaforge-Linux-x86_64.sh and installs jax[cuda11_pip] from Google's release
+# index, which publishes x86-64 wheels only. Both halves have aarch64 equivalents
+# on PyPI, so the env is built directly instead.
+# Verified on a GH200: jax 0.10.2 reports [CudaDevice(id=0)], and the install
+# provides colabfold_batch + colabfold_search (what MMseqs2Server calls).
+jax[cuda12]
+colabfold[alphafold-without-jax] @ git+https://github.com/sokrypton/ColabFold

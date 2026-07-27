@@ -140,12 +140,12 @@ fi
 # and biopipelines/base_config both import pandas at module load, so a pandas that
 # can't import (e.g. missing python-dateutil) silently breaks every run while
 # `import posebusters` still succeeds.
-if {env_manager} run -n posebusters python -c "import posebusters, pandas, numpy, gemmi" >/dev/null 2>&1; then
+if {cls._env_run("posebusters", env_manager)}python -c "import posebusters, pandas, numpy, gemmi" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PoseBusters installation complete ==="
 else
     echo "ERROR: PoseBusters verification failed (import of posebusters/pandas/numpy/gemmi)"
-    {env_manager} run -n posebusters python -c "import posebusters, pandas, numpy, gemmi" 2>&1 | tail -5
+    {cls._env_run("posebusters", env_manager)}python -c "import posebusters, pandas, numpy, gemmi" 2>&1 | tail -5
     exit 1
 fi
 """

@@ -100,7 +100,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify installation
-if {env_manager} run -n esmfold python -c "import esm" >/dev/null 2>&1; then
+if {cls._env_run("esmfold", env_manager)}python -c "import esm" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ESMFold installation complete ==="
 else

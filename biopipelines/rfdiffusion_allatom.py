@@ -90,7 +90,7 @@ class RFdiffusionAllAtom(BaseConfig):
         # Importable-rfdiffusion probe: the env merely existing is not enough —
         # the AllAtom extras layer on top of the rfdiffusion package, which
         # RFdiffusion.install() puts into SE3nv. Test the real precondition.
-        se3nv_ready = f'{env_manager} run -n SE3nv python -c "import rfdiffusion" >/dev/null 2>&1'
+        se3nv_ready = f'{cls._env_run("SE3nv", env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1'
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] && [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ] && {se3nv_ready}; then
     echo "RFdiffusion-AllAtom already installed, skipping. Use force_reinstall=True to reinstall."
@@ -123,7 +123,7 @@ fi
 
 # Layer the AllAtom-specific deps into the shared SE3nv env (declarative).
 if [ -f "{pip_reqs}" ]; then
-    {env_manager} run -n SE3nv pip install -r "{pip_reqs}"
+    {cls._env_run("SE3nv", env_manager)}pip install -r "{pip_reqs}"
 else
     echo "WARNING: {pip_reqs} not found; skipping AllAtom extra deps."
 fi

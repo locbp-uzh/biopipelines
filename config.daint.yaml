@@ -1,0 +1,202 @@
+# BioPipelines Configuration — CSCS Daint (Alps, GH200/aarch64)
+# Select with Pipeline(config="daint") or BIOPIPELINES_CONFIG_VARIANT=daint.
+# Rationale and verified findings for every choice here: llm/daint.md
+# STATUS: partial. Only the tools under `environments:` are verified.
+
+machine:
+  # Set yours in the overlay: two variants claiming one Unix name is ambiguous.
+  username: ""
+  email: ""
+
+  # The project billed for compute, not the user. CSCS rejects jobs without it.
+  billing_account: "uzh67"
+
+  # Stage the MMseqs2 UniRef index into /dev/shm (tmpfs) and search from there.
+  # capstor (Lustre) caps the client page cache at ~80GB, pinning --db-load-mode 2
+  # mmap residency at ~10% of the 770GB index no matter how it is warmed; tmpfs is
+  # anonymous RAM (uncapped), so a query drops from minutes to ~16s. tmpfs is 334GB
+  # per node, so this is UniRef-only (the environmental DB does not fit). Absent /
+  # false elsewhere (e.g. the shared x86-64 cluster) where vmtouch-mlock is correct.
+  mmseqs2_use_shm: true
+
+  env_manager:
+    name: "venv"
+    init: []
+    # On scratch, not $STORE: the project's 150k-inode quota cannot hold them
+    # (7 venvs already cost 101k). Scratch purges after 30 days of no access, so
+    # a tool unused for a month needs reinstalling — installs are idempotent.
+    venv_root: "<scratch>/venvs"
+    # PyMOL and mkdssp have no aarch64 wheel but conda-forge builds both. With a
+    # conda binary here, an env yaml naming conda packages is built with conda
+    # and wrapped in a venv; without it, such a yaml is an error.
+    conda_binary: "<group>/micromamba/micromamba"
+    conda_env_root: "<scratch>/mamba-envs"
+
+  scheduler:
+    name: "slurm"
+    init: []
+    modules: []
+
+  container_executor: "none"
+
+  # Every GPU partition is OverSubscribe=EXCLUSIVE: a job asking for one GPU is
+  # billed for the whole 4x GH200 node. Parallel(pack=N) packs N tasks onto each
+  # node as concurrent job steps; cores_per_node divides the CPUs between them,
+  # since a step given no --cpus-per-task gets a single core.
+  node_exclusive: true
+  cores_per_node: 288
+  gpus_per_node: 4
+
+folders:
+  base:
+    home: "/users/<username>"
+    scratch: "/capstor/scratch/cscs/<username>"
+    # $STORE — shared across the uzh67 project, setgid, backed up.
+    group: "/capstor/store/cscs/uzh/uzh67"
+    user: "<group>"
+    data: "<group>/data"
+    biopipelines: "<cwd>"
+    biopipelines_output: "<scratch>/BioPipelines"
+
+  infrastructure:
+    pipe_scripts: "<biopipelines>/pipe_scripts"
+    scripts: "<biopipelines>/my_scripts"
+    pdbs: "<biopipelines>/pdbs"
+    ligands: "<biopipelines>/ligands"
+    sequences: "<biopipelines>/sequences"
+    tables: "<biopipelines>/tables"
+    cache: "<group>/cache"
+    containers: "<group>/containers"
+    # CPython headers, copied out of the python:3.11 image. The login nodes ship
+    # no python3.11-dev, so any package without an aarch64 wheel fails to compile.
+    # Populate once with:
+    #   srun -A <acct> --environment=<group>/edf/py311.toml \
+    #        cp -r /usr/local/include/python3.11 <group>/pyheaders/
+    python_headers: "<group>/pyheaders/python3.11"
+
+  repositories:
+    # Downloaded policy/templates/stock, not a git clone: a handful of large
+    # files, so $STORE's inode quota is not a concern.
+    AiZynthFinder: "<data>/aizynthfinder"
+    AlphaFold: "<data>/localcolabfold"
+    Boltz: "<data>/boltz"
+    BoltzGen: "<data>/boltzgen"
+    LigandMPNN: "<data>/LigandMPNN"
+    MMseqs2: "<data>/mmseqs"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    RFdiffusion3: "<data>/rfdiffusion3"
+
+  cache:
+    BoltzCache: "<cache>/Boltz"
+    BoltzGenCache: "<cache>/BoltzGen"
+    # 234 GB downloaded, 1.9 TB once built (719 GB of that is the .idx files),
+    # so <group>'s 1 TB quota cannot hold it. Scratch purges on 30-day access
+    # time and a rebuild is ~9 h — see llm/daint.md.
+    ColabFoldDatabases: "<scratch>/mmseqs2_databases"
+    MMseqs2Databases: "<ColabFoldDatabases>"
+    # Shared by every AF2-consuming tool so the ~3.5 GB of params are
+    # downloaded once. Its params/ subdir holds params_model_*.npz.
+    AlphaFoldParams: "<data>/localcolabfold/colabfold"
+
+  server:
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
+
+# Only tools verified on Daint are listed. A tool absent here falls back to the
+# `biopipelines` venv, which carries the pure-python core (pyyaml + pandas).
+environments:
+  # Empty + an edf: entry means the image supplies the interpreter, so there
+  # is no env to activate. Our venv cannot carry BioEmu — see llm/daint.md.
+  BioEmu: ""
+  Boltz2: "Boltz2Env"
+  BoltzGen: "boltzgen"
+  BoltzGenImport: "boltzgen"
+  BoltzGenMerge: "boltzgen"
+  ESMFold2: "esmfold2"
+  # CPU-only, and every dependency has an aarch64 wheel, so a plain venv with no
+  # EDF. Pinned to admet-ai 1.x by admet_ai.pip.daint.txt.
+  ADMETAI: "admet_ai"
+  # Also CPU-only with aarch64 wheels throughout (rdkit, onnxruntime, numba).
+  AiZynthFinder: "aizynthfinder"
+  LigandMPNN: "ligandmpnn_env"
+  ProteinMPNN: "SE3nv"
+  RFdiffusion3: "foundry"
+  PoseBusters: "posebusters"
+  # conda-forge envs (PyMOL, mkdssp have no aarch64 wheel), wrapped in a venv
+  # shim so `source <env>/bin/activate` works. See llm/daint.md.
+  ConformationalChange: "ProteinEnv"
+  Contacts: "ProteinEnv"
+  PoseChange: "ProteinEnv"
+  PyMOL: "ProteinEnv"
+  SASA: "ProteinEnv"
+  Selection: "ProteinEnv"
+  DSSP: "dssp"
+  # All of these share the base `biopipelines` venv, whose aarch64 deps come from
+  # environments/biopipelines.pip.daint.txt rather than the conda yaml. Every
+  # BP-native tool needing nothing beyond it is listed, so the block reads as the
+  # supported set rather than leaving them on the implicit fallback.
+  Angle: "biopipelines"
+  CompoundLibrary: "biopipelines"
+  Consensus: "biopipelines"
+  Distance: "biopipelines"
+  DistanceSelector: "biopipelines"
+  DNAEncoder: "biopipelines"
+  EnsembleAnalysis: "biopipelines"
+  ExtractMetrics: "biopipelines"
+  Fuse: "biopipelines"
+  Ligand: "biopipelines"
+  Load: "biopipelines"
+  LoadMultiple: "biopipelines"
+  MSA: "biopipelines"
+  Panda: "biopipelines"
+  PDB: "biopipelines"
+  Plot: "biopipelines"
+  Pool: "biopipelines"
+  RCSB: "biopipelines"
+  RDKit: "biopipelines"
+  ReMap: "biopipelines"
+  Scripting: "biopipelines"
+  Sequence: "biopipelines"
+  StitchSequences: "biopipelines"
+  Table: "biopipelines"
+  UniProt: "biopipelines"
+
+# CSCS Container Engine: the tool's whole script runs via `srun --environment=`.
+# Absolute paths, not bare names — a bare name resolves against each user's private ~/.edf.
+# A tool here needs its venv built inside the container; the EDF mounts /capstor so <group> is visible.
+# Unrelated to `containers:` (apptainer, which Daint does not have).
+# CPU-only tools are omitted on purpose so they never pay the image pull.
+edf:
+  BioEmu: "<group>/edf/md-bioemu.toml"
+  Boltz2: "<group>/edf/ngc-pytorch.toml"
+  BoltzGen: "<group>/edf/ngc-pytorch.toml"
+  BoltzGenImport: "<group>/edf/ngc-pytorch.toml"
+  BoltzGenMerge: "<group>/edf/ngc-pytorch.toml"
+  ESMFold2: "<group>/edf/ngc-pytorch.toml"
+  RFdiffusion3: "<group>/edf/ngc-pytorch.toml"
+
+containers: {}
+
+tool_overrides: {}
+
+renderers:
+  streams:
+    _metadata: renderers/streams.py
+    pdb: renderers/structures.py
+    cif: renderers/structures.py
+    "pdb|cif": renderers/structures.py
+    pqr: renderers/structures.py
+    dx: renderers/grids.py
+    png: renderers/images.py
+    jpg: renderers/images.py
+    jpeg: renderers/images.py
+    svg: renderers/images.py
+    gif: renderers/images.py
+    bmp: renderers/images.py
+    tiff: renderers/images.py
+    webp: renderers/images.py
+    plots: renderers/plots.py
+    fasta: renderers/fasta.py
+    fa: renderers/fasta.py
+    _default: renderers/streams.py
+  tables:
+    _default: renderers/tables.py

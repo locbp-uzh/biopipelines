@@ -58,7 +58,7 @@ class CABSflex(BaseConfig):
         # Use the same env-manager-agnostic import check as the verification
         # step below — `conda list` is unavailable on Colab (micromamba only).
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_manager} run -n CABSflex python -c "import CABS" >/dev/null 2>&1; then
+if {cls._env_run("CABSflex", env_manager)}python -c "import CABS" >/dev/null 2>&1; then
     echo "CABS-Flex already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -77,7 +77,7 @@ echo "Then set: export KEY_MODELLER=your_key"
 {env_block}
 
 # Verify installation
-if {env_manager} run -n CABSflex python -c "import CABS" >/dev/null 2>&1; then
+if {cls._env_run("CABSflex", env_manager)}python -c "import CABS" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== CABS-Flex installation complete ==="
 else

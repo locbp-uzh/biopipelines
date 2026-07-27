@@ -1,0 +1,11 @@
+# LigandMPNN on Daint (aarch64/GH200), replacing the repo's requirements.txt.
+# That file pins torch==2.2.1 plus nvidia-*-cu12 wheels that have no aarch64 build;
+# pip torch resolves a CUDA-enabled aarch64 wheel on its own.
+# numpy stays <2 for the vendored openfold, but must be >=1.26 or ProDy's scipy breaks.
+# ProDy has no aarch64 wheel and compiles, so this env needs the python:3.11 EDF
+# (headers + gcc) rather than a login-node venv.
+torch
+numpy>=1.26,<2
+prody
+ml-collections
+dm-tree

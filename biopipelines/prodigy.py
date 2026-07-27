@@ -63,7 +63,7 @@ fi
 {skip}{remove_block}
 {env_block}
 
-if {env_manager} run -n prodigy python -c "import prodigy_prot" >/dev/null 2>&1; then
+if {cls._env_run("prodigy", env_manager)}python -c "import prodigy_prot" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Prodigy installation complete ==="
 else

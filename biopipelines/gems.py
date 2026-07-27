@@ -66,7 +66,7 @@ class GEMS(BaseConfig):
         repo_dir = folders.get("GEMS", "")
         # Verify torch + ankh actually import (catches the MKL ABI breakage)
         # rather than just probing that the env directory exists.
-        import_check = (f'{env_manager} run -n gems python -c '
+        import_check = (f'{cls._env_run("gems", env_manager)}python -c '
                         f'"import torch, ankh, torch_geometric" >/dev/null 2>&1')
         repo_check = f'[ -d "{repo_dir}/model" ]'
         skip = "" if force_reinstall else f"""# Check if already installed
