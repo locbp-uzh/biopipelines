@@ -19,12 +19,22 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
+    from . import compound_datasets
+    from .compound_datasets import CompoundDataset
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
+    import compound_datasets
+    from compound_datasets import CompoundDataset
+
+
+def _read_dataset_ids(csv_path: str) -> List[str]:
+    """Read the id column of a resolved dataset CSV."""
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        return [row['id'] for row in csv.DictReader(f)]
 
 
 def _make_indexed_ids(base_name: str, num_compounds: int) -> List[str]:
@@ -56,6 +66,18 @@ class CompoundLibrary(BaseConfig):
 
     TOOL_NAME = "CompoundLibrary"
     TOOL_VERSION = "1.0"
+
+    # Public datasets usable as `library`. Resolved from the cache folder,
+    # downloaded once per machine. Narrow them downstream with Panda.
+    FluoDB = compound_datasets.FLUODB
+    FluoDBLite = compound_datasets.FLUODB_LITE
+    ChemFluor = compound_datasets.CHEMFLUOR
+    Deep4Chem = compound_datasets.DEEP4CHEM
+    DYES = compound_datasets.DYES
+    PhotochemCAD = compound_datasets.PHOTOCHEMCAD
+    DSSCDB = compound_datasets.DSSCDB
+    ChemDataExtractor = compound_datasets.CHEMDATAEXTRACTOR
+    DyeAggregation = compound_datasets.DYE_AGGREGATION
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -93,7 +115,8 @@ echo "=== CompoundLibrary ready ==="
         Initialize CompoundLibrary configuration.
 
         Args:
-            library: Dictionary with expansion keys or path to existing CSV/CDXML library
+            library: Dictionary with expansion keys, path to an existing CSV/CDXML
+                     library, or a public dataset constant (CompoundLibrary.FluoDB, ...)
             primary_key: Root key for expansion when library is a dictionary. Auto-detected
                          by scanning keys in order for <placeholder> patterns.
             covalent: Generate CCD/PKL files for covalent ligand binding (calls runtime script)
@@ -124,6 +147,7 @@ echo "=== CompoundLibrary ready ==="
         self.library_dict = None
         self.library_csv = None
         self.library_cdxml = None
+        self.library_dataset = library if isinstance(library, CompoundDataset) else None
         self.expanded_compounds = []
         self.compound_ids = []
 
@@ -144,7 +168,9 @@ echo "=== CompoundLibrary ready ==="
             raise ValueError("library parameter is required")
 
         # Validate library format
-        if isinstance(self.library, dict):
+        if isinstance(self.library, CompoundDataset):
+            pass
+        elif isinstance(self.library, dict):
             # Dictionary-based library
             if self.primary_key and self.primary_key not in self.library:
                 raise ValueError(f"primary_key '{self.primary_key}' not found in library dictionary")
@@ -164,7 +190,18 @@ echo "=== CompoundLibrary ready ==="
         """Configure input library sources."""
         self.folders = pipeline_folders
 
-        if isinstance(self.library, str) and self.library.endswith('.cdxml'):
+        if self.library_dataset is not None:
+            cache_folder = pipeline_folders.get('cache')
+            if not cache_folder:
+                raise ValueError(
+                    "folders.cache is not configured; it is required to resolve "
+                    f"the '{self.library_dataset.name}' dataset."
+                )
+            # Already in the compounds schema: copied verbatim, keeping the
+            # photophysics columns a generic CSV import would drop.
+            self.library_csv = self.library_dataset.resolve(cache_folder)
+            self.compound_ids = _read_dataset_ids(self.library_csv)
+        elif isinstance(self.library, str) and self.library.endswith('.cdxml'):
             # CDXML file - resolve path
             if os.path.exists(self.library):
                 self.library_cdxml = self.library
@@ -1110,7 +1147,14 @@ fi
 """
 
         # Generate summary
-        library_type = "Dictionary" if self.library_dict else ("CDXML" if self.library_cdxml else "CSV file")
+        if self.library_dataset is not None:
+            library_type = f"Dataset ({self.library_dataset.name})"
+        elif self.library_dict:
+            library_type = "Dictionary"
+        elif self.library_cdxml:
+            library_type = "CDXML"
+        else:
+            library_type = "CSV file"
         primary_key_str = self.primary_key if self.primary_key else "None"
         covalent_str = str(self.covalent)
         compounds_csv_basename = os.path.basename(self.compounds_csv)
@@ -1158,6 +1202,8 @@ print(f'Output: {self.compounds_csv}')
         # Build tables with rich metadata
         tables = {}
         columns = ["id", "format", "smiles", "ccd"]
+        if self.library_dataset is not None:
+            columns.extend(compound_datasets._EXTRA_COLUMNS)
         if self.expanded_compounds:
             # Add branching columns (from dict, CDXML, or expanded CSV)
             all_branch_keys = set()
@@ -1211,7 +1257,12 @@ print(f'Output: {self.compounds_csv}')
         """Get configuration display lines for pipeline output."""
         config_lines = super().get_config_display()
 
-        if isinstance(self.library, dict):
+        if self.library_dataset is not None:
+            config_lines.append(
+                f"LIBRARY: dataset {self.library_dataset.name} "
+                f"({len(self.compound_ids)} compounds, {self.library_dataset.license})"
+            )
+        elif isinstance(self.library, dict):
             config_lines.append(f"LIBRARY: Dictionary ({len(self.library)} keys)")
             if self.primary_key:
                 config_lines.append(f"PRIMARY KEY: {self.primary_key}")
@@ -1238,16 +1289,25 @@ print(f'Output: {self.compounds_csv}')
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration including CompoundLibrary-specific parameters."""
         base_dict = super().to_dict()
-        if self.library_cdxml:
+        if self.library_dataset is not None:
+            library_type = "dataset"
+        elif self.library_cdxml:
             library_type = "cdxml"
         elif self.library_dict:
             library_type = "dictionary"
         else:
             library_type = "csv"
 
+        if isinstance(self.library, str):
+            library_repr = self.library
+        elif self.library_dataset is not None:
+            library_repr = self.library_dataset.name
+        else:
+            library_repr = "<dictionary>"
+
         base_dict.update({
             "compound_library_params": {
-                "library": self.library if isinstance(self.library, str) else "<dictionary>",
+                "library": library_repr,
                 "library_type": library_type,
                 "primary_key": self.primary_key,
                 "covalent": self.covalent,

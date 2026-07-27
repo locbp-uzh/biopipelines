@@ -75,27 +75,26 @@ def get_protein_residues(atoms: List[Atom]) -> Dict[Tuple[str, int], List[Atom]]
     return by_residue
 
 
-def parse_restrict_spec(restrict_spec: str, structure_id: str, available_chains: set) -> Tuple[Optional[set], Optional[set], Optional[set]]:
+def parse_restrict_spec(restrict_spec: str, structure_id: str, available_chains: set,
+                        map_table_paths: Optional[List[str]] = None) -> Tuple[Optional[set], Optional[set], Optional[set]]:
     """Resolve restrict-to spec into (chained_residues, chainless_residues, chains).
 
     Returns three optional sets — chained ``{(chain, resnum)}``, chainless
     ``{resnum}``, and chain-only ``{chain}`` — describing the restriction.
     A return of ``(None, None, None)`` means no restriction.
+
+    ``map_table_paths`` carries the input stream's map_table so ids renamed
+    upstream still resolve against the restriction table's original id space.
     """
     if not restrict_spec:
         return None, None, None
 
     if restrict_spec.startswith("TABLE_REFERENCE:"):
-        try:
-            table, column = load_table(restrict_spec)
-        except FileNotFoundError as e:
-            print(f"Warning: Restriction table not found: {e}", file=sys.stderr)
-            return None, None, None
-        try:
-            value = lookup_table_value(table, structure_id, column)
-        except KeyError as e:
-            print(f"ERROR: No restriction-table entry for ID '{structure_id}': {e}", file=sys.stderr)
-            return set(), set(), set()  # empty restriction = nothing passes
+        # Must raise: a missing id silently meant "nothing passes", which
+        # corrupts the selection instead of stopping the run.
+        table, column = load_table(restrict_spec)
+        value = lookup_table_value(table, structure_id, column,
+                                   map_table_paths=map_table_paths)
         residues = sele_to_list(value)
         chained = {(c, r) for c, r in residues if c}
         chainless = {r for c, r in residues if not c}
@@ -242,7 +241,8 @@ def analyze_structure(structure_id: str,
                       atom_class: str,
                       restrict_spec: str,
                       include_reference: bool,
-                      distances_dir: str) -> Tuple[Dict[str, str], str]:
+                      distances_dir: str,
+                      map_table_paths: Optional[List[str]] = None) -> Tuple[Dict[str, str], str]:
     """Analyze one structure. Returns (selections_row, distances_file_path)."""
     atoms = parse_pdb_file(pdb_file)
     if not atoms:
@@ -269,7 +269,7 @@ def analyze_structure(structure_id: str,
 
     available_chains = {a.chain for a in atoms if a.res_name in STANDARD_RESIDUES}
     r_chained, r_chainless, r_chains = parse_restrict_spec(
-        restrict_spec, structure_id, available_chains
+        restrict_spec, structure_id, available_chains, map_table_paths
     )
 
     protein_residues = get_protein_residues(atoms)
@@ -383,6 +383,12 @@ def main():
     if args.restrict_to:
         print(f"Restriction: {args.restrict_to}")
 
+    # A bad restriction table is a wiring error affecting every structure, not a
+    # per-structure failure — resolve it once here so it cannot be swallowed by
+    # the per-structure handler below and reported as N analysis failures.
+    if args.restrict_to.startswith("TABLE_REFERENCE:"):
+        load_table(args.restrict_to)
+
     sel_rows = []
     map_rows = []
     failed = []
@@ -405,6 +411,7 @@ def main():
                 restrict_spec=args.restrict_to,
                 include_reference=include_reference,
                 distances_dir=args.distances_dir,
+                map_table_paths=[ds.map_table] if ds.map_table else None,
             )
             sel_rows.append(row)
             map_rows.append({"id": structure_id, "file": dist_file})

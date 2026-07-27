@@ -566,6 +566,9 @@ echo "=== Panda ready ==="
             tables: Table input(s). Can be a single table or a list of tables.
                     Single table: Panda(tables=boltz.tables.confidence, ...)
                     Multiple tables: Panda(tables=[apo.tables.affinity, holo.tables.affinity], ...)
+                    Omitted with `pool` given: defaults to the pool's own tables
+                    (excluding `missing`). No merge is implied — pass
+                    `operations=[Panda.merge()]` to join them.
             operations: List of operations to apply sequentially
             pool: Tool output(s) for pool mode - structures matching filtered IDs will be copied.
                   Can be a single pool or a list of pools matching `tables` for multi-pool selection.
@@ -591,6 +594,25 @@ echo "=== Panda ready ==="
                 result: columns derived from input + applied operations (dynamic)
                 missing: id | removed_by | kind | cause
         """
+        # Handle pool - can be single or list
+        if pool is None:
+            self.pool_outputs = []
+            self.use_pool_mode = False
+        elif isinstance(pool, list):
+            self.pool_outputs = pool
+            self.use_pool_mode = True
+        else:
+            self.pool_outputs = [pool]
+            self.use_pool_mode = True
+
+        if tables is None and self.use_pool_mode:
+            tables = self._tables_from_pools()
+            if not tables:
+                raise ValueError(
+                    "pool was given without 'tables', but the pool output(s) expose no "
+                    "usable tables. Pass 'tables' explicitly."
+                )
+
         if tables is None:
             raise ValueError("Must specify 'tables' (single table or list of tables)")
 
@@ -608,21 +630,23 @@ echo "=== Panda ready ==="
         self.ignore_missing = ignore_missing
         self.prune_redundant_provenance = prune_redundant_provenance
 
-        # Handle pool - can be single or list
-        if pool is None:
-            self.pool_outputs = []
-            self.use_pool_mode = False
-        elif isinstance(pool, list):
-            self.pool_outputs = pool
-            self.use_pool_mode = True
-        else:
-            self.pool_outputs = [pool]
-            self.use_pool_mode = True
-
         # Validate operations
         self._validate_operations()
 
         super().__init__(**kwargs)
+
+    def _tables_from_pools(self) -> List[Any]:
+        """Collect the pool outputs' tables, in pool order then declaration order."""
+        collected = []
+        for pool in self.pool_outputs:
+            tables_attr = getattr(pool, 'tables', None)
+            if not hasattr(tables_attr, '_tables'):
+                continue
+            for table_name, table_info in tables_attr._tables.items():
+                if table_name in ('result', 'missing'):
+                    continue
+                collected.append(table_info)
+        return collected
 
     def _validate_operations(self):
         """Validate that operations are compatible with input type."""

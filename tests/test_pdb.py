@@ -789,3 +789,71 @@ def test_apply_remove_operation_drops_dependent_records(record_case):
     assert refs == ["3", "4"]  # base + one surviving partner, no lone base, no dead serial 2
     # The surviving STI atoms are untouched.
     assert sum(1 for l in lines if l.startswith("HETATM") and pp.field_res_name(l) == "STI") == 2
+
+
+def test_upstream_map_is_authoritative_id_set(tmp_path, record_case):
+    """A filtered upstream (Panda/Pool) declares its PRE-filter ids, so expanding the
+    declared pattern hands PDB every id the filter dropped. Each resolves to a file that
+    does not exist, is excused as "missing as expected", and the step completes having
+    produced nothing. The upstream map lists what was actually produced, so it wins."""
+    import pandas as pd
+
+    swept = [f"pose_{i}" for i in range(1, 11)]      # what the pattern expands to
+    survivors = ["pose_3", "pose_7"]                 # what the filter kept
+    for sid in survivors:
+        (tmp_path / f"{sid}.pdb").write_text(
+            "ATOM      1  CA  ALA A   1      1.0  1.0  1.0  1.00  0.00           C\n")
+    map_csv = tmp_path / "structures.csv"
+    pd.DataFrame({"id": survivors,
+                  "file_path": [str(tmp_path / f"{s}.pdb") for s in survivors]}
+                 ).to_csv(map_csv, index=False)
+
+    upstream_id_to_file = {r["id"]: r["file_path"]
+                           for _, r in pd.read_csv(map_csv).iterrows()}
+    pdb_ids, custom_ids = list(swept), list(swept)
+
+    # The narrowing the runtime performs once the map has been read.
+    mapped = [i for i in pdb_ids if i in upstream_id_to_file]
+    extra = [i for i in upstream_id_to_file if i not in set(pdb_ids)]
+    resolved = mapped + extra
+    id_rename = dict(zip(pdb_ids, custom_ids))
+    if resolved and len(resolved) != len(pdb_ids):
+        pdb_ids = resolved
+        custom_ids = [id_rename.get(i, i) for i in resolved]
+
+    record_case(input=f"declared={swept}, map={survivors}",
+                expected="ids narrowed to the map's 2 survivors",
+                actual=f"pdb_ids={pdb_ids}")
+    assert pdb_ids == survivors
+    assert custom_ids == survivors
+    assert len(pdb_ids) == 2, "must not process ids the upstream filter dropped"
+
+
+def test_survivor_not_excused_by_fuzzy_missing_match(record_case):
+    """A survivor whose file the map resolves must never be excused as upstream-missing.
+    The filtered-out ids share the survivor's `<base>_r*` shape, so the fuzzy matcher
+    would otherwise pair every survivor with some dropped id and excuse them all —
+    producing nothing while the files sit right there."""
+    upstream_id_to_file = {
+        "pose_9_r135_r0_r105": "/run/006_Panda/structures/pose_9_r135_r0_r105.pdb",
+        "pose_2_r135_r15_r90":  "/run/006_Panda/structures/pose_2_r135_r15_r90.pdb",
+    }
+    upstream_missing_ids = {  # a handful of the ~121k the gate dropped, same shape
+        "pose_1_r0_r0_r0", "pose_9_r135_r0_r120", "pose_2_r135_r15_r105",
+    }
+
+    def would_skip(pdb_id, custom_id, excused):
+        is_present = pdb_id in upstream_id_to_file or custom_id in upstream_id_to_file
+        matched = None if is_present else (
+            pdb_id if pdb_id in upstream_missing_ids else
+            custom_id if custom_id in upstream_missing_ids else
+            excused.get(pdb_id) or excused.get(custom_id))
+        return matched is not None
+
+    # Even if the fuzzy matcher had (wrongly) populated excused for a present id, presence wins.
+    excused = {"pose_9_r135_r0_r105": "pose_9_r135_r0_r120"}
+    skipped = [i for i in upstream_id_to_file if would_skip(i, i, excused)]
+    record_case(input="survivors vs same-shaped missing ids",
+                expected="no survivor skipped",
+                actual=f"skipped={skipped}")
+    assert skipped == [], "a survivor with a real file must not be excused"

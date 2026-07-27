@@ -55,6 +55,29 @@ def test_design_within(local_config, isolated_cwd, new_pipeline):
     assert "8.0" in content
 
 
+def test_redesigned_table_reference_serializes(
+    local_config, isolated_cwd, new_pipeline,
+):
+    from biopipelines.base_config import TableInfo
+
+    reference = TableInfo(
+        name="selections",
+        path="/tmp/selections.csv",
+        columns=["within"],
+    ).within
+    content = _build(
+        local_config,
+        isolated_cwd,
+        new_pipeline,
+        redesigned=reference,
+    )
+    assert_substrings_in(
+        content,
+        ["TABLE_REFERENCE:/tmp/selections.csv:within"],
+        label="redesigned TableReference",
+    )
+
+
 def test_model(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, model="v_32_020")
     assert "v_32_020" in content

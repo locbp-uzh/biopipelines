@@ -60,7 +60,7 @@ Strain answers a question PoseBusters cannot: a pose can be clash-free and geome
 
 **Parameters**:
 - `compounds`: DataStream | StandardizedOutput = None — Input compounds; SMILES are read from the compounds map_table. Produces the `descriptors` table.
-- `structures`: DataStream | StandardizedOutput = None — Posed ligand coordinate files, one per id (e.g. the `structures` stream of `Ligand(code=..., structures=poses)`, which extracts a bound ligand *with* its coordinates). Produces the `strain` table.
+- `structures`: DataStream | StandardizedOutput = None — Posed **ligand-only** coordinate files, one per id (e.g. the `structures` stream of `Ligand(structures=poses, codes="UNL")`, which carves the bound ligand out of every input structure *with* its coordinates). Produces the `strain` table. A whole complex is refused rather than minimised: bond-order templating matches the ligand substructure inside a complex without erroring, so every protein atom would be silently dragged into the minimisation.
 - `descriptors`: List[str] = None — Subset of descriptor names to compute. `None` computes the default wide set.
 - `morgan_fp`: bool = False — Also emit a Morgan fingerprint per compound.
 - `smiles`: str | (TableInfo, column) = None — Bond-order template for the posed coordinates: a literal SMILES, or a table-column reference for a per-id template. Defaults to the `smiles` column of the `compounds` stream when one is supplied. **Mandatory for the strain path** — coordinate-only perception mis-assigns conjugated and charged systems, so there is no silent fallback; supplying neither raises.
@@ -126,5 +126,75 @@ kept = Panda(
     operations=[Panda.merge(on="id"),
                 Panda.filter("all_pass == True and strain < 5")],
     pool=valid_poses,
+)
+```
+
+---
+
+### AiZynthFinder
+
+Retrosynthetic route planning. Runs a Monte-Carlo tree search that recursively applies reaction templates to break each target molecule apart, stopping when every branch ends in a purchasable building block. Use it to ask whether a designed compound is actually *makeable*, and out of what — a synthetic-accessibility filter with the routes and starting materials attached, rather than a single opaque score.
+
+The output is nested, and the tool exposes all three levels: a **target** is searched, producing several ranked **routes**, each of which ends in several **precursors**. Routes are ranked best-first by the state score (a combination of stock availability and route length); precursors carry only an `in_stock` boolean, so they are molecules rather than scored objects.
+
+The `precursors` stream is a **compounds** stream with the canonical `id | format | smiles | ccd` schema, so the building blocks feed directly into any compounds consumer (`ADMETAI`, `RDKit`, `OpenBabel`, a docking run). Its map_table *is* the `precursors` table, so filtering it with `Panda` and passing `pool=` carries the stream along.
+
+**References**: https://github.com/MolecularAI/aizynthfinder — Genheden et al. (2020) *J. Cheminform.* 12, 70.
+
+**Environment**: `aizynthfinder` (dedicated). `AiZynthFinder.install()` creates the env and runs `download_public_data` to fetch the expansion policy, reaction templates and stock from figshare, writing the `config.yml` the CLI reads.
+
+**Parameters**:
+- `compounds`: DataStream | StandardizedOutput — Target molecules. SMILES are read from the `smiles` column of the compounds map_table.
+- `config`: str = None — Path to an aizynthfinder `config.yml`, overriding the downloaded one. Use this to point at your own trained policy or an in-house stock file.
+- `stocks`: List[str] = None — Stock names to search against (default: all in the config).
+- `expansion_policy`: List[str] = None — Expansion policy names (default: the first in the config).
+- `filter_policy`: List[str] = None — Filter policy names (default: all in the config).
+- `max_routes`: int = 25 — Most routes kept per target.
+- `min_routes`: int = 5 — Fewest routes kept per target.
+- `time_limit`: int = None — Per-target search cutoff in seconds.
+- `iteration_limit`: int = None — Per-target cap on tree-search iterations.
+- `nproc`: int = None — Targets searched in parallel.
+
+**Streams**:
+- `routes` — one JSON per route holding its reaction tree. ids are `<compound>_<route>`.
+- `precursors` — compounds stream of route leaf molecules. ids are `<compound>_<route>_<precursor>`.
+
+**Tables**:
+- `targets` — `id | smiles | is_solved | top_score | number_of_routes | number_of_returned_routes | number_of_solved_routes | number_of_nodes | search_time | first_solution_time | first_solution_iteration`. One row per input compound; a target with no route is kept with `is_solved=False`. `number_of_routes` is how many routes the search found, `number_of_returned_routes` how many `max_routes` let through — the latter is how many route ids exist.
+- `routes` — `id | compounds.id | route | score | is_solved | number_of_steps | number_of_precursors | number_of_precursors_in_stock`.
+- `precursors` — `id | format | smiles | ccd | compounds.id | route | precursor | in_stock`.
+- `missing` — `id | removed_by | kind | cause`. Targets with no route (and compounds with no SMILES) land here as `kind="filter"`.
+
+**Example**:
+```python
+from biopipelines import AiZynthFinder, Panda, CompoundLibrary
+
+library = CompoundLibrary("designs.csv")
+azf = AiZynthFinder(compounds=library, max_routes=10, time_limit=120, nproc=8)
+
+# Keep only designs that are synthesizable at all
+makeable = Panda(
+    tables=azf.tables.targets,
+    operations=[Panda.filter("is_solved == True"),
+                Panda.sort("top_score", ascending=False)],
+    pool=library,
+)
+
+# The buyable building blocks, as a compounds stream ready for the next tool
+buyable = Panda(
+    tables=azf.tables.precursors,
+    operations=[Panda.filter("in_stock == True"),
+                Panda.drop_duplicates("smiles")],
+    pool=azf,
+)
+```
+
+Shortest-route-first selection uses the `routes` table, whose `route` column is the rank (`route == 1` is the best-scoring route for each target):
+
+```python
+best_routes = Panda(
+    tables=azf.tables.routes,
+    operations=[Panda.filter("route == 1 and number_of_steps <= 3")],
+    pool=azf,
 )
 ```

@@ -120,6 +120,29 @@ def test_sampling_temp(local_config, isolated_cwd, new_pipeline):
     assert_kwarg_emitted(content, "sampling_temp", 0.42, flag="--sampling_temp 0.42")
 
 
+def test_redesigned_table_reference_serializes(
+    local_config, isolated_cwd, new_pipeline,
+):
+    from biopipelines.base_config import TableInfo
+
+    reference = TableInfo(
+        name="selections",
+        path="/tmp/selections.csv",
+        columns=["beyond"],
+    ).beyond
+    content = _build(
+        local_config,
+        isolated_cwd,
+        new_pipeline,
+        redesigned=reference,
+    )
+    assert_substrings_in(
+        content,
+        ["TABLE_REFERENCE:/tmp/selections.csv:beyond"],
+        label="redesigned TableReference",
+    )
+
+
 def test_model_name(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, model_name="v_48_030")
     assert_kwarg_emitted(content, "model_name", "v_48_030", flag="--model_name v_48_030")

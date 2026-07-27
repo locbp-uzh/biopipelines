@@ -35,18 +35,22 @@ from biopipelines.biopipelines_io import (
 )
 
 
-def resolve_arg(arg, pdb_id):
+def resolve_arg(arg, pdb_id, map_table_paths=None):
     """Resolve one selection argument for a single pdb id.
 
     `arg` is ``'-'`` (unset -> ""), a literal (broadcast — same value for every
     id), or a ``TABLE_REFERENCE:<path>:<column>`` token whose per-id cell holds
     the value. Returns the resolved string ("" when unset / empty cell).
+
+    ``map_table_paths`` carries the input stream's map_table so ids renamed
+    upstream still resolve against the table's original id space.
     """
     if arg == "-" or arg == "":
         return ""
     if arg.startswith("TABLE_REFERENCE:"):
         table, column = load_table(arg)
-        cell = lookup_table_value(table, pdb_id, column)
+        cell = lookup_table_value(table, pdb_id, column,
+                                  map_table_paths=map_table_paths)
         if cell is None or (isinstance(cell, float) and pd.isna(cell)):
             return ""
         return str(cell)
@@ -72,15 +76,17 @@ def main():
     if not pdb_ids:
         raise ValueError(f"No structures found in DataStream: {structures_json}")
 
+    maps = [ds.map_table] if ds.map_table else None
+
     options = {}
     for pdb_id in pdb_ids:
-        contigs = resolve_arg(contigs_arg, pdb_id)
+        contigs = resolve_arg(contigs_arg, pdb_id, maps)
         if not contigs:
             raise ValueError(f"contigs resolved to empty for {pdb_id}")
         options[pdb_id] = {
             "contigs": contigs,
-            "inpaint": resolve_arg(inpaint_arg, pdb_id),
-            "inpaint_str": resolve_arg(inpaint_str_arg, pdb_id),
+            "inpaint": resolve_arg(inpaint_arg, pdb_id, maps),
+            "inpaint_str": resolve_arg(inpaint_str_arg, pdb_id, maps),
         }
 
     os.makedirs(os.path.dirname(output_json), exist_ok=True)

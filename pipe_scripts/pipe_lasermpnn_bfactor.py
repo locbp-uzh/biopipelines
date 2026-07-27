@@ -36,11 +36,15 @@ from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES, field_cha
 from biopipelines.sele_utils import sele_to_list, chain_aware_sele
 
 
-def _resolve_selection_for_ids(reference, design_ids, default_chain):
+def _resolve_selection_for_ids(reference, design_ids, default_chain,
+                               map_table_paths=None):
     """Map each design id to a list of (chain, resnum) tuples.
 
     `reference` is "-" (empty), a broadcast PyMOL string, or a
     TABLE_REFERENCE:path:col resolved per id.
+
+    ``map_table_paths`` carries the input stream's map_table so ids renamed
+    upstream still resolve against the table's original id space.
     """
     if not reference or reference == "-":
         return {sid: [] for sid in design_ids}
@@ -53,7 +57,8 @@ def _resolve_selection_for_ids(reference, design_ids, default_chain):
     out = {}
     for sid in design_ids:
         try:
-            value = lookup_table_value(table, sid, column)
+            value = lookup_table_value(table, sid, column,
+                                       map_table_paths=map_table_paths)
             out[sid] = [_with_chain(t, default_chain) for t in sele_to_list(value)]
         except KeyError:
             print(f"Warning: no table entry for {sid} in column {column}", file=sys.stderr)
@@ -94,8 +99,9 @@ def do_resolve(args_json):
     fixed_ref = cfg["fixed"]
     redesigned_ref = cfg["redesigned"]
 
-    fixed_per_id = _resolve_selection_for_ids(fixed_ref, design_ids, default_chain)
-    redesigned_per_id = _resolve_selection_for_ids(redesigned_ref, design_ids, default_chain)
+    ds_maps = [ds.map_table] if ds.map_table else None
+    fixed_per_id = _resolve_selection_for_ids(fixed_ref, design_ids, default_chain, ds_maps)
+    redesigned_per_id = _resolve_selection_for_ids(redesigned_ref, design_ids, default_chain, ds_maps)
 
     result = {}
     for sid in design_ids:

@@ -15,6 +15,11 @@ several ligands passes ``allow_multiple=True`` and gets the full set back.
 import os
 import re
 
+try:
+    from .pdb_parser import STANDARD_RESIDUES
+except ImportError:
+    from pdb_parser import STANDARD_RESIDUES  # type: ignore
+
 # Extended CCD codes are 1-5 alphanumeric (matches Ligand's _CCD_CODE_RE).
 _CODE_RE = re.compile(r'^[A-Za-z0-9]{1,5}$')
 
@@ -140,6 +145,30 @@ def auth_ligand_field(row) -> tuple:
         f"Ligand(smiles=...).")
 
 
+def _reject_complex_pdb(coord_path: str) -> None:
+    """Refuse a whole complex where a ligand-only coordinate file is required.
+
+    RDKit reads a complex without complaining and AssignBondOrdersFromTemplate
+    still matches the ligand substructure inside it, so every protein atom is
+    silently carried into the mol — minimisation then runs on thousands of atoms
+    and does not converge. Nothing errors, so the wrong input has to be named here.
+    """
+    n_atoms = 0
+    n_protein = 0
+    with open(coord_path) as fh:
+        for line in fh:
+            if line.startswith(("ATOM  ", "HETATM")):
+                n_atoms += 1
+                if line[17:20].strip().upper() in STANDARD_RESIDUES:
+                    n_protein += 1
+    if n_protein:
+        raise RuntimeError(
+            f"{coord_path} is a complex ({n_atoms} atoms, {n_protein} in standard residues), "
+            f"not a ligand-only coordinate file. Bond-order templating would silently keep "
+            f"every protein atom. Extract the ligand first, e.g. "
+            f"Ligand(structures=<poses>, codes=\"<HETATM code>\"), and pass that stream instead.")
+
+
 def templated_ligand_mol(coord_path: str, smiles: str = None):
     """Read a coordinate ligand (PDB/mol2) and return a sanitized RDKit mol with
     correct bond orders, KEEPING its coordinates. THE single shared bond-order
@@ -151,12 +180,16 @@ def templated_ligand_mol(coord_path: str, smiles: str = None):
     bond orders from it (matching by heavy-atom skeleton, coords preserved),
     trying the bare template first then AddHs-both as a fallback. Without a
     template, fall back to RDKit's own perception.
+
+    The input must be ligand-only: a whole complex is refused rather than
+    minimised in full.
     """
     from rdkit import Chem
     from rdkit.Chem import AllChem
 
     ext = os.path.splitext(coord_path)[1].lower()
     if ext == ".pdb":
+        _reject_complex_pdb(coord_path)
         mol = Chem.MolFromPDBFile(coord_path, removeHs=False, sanitize=False)
     elif ext == ".mol2":
         mol = Chem.MolFromMol2File(coord_path, removeHs=False, sanitize=False)

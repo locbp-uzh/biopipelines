@@ -34,12 +34,15 @@ from biopipelines.biopipelines_io import (
 )
 
 
-def resolve_arg(arg, struct_id):
+def resolve_arg(arg, struct_id, map_table_paths=None):
     """Resolve one constraint argument for a single input id.
 
     `arg` is ``'-'`` (unset -> ""), a literal (broadcast — same value for every
     id), or a ``TABLE_REFERENCE:<path>:<column>`` token whose per-id cell holds
     the value. Returns the resolved string ("" when unset / empty cell).
+
+    ``map_table_paths`` carries the input stream's map_table so ids renamed
+    upstream still resolve against the table's original id space.
 
     A table cell is arbitrary user data that ends up in a bash ``eval``; reject
     shell metacharacters here (literals were already validated at construction
@@ -49,7 +52,8 @@ def resolve_arg(arg, struct_id):
         return ""
     if arg.startswith("TABLE_REFERENCE:"):
         table, column = load_table(arg)
-        cell = lookup_table_value(table, struct_id, column)
+        cell = lookup_table_value(table, struct_id, column,
+                                  map_table_paths=map_table_paths)
         if cell is None or (isinstance(cell, float) and pd.isna(cell)):
             return ""
         value = str(cell)
@@ -82,12 +86,14 @@ def main():
     if not struct_ids:
         raise ValueError(f"No structures found in DataStream: {structures_json}")
 
+    maps = [ds.map_table] if ds.map_table else None
+
     options = {}
     for struct_id in struct_ids:
         options[struct_id] = {
-            "guide_res": resolve_arg(guide_res_arg, struct_id),
-            "guide_seq": resolve_arg(guide_seq_arg, struct_id),
-            "anchor_res": resolve_arg(anchor_res_arg, struct_id),
+            "guide_res": resolve_arg(guide_res_arg, struct_id, maps),
+            "guide_seq": resolve_arg(guide_seq_arg, struct_id, maps),
+            "anchor_res": resolve_arg(anchor_res_arg, struct_id, maps),
         }
 
     os.makedirs(os.path.dirname(output_json), exist_ok=True)

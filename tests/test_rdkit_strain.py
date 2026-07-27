@@ -289,3 +289,53 @@ def test_single_compound_broadcasts_to_every_pose(tmp_path, record_case):
 
     record_case(input="one compound, two poses", expected=["CCO", "CCO"], actual=got)
     assert got == ["CCO", "CCO"]
+
+
+def test_strain_uses_filtered_runtime_map_ids(tmp_path, monkeypatch, record_case):
+    """A concrete upstream map must narrow numeric-pattern declarations."""
+    import json
+    import pandas as pd
+    from biopipelines.datastream import DataStream
+
+    mod = _load_pipe()
+    survivors = ["pose_1_r0", "pose_2_r15"]
+    for sid in survivors:
+        (tmp_path / f"{sid}.pdb").write_text("END\n")
+    structures_map = tmp_path / "structures_map.csv"
+    pd.DataFrame([
+        {"id": sid, "file": str(tmp_path / f"{sid}.pdb")} for sid in survivors
+    ]).to_csv(structures_map, index=False)
+    structures = DataStream(
+        name="structures",
+        ids=["pose_<1..10>_r0", "pose_<1..10>_r15"],
+        files=[str(tmp_path / "<id>.pdb")],
+        map_table=str(structures_map),
+        format="pdb",
+    )
+    structures_json = tmp_path / "structures.json"
+    structures.save_json(str(structures_json))
+    output = tmp_path / "strain.csv"
+    cfg = {
+        "structures_json": str(structures_json),
+        "strain_csv": str(output),
+        "smiles": "CCO",
+        "cpus": 1,
+    }
+
+    monkeypatch.setattr(
+        mod,
+        "_strain_one",
+        lambda task: (
+            {"id": task[0], "smiles": task[2], "e_pose": 1.0,
+             "e_relaxed": 0.0, "strain": 1.0, "ff_engine": "test"},
+            None,
+        ),
+    )
+    assert mod.compute_strain(cfg)
+    actual = pd.read_csv(output)["id"].tolist()
+    record_case(
+        input=json.loads(structures_json.read_text())["ids"],
+        expected=survivors,
+        actual=actual,
+    )
+    assert actual == survivors

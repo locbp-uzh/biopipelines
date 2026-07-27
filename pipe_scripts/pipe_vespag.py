@@ -65,14 +65,20 @@ def parse_mutation_tokens(spec: str) -> Set[Tuple[str, int, str]]:
     return out
 
 
-def resolve_mutations_arg(arg: str, seq_id: str) -> Optional[Set[Tuple[str, int, str]]]:
+def resolve_mutations_arg(arg: str, seq_id: str,
+                          map_table_paths: Optional[List[str]] = None
+                          ) -> Optional[Set[Tuple[str, int, str]]]:
     """Resolve --mutations for a sequence. '-'/empty -> None (saturation);
-    a literal token string or a TABLE_REFERENCE -> parsed token set."""
+    a literal token string or a TABLE_REFERENCE -> parsed token set.
+
+    ``map_table_paths`` carries the input stream's map_table so ids renamed
+    upstream still resolve against the table's original id space."""
     if not arg or arg == "-":
         return None
     if arg.startswith("TABLE_REFERENCE:"):
         table, column = load_table(arg)
-        cell = lookup_table_value(table, seq_id, column)
+        cell = lookup_table_value(table, seq_id, column,
+                                  map_table_paths=map_table_paths)
         if cell is None or (isinstance(cell, float) and pd.isna(cell)):
             return None
         return parse_mutation_tokens(str(cell))
@@ -104,7 +110,8 @@ def main():
     args = ap.parse_args()
 
     # Loaded for validation/ID provenance; the CSV is the sequence source.
-    _ = load_datastream(args.sequences_json)
+    seq_ds = load_datastream(args.sequences_json)
+    seq_maps = [seq_ds.map_table] if seq_ds.map_table else None
     sequences = read_sequences_csv(args.sequences_csv)
 
     missing: List[dict] = []
@@ -115,7 +122,7 @@ def main():
     requested_by_seq: Dict[str, Optional[Set[Tuple[str, int, str]]]] = {}
     for seq_id, _seq in sequences:
         try:
-            requested_by_seq[seq_id] = resolve_mutations_arg(args.mutations, seq_id)
+            requested_by_seq[seq_id] = resolve_mutations_arg(args.mutations, seq_id, seq_maps)
         except Exception as exc:  # noqa: BLE001
             requested_by_seq[seq_id] = None
             missing.append({"id": seq_id, "removed_by": step_id, "kind": "failure",

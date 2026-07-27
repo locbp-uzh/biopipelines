@@ -70,19 +70,25 @@ def parse_mutation_tokens(spec: str) -> Set[Tuple[str, int, str]]:
     return out
 
 
-def resolve_mutations_arg(arg: str, struct_id: str) -> Optional[Set[Tuple[str, int, str]]]:
+def resolve_mutations_arg(arg: str, struct_id: str,
+                          map_table_paths: Optional[List[str]] = None
+                          ) -> Optional[Set[Tuple[str, int, str]]]:
     """Resolve the --mutations argument for a given structure.
 
     `arg` is '-' (saturation; returns None), a literal '+'-joined token string,
     or a 'TABLE_REFERENCE:<path>:<col>' token whose per-structure cell holds
     such a string. Returns the parsed set of (wt, pos, mut) tuples, or None for
     site-saturation.
+
+    ``map_table_paths`` carries the input stream's map_table so ids renamed
+    upstream still resolve against the table's original id space.
     """
     if not arg or arg == "-":
         return None
     if arg.startswith("TABLE_REFERENCE:"):
         table, column = load_table(arg)
-        cell = lookup_table_value(table, struct_id, column)
+        cell = lookup_table_value(table, struct_id, column,
+                                  map_table_paths=map_table_paths)
         if cell is None or (isinstance(cell, float) and pd.isna(cell)):
             return None
         return parse_mutation_tokens(str(cell))
@@ -138,6 +144,7 @@ def main():
     args = ap.parse_args()
 
     structures = load_datastream(args.structures_json)
+    struct_maps = [structures.map_table] if structures.map_table else None
 
     rows: List[dict] = []
     missing: List[dict] = []
@@ -146,7 +153,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="thermompnn_") as work:
         for struct_id, pdb_file in iterate_files(structures):
             try:
-                requested = resolve_mutations_arg(args.mutations, struct_id)
+                requested = resolve_mutations_arg(args.mutations, struct_id, struct_maps)
 
                 struct_work = os.path.join(work, struct_id)
                 os.makedirs(struct_work, exist_ok=True)

@@ -508,6 +508,76 @@ def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=No
         log(f"ERROR: Failed to process CSV file {csv_file}: {str(e)}")
         return []
 
+def submit_batch_http(server_url, seqs, output_dir, timeout=3600, user=None, password=None):
+    """Run the batch against a ColabFold-protocol MSA server over HTTP.
+
+    Same contract as submit_batch_job: writes "<alias>.a3m" per query into
+    output_dir, aliases being the sequential integers the caller maps back to
+    real ids. Returns True on success.
+
+    The protocol is ColabFold's: POST the multi-FASTA to /ticket/msa, poll
+    /ticket/<id> until the status leaves PENDING/RUNNING, then GET
+    /result/download/<id> — a tar.gz whose *.a3m members are the per-query
+    alignments in submission order.
+    """
+    import io, tarfile, urllib.request, urllib.parse, urllib.error, base64, json
+
+    base = server_url.rstrip("/")
+    fasta = "".join(f">{alias}\n{seq}\n" for alias, (_sid, seq) in enumerate(seqs))
+
+    if user and not base.startswith("https://"):
+        log(f"ERROR: refusing to send credentials to {base} — basic auth is base64, "
+            f"not encryption, and this endpoint is not HTTPS.")
+        return False
+
+    def _open(req):
+        if user:
+            token = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
+            req.add_header("Authorization", f"Basic {token}")
+        return urllib.request.urlopen(req, timeout=120)
+
+    data = urllib.parse.urlencode({"q": fasta, "mode": "env"}).encode()
+    with _open(urllib.request.Request(f"{base}/ticket/msa", data=data)) as r:
+        ticket = json.loads(r.read().decode())
+    tid = ticket.get("id")
+    if not tid:
+        log(f"ERROR: MSA server returned no ticket id: {ticket}")
+        return False
+    log(f"Submitted {len(seqs)} sequence(s) to {base} (ticket {tid})")
+
+    start = time.time()
+    while True:
+        with _open(urllib.request.Request(f"{base}/ticket/{tid}")) as r:
+            status = json.loads(r.read().decode()).get("status")
+        if status == "COMPLETE":
+            break
+        if status in ("ERROR", "UNKNOWN"):
+            log(f"ERROR: MSA server ticket {tid} ended as {status}")
+            return False
+        if time.time() - start > timeout:
+            log(f"ERROR: MSA server ticket {tid} timed out after {timeout}s (last status {status})")
+            return False
+        time.sleep(5)
+
+    with _open(urllib.request.Request(f"{base}/result/download/{tid}")) as r:
+        blob = r.read()
+    os.makedirs(output_dir, exist_ok=True)
+    written = 0
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+        for member in sorted((m for m in tar.getmembers() if m.name.endswith(".a3m")),
+                             key=lambda m: m.name):
+            fh = tar.extractfile(member)
+            if fh is None:
+                continue
+            # Members come back named per query; keep the alias ordering the
+            # caller expects rather than the server's own naming.
+            with open(os.path.join(output_dir, f"{written}.a3m"), "wb") as out:
+                out.write(fh.read())
+            written += 1
+    log(f"Retrieved {written} MSA(s) from {base}")
+    return written > 0
+
+
 def submit_batch_job(server_dir, seqs, output_format, output_dir):
     """Submit ALL sequences as ONE job carrying a multi-FASTA; return the job_id.
 
@@ -580,6 +650,8 @@ def main():
                        help='Output format from server (default: csv)')
     parser.add_argument('--server_dir', required=True,
                        help='Path to MMseqs2 server directory for timestamp files')
+    parser.add_argument('--server_url', default=None,
+                       help='ColabFold-protocol MSA server URL. When set, queries go over HTTP and no local server is started.')
     parser.add_argument('--mask_table', default=None,
                        help='Path to table CSV with mask information per sequence')
     parser.add_argument('--mask_column', default=None,
@@ -626,7 +698,11 @@ def main():
 
             for seq_id in sequences_df['id']:
                 try:
-                    mask_selection = lookup_table_value(mask_df, seq_id, args.mask_column)
+                    # sequences_csv IS the input stream's map_table; its provenance
+                    # relates a renamed id to the mask table's id space.
+                    mask_selection = lookup_table_value(
+                        mask_df, seq_id, args.mask_column,
+                        map_table_paths=[args.sequences_csv])
                 except Exception:
                     mask_selection = None
 
@@ -674,8 +750,11 @@ def main():
         log(f"Excluded {before - len(sequences_df)} upstream-missing sequence(s) from search")
 
     # Check server status before starting
-    log("Checking server status before starting submissions...")
-    check_and_resubmit_server(args.server_dir)
+    if args.server_url:
+        log(f"Using remote MSA server {args.server_url}; no local server needed")
+    else:
+        log("Checking server status before starting submissions...")
+        check_and_resubmit_server(args.server_dir)
 
     output_dir = os.path.dirname(args.output_msa_csv)
     os.makedirs(output_dir, exist_ok=True)
@@ -719,11 +798,18 @@ def main():
         os.makedirs(staging, exist_ok=True)
 
         log(f"Submitting batch of {len(pending)} sequence(s) as one job")
-        job_id = submit_batch_job(args.server_dir, pending, ext, staging)
         # Generous timeout: one amortised search, but a large set on a busy node
         # can still take a while; scale with batch size.
         timeout = max(7200, 120 * len(pending))
-        status = wait_for_status(args.server_dir, job_id, timeout)
+        if args.server_url:
+            ok = submit_batch_http(args.server_url, pending, staging, timeout,
+                                   os.environ.get("MMSEQS2_SERVER_USER"),
+                                   os.environ.get("MMSEQS2_SERVER_PASSWORD"))
+            job_id = args.server_url
+            status = None if not ok else "SUCCESS"
+        else:
+            job_id = submit_batch_job(args.server_dir, pending, ext, staging)
+            status = wait_for_status(args.server_dir, job_id, timeout)
 
         if status is None or status.startswith("FAILED"):
             log(f"ERROR: batch job {job_id} did not succeed (status: {status})")

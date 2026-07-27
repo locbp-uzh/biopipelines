@@ -139,6 +139,10 @@ renderers — the format is a presentation choice, not a content choice.
 - *Colab:* remind the user to save what they want to keep before the runtime
   ends.
 
+### Output recycling
+- If a stage of the pipeline fails and has to be repeated, prefer loading 
+  results from upstream tools instead of running them again. This can be done
+  with the *Load* tool: *Load("/path/to/tool_output_folder)*
 ---
 
 ## Cluster mode

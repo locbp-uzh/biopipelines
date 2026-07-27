@@ -148,13 +148,15 @@ def compute_complement(all_residues, redesigned_residues):
     complement = [res for res in all_residues if res not in redesigned_set]
     return sorted(complement)
 
-def resolve_table_reference(reference, design_ids):
+def resolve_table_reference(reference, design_ids, map_table_paths=None):
     """
     Resolve table reference to per-design selections.
 
     Args:
         reference: Either a table reference like "TABLE_REFERENCE:path:column" or direct PyMOL selection
         design_ids: List of design IDs from DataStream
+        map_table_paths: Input stream's map_table, so ids renamed upstream still
+            resolve against the table's original id space
 
     Returns:
         Dictionary mapping design IDs to position lists
@@ -169,7 +171,8 @@ def resolve_table_reference(reference, design_ids):
 
     for design_id in design_ids:
         try:
-            selection_value = lookup_table_value(table, design_id, column_name)
+            selection_value = lookup_table_value(table, design_id, column_name,
+                                                 map_table_paths=map_table_paths)
             if pd.notna(selection_value) and selection_value != '':
                 positions_per_design[design_id] = sele_to_list(str(selection_value))
             else:
@@ -212,8 +215,9 @@ fixed_dict = dict()
 mobile_dict = dict()
 
 # Resolve table references if present
-fixed_per_design = resolve_table_reference(FIXED, design_ids) if FIXED else {design_id: [] for design_id in design_ids}
-designed_per_design = resolve_table_reference(DESIGNED, design_ids) if DESIGNED else {design_id: [] for design_id in design_ids}
+structures_maps = [structures_ds.map_table] if structures_ds.map_table else None
+fixed_per_design = resolve_table_reference(FIXED, design_ids, structures_maps) if FIXED else {design_id: [] for design_id in design_ids}
+designed_per_design = resolve_table_reference(DESIGNED, design_ids, structures_maps) if DESIGNED else {design_id: [] for design_id in design_ids}
 
 for design_id in design_ids:
     fixed_dict[design_id] = dict()

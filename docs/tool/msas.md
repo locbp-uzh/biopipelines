@@ -25,7 +25,7 @@ Generates multiple sequence alignments for structure prediction by querying a lo
 **Streams**: `msas`
 
 **Tables**:
-- `msas`: | id | sequences.id | sequence | msa_file |
+- `msas`: | id | sequences.id | sequence | msa_file | file |
 
 **Example**:
 ```python

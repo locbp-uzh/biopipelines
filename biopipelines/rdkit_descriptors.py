@@ -84,6 +84,9 @@ class RDKit(BaseConfig):
         restrain_bonds: explicit torsions to restrain, as (atom_name, atom_name)
             pairs naming the two central atoms of each rotatable bond (PDB atom
             names). Default None restrains every rotatable bond.
+        cpus: worker processes for the strain path. Defaults to the step's SLURM
+            allocation (``SLURM_CPUS_PER_TASK``), else the machine's core count.
+            Each pose is independent, so this scales close to linearly.
         ff: force field — "auto" (MMFF, falling back to UFF where MMFF cannot
             type the molecule), "mmff", or "uff".
 
@@ -122,6 +125,7 @@ echo "=== RDKit ready ==="
                  smiles: Union[str, Tuple[TableInfo, str], 'TableReference'] = None,
                  restrain_bonds: List[Tuple[str, str]] = None,
                  ff: str = "auto",
+                 cpus: Optional[int] = None,
                  **kwargs):
         self.compounds_stream: Optional[DataStream] = None
         if compounds is not None:
@@ -145,6 +149,7 @@ echo "=== RDKit ready ==="
         self.morgan_fp = bool(morgan_fp)
         self.smiles = _normalize_smiles_template(smiles)
         self.restrain_bonds = [tuple(b) for b in restrain_bonds] if restrain_bonds else None
+        self.cpus = int(cpus) if cpus else None
         self.ff = ff
         super().__init__(**kwargs)
 
@@ -220,6 +225,7 @@ echo "=== RDKit ready ==="
             cfg["smiles"] = str(self.smiles) if self.smiles is not None else None
             cfg["restrain_bonds"] = [list(b) for b in self.restrain_bonds] if self.restrain_bonds else None
             cfg["ff"] = self.ff
+            cfg["cpus"] = self.cpus
 
         os.makedirs(os.path.dirname(self.config_json), exist_ok=True)
         with open(self.config_json, "w", encoding="utf-8") as f:

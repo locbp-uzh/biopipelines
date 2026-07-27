@@ -42,7 +42,7 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `tables`: TableInfo | StandardizedOutput | str | List[...] = None - One table or a list of tables (a list enables per-frame ops and merge/concat)
+- `tables`: TableInfo | StandardizedOutput | str | List[...] = None - One table or a list of tables (a list enables per-frame ops and merge/concat). Omitted when `pool` is given, it defaults to the pool's own tables (excluding `missing`), in pool order; no merge is implied, so pass `Panda.merge()` yourself to join them.
 - `operations`: List[Operation] = None - Sequence of operations
 - `pool`: StandardizedOutput | List[StandardizedOutput] = None - Copy files matching filtered IDs (list = one pool per input table)
 - `rename`: str = None - Rename output IDs to `{rename}_1`, `{rename}_2`, ...
@@ -104,6 +104,18 @@ ranked = Panda(
     tables=boltz.tables.confidence,
     operations=[Panda.sort("score", ascending=False)],
     rename="best",  # Output: best_1, best_2, ...
+    pool=boltz
+)
+
+# Pool without tables: tables default to the pool's own
+filtered = Panda(
+    operations=[Panda.filter("plddt > 80")],
+    pool=boltz
+)
+
+# Same, joining the pool's tables explicitly
+joined = Panda(
+    operations=[Panda.merge(), Panda.filter("plddt > 80 and affinity < -8")],
     pool=boltz
 )
 

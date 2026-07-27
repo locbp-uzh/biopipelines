@@ -236,6 +236,57 @@ def build_rename_mapping(operations: List[Dict[str, Any]]) -> Dict[str, str]:
     return mapping
 
 
+def sweep_suffixes(operations: List[Dict[str, Any]]) -> List[str]:
+    """Per-variant id suffixes for the rotate_bond sweeps in `operations`.
+
+    Returns [""] when nothing sweeps, so callers treat the single-structure case
+    and the grid case the same way. Suffixes are "_r<angle>" per sweeping op, in
+    declaration order, giving ids like "<id>_r0_r15_r330".
+    """
+    from itertools import product
+
+    angle_lists = [op["angles"] for op in operations
+                   if op.get("op") == "rotate_bond" and op.get("angles")]
+    if not angle_lists:
+        return [""]
+    return ["".join(f"_r{a:g}" for a in combo)
+            for combo in product(*angle_lists)]
+
+
+def apply_operations_swept(content: str, format: str,
+                           operations: List[Dict[str, Any]],
+                           structure_id: Optional[str] = None):
+    """Yield (suffix, content) for every point of the rotate_bond sweep grid.
+
+    A sweeping rotate_bond carries `angles` instead of `angle`; several of them in
+    one operation list give the Cartesian product over their angle lists. Non-sweeping
+    operations are applied identically to every variant. Without any sweep this yields
+    exactly one ("", content) pair, so the ordinary single-structure path is unchanged.
+    """
+    from itertools import product
+
+    sweeping = [i for i, op in enumerate(operations)
+                if op.get("op") == "rotate_bond" and op.get("angles")]
+    if not sweeping:
+        yield "", apply_operations(content, format, operations, structure_id)
+        return
+
+    angle_lists = [operations[i]["angles"] for i in sweeping]
+    for combo in product(*angle_lists):
+        # Bind this grid point's angles onto their ops, leaving everything else alone.
+        resolved = []
+        for i, op in enumerate(operations):
+            if i in sweeping:
+                bound = dict(op)
+                bound.pop("angles", None)
+                bound["angle"] = combo[sweeping.index(i)]
+                resolved.append(bound)
+            else:
+                resolved.append(op)
+        suffix = "".join(f"_r{a:g}" for a in combo)
+        yield suffix, apply_operations(content, format, resolved, structure_id)
+
+
 def apply_operations(content: str, format: str, operations: List[Dict[str, Any]],
                      structure_id: Optional[str] = None) -> str:
     """
@@ -263,6 +314,8 @@ def apply_operations(content: str, format: str, operations: List[Dict[str, Any]]
         elif op_type == "break_bond":
             content = apply_break_bond_operation(content, format, op["atom1"], op["atom2"])
         elif op_type == "rotate_bond":
+            if op.get("angles"):
+                continue   # swept: expanded by apply_operations_swept, not applied here
             content = apply_rotate_bond_operation(content, format, op["atom1"], op["atom2"], op["angle"])
         else:
             print(f"Warning: Unknown operation type '{op_type}', skipping")
@@ -1146,26 +1199,25 @@ def fetch_ligand_smiles_from_rcsb(ligand_code: str) -> Optional[str]:
 
         data = response.json()
 
-        # Extract SMILES from the response
-        # RCSB provides SMILES in the 'chem_comp' section
-        if 'chem_comp' in data:
-            chem_comp = data['chem_comp']
-            # Try different possible fields for SMILES
-            for field in ['pdbx_smiles_canonical', 'smiles', 'smiles_canonical']:
-                if field in chem_comp and chem_comp[field]:
-                    print(f"  Found SMILES for {ligand_code}: {chem_comp[field][:50]}...")
-                    return chem_comp[field]
+        # rcsb_chem_comp_descriptor holds the SMILES under UPPERCASE keys;
+        # the stereo form is preferred where the component has one.
+        descriptors = data.get('rcsb_chem_comp_descriptor')
+        if isinstance(descriptors, dict):
+            for field in ('SMILES_stereo', 'SMILES'):
+                value = descriptors.get(field)
+                if value:
+                    print(f"  Found SMILES for {ligand_code}: {value[:50]}...")
+                    return value
 
-        # Alternative location in descriptors
-        if 'rcsb_chem_comp_descriptor' in data:
-            descriptors = data['rcsb_chem_comp_descriptor']
-            if isinstance(descriptors, dict):
-                if 'smiles_canonical' in descriptors:
-                    print(f"  Found SMILES for {ligand_code}: {descriptors['smiles_canonical'][:50]}...")
-                    return descriptors['smiles_canonical']
-                elif 'smiles' in descriptors:
-                    print(f"  Found SMILES for {ligand_code}: {descriptors['smiles'][:50]}...")
-                    return descriptors['smiles']
+        # Fallback: the per-program descriptor list, preferring a canonical entry.
+        entries = data.get('pdbx_chem_comp_descriptor')
+        if isinstance(entries, list):
+            for wanted in ('SMILES_CANONICAL', 'SMILES'):
+                for entry in entries:
+                    if entry.get('type') == wanted and entry.get('descriptor'):
+                        value = entry['descriptor']
+                        print(f"  Found SMILES for {ligand_code}: {value[:50]}...")
+                        return value
 
         print(f"  No SMILES found for {ligand_code} in RCSB response")
         return None
@@ -1651,6 +1703,22 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         except Exception as e:
             print(f"  Warning: could not read upstream map table ({e}); falling back to file-list resolution")
 
+    # The map lists what the upstream step actually produced, so it — not the declared id
+    # pattern — is the authoritative id set. A filtered upstream (Panda/Pool) declares the
+    # pre-filter ids: expanding that pattern hands this tool every id the filter dropped,
+    # each resolving to a file that does not exist, which is then excused as "missing as
+    # expected" and the step completes having produced nothing.
+    if upstream_id_to_file and not config_data.get('ids_are_explicit'):
+        mapped = [i for i in pdb_ids if i in upstream_id_to_file]
+        extra = [i for i in upstream_id_to_file if i not in set(pdb_ids)]
+        resolved = mapped + extra
+        if resolved and len(resolved) != len(pdb_ids):
+            id_rename = dict(zip(pdb_ids, custom_ids)) if len(pdb_ids) == len(custom_ids) else {}
+            print(f"  PDB: upstream map lists {len(resolved)} structure(s); "
+                  f"declared ids expanded to {len(pdb_ids)} (upstream filter applied)")
+            pdb_ids = resolved
+            custom_ids = [id_rename.get(i, i) for i in resolved]
+
     # Ids an upstream filter already dropped — their files are legitimately
     # absent and must NOT count as fetch failures (would otherwise hard-exit).
     # PDB owns tables/missing.csv: rows are re-keyed to THIS tool's id
@@ -1669,12 +1737,18 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     # so a product id is excused when any of its components was dropped upstream.
     excused_to_upstream = {}  # custom_id/pdb_id -> upstream missing id
     if upstream_missing_ids:
-        print(f"Excusing {len(upstream_missing_ids)} ids dropped upstream: {sorted(upstream_missing_ids)}")
-        candidate_ids = sorted(set(pdb_ids) | set(custom_ids))
-        mapped = get_mapped_ids(candidate_ids, sorted(upstream_missing_ids), unique=True)
-        for out_id, up_id in mapped.items():
-            if up_id:
-                excused_to_upstream[out_id] = up_id
+        # An id the map resolves to a real file is present, not missing — never excuse it.
+        # Without this guard the fuzzy matcher pairs each survivor with some id in the
+        # filtered-out set (they share the same `<base>_r*_r*_r*` shape), excusing every
+        # survivor and producing nothing.
+        present = set(upstream_id_to_file)
+        candidate_ids = sorted((set(pdb_ids) | set(custom_ids)) - present)
+        if candidate_ids:
+            print(f"Excusing against {len(upstream_missing_ids)} ids dropped upstream")
+            mapped = get_mapped_ids(candidate_ids, sorted(upstream_missing_ids), unique=True)
+            for out_id, up_id in mapped.items():
+                if up_id:
+                    excused_to_upstream[out_id] = up_id
 
     if from_upstream:
         print(f"Processing {len(pdb_ids)} structures from upstream tool")
@@ -1713,7 +1787,11 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         # from_upstream); custom_id may be a rename via ids=. Match either so a
         # renamed input is still excused, not re-failed, and re-key the row to
         # custom_id so completion excuses THIS tool's (possibly renamed) output.
-        matched_key = pdb_id if pdb_id in upstream_missing_ids else (
+        # An id the map resolves to a real file is present; never excuse it, even if it
+        # collides with the missing set by name or fuzzy match.
+        is_present = pdb_id in upstream_id_to_file or custom_id in upstream_id_to_file
+        matched_key = None if is_present else (
+            pdb_id if pdb_id in upstream_missing_ids else
             custom_id if custom_id in upstream_missing_ids else
             excused_to_upstream.get(pdb_id) or excused_to_upstream.get(custom_id))
         if matched_key is not None:
@@ -1819,6 +1897,34 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                         os.remove(file_path)
                     except OSError:
                         pass
+            elif sweep_suffixes(operations) != [""]:
+                # A rotate_bond carrying `angles` sweeps: replace the single file with one
+                # per grid point. Same shape as split_chains above — the parent is removed
+                # so each id maps to exactly one file. The structure is parsed once here
+                # rather than once per grid point, which is the whole reason for the sweep.
+                with open(file_path, 'r') as fh:
+                    base_content = fh.read()
+                extension = ".pdb" if actual_format == "pdb" else ".cif"
+                n_variants = 0
+                for suffix, variant in apply_operations_swept(
+                        base_content, actual_format, operations, structure_id=custom_id):
+                    variant_path = os.path.join(output_folder, f"{custom_id}{suffix}{extension}")
+                    with open(variant_path, 'w') as fh:
+                        fh.write(variant)
+                    successful_downloads.append({
+                        'id': f"{custom_id}{suffix}",
+                        'pdb_id': pdb_id,
+                        'file_path': variant_path,
+                        'format': actual_format,
+                        'file_size': os.path.getsize(variant_path),
+                        'source': metadata['source'] + f" (rotation sweep {suffix})",
+                    })
+                    n_variants += 1
+                print(f"  Rotation sweep: wrote {n_variants} variants for {custom_id}")
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
             else:
                 successful_downloads.append({
                     'id': custom_id,
@@ -1980,7 +2086,8 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     print(f"Requested: {len(pdb_ids)} structures")
     print(f"Successful: {len(successful_downloads)}")
     print(f"Failed: {len(failed_downloads)}")
-    print(f"Success rate: {len(successful_downloads)/len(pdb_ids)*100:.1f}%")
+    rate = len(successful_downloads) / len(pdb_ids) * 100 if pdb_ids else 0.0
+    print(f"Success rate: {rate:.1f}%")
 
     if successful_downloads:
         total_size = sum(item['file_size'] for item in successful_downloads)

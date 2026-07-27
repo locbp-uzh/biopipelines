@@ -163,6 +163,64 @@ def test_standardized_output_multi_stream_selection(record_case):
     assert actual == expected
 
 
+def test_standardized_output_chunks_aligned_streams(record_case):
+    ids = ["a", "b", "c", "d", "e"]
+    seqs = DataStream(name="sequences", ids=list(ids))
+    structs = DataStream(
+        name="structures",
+        ids=list(ids),
+        files=[f"{item}.pdb" for item in ids],
+        format="pdb",
+    )
+    out = StandardizedOutput({
+        "sequences": seqs,
+        "structures": structs,
+        "output_folder": "/tmp/tool",
+        "tables": {"scores": {"path": "/tmp/scores.csv", "columns": ["id"]}},
+    })
+
+    chunks = out.chunks(2)
+    actual = [
+        (
+            chunk.streams.sequences.ids,
+            chunk.streams.structures.ids,
+            chunk.streams.structures.files,
+        )
+        for chunk in chunks
+    ]
+    expected = [
+        (["a", "b", "c"], ["a", "b", "c"], ["a.pdb", "b.pdb", "c.pdb"]),
+        (["d", "e"], ["d", "e"], ["d.pdb", "e.pdb"]),
+    ]
+    record_case(input="5 aligned ids, chunks(2)", expected=expected, actual=actual)
+    assert actual == expected
+    assert all(chunk.output_folder == "/tmp/tool" for chunk in chunks)
+    assert all(chunk.tables.scores.info.path == "/tmp/scores.csv" for chunk in chunks)
+
+
+def test_standardized_output_chunks_by_size(record_case):
+    ids = ["a", "b", "c", "d", "e"]
+    out = StandardizedOutput({
+        "structures": DataStream(name="structures", ids=ids, files=["<id>.pdb"])
+    })
+
+    actual = [chunk.streams.structures.ids for chunk in out.chunks(size=2)]
+    expected = [["a", "b"], ["c", "d"], ["e"]]
+    record_case(input="5 ids, chunks(size=2)", expected=expected, actual=actual)
+    assert actual == expected
+
+
+def test_standardized_output_chunks_reject_mismatched_streams(record_case):
+    out = StandardizedOutput({
+        "sequences": DataStream(name="sequences", ids=["a", "b"]),
+        "structures": DataStream(name="structures", ids=["a", "c"]),
+    })
+
+    record_case(input="mismatched stream ids", expected="ValueError", actual="ValueError")
+    with pytest.raises(ValueError, match="mismatched IDs"):
+        out.chunks(2)
+
+
 # ── Mock-driven: real files + map_table wiring ────────────────────────────────
 
 def test_datastream_len_and_slice_via_mock(

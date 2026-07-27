@@ -81,18 +81,23 @@ def parse_chain_aware_positions(spec: str, chain: str) -> Optional[List[int]]:
     return sorted(set(out)) or None
 
 
-def resolve_selection_arg(arg: str, struct_id: str, chain: str) -> Optional[List[int]]:
+def resolve_selection_arg(arg: str, struct_id: str, chain: str,
+                          map_table_paths: Optional[List[str]] = None) -> Optional[List[int]]:
     """Resolve a fixed/redesigned selection argument to 1-indexed residue numbers.
 
     `arg` is either '-' (none), a chain-aware selection string, or a
     'TABLE_REFERENCE:<path>:<col>' token whose per-structure cell holds the
     selection string. Returns the sorted residue list for `chain`, or None.
+
+    ``map_table_paths`` carries the input stream's map_table so ids renamed
+    upstream still resolve against the table's original id space.
     """
     if not arg or arg == "-":
         return None
     if arg.startswith("TABLE_REFERENCE:"):
         table, column = load_table(arg)
-        sel = lookup_table_value(table, struct_id, column)
+        sel = lookup_table_value(table, struct_id, column,
+                                 map_table_paths=map_table_paths)
         return parse_chain_aware_positions(sel or "", chain)
     return parse_chain_aware_positions(arg, chain)
 
@@ -202,6 +207,7 @@ def main():
     omit_list = list(args.omit_aa) if args.omit_aa else None
 
     ds = load_datastream(args.ds_json)
+    ds_maps = [ds.map_table] if ds.map_table else None
 
     rows: List[dict] = []
     failed: List[Tuple[str, str]] = []
@@ -212,8 +218,8 @@ def main():
             # Resolve fixed positions per structure. `redesigned` is converted
             # to its complement against the chain's residues so Frame2seq (which
             # only takes a fixed list) designs exactly the requested positions.
-            fixed_list = resolve_selection_arg(args.fixed, struct_id, args.chain)
-            redesign_list = resolve_selection_arg(args.redesigned, struct_id, args.chain)
+            fixed_list = resolve_selection_arg(args.fixed, struct_id, args.chain, ds_maps)
+            redesign_list = resolve_selection_arg(args.redesigned, struct_id, args.chain, ds_maps)
             if redesign_list is not None:
                 all_resis = chain_residue_numbers(pdb_file, args.chain)
                 redesign_set = set(redesign_list)

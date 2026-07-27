@@ -31,6 +31,20 @@ ADMETAI:
   current: "1.0"
   history: []
 
+AiZynthFinder:
+  files:
+  - biopipelines/aizynthfinder.py
+  - pipe_scripts/pipe_aizynthfinder.py
+  current: "1.1"
+  history:
+  - version: '1.0'
+    date: '2026-07-23'
+    note: Initial AiZynthFinder retrosynthesis wrapper.
+  - version: '1.1'
+    date: '2026-07-23'
+    note: Parse aizynthcli's orient="table" JSON envelope; per-route scores from
+      each tree's scores dict; split number_of_routes from number_of_returned_routes.
+
 AF2BIND:
   files:
   - biopipelines/af2bind.py

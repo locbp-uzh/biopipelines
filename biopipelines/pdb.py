@@ -64,6 +64,19 @@ def _normalize_selection(selection):
     )
 
 
+# Crystallization additives and ions that are never the ligand of interest.
+# Shared with RCSB so both tools classify a bound component the same way.
+COMMON_SOLVENTS = {
+    'HOH', 'WAT', 'H2O',                                                      # Water
+    'NA', 'CL', 'CA', 'MG', 'K', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',          # Common ions
+    'SO4', 'PO4', 'NO3',                                                      # Anions
+    'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',            # Glycols and PEGs
+    'ACT', 'ACE', 'ACY',                                                      # Acetate
+    'PYR', 'PYO',                                                             # Pyruvate
+    'DMS', 'DMSO', 'BME', 'MPD', 'TRS', 'EPE',                                # Common solvents
+}
+
+
 class PDBOperation:
     """Base class for PDB operations applied after loading structures."""
 
@@ -76,7 +89,9 @@ class PDBOperation:
         # Stringify any non-JSON-native params (e.g. a TableReference selection
         # serializes to its TABLE_REFERENCE:path:column form, parsed downstream).
         params = {
-            k: (v if isinstance(v, (str, int, float, bool, type(None))) else str(v))
+            k: (v if isinstance(v, (str, int, float, bool, type(None)))
+                or (k == "angles" and isinstance(v, list))
+                else str(v))
             for k, v in self.params.items()
         }
         return {"op": self.op_type, **params}
@@ -249,7 +264,8 @@ echo "=== PDB ready ==="
         return PDBOperation("break_bond", atom1=atom1, atom2=atom2)
 
     @staticmethod
-    def rotate_bond(atom1: str, atom2: str, angle: float) -> PDBOperation:
+    def rotate_bond(atom1: str, atom2: str,
+                    angle: Union[float, List[float]]) -> PDBOperation:
         """
         Rotate a fragment about the ``atom1``–``atom2`` bond (torsion rotation).
 
@@ -264,10 +280,16 @@ echo "=== PDB ready ==="
 
         Atom selections use the standard `<residue>.<atom>` syntax (as break_bond).
 
+        A list of angles sweeps the bond, emitting one structure per angle from a
+        single step. Several sweeping rotations in one ``PDB`` call give the full
+        grid over them, so an N-bond torsion scan costs one step rather than one
+        per grid point — the file is parsed and its connectivity built once.
+
         Args:
             atom1: Fixed end of the bond axis (e.g. `"LIG.C60"`).
             atom2: Moving end; its side of the bond rotates (e.g. `"LIG.C47"`).
-            angle: Rotation in degrees (e.g. `180`).
+            angle: Rotation in degrees (e.g. `180`), or a list to sweep
+                (e.g. `range(0, 360, 15)`).
 
         Returns:
             PDBOperation for the bond rotation.
@@ -275,10 +297,38 @@ echo "=== PDB ready ==="
         Example:
             # Swing the fluorophore 180 deg about a linker bond, anchor end fixed
             PDB(complex, PDB.rotate_bond("LIG.C60", "LIG.C47", 180))
+
+            # Two-bond torsion grid: 24 x 24 structures from one step
+            angles = list(range(0, 360, 15))
+            PDB(complex,
+                PDB.rotate_bond("LIG.C60", "LIG.C47", angles),
+                PDB.rotate_bond("LIG.C47", "LIG.N30", angles))
         """
+        if isinstance(angle, (list, tuple, range)):
+            angles = [float(a) for a in angle]
+            if not angles:
+                raise ValueError("rotate_bond: angle list is empty")
+            return PDBOperation("rotate_bond", atom1=atom1, atom2=atom2,
+                                angles=angles)
         return PDBOperation("rotate_bond", atom1=atom1, atom2=atom2, angle=float(angle))
 
     # --- Instance methods ---
+
+    def _sweep_suffixes(self) -> List[str]:
+        """Per-variant id suffixes for the sweeping rotate_bond operations, [] if none.
+
+        Several sweeping rotations give the Cartesian product over their angle lists, so
+        the suffix is "_r<angle>" per sweeping op in declaration order. Mirrors
+        pipe_pdb.sweep_suffixes so declared ids match the files written at runtime.
+        """
+        from itertools import product
+
+        angle_lists = [op.params["angles"] for op in getattr(self, "operations", [])
+                       if op.op_type == "rotate_bond" and op.params.get("angles")]
+        if not angle_lists:
+            return []
+        return ["".join(f"_r{a:g}" for a in combo)
+                for combo in product(*angle_lists)]
 
     def __init__(self,
                  pdbs: Union[str, List[str], Dict[str, str], 'StandardizedOutput', 'DataStream'],
@@ -365,6 +415,10 @@ echo "=== PDB ready ==="
         # that appends (e.g. _check_ligands_in_rcsb) cannot hit AttributeError.
         self.predicted_compound_ids = []
 
+        n_variants = len(self._sweep_suffixes() or [""])
+        if n_variants > 1:
+            print(f"  PDB: rotation sweep over {n_variants} grid points per structure")
+
         # Dict input: {id: pdb_code} -> extract ids from keys, pdb codes from values
         if isinstance(pdbs, dict):
             if ids is not None:
@@ -406,6 +460,7 @@ echo "=== PDB ready ==="
         # lookup key in pdb_ids but must NOT become the output id verbatim — the
         # id is the basename stem (e.g. "/x/M0584_1ldm.pdb" -> "M0584_1ldm"), or
         # the predicted output path embeds the whole path and a double extension.
+        self._ids_explicit = ids is not None
         if ids is None:
             self.custom_ids = [self._default_id_from_source(p) for p in self.pdb_ids]
         else:
@@ -716,16 +771,7 @@ echo "=== PDB ready ==="
             if 'nonpolymer_bound_components' in entry_info:
                 ligands = entry_info['nonpolymer_bound_components']
                 # Filter out common solvents/ions/crystallization agents
-                common_solvents = {
-                    'HOH', 'WAT', 'H2O',  # Water
-                    'NA', 'CL', 'CA', 'MG', 'K', 'ZN', 'MN', 'FE', 'CU', 'NI', 'CO',  # Common ions
-                    'SO4', 'PO4', 'NO3',  # Anions
-                    'GOL', 'EDO', 'PEG', 'PGE', 'PE4', 'PE3', 'P6G', 'PG4', '1PE',  # Glycols and PEGs
-                    'ACT', 'ACE', 'ACY',  # Acetate
-                    'PYR', 'PYO',  # Pyruvate
-                    'DMS', 'DMSO', 'BME', 'MPD', 'TRS', 'EPE'  # Common solvents
-                }
-                real_ligands = [lig for lig in ligands if lig not in common_solvents]
+                real_ligands = [lig for lig in ligands if lig not in COMMON_SOLVENTS]
 
                 # Store predicted compound IDs if custom_id provided
                 if custom_id and real_ligands:
@@ -814,7 +860,11 @@ echo "=== PDB ready ==="
                 elif op.op_type == "break_bond":
                     op_summaries.append(f"break_bond({op.params['atom1']}, {op.params['atom2']})")
                 elif op.op_type == "rotate_bond":
-                    op_summaries.append(f"rotate_bond({op.params['atom1']}, {op.params['atom2']}, {op.params['angle']})")
+                    angles = op.params.get("angles")
+                    spec = (f"{len(angles)} angles" if angles
+                            else f"{op.params['angle']}")
+                    op_summaries.append(
+                        f"rotate_bond({op.params['atom1']}, {op.params['atom2']}, {spec})")
                 else:
                     op_summaries.append(op.op_type)
             config_lines.append(f"OPERATIONS: {', '.join(op_summaries)}")
@@ -855,6 +905,9 @@ echo "=== PDB ready ==="
         config_data = {
             "pdb_ids": self.pdb_ids,
             "custom_ids": self.custom_ids,
+            # Explicit ids= must survive: the runtime otherwise takes the upstream map's id
+            # set as authoritative, since a filtered upstream declares its pre-filter ids.
+            "ids_are_explicit": self._ids_explicit,
             "convert": self.convert,  # None means no conversion
             "local_folder": effective_local_folder,
             "repo_pdbs_folder": repo_pdbs_folder,
@@ -936,6 +989,12 @@ python "{self.pdb_py}" --config "{self.config_file}"
         elif self.split_chains:
             # chain="all" -> chain letters resolved at runtime; lazy id pattern.
             structure_id_patterns = [f"{cid}[_<chain>]" for cid in self.custom_ids]
+        elif self._sweep_suffixes():
+            # A sweeping rotate_bond emits one structure per grid point; the angles are
+            # known at config time, so the ids are literal rather than a lazy pattern.
+            structure_id_patterns = [f"{cid}{sfx}"
+                                     for cid in self.custom_ids
+                                     for sfx in self._sweep_suffixes()]
         else:
             structure_id_patterns = list(self.custom_ids)
 

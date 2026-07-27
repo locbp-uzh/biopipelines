@@ -96,6 +96,12 @@ def _tokenize_cif_line(line: str) -> List[str]:
     unquoted ``O5'`` is a single literal token (the prime is not a closing quote),
     which ``shlex`` would instead reject as an unterminated quote.
     """
+    # Fast path: a line with no quotes tokenizes by plain whitespace, and
+    # str.split() does that in C. The character scanner below only matters when a
+    # quote is present, which is rare in an _atom_site loop (the bulk of a CIF).
+    if "'" not in line and '"' not in line:
+        return line.split()
+
     tokens: List[str] = []
     i = 0
     n = len(line)

@@ -983,11 +983,15 @@ from biopipelines.biopipelines_io import load_table, lookup_table_value, iterate
 # Parse reference and load table
 table, column = load_table("TABLE_REFERENCE:/path/to/positions.csv:within")
 
-# Look up value for a specific structure
-positions = lookup_table_value(table, "protein_1", column)
+# Look up value for a specific structure. ALWAYS pass the consumed stream's
+# map_table — see "Always pass map_table_paths" below.
+ds = load_datastream(structures_json)
+maps = [ds.map_table] if ds.map_table else None
+positions = lookup_table_value(table, "protein_1", column, map_table_paths=maps)
 
 # Or iterate over all structures
-for struct_id, positions in iterate_table_values(table, structure_ids, column):
+for struct_id, positions in iterate_table_values(table, structure_ids, column,
+                                                 map_table_paths=maps):
     print(f"{struct_id}: {positions}")
 ```
 
@@ -995,6 +999,15 @@ The lookup handles ID matching automatically:
 1. Try `pdb` column with `.pdb` extension
 2. Try `id` column exact match
 3. Try ID mapping (strip suffixes like `_1`, `_2`)
+4. Try `<stream>.id` provenance — **only when `map_table_paths` is supplied**
+
+#### Always pass `map_table_paths`
+
+Tiers 1–3 are all string operations on the id. They break the moment an upstream tool renames ids: `Panda_1` has no string relationship to `design_3`, so the lookup raises even though the rename is fully recorded. Tier 4 is what recovers it, and it is unreachable unless the caller supplies the map_tables.
+
+The map to pass is the **map_table of the stream the caller is iterating** — the CSV whose `<stream>.id` columns map the caller's ids back to the ids the referenced table is keyed on. Every pipe script that resolves a table reference already has this: it called `load_datastream()` to get the ids in the first place, so `ds.map_table` is in scope. Scripts handed a map_table CSV directly (`--sequences`, `--sequences-csv`) pass that path.
+
+Do **not** pass the referenced table's own path. A table's `<stream>.id` column records where *its* rows came from, not where its ids were later renamed to — it points the wrong way and will not match.
 
 #### Example: Processing Structures with Per-Structure Data
 
@@ -1022,10 +1035,13 @@ def main():
     # Load positions table
     table, column = load_table(positions_ref)
 
+    # The stream's map_table routes ids an upstream tool renamed.
+    maps = [ds.map_table] if ds.map_table else None
+
     results = []
     for struct_id, struct_file in iterate_files(ds):
         # Get per-structure positions
-        positions = lookup_table_value(table, struct_id, column)
+        positions = lookup_table_value(table, struct_id, column, map_table_paths=maps)
 
         # Process structure with its positions
         result = process(struct_file, positions)

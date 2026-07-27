@@ -96,6 +96,7 @@ Analyze structures, interactions, stability, and fitness.
 
 Convert molecules and compute chemical descriptors.
 
+- [AiZynthFinder](tool/cheminformatics.md#aizynthfinder) — Retrosynthetic route planning, purchasable precursors
 - [OpenBabel](tool/cheminformatics.md#openbabel) — Format conversion, 3-D coordinates, protonation
 - [RDKit](tool/cheminformatics.md#rdkit) — Molecular descriptors
 

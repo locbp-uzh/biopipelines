@@ -19,7 +19,7 @@ Creates compound collections from dictionaries with optional combinatorial expan
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `library`: str | Dict - Dictionary with SMILES, path to CSV, or path to `.cdxml` file (ChemDraw R-group enumeration)
+- `library`: str | Dict | CompoundDataset - Dictionary with SMILES, path to CSV, path to `.cdxml` file (ChemDraw R-group enumeration), or a public dataset constant (see *Public datasets* below)
 - `primary_key`: str = None - Root key for expansion. Auto-detected by scanning keys in insertion order for `<placeholder>` patterns.
 - `covalent`: bool = False - Generate CCD/PKL files for covalent binding
 - `validate_smiles`: bool = True - Validate SMILES during expansion
@@ -60,6 +60,45 @@ library = CompoundLibrary("my_library.csv")
 library = CompoundLibrary({...}, generate_images=True)
 ```
 
+**Public datasets**:
+
+Passing a dataset constant instead of a path builds the library from a published compound collection. The archive is downloaded once into `folders.cache/CompoundDatasets/` and verified against a checksum; every later run reads the cached CSV, so only the first pipeline on a machine touches the network. Resolution happens at configuration time, which needs network access on the host that builds the pipeline (a cluster login node, not necessarily a compute node).
+
+The datasets carry no filtering parameters — narrow them downstream with [Panda](data_management.md#panda), e.g. `Panda.filter("tag_name == 'Cyanine'")` or `Panda.drop_duplicates("smiles")`.
+
+| Constant | Rows | Unique SMILES | Notes |
+|---|---|---|---|
+| `CompoundLibrary.FluoDB` | 55,169 | 35,535 | Full aggregated database |
+| `CompoundLibrary.FluoDBLite` | 49,851 | 30,939 | Complexes and mixtures removed |
+| `CompoundLibrary.DYES` | 25,896 | 20,649 | No absorption/emission |
+| `CompoundLibrary.Deep4Chem` | 20,014 | 6,809 | |
+| `CompoundLibrary.ChemFluor` | 4,052 | 2,595 | |
+| `CompoundLibrary.DyeAggregation` | 4,043 | 3,712 | No emission |
+| `CompoundLibrary.DSSCDB` | 2,551 | 2,269 | Dye-sensitized solar cells |
+| `CompoundLibrary.ChemDataExtractor` | 2,219 | 2,206 | No emission or PLQY |
+| `CompoundLibrary.PhotochemCAD` | 427 | 268 | No emission |
+
+All nine come from the FluoDB release (CC BY 4.0, doi:10.6084/m9.figshare.26317933; [Nat Commun 16, 2025](https://doi.org/10.1038/s41467-025-58881-5)). The eight source databases are the collections FluoDB aggregates, exposed individually.
+
+Rows are one fluorophore–solvent pair, so a molecule recurs across solvents — hence unique SMILES being well below the row count. Photophysical columns are sparse: only 26,070 of FluoDB's 55,169 rows carry an emission wavelength, so filtering on `emission_nm` silently drops rows with no measurement.
+
+**Dataset tables**: `compounds`: | id | format | smiles | ccd | absorption_nm | emission_nm | plqy | extinction | solvent | reference_doi | source | tag_name |
+
+`tag_name` (FluoDB and FluoDB-Lite only) is a scaffold class — BODIPY, Porphyrin, Acridines, PAHs, Triphenylamine, Carbazole, Coumarin, Cyanine, Naphthalimide, SquaricAcid, Benz, and ring-size codes — and is the most useful axis for cutting the set to a workable size.
+
+```python
+from biopipelines.entities import CompoundLibrary
+from biopipelines.panda import Panda
+
+dyes = CompoundLibrary(CompoundLibrary.FluoDB)
+
+cyanines = Panda(
+    tables=dyes.tables.compounds,
+    operations=[Panda.filter("tag_name == 'Cyanine'"),
+                Panda.drop_duplicates("smiles")],
+)
+```
+
 **CDXML R-Group Enumeration**:
 
 Draw the following in a single ChemDraw `.cdxml` file:
@@ -89,7 +128,7 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 - `source`: str = None - Force "rcsb" or "pubchem" (auto-detects if None)
 - `local_folder`: str = None - Check first before ligands/
 - `smiles`: str | List[str] | Dict[str, str] = None - Direct SMILES input (bypasses lookup)
-- `structures`: DataStream | StandardizedOutput = None - Extract the ligand's bound coordinates from these structures (keeps the crystal pose) while taking chemistry from `code`/`smiles`. See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates).
+- `structures`: DataStream | StandardizedOutput = None - Extract the ligand's bound coordinates from these structures (keeps the crystal pose). With `codes=` and no `lookup`/`smiles` it **fans out over the input structures**: N structures × 1 code gives N ligands keyed by the input ids, N × M codes gives N·M ligands keyed `<structure_id>_<code>`, and both maps carry a `structures.id` provenance column. `ids=` is not accepted in this mode (ids are derived) and a code missing from a given structure routes that pair to the `failed` table while the rest proceed. Combined with `lookup`/`smiles` it instead overlays bound coordinates onto that one chemistry entry, so it requires a single input structure. See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates).
 - `generate_images`: bool = False - Generate PNG images per ligand using RDKit
 
 **Auto-detection** (when source=None):
@@ -441,7 +480,8 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 
 **Parameters**:
 - `*queries`: One or more query objects (combined with logical_operator)
-- `max_results`: int = 10 - Maximum PDB entries to return
+- `max_results`: int = 10 - Maximum PDB entries to return. With a compounds-stream query (see *Searching from a compounds stream*) this is the cap **per compound**.
+- `total_max_results`: int = None - Cap on the unioned hit count for a compounds-stream query, applied after deduplication and keeping the highest-scoring entries. `None` keeps every unique hit.
 - `return_type`: str = "entry" - Result granularity ("entry", "assembly", "polymer_entity", "polymer_instance")
 - `sort`: str = "score" - Sort field ("score", "resolution", "release_date", or RCSB attribute)
 - `convert`: str = None - Target format to convert to ("pdb", "cif", or None). When None, no conversion is performed: each structure is kept in whatever format is downloaded from RCSB (PDB if available, CIF as fallback). The structures stream will have format "pdb|cif".
@@ -457,7 +497,7 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 - `RCSB.SeqMotif(pattern, pattern_type, sequence_type)` - Motif search (prosite/simple/regex)
 - `RCSB.Structure(entry_id, assembly_id)` - 3D structure similarity
 - `RCSB.StrucMotif(residues, pdb_id, assembly_id)` - Structure motif search
-- `RCSB.Chemical(value, match_type, descriptor_type)` - Chemical similarity (by SMILES/InChI)
+- `RCSB.Chemical(value, match_type, descriptor_type)` - Chemical similarity (by SMILES/InChI, or a compounds stream — see below)
 - `StructureAttribute.*` - Typed attribute search (see below)
 
 **StructureAttribute** — typed descriptors organised by RCSB category. Each attribute exposes comparison methods that return a query object:
@@ -513,6 +553,43 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 - `compounds`: | id | code | smiles | ccd |
 - `search_results`: | id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date |
 - `missing`: | pdb_id | error_message | source | attempted_path |
+
+**Searching from a compounds stream**:
+
+`RCSB.Chemical` accepts a compounds stream (or any tool output carrying one) in place of a literal descriptor. The tool then runs **one search per compound** and unions the hits, deduplicating on PDB ID — the way to ask "which structures bind anything resembling these molecules?" without writing one `RCSB(...)` call per molecule.
+
+This changes when the search happens. With a literal descriptor the search runs at configuration time and the output IDs are known immediately. A stream's SMILES do not exist until the upstream step has run, so the search moves to **execution time** and the output IDs become lazy — resolved when the job runs, like any other runtime fan-out. Two consequences:
+
+- `ids=` cannot be combined with a compounds-stream query (the hit count is unknown at configuration time) and raises.
+- `search_results` carries provenance instead of entry metadata: | id | pdb_id | result_id | score | compounds.id | query_smiles |. The `compounds.id` and `query_smiles` columns record which input compound produced each hit. Entry metadata (title, resolution, organism, …) is not fetched, since that lookup needs IDs the search has not yet produced.
+
+Only one query per `RCSB(...)` call may draw from a stream; a second raises. Other queries combine with it as usual, so attribute filters apply to every per-compound search.
+
+`max_results` is the per-compound cap, so N compounds can yield up to N × `max_results` unique entries — use `total_max_results` to bound the union.
+
+```python
+from biopipelines.entities import RCSB, CompoundLibrary
+from biopipelines.rcsb import StructureAttribute
+from biopipelines.panda import Panda
+
+dyes = CompoundLibrary(CompoundLibrary.FluoDB)
+cyanines = Panda(
+    tables=dyes.tables.compounds,
+    operations=[Panda.filter("tag_name == 'Cyanine'"),
+                Panda.drop_duplicates("smiles"),
+                Panda.head(20)],
+)
+
+# One substructure search per dye, restricted to well-resolved structures
+binders = RCSB(
+    RCSB.Chemical(cyanines, match_type="sub-struct-graph-relaxed"),
+    StructureAttribute.Methods.Resolution.less_than(2.5),
+    max_results=10,
+    total_max_results=100,
+)
+```
+
+A whole-molecule fingerprint search on a large dye rarely returns anything — matching a substructure (a fluorophore core or a warhead) is what produces hits.
 
 **Examples**:
 

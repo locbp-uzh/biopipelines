@@ -48,12 +48,14 @@ class _StreamInput:
 class _TableInput:
     """Runtime view of a table-column input: per-id lookup over one column."""
 
-    def __init__(self, reference):
+    def __init__(self, reference, map_table_paths=None):
         self._table, self._column = load_table(reference)
+        self._maps = map_table_paths
         self.ids = list(self._table["id"]) if "id" in self._table.columns else []
 
     def value(self, item_id):
-        return lookup_table_value(self._table, item_id, self._column)
+        return lookup_table_value(self._table, item_id, self._column,
+                                  map_table_paths=self._maps)
 
 
 class _TableFullInput:
@@ -62,16 +64,20 @@ class _TableFullInput:
     ``ids`` are the table's id column; ``columns`` its columns. ``value(id, col)`` looks one cell up (framework id-matching), ``row(id)`` the whole row as a dict, and ``rows()`` iterates ``(id, row_dict)``.
     """
 
-    def __init__(self, path):
+    def __init__(self, path, map_table_paths=None):
         self._table, _ = load_table(path)
+        self._maps = map_table_paths
         self.columns = list(self._table.columns)
         self.ids = list(self._table["id"]) if "id" in self._table.columns else []
 
     def value(self, item_id, column):
-        return lookup_table_value(self._table, item_id, column)
+        return lookup_table_value(self._table, item_id, column,
+                                  map_table_paths=self._maps)
 
     def row(self, item_id):
-        return {c: lookup_table_value(self._table, item_id, c) for c in self.columns}
+        return {c: lookup_table_value(self._table, item_id, c,
+                                      map_table_paths=self._maps)
+                for c in self.columns}
 
     def rows(self):
         for _, r in self._table.iterrows():
@@ -204,13 +210,20 @@ def _load_user_module(script_path):
 
 def _build_inputs(inputs_manifest):
     inputs = {}
+    # Streams first: their map_tables carry the provenance that lets a table
+    # lookup resolve an id an upstream tool renamed.
     for name, spec in inputs_manifest.items():
         if spec["kind"] == "stream":
             inputs[name] = _StreamInput(load_datastream(spec["payload"]))
-        elif spec["kind"] == "table_full":
-            inputs[name] = _TableFullInput(spec["payload"])
+    stream_maps = [i.map_table for i in inputs.values() if i.map_table] or None
+
+    for name, spec in inputs_manifest.items():
+        if spec["kind"] == "stream":
+            continue
+        if spec["kind"] == "table_full":
+            inputs[name] = _TableFullInput(spec["payload"], stream_maps)
         else:
-            inputs[name] = _TableInput(spec["payload"])
+            inputs[name] = _TableInput(spec["payload"], stream_maps)
     return inputs
 
 

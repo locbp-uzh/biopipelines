@@ -1,0 +1,3 @@
+# Not aizynthfinder[all]: the extras add torch + pytorch-lightning (route
+# clustering) and the jupyter GUI, neither of which this wrapper exposes.
+aizynthfinder

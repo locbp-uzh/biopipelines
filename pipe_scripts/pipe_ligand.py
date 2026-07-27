@@ -146,6 +146,9 @@ def _write_ligand_tables(successful: List[Dict[str, Any]],
     same outputs the download paths produce, shared by extract mode."""
     compound_cols = ["id", "format", "code", "lookup", "source", "ccd", "cid",
                      "cas", "smiles", "name", "formula", "file_path"]
+    # The extract path records which structure each ligand was carved from.
+    if any("structures.id" in item for item in successful):
+        compound_cols = compound_cols + ["structures.id"]
     if successful:
         pd.DataFrame(successful, columns=compound_cols).to_csv(compounds_table, index=False)
         print(f"\nExtracted ligands saved: {compounds_table} ({len(successful)} ligands)")
@@ -154,9 +157,18 @@ def _write_ligand_tables(successful: List[Dict[str, Any]],
         print(f"No ligands extracted - created empty table: {compounds_table}")
 
     if structures_table:
-        struct_rows = [{'id': item['id'], 'file': item['file_path']}
-                       for item in successful if item.get('file_path')]
-        pd.DataFrame(struct_rows, columns=["id", "file"]).to_csv(structures_table, index=False)
+        struct_cols = ["id", "file"]
+        struct_rows = []
+        for item in successful:
+            if not item.get('file_path'):
+                continue
+            row = {'id': item['id'], 'file': item['file_path']}
+            if 'structures.id' in item:
+                row['structures.id'] = item['structures.id']
+            struct_rows.append(row)
+        if any('structures.id' in r for r in struct_rows):
+            struct_cols = struct_cols + ["structures.id"]
+        pd.DataFrame(struct_rows, columns=struct_cols).to_csv(structures_table, index=False)
         print(f"Structures map saved: {structures_table} ({len(struct_rows)} files)")
 
     if failed:
@@ -170,19 +182,20 @@ def _write_ligand_tables(successful: List[Dict[str, Any]],
 def extract_ligands_from_structures(config_data: Dict[str, Any],
                                     successful: List[Dict[str, Any]],
                                     failed: List[Dict[str, Any]]) -> None:
-    """Carve each requested HETATM code out of the input structures, keeping the
-    bound coordinates, and write one coordinate file per ligand id. Appends rows
-    to `successful` / `failed` using the same schema as the download paths.
+    """Carve the requested HETATM code(s) out of EVERY input structure, keeping
+    the bound coordinates, and write one coordinate file per (structure × code).
+    Appends rows to `successful` / `failed` using the same schema as the download
+    paths, plus a `structures.id` provenance column on the successful rows.
 
-    For each (id, code) pair we scan the input structures and use the first one
-    that contains a matching HETATM block. A code present in none of the inputs
-    is routed to the failed table.
+    Output ids are derived from the source structure: `<structure_id>` for a
+    single code, `<structure_id>_<code>` when several codes are extracted. A code
+    absent from a given structure routes that pair to the failed table; the other
+    structures still produce their ligands.
     """
     # Local import so the download paths don't pay for it.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from biopipelines.biopipelines_io import load_datastream, iterate_files
 
-    custom_ids = config_data['custom_ids']
     residue_codes = config_data['residue_codes']
     output_folder = config_data['output_folder']
     structures_json = config_data['extract_structures_json']
@@ -190,38 +203,36 @@ def extract_ligands_from_structures(config_data: Dict[str, Any],
     os.makedirs(output_folder, exist_ok=True)
     structures = [(sid, path) for sid, path in iterate_files(load_datastream(structures_json))]
     if not structures:
-        for cid, code in zip(custom_ids, residue_codes):
+        for code in residue_codes:
             failed.append({'lookup': f"extract:{code}", 'error_message': 'no input structures',
                            'source': 'extract_failed', 'attempted_path': ''})
         return
 
-    print(f"Extracting {len(custom_ids)} ligand(s) from {len(structures)} structure(s)")
-    for cid, code in zip(custom_ids, residue_codes):
-        block = None
-        src_id = None
-        carved_fmt = "pdb"
-        for sid, path in structures:
+    single_code = len(residue_codes) == 1
+    print(f"Extracting {len(residue_codes)} code(s) from {len(structures)} structure(s) "
+          f"-> {len(structures) * len(residue_codes)} ligand(s)")
+    n_ok = 0
+    for sid, path in structures:
+        for code in residue_codes:
+            cid = sid if single_code else f"{sid}_{code}"
             block, carved_fmt = _carve_hetatm_block(path, code)
-            if block is not None:
-                src_id = sid
-                break
-        if block is None:
-            present = ', '.join(sid for sid, _ in structures)
-            print(f"  MISSING: code {code!r} not found as HETATM in any input structure ({present})")
-            failed.append({'lookup': f"extract:{code}",
-                           'error_message': f"HETATM code {code!r} not present in any input structure",
-                           'source': 'extract_failed', 'attempted_path': ''})
-            continue
-        out_path = os.path.join(output_folder, f"{cid}.{carved_fmt}")
-        with open(out_path, 'w') as fh:
-            fh.write(block)
-        print(f"  {cid}: extracted {code} from {src_id} -> {out_path}")
-        successful.append({
-            'id': cid, 'format': carved_fmt, 'code': code,
-            'lookup': '', 'source': f"extract({src_id})",
-            'ccd': '', 'cid': '', 'cas': '', 'smiles': '', 'name': '', 'formula': '',
-            'file_path': out_path,
-        })
+            if block is None:
+                print(f"  MISSING: code {code!r} not found as HETATM in {sid}")
+                failed.append({'lookup': f"extract:{code}",
+                               'error_message': f"HETATM code {code!r} not present in structure {sid}",
+                               'source': 'extract_failed', 'attempted_path': path})
+                continue
+            out_path = os.path.join(output_folder, f"{cid}.{carved_fmt}")
+            with open(out_path, 'w') as fh:
+                fh.write(block)
+            n_ok += 1
+            successful.append({
+                'id': cid, 'format': carved_fmt, 'code': code,
+                'lookup': '', 'source': 'extract',
+                'ccd': '', 'cid': '', 'cas': '', 'smiles': '', 'name': '', 'formula': '',
+                'file_path': out_path, 'structures.id': sid,
+            })
+    print(f"  extracted {n_ok} ligand(s), {len(failed)} missing")
 
 
 def overlay_extracted_coords(config_data: Dict[str, Any],
@@ -241,6 +252,16 @@ def overlay_extracted_coords(config_data: Dict[str, Any],
                   iterate_files(load_datastream(config_data['extract_structures_json']))]
     os.makedirs(output_folder, exist_ok=True)
     print(f"Overlaying bound coordinates from {len(structures)} structure(s)")
+    # This mode pairs ONE chemistry entry with ONE pose, so a many-structure input
+    # would silently pick an arbitrary source. Ligand(structures=, codes=) is the
+    # fan-out form; say so instead of carving from whichever structure matched first.
+    if len(structures) > 1:
+        raise ValueError(
+            f"structures= combined with lookup/smiles overlays bound coordinates onto a single "
+            f"ligand, but {len(structures)} structures were given — the source pose would be "
+            f"arbitrary. To carve a ligand out of every structure use "
+            f"Ligand(structures=..., codes=...) with no lookup/smiles, which fans out one "
+            f"ligand per input structure.")
 
     kept = []
     for item in successful:
@@ -1198,7 +1219,17 @@ def fetch_ligands(config_data: Dict[str, Any]) -> int:
         extract_ligands_from_structures(config_data, successful_downloads, failed_downloads)
         _write_ligand_tables(successful_downloads, failed_downloads,
                              compounds_table, structures_table, failed_table)
-        return len(failed_downloads)
+        # The extract fans out over the inputs, so a code missing from a few
+        # structures is a per-item failure, not a broken step: keep the ligands
+        # that were carved and fail only when nothing was.
+        if not successful_downloads:
+            return len(failed_downloads) or 1
+        if failed_downloads:
+            print(f"WARNING: {len(failed_downloads)} of "
+                  f"{len(successful_downloads) + len(failed_downloads)} extractions failed "
+                  f"(see {failed_table}); continuing with {len(successful_downloads)} ligand(s)",
+                  file=sys.stderr)
+        return 0
 
     total_count = len(lookup_values) + len(smiles_values)
     print(f"Processing {total_count} ligands ({len(lookup_values)} lookup, {len(smiles_values)} SMILES)")

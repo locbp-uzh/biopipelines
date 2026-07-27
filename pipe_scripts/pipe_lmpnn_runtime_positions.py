@@ -87,13 +87,15 @@ def process_table_source(input_table, design_entries):
     return positions_data
 
 
-def resolve_table_reference(reference, design_ids):
+def resolve_table_reference(reference, design_ids, map_table_paths=None):
     """
     Resolve table reference to per-design selections.
 
     Args:
         reference: Either a table reference like "TABLE_REFERENCE:path:column" or direct PyMOL selection
         design_ids: List of design IDs from DataStream
+        map_table_paths: Input stream's map_table, so ids renamed upstream still
+            resolve against the table's original id space
 
     Returns:
         Dictionary mapping design IDs to position lists
@@ -110,7 +112,8 @@ def resolve_table_reference(reference, design_ids):
 
     for design_id in design_ids:
         try:
-            selection_value = lookup_table_value(table, design_id, column_name)
+            selection_value = lookup_table_value(table, design_id, column_name,
+                                                 map_table_paths=map_table_paths)
             positions_per_design[design_id] = sele_to_list(selection_value)
         except KeyError:
             print(f"Warning: No table entry found for {design_id} in column {column_name}")
@@ -129,17 +132,20 @@ def get_protein_residues_from_pdb(pdb_path):
     return sorted(residues, key=lambda x: (x[0], x[1]))
 
 
-def process_selection_source(fixed_positions, designed_positions, design_entries):
+def process_selection_source(fixed_positions, designed_positions, design_entries,
+                             map_table_paths=None):
     """Process direct PyMOL selections or table references for fixed/designed positions.
 
     Args:
         fixed_positions: Fixed positions string or TABLE_REFERENCE
         designed_positions: Designed positions string or TABLE_REFERENCE
         design_entries: List of (design_id, pdb_file) tuples from DataStream
+        map_table_paths: Input stream's map_table, so ids renamed upstream still
+            resolve against the table's original id space
     """
     design_ids = [entry[0] for entry in design_entries]
-    fixed_per_design = resolve_table_reference(fixed_positions, design_ids)
-    designed_per_design = resolve_table_reference(designed_positions, design_ids)
+    fixed_per_design = resolve_table_reference(fixed_positions, design_ids, map_table_paths)
+    designed_per_design = resolve_table_reference(designed_positions, design_ids, map_table_paths)
 
     positions_data = {}
     for design_id, pdb_file in design_entries:
@@ -260,7 +266,9 @@ def main():
     if input_source == "table" and input_table != "-":
         positions_data = process_table_source(input_table, design_entries)
     elif input_source == "selection":
-        positions_data = process_selection_source(fixed_positions, designed_positions, design_entries)
+        positions_data = process_selection_source(
+            fixed_positions, designed_positions, design_entries,
+            [structures_ds.map_table] if structures_ds.map_table else None)
     elif input_source == "ligand":
         ligand_code = resolve_ligand_code(ligand_json)
         positions_data = process_ligand_source(ligand_code, design_within, design_entries)

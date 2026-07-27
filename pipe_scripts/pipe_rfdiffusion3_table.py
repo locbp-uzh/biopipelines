@@ -30,6 +30,8 @@ def parse_sampled_contig(sampled_contig, total_length):
     - "17,A9-140" -> 17 designed residues (1-17), then fixed A9-140 mapped to 18-149
     - "A1-50,20,A60-100" -> fixed A1-50 (1-50), 20 designed (51-70), fixed A60-100 (71-111)
     - "160" -> 160 designed residues (de novo design with only length specified)
+    - "69P,A84,A85,...,A182" -> foundry form: "<N>P" is N designed residues (1-N),
+      followed by the fixed template residues listed one per segment ("A84").
 
     Args:
         sampled_contig: The sampled contig string from specifications
@@ -70,6 +72,15 @@ def parse_sampled_contig(sampled_contig, total_length):
         elif segment.isdigit():
             num_residues = int(segment)
             # These residues are designed
+            for i in range(num_residues):
+                designed_residues.append(current_pos + i)
+            current_pos += num_residues
+
+        # foundry emits the designed run as "<N>P" (e.g. "69P" = 69 designed
+        # residues), with fixed template residues then listed one per segment.
+        # Without this branch the token is unparsed and 'designed' comes out empty.
+        elif re.match(r'^(\d+)P$', segment):
+            num_residues = int(segment[:-1])
             for i in range(num_residues):
                 designed_residues.append(current_pos + i)
             current_pos += num_residues

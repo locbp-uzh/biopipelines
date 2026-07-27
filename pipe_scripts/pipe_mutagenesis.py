@@ -420,8 +420,11 @@ def main():
 
             if args.selection:
                 # Selection mode: look up per-row positions from table
+                # --sequences IS the input stream's map_table, so it carries the
+                # provenance that relates a renamed id to the selection table.
                 selection_value = lookup_table_value(
-                    selection_table, sequence_id, selection_column
+                    selection_table, sequence_id, selection_column,
+                    map_table_paths=[args.sequences]
                 )
 
                 # Empty selection (NaN): no positions to mutate — pass through original

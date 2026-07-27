@@ -19,12 +19,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .pdb import COMMON_SOLVENTS
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from pdb import COMMON_SOLVENTS
 
 
 class RCSBQuery:
@@ -32,6 +34,33 @@ class RCSBQuery:
 
     def __init__(self, query_dict: Dict[str, Any]):
         self.query_dict = query_dict
+        # Set when the query's value comes from a compounds stream resolved at
+        # execution time rather than a literal descriptor.
+        self.compounds_stream = None
+
+
+def _as_compounds_stream(value: Any):
+    """Return the compounds DataStream behind `value`, or None if it is a literal."""
+    if isinstance(value, str) or value is None:
+        return None
+
+    if isinstance(value, DataStream):
+        stream = value
+    else:
+        streams = getattr(value, 'streams', None)
+        stream = streams.get('compounds') if streams is not None else None
+        if stream is None:
+            raise ValueError(
+                "RCSB.Chemical() needs a SMILES string or a compounds stream; "
+                f"got {type(value).__name__} with no 'compounds' stream."
+            )
+
+    if not stream.map_table:
+        raise ValueError(
+            "RCSB.Chemical(): the compounds stream carries no map_table, so its "
+            "SMILES cannot be resolved at execution time."
+        )
+    return stream
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +146,10 @@ class _Attr:
     def equals(self, value: Any) -> RCSBQuery:
         """Exact equality. Pass an Enum member or a plain value."""
         v = value.value if isinstance(value, Enum) else value
-        return self._make("exact_match", v)
+        # The API splits equality by type: numeric attributes take "equals" and
+        # reject "exact_match" with HTTP 400, string attributes the reverse.
+        op = "equals" if isinstance(v, (int, float)) and not isinstance(v, bool) else "exact_match"
+        return self._make(op, v)
 
     def is_any(self, *values) -> RCSBQuery:
         """Value is one of the supplied options (OR). Pass Enum members or plain strings."""
@@ -158,7 +190,8 @@ class _Attr:
     def not_equals(self, value: Any) -> RCSBQuery:
         """Negated exact equality."""
         v = value.value if isinstance(value, Enum) else value
-        return self._make("exact_match", v, negation=True)
+        op = "equals" if isinstance(v, (int, float)) and not isinstance(v, bool) else "exact_match"
+        return self._make(op, v, negation=True)
 
     def not_any(self, *values) -> RCSBQuery:
         """Value is none of the supplied options."""
@@ -210,7 +243,7 @@ class StructureAttribute:
         StructureTitle              = _Attr("struct.title")
         DepositDate                 = _Attr("rcsb_accession_info.deposit_date")
         ReleaseDate                 = _Attr("rcsb_accession_info.initial_release_date")
-        RevisionDate                = _Attr("rcsb_accession_info.major_revision")
+        RevisionDate                = _Attr("rcsb_accession_info.revision_date")
 
     # --- Entry Features ---
     class EntryFeatures:
@@ -227,17 +260,17 @@ class StructureAttribute:
         PolymerEntityDescription    = _Attr("rcsb_polymer_entity.pdbx_description")
         PolymerEntityType           = _Attr("entity_poly.rcsb_entity_polymer_type")
         PolymerEntitySequenceLength = _Attr("entity_poly.rcsb_sample_sequence_length")
-        MonomerComponentId          = _Attr("entity_poly.pdbx_seq_one_letter_code_can")
+        MonomerComponentId          = _Attr("rcsb_polymer_entity_container_identifiers.chem_comp_monomers")
         ScientificName              = _Attr("rcsb_entity_source_organism.scientific_name")
-        TaxonomyId                  = _Attr("rcsb_entity_source_organism.ncbi_taxonomy_id")
-        GeneName                    = _Attr("rcsb_gene_name.value")
+        TaxonomyId                  = _Attr("rcsb_entity_source_organism.taxonomy_lineage.id")
+        GeneName                    = _Attr("rcsb_entity_source_organism.rcsb_gene_name.value")
         EnzymeClassification        = _Attr("rcsb_polymer_entity.rcsb_ec_lineage.id")
 
     # --- Nonpolymer (Ligand) Molecular Features ---
     class NonpolymerFeatures:
         ComponentIdentifier         = _Attr("rcsb_nonpolymer_entity_container_identifiers.nonpolymer_comp_id")
-        FormulaWeight               = _Attr("rcsb_nonpolymer_entity.formula_weight")
-        LigandQscore                = _Attr("rcsb_nonpolymer_entity_instance_container_identifiers.ligand_qscore")
+        FormulaWeight               = _Attr("chem_comp.formula_weight")
+        LigandQscore                = _Attr("rcsb_nonpolymer_instance_validation_score.Q_score")
 
     # --- Assembly Features ---
     class AssemblyFeatures:
@@ -247,7 +280,7 @@ class StructureAttribute:
 
     # --- Methods ---
     class Methods:
-        ExperimentalMethod          = _Attr("rcsb_entry_info.experimental_method")
+        ExperimentalMethod          = _Attr("exptl.method")
         Resolution                  = _Attr("rcsb_entry_info.resolution_combined")
 
 
@@ -322,6 +355,20 @@ class RCSB(BaseConfig):
     TOOL_VERSION = "1.0"
 
     SEARCH_API_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
+
+    # Friendly `sort=` values mapped to the attribute paths the API sorts on.
+    SORT_ALIASES = {
+        "resolution": "rcsb_entry_info.resolution_combined",
+        "release_date": "rcsb_accession_info.initial_release_date",
+        "deposit_date": "rcsb_accession_info.deposit_date",
+        "molecular_weight": "rcsb_entry_info.molecular_weight",
+    }
+
+    # Best-first differs per field: finer resolution is better, newer date is better.
+    SORT_DIRECTIONS = {
+        "rcsb_accession_info.initial_release_date": "desc",
+        "rcsb_accession_info.deposit_date": "desc",
+    }
     GRAPHQL_URL = "https://data.rcsb.org/graphql"
 
     # Sort field mapping for convenience names
@@ -349,7 +396,10 @@ echo "=== RCSB ready ==="
     missing_csv = Path(lambda self: self.table_path("missing"))
     search_results_csv = Path(lambda self: self.table_path("search_results"))
     config_file = Path(lambda self: self.configuration_path("fetch_config.json"))
+    search_config_file = Path(lambda self: self.configuration_path("search_config.json"))
+    compounds_input_json = Path(lambda self: self.configuration_path("compounds_input.json"))
     pdb_py = Path(lambda self: self.pipe_script_path("pipe_pdb.py"))
+    search_py = Path(lambda self: self.pipe_script_path("pipe_rcsb_search.py"))
 
     # --- Static methods for creating query objects ---
 
@@ -397,7 +447,7 @@ echo "=== RCSB ready ==="
         Example:
             RCSB.Attribute("rcsb_entry_info.resolution_combined", "less", 2.0)
             RCSB.Attribute("rcsb_entity_source_organism.scientific_name", "exact_match", "Homo sapiens")
-            RCSB.Attribute("rcsb_entry_info.experimental_method", "exact_match", "X-RAY DIFFRACTION")
+            RCSB.Attribute("exptl.method", "exact_match", "X-RAY DIFFRACTION")
             RCSB.Attribute("rcsb_entry_info.release_date", "range", {"from": "2023-01-01", "to": "2024-01-01", "include_lower": True, "include_upper": False})
         """
         params = {
@@ -540,7 +590,7 @@ echo "=== RCSB ready ==="
         })
 
     @staticmethod
-    def Chemical(value: str, match_type: str = "graph-relaxed",
+    def Chemical(value: Any, match_type: str = "graph-relaxed",
                  descriptor_type: str = "SMILES") -> RCSBQuery:
         """
         Chemical similarity search by SMILES or InChI descriptor.
@@ -549,7 +599,10 @@ echo "=== RCSB ready ==="
             RCSB.Attribute("rcsb_chem_comp_container_identifiers.comp_id", "in", ["ATP"])
 
         Args:
-            value: SMILES or InChI string (e.g., "c1ccc(cc1)C(=O)O")
+            value: A SMILES/InChI string, or a compounds stream (a DataStream or a
+                   tool output carrying one). Given a stream, the search fans out at
+                   execution time — one search per compound, hits unioned — and the
+                   output ids become lazy.
             match_type: Matching method. Options:
                         "graph-exact", "graph-strict", "graph-relaxed",
                         "graph-relaxed-stereo", "fingerprint-similarity",
@@ -563,24 +616,28 @@ echo "=== RCSB ready ==="
 
         Example:
             RCSB.Chemical("c1ccc(cc1)C(=O)O", match_type="fingerprint-similarity")
-            RCSB.Chemical("c1ccccc1", match_type="graph-relaxed")
+            RCSB.Chemical(dyes, match_type="sub-struct-graph-relaxed")
         """
-        return RCSBQuery({
+        stream = _as_compounds_stream(value)
+        query = RCSBQuery({
             "type": "terminal",
             "service": "chemical",
             "parameters": {
-                "value": value,
+                "value": "" if stream is not None else value,
                 "type": "descriptor",
                 "descriptor_type": descriptor_type,
                 "match_type": match_type
             }
         })
+        query.compounds_stream = stream
+        return query
 
     # --- Instance methods ---
 
     def __init__(self,
                  *queries: RCSBQuery,
                  max_results: int = 10,
+                 total_max_results: Optional[int] = None,
                  return_type: str = "entry",
                  sort: str = "score",
                  convert: Optional[str] = None,
@@ -596,7 +653,11 @@ echo "=== RCSB ready ==="
         Args:
             *queries: One or more RCSBQuery objects (from RCSB.Text, RCSB.Attribute, etc.).
                       Multiple queries are combined with the logical_operator.
-            max_results: Maximum number of PDB entries to return (default: 10)
+            max_results: Maximum number of PDB entries to return (default: 10).
+                        With a compounds-stream query this is the cap *per compound*.
+            total_max_results: Cap on the unioned hit count for a compounds-stream
+                        query, applied after deduplication, keeping the highest-scoring
+                        entries. None (default) keeps every unique hit.
             return_type: Result granularity - "entry" (default), "assembly",
                         "polymer_entity", "polymer_instance"
             sort: Sort field - "score" (default), "resolution", "release_date",
@@ -636,7 +697,23 @@ echo "=== RCSB ready ==="
                     f"Use RCSB.Text(), RCSB.Attribute(), RCSB.Sequence(), etc."
                 )
 
+        # A query whose descriptor comes from a compounds stream defers the whole
+        # search to execution time, so the resulting ids are lazy.
+        stream_slots = [i for i, q in enumerate(self.queries)
+                        if getattr(q, 'compounds_stream', None) is not None]
+        if len(stream_slots) > 1:
+            raise ValueError(
+                "Only one query may draw its value from a compounds stream; "
+                f"got {len(stream_slots)}."
+            )
+        self.stream_query_index = stream_slots[0] if stream_slots else None
+        self.compounds_stream = (
+            self.queries[self.stream_query_index].compounds_stream
+            if self.stream_query_index is not None else None
+        )
+
         self.max_results = max_results
+        self.total_max_results = total_max_results
         self.return_type = return_type
         self.convert = convert.lower() if convert is not None else None
         self.remove_waters = remove_waters
@@ -668,10 +745,18 @@ echo "=== RCSB ready ==="
         if self.logical_operator not in ["and", "or"]:
             raise ValueError(f"Invalid logical_operator: {logical_operator}. Must be 'and' or 'or'")
 
+        if self.compounds_stream is not None and self.custom_ids is not None:
+            raise ValueError(
+                "ids= cannot be combined with a compounds-stream query: the number of "
+                "hits is unknown until the search runs at execution time."
+            )
+
         # Will be populated during configure_inputs
         self.pdb_ids = []
         self.search_scores = []
         self.result_ids = []
+        # Filled in configure_inputs from each hit's bound ligands.
+        self.predicted_compound_ids = []
 
         super().__init__(**kwargs)
 
@@ -706,12 +791,13 @@ echo "=== RCSB ready ==="
             }
         }
 
-        # Add sorting
+        # Add sorting. `sort_by` takes the attribute path itself; the documented
+        # friendly names map onto their paths, anything else is passed through.
         if self.sort_field != "score":
+            field = self.SORT_ALIASES.get(self.sort_field, self.sort_field)
             request["request_options"]["sort"] = [{
-                "sort_by": "attribute",
-                "attribute": self.sort_field,
-                "direction": "asc"
+                "sort_by": field,
+                "direction": self.SORT_DIRECTIONS.get(field, "asc"),
             }]
 
         return request
@@ -763,9 +849,17 @@ echo "=== RCSB ready ==="
             raise ValueError("RCSB search returned no results")
 
         if response.status_code != 200:
+            # The API's own diagnostic (e.g. "search is not enabled on [attr]")
+            # trails a long echo of the submitted query, so surface `message`
+            # rather than a prefix slice that would cut it off.
+            detail = response.text
+            try:
+                detail = response.json().get("message", detail)
+            except ValueError:
+                pass
             raise ValueError(
-                f"RCSB search failed with status {response.status_code}: "
-                f"{response.text[:200]}"
+                f"RCSB search failed with status {response.status_code}: {detail}\n"
+                f"Query: {json.dumps(query_json)}"
             )
 
         data = response.json()
@@ -828,6 +922,13 @@ echo "=== RCSB ready ==="
                 ncbi_taxonomy_id
               }}
             }}
+            nonpolymer_entities {{
+              nonpolymer_comp {{
+                chem_comp {{
+                  id
+                }}
+              }}
+            }}
           }}
         }}
         """
@@ -881,7 +982,18 @@ echo "=== RCSB ready ==="
             release_date = (acc.get("initial_release_date") or "")[:10]  # YYYY-MM-DD
             deposit_date = (acc.get("deposit_date") or "")[:10]
 
+            # Bound ligands, solvents/ions excluded. Read from nonpolymer_entities
+            # rather than rcsb_entry_info.nonpolymer_bound_components, which is
+            # null for many entries that do carry a ligand.
+            ligand_codes = []
+            for npe in (entry.get("nonpolymer_entities") or []):
+                comp = ((npe.get("nonpolymer_comp") or {}).get("chem_comp") or {})
+                code = comp.get("id", "")
+                if code and code not in COMMON_SOLVENTS and code not in ligand_codes:
+                    ligand_codes.append(code)
+
             metadata_list.append({
+                "ligand_codes": ligand_codes,
                 "title": struct.get("title", ""),
                 "resolution": resolution_val,
                 "method": info.get("experimental_method", ""),
@@ -915,6 +1027,14 @@ echo "=== RCSB ready ==="
         """Perform RCSB search and configure inputs for download."""
         self.folders = pipeline_folders
 
+        if self.compounds_stream is not None:
+            # The descriptor is only known once the upstream stream is written, so
+            # the search runs at execution time and the ids stay lazy until then.
+            self.pdb_ids = []
+            self.output_ids = ["[<hits>]"]
+            self.entry_metadata = []
+            return
+
         # Perform search
         results = self._perform_search()
 
@@ -945,6 +1065,26 @@ echo "=== RCSB ready ==="
 
         # Fetch entry metadata from RCSB Data API
         self.entry_metadata = self._fetch_entry_metadata(self.pdb_ids)
+
+        # Predict the compounds stream's ids from the bound ligands each hit
+        # carries, so downstream compounds consumers can be wired at config
+        # time (PDB does the same via _check_ligands_in_rcsb).
+        #
+        # The runtime reads codes back out of the downloaded structure, so the
+        # prediction must match what that file can hold: fixed-column PDB clips
+        # a residue name to 3 characters, which silently renames a 5-character
+        # extended-CCD code (A1A55 -> A1A). Predicting the API's full code would
+        # emit an id the runtime never writes.
+        if self.fetch_compounds:
+            clip = 3 if self.convert == "pdb" else None
+            seen = set()
+            self.predicted_compound_ids = []
+            for out_id, meta in zip(self.output_ids, self.entry_metadata):
+                for code in (meta.get("ligand_codes") or []):
+                    compound_id = f"{out_id}_{code[:clip] if clip else code}"
+                    if compound_id not in seen:
+                        seen.add(compound_id)
+                        self.predicted_compound_ids.append(compound_id)
 
         # Print summary with metadata
         for pdb_id, score, meta in zip(self.pdb_ids, self.search_scores, self.entry_metadata):
@@ -985,8 +1125,11 @@ echo "=== RCSB ready ==="
                 entry = q.query_dict["parameters"].get("value", {}).get("entry_id", "")
                 query_summaries.append(f"StrucMotif({entry})")
             elif service == "chemical":
-                val = q.query_dict["parameters"].get("value", "")[:20]
-                query_summaries.append(f"Chemical({val})")
+                if getattr(q, 'compounds_stream', None) is not None:
+                    query_summaries.append(f"Chemical(<{q.compounds_stream.name} stream>)")
+                else:
+                    val = q.query_dict["parameters"].get("value", "")[:20]
+                    query_summaries.append(f"Chemical({val})")
             else:
                 query_summaries.append(f"{service}(...)")
 
@@ -999,7 +1142,12 @@ echo "=== RCSB ready ==="
             f"CONVERT: {convert_display}",
         ])
 
-        if self.pdb_ids:
+        if self.compounds_stream is not None:
+            config_lines.append(
+                f"FAN-OUT: one search per compound of '{self.compounds_stream.name}' "
+                f"(resolved at execution time)"
+            )
+        elif self.pdb_ids:
             config_lines.append(f"FOUND: {', '.join(self.pdb_ids)} ({len(self.pdb_ids)} entries)")
 
         return config_lines
@@ -1042,10 +1190,38 @@ echo "=== RCSB ready ==="
         with open(self.config_file, 'w') as f:
             json.dump(config_data, f, indent=2)
 
+        convert_display = f"convert to {self.convert.upper()}" if self.convert else "keep as-is (pdb|cif)"
+
+        if self.compounds_stream is not None:
+            self.compounds_stream.save_json(self.compounds_input_json)
+            search_config = {
+                "query_nodes": [q.query_dict for q in self.queries],
+                "stream_query_index": self.stream_query_index,
+                "logical_operator": self.logical_operator,
+                "return_type": self.return_type,
+                "max_results": self.max_results,
+                "total_max_results": self.total_max_results,
+                "sort_field": self.sort_field,
+                "compounds_stream": str(self.compounds_input_json),
+                "fetch_config": str(self.config_file),
+                "hits_table": str(self.search_results_csv),
+            }
+            with open(self.search_config_file, 'w') as f:
+                json.dump(search_config, f, indent=2)
+
+            return f"""echo "RCSB Search: one search per compound, then download"
+echo "Convert: {convert_display}"
+echo "Output folder: {self.output_folder}"
+
+python "{self.search_py}" --config "{self.search_config_file}"
+
+python "{self.pdb_py}" --config "{self.config_file}"
+
+"""
+
         # Write search results CSV
         self._write_search_results_csv()
 
-        convert_display = f"convert to {self.convert.upper()}" if self.convert else "keep as-is (pdb|cif)"
         return f"""echo "RCSB Search: downloading {len(self.pdb_ids)} structures"
 echo "PDB IDs: {', '.join(self.pdb_ids)}"
 echo "Output IDs: {', '.join(self.output_ids)}"
@@ -1100,7 +1276,13 @@ python "{self.pdb_py}" --config "{self.config_file}"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after search and download."""
         structures_dir = self.stream_folder("structures")
-        if self.convert is not None:
+        if self.compounds_stream is not None:
+            # Lazy ids: how many structures the search returns (possibly none) is
+            # only known at execution time, so no per-id path can be asserted.
+            # The stream resolves through structures.csv, which the fetch writes.
+            structure_files = []
+            stream_format = self.convert if self.convert is not None else "pdb|cif"
+        elif self.convert is not None:
             extension = ".pdb" if self.convert == "pdb" else ".cif"
             structure_files = [os.path.join(structures_dir, f"{oid}{extension}")
                               for oid in self.output_ids]
@@ -1151,12 +1333,16 @@ python "{self.pdb_py}" --config "{self.config_file}"
             "search_results": TableInfo(
                 name="search_results",
                 path=self.search_results_csv,
-                columns=["id", "pdb_id", "result_id", "score",
-                         "title", "resolution", "method",
-                         "molecular_weight_kda", "organism", "entity_description",
-                         "protein_entity_count", "residue_count",
-                         "citation_title", "citation_journal", "citation_year",
-                         "citation_authors", "release_date", "deposit_date"],
+                # The per-compound path writes provenance instead of entry metadata:
+                # the metadata GraphQL fetch needs ids the search has not produced yet.
+                columns=(["id", "pdb_id", "result_id", "score", "compounds.id", "query_smiles"]
+                         if self.compounds_stream is not None else
+                         ["id", "pdb_id", "result_id", "score",
+                          "title", "resolution", "method",
+                          "molecular_weight_kda", "organism", "entity_description",
+                          "protein_entity_count", "residue_count",
+                          "citation_title", "citation_journal", "citation_year",
+                          "citation_authors", "release_date", "deposit_date"]),
                 description="RCSB search results with scores and entry metadata"
             ),
             "missing": TableInfo(
@@ -1191,7 +1377,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
 
         compounds = DataStream(
             name="compounds",
-            ids=[],
+            ids=getattr(self, 'predicted_compound_ids', []),
             files=[],
             map_table=self.compounds_csv,
             format="csv"

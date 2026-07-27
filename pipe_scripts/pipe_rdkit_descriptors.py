@@ -58,6 +58,11 @@ def compute_descriptors(cfg):
     failed = []
     for cid, values in iterate_values(ds, columns=["smiles"]):
         smiles = values.get("smiles", "")
+        # A missing cell reads back as float NaN, which is truthy — coerce to
+        # str before testing so it is skipped rather than crashing MolFromSmiles.
+        if not isinstance(smiles, str):
+            smiles = "" if smiles is None or smiles != smiles else str(smiles)
+        smiles = smiles.strip()
         if not smiles:
             print(f"WARNING: {cid} has no SMILES", file=sys.stderr)
             failed.append(cid)
@@ -111,7 +116,8 @@ def _smiles_resolver(cfg, structures_ds):
     spec = cfg.get("smiles")
     if spec and str(spec).startswith("TABLE_REFERENCE:"):
         table, column = load_table(spec)
-        return lambda sid: lookup_table_value(table, sid, column)
+        maps = [structures_ds.map_table] if structures_ds.map_table else None
+        return lambda sid: lookup_table_value(table, sid, column, map_table_paths=maps)
     if spec:
         return lambda sid: spec
 
@@ -148,6 +154,35 @@ def _smiles_resolver(cfg, structures_ds):
     return resolve
 
 
+def _strain_workers(cfg, n_tasks):
+    """Worker count: explicit cpus, else the SLURM allocation, else the machine.
+
+    SLURM_CPUS_PER_TASK reflects what this step was actually granted; os.cpu_count() on a
+    shared or packed node would oversubscribe it.
+    """
+    requested = cfg.get("cpus")
+    if requested:
+        workers = int(requested)
+    else:
+        workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 0)) or (os.cpu_count() or 1)
+    return max(1, min(workers, n_tasks or 1))
+
+
+def _strain_one(task):
+    """One pose's strain. Module-level so multiprocessing can pickle it."""
+    sid, path, smiles, restrain_bonds, ff = task
+    try:
+        if not smiles:
+            raise ValueError("no bond-order template SMILES for this id")
+        mol = posed_ligand_mol(path, smiles)
+        e_pose, e_relaxed, strain, engine = conformer_strain(
+            mol, restrain_bonds=restrain_bonds, ff=ff)
+        return {"id": sid, "smiles": smiles, "e_pose": e_pose,
+                "e_relaxed": e_relaxed, "strain": strain, "ff_engine": engine}, None
+    except Exception as e:
+        return None, (sid, str(e))
+
+
 def compute_strain(cfg):
     ds = load_datastream(cfg["structures_json"])
     output_csv = cfg["strain_csv"]
@@ -155,22 +190,43 @@ def compute_strain(cfg):
     restrain_bonds = [tuple(b) for b in restrain_bonds] if restrain_bonds else None
     ff = cfg.get("ff", "auto")
 
+    # The structures map is the concrete runtime output of the upstream tool.
+    # The declared ids can still describe its pre-filter domain (and numeric
+    # angle patterns are not DataStream "lazy" patterns), so iterating those
+    # declarations would silently reintroduce every pose the filter removed.
+    if ds.map_table and os.path.exists(ds.map_table):
+        mapped = pd.read_csv(ds.map_table, dtype={"id": str}, usecols=["id"])
+        ds._ids_expanded = mapped["id"].dropna().astype(str).tolist()
+
     resolve_smiles = _smiles_resolver(cfg, ds)
 
-    rows = []
+    # Each pose is independent — parse, minimise twice, emit a row — so this fans out over
+    # the node's cores. Serially it ran ~1.5 s/pose, which put 7857 poses past a 4 h wall.
+    tasks = []
     failed = []
     for sid, path in iterate_files(ds):
         try:
-            smiles = resolve_smiles(sid)
-            if not smiles:
-                raise ValueError("no bond-order template SMILES for this id")
-            mol = posed_ligand_mol(path, smiles)
-            e_pose, e_relaxed, strain, engine = conformer_strain(
-                mol, restrain_bonds=restrain_bonds, ff=ff)
-            rows.append({"id": sid, "smiles": smiles, "e_pose": e_pose,
-                         "e_relaxed": e_relaxed, "strain": strain, "ff_engine": engine})
+            tasks.append((sid, path, resolve_smiles(sid), restrain_bonds, ff))
         except Exception as e:
             print(f"WARNING: {sid} strain failed: {e}", file=sys.stderr)
+            failed.append(sid)
+
+    workers = _strain_workers(cfg, len(tasks))
+    rows = []
+    if workers > 1 and tasks:
+        import multiprocessing as mp
+        print(f"Strain: {len(tasks)} poses over {workers} workers")
+        with mp.Pool(workers) as pool:
+            results = pool.map(_strain_one, tasks, chunksize=8)
+    else:
+        results = [_strain_one(t) for t in tasks]
+
+    for row, err in results:
+        if row is not None:
+            rows.append(row)
+        else:
+            sid, msg = err
+            print(f"WARNING: {sid} strain failed: {msg}", file=sys.stderr)
             failed.append(sid)
 
     if not rows:
