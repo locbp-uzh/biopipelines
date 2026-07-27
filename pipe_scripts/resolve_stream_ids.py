@@ -21,7 +21,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
 
 ds = load_datastream(sys.argv[1])
-if "--valid-set" in sys.argv[2:]:
+# A value-based stream (compounds: ids plus a code/smiles column, no files) has nothing
+# on disk to check, so file presence says nothing about which ids are real and the
+# declared ids stand — iterate_files would raise "has no files configured". Tested on the
+# stream declaring no files, not on an empty result: a file-backed stream whose files
+# were all filtered out IS legitimately empty, and falling back there would hand the
+# caller paths that do not exist.
+if "--valid-set" in sys.argv[2:] and ds.files:
     # iterate_files warns to stdout for absent ids; capture so only ids reach stdout.
     import contextlib
     ids = []

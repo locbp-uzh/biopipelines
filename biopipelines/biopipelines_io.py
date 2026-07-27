@@ -990,7 +990,7 @@ class Resolve:
         return f'$(resolve_stream_item "{ds_json}" "{item_id}")'
 
     @staticmethod
-    def stream_ids(ds_json: str, index: Optional[int] = None, valid_set: bool = False) -> str:
+    def stream_ids(ds_json: str, index: Optional[int] = None, valid_set: bool = True) -> str:
         """Bash expression that prints expanded IDs from a DataStream JSON, one per line.
 
         Handles lazy patterns by matching against map_table at runtime.
@@ -998,11 +998,12 @@ class Resolve:
         Args:
             ds_json: Path to the serialized DataStream JSON file
             index: If provided, return only the ID at this position (0-based).
-            valid_set: Restrict to ids whose file is present on disk. A filtered
-                Pool/Panda declares every original id but materializes only the
-                survivors, so ``index=0`` without this can return an absent id whose
-                file then fails to resolve. Use ``index=0, valid_set=True`` to sample
-                a real id.
+            valid_set: Restrict to ids whose file is present on disk (default). A
+                filtered Pool/Panda declares every original id but materializes only
+                the survivors, so the declared list names files that do not exist; a
+                loop over it hands the tool a missing path. Pass ``False`` only for a
+                stream whose ids are not backed by files (e.g. iterating a ligand
+                stream to read a table column), where file presence says nothing.
         """
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "..", "pipe_scripts", "resolve_stream_ids.py")
