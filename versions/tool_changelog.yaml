@@ -35,7 +35,7 @@ AiZynthFinder:
   files:
   - biopipelines/aizynthfinder.py
   - pipe_scripts/pipe_aizynthfinder.py
-  current: "1.1"
+  current: "1.2"
   history:
   - version: '1.0'
     date: '2026-07-23'
@@ -44,6 +44,11 @@ AiZynthFinder:
     date: '2026-07-23'
     note: Parse aizynthcli's orient="table" JSON envelope; per-route scores from
       each tree's scores dict; split number_of_routes from number_of_returned_routes.
+  - version: '1.2'
+    date: '2026-07-27'
+    note: Reject a bare string for stocks/expansion_policy/filter_policy instead of
+      splitting it into characters; treat NaN as not-in-stock so an absent flag no
+      longer marks a route solved.
 
 AF2BIND:
   files:
@@ -354,8 +359,13 @@ Ligand:
   files:
   - biopipelines/ligand.py
   - pipe_scripts/pipe_ligand.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: "1.1"
+    date: "2026-07-27"
+    note: >-
+      Add execution-time PubChem PUG-View chemical-vendor enrichment for an
+      existing compounds stream, preserving filtered ids and input columns.
 
 LigandMPNN:
   files:
@@ -380,8 +390,13 @@ MMseqs2:
   - biopipelines/mmseqs2.py
   - pipe_scripts/pipe_mmseqs2_sequences.py
   - pipe_scripts/mmseqs2_client.sh
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-07-27'
+    note: Map remote-server alignments to queries by parsed integer alias, not by
+      position in the lexically sorted tar members (past ten sequences "10" sorts
+      before "2"); require output_format="a3m" with server_url.
 
 MMseqs2Server:
   files:
@@ -615,8 +630,15 @@ RBSDesigner:
 RCSB:
   files:
   - biopipelines/rcsb.py
-  current: "1.0"
-  history: []
+  - pipe_scripts/pipe_rcsb_search.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-07-27'
+    note: Runtime compounds-stream search shares the configuration-time request
+      builder and identifier normalizer (it kept the rejected sort_by="attribute"
+      form); add the sys.path bootstrap so the helper imports off a node; keep
+      many-to-many compound provenance via compounds.ids / n_compounds.
 
 RDKit:
   files:

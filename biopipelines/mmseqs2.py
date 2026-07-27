@@ -67,7 +67,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -175,6 +175,13 @@ echo "=== MMseqs2 ready ==="
 
         if self.output_format not in ["csv", "a3m"]:
             raise ValueError("output_format must be 'csv' or 'a3m'")
+
+        # The ColabFold protocol returns a3m only; a csv request would have the
+        # harvester look for files the remote path never writes.
+        if self.server_url and self.output_format != "a3m":
+            raise ValueError(
+                f"server_url requires output_format='a3m' (got '{self.output_format}'): "
+                f"a ColabFold-protocol server returns a3m alignments.")
 
         if self.timeout <= 0:
             raise ValueError("timeout must be positive")

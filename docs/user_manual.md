@@ -677,6 +677,8 @@ with Pipeline("Project", "Job"):
 
 `Run()` outside a packed block raises, as does a second `Resources()` inside one.
 
+Packing requires the machine to declare its node geometry, and refuses to engage otherwise: `machine.node_exclusive: true`, a positive `machine.cores_per_node`, and — when any task requests GPUs — `machine.gpus_per_node`. The scheduler must be SLURM, since the tasks are emitted as `srun` job steps. Each requirement is checked when the block opens, so a misconfigured machine fails immediately rather than after the allocation is granted. `cores_per_node` is what divides the node between the tasks; without it every step would silently receive a single core.
+
 **Splitting a stream across tasks**: iterating a DataStream yields one stream per id, which is too fine when the work is meant to be shared between a few workers. `chunks()` groups instead:
 
 ```python

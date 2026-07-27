@@ -95,6 +95,31 @@ def slurm_local_config(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def pbs_local_config(monkeypatch, tmp_path):
+    """Points at ``config.pbs_local.yaml``, for tests asserting that a
+    SLURM-only feature declines to engage on another scheduler."""
+    from biopipelines.config_manager import ConfigManager
+
+    config_path = FIXTURES_DIR / "config.pbs_local.yaml"
+    assert config_path.exists(), f"Missing fixture: {config_path}"
+
+    ConfigManager._instance = None
+    ConfigManager._config = None
+    ConfigManager._variant = None
+
+    monkeypatch.setattr(
+        ConfigManager, "_get_config_path",
+        classmethod(lambda cls, variant=None: str(config_path)),
+    )
+
+    yield config_path
+
+    ConfigManager._instance = None
+    ConfigManager._config = None
+    ConfigManager._variant = None
+
+
+@pytest.fixture
 def isolated_cwd(tmp_path, monkeypatch):
     """Run a test with cwd set to an isolated temp directory."""
     monkeypatch.chdir(tmp_path)

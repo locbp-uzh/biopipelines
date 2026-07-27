@@ -47,6 +47,20 @@ PRECURSOR_COLUMNS = [
 ]
 
 
+def _as_name_list(param: str, value) -> Optional[List[str]]:
+    """Normalize a list-valued name parameter, rejecting a bare string."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        raise ValueError(
+            f"{param} must be a list of names, not a string; "
+            f"pass {param}=[{value!r}] for a single entry")
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(
+            f"{param} must be a list or tuple of names, got {type(value).__name__}")
+    return list(value) or None
+
+
 class AiZynthFinder(BaseConfig):
     """
     AiZynthFinder: retrosynthetic route search for a compounds stream.
@@ -105,7 +119,7 @@ class AiZynthFinder(BaseConfig):
     """
 
     TOOL_NAME = "AiZynthFinder"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -193,9 +207,11 @@ fi
             )
 
         self.config = config
-        self.stocks = list(stocks) if stocks else None
-        self.expansion_policy = list(expansion_policy) if expansion_policy else None
-        self.filter_policy = list(filter_policy) if filter_policy else None
+        # A bare string would list() into its characters and reach aizynthcli as
+        # "--stocks s t o c k", failing deep inside the CLI instead of here.
+        self.stocks = _as_name_list("stocks", stocks)
+        self.expansion_policy = _as_name_list("expansion_policy", expansion_policy)
+        self.filter_policy = _as_name_list("filter_policy", filter_policy)
         self.max_routes = max_routes
         self.min_routes = min_routes
         self.time_limit = time_limit

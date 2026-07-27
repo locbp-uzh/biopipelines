@@ -328,6 +328,9 @@ class BaseConfig(ABC):
                 rf"{re.escape(env_name)}\.pip\.(\d+)\.txt$",
             )
 
+        # venv's env_block already activated the env; the conda family has not.
+        pip = "pip" if env_manager == "venv" else f'{env_manager} run -n {env_name} pip'
+
         def _pip_line(path: str) -> str:
             # Honor leading `# bp:*` markers. `# bp:no-build-isolation` opts
             # the phase out of PEP 517 isolation (so it can see packages
@@ -360,9 +363,6 @@ class BaseConfig(ABC):
                       file=sys.stderr)
             flag_str = (" " + " ".join(flags)) if flags else ""
             return f'{pip} install{flag_str} -r "{path}"'
-
-        # venv's env_block already activated the env; the conda family has not.
-        pip = "pip" if env_manager == "venv" else f'{env_manager} run -n {env_name} pip'
 
         if numbered:
             pip_block = "\n".join(_pip_line(p) for _, p in numbered)

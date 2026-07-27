@@ -562,16 +562,28 @@ def submit_batch_http(server_url, seqs, output_dir, timeout=3600, user=None, pas
     with _open(urllib.request.Request(f"{base}/result/download/{tid}")) as r:
         blob = r.read()
     os.makedirs(output_dir, exist_ok=True)
+
+    # Map each member to its query by the integer alias in its name, never by
+    # position: the members' lexical order puts "10" before "2", so a positional
+    # rename silently hands one query another's alignment past 10 sequences.
     written = 0
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
-        for member in sorted((m for m in tar.getmembers() if m.name.endswith(".a3m")),
-                             key=lambda m: m.name):
+        members = [m for m in tar.getmembers() if m.name.endswith(".a3m")]
+        for member in members:
+            stem = os.path.splitext(os.path.basename(member.name))[0]
+            if not stem.isdigit():
+                log(f"ERROR: MSA server returned member {member.name!r}, whose name is not "
+                    f"the integer alias this batch submitted; cannot map it to a sequence.")
+                return False
+            alias = int(stem)
+            if not 0 <= alias < len(seqs):
+                log(f"ERROR: MSA server returned alias {alias}, outside the "
+                    f"{len(seqs)} submitted queries.")
+                return False
             fh = tar.extractfile(member)
             if fh is None:
                 continue
-            # Members come back named per query; keep the alias ordering the
-            # caller expects rather than the server's own naming.
-            with open(os.path.join(output_dir, f"{written}.a3m"), "wb") as out:
+            with open(os.path.join(output_dir, f"{alias}.a3m"), "wb") as out:
                 out.write(fh.read())
             written += 1
     log(f"Retrieved {written} MSA(s) from {base}")

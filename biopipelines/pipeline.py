@@ -1065,13 +1065,21 @@ class Pipeline:
             parts.append(f"--environment={edf}")
         return " ".join(parts) + " "
 
-    def _packed_task_cpus(self, pack: int, override: Optional[int]) -> Optional[int]:
-        """Per-task CPU share: explicit, else the node's cores divided by pack."""
+    def _packed_task_cpus(self, pack: int, override: Optional[int]) -> int:
+        """Per-task CPU share: explicit, else the node's cores divided by pack.
+
+        Never returns None: a step emitted without ``--cpus-per-task`` silently
+        gets one core, so an unresolvable share must fail loudly instead.
+        """
         if override:
             return override
         cores = ConfigManager().get_cores_per_node()
         if not cores:
-            return None
+            raise RuntimeError(
+                "Cannot size a packed task: machine.cores_per_node is unset and no "
+                "Run(cpus=) was given. Emitting the step without --cpus-per-task would "
+                "silently give it a single core."
+            )
         return max(1, cores // pack)
 
     def _packed_body_lines(self, packed: dict, resources: dict) -> List[str]:
@@ -1128,6 +1136,7 @@ class Pipeline:
             "done",
             'if [ "$_pack_failed" -gt 0 ]; then',
             '  echo "$_pack_failed of ${#_pack_pids[@]} packed tasks failed"',
+            "  exit 1",
             "fi",
             "echo",
         ])
@@ -2028,6 +2037,11 @@ class Parallel:
     Inside a packed block ``Resources()`` describes the allocation and is
     called ONCE; ``Run()`` delimits a task. See llm/daint.md for the probes
     that fixed this shape.
+
+    Packing requires ``machine.node_exclusive``, a positive
+    ``machine.cores_per_node``, and — for GPU tasks — ``machine.gpus_per_node``,
+    on a SLURM scheduler. Each is checked as the block opens, so a machine that
+    cannot pack says so at config time rather than after the allocation lands.
     """
 
     def __init__(self, pack: Optional[int] = None):
@@ -2037,6 +2051,52 @@ class Parallel:
                     f"Parallel(pack=) must be a positive integer (tasks per node), got {pack!r}."
                 )
         self.pack = pack
+
+    def _validate_machine_supports_packing(self, pipeline):
+        """Refuse ``pack=`` unless the machine declares the geometry it needs.
+
+        Packing only pays off where a job is billed for a whole node anyway,
+        and a step with no ``--cpus-per-task`` silently gets ONE core — so an
+        undeclared ``cores_per_node`` would run correctly and ~N times too
+        slowly. Both are config-time errors rather than post-submission ones.
+        """
+        cm = ConfigManager()
+        scheduler = cm.get_scheduler()
+        if scheduler != "slurm":
+            raise RuntimeError(
+                f"Parallel(pack=N) emits srun job steps, which are SLURM-specific, "
+                f"but this config's scheduler is '{scheduler}'. Use a plain Parallel() block."
+            )
+        if not cm.get_node_exclusive():
+            raise RuntimeError(
+                "Parallel(pack=N) requires machine.node_exclusive: true — packing tasks "
+                "onto a node only pays off where the scheduler bills whole nodes. "
+                "Use a plain Parallel() block instead."
+            )
+        cores = cm.get_cores_per_node()
+        if not cores or cores < 1:
+            raise RuntimeError(
+                "Parallel(pack=N) requires machine.cores_per_node (a positive integer): "
+                "it is what divides the node between the tasks. Without it every job step "
+                "silently gets a single core."
+            )
+
+    def _validate_gpu_geometry(self, pipeline, runs):
+        """A packed block asking for GPUs needs the node's GPU count declared.
+
+        Checked on exit, since what the tasks request is only known once the
+        ``Run()`` blocks have closed.
+        """
+        if not any(r["gpus"] for r in runs):
+            return
+        cm = ConfigManager()
+        per_node = cm.get_gpus_per_node()
+        if not per_node or per_node < 1:
+            raise RuntimeError(
+                "Parallel(pack=N) with GPU tasks requires machine.gpus_per_node "
+                "(a positive integer): on a node-exclusive machine the node's GPUs are "
+                "requested once for the allocation, so the count must be known."
+            )
 
     def __enter__(self):
         pipeline = Pipeline.get_active_pipeline()
@@ -2049,6 +2109,8 @@ class Parallel:
             raise RuntimeError(
                 "Nested Parallel() blocks are not supported."
             )
+        if self.pack is not None:
+            self._validate_machine_supports_packing(pipeline)
         pipeline._parallel_anchor = pipeline.current_batch
         pipeline._parallel_siblings = []
         pipeline._parallel_pack = self.pack
@@ -2076,6 +2138,8 @@ class Parallel:
                 if after_anchor is not None:
                     pipeline._pending_after_parent = after_anchor
                 return False
+            if exc_type is None:
+                self._validate_gpu_geometry(pipeline, runs)
             # One batch, not N: the siblings are job steps inside it, so the
             # chain default already makes the next batch depend on it.
             pipeline._register_packed_batch(self.pack, runs)
@@ -2134,6 +2198,17 @@ class Run:
                 raise ValueError(
                     f"Run(memory=) must be a memory value such as '20GB', got {memory!r}."
                 )
+        # Both reach an srun directive verbatim, so a bad value would surface only
+        # after the allocation is granted. bool is an int subclass: `gpus=True`
+        # would otherwise format as `--gpus-per-task=True`.
+        if cpus is not None and (not isinstance(cpus, int) or isinstance(cpus, bool) or cpus < 1):
+            raise ValueError(
+                f"Run(cpus=) must be a positive integer (CPUs for the task), got {cpus!r}."
+            )
+        if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 0:
+            raise ValueError(
+                f"Run(gpus=) must be a non-negative integer (0 declines GPUs), got {gpus!r}."
+            )
         self.cpus = cpus
         self.gpus = gpus
         self.memory = memory

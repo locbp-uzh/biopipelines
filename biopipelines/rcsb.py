@@ -29,6 +29,76 @@ except ImportError:
     from pdb import COMMON_SOLVENTS
 
 
+SEARCH_API_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
+
+# Friendly `sort=` values mapped to the attribute paths the API sorts on.
+SORT_ALIASES = {
+    "resolution": "rcsb_entry_info.resolution_combined",
+    "release_date": "rcsb_accession_info.initial_release_date",
+    "deposit_date": "rcsb_accession_info.deposit_date",
+    "molecular_weight": "rcsb_entry_info.molecular_weight",
+}
+
+# Best-first differs per field: finer resolution is better, newer date is better.
+SORT_DIRECTIONS = {
+    "rcsb_accession_info.initial_release_date": "desc",
+    "rcsb_accession_info.deposit_date": "desc",
+}
+
+
+def build_search_request(query_nodes: List[Dict[str, Any]], logical_operator: str,
+                         return_type: str, max_results: int,
+                         sort_field: str) -> Dict[str, Any]:
+    """Assemble the Search API request body. Shared by the configuration-time
+    search and the execution-time per-compound fan-out so the two cannot drift."""
+    nodes = []
+    for index, node in enumerate(query_nodes):
+        node = dict(node)
+        node["node_id"] = index
+        nodes.append(node)
+
+    query_node = nodes[0] if len(nodes) == 1 else {
+        "type": "group",
+        "logical_operator": logical_operator,
+        "nodes": nodes,
+    }
+
+    request = {
+        "query": query_node,
+        "return_type": return_type,
+        "request_options": {"paginate": {"start": 0, "rows": max_results}},
+    }
+
+    # `sort_by` takes the attribute path itself; the documented friendly names
+    # map onto their paths, anything else is passed through.
+    if sort_field != "score":
+        field = SORT_ALIASES.get(sort_field, sort_field)
+        request["request_options"]["sort"] = [{
+            "sort_by": field,
+            "direction": SORT_DIRECTIONS.get(field, "asc"),
+        }]
+
+    return request
+
+
+def extract_pdb_id(identifier: str, return_type: str) -> str:
+    """Extract the PDB ID from a search result identifier.
+
+    Different return_types produce different identifier formats:
+    - entry: "4HHB"
+    - assembly: "4HHB-1"
+    - polymer_entity: "4HHB_1"
+    - polymer_instance: "4HHB.A"
+    """
+    if return_type == "assembly":
+        return identifier.split("-")[0]
+    if return_type == "polymer_entity":
+        return identifier.split("_")[0]
+    if return_type == "polymer_instance":
+        return identifier.split(".")[0]
+    return identifier
+
+
 class RCSBQuery:
     """Represents a single RCSB search query node."""
 
@@ -352,23 +422,13 @@ class RCSB(BaseConfig):
     """
 
     TOOL_NAME = "RCSB"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
-    SEARCH_API_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
-
-    # Friendly `sort=` values mapped to the attribute paths the API sorts on.
-    SORT_ALIASES = {
-        "resolution": "rcsb_entry_info.resolution_combined",
-        "release_date": "rcsb_accession_info.initial_release_date",
-        "deposit_date": "rcsb_accession_info.deposit_date",
-        "molecular_weight": "rcsb_entry_info.molecular_weight",
-    }
-
-    # Best-first differs per field: finer resolution is better, newer date is better.
-    SORT_DIRECTIONS = {
-        "rcsb_accession_info.initial_release_date": "desc",
-        "rcsb_accession_info.deposit_date": "desc",
-    }
+    # Aliased to the module-level definitions, which the execution-time search
+    # shares — keep one source of truth for the request shape.
+    SEARCH_API_URL = globals()["SEARCH_API_URL"]
+    SORT_ALIASES = globals()["SORT_ALIASES"]
+    SORT_DIRECTIONS = globals()["SORT_DIRECTIONS"]
     GRAPHQL_URL = "https://data.rcsb.org/graphql"
 
     # Sort field mapping for convenience names
@@ -762,64 +822,14 @@ echo "=== RCSB ready ==="
 
     def _build_query_json(self) -> Dict[str, Any]:
         """Build the full RCSB Search API query JSON."""
-        # Add node_id to each terminal query (required by the API)
-        nodes = []
-        for i, q in enumerate(self.queries):
-            node = dict(q.query_dict)
-            node["node_id"] = i
-            nodes.append(node)
-
-        # Build query node
-        if len(nodes) == 1:
-            query_node = nodes[0]
-        else:
-            query_node = {
-                "type": "group",
-                "logical_operator": self.logical_operator,
-                "nodes": nodes
-            }
-
-        # Build request
-        request = {
-            "query": query_node,
-            "return_type": self.return_type,
-            "request_options": {
-                "paginate": {
-                    "start": 0,
-                    "rows": self.max_results
-                }
-            }
-        }
-
-        # Add sorting. `sort_by` takes the attribute path itself; the documented
-        # friendly names map onto their paths, anything else is passed through.
-        if self.sort_field != "score":
-            field = self.SORT_ALIASES.get(self.sort_field, self.sort_field)
-            request["request_options"]["sort"] = [{
-                "sort_by": field,
-                "direction": self.SORT_DIRECTIONS.get(field, "asc"),
-            }]
-
-        return request
+        return build_search_request(
+            [q.query_dict for q in self.queries], self.logical_operator,
+            self.return_type, self.max_results, self.sort_field,
+        )
 
     def _extract_pdb_id(self, identifier: str) -> str:
-        """Extract the PDB ID from a search result identifier.
-
-        Different return_types produce different identifier formats:
-        - entry: "4HHB"
-        - assembly: "4HHB-1"
-        - polymer_entity: "4HHB_1"
-        - polymer_instance: "4HHB.A"
-        """
-        if self.return_type == "entry":
-            return identifier
-        elif self.return_type == "assembly":
-            return identifier.split("-")[0]
-        elif self.return_type == "polymer_entity":
-            return identifier.split("_")[0]
-        elif self.return_type == "polymer_instance":
-            return identifier.split(".")[0]
-        return identifier
+        """Extract the PDB ID from a search result identifier."""
+        return extract_pdb_id(identifier, self.return_type)
 
     def _perform_search(self) -> List[Dict[str, Any]]:
         """
@@ -1335,7 +1345,8 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 path=self.search_results_csv,
                 # The per-compound path writes provenance instead of entry metadata:
                 # the metadata GraphQL fetch needs ids the search has not produced yet.
-                columns=(["id", "pdb_id", "result_id", "score", "compounds.id", "query_smiles"]
+                columns=(["id", "pdb_id", "result_id", "score",
+                          "compounds.id", "query_smiles"]
                          if self.compounds_stream is not None else
                          ["id", "pdb_id", "result_id", "score",
                           "title", "resolution", "method",

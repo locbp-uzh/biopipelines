@@ -17,6 +17,8 @@ import argparse
 import json
 import re
 import shlex
+import time
+import urllib.parse
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
@@ -26,6 +28,109 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.pdb_parser import (  # noqa: E402
     field_res_name, field_chain, field_res_seq,
 )
+from biopipelines.biopipelines_io import load_datastream, iterate_values  # noqa: E402
+
+
+VENDOR_COLUMNS = [
+    "vendor_status", "vendor_count", "vendors", "vendor_urls",
+    "vendor_checked_at", "vendor_error",
+]
+
+
+def _vendor_entries(payload):
+    """Extract unique vendors from PubChem's source-categories response."""
+    names, urls = [], []
+    categories = payload.get("SourceCategories", {}).get("Categories", [])
+    for category in categories:
+        if category.get("Category") != "Chemical Vendors":
+            continue
+        for source in category.get("Sources", []):
+            name = source.get("SourceName")
+            if name and name not in names:
+                names.append(name)
+            url = source.get("SourceURL")
+            if url and url not in urls:
+                urls.append(url)
+    return sorted(names), sorted(urls)
+
+
+def _resolve_cid(row, session):
+    cid = row.get("cid")
+    if cid is not None and not pd.isna(cid) and str(cid).strip():
+        return str(cid).strip()
+    smiles = row.get("smiles")
+    if smiles is None or pd.isna(smiles) or not str(smiles).strip():
+        raise ValueError("compound has neither cid nor smiles")
+    encoded = urllib.parse.quote(str(smiles).strip(), safe="")
+    response = session.get(
+        f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{encoded}/cids/JSON",
+        timeout=30,
+    )
+    response.raise_for_status()
+    cids = response.json().get("IdentifierList", {}).get("CID", [])
+    if not cids:
+        raise ValueError("PubChem returned no CID for smiles")
+    return str(cids[0])
+
+
+def enrich_vendor_evidence(config_data):
+    """Copy a filtered compounds stream and append live PubChem vendor evidence."""
+    import requests
+
+    if config_data.get("enrich_compounds_json"):
+        ds = load_datastream(config_data["enrich_compounds_json"])
+        source = pd.read_csv(ds.map_table)
+        value_columns = [column for column in source.columns if column != "id"]
+        input_rows = (
+            {"id": compound_id, **values}
+            for compound_id, values in iterate_values(ds, columns=value_columns)
+        )
+    else:
+        source = pd.read_csv(config_data["compounds_table"])
+        input_rows = source.to_dict("records")
+    rows = []
+    for input_row in input_rows:
+        row = dict(input_row)
+        compound_id = row["id"]
+        row.update({
+            "vendor_status": "error",
+            "vendor_count": 0,
+            "vendors": "",
+            "vendor_urls": "",
+            "vendor_checked_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "vendor_error": "",
+        })
+        try:
+            cid = _resolve_cid(row, requests)
+            row["cid"] = cid
+            response = requests.get(
+                f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/categories/compound/{cid}/JSON",
+                timeout=30,
+            )
+            response.raise_for_status()
+            vendors, urls = _vendor_entries(response.json())
+            row["vendor_status"] = "available" if vendors else "none"
+            row["vendor_count"] = len(vendors)
+            row["vendors"] = json.dumps(vendors, ensure_ascii=False)
+            row["vendor_urls"] = json.dumps(urls, ensure_ascii=False)
+        except Exception as exc:
+            row["vendor_error"] = str(exc)
+            print(f"WARNING: vendor lookup failed for {compound_id}: {exc}", file=sys.stderr)
+        rows.append(row)
+        # A row can make two requests (CID resolution + categories); 0.42 s keeps
+        # the sustained request rate at or below PubChem's five requests/second.
+        time.sleep(0.42)
+
+    columns = list(source.columns)
+    if "cid" not in columns:
+        columns.append("cid")
+    columns.extend(column for column in VENDOR_COLUMNS if column not in columns)
+    os.makedirs(os.path.dirname(config_data["compounds_table"]), exist_ok=True)
+    pd.DataFrame(rows, columns=columns).to_csv(config_data["compounds_table"], index=False)
+    pd.DataFrame(columns=["lookup", "error_message", "source", "attempted_path"]).to_csv(
+        config_data["failed_table"], index=False)
+    print(f"Vendor evidence: {config_data['compounds_table']} ({len(rows)} compounds)")
+    return 0
 
 
 def extract_hetatm_block(structure_pdb: str, code: str) -> Optional[str]:
@@ -1428,6 +1533,16 @@ def main():
         print(f"Error loading config: {e}")
         sys.exit(1)
 
+    if config_data.get("enrich_compounds_json"):
+        try:
+            enrich_vendor_evidence(config_data)
+            return
+        except Exception as e:
+            print(f"Error enriching vendor evidence: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
     # Validate required parameters
     required_params = ['custom_ids', 'residue_codes', 'repo_ligands_folder',
                        'output_folder', 'compounds_table', 'failed_table']
@@ -1454,6 +1569,9 @@ def main():
             print("Pipeline cannot continue with incomplete ligand set")
             print("Check failed_downloads.csv for details")
             sys.exit(1)
+
+        if config_data.get("vendor_lookup"):
+            enrich_vendor_evidence(config_data)
 
         print("\nAll ligands fetched successfully")
 

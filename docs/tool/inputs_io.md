@@ -130,6 +130,8 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 - `smiles`: str | List[str] | Dict[str, str] = None - Direct SMILES input (bypasses lookup)
 - `structures`: DataStream | StandardizedOutput = None - Extract the ligand's bound coordinates from these structures (keeps the crystal pose). With `codes=` and no `lookup`/`smiles` it **fans out over the input structures**: N structures × 1 code gives N ligands keyed by the input ids, N × M codes gives N·M ligands keyed `<structure_id>_<code>`, and both maps carry a `structures.id` provenance column. `ids=` is not accepted in this mode (ids are derived) and a code missing from a given structure routes that pair to the `failed` table while the rest proceed. Combined with `lookup`/`smiles` it instead overlays bound coordinates onto that one chemistry entry, so it requires a single input structure. See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates).
 - `generate_images`: bool = False - Generate PNG images per ligand using RDKit
+- `compounds`: DataStream | StandardizedOutput = None - Existing compounds stream to enrich. Mutually exclusive with the ligand-construction inputs.
+- `vendor_lookup`: bool = False - Resolve each compound to a PubChem CID and append live chemical-vendor evidence from PUG-View. Works both while constructing ligands and with `compounds=` enrichment; enrichment preserves the input rows, IDs, and extra columns.
 
 **Auto-detection** (when source=None):
 - 1-5 uppercase alphanumeric → RCSB (CCD)
@@ -163,6 +165,11 @@ ligands = Ligand("myligands.txt")
 
 # From a .cdxml file: each molecule becomes a ligand; ChemDraw names used as IDs
 ligands = Ligand("my_ligands.cdxml")
+
+# Add current PubChem chemical-vendor evidence to an existing compounds stream.
+# vendors/vendor_urls are JSON arrays; individual lookup failures remain as rows
+# with vendor_status="error" and the reason in vendor_error.
+available = Ligand(compounds=screened, vendor_lookup=True)
 ```
 
 A `code`-only Ligand (`Ligand(code="ZIT")`) names an existing HETATM residue without downloading or generating any structure — hand it to tools that only need the ligand's residue code (LigandMPNN, PoseBusters, PLIP, …). To turn a SMILES-carrying Ligand into a 3-D file, run [OpenBabel](cheminformatics.md#openbabel).
@@ -561,7 +568,7 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 This changes when the search happens. With a literal descriptor the search runs at configuration time and the output IDs are known immediately. A stream's SMILES do not exist until the upstream step has run, so the search moves to **execution time** and the output IDs become lazy — resolved when the job runs, like any other runtime fan-out. Two consequences:
 
 - `ids=` cannot be combined with a compounds-stream query (the hit count is unknown at configuration time) and raises.
-- `search_results` carries provenance instead of entry metadata: | id | pdb_id | result_id | score | compounds.id | query_smiles |. The `compounds.id` and `query_smiles` columns record which input compound produced each hit. Entry metadata (title, resolution, organism, …) is not fetched, since that lookup needs IDs the search has not yet produced.
+- `search_results` carries provenance instead of entry metadata: | id | pdb_id | result_id | score | compounds.id | query_smiles |. It has one row per entry/compound match, so an entry found by several compounds appears several times with canonical, single-valued `compounds.id` provenance. The structure download remains deduplicated by `id`. Entry metadata (title, resolution, organism, …) is not fetched, since that lookup needs IDs the search has not yet produced.
 
 Only one query per `RCSB(...)` call may draw from a stream; a second raises. Other queries combine with it as usual, so attribute filters apply to every per-compound search.
 

@@ -54,7 +54,7 @@ class Ligand(BaseConfig):
     """
 
     TOOL_NAME = "Ligand"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -139,13 +139,6 @@ echo "=== Ligand ready ==="
                     table. Mutually exclusive with lookup/smiles/code.
                     Example: Ligand(structures=complex, codes="STI").
             generate_images: Generate PNG images for each ligand using RDKit. Default: False
-            compounds: Existing compounds stream to enrich. This is mutually
-                    exclusive with lookup/smiles/code/structures. A DataStream or
-                    StandardizedOutput may also be passed as the first positional
-                    argument, e.g. ``Ligand(candidates, vendor_lookup=True)``.
-            vendor_lookup: Query PubChem for chemical-vendor depositors and append
-                    vendor evidence columns to compounds.csv. Requires compounds=
-                    in enrichment mode; it can also enrich newly fetched ligands.
             **kwargs: Additional parameters
 
         Output:
@@ -165,12 +158,9 @@ echo "=== Ligand ready ==="
                 "(structures=... extract). For PDB/CIF coordinates run "
                 "OpenBabel(compounds=lig, convert_3d=\"pdb\"|\"cif\").")
 
-        # Natural stream-to-stream spelling: Ligand(candidates,
-        # vendor_lookup=True). Historically the first positional argument is
-        # lookup, so reinterpret it only when its type is unambiguously a stream.
         if isinstance(lookup, (DataStream, StandardizedOutput)):
             if compounds is not None:
-                raise ValueError("Pass the compounds stream either positionally or with compounds=, not both")
+                raise ValueError("Pass the compounds stream positionally or with compounds=, not both")
             compounds, lookup = lookup, None
 
         self.vendor_lookup = bool(vendor_lookup)
@@ -182,7 +172,7 @@ echo "=== Ligand ready ==="
                     "compounds enrichment is mutually exclusive with lookup, smiles, "
                     "code, codes, and structures")
             if not self.vendor_lookup:
-                raise ValueError("compounds enrichment currently requires vendor_lookup=True")
+                raise ValueError("compounds enrichment requires vendor_lookup=True")
             if generate_images:
                 raise ValueError("generate_images is not supported in compounds enrichment mode")
             if isinstance(compounds, StandardizedOutput):
@@ -629,10 +619,8 @@ echo "=== Ligand ready ==="
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input parameters and check for local files."""
         self.folders = pipeline_folders
-
         if self.enrichment_mode:
             return
-
 
         # Check which files exist locally and which will need to be downloaded
         repo_ligands_folder = pipeline_folders.get('ligands', '')
@@ -749,13 +737,12 @@ echo "=== Ligand ready ==="
             self.compounds_stream.save_json(self.input_compounds_json)
             config_data = {
                 "enrich_compounds_json": self.input_compounds_json,
-                "vendor_lookup": True,
                 "compounds_table": self.compounds_csv,
                 "failed_table": self.failed_csv,
             }
             with open(self.config_file, 'w') as f:
                 json.dump(config_data, f, indent=2)
-            return f"""echo "Enriching {len(self.compounds_stream)} compounds with PubChem vendor evidence"
+            return f"""echo "Enriching compounds with PubChem vendor evidence"
 python "{self.ligand_py}" --config "{self.config_file}"
 """
 

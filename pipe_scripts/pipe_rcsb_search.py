@@ -15,9 +15,10 @@ import json
 import os
 import sys
 
-from biopipelines.biopipelines_io import iterate_values, load_datastream
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-SEARCH_API_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
+from biopipelines.biopipelines_io import iterate_values, load_datastream
+from biopipelines.rcsb import SEARCH_API_URL, build_search_request, extract_pdb_id
 
 
 def load_smiles(stream_source):
@@ -33,31 +34,6 @@ def load_smiles(stream_source):
             continue
         pairs.append((compound_id, smiles))
     return pairs
-
-
-def build_request(query_nodes, logical_operator, return_type, max_results, sort_field):
-    nodes = []
-    for index, node in enumerate(query_nodes):
-        node = dict(node)
-        node["node_id"] = index
-        nodes.append(node)
-
-    query_node = nodes[0] if len(nodes) == 1 else {
-        "type": "group",
-        "logical_operator": logical_operator,
-        "nodes": nodes,
-    }
-
-    request = {
-        "query": query_node,
-        "return_type": return_type,
-        "request_options": {"paginate": {"start": 0, "rows": max_results}},
-    }
-    if sort_field != "score":
-        request["request_options"]["sort"] = [
-            {"sort_by": "attribute", "attribute": sort_field, "direction": "asc"}
-        ]
-    return request
 
 
 def run_search(request):
@@ -77,16 +53,6 @@ def run_search(request):
     return response.json().get("result_set", [])
 
 
-def extract_pdb_id(identifier, return_type):
-    if return_type == "assembly":
-        return identifier.split("-")[0]
-    if return_type == "polymer_entity":
-        return identifier.split("_")[0]
-    if return_type == "polymer_instance":
-        return identifier.split(".")[0]
-    return identifier
-
-
 def main():
     parser = argparse.ArgumentParser(description="RCSB search with per-compound fan-out")
     parser.add_argument("--config", required=True, help="Search configuration JSON")
@@ -102,14 +68,13 @@ def main():
     print(f"RCSB search: {len(pairs)} compounds, one search each", flush=True)
 
     hits = {}
-    per_compound = []
     for compound_id, smiles in pairs:
         nodes = [dict(node) for node in config["query_nodes"]]
         parameters = dict(nodes[slot]["parameters"])
         parameters["value"] = smiles
         nodes[slot] = dict(nodes[slot], parameters=parameters)
 
-        request = build_request(
+        request = build_search_request(
             nodes, config["logical_operator"], return_type,
             config["max_results"], config["sort_field"],
         )
@@ -120,15 +85,34 @@ def main():
             identifier = result.get("identifier", "")
             pdb_id = extract_pdb_id(identifier, return_type)
             found.append(pdb_id)
-            if pdb_id not in hits:
+            score = result.get("score", 0.0)
+            hit = hits.get(pdb_id)
+            if hit is None:
                 hits[pdb_id] = {
                     "pdb_id": pdb_id,
                     "result_id": identifier,
-                    "score": result.get("score", 0.0),
+                    "score": score,
+                    # Several compounds can match one entry. Keep one relationship
+                    # record per match; the search-results table writes these in
+                    # long form so compounds.id remains canonical and joinable.
+                    "matches": [{
+                        "compound_id": compound_id,
+                        "smiles": smiles,
+                        "result_id": identifier,
+                        "score": score,
+                    }],
+                }
+            else:
+                # Rank the entry by its best match across compounds.
+                if score > hit["score"]:
+                    hit["score"] = score
+                    hit["result_id"] = identifier
+                hit["matches"].append({
                     "compound_id": compound_id,
                     "smiles": smiles,
-                }
-        per_compound.append((compound_id, smiles, found))
+                    "result_id": identifier,
+                    "score": score,
+                })
         print(f"  {compound_id}: {len(found)} hits", flush=True)
 
     total_cap = config.get("total_max_results")
@@ -141,14 +125,20 @@ def main():
     output_ids = [pdb_id.lower() for pdb_id in pdb_ids]
     print(f"RCSB search: {len(pdb_ids)} unique entries across {len(pairs)} compounds", flush=True)
 
+    # One row per entry/compound relationship. The fetch config below remains
+    # deduplicated by entry, while this table keeps canonical single-valued
+    # compounds.id provenance for filtering and equality joins.
     with open(config["hits_table"], "w", newline='', encoding='utf-8') as handle:
         writer = csv.writer(handle)
-        writer.writerow(["id", "pdb_id", "result_id", "score", "compounds.id", "query_smiles"])
+        writer.writerow([
+            "id", "pdb_id", "result_id", "score", "compounds.id", "query_smiles",
+        ])
         for output_id, hit in zip(output_ids, ordered):
-            writer.writerow([
-                output_id, hit["pdb_id"], hit["result_id"],
-                hit["score"], hit["compound_id"], hit["smiles"],
-            ])
+            for match in hit["matches"]:
+                writer.writerow([
+                    output_id, hit["pdb_id"], match["result_id"], match["score"],
+                    match["compound_id"], match["smiles"],
+                ])
 
     with open(config["fetch_config"]) as handle:
         fetch_config = json.load(handle)

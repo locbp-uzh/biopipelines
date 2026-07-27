@@ -21,6 +21,7 @@ Generates multiple sequence alignments for structure prediction by querying a lo
 - `output_format`: str = "csv" — Output format (`"csv"`, `"a3m"`).
 - `timeout`: int = 3600 — Server timeout in seconds.
 - `mask`: str | tuple = "" — Optional region of each sequence to mask out of the MSA query (PyMOL-style selection string or `(TableInfo, column)`).
+- `server_url`: str = "" — Query a remote ColabFold-protocol MSA server over HTTP instead of starting a local one. Requires `output_format="a3m"` (the protocol returns a3m alignments). Set `MMSEQS2_SERVER_USER` / `MMSEQS2_SERVER_PASSWORD` for basic auth; credentials are refused over plain HTTP.
 
 **Streams**: `msas`
 

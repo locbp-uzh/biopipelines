@@ -145,6 +145,29 @@ def test_each_tool_is_its_own_step_with_explicit_cpus(
     assert "wait" in body
 
 
+def test_failed_packed_tasks_make_the_batch_fail(
+    slurm_packed_config, isolated_cwd, new_packed_pipeline,
+):
+    """After waiting for every sibling, any failed task must make the packed
+    script exit non-zero so SLURM and afterok dependencies see the failure."""
+    from biopipelines.pipeline import Resources, Parallel, Run
+    from biopipelines.mock import Mock
+
+    pipeline = new_packed_pipeline("pack_failure_status")
+    with pipeline:
+        with Parallel(pack=4):
+            Resources()
+            with Run():
+                Mock(ids=["a"], streams=STREAM)
+        pipeline.save()
+        pipeline.generate_job_scripts()
+
+    body = (Path(pipeline.folders["runtime"]) / "pipeline.sh").read_text(encoding="utf-8")
+    failure_block = body.split('if [ "$_pack_failed" -gt 0 ]; then', 1)[1].split("fi", 1)[0]
+    assert 'echo "$_pack_failed of ${#_pack_pids[@]} packed tasks failed"' in failure_block
+    assert "exit 1" in failure_block
+
+
 def test_run_cpus_overrides_derived_share(
     slurm_packed_config, isolated_cwd, new_packed_pipeline,
 ):
@@ -236,6 +259,158 @@ def test_pack_requires_positive_int():
     for bad in (0, -1, 2.5, True, "4"):
         with pytest.raises(ValueError, match="positive integer"):
             Parallel(pack=bad)
+
+
+def test_run_rejects_invalid_cpus_and_gpus():
+    """Both reach an srun directive verbatim, so a bad value would otherwise
+    surface only after the allocation is granted. bool is an int subclass, so
+    ``gpus=True`` would format as ``--gpus-per-task=True``."""
+    from biopipelines.pipeline import Run
+
+    for bad in (0, -1, 2.5, True, "8"):
+        with pytest.raises(ValueError, match="positive integer"):
+            Run(cpus=bad)
+    for bad in (-1, 2.5, True, "1"):
+        with pytest.raises(ValueError, match="non-negative integer"):
+            Run(gpus=bad)
+    # gpus=0 is how a CPU-only task declines GRES — it must stay legal.
+    Run(cpus=32, gpus=0)
+    Run()
+
+
+# ── the node-geometry contract ────────────────────────────────────────────────
+
+def test_pack_refuses_a_non_exclusive_machine(
+    slurm_local_config, isolated_cwd, new_slurm_pipeline,
+):
+    """``get_node_exclusive`` documents that pack refuses to engage without it.
+
+    The slurm_local fixture declares no node geometry, so packing there would
+    emit steps with no --cpus-per-task at all — one core each, silently.
+    """
+    from biopipelines.pipeline import Resources, Parallel, Run
+    from biopipelines.mock import Mock
+
+    pipeline = new_slurm_pipeline("pack_non_exclusive")
+    with pipeline:
+        Resources()
+        Mock(ids=["pre"], streams=STREAM)
+        with pytest.raises(RuntimeError, match="node_exclusive"):
+            with Parallel(pack=4):
+                Resources()
+                with Run():
+                    Mock(ids=["a"], streams=STREAM)
+
+
+def test_pack_requires_cores_per_node(
+    slurm_packed_config, isolated_cwd, new_packed_pipeline, monkeypatch,
+):
+    """Without it there is nothing to divide between the tasks."""
+    from biopipelines.config_manager import ConfigManager
+    from biopipelines.pipeline import Resources, Parallel, Run
+    from biopipelines.mock import Mock
+
+    monkeypatch.setattr(ConfigManager, "get_cores_per_node", lambda self: None)
+
+    pipeline = new_packed_pipeline("pack_no_cores")
+    with pipeline:
+        Resources()
+        Mock(ids=["pre"], streams=STREAM)
+        with pytest.raises(RuntimeError, match="cores_per_node"):
+            with Parallel(pack=4):
+                Resources()
+                with Run():
+                    Mock(ids=["a"], streams=STREAM)
+
+
+def test_pack_with_gpu_tasks_requires_gpus_per_node(
+    slurm_packed_config, isolated_cwd, new_packed_pipeline, monkeypatch,
+):
+    """On an exclusive node the GPUs are requested once, so the count must be known."""
+    from biopipelines.config_manager import ConfigManager
+    from biopipelines.pipeline import Resources, Parallel, Run
+    from biopipelines.mock import Mock
+
+    monkeypatch.setattr(ConfigManager, "get_gpus_per_node", lambda self: None)
+
+    pipeline = new_packed_pipeline("pack_no_gpus_per_node")
+    with pipeline:
+        with pytest.raises(RuntimeError, match="gpus_per_node"):
+            with Parallel(pack=4):
+                Resources(gpu="gh")
+                with Run(gpus=1):
+                    Mock(ids=["a"], streams=STREAM)
+
+
+def test_pack_without_gpu_tasks_ignores_gpus_per_node(
+    slurm_packed_config, isolated_cwd, new_packed_pipeline, monkeypatch,
+):
+    """A CPU-only packed block never requests GRES, so the count is irrelevant."""
+    from biopipelines.config_manager import ConfigManager
+    from biopipelines.pipeline import Resources, Parallel, Run
+    from biopipelines.mock import Mock
+
+    monkeypatch.setattr(ConfigManager, "get_gpus_per_node", lambda self: None)
+
+    pipeline = new_packed_pipeline("pack_cpu_only")
+    with pipeline:
+        with Parallel(pack=4):
+            Resources()
+            with Run(gpus=0):
+                Mock(ids=["a"], streams=STREAM)
+        pipeline.save()
+        pipeline.generate_job_scripts()
+
+    body = (Path(pipeline.folders["runtime"]) / "pipeline.sh").read_text(encoding="utf-8")
+    assert "--gres=none" in body
+
+
+def test_pack_refuses_a_non_slurm_scheduler(
+    pbs_local_config, isolated_cwd,
+):
+    """Packing emits srun job steps, which only SLURM has."""
+    from biopipelines.pipeline import Pipeline, Resources, Parallel, Run
+    from biopipelines.mock import Mock
+
+    pipeline = Pipeline(
+        project="TestSuite", job="pack_pbs", on_the_fly=False,
+        local_output=True, config="pbs_local",
+    )
+    with pipeline:
+        Resources()
+        Mock(ids=["pre"], streams=STREAM)
+        with pytest.raises(RuntimeError, match="SLURM-specific"):
+            with Parallel(pack=4):
+                Resources()
+                with Run():
+                    Mock(ids=["a"], streams=STREAM)
+
+
+def test_pack_refuses_scheduler_none_even_with_exclusive_geometry(
+    local_config, isolated_cwd, monkeypatch,
+):
+    """The inert-script backend falls back to SLURM, but packing must inspect
+    the configured scheduler rather than that script-generation fallback."""
+    from biopipelines.config_manager import ConfigManager
+    from biopipelines.pipeline import Pipeline, Resources, Parallel, Run
+    from biopipelines.mock import Mock
+
+    monkeypatch.setattr(ConfigManager, "get_node_exclusive", lambda self: True)
+    monkeypatch.setattr(ConfigManager, "get_cores_per_node", lambda self: 64)
+    monkeypatch.setattr(ConfigManager, "get_gpus_per_node", lambda self: 4)
+
+    pipeline = Pipeline(
+        project="TestSuite", job="pack_none", on_the_fly=False,
+        local_output=True, config="local",
+    )
+    with pipeline:
+        Resources()
+        Mock(ids=["pre"], streams=STREAM)
+        with pytest.raises(RuntimeError, match="scheduler is 'none'"):
+            with Parallel(pack=4):
+                Resources()
+                with Run():
+                    Mock(ids=["a"], streams=STREAM)
 
 
 def test_unpacked_parallel_is_unchanged(

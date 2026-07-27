@@ -138,7 +138,15 @@ def _count_reactions(tree):
 
 
 def _as_bool(value):
-    """Normalize the mixed bool/str/NaN the tree dicts carry for in_stock."""
+    """Normalize the mixed bool/str/NaN the tree dicts carry for in_stock.
+
+    NaN is falsy here by fiat: bool(float("nan")) is True, so an absent value on
+    the HDF5 path would otherwise read as "in stock" and mark a route solved.
+    """
+    if value is None:
+        return False
+    if isinstance(value, float) and value != value:
+        return False
     if isinstance(value, str):
         return value.strip().lower() in ("true", "1", "yes")
     return bool(value)
