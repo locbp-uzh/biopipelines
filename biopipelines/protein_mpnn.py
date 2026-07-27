@@ -364,7 +364,7 @@ if [ ! -f "{self.missing_csv}" ]; then
     echo "id,removed_by,kind,cause" > "{self.missing_csv}"
 fi
 
-for struct_id in {Resolve.stream_ids(self.structures_json)}; do
+for struct_id in {Resolve.stream_ids(self.structures_json, valid_set=True)}; do
     SUBSET_JSONL="{per_pdb_dir}/${{struct_id}}.jsonl"
     SUBSET_FIXED="{per_pdb_dir}/${{struct_id}}_fixed.jsonl"
     SUBSET_LOG="{per_pdb_dir}/${{struct_id}}.log"

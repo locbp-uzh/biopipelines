@@ -320,7 +320,7 @@ python {self.runtime_positions_py} "{self.positions_args_json}"
 
         return f"""echo "Executing LigandMPNN commands..."
 cd {self.lmpnn_folder}
-for struct_id in {Resolve.stream_ids(self.structures_json)}; do
+for struct_id in {Resolve.stream_ids(self.structures_json, valid_set=True)}; do
     echo "Processing structure: $struct_id"
     PDB_FILE=$(resolve_stream_item "{self.structures_json}" "$struct_id")
 
