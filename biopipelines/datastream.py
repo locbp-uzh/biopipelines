@@ -160,7 +160,13 @@ class DataStream:
                     # Config time: expand only the deterministic prefix
                     self._ids_expanded, _ = id_patterns.try_expand_ids(self.ids)
             elif self.has_patterns():
-                self._ids_expanded = id_patterns.expand_ids(self.ids)
+                if self._runtime_mode and self.map_table:
+                    # A range pattern (<1..N>) states the design space, not what exists:
+                    # expanding it arithmetically re-declares ids an upstream filter has
+                    # already dropped. At runtime the map_table is what was produced.
+                    self._ids_expanded = list(self._get_map_data()['id'])
+                else:
+                    self._ids_expanded = id_patterns.expand_ids(self.ids)
             else:
                 self._ids_expanded = self.ids  # No copy — same list reference
         return self._ids_expanded
